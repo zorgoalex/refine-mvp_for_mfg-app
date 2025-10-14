@@ -1,6 +1,7 @@
 import { Refine, AuthProvider, Authenticated } from "@refinedev/core";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { notificationProvider, Layout } from "@refinedev/antd";
+import { CustomSider } from "./components/CustomSider";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider } from "antd";
@@ -110,7 +111,7 @@ const App = () => {
                     key="authenticated-routes"
                     fallback={<CatchAllNavigate to="/login" />}
                   >
-                    <Layout>
+                    <Layout Sider={CustomSider}>
                       <Outlet />
                     </Layout>
                   </Authenticated>
