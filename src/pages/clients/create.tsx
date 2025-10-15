@@ -19,7 +19,9 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
         >
           <Input />
         </Form.Item>
-        {/* Дополнительные поля клиента можно добавить по OpenAPI */}
+        <Form.Item label="Ref Key 1C" name="ref_key_1c">
+          <Input />
+        </Form.Item>
       </Form>
     </Create>
   );

@@ -2,24 +2,13 @@ import { Create, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input } from "antd";
 
-export const MillingTypeCreate: React.FC<IResourceComponentsProps> = () => {
+export const PaymentStatusCreate: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps } = useForm();
 
   return (
     <Create saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
-        <Form.Item
-          label="Name"
-          name="milling_type_name"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item label="Cost per sqm" name="cost_per_sqm">
+        <Form.Item label="Name" name="payment_status_name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
@@ -29,3 +18,4 @@ export const MillingTypeCreate: React.FC<IResourceComponentsProps> = () => {
     </Create>
   );
 };
+

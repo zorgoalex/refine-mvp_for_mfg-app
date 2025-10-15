@@ -10,9 +10,18 @@ const ID_COLUMNS: Record<string, string> = {
   orders_view: "order_id",
   orders: "order_id",
   materials: "material_id",
+  material_types: "material_type_id",
+  vendors: "vendor_id",
+  suppliers: "supplier_id",
   milling_types: "milling_type_id",
   films: "film_id",
   clients: "client_id",
+  film_types: "film_type_id",
+  film_vendors: "film_vendor_id",
+  edge_types: "edge_type_id",
+  order_statuses: "order_status_id",
+  payment_statuses: "payment_status_id",
+  payment_types: "type_paid_id",
 };
 
 const RESOURCE_FIELDS: Record<string, string[]> = {
@@ -61,6 +70,13 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "description",
     "ref_key_1c",
   ],
+  material_types: [
+    "material_type_id",
+    "material_type_name",
+    "description",
+    "ref_key_1c",
+  ],
+  
   milling_types: [
     "milling_type_id",
     "milling_type_name",
@@ -80,6 +96,68 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "client_name",
     "ref_key_1c",
   ],
+  film_types: [
+    "film_type_id",
+    "film_type_name",
+    "ref_key_1c",
+  ],
+  film_vendors: [
+    "film_vendor_id",
+    "film_vendor_name",
+    "ref_key_1c",
+  ],
+  edge_types: [
+    "edge_type_id",
+    "edge_type_name",
+    "ref_key_1c",
+  ],
+  vendors: [
+    "vendor_id",
+    "vendor_name",
+    "contact_info",
+    "ref_key_1c",
+  ],
+  suppliers: [
+    "supplier_id",
+    "name",
+    "address",
+    "contact_person",
+    "phone",
+    "ref_key_1c",
+  ],
+  order_statuses: [
+    "order_status_id",
+    "order_status_name",
+    "ref_key_1c",
+  ],
+  payment_statuses: [
+    "payment_status_id",
+    "payment_status_name",
+    "ref_key_1c",
+  ],
+  payment_types: [
+    "type_paid_id",
+    "type_paid_name",
+    "ref_key_1c",
+  ],
+};
+
+const REQUIRED_FIELDS: Record<string, string[]> = {
+  film_vendors: ["film_vendor_name"],
+  film_types: ["film_type_name"],
+  material_types: ["material_type_name"],
+  vendors: ["vendor_name"],
+  edge_types: ["edge_type_name"],
+  order_statuses: ["order_status_name"],
+  payment_statuses: ["payment_status_name"],
+  payment_types: ["type_paid_name"],
+  suppliers: ["name"],
+};
+
+// Temporary workaround for tables where PK has NOT NULL without default/identity in the actual DB
+// Generates a BIGINT ID on the client if not provided
+const FORCE_PK_ON_INSERT: Record<string, boolean> = {
+  film_vendors: true,
 };
 
 const headers = () => ({
@@ -96,7 +174,8 @@ const gqlRequest = async (query: string): Promise<any> => {
   const json = await res.json();
   if (!res.ok || json.errors) {
     const message = json?.errors?.[0]?.message || res.statusText;
-    throw { message, statusCode: res.status };
+    const statusCode = !res.ok ? res.status : 400;
+    throw { message, statusCode };
   }
   return json.data;
 };
@@ -107,6 +186,22 @@ const escapeValue = (v: any) => {
   // ISO for Date
   if (v instanceof Date) return JSON.stringify(v.toISOString());
   return JSON.stringify(v);
+};
+
+const sanitizeVariables = (input: AnyObject) => {
+  const out: AnyObject = {};
+  for (const [k, v] of Object.entries(input || {})) {
+    if (v === "") {
+      out[k] = null;
+      continue;
+    }
+    if (typeof v === "string" && /^\d+$/.test(v)) {
+      out[k] = Number(v);
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
 };
 
 const buildOrderBy = (resource: string, sorters?: any[]) => {
@@ -212,7 +307,38 @@ export const dataProvider = (_apiUrl: string) => {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
       const selection = fieldsFor(resource);
-      const objectLiteral = JSON.stringify(variables).replace(/"([^("]+)":/g, "$1:");
+      const idCol = ID_COLUMNS[resource] ?? "id";
+      // Omit PK from insert to let identity/defaults generate value
+      const { [idCol]: _omitId, ...restVars } = variables || {};
+      // Sanitize and drop null/undefined to avoid NOT NULL violations on inserts
+      const sanitized: AnyObject = sanitizeVariables(restVars);
+      const cleaned: AnyObject = {};
+      for (const [k, v] of Object.entries(sanitized)) {
+        if (v === null || v === undefined) continue;
+        cleaned[k] = v;
+      }
+      // Validate required fields (simple guard to avoid NOT NULL violations)
+      const required = REQUIRED_FIELDS[resource] || [];
+      for (const key of required) {
+        const val = cleaned[key];
+        if (typeof val === "string") {
+          if (val.trim().length === 0) {
+            throw { message: `Field \"${key}\" is required`, statusCode: 400 };
+          }
+        }
+        if (val === undefined) {
+          throw { message: `Field \"${key}\" is required`, statusCode: 400 };
+        }
+      }
+
+      // Fallback: if PK is required by DB (no default) ensure we send a generated value
+      if (FORCE_PK_ON_INSERT[resource]) {
+        if (cleaned[idCol] === undefined) {
+          // Use epoch ms as BIGINT; unique enough for MVP
+          cleaned[idCol] = Date.now();
+        }
+      }
+      const objectLiteral = JSON.stringify(cleaned).replace(/"([^("]+)":/g, "$1:");
       const query = `
         mutation {
           insert_${resource}_one(object: ${objectLiteral}) {
@@ -231,7 +357,7 @@ export const dataProvider = (_apiUrl: string) => {
       const idCol = ID_COLUMNS[resource] ?? "id";
       // Do not send id in _set
       const { [idCol]: _omit, ...rest } = variables || {};
-      const setLiteral = JSON.stringify(rest).replace(/"([^("]+)":/g, "$1:");
+      const setLiteral = JSON.stringify(sanitizeVariables(rest)).replace(/"([^("]+)":/g, "$1:");
       const query = `
         mutation {
           update_${resource}_by_pk(pk_columns: { ${idCol}: ${escapeValue(id)} }, _set: ${setLiteral}) {

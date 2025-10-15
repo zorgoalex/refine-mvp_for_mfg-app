@@ -19,7 +19,12 @@ export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
         >
           <Input />
         </Form.Item>
-        {/* Дополнительные поля по OpenAPI при необходимости */}
+        <Form.Item label="Cost per sqm" name="cost_per_sqm">
+          <Input />
+        </Form.Item>
+        <Form.Item label="Ref Key 1C" name="ref_key_1c">
+          <Input />
+        </Form.Item>
       </Form>
     </Edit>
   );
