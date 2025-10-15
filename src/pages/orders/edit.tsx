@@ -3,7 +3,8 @@ import { IResourceComponentsProps } from "@refinedev/core";
 import { DatePicker, Form, Input, Select } from "antd";
 
 export const OrderEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps, queryResult } = useForm();
+  // Write operations should target base table `orders`, not read-only `orders_view`.
+  const { formProps, saveButtonProps, queryResult } = useForm({ resource: "orders" });
 
   const { selectProps: clientSelectProps } = useSelect({
     resource: "clients",

@@ -7,8 +7,8 @@ import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import "@refinedev/antd/dist/reset.css";
 import { OrderList } from "./pages/orders/list";
-// OrderCreate/Edit routes are disabled for read-only orders_view
 import { OrderShow } from "./pages/orders/show";
+import { OrderEdit } from "./pages/orders/edit";
 import { MaterialList } from "./pages/materials/list";
 import { MaterialCreate } from "./pages/materials/create";
 import { MaterialEdit } from "./pages/materials/edit";
@@ -63,6 +63,7 @@ const App = () => {
               {
                 name: "orders_view",
                 list: "/orders",
+                edit: "/orders/edit/:id",
                 show: "/orders/show/:id",
                 meta: { idColumnName: "order_id" },
               },
@@ -123,6 +124,7 @@ const App = () => {
                 />
                 <Route path="/orders" >
                   <Route index element={<OrderList />} />
+                  <Route path="edit/:id" element={<OrderEdit />} />
                   <Route path="show/:id" element={<OrderShow />} />
                 </Route>
                 <Route path="/materials" >

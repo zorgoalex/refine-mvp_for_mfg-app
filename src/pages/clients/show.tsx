@@ -18,6 +18,8 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
       <TextField value={record?.client_id} />
       <Title level={5}>Name</Title>
       <TextField value={record?.client_name} />
+      <Title level={5}>Ref Key 1C</Title>
+      <TextField value={record?.ref_key_1c} />
     </Show>
   );
 };

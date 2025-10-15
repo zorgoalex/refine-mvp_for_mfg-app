@@ -5,19 +5,23 @@ import { Typography } from "antd";
 const { Title } = Typography;
 
 export const MillingTypeShow: React.FC<IResourceComponentsProps> = () => {
-  const { queryResult } = useShow();
+  const { queryResult } = useShow({
+    meta: { idColumnName: "milling_type_id" },
+  });
   const { data, isLoading } = queryResult;
 
   const record = data?.data;
 
   return (
     <Show isLoading={isLoading}>
-      <Title level={5}>Id</Title>
-      <TextField value={record?.id} />
+      <Title level={5}>Milling Type ID</Title>
+      <TextField value={record?.milling_type_id} />
       <Title level={5}>Name</Title>
-      <TextField value={record?.name} />
-      <Title level={5}>Price</Title>
-      <TextField value={record?.price} />
+      <TextField value={record?.milling_type_name} />
+      <Title level={5}>Cost per sqm</Title>
+      <TextField value={record?.cost_per_sqm} />
+      <Title level={5}>Ref Key 1C</Title>
+      <TextField value={record?.ref_key_1c} />
     </Show>
   );
 };
