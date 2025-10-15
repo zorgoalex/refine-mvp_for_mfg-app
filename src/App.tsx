@@ -28,8 +28,8 @@ import { ClientShow } from "./pages/clients/show";
 import { LoginPage } from "./pages/login";
 import { dataProvider } from "./utils/dataProvider";
 
-const API_URL = import.meta.env.VITE_API_URL as string;
-const API_TOKEN = import.meta.env.VITE_API_TOKEN as string;
+const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
+const HASURA_ADMIN_SECRET = import.meta.env.VITE_HASURA_ADMIN_SECRET as string;
 
 const App = () => {
   const authProvider: AuthProvider = {
@@ -42,7 +42,7 @@ const App = () => {
       return { success: true, redirectTo: "/login" };
     },
     check: async () => {
-      if (API_TOKEN) {
+      if (HASURA_ADMIN_SECRET && API_URL) {
         return { authenticated: true };
       }
       return { authenticated: false, redirectTo: "/login" };
