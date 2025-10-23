@@ -14,7 +14,7 @@ export const SupplierShow: React.FC<IResourceComponentsProps> = () => {
       <Title level={5}>Supplier ID</Title>
       <TextField value={record?.supplier_id} />
       <Title level={5}>Name</Title>
-      <TextField value={record?.name} />
+      <TextField value={record?.supplier_name} />
       <Title level={5}>Address</Title>
       <TextField value={record?.address} />
       <Title level={5}>Contact Person</Title>

@@ -8,7 +8,7 @@ export const SupplierEdit: React.FC<IResourceComponentsProps> = () => {
   return (
     <Edit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
-        <Form.Item label="Name" name="name" rules={[{ required: true }]}>
+        <Form.Item label="Name" name="supplier_name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
         <Form.Item label="Address" name="address">

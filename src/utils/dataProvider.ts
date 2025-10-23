@@ -22,6 +22,13 @@ const ID_COLUMNS: Record<string, string> = {
   order_statuses: "order_status_id",
   payment_statuses: "payment_status_id",
   payment_types: "type_paid_id",
+  // New resources from schema v11.4:
+  units: "unit_id",
+  work_centers: "workcenter_id",
+  requisition_statuses: "requisition_status_id",
+  movements_statuses: "movement_status_id",
+  material_transaction_types: "transaction_type_id",
+  transaction_direction: "direction_type_id",
 };
 
 const RESOURCE_FIELDS: Record<string, string[]> = {
@@ -63,11 +70,16 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   materials: [
     "material_id",
     "material_name",
-    "unit",
+    "unit_id",
     "material_type_id",
     "vendor_id",
     "default_supplier_id",
     "description",
+    "is_active",
+    "created_by",
+    "edited_by",
+    "created_at",
+    "updated_at",
     "ref_key_1c",
   ],
   material_types: [
@@ -119,7 +131,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   ],
   suppliers: [
     "supplier_id",
-    "name",
+    "supplier_name",
     "address",
     "contact_person",
     "phone",
@@ -140,6 +152,55 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "type_paid_name",
     "ref_key_1c",
   ],
+  // New resources from schema v11.4:
+  units: [
+    "unit_id",
+    "unit_code",
+    "unit_name",
+    "unit_symbol",
+    "decimals",
+    "ref_key_1c",
+  ],
+  work_centers: [
+    "workcenter_id",
+    "workcenter_code",
+    "workcenter_name",
+    "workshop_id",
+    "is_active",
+    "ref_key_1c",
+  ],
+  requisition_statuses: [
+    "requisition_status_id",
+    "requisition_status_name",
+    "sort_order",
+    "is_active",
+    "description",
+  ],
+  movements_statuses: [
+    "movement_status_id",
+    "movement_status_code",
+    "movement_status_name",
+    "sort_order",
+    "is_active",
+    "description",
+  ],
+  material_transaction_types: [
+    "transaction_type_id",
+    "transaction_type_name",
+    "direction_type_id",
+    "affects_stock",
+    "requires_document",
+    "sort_order",
+    "is_active",
+    "description",
+  ],
+  transaction_direction: [
+    "direction_type_id",
+    "direction_code",
+    "direction_name",
+    "description",
+    "is_active",
+  ],
 };
 
 const REQUIRED_FIELDS: Record<string, string[]> = {
@@ -151,13 +212,21 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   order_statuses: ["order_status_name"],
   payment_statuses: ["payment_status_name"],
   payment_types: ["type_paid_name"],
-  suppliers: ["name"],
+  suppliers: ["supplier_name"],
+  // New resources from schema v11.4:
+  units: ["unit_code", "unit_name"],
+  work_centers: ["workcenter_code", "workcenter_name"],
+  requisition_statuses: ["requisition_status_name"],
+  movements_statuses: ["movement_status_code", "movement_status_name"],
+  material_transaction_types: ["transaction_type_name"],
+  transaction_direction: ["direction_code", "direction_name"],
 };
 
 // Temporary workaround for tables where PK has NOT NULL without default/identity in the actual DB
 // Generates a BIGINT ID on the client if not provided
+// NOTE: schema v11.4 has IDENTITY for all tables, so this is no longer needed
 const FORCE_PK_ON_INSERT: Record<string, boolean> = {
-  film_vendors: true,
+  // film_vendors: true,  // REMOVED: now has IDENTITY in schema v11.4
 };
 
 const headers = () => ({

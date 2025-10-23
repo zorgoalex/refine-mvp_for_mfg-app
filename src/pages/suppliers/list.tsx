@@ -9,7 +9,7 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
     <List>
       <Table {...tableProps} rowKey="supplier_id">
         <Table.Column dataIndex="supplier_id" title="Supplier ID" sorter />
-        <Table.Column dataIndex="name" title="Name" sorter />
+        <Table.Column dataIndex="supplier_name" title="Name" sorter />
         <Table.Column dataIndex="address" title="Address" />
         <Table.Column dataIndex="contact_person" title="Contact Person" />
         <Table.Column dataIndex="phone" title="Phone" />

@@ -41,10 +41,22 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
       ),
     [tableProps?.dataSource]
   );
+  const unitIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          ((tableProps?.dataSource as any[]) || [])
+            .map((i) => i?.unit_id)
+            .filter((v) => v !== undefined && v !== null)
+        )
+      ),
+    [tableProps?.dataSource]
+  );
 
   const { data: typesData } = useMany({ resource: "material_types", ids: typeIds, queryOptions: { enabled: typeIds.length > 0 } });
   const { data: vendorsData } = useMany({ resource: "vendors", ids: vendorIds, queryOptions: { enabled: vendorIds.length > 0 } });
   const { data: suppliersData } = useMany({ resource: "suppliers", ids: supplierIds, queryOptions: { enabled: supplierIds.length > 0 } });
+  const { data: unitsData } = useMany({ resource: "units", ids: unitIds, queryOptions: { enabled: unitIds.length > 0 } });
 
   const typeMap = useMemo(() => {
     const map: Record<string | number, string> = {};
@@ -58,16 +70,21 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
   }, [vendorsData]);
   const supplierMap = useMemo(() => {
     const map: Record<string | number, string> = {};
-    (suppliersData?.data || []).forEach((s: any) => (map[s.supplier_id] = s.name));
+    (suppliersData?.data || []).forEach((s: any) => (map[s.supplier_id] = s.supplier_name));
     return map;
   }, [suppliersData]);
+  const unitMap = useMemo(() => {
+    const map: Record<string | number, string> = {};
+    (unitsData?.data || []).forEach((u: any) => (map[u.unit_id] = u.unit_name));
+    return map;
+  }, [unitsData]);
 
   return (
     <List>
       <Table {...tableProps} rowKey="material_id">
         <Table.Column dataIndex="material_id" title="Material ID" sorter />
         <Table.Column dataIndex="material_name" title="Name" sorter />
-        <Table.Column dataIndex="unit" title="Unit" />
+        <Table.Column dataIndex="unit_id" title="Unit" render={(_, r: any) => unitMap[r?.unit_id] ?? r?.unit_id} />
         <Table.Column dataIndex="material_type_id" title="Material Type" render={(_, r: any) => typeMap[r?.material_type_id] ?? r?.material_type_id} />
         <Table.Column dataIndex="vendor_id" title="Vendor" render={(_, r: any) => vendorMap[r?.vendor_id] ?? r?.vendor_id} />
         <Table.Column dataIndex="default_supplier_id" title="Supplier" render={(_, r: any) => supplierMap[r?.default_supplier_id] ?? r?.default_supplier_id} />
