@@ -24,6 +24,10 @@ const ID_COLUMNS: Record<string, string> = {
   payment_types: "type_paid_id",
   // New resources from schema v11.4:
   units: "unit_id",
+  roles: "role_id",
+  employees: "employee_id",
+  users: "user_id",
+  workshops: "workshop_id",
   work_centers: "workcenter_id",
   requisition_statuses: "requisition_status_id",
   movements_statuses: "movement_status_id",
@@ -31,6 +35,8 @@ const ID_COLUMNS: Record<string, string> = {
   transaction_direction: "direction_type_id",
   production_statuses: "production_status_id",
   resource_requirements_statuses: "requirement_status_id",
+  order_workshops: "order_workshop_id",
+  order_resource_requirements: "requirement_id",
 };
 
 const RESOURCE_FIELDS: Record<string, string[]> = {
@@ -181,11 +187,47 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "decimals",
     "ref_key_1c",
   ],
+  roles: [
+    "role_id",
+    "role_name",
+    "role_description",
+    "is_active",
+    "ref_key_1c",
+  ],
+  employees: [
+    "employee_id",
+    "position",
+    "full_name",
+    "note",
+    "is_active",
+    "ref_key_1c",
+  ],
+  users: [
+    "user_id",
+    "username",
+    "role_id",
+    "role { role_id role_name }",
+    "employee_id",
+    "employee { employee_id full_name }",
+    "is_active",
+    "last_login_at",
+    "ref_key_1c",
+  ],
+  workshops: [
+    "workshop_id",
+    "workshop_name",
+    "address",
+    "responsible_employee_id",
+    "employee { employee_id full_name }",
+    "is_active",
+    "ref_key_1c",
+  ],
   work_centers: [
     "workcenter_id",
     "workcenter_code",
     "workcenter_name",
     "workshop_id",
+    "workshop { workshop_id workshop_name }",
     "is_active",
     "ref_key_1c",
   ],
@@ -240,6 +282,44 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "description",
     "ref_key_1c",
   ],
+  order_workshops: [
+    "order_workshop_id",
+    "order_id",
+    "workshop_id",
+    "production_status_id",
+    "received_date",
+    "started_date",
+    "completed_date",
+    "planned_completion_date",
+    "sequence_order",
+    "notes",
+    "responsible_employee_id",
+    "delete_flag",
+    "ref_key_1c",
+  ],
+  order_resource_requirements: [
+    "requirement_id",
+    "order_id",
+    "resource_type",
+    "material_id",
+    "film_id",
+    "edge_type_id",
+    "required_quantity",
+    "unit_id",
+    "waste_percentage",
+    "final_quantity",
+    "requirement_status_id",
+    "supplier_id",
+    "purchase_price",
+    "requisition_id",
+    "warehouse_id",
+    "reserved_at",
+    "consumed_at",
+    "notes",
+    "calculation_details",
+    "is_active",
+    "ref_key_1c",
+  ],
 };
 
 const REQUIRED_FIELDS: Record<string, string[]> = {
@@ -254,6 +334,9 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   suppliers: ["supplier_name"],
   // New resources from schema v11.4:
   units: ["unit_code", "unit_name"],
+  employees: ["position", "full_name"],
+  users: ["username"],
+  workshops: ["workshop_name"],
   work_centers: ["workcenter_code", "workcenter_name"],
   requisition_statuses: ["requisition_status_name"],
   movements_statuses: ["movement_status_code", "movement_status_name"],
@@ -261,6 +344,8 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   transaction_direction: ["direction_code", "direction_name"],
   production_statuses: ["production_status_name"],
   resource_requirements_statuses: ["requirement_status_code", "requirement_status_name"],
+  order_workshops: ["order_id", "workshop_id", "production_status_id"],
+  order_resource_requirements: ["order_id", "resource_type", "required_quantity", "unit_id", "requirement_status_id"],
 };
 
 // Temporary workaround for tables where PK has NOT NULL without default/identity in the actual DB
@@ -275,6 +360,52 @@ const headers = () => ({
   "x-hasura-admin-secret": HASURA_ADMIN_SECRET,
 });
 
+// Helper to parse PostgreSQL error messages into user-friendly text
+const parsePostgresError = (message: string): string => {
+  // Unique constraint violations
+  if (message.includes('duplicate key value violates unique constraint')) {
+    const constraintMatch = message.match(/constraint "(.+?)"/);
+    const constraint = constraintMatch ? constraintMatch[1] : 'unique constraint';
+
+    // Parse constraint name to field name
+    if (constraint.includes('_name')) {
+      return 'Это название уже существует. Пожалуйста, используйте другое.';
+    }
+    if (constraint.includes('_code')) {
+      return 'Этот код уже существует. Пожалуйста, используйте другой.';
+    }
+    if (constraint.includes('sort_order')) {
+      return 'Порядок сортировки должен быть уникальным. Это значение уже используется.';
+    }
+    return `Значение должно быть уникальным (${constraint})`;
+  }
+
+  // NOT NULL violations
+  if (message.includes('null value in column') && message.includes('violates not-null constraint')) {
+    const columnMatch = message.match(/column "(.+?)"/);
+    const column = columnMatch ? columnMatch[1] : 'поле';
+    return `Поле "${column}" обязательно для заполнения`;
+  }
+
+  // Foreign key violations
+  if (message.includes('violates foreign key constraint')) {
+    return 'Невозможно удалить запись, так как она используется в других таблицах';
+  }
+
+  // Check constraint violations
+  if (message.includes('violates check constraint')) {
+    const constraintMatch = message.match(/constraint "(.+?)"/);
+    const constraint = constraintMatch ? constraintMatch[1] : '';
+    if (constraint.includes('positive') || constraint.includes('non_negative')) {
+      return 'Значение должно быть положительным числом';
+    }
+    return 'Значение не соответствует требованиям валидации';
+  }
+
+  // Default: return original message
+  return message;
+};
+
 const gqlRequest = async (query: string): Promise<any> => {
   const res = await fetch(HASURA_URL, {
     method: "POST",
@@ -283,7 +414,8 @@ const gqlRequest = async (query: string): Promise<any> => {
   });
   const json = await res.json();
   if (!res.ok || json.errors) {
-    const message = json?.errors?.[0]?.message || res.statusText;
+    const rawMessage = json?.errors?.[0]?.message || res.statusText;
+    const message = parsePostgresError(rawMessage);
     const statusCode = !res.ok ? res.status : 400;
     throw { message, statusCode };
   }
@@ -300,12 +432,16 @@ const escapeValue = (v: any) => {
 
 const sanitizeVariables = (input: AnyObject) => {
   const out: AnyObject = {};
+  // Fields that should stay as strings even if they look like numbers
+  const stringFields = ["password_hash", "ref_key_1c"];
+
   for (const [k, v] of Object.entries(input || {})) {
     if (v === "") {
       out[k] = null;
       continue;
     }
-    if (typeof v === "string" && /^\d+$/.test(v)) {
+    // Don't convert password_hash or other string fields to numbers
+    if (typeof v === "string" && /^\d+$/.test(v) && !stringFields.includes(k)) {
       out[k] = Number(v);
       continue;
     }

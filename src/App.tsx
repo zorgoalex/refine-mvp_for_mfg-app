@@ -89,6 +89,30 @@ import { ResourceRequirementStatusList } from "./pages/resource_requirements_sta
 import { ResourceRequirementStatusCreate } from "./pages/resource_requirements_statuses/create";
 import { ResourceRequirementStatusEdit } from "./pages/resource_requirements_statuses/edit";
 import { ResourceRequirementStatusShow } from "./pages/resource_requirements_statuses/show";
+import { EmployeeList } from "./pages/employees/list";
+import { EmployeeCreate } from "./pages/employees/create";
+import { EmployeeEdit } from "./pages/employees/edit";
+import { EmployeeShow } from "./pages/employees/show";
+import { UserList } from "./pages/users/list";
+import { UserCreate } from "./pages/users/create";
+import { UserEdit } from "./pages/users/edit";
+import { UserShow } from "./pages/users/show";
+import { WorkshopList } from "./pages/workshops/list";
+import { WorkshopCreate } from "./pages/workshops/create";
+import { WorkshopEdit } from "./pages/workshops/edit";
+import { WorkshopShow } from "./pages/workshops/show";
+import { WorkCenterList } from "./pages/work_centers/list";
+import { WorkCenterCreate } from "./pages/work_centers/create";
+import { WorkCenterEdit } from "./pages/work_centers/edit";
+import { WorkCenterShow } from "./pages/work_centers/show";
+import { OrderWorkshopList } from "./pages/order_workshops/list";
+import { OrderWorkshopCreate } from "./pages/order_workshops/create";
+import { OrderWorkshopEdit } from "./pages/order_workshops/edit";
+import { OrderWorkshopShow } from "./pages/order_workshops/show";
+import { OrderResourceRequirementList } from "./pages/order_resource_requirements/list";
+import { OrderResourceRequirementCreate } from "./pages/order_resource_requirements/create";
+import { OrderResourceRequirementEdit } from "./pages/order_resource_requirements/edit";
+import { OrderResourceRequirementShow } from "./pages/order_resource_requirements/show";
 import { LoginPage } from "./pages/login";
 import { dataProvider } from "./utils/dataProvider";
 
@@ -291,6 +315,54 @@ const App = () => {
                 show: "/resource-requirements-statuses/show/:id",
                 meta: { idColumnName: "requirement_status_id", label: "Resource Requirements Statuses" },
               },
+              {
+                name: "employees",
+                list: "/employees",
+                create: "/employees/create",
+                edit: "/employees/edit/:id",
+                show: "/employees/show/:id",
+                meta: { idColumnName: "employee_id", label: "Employees" },
+              },
+              {
+                name: "users",
+                list: "/users",
+                create: "/users/create",
+                edit: "/users/edit/:id",
+                show: "/users/show/:id",
+                meta: { idColumnName: "user_id", label: "Users" },
+              },
+              {
+                name: "workshops",
+                list: "/workshops",
+                create: "/workshops/create",
+                edit: "/workshops/edit/:id",
+                show: "/workshops/show/:id",
+                meta: { idColumnName: "workshop_id", label: "Workshops" },
+              },
+              {
+                name: "work_centers",
+                list: "/work-centers",
+                create: "/work-centers/create",
+                edit: "/work-centers/edit/:id",
+                show: "/work-centers/show/:id",
+                meta: { idColumnName: "workcenter_id", label: "Work Centers" },
+              },
+              {
+                name: "order_workshops",
+                list: "/order-workshops",
+                create: "/order-workshops/create",
+                edit: "/order-workshops/edit/:id",
+                show: "/order-workshops/show/:id",
+                meta: { idColumnName: "order_workshop_id", label: "Order Workshops" },
+              },
+              {
+                name: "order_resource_requirements",
+                list: "/order-resource-requirements",
+                create: "/order-resource-requirements/create",
+                edit: "/order-resource-requirements/edit/:id",
+                show: "/order-resource-requirements/show/:id",
+                meta: { idColumnName: "requirement_id", label: "Order Resource Requirements" },
+              },
             ]}
             options={{
               syncWithLocation: true,
@@ -438,6 +510,42 @@ const App = () => {
                   <Route path="create" element={<ResourceRequirementStatusCreate />} />
                   <Route path="edit/:id" element={<ResourceRequirementStatusEdit />} />
                   <Route path="show/:id" element={<ResourceRequirementStatusShow />} />
+                </Route>
+                <Route path="/employees" >
+                  <Route index element={<EmployeeList />} />
+                  <Route path="create" element={<EmployeeCreate />} />
+                  <Route path="edit/:id" element={<EmployeeEdit />} />
+                  <Route path="show/:id" element={<EmployeeShow />} />
+                </Route>
+                <Route path="/users" >
+                  <Route index element={<UserList />} />
+                  <Route path="create" element={<UserCreate />} />
+                  <Route path="edit/:id" element={<UserEdit />} />
+                  <Route path="show/:id" element={<UserShow />} />
+                </Route>
+                <Route path="/workshops" >
+                  <Route index element={<WorkshopList />} />
+                  <Route path="create" element={<WorkshopCreate />} />
+                  <Route path="edit/:id" element={<WorkshopEdit />} />
+                  <Route path="show/:id" element={<WorkshopShow />} />
+                </Route>
+                <Route path="/work-centers" >
+                  <Route index element={<WorkCenterList />} />
+                  <Route path="create" element={<WorkCenterCreate />} />
+                  <Route path="edit/:id" element={<WorkCenterEdit />} />
+                  <Route path="show/:id" element={<WorkCenterShow />} />
+                </Route>
+                <Route path="/order-workshops" >
+                  <Route index element={<OrderWorkshopList />} />
+                  <Route path="create" element={<OrderWorkshopCreate />} />
+                  <Route path="edit/:id" element={<OrderWorkshopEdit />} />
+                  <Route path="show/:id" element={<OrderWorkshopShow />} />
+                </Route>
+                <Route path="/order-resource-requirements" >
+                  <Route index element={<OrderResourceRequirementList />} />
+                  <Route path="create" element={<OrderResourceRequirementCreate />} />
+                  <Route path="edit/:id" element={<OrderResourceRequirementEdit />} />
+                  <Route path="show/:id" element={<OrderResourceRequirementShow />} />
                 </Route>
               </Route>
               <Route
