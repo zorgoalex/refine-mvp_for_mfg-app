@@ -188,6 +188,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "transaction_type_id",
     "transaction_type_name",
     "direction_type_id",
+    "direction { direction_type_id direction_code direction_name }",
     "affects_stock",
     "requires_document",
     "sort_order",

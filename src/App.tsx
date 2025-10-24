@@ -61,6 +61,26 @@ import { PaymentTypeList } from "./pages/payment_types/list";
 import { PaymentTypeCreate } from "./pages/payment_types/create";
 import { PaymentTypeEdit } from "./pages/payment_types/edit";
 import { PaymentTypeShow } from "./pages/payment_types/show";
+import { UnitList } from "./pages/units/list";
+import { UnitCreate } from "./pages/units/create";
+import { UnitEdit } from "./pages/units/edit";
+import { UnitShow } from "./pages/units/show";
+import { RequisitionStatusList } from "./pages/requisition_statuses/list";
+import { RequisitionStatusCreate } from "./pages/requisition_statuses/create";
+import { RequisitionStatusEdit } from "./pages/requisition_statuses/edit";
+import { RequisitionStatusShow } from "./pages/requisition_statuses/show";
+import { MovementStatusList } from "./pages/movements_statuses/list";
+import { MovementStatusCreate } from "./pages/movements_statuses/create";
+import { MovementStatusEdit } from "./pages/movements_statuses/edit";
+import { MovementStatusShow } from "./pages/movements_statuses/show";
+import { MaterialTransactionTypeList } from "./pages/material_transaction_types/list";
+import { MaterialTransactionTypeCreate } from "./pages/material_transaction_types/create";
+import { MaterialTransactionTypeEdit } from "./pages/material_transaction_types/edit";
+import { MaterialTransactionTypeShow } from "./pages/material_transaction_types/show";
+import { TransactionDirectionList } from "./pages/transaction_direction/list";
+import { TransactionDirectionCreate } from "./pages/transaction_direction/create";
+import { TransactionDirectionEdit } from "./pages/transaction_direction/edit";
+import { TransactionDirectionShow } from "./pages/transaction_direction/show";
 import { LoginPage } from "./pages/login";
 import { dataProvider } from "./utils/dataProvider";
 
@@ -207,6 +227,46 @@ const App = () => {
                 show: "/payment-types/show/:id",
                 meta: { idColumnName: "type_paid_id" },
               },
+              {
+                name: "units",
+                list: "/units",
+                create: "/units/create",
+                edit: "/units/edit/:id",
+                show: "/units/show/:id",
+                meta: { idColumnName: "unit_id", label: "Units" },
+              },
+              {
+                name: "requisition_statuses",
+                list: "/requisition-statuses",
+                create: "/requisition-statuses/create",
+                edit: "/requisition-statuses/edit/:id",
+                show: "/requisition-statuses/show/:id",
+                meta: { idColumnName: "requisition_status_id", label: "Requisition Statuses" },
+              },
+              {
+                name: "movements_statuses",
+                list: "/movements-statuses",
+                create: "/movements-statuses/create",
+                edit: "/movements-statuses/edit/:id",
+                show: "/movements-statuses/show/:id",
+                meta: { idColumnName: "movement_status_id", label: "Movement Statuses" },
+              },
+              {
+                name: "material_transaction_types",
+                list: "/material-transaction-types",
+                create: "/material-transaction-types/create",
+                edit: "/material-transaction-types/edit/:id",
+                show: "/material-transaction-types/show/:id",
+                meta: { idColumnName: "transaction_type_id", label: "Material Transaction Types" },
+              },
+              {
+                name: "transaction_direction",
+                list: "/transaction-direction",
+                create: "/transaction-direction/create",
+                edit: "/transaction-direction/edit/:id",
+                show: "/transaction-direction/show/:id",
+                meta: { idColumnName: "direction_type_id", label: "Transaction Direction" },
+              },
             ]}
             options={{
               syncWithLocation: true,
@@ -312,6 +372,36 @@ const App = () => {
                   <Route path="create" element={<PaymentTypeCreate />} />
                   <Route path="edit/:id" element={<PaymentTypeEdit />} />
                   <Route path="show/:id" element={<PaymentTypeShow />} />
+                </Route>
+                <Route path="/units" >
+                  <Route index element={<UnitList />} />
+                  <Route path="create" element={<UnitCreate />} />
+                  <Route path="edit/:id" element={<UnitEdit />} />
+                  <Route path="show/:id" element={<UnitShow />} />
+                </Route>
+                <Route path="/requisition-statuses" >
+                  <Route index element={<RequisitionStatusList />} />
+                  <Route path="create" element={<RequisitionStatusCreate />} />
+                  <Route path="edit/:id" element={<RequisitionStatusEdit />} />
+                  <Route path="show/:id" element={<RequisitionStatusShow />} />
+                </Route>
+                <Route path="/movements-statuses" >
+                  <Route index element={<MovementStatusList />} />
+                  <Route path="create" element={<MovementStatusCreate />} />
+                  <Route path="edit/:id" element={<MovementStatusEdit />} />
+                  <Route path="show/:id" element={<MovementStatusShow />} />
+                </Route>
+                <Route path="/material-transaction-types" >
+                  <Route index element={<MaterialTransactionTypeList />} />
+                  <Route path="create" element={<MaterialTransactionTypeCreate />} />
+                  <Route path="edit/:id" element={<MaterialTransactionTypeEdit />} />
+                  <Route path="show/:id" element={<MaterialTransactionTypeShow />} />
+                </Route>
+                <Route path="/transaction-direction" >
+                  <Route index element={<TransactionDirectionList />} />
+                  <Route path="create" element={<TransactionDirectionCreate />} />
+                  <Route path="edit/:id" element={<TransactionDirectionEdit />} />
+                  <Route path="show/:id" element={<TransactionDirectionShow />} />
                 </Route>
               </Route>
               <Route
