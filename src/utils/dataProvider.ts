@@ -29,6 +29,8 @@ const ID_COLUMNS: Record<string, string> = {
   movements_statuses: "movement_status_id",
   material_transaction_types: "transaction_type_id",
   transaction_direction: "direction_type_id",
+  production_statuses: "production_status_id",
+  resource_requirements_statuses: "requirement_status_id",
 };
 
 const RESOURCE_FIELDS: Record<string, string[]> = {
@@ -71,21 +73,23 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "material_id",
     "material_name",
     "unit_id",
+    "unit { unit_id unit_code unit_name unit_symbol }",
     "material_type_id",
+    "material_type { material_type_id material_type_name }",
     "vendor_id",
+    "vendor { vendor_id vendor_name }",
     "default_supplier_id",
+    "default_supplier { supplier_id supplier_name }",
     "description",
     "is_active",
-    "created_by",
-    "edited_by",
-    "created_at",
-    "updated_at",
     "ref_key_1c",
   ],
   material_types: [
     "material_type_id",
     "material_type_name",
+    "sort_order",
     "description",
+    "is_active",
     "ref_key_1c",
   ],
   
@@ -93,6 +97,9 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "milling_type_id",
     "milling_type_name",
     "cost_per_sqm",
+    "sort_order",
+    "description",
+    "is_active",
     "ref_key_1c",
   ],
   films: [
@@ -121,6 +128,9 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   edge_types: [
     "edge_type_id",
     "edge_type_name",
+    "sort_order",
+    "description",
+    "is_active",
     "ref_key_1c",
   ],
   vendors: [
@@ -140,16 +150,26 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   order_statuses: [
     "order_status_id",
     "order_status_name",
+    "sort_order",
+    "color",
+    "description",
+    "is_active",
     "ref_key_1c",
   ],
   payment_statuses: [
     "payment_status_id",
     "payment_status_name",
+    "sort_order",
+    "color",
+    "description",
+    "is_active",
     "ref_key_1c",
   ],
   payment_types: [
     "type_paid_id",
     "type_paid_name",
+    "sort_order",
+    "is_active",
     "ref_key_1c",
   ],
   // New resources from schema v11.4:
@@ -202,6 +222,24 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "description",
     "is_active",
   ],
+  production_statuses: [
+    "production_status_id",
+    "production_status_name",
+    "sort_order",
+    "color",
+    "description",
+    "is_active",
+    "ref_key_1c",
+  ],
+  resource_requirements_statuses: [
+    "requirement_status_id",
+    "requirement_status_code",
+    "requirement_status_name",
+    "sort_order",
+    "is_active",
+    "description",
+    "ref_key_1c",
+  ],
 };
 
 const REQUIRED_FIELDS: Record<string, string[]> = {
@@ -221,6 +259,8 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   movements_statuses: ["movement_status_code", "movement_status_name"],
   material_transaction_types: ["transaction_type_name"],
   transaction_direction: ["direction_code", "direction_name"],
+  production_statuses: ["production_status_name"],
+  resource_requirements_statuses: ["requirement_status_code", "requirement_status_name"],
 };
 
 // Temporary workaround for tables where PK has NOT NULL without default/identity in the actual DB
@@ -425,9 +465,16 @@ export const dataProvider = (_apiUrl: string) => {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
       const idCol = ID_COLUMNS[resource] ?? "id";
-      // Do not send id in _set
-      const { [idCol]: _omit, ...rest } = variables || {};
-      const setLiteral = JSON.stringify(sanitizeVariables(rest)).replace(/"([^("]+)":/g, "$1:");
+      // Do not send id, audit fields, or timestamps in _set
+      const {
+        [idCol]: _omit,
+        created_by,
+        edited_by,
+        created_at,
+        updated_at,
+        ...rest
+      } = variables || {};
+      const setLiteral = JSON.stringify(sanitizeVariables(rest)).replace(/"([^(\"]+)":/g, "$1:");
       const query = `
         mutation {
           update_${resource}_by_pk(pk_columns: { ${idCol}: ${escapeValue(id)} }, _set: ${setLiteral}) {

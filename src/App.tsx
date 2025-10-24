@@ -81,6 +81,14 @@ import { TransactionDirectionList } from "./pages/transaction_direction/list";
 import { TransactionDirectionCreate } from "./pages/transaction_direction/create";
 import { TransactionDirectionEdit } from "./pages/transaction_direction/edit";
 import { TransactionDirectionShow } from "./pages/transaction_direction/show";
+import { ProductionStatusList } from "./pages/production_statuses/list";
+import { ProductionStatusCreate } from "./pages/production_statuses/create";
+import { ProductionStatusEdit } from "./pages/production_statuses/edit";
+import { ProductionStatusShow } from "./pages/production_statuses/show";
+import { ResourceRequirementStatusList } from "./pages/resource_requirements_statuses/list";
+import { ResourceRequirementStatusCreate } from "./pages/resource_requirements_statuses/create";
+import { ResourceRequirementStatusEdit } from "./pages/resource_requirements_statuses/edit";
+import { ResourceRequirementStatusShow } from "./pages/resource_requirements_statuses/show";
 import { LoginPage } from "./pages/login";
 import { dataProvider } from "./utils/dataProvider";
 
@@ -267,6 +275,22 @@ const App = () => {
                 show: "/transaction-direction/show/:id",
                 meta: { idColumnName: "direction_type_id", label: "Transaction Direction" },
               },
+              {
+                name: "production_statuses",
+                list: "/production-statuses",
+                create: "/production-statuses/create",
+                edit: "/production-statuses/edit/:id",
+                show: "/production-statuses/show/:id",
+                meta: { idColumnName: "production_status_id", label: "Production Statuses" },
+              },
+              {
+                name: "resource_requirements_statuses",
+                list: "/resource-requirements-statuses",
+                create: "/resource-requirements-statuses/create",
+                edit: "/resource-requirements-statuses/edit/:id",
+                show: "/resource-requirements-statuses/show/:id",
+                meta: { idColumnName: "requirement_status_id", label: "Resource Requirements Statuses" },
+              },
             ]}
             options={{
               syncWithLocation: true,
@@ -402,6 +426,18 @@ const App = () => {
                   <Route path="create" element={<TransactionDirectionCreate />} />
                   <Route path="edit/:id" element={<TransactionDirectionEdit />} />
                   <Route path="show/:id" element={<TransactionDirectionShow />} />
+                </Route>
+                <Route path="/production-statuses" >
+                  <Route index element={<ProductionStatusList />} />
+                  <Route path="create" element={<ProductionStatusCreate />} />
+                  <Route path="edit/:id" element={<ProductionStatusEdit />} />
+                  <Route path="show/:id" element={<ProductionStatusShow />} />
+                </Route>
+                <Route path="/resource-requirements-statuses" >
+                  <Route index element={<ResourceRequirementStatusList />} />
+                  <Route path="create" element={<ResourceRequirementStatusCreate />} />
+                  <Route path="edit/:id" element={<ResourceRequirementStatusEdit />} />
+                  <Route path="show/:id" element={<ResourceRequirementStatusShow />} />
                 </Route>
               </Route>
               <Route

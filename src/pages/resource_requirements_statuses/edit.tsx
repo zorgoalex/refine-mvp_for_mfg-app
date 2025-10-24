@@ -2,13 +2,16 @@ import { Edit, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
 
-export const MaterialTypeEdit: React.FC<IResourceComponentsProps> = () => {
+export const ResourceRequirementStatusEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps } = useForm();
 
   return (
     <Edit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
-        <Form.Item label="Name" name="material_type_name" rules={[{ required: true }]}>
+        <Form.Item label="Code" name="requirement_status_code" rules={[{ required: true }]}>
+          <Input />
+        </Form.Item>
+        <Form.Item label="Name" name="requirement_status_name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
         <Form.Item label="Sort Order" name="sort_order" rules={[{ required: true }]}>
@@ -27,4 +30,3 @@ export const MaterialTypeEdit: React.FC<IResourceComponentsProps> = () => {
     </Edit>
   );
 };
-

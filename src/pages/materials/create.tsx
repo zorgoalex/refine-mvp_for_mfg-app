@@ -39,10 +39,10 @@ export const MaterialCreate: React.FC<IResourceComponentsProps> = () => {
         >
           <Input />
         </Form.Item>
-        <Form.Item label="Unit" name="unit_id">
+        <Form.Item label="Unit" name="unit_id" rules={[{ required: true, message: "Unit is required" }]}>
           <Select {...unitSelectProps} />
         </Form.Item>
-        <Form.Item label="Material Type" name="material_type_id">
+        <Form.Item label="Material Type" name="material_type_id" rules={[{ required: true, message: "Material Type is required" }]}>
           <Select {...typeSelectProps} />
         </Form.Item>
         <Form.Item label="Vendor" name="vendor_id">

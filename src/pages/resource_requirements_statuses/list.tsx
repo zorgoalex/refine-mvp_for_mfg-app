@@ -2,17 +2,15 @@ import { IResourceComponentsProps } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table } from "antd";
 
-export const MillingTypeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
-    syncWithLocation: true,
-  });
+export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> = () => {
+  const { tableProps } = useTable({ syncWithLocation: true });
 
   return (
     <List>
-      <Table {...tableProps} rowKey="milling_type_id">
-        <Table.Column dataIndex="milling_type_id" title="Milling Type ID" sorter />
-        <Table.Column dataIndex="milling_type_name" title="Name" sorter />
-        <Table.Column dataIndex="cost_per_sqm" title="Cost per sqm" />
+      <Table {...tableProps} rowKey="requirement_status_id">
+        <Table.Column dataIndex="requirement_status_id" title="Status ID" sorter />
+        <Table.Column dataIndex="requirement_status_code" title="Code" sorter />
+        <Table.Column dataIndex="requirement_status_name" title="Name" sorter />
         <Table.Column dataIndex="sort_order" title="Sort Order" sorter />
         <Table.Column
           dataIndex="is_active"
@@ -24,8 +22,8 @@ export const MillingTypeList: React.FC<IResourceComponentsProps> = () => {
           title="Actions"
           render={(_, record: any) => (
             <Space>
-              <ShowButton hideText size="small" recordItemId={record.milling_type_id} />
-              <EditButton hideText size="small" recordItemId={record.milling_type_id} />
+              <ShowButton hideText size="small" recordItemId={record.requirement_status_id} />
+              <EditButton hideText size="small" recordItemId={record.requirement_status_id} />
             </Space>
           )}
         />

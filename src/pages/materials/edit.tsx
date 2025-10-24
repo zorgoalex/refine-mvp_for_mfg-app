@@ -15,13 +15,13 @@ export const MaterialEdit: React.FC<IResourceComponentsProps> = () => {
     resource: "vendors",
     optionLabel: "vendor_name",
     optionValue: "vendor_id",
-    defaultValue: current?.vendor_id,
+    defaultValue: current?.vendor_id || undefined,
   });
   const { selectProps: supplierSelectProps } = useSelect({
     resource: "suppliers",
     optionLabel: "supplier_name",
     optionValue: "supplier_id",
-    defaultValue: current?.default_supplier_id,
+    defaultValue: current?.default_supplier_id || undefined,
   });
   const { selectProps: unitSelectProps } = useSelect({
     resource: "units",
@@ -44,10 +44,10 @@ export const MaterialEdit: React.FC<IResourceComponentsProps> = () => {
         >
           <Input />
         </Form.Item>
-        <Form.Item label="Unit" name="unit_id">
+        <Form.Item label="Unit" name="unit_id" rules={[{ required: true, message: "Unit is required" }]}>
           <Select {...unitSelectProps} />
         </Form.Item>
-        <Form.Item label="Material Type" name="material_type_id">
+        <Form.Item label="Material Type" name="material_type_id" rules={[{ required: true, message: "Material Type is required" }]}>
           <Select {...typeSelectProps} />
         </Form.Item>
         <Form.Item label="Vendor" name="vendor_id">
