@@ -39,6 +39,37 @@ const ID_COLUMNS: Record<string, string> = {
   order_resource_requirements: "requirement_id",
 };
 
+// Resources with is_active field - automatically filter by is_active = true in getList
+const ACTIVE_FILTERED_RESOURCES = [
+  // Reference tables (справочники)
+  // NOTE: "units" does NOT have is_active field in schema v11.5
+  "clients",
+  "edge_types",
+  "film_vendors",
+  "film_types",
+  "films",
+  "materials",
+  "material_types",
+  "vendors",
+  "suppliers",
+  "milling_types",
+  "payment_types",
+  "payment_statuses",
+  "order_statuses",
+  // Logistics & statuses (логистика и статусы)
+  "requisition_statuses",
+  "movements_statuses",
+  "material_transaction_types",
+  "transaction_direction",
+  // Production resources (производственные ресурсы)
+  "employees",
+  "users",
+  "workshops",
+  "work_centers",
+  "production_statuses",
+  "resource_requirements_statuses",
+];
+
 const RESOURCE_FIELDS: Record<string, string[]> = {
   // Read-only aggregate view
   orders_view: [
@@ -515,14 +546,26 @@ export const dataProvider = (_apiUrl: string) => {
       const page = pagination?.current ?? 1;
       const offset = (page - 1) * limit;
       const orderBy = buildOrderBy(resource, sorters);
-      const where = buildWhere(filters);
+
+      // Auto-add is_active filter for reference tables (unless explicitly overridden)
+      let enhancedFilters = filters || [];
+      if (ACTIVE_FILTERED_RESOURCES.includes(resource)) {
+        const hasIsActiveFilter = enhancedFilters.some((f: any) => f.field === "is_active");
+        if (!hasIsActiveFilter) {
+          enhancedFilters = [...enhancedFilters, { field: "is_active", operator: "eq", value: true }];
+        }
+      }
+
+      const where = buildWhere(enhancedFilters);
       const selection = fieldsFor(resource);
+      // For aggregate, remove leading comma from where clause
+      const aggregateWhere = where ? `(${where.replace(/^,\s*/, '')})` : '';
       const query = `
         query {
           ${resource}(limit: ${limit}, offset: ${offset}${orderBy}${where}) {
             ${selection}
           }
-          ${resource}_aggregate${where} { aggregate { count } }
+          ${resource}_aggregate${aggregateWhere} { aggregate { count } }
         }
       `;
       const data = await gqlRequest(query);

@@ -1,0 +1,68 @@
+/* Fixed sidebar with independent scrolling for content area */
+
+/* Make the main layout container full height */
+.ant-layout {
+  min-height: 100vh;
+  display: flex;
+}
+
+/* Fixed sidebar */
+.ant-layout-sider {
+  position: fixed !important;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  height: 100vh !important;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  z-index: 10;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
+}
+
+/* Scrollbar styling for sidebar */
+.ant-layout-sider::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-track {
+  background: #f0f0f0;
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb {
+  background: #bfbfbf;
+  border-radius: 3px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
+
+/* Adjust content area to account for fixed sidebar */
+.ant-layout-content {
+  margin-left: 200px !important; /* Default collapsed width */
+  transition: margin-left 0.2s;
+  overflow-y: auto;
+  min-height: 100vh;
+}
+
+/* When sidebar is expanded */
+.ant-layout-sider:not(.ant-layout-sider-collapsed) + * .ant-layout-content,
+.ant-layout-has-sider .ant-layout-content {
+  margin-left: 200px !important;
+}
+
+/* When sidebar is collapsed */
+.ant-layout-sider-collapsed + * .ant-layout-content {
+  margin-left: 80px !important;
+}
+
+/* Ensure the layout wrapper doesn't add extra scrollbars */
+.ant-layout-has-sider {
+  overflow: visible !important;
+}
+
+/* Header should stay with content, not fixed */
+.ant-layout-header {
+  position: relative;
+  z-index: 5;
+}

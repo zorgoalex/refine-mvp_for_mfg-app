@@ -6,6 +6,7 @@ import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import "@refinedev/antd/dist/reset.css";
+import "./styles/app.css";
 import { OrderList } from "./pages/orders/list";
 import { OrderShow } from "./pages/orders/show";
 import { OrderEdit } from "./pages/orders/edit";
