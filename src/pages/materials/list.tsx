@@ -7,8 +7,11 @@ import { useHighlightRow } from "../../hooks/useHighlightRow";
 export const MaterialList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "material_id", order: "desc" }],
+    },
   });
-  const { highlightProps } = useHighlightRow("material_id");
+  const { highlightProps } = useHighlightRow("material_id", tableProps.dataSource);
 
   const typeIds = useMemo(
     () =>

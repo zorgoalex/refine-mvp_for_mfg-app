@@ -1,5 +1,4 @@
 import { useForm as useRefineForm, UseFormProps, UseFormReturnType } from "@refinedev/antd";
-import { useNavigate } from "react-router-dom";
 import { BaseRecord, HttpError } from "@refinedev/core";
 
 /**
@@ -23,20 +22,21 @@ export const useFormWithHighlight = <
   action?: "create" | "edit";
   formProps?: UseFormProps<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>;
 }): UseFormReturnType<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError> => {
-  const navigate = useNavigate();
   const { resource, idField, action = "create", formProps: additionalProps } = props;
 
   const formReturn = useRefineForm<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>({
-    redirect: false,
     ...additionalProps,
+    redirect: false,
     onMutationSuccess: (data, variables, context, isAutoSave) => {
       // Call original onMutationSuccess if provided
       additionalProps?.onMutationSuccess?.(data, variables, context, isAutoSave);
 
-      // Navigate with highlight parameter
+      // Navigate manually with highlightId
       const recordId = data.data?.[idField];
       if (recordId) {
-        navigate(`/${resource}?highlightId=${recordId}`, { replace: true });
+        // Navigate to list page with highlight parameter
+        const baseUrl = `${window.location.origin}/${resource}`;
+        window.location.href = `${baseUrl}?highlightId=${recordId}`;
       }
     },
   });

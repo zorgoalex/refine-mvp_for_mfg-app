@@ -4,8 +4,13 @@ import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({ syncWithLocation: true });
-  const { highlightProps } = useHighlightRow("film_type_id");
+  const { tableProps } = useTable({
+    syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "film_type_id", order: "desc" }],
+    },
+  });
+  const { highlightProps } = useHighlightRow("film_type_id", tableProps.dataSource);
 
   return (
     <List>

@@ -6,8 +6,11 @@ import { useHighlightRow } from "../../hooks/useHighlightRow";
 export const MillingTypeList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "milling_type_id", order: "desc" }],
+    },
   });
-  const { highlightProps } = useHighlightRow("milling_type_id");
+  const { highlightProps } = useHighlightRow("milling_type_id", tableProps.dataSource);
 
   return (
     <List>

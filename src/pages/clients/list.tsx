@@ -6,8 +6,11 @@ import { useHighlightRow } from "../../hooks/useHighlightRow";
 export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "client_id", order: "desc" }],
+    },
   });
-  const { highlightProps } = useHighlightRow("client_id");
+  const { highlightProps } = useHighlightRow("client_id", tableProps.dataSource);
 
   return (
     <List>

@@ -4,8 +4,13 @@ import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const VendorList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({ syncWithLocation: true });
-  const { highlightProps } = useHighlightRow("vendor_id");
+  const { tableProps } = useTable({
+    syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "vendor_id", order: "desc" }],
+    },
+  });
+  const { highlightProps } = useHighlightRow("vendor_id", tableProps.dataSource);
 
   return (
     <List>

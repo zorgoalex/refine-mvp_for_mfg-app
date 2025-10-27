@@ -4,8 +4,13 @@ import { Space, Table } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const MaterialTypeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({ syncWithLocation: true });
-  const { highlightProps } = useHighlightRow("material_type_id");
+  const { tableProps } = useTable({
+    syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "material_type_id", order: "desc" }],
+    },
+  });
+  const { highlightProps } = useHighlightRow("material_type_id", tableProps.dataSource);
 
   return (
     <List>
