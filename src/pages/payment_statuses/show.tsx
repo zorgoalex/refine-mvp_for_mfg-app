@@ -22,12 +22,17 @@ export const PaymentStatusShow: React.FC<IResourceComponentsProps> = () => {
         status={record?.is_active ? "success" : "default"}
         text={record?.is_active ? "Активен" : "Неактивен"}
       />
-      <Title level={5}>Created At</Title>
+      <Title level={5}>Создан</Title>
+      <TextField value={record?.created_by || "-"} />
+      <Title level={5}>Изменён</Title>
+      <TextField value={record?.edited_by || "-"} />
+      <Title level={5}>Создано</Title>
       <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
-      <Title level={5}>Updated At</Title>
+      <Title level={5}>Обновлено</Title>
       <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
     </Show>
   );
 };
+
 
 

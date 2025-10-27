@@ -46,3 +46,4 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
     </List>
   );
 };
+
