@@ -63,8 +63,8 @@ export const OrderEdit: React.FC<IResourceComponentsProps> = () => {
           <DatePicker />
         </Form.Item>
         <Form.Item
-          label="Order Number"
-          name="order_number"
+          label="Order Name"
+          name="order_name"
           rules={[
             {
               required: true,

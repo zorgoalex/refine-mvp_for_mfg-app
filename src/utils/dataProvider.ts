@@ -99,7 +99,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   // Base orders table (for edit)
   orders: [
     "order_id",
-    "order_number",
+    "order_name",
     "order_date",
     "client_id",
     "material_id",

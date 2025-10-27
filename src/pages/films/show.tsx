@@ -32,8 +32,12 @@ export const FilmShow: React.FC<IResourceComponentsProps> = () => {
       <Badge status={record?.is_active ? "success" : "default"} text={record?.is_active ? "Активен" : "Неактивен"} />
       <Title level={5}>Создано</Title>
       <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
+      <Title level={5}>Создано пользователем</Title>
+      <TextField value={record?.created_by || "-"} />
       <Title level={5}>Обновлено</Title>
       <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
+      <Title level={5}>Обновлено пользователем</Title>
+      <TextField value={record?.edited_by || "-"} />
     </Show>
   );
 };
