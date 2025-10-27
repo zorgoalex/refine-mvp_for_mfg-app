@@ -1,6 +1,6 @@
 import { IResourceComponentsProps, useMany } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
-import { Space, Table } from "antd";
+import { Space, Table, Badge } from "antd";
 import { useMemo } from "react";
 
 export const MaterialList: React.FC<IResourceComponentsProps> = () => {
@@ -89,6 +89,21 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="vendor_id" title="Vendor" render={(_, r: any) => vendorMap[r?.vendor_id] ?? r?.vendor_id} />
         <Table.Column dataIndex="default_supplier_id" title="Supplier" render={(_, r: any) => supplierMap[r?.default_supplier_id] ?? r?.default_supplier_id} />
         <Table.Column dataIndex="description" title="Description" />
+        <Table.Column
+          dataIndex="is_active"
+          title="Active"
+          sorter
+          render={(value: boolean) => (
+            <Badge
+              status={value ? "success" : "default"}
+              text={value ? "Active" : "Inactive"}
+            />
+          )}
+          filters={[
+            { text: "Active", value: true },
+            { text: "Inactive", value: false },
+          ]}
+        />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
         <Table.Column
           title="Actions"

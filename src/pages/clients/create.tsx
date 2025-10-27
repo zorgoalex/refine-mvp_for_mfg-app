@@ -1,6 +1,6 @@
 import { Create, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
-import { Form, Input } from "antd";
+import { Form, Input, Checkbox } from "antd";
 
 export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps } = useForm();
@@ -18,6 +18,17 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
           ]}
         >
           <Input />
+        </Form.Item>
+        <Form.Item label="Notes" name="notes">
+          <Input.TextArea rows={4} />
+        </Form.Item>
+        <Form.Item
+          label="Active"
+          name="is_active"
+          valuePropName="checked"
+          initialValue={true}
+        >
+          <Checkbox>Active</Checkbox>
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />

@@ -1,6 +1,6 @@
 import { IResourceComponentsProps, useMany } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
-import { Space, Table } from "antd";
+import { Space, Table, Badge } from "antd";
 import { useMemo } from "react";
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
@@ -62,6 +62,17 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column dataIndex="film_texture" title="Texture" />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
+        <Table.Column
+          dataIndex="is_active"
+          title="Active"
+          render={(value: boolean) => (
+            <Badge status={value ? "success" : "default"} text={value ? "Active" : "Inactive"} />
+          )}
+          filters={[
+            { text: "Active", value: true },
+            { text: "Inactive", value: false },
+          ]}
+        />
         <Table.Column
           title="Actions"
           render={(_, record: any) => (

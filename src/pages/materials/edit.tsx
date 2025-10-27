@@ -1,6 +1,6 @@
 import { Edit, useForm, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
-import { Form, Input, Select } from "antd";
+import { Form, Input, Select, Checkbox } from "antd";
 
 export const MaterialEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps, queryResult } = useForm();
@@ -57,7 +57,14 @@ export const MaterialEdit: React.FC<IResourceComponentsProps> = () => {
           <Select {...supplierSelectProps} />
         </Form.Item>
         <Form.Item label="Description" name="description">
-          <Input />
+          <Input.TextArea rows={3} />
+        </Form.Item>
+        <Form.Item
+          label="Active"
+          name="is_active"
+          valuePropName="checked"
+        >
+          <Checkbox>Active</Checkbox>
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />

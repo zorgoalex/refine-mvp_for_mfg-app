@@ -1,6 +1,6 @@
 import { IResourceComponentsProps } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
-import { Space, Table } from "antd";
+import { Space, Table, Badge } from "antd";
 
 export const VendorList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({ syncWithLocation: true });
@@ -12,6 +12,18 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="vendor_name" title="Name" sorter />
         <Table.Column dataIndex="contact_info" title="Contact Info" />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
+        <Table.Column
+          dataIndex="is_active"
+          title="Active"
+          sorter
+          filters={[
+            { text: "Active", value: true },
+            { text: "Inactive", value: false },
+          ]}
+          render={(value) => (
+            <Badge status={value ? "success" : "default"} text={value ? "Active" : "Inactive"} />
+          )}
+        />
         <Table.Column
           title="Actions"
           render={(_, record: any) => (

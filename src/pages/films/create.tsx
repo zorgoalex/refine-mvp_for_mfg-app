@@ -1,6 +1,6 @@
 import { Create, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
-import { Form, Input, Switch, Select } from "antd";
+import { Form, Input, Switch, Select, Checkbox } from "antd";
 import { useSelect } from "@refinedev/antd";
 
 export const FilmCreate: React.FC<IResourceComponentsProps> = () => {
@@ -41,6 +41,9 @@ export const FilmCreate: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />
+        </Form.Item>
+        <Form.Item label="Active" name="is_active" valuePropName="checked" initialValue={true}>
+          <Checkbox>Is Active</Checkbox>
         </Form.Item>
       </Form>
     </Create>

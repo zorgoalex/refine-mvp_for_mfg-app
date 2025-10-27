@@ -1,6 +1,6 @@
 import { Create, useForm, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
-import { Form, Input, Select } from "antd";
+import { Form, Input, Select, Checkbox } from "antd";
 
 export const MaterialCreate: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps } = useForm();
@@ -52,7 +52,15 @@ export const MaterialCreate: React.FC<IResourceComponentsProps> = () => {
           <Select {...supplierSelectProps} />
         </Form.Item>
         <Form.Item label="Description" name="description">
-          <Input />
+          <Input.TextArea rows={3} />
+        </Form.Item>
+        <Form.Item
+          label="Active"
+          name="is_active"
+          valuePropName="checked"
+          initialValue={true}
+        >
+          <Checkbox>Active</Checkbox>
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />
