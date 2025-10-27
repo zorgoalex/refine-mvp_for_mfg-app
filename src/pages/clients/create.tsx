@@ -27,12 +27,12 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
           <Input.TextArea rows={4} />
         </Form.Item>
         <Form.Item
-          label="Active"
+          label="Активен"
           name="is_active"
           valuePropName="checked"
           initialValue={true}
         >
-          <Checkbox>Active</Checkbox>
+          <Checkbox>Активен</Checkbox>
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />
@@ -41,3 +41,4 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
     </Create>
   );
 };
+

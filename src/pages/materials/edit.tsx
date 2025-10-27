@@ -65,11 +65,11 @@ export const MaterialEdit: React.FC<IResourceComponentsProps> = () => {
           <Input.TextArea rows={3} />
         </Form.Item>
         <Form.Item
-          label="Active"
+          label="Активен"
           name="is_active"
           valuePropName="checked"
         >
-          <Checkbox>Active</Checkbox>
+          <Checkbox>Активен</Checkbox>
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />
@@ -78,3 +78,4 @@ export const MaterialEdit: React.FC<IResourceComponentsProps> = () => {
     </Edit>
   );
 };
+

@@ -30,11 +30,12 @@ export const SupplierCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Description" name="description">
           <Input.TextArea rows={3} />
         </Form.Item>
-        <Form.Item label="Active" name="is_active" valuePropName="checked" initialValue={true}>
+        <Form.Item label="Активен" name="is_active" valuePropName="checked" initialValue={true}>
           <Checkbox />
         </Form.Item>
       </Form>
     </Create>
   );
 };
+
 

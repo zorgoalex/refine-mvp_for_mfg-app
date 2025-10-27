@@ -21,11 +21,12 @@ export const VendorCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />
         </Form.Item>
-        <Form.Item label="Active" name="is_active" initialValue={true} valuePropName="checked">
+        <Form.Item label="Активен" name="is_active" initialValue={true} valuePropName="checked">
           <Checkbox />
         </Form.Item>
       </Form>
     </Create>
   );
 };
+
 

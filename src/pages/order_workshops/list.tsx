@@ -3,7 +3,12 @@ import { List, useTable, ShowButton, EditButton, DateField } from "@refinedev/an
 import { Space, Table } from "antd";
 
 export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({ syncWithLocation: true });
+  const { tableProps } = useTable({
+    syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "order_workshop_id", order: "desc" }],
+    },
+  });
 
   return (
     <List>

@@ -17,10 +17,10 @@ export const OrderStatusShow: React.FC<IResourceComponentsProps> = () => {
       <TextField value={record?.order_status_name} />
       <Title level={5}>Ref Key 1C</Title>
       <TextField value={record?.ref_key_1c} />
-      <Title level={5}>Active</Title>
+      <Title level={5}>Активен</Title>
       <Badge
         status={record?.is_active ? "success" : "default"}
-        text={record?.is_active ? "Active" : "Inactive"}
+        text={record?.is_active ? "Активен" : "Неактивен"}
       />
       <Title level={5}>Created At</Title>
       <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
@@ -29,4 +29,5 @@ export const OrderStatusShow: React.FC<IResourceComponentsProps> = () => {
     </Show>
   );
 };
+
 

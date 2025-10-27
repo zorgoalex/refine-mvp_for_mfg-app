@@ -31,11 +31,12 @@ export const SupplierEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Description" name="description">
           <Input.TextArea rows={3} />
         </Form.Item>
-        <Form.Item label="Active" name="is_active" valuePropName="checked">
+        <Form.Item label="Активен" name="is_active" valuePropName="checked">
           <Checkbox />
         </Form.Item>
       </Form>
     </Edit>
   );
 };
+
 

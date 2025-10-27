@@ -29,10 +29,10 @@ export const MaterialTransactionTypeShow: React.FC<IResourceComponentsProps> = (
       <TextField value={record?.sort_order} />
       <Title level={5}>Description</Title>
       <TextField value={record?.description} />
-      <Title level={5}>Active</Title>
+      <Title level={5}>Активен</Title>
       <Badge
         status={record?.is_active ? "success" : "default"}
-        text={record?.is_active ? "Active" : "Inactive"}
+        text={record?.is_active ? "Активен" : "Неактивен"}
       />
       <Title level={5}>Created At</Title>
       <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
@@ -41,3 +41,4 @@ export const MaterialTransactionTypeShow: React.FC<IResourceComponentsProps> = (
     </Show>
   );
 };
+

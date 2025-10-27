@@ -35,10 +35,11 @@ export const FilmVendorCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Contact Info" name="contact_info">
           <Input.TextArea rows={3} />
         </Form.Item>
-        <Form.Item label="Active" name="is_active" valuePropName="checked" initialValue={true}>
+        <Form.Item label="Активен" name="is_active" valuePropName="checked" initialValue={true}>
           <Checkbox />
         </Form.Item>
       </Form>
     </Create>
   );
 };
+

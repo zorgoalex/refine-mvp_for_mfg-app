@@ -24,7 +24,7 @@ export const WorkshopShow: React.FC<IResourceComponentsProps> = () => {
       <Title level={5}>Активен</Title>
       <Badge
         status={record?.is_active ? "success" : "default"}
-        text={record?.is_active ? "Active" : "Inactive"}
+        text={record?.is_active ? "Активен" : "Неактивен"}
       />
       <Title level={5}>Created At</Title>
       <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
@@ -33,3 +33,4 @@ export const WorkshopShow: React.FC<IResourceComponentsProps> = () => {
     </Show>
   );
 };
+

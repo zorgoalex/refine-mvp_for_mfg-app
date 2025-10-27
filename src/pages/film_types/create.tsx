@@ -18,11 +18,12 @@ export const FilmTypeCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />
         </Form.Item>
-        <Form.Item label="Active" name="is_active" valuePropName="checked" initialValue={true}>
+        <Form.Item label="Активен" name="is_active" valuePropName="checked" initialValue={true}>
           <Checkbox />
         </Form.Item>
       </Form>
     </Create>
   );
 };
+
 

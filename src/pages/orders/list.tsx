@@ -5,6 +5,9 @@ import { Space, Table } from "antd";
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "order_id", order: "desc" }],
+    },
   });
 
   return (

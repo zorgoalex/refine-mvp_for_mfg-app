@@ -19,16 +19,19 @@ export const VendorShow: React.FC<IResourceComponentsProps> = () => {
       <TextField value={record?.contact_info} />
       <Title level={5}>Ref Key 1C</Title>
       <TextField value={record?.ref_key_1c} />
-      <Title level={5}>Active</Title>
+      <Title level={5}>Активен</Title>
       <Badge
         status={record?.is_active ? "success" : "default"}
-        text={record?.is_active ? "Active" : "Inactive"}
+        text={record?.is_active ? "Активен" : "Неактивен"}
       />
-      <Title level={5}>Created At</Title>
+      <Title level={5}>Создан</Title>
+      <TextField value={record?.created_by || "-"} />
+      <Title level={5}>Изменён</Title>
+      <TextField value={record?.edited_by || "-"} />
+      <Title level={5}>Создано</Title>
       <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
-      <Title level={5}>Updated At</Title>
+      <Title level={5}>Обновлено</Title>
       <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
     </Show>
   );
 };
-
