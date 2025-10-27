@@ -1,13 +1,15 @@
 import { IResourceComponentsProps } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
+import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({ syncWithLocation: true });
+  const { highlightProps } = useHighlightRow("film_type_id");
 
   return (
     <List>
-      <Table {...tableProps} rowKey="film_type_id">
+      <Table {...tableProps} {...highlightProps} rowKey="film_type_id">
         <Table.Column dataIndex="film_type_id" title="Film Type ID" sorter />
         <Table.Column dataIndex="film_type_name" title="Name" sorter />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />

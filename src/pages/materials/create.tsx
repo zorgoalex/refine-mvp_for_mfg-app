@@ -1,9 +1,13 @@
-import { Create, useForm, useSelect } from "@refinedev/antd";
+import { Create, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Select, Checkbox } from "antd";
+import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 
 export const MaterialCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useFormWithHighlight({
+    resource: "materials",
+    idField: "material_id",
+  });
   const { selectProps: typeSelectProps } = useSelect({
     resource: "material_types",
     optionLabel: "material_type_name",

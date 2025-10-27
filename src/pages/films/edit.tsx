@@ -1,10 +1,14 @@
-import { Edit, useForm } from "@refinedev/antd";
+import { Edit, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Switch, Select, Checkbox } from "antd";
-import { useSelect } from "@refinedev/antd";
+import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 
 export const FilmEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps, queryResult } = useForm();
+  const { formProps, saveButtonProps, queryResult } = useFormWithHighlight({
+    resource: "films",
+    idField: "film_id",
+    action: "edit",
+  });
   const current = queryResult?.data?.data;
   const { selectProps: typeSelectProps } = useSelect({
     resource: "film_types",

@@ -1,13 +1,15 @@
 import { IResourceComponentsProps } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
+import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const SupplierList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({ syncWithLocation: true });
+  const { highlightProps } = useHighlightRow("supplier_id");
 
   return (
     <List>
-      <Table {...tableProps} rowKey="supplier_id">
+      <Table {...tableProps} {...highlightProps} rowKey="supplier_id">
         <Table.Column dataIndex="supplier_id" title="Supplier ID" sorter />
         <Table.Column dataIndex="supplier_name" title="Name" sorter />
         <Table.Column dataIndex="address" title="Address" />

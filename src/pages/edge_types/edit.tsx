@@ -1,9 +1,14 @@
-import { Edit, useForm } from "@refinedev/antd";
+import { Edit } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
+import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 
 export const EdgeTypeEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useFormWithHighlight({
+    resource: "edge_types",
+    idField: "edge_type_id",
+    action: "edit",
+  });
 
   return (
     <Edit saveButtonProps={saveButtonProps}>

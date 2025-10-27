@@ -1,9 +1,13 @@
-import { Create, useForm } from "@refinedev/antd";
+import { Create } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
+import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 
 export const MillingTypeCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useFormWithHighlight({
+    resource: "milling_types",
+    idField: "milling_type_id",
+  });
 
   return (
     <Create saveButtonProps={saveButtonProps}>

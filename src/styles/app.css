@@ -66,3 +66,23 @@
   position: relative;
   z-index: 5;
 }
+
+/* Highlighted row animation after create/edit */
+.highlighted-row {
+  background-color: #ffd666 !important;
+  animation: fadeHighlight 2s ease-out;
+}
+
+@keyframes fadeHighlight {
+  0% {
+    background-color: #ffd666;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* Hover state should still work */
+.highlighted-row:hover td {
+  background-color: #fafafa !important;
+}

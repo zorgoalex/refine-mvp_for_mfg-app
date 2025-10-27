@@ -2,11 +2,13 @@ import { IResourceComponentsProps, useMany } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useMemo } from "react";
+import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
   });
+  const { highlightProps } = useHighlightRow("film_id");
 
   const typeIds = useMemo(
     () =>
@@ -47,7 +49,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <List>
-      <Table {...tableProps} rowKey="film_id">
+      <Table {...tableProps} {...highlightProps} rowKey="film_id">
         <Table.Column dataIndex="film_id" title="Film ID" sorter />
         <Table.Column dataIndex="film_name" title="Name" sorter />
         <Table.Column
