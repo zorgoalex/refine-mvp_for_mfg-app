@@ -62,6 +62,10 @@ import { PaymentTypeList } from "./pages/payment_types/list";
 import { PaymentTypeCreate } from "./pages/payment_types/create";
 import { PaymentTypeEdit } from "./pages/payment_types/edit";
 import { PaymentTypeShow } from "./pages/payment_types/show";
+import { PaymentList } from "./pages/payments/list";
+import { PaymentCreate } from "./pages/payments/create";
+import { PaymentEdit } from "./pages/payments/edit";
+import { PaymentShow } from "./pages/payments/show";
 import { UnitList } from "./pages/units/list";
 import { UnitCreate } from "./pages/units/create";
 import { UnitEdit } from "./pages/units/edit";
@@ -259,6 +263,14 @@ const App = () => {
                 edit: "/payment-types/edit/:id",
                 show: "/payment-types/show/:id",
                 meta: { idColumnName: "type_paid_id" },
+              },
+              {
+                name: "payments",
+                list: "/payments",
+                create: "/payments/create",
+                edit: "/payments/edit/:id",
+                show: "/payments/show/:id",
+                meta: { idColumnName: "payment_id" },
               },
               {
                 name: "units",
@@ -476,7 +488,12 @@ const App = () => {
                   <Route path="edit/:id" element={<UnitEdit />} />
                   <Route path="show/:id" element={<UnitShow />} />
                 </Route>
-                <Route path="/requisition-statuses" >
+                <Route path="/payments" >
+                  <Route index element={<PaymentList />} />
+                  <Route path="create" element={<PaymentCreate />} />
+                  <Route path="edit/:id" element={<PaymentEdit />} />
+                  <Route path="show/:id" element={<PaymentShow />} />
+                </Route>                <Route path="/requisition-statuses" >
                   <Route index element={<RequisitionStatusList />} />
                   <Route path="create" element={<RequisitionStatusCreate />} />
                   <Route path="edit/:id" element={<RequisitionStatusEdit />} />
@@ -564,3 +581,10 @@ const App = () => {
 }
 
 export default App;
+
+
+
+
+
+
+

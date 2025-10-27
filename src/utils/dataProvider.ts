@@ -37,6 +37,7 @@ const ID_COLUMNS: Record<string, string> = {
   resource_requirements_statuses: "requirement_status_id",
   order_workshops: "order_workshop_id",
   order_resource_requirements: "requirement_id",
+  payments: "payment_id",
 };
 
 // Resources with is_active field - automatically filter by is_active = true in getList
@@ -412,6 +413,19 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "is_active",
     "ref_key_1c",
   ],
+  payments: [
+    "payment_id",
+    "order_id",
+    "type_paid_id",
+    "amount",
+    "payment_date",
+    "notes",
+    "ref_key_1c",
+    "created_by",
+    "edited_by",
+    "created_at",
+    "updated_at",
+  ],
 };
 
 const REQUIRED_FIELDS: Record<string, string[]> = {
@@ -428,6 +442,7 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   units: ["unit_code", "unit_name"],
   employees: ["position", "full_name"],
   users: ["username"],
+  payments: ["order_id", "type_paid_id", "amount", "payment_date"],
   workshops: ["workshop_name"],
   work_centers: ["workcenter_code", "workcenter_name"],
   requisition_statuses: ["requisition_status_name"],
