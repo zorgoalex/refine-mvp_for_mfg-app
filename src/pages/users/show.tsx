@@ -1,6 +1,6 @@
 import { IResourceComponentsProps, useShow } from "@refinedev/core";
-import { Show, TextField, BooleanField, DateField } from "@refinedev/antd";
-import { Typography } from "antd";
+import { Show, TextField, DateField } from "@refinedev/antd";
+import { Typography, Badge } from "antd";
 
 const { Title } = Typography;
 
@@ -19,8 +19,6 @@ export const UserShow: React.FC<IResourceComponentsProps> = () => {
       <TextField value={record?.role?.role_name || "-"} />
       <Title level={5}>Сотрудник</Title>
       <TextField value={record?.employee?.full_name || "-"} />
-      <Title level={5}>Активен</Title>
-      <BooleanField value={record?.is_active} />
       <Title level={5}>Последний вход</Title>
       {record?.last_login_at ? (
         <DateField value={record.last_login_at} format="YYYY-MM-DD HH:mm:ss" />
@@ -29,6 +27,15 @@ export const UserShow: React.FC<IResourceComponentsProps> = () => {
       )}
       <Title level={5}>Ключ 1C</Title>
       <TextField value={record?.ref_key_1c} />
+      <Title level={5}>Активен</Title>
+      <Badge
+        status={record?.is_active ? "success" : "default"}
+        text={record?.is_active ? "Active" : "Inactive"}
+      />
+      <Title level={5}>Created At</Title>
+      <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
+      <Title level={5}>Updated At</Title>
+      <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
     </Show>
   );
 };

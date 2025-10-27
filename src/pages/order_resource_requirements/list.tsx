@@ -1,13 +1,20 @@
 import { IResourceComponentsProps } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
-import { Space, Table } from "antd";
+import { Space, Table, Badge } from "antd";
+import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({ syncWithLocation: true });
+  const { tableProps } = useTable({
+    syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "requirement_id", order: "desc" }],
+    },
+  });
+  const { highlightProps } = useHighlightRow("requirement_id", tableProps.dataSource);
 
   return (
     <List>
-      <Table {...tableProps} rowKey="requirement_id">
+      <Table {...tableProps} {...highlightProps} rowKey="requirement_id">
         <Table.Column dataIndex="requirement_id" title="ID" sorter />
         <Table.Column dataIndex="order_id" title="Order ID" sorter />
         <Table.Column dataIndex="resource_type" title="Resource Type" sorter />
@@ -20,8 +27,18 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
         <Table.Column dataIndex="requirement_status_id" title="Status ID" sorter />
         <Table.Column
           dataIndex="is_active"
-          title="Active"
-          render={(value) => (value ? "Yes" : "No")}
+          title="Активен"
+          sorter
+          render={(value: boolean) => (
+            <Badge
+              status={value ? "success" : "default"}
+              text={value ? "Активен" : "Неактивен"}
+            />
+          )}
+          filters={[
+            { text: "Активен", value: true },
+            { text: "Неактивен", value: false },
+          ]}
         />
         <Table.Column
           title="Actions"

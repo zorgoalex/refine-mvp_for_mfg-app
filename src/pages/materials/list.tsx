@@ -96,17 +96,17 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="description" title="Description" />
         <Table.Column
           dataIndex="is_active"
-          title="Active"
+          title="Активен"
           sorter
           render={(value: boolean) => (
             <Badge
               status={value ? "success" : "default"}
-              text={value ? "Active" : "Inactive"}
+              text={value ? "Активен" : "Неактивен"}
             />
           )}
           filters={[
-            { text: "Active", value: true },
-            { text: "Inactive", value: false },
+            { text: "Активен", value: true },
+            { text: "Неактивен", value: false },
           ]}
         />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />

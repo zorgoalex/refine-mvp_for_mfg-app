@@ -1,9 +1,14 @@
 import { IResourceComponentsProps } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
-import { Space, Table, Tag } from "antd";
+import { Space, Table, Badge } from "antd";
 
 export const TransactionDirectionList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({ syncWithLocation: true });
+  const { tableProps } = useTable({
+    syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "direction_type_id", order: "desc" }],
+    },
+  });
 
   return (
     <List>
@@ -14,8 +19,18 @@ export const TransactionDirectionList: React.FC<IResourceComponentsProps> = () =
         <Table.Column dataIndex="description" title="Description" />
         <Table.Column
           dataIndex="is_active"
-          title="Active"
-          render={(value) => <Tag color={value ? "success" : "default"}>{value ? "Yes" : "No"}</Tag>}
+          title="Активен"
+          sorter
+          render={(value: boolean) => (
+            <Badge
+              status={value ? "success" : "default"}
+              text={value ? "Активен" : "Неактивен"}
+            />
+          )}
+          filters={[
+            { text: "Активен", value: true },
+            { text: "Неактивен", value: false },
+          ]}
         />
         <Table.Column
           title="Actions"

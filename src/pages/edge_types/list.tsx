@@ -1,6 +1,6 @@
 import { IResourceComponentsProps } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
-import { Space, Table } from "antd";
+import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
@@ -20,8 +20,18 @@ export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="sort_order" title="Sort Order" sorter />
         <Table.Column
           dataIndex="is_active"
-          title="Active"
-          render={(value) => (value ? "Yes" : "No")}
+          title="Активен"
+          sorter
+          render={(value: boolean) => (
+            <Badge
+              status={value ? "success" : "default"}
+              text={value ? "Активен" : "Неактивен"}
+            />
+          )}
+          filters={[
+            { text: "Активен", value: true },
+            { text: "Неактивен", value: false },
+          ]}
         />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
         <Table.Column

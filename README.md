@@ -17,6 +17,17 @@
 ## Обзор
 - Backend: Hasura GraphQL доступен локально по `http://localhost:8585/v1/graphql` с заголовком `x-hasura-admin-secret` (dev).
 - Frontend: Refine (+ AntD) на Vite/React.
+- Схема БД: **v11.5** (см. `ai_docs/postgre_sql_schema_v_11.5.sql`)
+- Dev server: `http://localhost:5576`
+
+## Ключевые фичи
+- ✅ **CRUD операции** для всех справочников и операционных таблиц
+- ✅ **is_active фильтры** во всех справочниках (автоматическая фильтрация активных записей)
+- ✅ **Audit поля** (created_by, edited_by, created_at, updated_at) отображаются в show страницах
+- ✅ **Row Highlight** - автоматическая подсветка и скролл к новой/отредактированной записи
+- ✅ **Сортировка DESC** по ID по умолчанию - новые записи всегда сверху
+- ✅ **GraphQL relationships** - отображение связанных данных (role_name, employee.full_name, etc.)
+- ✅ **Фиксированный sidebar** с независимой прокруткой
 
 ## Стек и зависимости
 - React 18, Vite 4
@@ -47,8 +58,20 @@
   - Order Statuses: `src/pages/order_statuses/{list,create,edit,show}.tsx`
   - Payment Statuses: `src/pages/payment_statuses/{list,create,edit,show}.tsx`
   - Payment Types: `src/pages/payment_types/{list,create,edit,show}.tsx`
+  - Units: `src/pages/units/{list,create,edit,show}.tsx`
+  - Employees: `src/pages/employees/{list,create,edit,show}.tsx`
+  - Users: `src/pages/users/{list,create,edit,show}.tsx`
+  - Workshops: `src/pages/workshops/{list,create,edit,show}.tsx`
+  - Work Centers: `src/pages/work_centers/{list,create,edit,show}.tsx`
+  - Production Statuses: `src/pages/production_statuses/{list,create,edit,show}.tsx`
+  - Resource Requirements Statuses: `src/pages/resource_requirements_statuses/{list,create,edit,show}.tsx`
+- Хуки:
+  - `src/hooks/useFormWithHighlight.ts` — навигация с подсветкой после create/edit
+  - `src/hooks/useHighlightRow.ts` — подсветка и скролл к строке в таблице
+- Стили:
+  - `src/styles/app.css` — глобальные стили (sidebar, row highlight анимация)
 - Инфраструктура:
-  - `vite.config.ts` — порт 5573.
+  - `vite.config.ts` — порт 5576.
   - `index.html`, `vite.svg` — стандартные артефакты Vite.
 
 ## Ресурсы и маршруты

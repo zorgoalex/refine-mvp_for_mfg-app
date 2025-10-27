@@ -1,9 +1,14 @@
 import { IResourceComponentsProps } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
-import { Space, Table } from "antd";
+import { Space, Table, Badge } from "antd";
 
 export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({ syncWithLocation: true });
+  const { tableProps } = useTable({
+    syncWithLocation: true,
+    sorters: {
+      initial: [{ field: "workcenter_id", order: "desc" }],
+    },
+  });
 
   return (
     <List>
@@ -19,7 +24,17 @@ export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="is_active"
           title="Активен"
-          render={(value) => (value ? "Да" : "Нет")}
+          sorter
+          render={(value: boolean) => (
+            <Badge
+              status={value ? "success" : "default"}
+              text={value ? "Активен" : "Неактивен"}
+            />
+          )}
+          filters={[
+            { text: "Активен", value: true },
+            { text: "Неактивен", value: false },
+          ]}
         />
         <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
         <Table.Column

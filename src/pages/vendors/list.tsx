@@ -21,14 +21,14 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
         <Table.Column
           dataIndex="is_active"
-          title="Active"
+          title="Активен"
           sorter
           filters={[
-            { text: "Active", value: true },
-            { text: "Inactive", value: false },
+            { text: "Активен", value: true },
+            { text: "Неактивен", value: false },
           ]}
           render={(value) => (
-            <Badge status={value ? "success" : "default"} text={value ? "Active" : "Inactive"} />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
         />
         <Table.Column

@@ -1,6 +1,6 @@
 import { useShow, IResourceComponentsProps } from "@refinedev/core";
-import { Show, TextField } from "@refinedev/antd";
-import { Typography, Tag } from "antd";
+import { Show, TextField, DateField } from "@refinedev/antd";
+import { Typography, Tag, Badge } from "antd";
 
 const { Title } = Typography;
 
@@ -27,12 +27,17 @@ export const MaterialTransactionTypeShow: React.FC<IResourceComponentsProps> = (
       </Tag>
       <Title level={5}>Sort Order</Title>
       <TextField value={record?.sort_order} />
-      <Title level={5}>Active</Title>
-      <Tag color={record?.is_active ? "success" : "default"}>
-        {record?.is_active ? "Yes" : "No"}
-      </Tag>
       <Title level={5}>Description</Title>
       <TextField value={record?.description} />
+      <Title level={5}>Active</Title>
+      <Badge
+        status={record?.is_active ? "success" : "default"}
+        text={record?.is_active ? "Active" : "Inactive"}
+      />
+      <Title level={5}>Created At</Title>
+      <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
+      <Title level={5}>Updated At</Title>
+      <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
     </Show>
   );
 };
