@@ -56,6 +56,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       <TextField value={record?.total_area} />
       <Title level={5}>Edge Type</Title>
       <TextField value={record?.edge_type_name} />
+
+      <Title level={5}>Менеджер ID</Title>
+      <TextField value={record?.manager_id} />
+
+      <Title level={5}>Создано пользователем</Title>
+      <TextField value={record?.created_by} />
+
+      <Title level={5}>Дата создания</Title>
+      <DateField value={record?.created_at} />
+
+      <Title level={5}>Изменено пользователем</Title>
+      <TextField value={record?.edited_by} />
+
+      <Title level={5}>Дата изменения</Title>
+      <DateField value={record?.updated_at} />
     </Show>
   );
 };
