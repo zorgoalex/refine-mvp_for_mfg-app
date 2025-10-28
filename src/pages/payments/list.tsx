@@ -1,4 +1,4 @@
-import { IResourceComponentsProps, useMany } from "@refinedev/core";
+import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table } from "antd";
 import { useMemo } from "react";
@@ -10,6 +10,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
     sorters: { initial: [{ field: "payment_id", order: "desc" }] },
   });
   const { highlightProps } = useHighlightRow("payment_id", tableProps.dataSource);
+  const { show } = useNavigation();
 
   const orderIds = useMemo(
     () => Array.from(new Set(((tableProps?.dataSource as any[]) || []).map((i) => i?.order_id).filter((v) => v != null))),
@@ -37,7 +38,16 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <List>
-      <Table {...tableProps} {...highlightProps} rowKey="payment_id">
+      <Table
+        {...tableProps}
+        {...highlightProps}
+        rowKey="payment_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("payments", record.payment_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="payment_id" title="Payment ID" sorter />
         <Table.Column dataIndex="order_id" title="Order" render={(_, r: any) => orderMap[r?.order_id] ?? r?.order_id} />
         <Table.Column dataIndex="type_paid_id" title="Payment Type" render={(_, r: any) => typeMap[r?.type_paid_id] ?? r?.type_paid_id} />

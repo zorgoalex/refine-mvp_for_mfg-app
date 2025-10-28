@@ -1,4 +1,4 @@
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
@@ -11,10 +11,20 @@ export const MillingTypeList: React.FC<IResourceComponentsProps> = () => {
     },
   });
   const { highlightProps } = useHighlightRow("milling_type_id", tableProps.dataSource);
+  const { show } = useNavigation();
 
   return (
     <List>
-      <Table {...tableProps} {...highlightProps} rowKey="milling_type_id">
+      <Table
+        {...tableProps}
+        {...highlightProps}
+        rowKey="milling_type_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("milling_types", record.milling_type_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="milling_type_id" title="Milling Type ID" sorter />
         <Table.Column dataIndex="milling_type_name" title="Name" sorter />
         <Table.Column dataIndex="cost_per_sqm" title="Cost per sqm" />

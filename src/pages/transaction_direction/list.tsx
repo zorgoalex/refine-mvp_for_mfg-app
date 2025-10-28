@@ -1,4 +1,4 @@
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 
@@ -9,10 +9,19 @@ export const TransactionDirectionList: React.FC<IResourceComponentsProps> = () =
       initial: [{ field: "direction_type_id", order: "desc" }],
     },
   });
+  const { show } = useNavigation();
 
   return (
     <List>
-      <Table {...tableProps} rowKey="direction_type_id">
+      <Table
+        {...tableProps}
+        rowKey="direction_type_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("transaction_direction", record.direction_type_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="direction_type_id" title="ID" sorter />
         <Table.Column dataIndex="direction_code" title="Code" sorter />
         <Table.Column dataIndex="direction_name" title="Name" sorter />

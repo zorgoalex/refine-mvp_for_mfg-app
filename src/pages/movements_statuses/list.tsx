@@ -1,4 +1,4 @@
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
@@ -11,10 +11,20 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
     },
   });
   const { highlightProps } = useHighlightRow("movement_status_id", tableProps.dataSource);
+  const { show } = useNavigation();
 
   return (
     <List>
-      <Table {...tableProps} {...highlightProps} rowKey="movement_status_id">
+      <Table
+        {...tableProps}
+        {...highlightProps}
+        rowKey="movement_status_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("movements_statuses", record.movement_status_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="movement_status_id" title="ID" sorter />
         <Table.Column dataIndex="movement_status_code" title="Code" sorter />
         <Table.Column dataIndex="movement_status_name" title="Name" sorter />

@@ -1,4 +1,4 @@
-import { IResourceComponentsProps, useMany } from "@refinedev/core";
+import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useMemo } from "react";
@@ -12,6 +12,7 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
     },
   });
   const { highlightProps } = useHighlightRow("material_id", tableProps.dataSource);
+  const { show } = useNavigation();
 
   const typeIds = useMemo(
     () =>
@@ -86,7 +87,16 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <List>
-      <Table {...tableProps} {...highlightProps} rowKey="material_id">
+      <Table
+        {...tableProps}
+        {...highlightProps}
+        rowKey="material_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("materials", record.material_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="material_id" title="Material ID" sorter />
         <Table.Column dataIndex="material_name" title="Name" sorter />
         <Table.Column dataIndex="unit_id" title="Unit" render={(_, r: any) => unitMap[r?.unit_id] ?? r?.unit_id} />

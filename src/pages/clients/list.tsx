@@ -1,4 +1,4 @@
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
@@ -11,10 +11,20 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
     },
   });
   const { highlightProps } = useHighlightRow("client_id", tableProps.dataSource);
+  const { show } = useNavigation();
 
   return (
     <List>
-      <Table {...tableProps} {...highlightProps} rowKey="client_id">
+      <Table
+        {...tableProps}
+        {...highlightProps}
+        rowKey="client_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("clients", record.client_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="client_id" title="Client ID" sorter />
         <Table.Column dataIndex="client_name" title="Name" sorter />
         <Table.Column

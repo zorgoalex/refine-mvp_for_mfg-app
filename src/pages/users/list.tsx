@@ -1,4 +1,4 @@
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 
@@ -9,10 +9,19 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
       initial: [{ field: "user_id", order: "desc" }],
     },
   });
+  const { show } = useNavigation();
 
   return (
     <List>
-      <Table {...tableProps} rowKey="user_id">
+      <Table
+        {...tableProps}
+        rowKey="user_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("users", record.user_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="user_id" title="ID" sorter />
         <Table.Column dataIndex="username" title="Логин" sorter />
         <Table.Column

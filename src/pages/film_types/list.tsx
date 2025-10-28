@@ -1,4 +1,4 @@
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
@@ -11,10 +11,20 @@ export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
     },
   });
   const { highlightProps } = useHighlightRow("film_type_id", tableProps.dataSource);
+  const { show } = useNavigation();
 
   return (
     <List>
-      <Table {...tableProps} {...highlightProps} rowKey="film_type_id">
+      <Table
+        {...tableProps}
+        {...highlightProps}
+        rowKey="film_type_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("film_types", record.film_type_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="film_type_id" title="Film Type ID" sorter />
         <Table.Column dataIndex="film_type_name" title="Name" sorter />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />

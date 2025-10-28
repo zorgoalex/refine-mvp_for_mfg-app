@@ -1,4 +1,4 @@
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table } from "antd";
 
@@ -9,10 +9,19 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       initial: [{ field: "order_id", order: "desc" }],
     },
   });
+  const { show } = useNavigation();
 
   return (
     <List>
-      <Table {...tableProps} rowKey="order_id">
+      <Table
+        {...tableProps}
+        rowKey="order_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("orders_view", record.order_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="order_id" title="Order ID" sorter />
         <Table.Column dataIndex="order_name" title="Order Name" sorter />
         <Table.Column dataIndex="order_date" title="Order Date" sorter />

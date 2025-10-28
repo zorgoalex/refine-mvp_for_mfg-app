@@ -1,13 +1,22 @@
-import { IResourceComponentsProps } from "@refinedev/core";
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table } from "antd";
 
 export const UnitList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({ syncWithLocation: true });
+  const { show } = useNavigation();
 
   return (
     <List>
-      <Table {...tableProps} rowKey="unit_id">
+      <Table
+        {...tableProps}
+        rowKey="unit_id"
+        onRow={(record) => ({
+          onDoubleClick: () => {
+            show("units", record.unit_id);
+          },
+        })}
+      >
         <Table.Column dataIndex="unit_id" title="Unit ID" sorter />
         <Table.Column dataIndex="unit_code" title="Code" sorter />
         <Table.Column dataIndex="unit_name" title="Name" sorter />
