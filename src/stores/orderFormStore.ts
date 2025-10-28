@@ -1,0 +1,417 @@
+// Zustand Store for Order Form State Management
+// Manages the entire order form state including header and all child tables
+
+import { create } from 'zustand';
+import { devtools, persist } from 'zustand/middleware';
+import {
+  Order,
+  OrderDetail,
+  Payment,
+  OrderWorkshop,
+  OrderResourceRequirement,
+  OrderFormValues,
+  OrderTotals,
+} from '../types/orders';
+
+// ============================================================================
+// STATE INTERFACE
+// ============================================================================
+
+interface OrderFormState {
+  // ========== STATE ==========
+  header: Partial<Order>;
+  details: OrderDetail[];
+  payments: Payment[];
+  workshops: OrderWorkshop[];
+  requirements: OrderResourceRequirement[];
+
+  // Deleted items (track for deletion on server)
+  deletedDetails: number[];
+  deletedPayments: number[];
+  deletedWorkshops: number[];
+  deletedRequirements: number[];
+
+  // Form metadata
+  isDirty: boolean;
+  version: number;
+
+  // ========== ACTIONS: HEADER ==========
+  setHeader: (data: Partial<Order>) => void;
+  updateHeaderField: <K extends keyof Order>(field: K, value: Order[K]) => void;
+
+  // ========== ACTIONS: DETAILS ==========
+  addDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
+  updateDetail: (tempId: number, data: Partial<OrderDetail>) => void;
+  deleteDetail: (tempId: number, detailId?: number) => void;
+  reorderDetails: () => void; // Renumber detail_number
+
+  // ========== ACTIONS: PAYMENTS ==========
+  addPayment: (payment: Omit<Payment, 'temp_id'>) => void;
+  updatePayment: (tempId: number, data: Partial<Payment>) => void;
+  deletePayment: (tempId: number, paymentId?: number) => void;
+
+  // ========== ACTIONS: WORKSHOPS ==========
+  addWorkshop: (workshop: Omit<OrderWorkshop, 'temp_id'>) => void;
+  updateWorkshop: (tempId: number, data: Partial<OrderWorkshop>) => void;
+  deleteWorkshop: (tempId: number, workshopId?: number) => void;
+
+  // ========== ACTIONS: REQUIREMENTS ==========
+  addRequirement: (requirement: Omit<OrderResourceRequirement, 'temp_id'>) => void;
+  updateRequirement: (tempId: number, data: Partial<OrderResourceRequirement>) => void;
+  deleteRequirement: (tempId: number, requirementId?: number) => void;
+
+  // ========== COMPUTED ==========
+  calculatedTotals: () => OrderTotals;
+
+  // ========== UTILITY ==========
+  reset: () => void;
+  loadOrder: (order: OrderFormValues) => void;
+  getFormValues: () => OrderFormValues;
+  setDirty: (isDirty: boolean) => void;
+}
+
+// ============================================================================
+// INITIAL STATE
+// ============================================================================
+
+const initialState = {
+  header: {},
+  details: [],
+  payments: [],
+  workshops: [],
+  requirements: [],
+  deletedDetails: [],
+  deletedPayments: [],
+  deletedWorkshops: [],
+  deletedRequirements: [],
+  isDirty: false,
+  version: 0,
+};
+
+// ============================================================================
+// STORE
+// ============================================================================
+
+export const useOrderFormStore = create<OrderFormState>()(
+  devtools(
+    persist(
+      (set, get) => ({
+        // ========== INITIAL STATE ==========
+        ...initialState,
+
+        // ========== HEADER ACTIONS ==========
+        setHeader: (data) =>
+          set(
+            (state) => ({
+              header: { ...state.header, ...data },
+              isDirty: true,
+            }),
+            false,
+            'setHeader'
+          ),
+
+        updateHeaderField: (field, value) =>
+          set(
+            (state) => ({
+              header: { ...state.header, [field]: value },
+              isDirty: true,
+            }),
+            false,
+            'updateHeaderField'
+          ),
+
+        // ========== DETAILS ACTIONS ==========
+        addDetail: (detail) =>
+          set(
+            (state) => ({
+              details: [
+                ...state.details,
+                {
+                  ...detail,
+                  temp_id: Date.now(),
+                  detail_number: state.details.length + 1,
+                  priority: detail.priority || 100,
+                  quantity: detail.quantity || 1,
+                  delete_flag: false,
+                },
+              ],
+              isDirty: true,
+            }),
+            false,
+            'addDetail'
+          ),
+
+        updateDetail: (tempId, data) =>
+          set(
+            (state) => ({
+              details: state.details.map((d) =>
+                d.temp_id === tempId || d.detail_id === tempId ? { ...d, ...data } : d
+              ),
+              isDirty: true,
+            }),
+            false,
+            'updateDetail'
+          ),
+
+        deleteDetail: (tempId, detailId) =>
+          set(
+            (state) => ({
+              details: state.details.filter(
+                (d) => d.temp_id !== tempId && d.detail_id !== tempId
+              ),
+              deletedDetails: detailId
+                ? [...state.deletedDetails, detailId]
+                : state.deletedDetails,
+              isDirty: true,
+            }),
+            false,
+            'deleteDetail'
+          ),
+
+        reorderDetails: () =>
+          set(
+            (state) => ({
+              details: state.details.map((d, idx) => ({
+                ...d,
+                detail_number: idx + 1,
+              })),
+              isDirty: true,
+            }),
+            false,
+            'reorderDetails'
+          ),
+
+        // ========== PAYMENTS ACTIONS ==========
+        addPayment: (payment) =>
+          set(
+            (state) => ({
+              payments: [
+                ...state.payments,
+                {
+                  ...payment,
+                  temp_id: Date.now(),
+                },
+              ],
+              isDirty: true,
+            }),
+            false,
+            'addPayment'
+          ),
+
+        updatePayment: (tempId, data) =>
+          set(
+            (state) => ({
+              payments: state.payments.map((p) =>
+                p.temp_id === tempId || p.payment_id === tempId ? { ...p, ...data } : p
+              ),
+              isDirty: true,
+            }),
+            false,
+            'updatePayment'
+          ),
+
+        deletePayment: (tempId, paymentId) =>
+          set(
+            (state) => ({
+              payments: state.payments.filter(
+                (p) => p.temp_id !== tempId && p.payment_id !== tempId
+              ),
+              deletedPayments: paymentId
+                ? [...state.deletedPayments, paymentId]
+                : state.deletedPayments,
+              isDirty: true,
+            }),
+            false,
+            'deletePayment'
+          ),
+
+        // ========== WORKSHOPS ACTIONS ==========
+        addWorkshop: (workshop) =>
+          set(
+            (state) => ({
+              workshops: [
+                ...state.workshops,
+                {
+                  ...workshop,
+                  temp_id: Date.now(),
+                  delete_flag: false,
+                },
+              ],
+              isDirty: true,
+            }),
+            false,
+            'addWorkshop'
+          ),
+
+        updateWorkshop: (tempId, data) =>
+          set(
+            (state) => ({
+              workshops: state.workshops.map((w) =>
+                w.temp_id === tempId || w.order_workshop_id === tempId
+                  ? { ...w, ...data }
+                  : w
+              ),
+              isDirty: true,
+            }),
+            false,
+            'updateWorkshop'
+          ),
+
+        deleteWorkshop: (tempId, workshopId) =>
+          set(
+            (state) => ({
+              workshops: state.workshops.filter(
+                (w) => w.temp_id !== tempId && w.order_workshop_id !== tempId
+              ),
+              deletedWorkshops: workshopId
+                ? [...state.deletedWorkshops, workshopId]
+                : state.deletedWorkshops,
+              isDirty: true,
+            }),
+            false,
+            'deleteWorkshop'
+          ),
+
+        // ========== REQUIREMENTS ACTIONS ==========
+        addRequirement: (requirement) =>
+          set(
+            (state) => ({
+              requirements: [
+                ...state.requirements,
+                {
+                  ...requirement,
+                  temp_id: Date.now(),
+                  is_active: true,
+                },
+              ],
+              isDirty: true,
+            }),
+            false,
+            'addRequirement'
+          ),
+
+        updateRequirement: (tempId, data) =>
+          set(
+            (state) => ({
+              requirements: state.requirements.map((r) =>
+                r.temp_id === tempId || r.requirement_id === tempId ? { ...r, ...data } : r
+              ),
+              isDirty: true,
+            }),
+            false,
+            'updateRequirement'
+          ),
+
+        deleteRequirement: (tempId, requirementId) =>
+          set(
+            (state) => ({
+              requirements: state.requirements.filter(
+                (r) => r.temp_id !== tempId && r.requirement_id !== tempId
+              ),
+              deletedRequirements: requirementId
+                ? [...state.deletedRequirements, requirementId]
+                : state.deletedRequirements,
+              isDirty: true,
+            }),
+            false,
+            'deleteRequirement'
+          ),
+
+        // ========== COMPUTED ==========
+        calculatedTotals: () => {
+          const state = get();
+          return {
+            parts_count: state.details.reduce((sum, d) => sum + (d.quantity || 0), 0),
+            total_area: state.details.reduce((sum, d) => sum + (d.area || 0), 0),
+            total_paid: state.payments.reduce((sum, p) => sum + (p.amount || 0), 0),
+          };
+        },
+
+        // ========== UTILITY ==========
+        reset: () => set(initialState, false, 'reset'),
+
+        loadOrder: (order) =>
+          set(
+            {
+              header: order.header || {},
+              details:
+                order.details?.map((d) => ({
+                  ...d,
+                  temp_id: d.detail_id || Date.now() + Math.random(),
+                })) || [],
+              payments:
+                order.payments?.map((p) => ({
+                  ...p,
+                  temp_id: p.payment_id || Date.now() + Math.random(),
+                })) || [],
+              workshops:
+                order.workshops?.map((w) => ({
+                  ...w,
+                  temp_id: w.order_workshop_id || Date.now() + Math.random(),
+                })) || [],
+              requirements:
+                order.requirements?.map((r) => ({
+                  ...r,
+                  temp_id: r.requirement_id || Date.now() + Math.random(),
+                })) || [],
+              deletedDetails: [],
+              deletedPayments: [],
+              deletedWorkshops: [],
+              deletedRequirements: [],
+              isDirty: false,
+              version: order.version || 0,
+            },
+            false,
+            'loadOrder'
+          ),
+
+        getFormValues: () => {
+          const state = get();
+          return {
+            header: state.header as Order,
+            details: state.details,
+            payments: state.payments,
+            workshops: state.workshops,
+            requirements: state.requirements,
+            deletedDetails: state.deletedDetails,
+            deletedPayments: state.deletedPayments,
+            deletedWorkshops: state.deletedWorkshops,
+            deletedRequirements: state.deletedRequirements,
+            isDirty: state.isDirty,
+            version: state.version,
+          };
+        },
+
+        setDirty: (isDirty) => set({ isDirty }, false, 'setDirty'),
+      }),
+      {
+        name: 'order-form-storage',
+        // Only persist essential data for draft recovery
+        partialize: (state) => ({
+          header: state.header,
+          details: state.details,
+          payments: state.payments,
+          workshops: state.workshops,
+          requirements: state.requirements,
+          isDirty: state.isDirty,
+          version: state.version,
+        }),
+      }
+    ),
+    {
+      name: 'OrderFormStore',
+    }
+  )
+);
+
+// ============================================================================
+// SELECTORS (for optimized access)
+// ============================================================================
+
+export const selectHeader = (state: OrderFormState) => state.header;
+export const selectDetails = (state: OrderFormState) => state.details;
+export const selectPayments = (state: OrderFormState) => state.payments;
+export const selectWorkshops = (state: OrderFormState) => state.workshops;
+export const selectRequirements = (state: OrderFormState) => state.requirements;
+export const selectIsDirty = (state: OrderFormState) => state.isDirty;
+export const selectTotals = (state: OrderFormState) => state.calculatedTotals();

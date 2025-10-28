@@ -12,6 +12,7 @@
   "description": "",
   "dependencies": {
     "@ffimnsr/refine-postgrest": "^1.0.1",
+    "@hookform/resolvers": "^5.2.2",
     "@playwright/test": "^1.56.0",
     "@refinedev/antd": "^5.0.0",
     "@refinedev/cli": "^2.16.40",
@@ -21,7 +22,10 @@
     "antd": "^5.0.5",
     "dotenv": "^17.2.3",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-hook-form": "^7.65.0",
+    "zod": "^4.1.12",
+    "zustand": "^5.0.8"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.0",
