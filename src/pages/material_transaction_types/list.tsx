@@ -45,10 +45,7 @@ export const MaterialTransactionTypeList: React.FC<IResourceComponentsProps> = (
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },

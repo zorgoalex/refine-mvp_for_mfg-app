@@ -35,17 +35,14 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },
             { text: "Неактивен", value: false },
           ]}
         />
-        <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
+        <Table.Column dataIndex="ref_key_1c" title="Код 1C" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
@@ -59,3 +56,4 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
     </List>
   );
 };
+

@@ -1,7 +1,6 @@
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
-import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -10,14 +9,12 @@ export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> =
       initial: [{ field: "requirement_status_id", order: "desc" }],
     },
   });
-  const { highlightProps } = useHighlightRow("requirement_status_id", tableProps.dataSource);
   const { show } = useNavigation();
 
   return (
     <List>
       <Table
         {...tableProps}
-        {...highlightProps}
         rowKey="requirement_status_id"
         onRow={(record) => ({
           onDoubleClick: () => {
@@ -25,7 +22,7 @@ export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> =
           },
         })}
       >
-        <Table.Column dataIndex="requirement_status_id" title="Status ID" sorter />
+        <Table.Column dataIndex="requirement_status_id" title="ID" sorter />
         <Table.Column dataIndex="requirement_status_code" title="Code" sorter />
         <Table.Column dataIndex="requirement_status_name" title="Name" sorter />
         <Table.Column dataIndex="sort_order" title="Sort Order" sorter />
@@ -34,16 +31,14 @@ export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> =
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },
             { text: "Неактивен", value: false },
           ]}
         />
+        <Table.Column dataIndex="description" title="Description" />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
         <Table.Column
           title="Actions"
@@ -58,3 +53,4 @@ export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> =
     </List>
   );
 };
+

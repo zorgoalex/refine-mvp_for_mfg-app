@@ -23,17 +23,14 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="employee_id" title="ID" sorter />
-        <Table.Column dataIndex="full_name" title="ФИО" sorter />
+        <Table.Column dataIndex="full_name" title="Имя" sorter />
         <Table.Column dataIndex="position" title="Должность" sorter />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },
@@ -41,7 +38,7 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
           ]}
         />
         <Table.Column dataIndex="note" title="Примечание" />
-        <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
+        <Table.Column dataIndex="ref_key_1c" title="Код 1C" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
@@ -55,3 +52,4 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
     </List>
   );
 };
+

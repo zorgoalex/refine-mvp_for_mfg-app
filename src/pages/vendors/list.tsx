@@ -2,6 +2,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+ 
 
 export const VendorList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -33,13 +34,13 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
           dataIndex="is_active"
           title="Активен"
           sorter
+          render={(value: boolean) => (
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
+          )}
           filters={[
             { text: "Активен", value: true },
             { text: "Неактивен", value: false },
           ]}
-          render={(value) => (
-            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
-          )}
         />
         <Table.Column
           title="Actions"
@@ -54,4 +55,3 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
     </List>
   );
 };
-

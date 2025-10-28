@@ -2,6 +2,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+ 
 
 export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -32,7 +33,7 @@ export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
           dataIndex="is_active"
           title="Активен"
           sorter
-          render={(value) => (
+          render={(value: boolean) => (
             <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
@@ -53,4 +54,3 @@ export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
     </List>
   );
 };
-

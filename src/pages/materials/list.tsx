@@ -3,6 +3,7 @@ import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useMemo } from "react";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+ 
 
 export const MaterialList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -109,10 +110,7 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },
@@ -133,4 +131,3 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
     </List>
   );
 };
-

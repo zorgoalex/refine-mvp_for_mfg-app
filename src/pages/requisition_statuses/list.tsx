@@ -1,7 +1,6 @@
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
-import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const RequisitionStatusList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -10,14 +9,12 @@ export const RequisitionStatusList: React.FC<IResourceComponentsProps> = () => {
       initial: [{ field: "requisition_status_id", order: "desc" }],
     },
   });
-  const { highlightProps } = useHighlightRow("requisition_status_id", tableProps.dataSource);
   const { show } = useNavigation();
 
   return (
     <List>
       <Table
         {...tableProps}
-        {...highlightProps}
         rowKey="requisition_status_id"
         onRow={(record) => ({
           onDoubleClick: () => {
@@ -33,10 +30,7 @@ export const RequisitionStatusList: React.FC<IResourceComponentsProps> = () => {
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },
@@ -57,3 +51,4 @@ export const RequisitionStatusList: React.FC<IResourceComponentsProps> = () => {
     </List>
   );
 };
+

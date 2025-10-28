@@ -25,16 +25,12 @@ export const TransactionDirectionList: React.FC<IResourceComponentsProps> = () =
         <Table.Column dataIndex="direction_type_id" title="ID" sorter />
         <Table.Column dataIndex="direction_code" title="Code" sorter />
         <Table.Column dataIndex="direction_name" title="Name" sorter />
-        <Table.Column dataIndex="description" title="Description" />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },
@@ -54,3 +50,4 @@ export const TransactionDirectionList: React.FC<IResourceComponentsProps> = () =
     </List>
   );
 };
+

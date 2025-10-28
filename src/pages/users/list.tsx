@@ -40,10 +40,7 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },
@@ -55,7 +52,7 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
           title="Последний вход"
           render={(value) => value && <DateField value={value} format="YYYY-MM-DD HH:mm" />}
         />
-        <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
+        <Table.Column dataIndex="ref_key_1c" title="Код 1C" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
@@ -69,3 +66,4 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
     </List>
   );
 };
+

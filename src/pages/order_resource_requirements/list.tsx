@@ -1,5 +1,5 @@
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
+import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 
@@ -40,10 +40,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },
@@ -63,3 +60,4 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     </List>
   );
 };
+

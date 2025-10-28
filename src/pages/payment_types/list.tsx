@@ -1,7 +1,6 @@
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
-import { useHighlightRow } from "../../hooks/useHighlightRow";
 
 export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -10,14 +9,12 @@ export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
       initial: [{ field: "type_paid_id", order: "desc" }],
     },
   });
-  const { highlightProps } = useHighlightRow("type_paid_id", tableProps.dataSource);
   const { show } = useNavigation();
 
   return (
     <List>
       <Table
         {...tableProps}
-        {...highlightProps}
         rowKey="type_paid_id"
         onRow={(record) => ({
           onDoubleClick: () => {
@@ -25,7 +22,7 @@ export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="type_paid_id" title="Payment Type ID" sorter />
+        <Table.Column dataIndex="type_paid_id" title="ID" sorter />
         <Table.Column dataIndex="type_paid_name" title="Name" sorter />
         <Table.Column dataIndex="sort_order" title="Sort Order" sorter />
         <Table.Column
@@ -33,10 +30,7 @@ export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
           title="Активен"
           sorter
           render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Активен" : "Неактивен"}
-            />
+            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },

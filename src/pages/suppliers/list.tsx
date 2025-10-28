@@ -34,14 +34,14 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="is_active"
           title="Активен"
-          render={(value) => (
+          sorter
+          render={(value: boolean) => (
             <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
           )}
           filters={[
             { text: "Активен", value: true },
             { text: "Неактивен", value: false },
           ]}
-          onFilter={(value, record: any) => record.is_active === value}
         />
         <Table.Column
           title="Actions"
