@@ -1,134 +1,30 @@
-import { Edit, useForm, useSelect } from "@refinedev/antd";
-import { IResourceComponentsProps } from "@refinedev/core";
-import { DatePicker, Form, Input, Select } from "antd";
+// Edit Order Page
 
-export const OrderEdit: React.FC<IResourceComponentsProps> = () => {
-  // Write operations should target base table `orders`, not read-only `orders_view`.
-  const { formProps, saveButtonProps, queryResult } = useForm({ resource: "orders" });
+import React from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { OrderForm } from './components/OrderForm';
 
-  const { selectProps: clientSelectProps } = useSelect({
-    resource: "clients",
-    optionLabel: "client_name",
-    optionValue: "client_id",
-    defaultValue: queryResult?.data?.data.client_id,
-  });
+export const OrderEdit: React.FC = () => {
+  const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const orderId = id ? parseInt(id, 10) : undefined;
 
-  const { selectProps: materialSelectProps } = useSelect({
-    resource: "materials",
-    optionLabel: "material_name",
-    optionValue: "material_id",
-    defaultValue: queryResult?.data?.data.material_id,
-  });
+  const handleSaveSuccess = (savedOrderId: number) => {
+    // Navigate to the updated order's show page
+    navigate(`/orders/show/${savedOrderId}`);
+  };
 
-  const { selectProps: millingTypeSelectProps } = useSelect({
-    resource: "milling_types",
-    optionLabel: "milling_type_name",
-    optionValue: "milling_type_id",
-    defaultValue: queryResult?.data?.data.milling_type_id,
-  });
-
-  const { selectProps: filmSelectProps } = useSelect({
-    resource: "films",
-    optionLabel: "film_name",
-    optionValue: "film_id",
-    defaultValue: queryResult?.data?.data.film_id,
-  });
+  const handleCancel = () => {
+    // Navigate back to orders list
+    navigate('/orders');
+  };
 
   return (
-    <Edit saveButtonProps={saveButtonProps}>
-      <Form
-        {...formProps}
-        layout="vertical"
-        onFinish={(values) => {
-          const isoDate = values?.order_date
-            ? (values.order_date.toDate?.()
-                ? values.order_date.toDate().toISOString()
-                : values.order_date.toISOString?.() ?? values.order_date)
-            : null;
-          return formProps.onFinish?.({
-            ...values,
-            order_date: isoDate,
-          });
-        }}
-      >
-        <Form.Item
-          label="Order Date"
-          name="order_date"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <DatePicker />
-        </Form.Item>
-        <Form.Item
-          label="Order Name"
-          name="order_name"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item
-          label="Client"
-          name="client_id"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Select {...clientSelectProps} />
-        </Form.Item>
-        <Form.Item
-          label="Material"
-          name="material_id"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Select {...materialSelectProps} />
-        </Form.Item>
-        <Form.Item
-          label="Milling Type"
-          name="milling_type_id"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Select {...millingTypeSelectProps} />
-        </Form.Item>
-        <Form.Item
-          label="Film"
-          name="film_id"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Select {...filmSelectProps} />
-        </Form.Item>
-        <Form.Item
-          label="Price"
-          name="price"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Input />
-        </Form.Item>
-      </Form>
-    </Edit>
+    <OrderForm
+      mode="edit"
+      orderId={orderId}
+      onSaveSuccess={handleSaveSuccess}
+      onCancel={handleCancel}
+    />
   );
 };

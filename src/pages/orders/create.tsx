@@ -1,129 +1,27 @@
-import { Create, useForm, useSelect } from "@refinedev/antd";
-import { IResourceComponentsProps } from "@refinedev/core";
-import { DatePicker, Form, Input, Select } from "antd";
+// Create Order Page
 
-export const OrderCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { OrderForm } from './components/OrderForm';
 
-  const { selectProps: clientSelectProps } = useSelect({
-    resource: "clients",
-    optionLabel: "client_name",
-    optionValue: "client_id",
-  });
+export const OrderCreate: React.FC = () => {
+  const navigate = useNavigate();
 
-  const { selectProps: materialSelectProps } = useSelect({
-    resource: "materials",
-    optionLabel: "material_name",
-    optionValue: "material_id",
-  });
+  const handleSaveSuccess = (orderId: number) => {
+    // Navigate to the created order's show page
+    navigate(`/orders/show/${orderId}`);
+  };
 
-  const { selectProps: millingTypeSelectProps } = useSelect({
-    resource: "milling_types",
-    optionLabel: "milling_type_name",
-    optionValue: "milling_type_id",
-  });
-
-  const { selectProps: filmSelectProps } = useSelect({
-    resource: "films",
-    optionLabel: "film_name",
-    optionValue: "film_id",
-  });
+  const handleCancel = () => {
+    // Navigate back to orders list
+    navigate('/orders');
+  };
 
   return (
-    <Create saveButtonProps={saveButtonProps}>
-      <Form
-        {...formProps}
-        layout="vertical"
-        onFinish={(values) => {
-          const isoDate = values?.order_date
-            ? (values.order_date.toDate?.()
-                ? values.order_date.toDate().toISOString()
-                : values.order_date.toISOString?.() ?? values.order_date)
-            : null;
-          return formProps.onFinish?.({
-            ...values,
-            order_date: isoDate,
-          });
-        }}
-      >
-        <Form.Item
-          label="Order Date"
-          name="order_date"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <DatePicker />
-        </Form.Item>
-        <Form.Item
-          label="Order Name"
-          name="order_name"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item
-          label="Client"
-          name="client_id"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Select {...clientSelectProps} />
-        </Form.Item>
-        <Form.Item
-          label="Material"
-          name="material_id"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Select {...materialSelectProps} />
-        </Form.Item>
-        <Form.Item
-          label="Milling Type"
-          name="milling_type_id"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Select {...millingTypeSelectProps} />
-        </Form.Item>
-        <Form.Item
-          label="Film"
-          name="film_id"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Select {...filmSelectProps} />
-        </Form.Item>
-        <Form.Item
-          label="Price"
-          name="price"
-          rules={[
-            {
-              required: true,
-            },
-          ]}
-        >
-          <Input />
-        </Form.Item>
-      </Form>
-    </Create>
+    <OrderForm
+      mode="create"
+      onSaveSuccess={handleSaveSuccess}
+      onCancel={handleCancel}
+    />
   );
 };
