@@ -21,6 +21,9 @@ import { OrderLegacySection } from './sections/OrderLegacySection';
 import { OrderFilesSection } from './sections/OrderFilesSection';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 
+// Tabs
+import { OrderDetailsTab } from './tabs/OrderDetailsTab';
+
 interface OrderFormProps {
   mode: OrderFormMode;
   orderId?: number;
@@ -216,8 +219,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     {
       key: 'details',
       label: 'Детали заказа',
-      children: <div>TODO: Order Details Tab</div>,
-      disabled: mode === 'create' && !header.order_id, // Disable until order is created
+      children: <OrderDetailsTab />,
     },
     {
       key: 'payments',
