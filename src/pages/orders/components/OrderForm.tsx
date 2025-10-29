@@ -2,14 +2,15 @@
 // Master-Detail form with Tabs for child entities
 
 import React, { useEffect } from 'react';
-import { Card, Tabs, Button, Space, Spin } from 'antd';
+import { Card, Tabs, Button, Space, Spin, notification } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
-import { useOne, useList } from '@refinedev/core';
+import { useOne, useList, useNavigation } from '@refinedev/core';
 import { useOrderFormStore } from '../../../stores/orderFormStore';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
 import { useUnsavedChangesWarning } from '../../../hooks/useUnsavedChangesWarning';
 import { useOrderSave } from '../../../hooks/useOrderSave';
 import { OrderFormMode } from '../../../types/orders';
+import { orderFormSchema } from '../../../schemas/orderSchema';
 
 // Sections
 import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
@@ -129,16 +130,31 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     shouldLoadPayments,
   ]);
 
+  // Navigation
+  const { list, edit } = useNavigation();
+
   // Handle save
   const handleSave = async () => {
     const formValues = getFormValues();
 
-    // TODO: Add Zod validation here
-    // const result = orderFormSchema.safeParse(formValues);
-    // if (!result.success) {
-    //   // Show validation errors
-    //   return;
-    // }
+    // Zod validation
+    const result = orderFormSchema.safeParse(formValues);
+    if (!result.success) {
+      // Show validation errors
+      const errors = result.error.errors;
+      const errorMessages = errors.map((err) => `${err.path.join('.')}: ${err.message}`).join('\n');
+
+      notification.error({
+        message: 'Ошибка валидации',
+        description: (
+          <div style={{ whiteSpace: 'pre-line' }}>
+            {errorMessages}
+          </div>
+        ),
+        duration: 0, // Don't auto-hide
+      });
+      return;
+    }
 
     const savedOrderId = await saveOrder(formValues, mode === 'edit');
 
@@ -146,6 +162,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       setDirty(false);
       if (onSaveSuccess) {
         onSaveSuccess(savedOrderId);
+      } else {
+        // Navigate to edit page if created, or to list if edited
+        if (mode === 'create') {
+          edit('orders', savedOrderId);
+        } else {
+          list('orders');
+        }
       }
     }
   };
