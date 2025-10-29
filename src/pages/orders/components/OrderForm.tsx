@@ -4,6 +4,7 @@
 import React, { useEffect } from 'react';
 import { Card, Tabs, Button, Space, Spin } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
+import { useOne } from '@refinedev/core';
 import { useOrderFormStore } from '../../../stores/orderFormStore';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
 import { useUnsavedChangesWarning } from '../../../hooks/useUnsavedChangesWarning';
@@ -37,6 +38,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     setHeader,
     isDirty,
     reset,
+    loadOrder,
     getFormValues,
     setDirty,
   } = useOrderFormStore();
@@ -45,6 +47,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     useDefaultStatuses();
   const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
+
+  // Load existing order data in edit mode
+  const { data: orderData, isLoading: orderLoading } = useOne({
+    resource: 'orders',
+    id: orderId,
+    queryOptions: {
+      enabled: mode === 'edit' && !!orderId,
+    },
+  });
 
   // Initialize form with default values for create mode
   useEffect(() => {
@@ -61,13 +72,19 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
   }, [mode, defaultOrderStatus, defaultPaymentStatus]);
 
-  // TODO: Load existing order data in edit mode
-  // useEffect(() => {
-  //   if (mode === 'edit' && orderId) {
-  //     // Load order data using dataProvider
-  //     // loadOrder(orderData);
-  //   }
-  // }, [mode, orderId]);
+  // Load order data in edit mode
+  useEffect(() => {
+    if (mode === 'edit' && orderData?.data) {
+      loadOrder({
+        header: orderData.data,
+        details: [],
+        payments: [],
+        workshops: [],
+        requirements: [],
+      });
+      setDirty(false);
+    }
+  }, [mode, orderData]);
 
   // Handle save
   const handleSave = async () => {
@@ -100,12 +117,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     });
   };
 
-  if (statusesLoading) {
+  if (statusesLoading || orderLoading) {
     return (
       <Card>
         <div style={{ textAlign: 'center', padding: '50px' }}>
           <Spin size="large" />
-          <div style={{ marginTop: '16px' }}>Загрузка формы...</div>
+          <div style={{ marginTop: '16px' }}>
+            {orderLoading ? 'Загрузка заказа...' : 'Загрузка формы...'}
+          </div>
         </div>
       </Card>
     );

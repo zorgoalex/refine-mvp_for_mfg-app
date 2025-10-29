@@ -4,13 +4,14 @@
 import React, { useEffect } from 'react';
 import { Form, InputNumber, DatePicker, Row, Col, Collapse } from 'antd';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
+import { useShallow } from 'zustand/react/shallow';
 import dayjs from 'dayjs';
 
 const { Panel } = Collapse;
 
 export const OrderFinanceSection: React.FC = () => {
   const { header, updateHeaderField } = useOrderFormStore();
-  const totals = useOrderFormStore(selectTotals);
+  const totals = useOrderFormStore(useShallow(selectTotals));
 
   // Auto-calculate discounted_amount when total_amount or discount changes
   useEffect(() => {

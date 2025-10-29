@@ -5,9 +5,10 @@ import React from 'react';
 import { Card, Statistic, Row, Col } from 'antd';
 import { FileTextOutlined, ColumnHeightOutlined } from '@ant-design/icons';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export const OrderAggregatesDisplay: React.FC = () => {
-  const totals = useOrderFormStore(selectTotals);
+  const totals = useOrderFormStore(useShallow(selectTotals));
 
   return (
     <Card title="Итоговые показатели" size="small">
