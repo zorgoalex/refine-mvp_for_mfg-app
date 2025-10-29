@@ -39,7 +39,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       title: 'Высота',
       dataIndex: 'height',
       key: 'height',
-      width: 90,
+      width: 70,
       align: 'right',
       render: (value) => {
         const num = Number(value);
@@ -50,7 +50,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       title: 'Ширина',
       dataIndex: 'width',
       key: 'width',
-      width: 90,
+      width: 70,
       align: 'right',
       render: (value) => {
         const num = Number(value);
@@ -69,7 +69,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       title: 'Площадь',
       dataIndex: 'area',
       key: 'area',
-      width: 100,
+      width: 70,
       align: 'right',
       render: (value) => formatNumber(value, 2) + ' м²',
     },
@@ -98,17 +98,52 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       render: (materialId) => <MaterialCell materialId={materialId} />,
     },
     {
+      title: 'Прим-е',
+      dataIndex: 'note',
+      key: 'note',
+      width: 100,
+      render: (text) => text || '—',
+    },
+    {
+      title: 'Цена за кв.м.',
+      dataIndex: 'milling_cost_per_sqm',
+      key: 'milling_cost_per_sqm',
+      width: 70,
+      align: 'right',
+      render: (value) => (
+        <span style={{ fontSize: '11px' }}>
+          {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
+        </span>
+      ),
+    },
+    {
+      title: 'Сумма',
+      dataIndex: 'detail_cost',
+      key: 'detail_cost',
+      width: 70,
+      align: 'right',
+      render: (value) => (
+        <span style={{ fontSize: '11px' }}>
+          {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
+        </span>
+      ),
+    },
+    {
       title: 'Пленка',
       dataIndex: 'film_id',
       key: 'film_id',
       width: 120,
-      render: (filmId) => (filmId ? <FilmCell filmId={filmId} /> : '—'),
+      render: (filmId) => (
+        <span style={{ fontSize: '11px' }}>
+          {filmId ? <FilmCell filmId={filmId} /> : '—'}
+        </span>
+      ),
     },
     {
-      title: 'Приоритет',
+      title: 'Пр-т',
       dataIndex: 'priority',
       key: 'priority',
-      width: 90,
+      width: 35,
       align: 'center',
       render: (value) => formatNumber(value, 0),
     },
@@ -121,31 +156,37 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         statusId ? <ProductionStatusCell statusId={statusId} /> : <Tag>Не назначен</Tag>,
     },
     {
-      title: 'Название',
+      title: (
+        <div style={{ whiteSpace: 'normal', lineHeight: '1.2' }}>
+          Название<br />детали
+        </div>
+      ),
       dataIndex: 'detail_name',
       key: 'detail_name',
       width: 100,
       render: (text) => text || '—',
     },
     {
-      title: 'Действия',
+      title: <span style={{ fontSize: '11px' }}>Действия</span>,
       key: 'actions',
-      width: 120,
+      width: 70,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
+        <Space size={2}>
           <Button
             type="text"
             size="small"
-            icon={<EditOutlined />}
+            icon={<EditOutlined style={{ fontSize: '12px' }} />}
             onClick={() => onEdit(record)}
+            style={{ padding: '0 4px' }}
           />
           <Button
             type="text"
             size="small"
             danger
-            icon={<DeleteOutlined />}
+            icon={<DeleteOutlined style={{ fontSize: '12px' }} />}
             onClick={() => onDelete(record.temp_id!, record.detail_id)}
+            style={{ padding: '0 4px' }}
           />
         </Space>
       ),
