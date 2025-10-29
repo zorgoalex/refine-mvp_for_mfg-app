@@ -1,12 +1,13 @@
 // Order Details Table
 // Displays list of order details with inline editing capabilities
 
-import React from 'react';
-import { Table, Button, Tag, Space } from 'antd';
-import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import React, { useMemo, useState } from 'react';
+import { Table, Button, Tag, Space, Form, InputNumber, Input, Select } from 'antd';
+import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useOne } from '@refinedev/core';
+import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { formatNumber } from '../../../../utils/numberFormat';
 
@@ -23,7 +24,93 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   selectedRowKeys = [],
   onSelectChange,
 }) => {
-  const { details } = useOrderFormStore();
+  const { details, updateDetail } = useOrderFormStore();
+
+  const [form] = Form.useForm();
+  const [editingKey, setEditingKey] = useState<number | string | null>(null);
+  const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
+
+  // Reference selects (enabled only while editing)
+  const selectsEnabled = editingKey !== null;
+  const { selectProps: materialSelectProps } = useSelect({
+    resource: 'materials',
+    optionLabel: 'material_name',
+    optionValue: 'material_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    queryOptions: { enabled: selectsEnabled },
+  });
+  const { selectProps: millingTypeSelectProps } = useSelect({
+    resource: 'milling_types',
+    optionLabel: 'milling_type_name',
+    optionValue: 'milling_type_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
+    queryOptions: { enabled: selectsEnabled },
+  });
+  const { selectProps: edgeTypeSelectProps } = useSelect({
+    resource: 'edge_types',
+    optionLabel: 'edge_type_name',
+    optionValue: 'edge_type_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
+    queryOptions: { enabled: selectsEnabled },
+  });
+  const { selectProps: filmSelectProps } = useSelect({
+    resource: 'films',
+    optionLabel: 'film_name',
+    optionValue: 'film_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    queryOptions: { enabled: selectsEnabled },
+  });
+  const { selectProps: productionStatusSelectProps } = useSelect({
+    resource: 'production_statuses',
+    optionLabel: 'production_status_name',
+    optionValue: 'production_status_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
+    queryOptions: { enabled: selectsEnabled },
+  });
+
+  const startEdit = (record: OrderDetail) => {
+    setEditingKey(record.temp_id || record.detail_id || null);
+    form.setFieldsValue({
+      height: record.height,
+      width: record.width,
+      quantity: record.quantity,
+      area: record.area,
+      material_id: record.material_id,
+      milling_type_id: record.milling_type_id,
+      edge_type_id: record.edge_type_id,
+      film_id: record.film_id ?? null,
+      milling_cost_per_sqm: record.milling_cost_per_sqm ?? null,
+      detail_cost: record.detail_cost ?? null,
+      note: record.note ?? '',
+      priority: record.priority,
+      production_status_id: record.production_status_id ?? null,
+      detail_name: record.detail_name ?? '',
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingKey(null);
+    form.resetFields();
+  };
+
+  const recalcArea = () => {
+    const height = form.getFieldValue('height');
+    const width = form.getFieldValue('width');
+    if (height && width && height > 0 && width > 0) {
+      const area = (height * width) / 1000000; // mm^2 -> m^2
+      form.setFieldsValue({ area });
+    }
+  };
+
+  const saveEdit = async (record: OrderDetail) => {
+    const values = await form.validateFields();
+    const tempId = record.temp_id || record.detail_id!;
+    updateDetail(tempId, values);
+    cancelEdit();
+  };
 
   const columns: ColumnsType<OrderDetail> = [
     {
@@ -41,9 +128,16 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'height',
       width: 70,
       align: 'right',
-      render: (value) => {
-        const num = Number(value);
-        return formatNumber(num, num % 1 === 0 ? 0 : 2);
+      render: (value, record) => {
+        if (!isEditing(record)) {
+          const num = Number(value);
+          return formatNumber(num, num % 1 === 0 ? 0 : 2);
+        }
+        return (
+          <Form.Item name="height" style={{ margin: 0 }} rules={[{ required: true }]}> 
+            <InputNumber autoFocus style={{ width: '100%' }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        );
       },
     },
     {
@@ -52,9 +146,16 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'width',
       width: 70,
       align: 'right',
-      render: (value) => {
-        const num = Number(value);
-        return formatNumber(num, num % 1 === 0 ? 0 : 2);
+      render: (value, record) => {
+        if (!isEditing(record)) {
+          const num = Number(value);
+          return formatNumber(num, num % 1 === 0 ? 0 : 2);
+        }
+        return (
+          <Form.Item name="width" style={{ margin: 0 }} rules={[{ required: true }]}> 
+            <InputNumber style={{ width: '100%' }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        );
       },
     },
     {
@@ -63,7 +164,14 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'quantity',
       width: 70,
       align: 'right',
-      render: (value) => formatNumber(value, 0),
+      render: (value, record) =>
+        isEditing(record) ? (
+          <Form.Item name="quantity" style={{ margin: 0 }} rules={[{ required: true }]}> 
+            <InputNumber style={{ width: '100%' }} min={1} precision={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          formatNumber(value, 0)
+        ),
     },
     {
       title: 'Площадь',
@@ -71,7 +179,14 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'area',
       width: 70,
       align: 'right',
-      render: (value) => formatNumber(value, 2) + ' м²',
+      render: (value, record) =>
+        isEditing(record) ? (
+          <Form.Item name="area" style={{ margin: 0 }}> 
+            <InputNumber style={{ width: '100%' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          formatNumber(value, 2) + ' м²'
+        ),
     },
     {
       title: 'Фрезеровка',
@@ -79,7 +194,14 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'milling_type_id',
       width: 100,
       align: 'center',
-      render: (millingTypeId) => <MillingTypeCell millingTypeId={millingTypeId} />,
+      render: (millingTypeId, record) =>
+        isEditing(record) ? (
+          <Form.Item name="milling_type_id" style={{ margin: 0 }} rules={[{ required: true }]}> 
+            <Select {...millingTypeSelectProps} placeholder="Тип фрезеровки" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          </Form.Item>
+        ) : (
+          <MillingTypeCell millingTypeId={millingTypeId} />
+        ),
     },
     {
       title: 'Кромка',
@@ -87,7 +209,14 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'edge_type_id',
       width: 80,
       align: 'center',
-      render: (edgeTypeId) => <EdgeTypeCell edgeTypeId={edgeTypeId} />,
+      render: (edgeTypeId, record) =>
+        isEditing(record) ? (
+          <Form.Item name="edge_type_id" style={{ margin: 0 }} rules={[{ required: true }]}> 
+            <Select {...edgeTypeSelectProps} placeholder="Тип кромки" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          </Form.Item>
+        ) : (
+          <EdgeTypeCell edgeTypeId={edgeTypeId} />
+        ),
     },
     {
       title: 'Материал',
@@ -95,14 +224,28 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'material_id',
       width: 80,
       align: 'center',
-      render: (materialId) => <MaterialCell materialId={materialId} />,
+      render: (materialId, record) =>
+        isEditing(record) ? (
+          <Form.Item name="material_id" style={{ margin: 0 }} rules={[{ required: true }]}> 
+            <Select {...materialSelectProps} placeholder="Материал" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          </Form.Item>
+        ) : (
+          <MaterialCell materialId={materialId} />
+        ),
     },
     {
       title: 'Прим-е',
       dataIndex: 'note',
       key: 'note',
       width: 100,
-      render: (text) => text || '—',
+      render: (text, record) =>
+        isEditing(record) ? (
+          <Form.Item name="note" style={{ margin: 0 }}> 
+            <Input placeholder="Примечание" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          text || '—'
+        ),
     },
     {
       title: 'Цена за кв.м.',
@@ -110,11 +253,16 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'milling_cost_per_sqm',
       width: 70,
       align: 'right',
-      render: (value) => (
-        <span style={{ fontSize: '11px' }}>
-          {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
-        </span>
-      ),
+      render: (value, record) =>
+        isEditing(record) ? (
+          <Form.Item name="milling_cost_per_sqm" style={{ margin: 0 }}> 
+            <InputNumber style={{ width: '100%' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '11px' }}>
+            {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
+          </span>
+        ),
     },
     {
       title: 'Сумма',
@@ -122,22 +270,32 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'detail_cost',
       width: 70,
       align: 'right',
-      render: (value) => (
-        <span style={{ fontSize: '11px' }}>
-          {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
-        </span>
-      ),
+      render: (value, record) =>
+        isEditing(record) ? (
+          <Form.Item name="detail_cost" style={{ margin: 0 }}> 
+            <InputNumber style={{ width: '100%' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '11px' }}>
+            {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
+          </span>
+        ),
     },
     {
       title: 'Пленка',
       dataIndex: 'film_id',
       key: 'film_id',
       width: 120,
-      render: (filmId) => (
-        <span style={{ fontSize: '11px' }}>
-          {filmId ? <FilmCell filmId={filmId} /> : '—'}
-        </span>
-      ),
+      render: (filmId, record) =>
+        isEditing(record) ? (
+          <Form.Item name="film_id" style={{ margin: 0 }}> 
+            <Select {...filmSelectProps} allowClear placeholder="Плёнка" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '11px' }}>
+            {filmId ? <FilmCell filmId={filmId} /> : '—'}
+          </span>
+        ),
     },
     {
       title: 'Пр-т',
@@ -145,15 +303,28 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'priority',
       width: 35,
       align: 'center',
-      render: (value) => formatNumber(value, 0),
+      render: (value, record) =>
+        isEditing(record) ? (
+          <Form.Item name="priority" style={{ margin: 0 }} rules={[{ required: true }]}> 
+            <InputNumber min={1} max={999} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          formatNumber(value, 0)
+        ),
     },
     {
       title: 'Статус',
       dataIndex: 'production_status_id',
       key: 'production_status_id',
       width: 120,
-      render: (statusId) =>
-        statusId ? <ProductionStatusCell statusId={statusId} /> : <Tag>Не назначен</Tag>,
+      render: (statusId, record) =>
+        isEditing(record) ? (
+          <Form.Item name="production_status_id" style={{ margin: 0 }}> 
+            <Select {...productionStatusSelectProps} allowClear placeholder="Статус" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          </Form.Item>
+        ) : (
+          statusId ? <ProductionStatusCell statusId={statusId} /> : <Tag>Не назначен</Tag>
+        ),
     },
     {
       title: (
@@ -164,7 +335,14 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       dataIndex: 'detail_name',
       key: 'detail_name',
       width: 100,
-      render: (text) => text || '—',
+      render: (text, record) =>
+        isEditing(record) ? (
+          <Form.Item name="detail_name" style={{ margin: 0 }}> 
+            <Input placeholder="Название детали" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          text || '—'
+        ),
     },
     {
       title: <span style={{ fontSize: '11px' }}>Действия</span>,
@@ -173,21 +351,42 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       fixed: 'right',
       render: (_, record) => (
         <Space size={2}>
-          <Button
-            type="text"
-            size="small"
-            icon={<EditOutlined style={{ fontSize: '12px' }} />}
-            onClick={() => onEdit(record)}
-            style={{ padding: '0 4px' }}
-          />
-          <Button
-            type="text"
-            size="small"
-            danger
-            icon={<DeleteOutlined style={{ fontSize: '12px' }} />}
-            onClick={() => onDelete(record.temp_id!, record.detail_id)}
-            style={{ padding: '0 4px' }}
-          />
+          {isEditing(record) ? (
+            <>
+              <Button
+                type="text"
+                size="small"
+                icon={<CheckOutlined style={{ fontSize: '12px', color: '#52c41a' }} />}
+                onClick={() => saveEdit(record)}
+                style={{ padding: '0 4px' }}
+              />
+              <Button
+                type="text"
+                size="small"
+                icon={<CloseOutlined style={{ fontSize: '12px', color: '#ff4d4f' }} />}
+                onClick={cancelEdit}
+                style={{ padding: '0 4px' }}
+              />
+            </>
+          ) : (
+            <>
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined style={{ fontSize: '12px' }} />}
+                onClick={() => startEdit(record)}
+                style={{ padding: '0 4px' }}
+              />
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined style={{ fontSize: '12px' }} />}
+                onClick={() => onDelete(record.temp_id!, record.detail_id)}
+                style={{ padding: '0 4px' }}
+              />
+            </>
+          )}
         </Space>
       ),
     },
@@ -201,26 +400,29 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     : undefined;
 
   return (
-    <Table<OrderDetail>
-      dataSource={details}
-      columns={columns}
-      rowKey={(record) => record.temp_id || record.detail_id || 0}
-      rowSelection={rowSelection}
-      pagination={{
-        pageSize: 20,
-        showSizeChanger: true,
-        showTotal: (total) => `Всего: ${total} позиций`,
-      }}
-      scroll={{ x: 1500, y: 500 }}
-      size="small"
-      bordered
-      rowClassName={(_, index) => (index % 2 === 0 ? '' : '')}
-      onRow={(_, index) => ({
-        style: {
-          backgroundColor: index! % 2 === 0 ? '#ffffff' : '#f5f5f5',
-        },
-      })}
-    />
+    <Form form={form} component={false}>
+      <Table<OrderDetail>
+        dataSource={details}
+        columns={columns}
+        rowKey={(record) => record.temp_id || record.detail_id || 0}
+        rowSelection={rowSelection}
+        pagination={{
+          pageSize: 20,
+          showSizeChanger: true,
+          showTotal: (total) => `Всего: ${total} позиций`,
+        }}
+        scroll={{ x: 1500, y: 500 }}
+        size="small"
+        bordered
+        rowClassName={(_, index) => (index % 2 === 0 ? '' : '')}
+        onRow={(record, index) => ({
+          style: {
+            backgroundColor: index! % 2 === 0 ? '#ffffff' : '#f5f5f5',
+          },
+          onDoubleClick: () => startEdit(record),
+        })}
+      />
+    </Form>
   );
 };
 
