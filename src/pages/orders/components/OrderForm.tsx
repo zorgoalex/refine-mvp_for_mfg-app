@@ -1,7 +1,7 @@
 // Main Order Form Component
 // Master-Detail form with Tabs for child entities
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Card, Tabs, Button, Space, Spin, notification } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
@@ -101,8 +101,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
   }, [mode, defaultOrderStatus, defaultPaymentStatus]);
 
-  // Load order data in edit mode
+  // Load order data in edit mode (one-time)
+  const didInit = useRef(false);
   useEffect(() => {
+    if (didInit.current) return;
     if (mode === 'edit' && orderData?.data) {
       // Wait for details and payments only if they should be loaded
       const detailsReady = !shouldLoadDetails || (!detailsLoading && detailsData);
@@ -117,6 +119,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           requirements: [],
         });
         setDirty(false);
+        didInit.current = true;
       }
     }
   }, [

@@ -328,6 +328,10 @@ export const useOrderSave = (): UseOrderSaveResult => {
         id: createdOrderId,
       });
 
+      // Ensure child lists are refreshed for the current order
+      await invalidate({ resource: 'order_details', invalidates: ['list'] });
+      await invalidate({ resource: 'payments', invalidates: ['list'] });
+
       // ========== SUCCESS ==========
       notification.success({
         message: `Заказ успешно ${isEdit ? 'обновлен' : 'создан'}`,
