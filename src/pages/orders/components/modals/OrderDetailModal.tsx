@@ -82,7 +82,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         form.resetFields();
         form.setFieldsValue({
           quantity: 1,
-          priority: 1,
+          priority: 100,
         });
         setCalculatedArea(0);
       }
@@ -143,7 +143,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <Form.Item
               label="Приоритет"
               name="priority"
-              initialValue={1}
+              initialValue={100}
               tooltip="1 — наивысший приоритет, большее число — ниже"
             >
               <InputNumber

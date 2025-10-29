@@ -93,7 +93,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         order_date: new Date().toISOString().split('T')[0], // Today's date
         order_status_id: defaultOrderStatus,
         payment_status_id: defaultPaymentStatus,
-        priority: 1,
+        priority: 100,
         discount: 0,
         paid_amount: 0,
       });

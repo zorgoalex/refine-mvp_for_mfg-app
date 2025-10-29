@@ -29,7 +29,7 @@ export const orderHeaderSchema = z
       .max(200, "Название заказа не может превышать 200 символов"),
     client_id: z.number().positive("Выберите клиента"),
     order_date: z.date().or(z.string()),
-    priority: z.number().min(1, "Приоритет >= 1").max(100, "Приоритет <= 100").default(1),
+    priority: z.number().min(1, "Приоритет >= 1").max(100, "Приоритет <= 100").default(100),
     order_status_id: z.number().positive("Выберите статус заказа"),
     payment_status_id: z.number().positive("Выберите статус оплаты"),
 

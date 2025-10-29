@@ -112,7 +112,7 @@ export const OrderBasicInfo: React.FC = () => {
           >
             <InputNumber
               value={header.priority}
-              onChange={(value) => updateHeaderField('priority', value ?? 1)}
+              onChange={(value) => updateHeaderField('priority', value ?? 100)}
               min={1}
               max={100}
               formatter={(value) => numberFormatter(value, 0)}
