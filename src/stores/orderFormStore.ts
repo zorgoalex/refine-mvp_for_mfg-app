@@ -321,7 +321,8 @@ export const useOrderFormStore = create<OrderFormState>()(
         calculatedTotals: () => {
           const state = get();
           return {
-            parts_count: state.details.reduce((sum, d) => sum + (d.quantity || 0), 0),
+            positions_count: state.details.length, // Количество позиций (записей)
+            parts_count: state.details.reduce((sum, d) => sum + (d.quantity || 0), 0), // Количество деталей (сумма quantity)
             total_area: state.details.reduce((sum, d) => sum + (d.area || 0), 0),
             total_paid: state.payments.reduce((sum, p) => sum + (p.amount || 0), 0),
           };

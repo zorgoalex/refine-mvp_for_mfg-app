@@ -90,41 +90,54 @@ export const OrderHeaderSummary: React.FC = () => {
           </Descriptions.Item>
         </Descriptions>
 
-        {/* Aggregates and Finance */}
-        <Row gutter={16}>
-          <Col span={4}>
+        {/* Aggregates and Finance - compact row with smaller font */}
+        <Row gutter={12} style={{ fontSize: '13px' }}>
+          <Col span={3}>
             <Statistic
-              title="Количество деталей"
+              title="Позиций"
+              value={formatNumber(totals.positions_count, 0)}
+              suffix="поз"
+              valueStyle={{ fontSize: '18px' }}
+            />
+          </Col>
+          <Col span={3}>
+            <Statistic
+              title="Деталей"
               value={formatNumber(totals.parts_count, 0)}
               suffix="шт"
+              valueStyle={{ fontSize: '18px' }}
             />
           </Col>
-          <Col span={4}>
+          <Col span={3}>
             <Statistic
-              title="Общая площадь"
+              title="Площадь"
               value={formatNumber(totals.total_area, 2)}
               suffix="м²"
+              valueStyle={{ fontSize: '18px' }}
             />
           </Col>
           <Col span={4}>
             <Statistic
-              title="Общая сумма"
+              title="Сумма"
               value={formatNumber(header.total_amount || 0, 2)}
               suffix="₽"
+              valueStyle={{ fontSize: '18px' }}
             />
           </Col>
-          <Col span={4}>
+          <Col span={3}>
             <Statistic
               title="Скидка"
               value={formatNumber(header.discount || 0, 2)}
               suffix="%"
+              valueStyle={{ fontSize: '18px' }}
             />
           </Col>
           <Col span={4}>
             <Statistic
-              title="Сумма со скидкой"
+              title="Со скидкой"
               value={formatNumber(header.discounted_amount || 0, 2)}
               suffix="₽"
+              valueStyle={{ fontSize: '18px' }}
             />
           </Col>
           <Col span={4}>
@@ -132,7 +145,7 @@ export const OrderHeaderSummary: React.FC = () => {
               title="Оплачено"
               value={formatNumber(totals.total_paid, 2)}
               suffix="₽"
-              valueStyle={{ color: totals.total_paid > 0 ? '#3f8600' : undefined }}
+              valueStyle={{ fontSize: '18px', color: totals.total_paid > 0 ? '#3f8600' : undefined }}
             />
           </Col>
         </Row>

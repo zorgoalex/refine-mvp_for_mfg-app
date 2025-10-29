@@ -233,7 +233,8 @@ export interface OrderFormValues {
 // ============================================================================
 
 export interface OrderTotals {
-  parts_count: number;
+  positions_count: number; // Количество позиций (записей деталей)
+  parts_count: number; // Количество деталей (сумма quantity)
   total_area: number;
   total_paid: number;
 }
