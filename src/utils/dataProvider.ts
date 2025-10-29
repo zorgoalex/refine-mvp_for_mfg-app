@@ -5,6 +5,9 @@ type AnyObject = Record<string, any>;
 
 const HASURA_URL = (import.meta as any).env.VITE_HASURA_GRAPHQL_URL as string;
 const HASURA_ADMIN_SECRET = (import.meta as any).env.VITE_HASURA_ADMIN_SECRET as string;
+// Dev audit override: use env to inject edited_by on update; disable by setting VITE_DEV_FORCE_AUDIT=false
+const DEV_FORCE_AUDIT = String(((import.meta as any).env.VITE_DEV_FORCE_AUDIT ?? 'true')).toLowerCase() === 'true';
+const DEV_AUDIT_USER_ID = Number((import.meta as any).env.VITE_DEV_AUDIT_USER_ID ?? 1);
 
 const ID_COLUMNS: Record<string, string> = {
   orders_view: "order_id",
@@ -855,7 +858,8 @@ export const dataProvider = (_apiUrl: string) => {
         updated_at,
         ...rest
       } = variables || {};
-      const setLiteral = JSON.stringify(sanitizeVariables(rest)).replace(/"([^(\"]+)":/g, "$1:");
+      const payloadForUpdate = DEV_FORCE_AUDIT ? { ...rest, edited_by: DEV_AUDIT_USER_ID } : rest;
+      const setLiteral = JSON.stringify(sanitizeVariables(payloadForUpdate)).replace(/"([^\(\"]+)":/g, "$1:");
       const query = `
         mutation {
           update_${resource}_by_pk(pk_columns: { ${idCol}: ${escapeValue(id)} }, _set: ${setLiteral}) {

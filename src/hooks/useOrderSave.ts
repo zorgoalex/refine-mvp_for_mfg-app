@@ -136,7 +136,10 @@ export const useOrderSave = (): UseOrderSaveResult => {
 
         const orderResult = await dataProvider().create({
           resource: 'orders',
-          variables: headerData,
+          variables: {
+            ...headerData,
+            created_by: values.header?.created_by ?? 1,
+          },
         });
         createdOrderId = orderResult.data.order_id;
       }
@@ -170,7 +173,10 @@ export const useOrderSave = (): UseOrderSaveResult => {
             // Create new detail
             return dataProvider().create({
               resource: 'order_details',
-              variables: detailData,
+              variables: {
+                ...detailData,
+                created_by: (detail as any)?.created_by ?? 1,
+              },
             });
           }
         });
@@ -218,7 +224,10 @@ export const useOrderSave = (): UseOrderSaveResult => {
             // Create new payment
             return dataProvider().create({
               resource: 'payments',
-              variables: paymentData,
+              variables: {
+                ...paymentData,
+                created_by: (payment as any)?.created_by ?? 1,
+              },
             });
           }
         });
@@ -257,7 +266,10 @@ export const useOrderSave = (): UseOrderSaveResult => {
             // Create new workshop
             return dataProvider().create({
               resource: 'order_workshops',
-              variables: workshopData,
+              variables: {
+                ...workshopData,
+                created_by: (workshop as any)?.created_by ?? 1,
+              },
             });
           }
         });
@@ -296,7 +308,10 @@ export const useOrderSave = (): UseOrderSaveResult => {
             // Create new requirement
             return dataProvider().create({
               resource: 'order_resource_requirements',
-              variables: requirementData,
+              variables: {
+                ...requirementData,
+                created_by: (requirement as any)?.created_by ?? 1,
+              },
             });
           }
         });

@@ -36,6 +36,13 @@
 - Refine: `@refinedev/core`, `@refinedev/antd`, `@refinedev/react-router-v6`, `@refinedev/kbar`
 - UI: `antd@^5`
 - Data provider: встроенный минимальный Hasura GraphQL провайдер (`src/utils/dataProvider.ts`)
+
+### Dev Audit Override
+- Для ускорения разработки включена подстановка `edited_by` при апдейтах на фронтенде.
+- Управление через переменные окружения в `.env`:
+  - `VITE_DEV_FORCE_AUDIT=true|false` — включить/выключить режим (по умолчанию true).
+  - `VITE_DEV_AUDIT_USER_ID=1` — ID пользователя, который ставится в `edited_by`.
+- Перед релизом установите `VITE_DEV_FORCE_AUDIT=false` или удалите обе переменные, чтобы использовать корректный аудит.
 - Dev: `@vitejs/plugin-react`
 
 Список версий см. в `package.json`.
@@ -147,4 +154,3 @@ npm run dev
 ## Ссылки и материалы
 - Refine документация: https://refine.dev/docs/
 - Примеры провайдера GraphQL/Hasura: `ai_docs/data-provider-graphql`, `ai_docs/data-provider-hasura`
-

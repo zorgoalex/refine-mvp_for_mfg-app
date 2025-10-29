@@ -25,6 +25,10 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   onSelectChange,
 }) => {
   const { details, updateDetail } = useOrderFormStore();
+  const sortedDetails = useMemo(
+    () => [...details].sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0)),
+    [details]
+  );
 
   const [form] = Form.useForm();
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
@@ -119,6 +123,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'detail_number',
       width: 50,
       fixed: 'left',
+      defaultSortOrder: 'ascend',
       sorter: (a, b) => a.detail_number - b.detail_number,
       render: (value) => <span style={{ color: '#999' }}>{value}</span>,
     },
@@ -402,7 +407,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   return (
     <Form form={form} component={false}>
       <Table<OrderDetail>
-        dataSource={details}
+        dataSource={sortedDetails}
         columns={columns}
         rowKey={(record) => record.temp_id || record.detail_id || 0}
         rowSelection={rowSelection}
