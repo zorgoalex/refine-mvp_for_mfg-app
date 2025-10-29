@@ -460,20 +460,15 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "quantity",
     "area",
     "material_id",
-    "material { material_id material_name }",
     "milling_type_id",
-    "milling_type { milling_type_id milling_type_name }",
     "edge_type_id",
-    "edge_type { edge_type_id edge_type_name }",
     "film_id",
-    "film { film_id film_name }",
     "milling_cost_per_sqm",
     "detail_cost",
     "note",
     "detail_name",
     "priority",
     "production_status_id",
-    "production_status { production_status_id production_status_name }",
     "joint_order_id",
     "link_cutting_file",
     "link_cutting_image_file",
@@ -595,12 +590,14 @@ const gqlRequest = async (query: string): Promise<any> => {
     body: JSON.stringify({ query }),
   });
   const json = await res.json();
+
   if (!res.ok || json.errors) {
     const rawMessage = json?.errors?.[0]?.message || res.statusText;
     const message = parsePostgresError(rawMessage);
     const statusCode = !res.ok ? res.status : 400;
     throw { message, statusCode };
   }
+
   return json.data;
 };
 

@@ -6,6 +6,7 @@ import { Card, Statistic, Row, Col } from 'antd';
 import { FileTextOutlined, ColumnHeightOutlined } from '@ant-design/icons';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
+import { formatNumber } from '../../../../utils/numberFormat';
 
 export const OrderAggregatesDisplay: React.FC = () => {
   const totals = useOrderFormStore(useShallow(selectTotals));
@@ -16,7 +17,7 @@ export const OrderAggregatesDisplay: React.FC = () => {
         <Col span={8}>
           <Statistic
             title="Количество деталей"
-            value={totals.parts_count}
+            value={formatNumber(totals.parts_count, 0)}
             prefix={<FileTextOutlined />}
             suffix="шт"
           />
@@ -24,8 +25,7 @@ export const OrderAggregatesDisplay: React.FC = () => {
         <Col span={8}>
           <Statistic
             title="Общая площадь"
-            value={totals.total_area}
-            precision={2}
+            value={formatNumber(totals.total_area, 2)}
             prefix={<ColumnHeightOutlined />}
             suffix="м²"
           />
@@ -33,8 +33,7 @@ export const OrderAggregatesDisplay: React.FC = () => {
         <Col span={8}>
           <Statistic
             title="Оплачено"
-            value={totals.total_paid}
-            precision={2}
+            value={formatNumber(totals.total_paid, 2)}
             suffix="₽"
           />
         </Col>

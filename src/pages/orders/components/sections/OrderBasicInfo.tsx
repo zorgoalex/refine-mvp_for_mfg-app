@@ -5,25 +5,29 @@ import React from 'react';
 import { Form, Input, DatePicker, InputNumber, Row, Col, Select } from 'antd';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import dayjs from 'dayjs';
 
 export const OrderBasicInfo: React.FC = () => {
   const { header, updateHeaderField } = useOrderFormStore();
 
-  // Load clients
+  // Load clients - with defaultValue to show current selection properly
+  // IMPORTANT: only pass defaultValue if it exists to avoid null in GraphQL query
   const { selectProps: clientSelectProps } = useSelect({
     resource: 'clients',
     optionLabel: 'client_name',
     optionValue: 'client_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    ...(header.client_id ? { defaultValue: header.client_id } : {}),
   });
 
-  // Load employees (for manager)
+  // Load employees (for manager) - with defaultValue only if exists
   const { selectProps: employeeSelectProps } = useSelect({
     resource: 'employees',
     optionLabel: 'full_name',
     optionValue: 'employee_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    ...(header.manager_id ? { defaultValue: header.manager_id } : {}),
   });
 
   return (
@@ -111,6 +115,8 @@ export const OrderBasicInfo: React.FC = () => {
               onChange={(value) => updateHeaderField('priority', value || 100)}
               min={0}
               max={100}
+              formatter={(value) => numberFormatter(value, 0)}
+              parser={numberParser}
               style={{ width: '100%' }}
             />
           </Form.Item>

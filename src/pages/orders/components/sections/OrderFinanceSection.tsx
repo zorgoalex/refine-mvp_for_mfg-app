@@ -5,6 +5,7 @@ import React, { useEffect } from 'react';
 import { Form, InputNumber, DatePicker, Row, Col, Collapse } from 'antd';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
+import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import dayjs from 'dayjs';
 
 const { Panel } = Collapse;
@@ -38,6 +39,8 @@ export const OrderFinanceSection: React.FC = () => {
                   onChange={(value) => updateHeaderField('total_amount', value)}
                   min={0}
                   precision={2}
+                  formatter={(value) => numberFormatter(value, 2)}
+                  parser={numberParser}
                   style={{ width: '100%' }}
                   addonAfter="₽"
                 />
@@ -52,6 +55,8 @@ export const OrderFinanceSection: React.FC = () => {
                   min={0}
                   max={100}
                   precision={2}
+                  formatter={(value) => numberFormatter(value, 2)}
+                  parser={numberParser}
                   style={{ width: '100%' }}
                   addonAfter="%"
                 />
@@ -65,6 +70,8 @@ export const OrderFinanceSection: React.FC = () => {
                   onChange={(value) => updateHeaderField('discounted_amount', value)}
                   min={0}
                   precision={2}
+                  formatter={(value) => numberFormatter(value, 2)}
+                  parser={numberParser}
                   style={{ width: '100%' }}
                   addonAfter="₽"
                 />
@@ -77,6 +84,8 @@ export const OrderFinanceSection: React.FC = () => {
                   value={header.paid_amount}
                   readOnly
                   precision={2}
+                  formatter={(value) => numberFormatter(value, 2)}
+                  parser={numberParser}
                   style={{ width: '100%' }}
                   addonAfter="₽"
                 />

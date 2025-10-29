@@ -4,7 +4,7 @@
 import React, { useEffect } from 'react';
 import { Card, Tabs, Button, Space, Spin } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
-import { useOne } from '@refinedev/core';
+import { useOne, useList } from '@refinedev/core';
 import { useOrderFormStore } from '../../../stores/orderFormStore';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
 import { useUnsavedChangesWarning } from '../../../hooks/useUnsavedChangesWarning';
@@ -12,6 +12,7 @@ import { useOrderSave } from '../../../hooks/useOrderSave';
 import { OrderFormMode } from '../../../types/orders';
 
 // Sections
+import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
 import { OrderBasicInfo } from './sections/OrderBasicInfo';
 import { OrderStatusSection } from './sections/OrderStatusSection';
 import { OrderDatesSection } from './sections/OrderDatesSection';
@@ -57,6 +58,30 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     },
   });
 
+  // Load order details in edit mode (only if orderId is valid number)
+  const shouldLoadDetails = mode === 'edit' && orderId && typeof orderId === 'number' && orderId > 0;
+
+  const { data: detailsData, isLoading: detailsLoading } = useList({
+    resource: 'order_details',
+    filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
+    pagination: { pageSize: 1000 },
+    queryOptions: {
+      enabled: shouldLoadDetails,
+    },
+  });
+
+  // Load payments in edit mode (only if orderId is valid number)
+  const shouldLoadPayments = mode === 'edit' && orderId && typeof orderId === 'number' && orderId > 0;
+
+  const { data: paymentsData, isLoading: paymentsLoading } = useList({
+    resource: 'payments',
+    filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
+    pagination: { pageSize: 1000 },
+    queryOptions: {
+      enabled: shouldLoadPayments,
+    },
+  });
+
   // Initialize form with default values for create mode
   useEffect(() => {
     if (mode === 'create' && defaultOrderStatus && defaultPaymentStatus) {
@@ -75,16 +100,31 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   // Load order data in edit mode
   useEffect(() => {
     if (mode === 'edit' && orderData?.data) {
-      loadOrder({
-        header: orderData.data,
-        details: [],
-        payments: [],
-        workshops: [],
-        requirements: [],
-      });
-      setDirty(false);
+      // Wait for details and payments only if they should be loaded
+      const detailsReady = !shouldLoadDetails || (!detailsLoading && detailsData);
+      const paymentsReady = !shouldLoadPayments || (!paymentsLoading && paymentsData);
+
+      if (detailsReady && paymentsReady) {
+        loadOrder({
+          header: orderData.data,
+          details: detailsData?.data || [],
+          payments: paymentsData?.data || [],
+          workshops: [],
+          requirements: [],
+        });
+        setDirty(false);
+      }
     }
-  }, [mode, orderData]);
+  }, [
+    mode,
+    orderData,
+    detailsData,
+    paymentsData,
+    detailsLoading,
+    paymentsLoading,
+    shouldLoadDetails,
+    shouldLoadPayments,
+  ]);
 
   // Handle save
   const handleSave = async () => {
@@ -117,7 +157,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     });
   };
 
-  if (statusesLoading || orderLoading) {
+  // Show loading only for essential data
+  const isLoadingEssential =
+    statusesLoading ||
+    orderLoading ||
+    (shouldLoadDetails && detailsLoading) ||
+    (shouldLoadPayments && paymentsLoading);
+
+  if (isLoadingEssential) {
     return (
       <Card>
         <div style={{ textAlign: 'center', padding: '50px' }}>
@@ -212,6 +259,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         </Space>
       }
     >
+      {/* Read-only header with order summary (only in edit mode) */}
+      {mode === 'edit' && <OrderHeaderSummary />}
+
+      {/* Editable tabs */}
       <Tabs
         defaultActiveKey="basic"
         items={headerTabItems}
