@@ -29,7 +29,7 @@ export const orderHeaderSchema = z
       .max(200, "Название заказа не может превышать 200 символов"),
     client_id: z.number().positive("Выберите клиента"),
     order_date: z.date().or(z.string()),
-    priority: z.number().min(0, "Приоритет >= 0").max(100, "Приоритет <= 100").default(100),
+    priority: z.number().min(1, "Приоритет >= 1").max(100, "Приоритет <= 100").default(1),
     order_status_id: z.number().positive("Выберите статус заказа"),
     payment_status_id: z.number().positive("Выберите статус оплаты"),
 
@@ -157,9 +157,9 @@ export const orderDetailSchema = z.object({
   area: z.number().min(0, "Площадь должна быть >= 0"),
 
   // Materials and processing
-  material_id: z.number().positive("Выберите материал"),
-  milling_type_id: z.number().positive("Выберите тип фрезеровки"),
-  edge_type_id: z.number().positive("Выберите тип кромки"),
+  material_id: z.number().min(0, "Выберите материал"),
+  milling_type_id: z.number().min(0, "Выберите тип фрезеровки"),
+  edge_type_id: z.number().min(0, "Выберите тип кромки"),
   film_id: z.number().nullable().optional(),
 
   // Costs

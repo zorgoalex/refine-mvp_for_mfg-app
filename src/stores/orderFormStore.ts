@@ -17,7 +17,7 @@ import {
 // STATE INTERFACE
 // ============================================================================
 
-interface OrderFormState {
+  interface OrderFormState {
   // ========== STATE ==========
   header: Partial<Order>;
   details: OrderDetail[];
@@ -31,9 +31,15 @@ interface OrderFormState {
   deletedWorkshops: number[];
   deletedRequirements: number[];
 
-  // Form metadata
-  isDirty: boolean;
-  version: number;
+    // Form metadata
+    isDirty: boolean;
+    version: number;
+
+    // Originals loaded from server for change detection (keyed by persistent ID)
+    originalDetails: Record<number, OrderDetail>;
+    originalPayments: Record<number, Payment>;
+    originalWorkshops: Record<number, OrderWorkshop>;
+    originalRequirements: Record<number, OrderResourceRequirement>;
 
   // ========== ACTIONS: HEADER ==========
   setHeader: (data: Partial<Order>) => void;
@@ -67,26 +73,31 @@ interface OrderFormState {
   reset: () => void;
   loadOrder: (order: OrderFormValues) => void;
   getFormValues: () => OrderFormValues;
-  setDirty: (isDirty: boolean) => void;
+    setDirty: (isDirty: boolean) => void;
+    syncOriginals: () => void;
 }
 
 // ============================================================================
 // INITIAL STATE
 // ============================================================================
 
-const initialState = {
-  header: {},
-  details: [],
-  payments: [],
-  workshops: [],
-  requirements: [],
-  deletedDetails: [],
-  deletedPayments: [],
-  deletedWorkshops: [],
-  deletedRequirements: [],
-  isDirty: false,
-  version: 0,
-};
+  const initialState = {
+    header: {},
+    details: [],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    deletedDetails: [],
+    deletedPayments: [],
+    deletedWorkshops: [],
+    deletedRequirements: [],
+    isDirty: false,
+    version: 0,
+    originalDetails: {},
+    originalPayments: {},
+    originalWorkshops: {},
+    originalRequirements: {},
+  };
 
 // ============================================================================
 // STORE
@@ -361,6 +372,27 @@ export const useOrderFormStore = create<OrderFormState>()(
               deletedRequirements: [],
               isDirty: false,
               version: order.version || 0,
+              // Build original maps for change detection
+              originalDetails:
+                order.details?.reduce((acc: Record<number, OrderDetail>, d) => {
+                  if (d.detail_id) acc[d.detail_id] = { ...d } as OrderDetail;
+                  return acc;
+                }, {}) || {},
+              originalPayments:
+                order.payments?.reduce((acc: Record<number, Payment>, p) => {
+                  if (p.payment_id) acc[p.payment_id] = { ...p } as Payment;
+                  return acc;
+                }, {}) || {},
+              originalWorkshops:
+                order.workshops?.reduce((acc: Record<number, OrderWorkshop>, w) => {
+                  if (w.order_workshop_id) acc[w.order_workshop_id] = { ...w } as OrderWorkshop;
+                  return acc;
+                }, {}) || {},
+              originalRequirements:
+                order.requirements?.reduce((acc: Record<number, OrderResourceRequirement>, r) => {
+                  if (r.requirement_id) acc[r.requirement_id] = { ...r } as OrderResourceRequirement;
+                  return acc;
+                }, {}) || {},
             },
             false,
             'loadOrder'
@@ -384,6 +416,36 @@ export const useOrderFormStore = create<OrderFormState>()(
         },
 
         setDirty: (isDirty) => set({ isDirty }, false, 'setDirty'),
+
+        // Rebuild originals from current state (after successful save)
+        syncOriginals: () =>
+          set(
+            (state) => ({
+              originalDetails: state.details.reduce((acc: Record<number, OrderDetail>, d) => {
+                if (d.detail_id) acc[d.detail_id] = { ...d } as OrderDetail;
+                return acc;
+              }, {}),
+              originalPayments: state.payments.reduce((acc: Record<number, Payment>, p) => {
+                if (p.payment_id) acc[p.payment_id] = { ...p } as Payment;
+                return acc;
+              }, {}),
+              originalWorkshops: state.workshops.reduce((acc: Record<number, OrderWorkshop>, w) => {
+                if (w.order_workshop_id) acc[w.order_workshop_id] = { ...w } as OrderWorkshop;
+                return acc;
+              }, {}),
+              originalRequirements: state.requirements.reduce((acc: Record<number, OrderResourceRequirement>, r) => {
+                if (r.requirement_id) acc[r.requirement_id] = { ...r } as OrderResourceRequirement;
+                return acc;
+              }, {}),
+              // Clear deleted trackers after sync
+              deletedDetails: [],
+              deletedPayments: [],
+              deletedWorkshops: [],
+              deletedRequirements: [],
+            }),
+            false,
+            'syncOriginals'
+          ),
       }),
       {
         name: 'order-form-storage',
@@ -396,6 +458,7 @@ export const useOrderFormStore = create<OrderFormState>()(
           requirements: state.requirements,
           isDirty: state.isDirty,
           version: state.version,
+          // Do not persist originals to local storage
         }),
       }
     ),

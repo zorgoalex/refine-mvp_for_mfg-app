@@ -10,8 +10,8 @@ export const OrderEdit: React.FC = () => {
   const orderId = id ? parseInt(id, 10) : undefined;
 
   const handleSaveSuccess = (savedOrderId: number) => {
-    // Navigate to the updated order's show page
-    navigate(`/orders/show/${savedOrderId}`);
+    // Stay on the edit page after save (no navigation)
+    // Navigation is disabled per product requirement
   };
 
   const handleCancel = () => {

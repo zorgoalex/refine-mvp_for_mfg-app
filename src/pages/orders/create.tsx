@@ -8,8 +8,8 @@ export const OrderCreate: React.FC = () => {
   const navigate = useNavigate();
 
   const handleSaveSuccess = (orderId: number) => {
-    // Navigate to the created order's show page
-    navigate(`/orders/show/${orderId}`);
+    // Stay on the page after save (no navigation)
+    // Navigation is disabled per product requirement
   };
 
   const handleCancel = () => {

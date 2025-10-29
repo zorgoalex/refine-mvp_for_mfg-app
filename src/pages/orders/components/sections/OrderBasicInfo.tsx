@@ -108,12 +108,12 @@ export const OrderBasicInfo: React.FC = () => {
         <Col span={8}>
           <Form.Item
             label="Приоритет"
-            tooltip="От 0 (низкий) до 100 (высокий)"
+            tooltip="1 — наивысший приоритет, большее число — ниже"
           >
             <InputNumber
               value={header.priority}
-              onChange={(value) => updateHeaderField('priority', value || 100)}
-              min={0}
+              onChange={(value) => updateHeaderField('priority', value ?? 1)}
+              min={1}
               max={100}
               formatter={(value) => numberFormatter(value, 0)}
               parser={numberParser}

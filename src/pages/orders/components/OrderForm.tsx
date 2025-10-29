@@ -93,7 +93,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         order_date: new Date().toISOString().split('T')[0], // Today's date
         order_status_id: defaultOrderStatus,
         payment_status_id: defaultPaymentStatus,
-        priority: 100,
+        priority: 1,
         discount: 0,
         paid_amount: 0,
       });
@@ -135,41 +135,49 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   // Handle save
   const handleSave = async () => {
-    const formValues = getFormValues();
+    try {
+      const formValues = getFormValues();
 
-    // Zod validation
-    const result = orderFormSchema.safeParse(formValues);
-    if (!result.success) {
-      // Show validation errors
-      const errors = result.error.errors;
-      const errorMessages = errors.map((err) => `${err.path.join('.')}: ${err.message}`).join('\n');
+      // Zod validation
+      const result = orderFormSchema.safeParse(formValues);
+      if (!result.success) {
+        // Show validation errors
+        const errors = result.error?.errors || [];
+        const errorMessages = errors.length > 0
+          ? errors.map((err) => `${err.path.join('.')}: ${err.message}`).join('\n')
+          : 'Ошибка валидации данных';
 
-      notification.error({
-        message: 'Ошибка валидации',
-        description: (
-          <div style={{ whiteSpace: 'pre-line' }}>
-            {errorMessages}
-          </div>
-        ),
-        duration: 0, // Don't auto-hide
-      });
-      return;
-    }
+        notification.error({
+          message: 'Ошибка валидации',
+          description: (
+            <div style={{ whiteSpace: 'pre-line' }}>
+              {errorMessages}
+            </div>
+          ),
+          duration: 0, // Don't auto-hide
+        });
+        return;
+      }
 
-    const savedOrderId = await saveOrder(formValues, mode === 'edit');
+        const savedOrderId = await saveOrder(formValues, mode === 'edit');
 
-    if (savedOrderId) {
-      setDirty(false);
-      if (onSaveSuccess) {
-        onSaveSuccess(savedOrderId);
-      } else {
-        // Navigate to edit page if created, or to list if edited
-        if (mode === 'create') {
-          edit('orders', savedOrderId);
-        } else {
-          list('orders');
+      if (savedOrderId) {
+        // On success: remain on the same page.
+        // If this was a create, set header.order_id so tabs unlock and state reflects persisted record
+        if (mode === 'create' && !header.order_id) {
+          setHeader({ order_id: savedOrderId });
+        }
+        setDirty(false);
+        if (onSaveSuccess) {
+          onSaveSuccess(savedOrderId);
         }
       }
+    } catch (error) {
+      notification.error({
+        message: 'Ошибка при сохранении',
+        description: error instanceof Error ? error.message : 'Неизвестная ошибка',
+        duration: 0,
+      });
     }
   };
 
@@ -270,7 +278,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       extra={
         <Space>
           <Button
-            type="primary"
+            type={isDirty ? "primary" : "default"}
             icon={<SaveOutlined />}
             onClick={handleSave}
             loading={isSaving}

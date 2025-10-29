@@ -611,19 +611,73 @@ const escapeValue = (v: any) => {
 
 const sanitizeVariables = (input: AnyObject) => {
   const out: AnyObject = {};
-  // Fields that should stay as strings even if they look like numbers
-  const stringFields = ["password_hash", "ref_key_1c"];
+
+  // Keys that should be treated as numeric even if provided as strings
+  // (explicit whitelist to avoid breaking string fields like order_name/unit_code)
+  const NUMERIC_FIELDS = new Set([
+    // common numbers
+    "quantity",
+    "height",
+    "width",
+    "area",
+    "priority",
+    "discount",
+    "discounted_amount",
+    "total_amount",
+    "paid_amount",
+    "amount",
+    "payment_amount",
+    "milling_cost_per_sqm",
+    "detail_cost",
+    "purchase_price",
+    "required_quantity",
+    "waste_percentage",
+    "final_quantity",
+    "sequence_order",
+    "sort_order",
+    "decimals",
+    "version",
+  ]);
+
+  // Keys that should remain strings even if they look numeric
+  const FORCE_STRING_FIELDS = new Set([
+    "password_hash",
+    "ref_key_1c",
+    "order_name",
+    "unit_code",
+    "unit_name",
+    "direction_code",
+  ]);
+
+  // Heuristics for string-like keys
+  const isStringLikeKey = (key: string) =>
+    /(_name|_code|^link_|notes?$|description|address|contact|_file|_ref)/i.test(key) ||
+    FORCE_STRING_FIELDS.has(key);
+
+  // Heuristics for numeric-like keys
+  const isNumericLikeKey = (key: string) => key.endsWith("_id") || NUMERIC_FIELDS.has(key);
+
+  const isNumericString = (val: string) => /^\d+(?:\.\d+)?$/.test(val);
 
   for (const [k, v] of Object.entries(input || {})) {
     if (v === "") {
       out[k] = null;
       continue;
     }
-    // Don't convert password_hash or other string fields to numbers
-    if (typeof v === "string" && /^\d+$/.test(v) && !stringFields.includes(k)) {
-      out[k] = Number(v);
+
+    if (typeof v === "string") {
+      if (isStringLikeKey(k)) {
+        out[k] = v; // keep as string
+        continue;
+      }
+      if (isNumericLikeKey(k) && isNumericString(v)) {
+        out[k] = Number(v);
+        continue;
+      }
+      out[k] = v; // default: keep as string
       continue;
     }
+
     out[k] = v;
   }
   return out;
