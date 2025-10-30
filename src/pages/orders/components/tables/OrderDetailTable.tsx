@@ -297,7 +297,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
             <InputNumber style={{ width: '100%' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '11px' }}>
+          <span>
             {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
           </span>
         ),
@@ -310,11 +310,11 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'right',
       render: (value, record) =>
         isEditing(record) ? (
-          <Form.Item name="detail_cost" style={{ margin: 0 }}> 
+          <Form.Item name="detail_cost" style={{ margin: 0 }}>
             <InputNumber style={{ width: '100%' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '11px' }}>
+          <span>
             {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
           </span>
         ),
