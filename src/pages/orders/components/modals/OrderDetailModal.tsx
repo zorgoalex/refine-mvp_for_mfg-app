@@ -7,6 +7,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
+import { CURRENCY_SYMBOL } from '../../../../config/currency';
 
 interface OrderDetailModalProps {
   open: boolean;
@@ -192,8 +193,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <InputNumber
                 style={{ width: '100%' }}
                 min={0}
-                precision={2}
-                formatter={(value) => numberFormatter(value, 2)}
+                formatter={(value) => numberFormatter(value, 0)}
                 parser={numberParser}
                 onChange={handleDimensionChange}
               />
@@ -208,8 +208,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <InputNumber
                 style={{ width: '100%' }}
                 min={0}
-                precision={2}
-                formatter={(value) => numberFormatter(value, 2)}
+                formatter={(value) => numberFormatter(value, 0)}
                 parser={numberParser}
                 onChange={handleDimensionChange}
               />
@@ -367,10 +366,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <InputNumber
                 style={{ width: '100%' }}
                 min={0}
-                precision={2}
-                formatter={(value) => numberFormatter(value, 2)}
+                formatter={(value) => numberFormatter(value, 0)}
                 parser={numberParser}
-                addonAfter="₽"
+                addonAfter={CURRENCY_SYMBOL}
               />
             </Form.Item>
           </Col>

@@ -16,6 +16,7 @@ interface OrderDetailTableProps {
   onDelete: (tempId: number, detailId?: number) => void;
   selectedRowKeys?: React.Key[];
   onSelectChange?: (selectedRowKeys: React.Key[]) => void;
+  highlightedRowKey?: React.Key | null;
 }
 
 export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
@@ -23,6 +24,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   onDelete,
   selectedRowKeys = [],
   onSelectChange,
+  highlightedRowKey = null,
 }) => {
   const { details, updateDetail } = useOrderFormStore();
   const sortedDetails = useMemo(
@@ -420,12 +422,20 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         size="small"
         bordered
         rowClassName={(_, index) => (index % 2 === 0 ? '' : '')}
-        onRow={(record, index) => ({
-          style: {
-            backgroundColor: index! % 2 === 0 ? '#ffffff' : '#f5f5f5',
-          },
-          onDoubleClick: () => startEdit(record),
-        })}
+        onRow={(record, index) => {
+          const rowKey = record.temp_id || record.detail_id || 0;
+          const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
+
+          return {
+            style: {
+              backgroundColor: isHighlighted
+                ? '#e6f7ff' // Light blue for highlighted row
+                : (index! % 2 === 0 ? '#ffffff' : '#f5f5f5'),
+              transition: 'background-color 0.3s ease',
+            },
+            onDoubleClick: () => startEdit(record),
+          };
+        }}
       />
     </Form>
   );

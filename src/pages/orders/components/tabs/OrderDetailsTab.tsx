@@ -17,6 +17,7 @@ export const OrderDetailsTab: React.FC = () => {
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
 
   // Handle create new detail
   const handleCreate = () => {
@@ -34,16 +35,42 @@ export const OrderDetailsTab: React.FC = () => {
 
   // Handle save (create or update)
   const handleSave = (detailData: Omit<OrderDetail, 'temp_id'>) => {
+    let rowKey: React.Key;
+
     if (modalMode === 'create') {
+      // addDetail will assign temp_id internally
       addDetail(detailData);
+      // Get the last added detail's temp_id (it will be the last one in the array)
+      const lastDetail = [...details].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
+      rowKey = lastDetail?.temp_id || Date.now();
       message.success('Деталь добавлена');
     } else if (editingDetail) {
       const tempId = editingDetail.temp_id || editingDetail.detail_id!;
       updateDetail(tempId, detailData);
+      rowKey = tempId;
       message.success('Деталь обновлена');
+    } else {
+      setModalOpen(false);
+      setEditingDetail(undefined);
+      return;
     }
+
     setModalOpen(false);
     setEditingDetail(undefined);
+
+    // Highlight the row and auto-clear after 2 seconds
+    // Use setTimeout to ensure the detail is added to the list first
+    setTimeout(() => {
+      // Re-get the last detail after state update
+      const updatedDetails = useOrderFormStore.getState().details;
+      const lastDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
+      const actualRowKey = lastDetail?.temp_id || lastDetail?.detail_id || rowKey;
+
+      setHighlightedRowKey(actualRowKey);
+      setTimeout(() => {
+        setHighlightedRowKey(null);
+      }, 2000);
+    }, 100);
   };
 
   // Handle delete single detail
@@ -113,7 +140,7 @@ export const OrderDetailsTab: React.FC = () => {
             Удалить выбранные ({selectedRowKeys.length})
           </Button>
           <span style={{ marginLeft: 16, color: '#666' }}>
-            Всего деталей: {details.length}
+            Всего позиций: {details.length}
           </span>
         </Space>
 
@@ -123,6 +150,7 @@ export const OrderDetailsTab: React.FC = () => {
           onDelete={handleDelete}
           selectedRowKeys={selectedRowKeys}
           onSelectChange={handleSelectChange}
+          highlightedRowKey={highlightedRowKey}
         />
 
         {/* Modal */}
