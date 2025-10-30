@@ -1,7 +1,7 @@
 // Order Header Summary (Read-only)
 // Improved visual design with grouping, hierarchy, and better scannability
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Card, Row, Col, Tag, Space, Typography } from 'antd';
 import {
   UserOutlined,
@@ -12,7 +12,7 @@ import {
   BarChartOutlined,
   StarOutlined,
 } from '@ant-design/icons';
-import { useOne } from '@refinedev/core';
+import { useOne, useList } from '@refinedev/core';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
 import { formatNumber } from '../../../../utils/numberFormat';
@@ -22,8 +22,16 @@ import dayjs from 'dayjs';
 const { Text, Title } = Typography;
 
 export const OrderHeaderSummary: React.FC = () => {
-  const { header } = useOrderFormStore();
+  const { header, details } = useOrderFormStore();
   const totals = useOrderFormStore(useShallow(selectTotals));
+
+  // Get unique material IDs from details
+  const uniqueMaterialIds = useMemo(() => {
+    const ids = details
+      .map(d => d.material_id)
+      .filter((id): id is number => id !== null && id !== undefined);
+    return [...new Set(ids)];
+  }, [details]);
 
   // Load client name
   const { data: clientData } = useOne({
@@ -60,6 +68,27 @@ export const OrderHeaderSummary: React.FC = () => {
       enabled: !!header.manager_id,
     },
   });
+
+  // Load materials list
+  const { data: materialsData } = useList({
+    resource: 'materials',
+    filters: uniqueMaterialIds.length > 0 ? [
+      { field: 'material_id', operator: 'in', value: uniqueMaterialIds }
+    ] : [],
+    pagination: { pageSize: 100 },
+    queryOptions: {
+      enabled: uniqueMaterialIds.length > 0,
+    },
+  });
+
+  // Create materials summary string
+  const materialsSummary = useMemo(() => {
+    if (!materialsData?.data || materialsData.data.length === 0) return '—';
+    return materialsData.data
+      .map(m => m.material_name)
+      .filter(Boolean)
+      .join(', ');
+  }, [materialsData]);
 
   // Info item component with icon
   const InfoItem: React.FC<{
@@ -105,10 +134,10 @@ export const OrderHeaderSummary: React.FC = () => {
     color?: string;
     size?: 'small' | 'medium' | 'large';
   }> = ({ label, value, suffix, color, size = 'medium' }) => {
-    const fontSize = size === 'large' ? 14 : size === 'medium' ? 12 : 10;
+    const fontSize = size === 'large' ? 16 : size === 'medium' ? 14 : 12;
     return (
-      <div>
-        <Text type="secondary" style={{ fontSize: 8, display: 'block', marginBottom: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Text type="secondary" style={{ fontSize: 9 }}>
           {label.toUpperCase()}
         </Text>
         <div>
@@ -117,7 +146,7 @@ export const OrderHeaderSummary: React.FC = () => {
             style={{
               fontSize,
               color: color || '#262626',
-              lineHeight: 1.1,
+              lineHeight: 1,
             }}
           >
             {value}
@@ -318,7 +347,7 @@ export const OrderHeaderSummary: React.FC = () => {
         <div
           style={{
             marginTop: 16,
-            padding: 6,
+            padding: '5px 6px',
             background: '#fafafa',
             border: '1px solid #e8e8e8',
             borderRadius: 6,
@@ -352,17 +381,26 @@ export const OrderHeaderSummary: React.FC = () => {
               />
             </Col>
             <Col xs={12} sm={6}>
-              <StatItem
-                label="Средн. площадь детали"
-                value={
-                  totals.positions_count > 0
-                    ? formatNumber(totals.total_area / totals.positions_count, 3)
-                    : 0
-                }
-                suffix="м²"
-                size="small"
-                color="#000000"
-              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, height: '100%' }}>
+                <Text type="secondary" style={{ fontSize: 9, whiteSpace: 'nowrap' }}>
+                  МАТЕРИАЛЫ ЗАКАЗА
+                </Text>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: '#000000',
+                      lineHeight: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={materialsSummary}
+                  >
+                    {materialsSummary}
+                  </Text>
+                </div>
+              </div>
             </Col>
           </Row>
         </div>
