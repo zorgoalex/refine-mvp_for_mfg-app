@@ -94,10 +94,15 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     const height = form.getFieldValue('height');
     const width = form.getFieldValue('width');
 
+    console.log('[OrderDetailModal] handleDimensionChange - height:', height, 'width:', width);
+
     if (height && width && height > 0 && width > 0) {
       const area = (height * width) / 1000000; // Convert mm² to m²
+      console.log('[OrderDetailModal] calculated area:', area, '(height * width / 1000000 =', height, '*', width, '/ 1000000)');
       setCalculatedArea(area);
       form.setFieldsValue({ area });
+    } else {
+      console.log('[OrderDetailModal] cannot calculate - invalid dimensions');
     }
   };
 
@@ -105,12 +110,17 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     try {
       const values = await form.validateFields();
 
+      console.log('[OrderDetailModal] handleOk - form values:', values);
+      console.log('[OrderDetailModal] handleOk - calculatedArea:', calculatedArea);
+
       // Prepare detail data
       const detailData: Omit<OrderDetail, 'temp_id'> = {
         ...detail, // Keep existing fields like detail_id, temp_id for edit mode
         ...values,
         area: calculatedArea,
       };
+
+      console.log('[OrderDetailModal] handleOk - final detailData:', detailData);
 
       onSave(detailData);
       form.resetFields();

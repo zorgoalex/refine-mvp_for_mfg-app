@@ -802,15 +802,25 @@ export const dataProvider = (_apiUrl: string) => {
       }
       const selection = fieldsFor(resource);
       const idCol = ID_COLUMNS[resource] ?? "id";
+
+      console.log(`[dataProvider.create] resource: ${resource}, idCol: ${idCol}`);
+      console.log('[dataProvider.create] incoming variables:', variables);
+
       // Omit PK from insert to let identity/defaults generate value
       const { [idCol]: _omitId, ...restVars } = variables || {};
+      console.log('[dataProvider.create] after omitting PK:', restVars);
+
       // Sanitize and drop null/undefined to avoid NOT NULL violations on inserts
       const sanitized: AnyObject = sanitizeVariables(restVars);
+      console.log('[dataProvider.create] after sanitize:', sanitized);
+
       const cleaned: AnyObject = {};
       for (const [k, v] of Object.entries(sanitized)) {
         if (v === null || v === undefined) continue;
         cleaned[k] = v;
       }
+      console.log('[dataProvider.create] after cleaning null/undefined:', cleaned);
+
       // Validate required fields (simple guard to avoid NOT NULL violations)
       const required = REQUIRED_FIELDS[resource] || [];
       for (const key of required) {
@@ -840,6 +850,7 @@ export const dataProvider = (_apiUrl: string) => {
           }
         }
       `;
+      console.log('[dataProvider.create] GraphQL query:', query);
       const data = await gqlRequest(query);
       return { data: data[`insert_${resource}_one`] };
     },

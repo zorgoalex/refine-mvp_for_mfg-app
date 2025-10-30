@@ -152,31 +152,43 @@ export const useOrderSave = (): UseOrderSaveResult => {
           return rest;
         };
         const detailPromises = values.details.map((detail) => {
-          const detailData = {
-            ...detail,
-            order_id: createdOrderId,
-            temp_id: undefined, // Remove client-only field
-          };
-
           if (detail.detail_id) {
             // Update only if changed
             const original = originalDetails[detail.detail_id];
-            if (original && JSON.stringify(normalizeDetail(original)) === JSON.stringify(normalizeDetail(detailData))) {
+            // Exclude detail_id, temp_id from variables for update
+            const { detail_id, temp_id, ...detailData } = detail;
+            const updateData = {
+              ...detailData,
+              order_id: createdOrderId,
+            };
+
+            const normalizedOriginal = normalizeDetail(original);
+            const normalizedUpdate = normalizeDetail(updateData);
+            const isUnchanged = original && JSON.stringify(normalizedOriginal) === JSON.stringify(normalizedUpdate);
+
+            if (isUnchanged) {
               return Promise.resolve(null);
             }
             return dataProvider().update({
               resource: 'order_details',
               id: detail.detail_id,
-              variables: detailData,
+              variables: updateData,
             });
           } else {
-            // Create new detail
+            // Create new detail - exclude temp_id, detail_id and all audit/system fields
+            const { temp_id, detail_id, created_at, updated_at, created_by, edited_by, version, ...detailData } = detail;
+            console.log('[useOrderSave] CREATE detail - original:', detail);
+            console.log('[useOrderSave] CREATE detail - excluded fields:', { temp_id, detail_id, created_at, updated_at, created_by, edited_by, version });
+            console.log('[useOrderSave] CREATE detail - cleaned data:', detailData);
+            const createVariables = {
+              ...detailData,
+              order_id: createdOrderId,
+              created_by: 1, // Always set created_by=1 for new records in dev mode
+            };
+            console.log('[useOrderSave] CREATE detail - final variables:', createVariables);
             return dataProvider().create({
               resource: 'order_details',
-              variables: {
-                ...detailData,
-                created_by: (detail as any)?.created_by ?? 1,
-              },
+              variables: createVariables,
             });
           }
         });
@@ -203,30 +215,32 @@ export const useOrderSave = (): UseOrderSaveResult => {
           return rest;
         };
         const paymentPromises = values.payments.map((payment) => {
-          const paymentData = {
-            ...payment,
-            order_id: createdOrderId,
-            temp_id: undefined, // Remove client-only field
-          };
-
           if (payment.payment_id) {
             // Update only if changed
             const original = originalPayments[payment.payment_id];
-            if (original && JSON.stringify(normalizePayment(original)) === JSON.stringify(normalizePayment(paymentData))) {
+            // Exclude payment_id, temp_id from variables for update
+            const { payment_id, temp_id, ...paymentData } = payment;
+            const updateData = {
+              ...paymentData,
+              order_id: createdOrderId,
+            };
+            if (original && JSON.stringify(normalizePayment(original)) === JSON.stringify(normalizePayment(updateData))) {
               return Promise.resolve(null);
             }
             return dataProvider().update({
               resource: 'payments',
               id: payment.payment_id,
-              variables: paymentData,
+              variables: updateData,
             });
           } else {
-            // Create new payment
+            // Create new payment - exclude temp_id, payment_id and all audit/system fields
+            const { temp_id, payment_id, created_at, updated_at, created_by, edited_by, ...paymentData } = payment;
             return dataProvider().create({
               resource: 'payments',
               variables: {
                 ...paymentData,
-                created_by: (payment as any)?.created_by ?? 1,
+                order_id: createdOrderId,
+                created_by: 1, // Always set created_by=1 for new records in dev mode
               },
             });
           }
@@ -249,26 +263,26 @@ export const useOrderSave = (): UseOrderSaveResult => {
       // ========== STEP 6: Save workshops ==========
       if (values.workshops && values.workshops.length > 0) {
         const workshopPromises = values.workshops.map((workshop) => {
-          const workshopData = {
-            ...workshop,
-            order_id: createdOrderId,
-            temp_id: undefined, // Remove client-only field
-          };
-
           if (workshop.order_workshop_id) {
-            // Update existing workshop
+            // Update existing workshop - exclude order_workshop_id, temp_id from variables
+            const { order_workshop_id, temp_id, ...workshopData } = workshop;
             return dataProvider().update({
               resource: 'order_workshops',
               id: workshop.order_workshop_id,
-              variables: workshopData,
+              variables: {
+                ...workshopData,
+                order_id: createdOrderId,
+              },
             });
           } else {
-            // Create new workshop
+            // Create new workshop - exclude temp_id, order_workshop_id and all audit/system fields
+            const { temp_id, order_workshop_id, created_at, updated_at, created_by, edited_by, ...workshopData } = workshop;
             return dataProvider().create({
               resource: 'order_workshops',
               variables: {
                 ...workshopData,
-                created_by: (workshop as any)?.created_by ?? 1,
+                order_id: createdOrderId,
+                created_by: 1, // Always set created_by=1 for new records in dev mode
               },
             });
           }
@@ -291,26 +305,26 @@ export const useOrderSave = (): UseOrderSaveResult => {
       // ========== STEP 8: Save requirements ==========
       if (values.requirements && values.requirements.length > 0) {
         const requirementPromises = values.requirements.map((requirement) => {
-          const requirementData = {
-            ...requirement,
-            order_id: createdOrderId,
-            temp_id: undefined, // Remove client-only field
-          };
-
           if (requirement.requirement_id) {
-            // Update existing requirement
+            // Update existing requirement - exclude requirement_id, temp_id from variables
+            const { requirement_id, temp_id, ...requirementData } = requirement;
             return dataProvider().update({
               resource: 'order_resource_requirements',
               id: requirement.requirement_id,
-              variables: requirementData,
+              variables: {
+                ...requirementData,
+                order_id: createdOrderId,
+              },
             });
           } else {
-            // Create new requirement
+            // Create new requirement - exclude temp_id, requirement_id and all audit/system fields
+            const { temp_id, requirement_id, created_at, updated_at, created_by, edited_by, ...requirementData } = requirement;
             return dataProvider().create({
               resource: 'order_resource_requirements',
               variables: {
                 ...requirementData,
-                created_by: (requirement as any)?.created_by ?? 1,
+                order_id: createdOrderId,
+                created_by: 1, // Always set created_by=1 for new records in dev mode
               },
             });
           }
