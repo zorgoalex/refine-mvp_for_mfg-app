@@ -68,7 +68,7 @@ export const OrderHeaderSummary: React.FC = () => {
     value: React.ReactNode;
     highlight?: boolean;
   }> = ({ icon, label, value, highlight }) => (
-    <Space align="start" size={8}>
+    <Space align="start" size={8} style={{ minHeight: 44 }}>
       <div style={{ marginTop: 2, color: '#1890ff', fontSize: 16 }}>{icon}</div>
       <div>
         <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
@@ -87,7 +87,7 @@ export const OrderHeaderSummary: React.FC = () => {
     label,
     date,
   }) => (
-    <div>
+    <div style={{ minHeight: 44, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>
         {icon} {label.toUpperCase()}
       </Text>
@@ -147,8 +147,7 @@ export const OrderHeaderSummary: React.FC = () => {
         }}
       >
         <Title level={5} style={{ margin: 0, color: '#262626', fontSize: 16 }}>
-          ЗАКАЗ №{header.order_id || 'Новый'}
-          {header.order_name && ` — ${header.order_name}`}
+          {header.order_name ? `ЗАКАЗ "${header.order_name}"` : 'НОВЫЙ ЗАКАЗ'}
         </Title>
         <Space size="middle">
           <span style={{ display: 'inline-flex', alignItems: 'center', color: '#262626' }}>
@@ -185,19 +184,35 @@ export const OrderHeaderSummary: React.FC = () => {
         <Row gutter={[24, 16]}>
           {/* Left column - Key parties */}
           <Col xs={24} md={12} lg={8}>
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <InfoItem
-                icon={<UserOutlined />}
-                label="Клиент"
-                value={clientData?.data?.client_name || '—'}
-                highlight
-              />
-              <InfoItem
-                icon={<SolutionOutlined />}
-                label="Менеджер"
-                value={managerData?.data?.full_name || '—'}
-              />
-            </Space>
+            <InfoItem
+              icon={<UserOutlined />}
+              label="Клиент"
+              value={clientData?.data?.client_name || '—'}
+              highlight
+            />
+            {/* Divider */}
+            <div
+              style={{
+                height: 1,
+                background: '#d9d9d9',
+                margin: '14px 0',
+              }}
+            />
+            <InfoItem
+              icon={<SolutionOutlined />}
+              label="Менеджер"
+              value={managerData?.data?.full_name || '—'}
+            />
+            {header.order_id && (
+              <div style={{ marginTop: 16 }}>
+                <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
+                  ID ЗАКАЗА
+                </Text>
+                <Text style={{ fontSize: 15, lineHeight: 1.3, color: '#8c8c8c' }}>
+                  {header.order_id}
+                </Text>
+              </div>
+            )}
           </Col>
 
           {/* Middle column - Dates */}
@@ -217,6 +232,16 @@ export const OrderHeaderSummary: React.FC = () => {
                   date={header.planned_completion_date}
                 />
               </Col>
+            </Row>
+            {/* Divider between date rows */}
+            <div
+              style={{
+                height: 1,
+                background: '#d9d9d9',
+                margin: '14px 0',
+              }}
+            />
+            <Row gutter={[12, 12]}>
               <Col span={12}>
                 <DateItem
                   icon={<CheckCircleOutlined />}
@@ -235,13 +260,14 @@ export const OrderHeaderSummary: React.FC = () => {
           </Col>
 
           {/* Right column - Financial summary */}
-          <Col xs={24} lg={8}>
+          <Col xs={24} lg={8} style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <div
               style={{
                 padding: 8,
                 background: '#fafafa',
                 border: '1px solid #e8e8e8',
                 borderRadius: 6,
+                width: '50%',
               }}
             >
               <Space direction="vertical" size={4} style={{ width: '100%' }}>

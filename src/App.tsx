@@ -6,6 +6,7 @@ import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { useEffect } from "react";
 import { ConfigProvider } from "antd";
+import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
 import "./styles/app.css";
 import { OrderList } from "./pages/orders/list";
@@ -170,7 +171,7 @@ const App = () => {
   return (
     <BrowserRouter>
       <RefineKbarProvider>
-        <ConfigProvider>
+        <ConfigProvider locale={ruRU}>
           <Refine
             dataProvider={dataProvider(API_URL)}
             notificationProvider={notificationProvider}

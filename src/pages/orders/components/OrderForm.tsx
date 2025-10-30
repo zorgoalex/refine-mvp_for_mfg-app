@@ -144,6 +144,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       // Zod validation
       const result = orderFormSchema.safeParse(formValues);
       if (!result.success) {
+        // Log full error for debugging
+        console.error('Validation failed:', result.error);
+        console.error('Form values:', formValues);
+
         // Show validation errors
         const errors = result.error?.errors || [];
         const errorMessages = errors.length > 0
@@ -289,9 +293,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           >
             Сохранить
           </Button>
-          <Button icon={<CloseOutlined />} onClick={handleCancel}>
-            Отмена
-          </Button>
+          {isDirty && (
+            <Button icon={<CloseOutlined />} onClick={handleCancel}>
+              Отмена
+            </Button>
+          )}
         </Space>
       }
     >

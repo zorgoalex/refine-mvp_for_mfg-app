@@ -6,6 +6,7 @@ import { Form, InputNumber, DatePicker, Row, Col, Collapse } from 'antd';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
+import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import dayjs from 'dayjs';
 
 const { Panel } = Collapse;
@@ -42,7 +43,7 @@ export const OrderFinanceSection: React.FC = () => {
                   formatter={(value) => numberFormatter(value, 2)}
                   parser={numberParser}
                   style={{ width: '100%' }}
-                  addonAfter="₽"
+                  addonAfter={CURRENCY_SYMBOL}
                 />
               </Form.Item>
             </Col>
@@ -73,7 +74,7 @@ export const OrderFinanceSection: React.FC = () => {
                   formatter={(value) => numberFormatter(value, 2)}
                   parser={numberParser}
                   style={{ width: '100%' }}
-                  addonAfter="₽"
+                  addonAfter={CURRENCY_SYMBOL}
                 />
               </Form.Item>
             </Col>
@@ -87,7 +88,7 @@ export const OrderFinanceSection: React.FC = () => {
                   formatter={(value) => numberFormatter(value, 2)}
                   parser={numberParser}
                   style={{ width: '100%' }}
-                  addonAfter="₽"
+                  addonAfter={CURRENCY_SYMBOL}
                 />
               </Form.Item>
             </Col>

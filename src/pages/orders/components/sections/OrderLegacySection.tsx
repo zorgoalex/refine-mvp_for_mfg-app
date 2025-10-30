@@ -1,7 +1,7 @@
 // Order Legacy Section
 // Contains: Material ID, Milling Type ID, Edge Type ID, Film ID (для обратной совместимости)
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Form, Row, Col, Collapse, Select } from 'antd';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -10,6 +10,16 @@ const { Panel } = Collapse;
 
 export const OrderLegacySection: React.FC = () => {
   const { header, updateHeaderField } = useOrderFormStore();
+
+  // Check if any legacy fields are filled
+  const hasLegacyFields = useMemo(() => {
+    return !!(
+      header.material_id ||
+      header.milling_type_id ||
+      header.edge_type_id ||
+      header.film_id
+    );
+  }, [header.material_id, header.milling_type_id, header.edge_type_id, header.film_id]);
 
   // Load references
   const { selectProps: materialProps } = useSelect({
@@ -41,7 +51,7 @@ export const OrderLegacySection: React.FC = () => {
   });
 
   return (
-    <Collapse>
+    <Collapse defaultActiveKey={hasLegacyFields ? ['1'] : []}>
       <Panel header="Legacy поля (для совместимости)" key="1">
         <Form layout="vertical">
           <Row gutter={16}>
