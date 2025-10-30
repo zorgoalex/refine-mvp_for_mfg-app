@@ -49,8 +49,8 @@ export const numberFormatter = (value: number | undefined, precision: number = 0
  * Parser for Ant Design InputNumber
  * Removes spaces and parses the number
  */
-export const numberParser = (value: string | undefined): number => {
-  if (!value) return 0;
+export const numberParser = (value: string | undefined): number | string => {
+  if (!value || value.trim() === '') return '';
   const parsed = parseFormattedNumber(value);
-  return parsed ?? 0;
+  return parsed ?? '';
 };

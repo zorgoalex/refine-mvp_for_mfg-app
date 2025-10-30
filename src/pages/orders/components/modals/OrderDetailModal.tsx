@@ -161,8 +161,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 style={{ width: '100%' }}
                 min={1}
                 max={999}
-                formatter={(value) => numberFormatter(value, 0)}
-                parser={numberParser}
               />
             </Form.Item>
           </Col>
@@ -176,8 +174,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <InputNumber
                 style={{ width: '100%' }}
                 min={1}
-                formatter={(value) => numberFormatter(value, 0)}
-                parser={numberParser}
               />
             </Form.Item>
           </Col>
@@ -193,7 +189,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <InputNumber
                 style={{ width: '100%' }}
                 min={0}
-                formatter={(value) => numberFormatter(value, 0)}
+                precision={2}
                 parser={numberParser}
                 onChange={handleDimensionChange}
               />
@@ -208,7 +204,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <InputNumber
                 style={{ width: '100%' }}
                 min={0}
-                formatter={(value) => numberFormatter(value, 0)}
+                precision={2}
                 parser={numberParser}
                 onChange={handleDimensionChange}
               />
@@ -367,7 +363,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 style={{ width: '100%' }}
                 min={0}
                 precision={2}
-                formatter={(value) => numberFormatter(value, 2)}
                 parser={numberParser}
                 addonAfter={CURRENCY_SYMBOL}
               />
