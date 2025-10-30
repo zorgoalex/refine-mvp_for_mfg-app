@@ -137,7 +137,8 @@ export const OrderHeaderSummary: React.FC = () => {
       {/* Header bar with order name and status badges */}
       <div
         style={{
-          background: 'linear-gradient(135deg, #a8b5f0 0%, #b899d4 100%)',
+          background: 'white',
+          border: '2px solid #1890ff',
           padding: '12px 20px',
           borderRadius: '8px 8px 0 0',
           display: 'flex',
@@ -145,17 +146,17 @@ export const OrderHeaderSummary: React.FC = () => {
           alignItems: 'center',
         }}
       >
-        <Title level={5} style={{ margin: 0, color: 'white', fontSize: 16 }}>
+        <Title level={5} style={{ margin: 0, color: '#262626', fontSize: 16 }}>
           ЗАКАЗ №{header.order_id || 'Новый'}
           {header.order_name && ` — ${header.order_name}`}
         </Title>
         <Space size="middle">
-          <span style={{ display: 'inline-flex', alignItems: 'center', color: 'white' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', color: '#262626' }}>
             <StarOutlined
               style={{
                 fontSize: 16,
                 marginRight: 6,
-                color: header.priority && header.priority <= 50 ? '#ffd666' : 'white'
+                color: header.priority && header.priority <= 50 ? '#faad14' : '#8c8c8c'
               }}
             />
             <span style={{ fontSize: 16, fontWeight: 'normal' }}>
@@ -180,7 +181,7 @@ export const OrderHeaderSummary: React.FC = () => {
       </div>
 
       {/* Main info section */}
-      <Card size="small" style={{ borderRadius: '0 0 8px 8px', borderTop: 'none' }}>
+      <Card size="small" style={{ borderRadius: '0 0 8px 8px', border: '2px solid #1890ff', borderTop: 'none' }}>
         <Row gutter={[24, 16]}>
           {/* Left column - Key parties */}
           <Col xs={24} md={12} lg={8}>
@@ -276,7 +277,7 @@ export const OrderHeaderSummary: React.FC = () => {
                     strong
                     style={{
                       fontSize: 14,
-                      color: totals.total_paid > 0 ? '#73d13d' : '#8c8c8c',
+                      color: totals.total_paid > 0 ? '#389e0d' : '#595959',
                     }}
                   >
                     {formatNumber(totals.total_paid, 2)} {CURRENCY_SYMBOL}
