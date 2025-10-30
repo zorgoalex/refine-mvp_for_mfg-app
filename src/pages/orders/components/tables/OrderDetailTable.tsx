@@ -1,7 +1,7 @@
 // Order Details Table
 // Displays list of order details with inline editing capabilities
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -35,6 +35,17 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   const [form] = Form.useForm();
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
+  const highlightedRowRef = useRef<HTMLElement | null>(null);
+
+  // Scroll to highlighted row when it changes
+  useEffect(() => {
+    if (highlightedRowKey !== null && highlightedRowRef.current) {
+      highlightedRowRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }
+  }, [highlightedRowKey]);
 
   // Reference selects (enabled only while editing)
   const selectsEnabled = editingKey !== null;
@@ -130,10 +141,10 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       render: (value) => <span style={{ color: '#999' }}>{value}</span>,
     },
     {
-      title: 'Высота',
+      title: <span style={{ fontSize: '85%' }}>Высота</span>,
       dataIndex: 'height',
       key: 'height',
-      width: 70,
+      width: 60,
       align: 'right',
       render: (value, record) => {
         if (!isEditing(record)) {
@@ -148,10 +159,10 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       },
     },
     {
-      title: 'Ширина',
+      title: <span style={{ fontSize: '85%' }}>Ширина</span>,
       dataIndex: 'width',
       key: 'width',
-      width: 70,
+      width: 60,
       align: 'right',
       render: (value, record) => {
         if (!isEditing(record)) {
@@ -169,7 +180,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       title: 'Кол-во',
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 70,
+      width: 60,
       align: 'right',
       render: (value, record) =>
         isEditing(record) ? (
@@ -199,7 +210,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       title: 'Фрезеровка',
       dataIndex: 'milling_type_id',
       key: 'milling_type_id',
-      width: 100,
+      width: 85,
       align: 'center',
       render: (millingTypeId, record) =>
         isEditing(record) ? (
@@ -211,10 +222,10 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: 'Кромка',
+      title: <span style={{ fontSize: '85%' }}>Кромка</span>,
       dataIndex: 'edge_type_id',
       key: 'edge_type_id',
-      width: 80,
+      width: 68,
       align: 'center',
       render: (edgeTypeId, record) =>
         isEditing(record) ? (
@@ -247,11 +258,11 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       width: 100,
       render: (text, record) =>
         isEditing(record) ? (
-          <Form.Item name="note" style={{ margin: 0 }}> 
+          <Form.Item name="note" style={{ margin: 0 }}>
             <Input placeholder="Примечание" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          text || '—'
+          <span style={{ fontSize: '90%' }}>{text || '—'}</span>
         ),
     },
     {
@@ -427,6 +438,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
           const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
 
           return {
+            ref: isHighlighted ? highlightedRowRef : undefined,
             style: {
               backgroundColor: isHighlighted
                 ? '#e6f7ff' // Light blue for highlighted row

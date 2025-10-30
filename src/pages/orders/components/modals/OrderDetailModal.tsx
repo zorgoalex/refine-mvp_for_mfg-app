@@ -366,7 +366,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <InputNumber
                 style={{ width: '100%' }}
                 min={0}
-                formatter={(value) => numberFormatter(value, 0)}
+                precision={2}
+                formatter={(value) => numberFormatter(value, 2)}
                 parser={numberParser}
                 addonAfter={CURRENCY_SYMBOL}
               />
