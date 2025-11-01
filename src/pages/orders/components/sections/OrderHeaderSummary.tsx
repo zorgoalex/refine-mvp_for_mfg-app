@@ -232,16 +232,66 @@ export const OrderHeaderSummary: React.FC = () => {
               label="Менеджер"
               value={managerData?.data?.full_name || '—'}
             />
-            {header.order_id && (
-              <div style={{ marginTop: 16 }}>
-                <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
-                  ID ЗАКАЗА
-                </Text>
-                <Text style={{ fontSize: 15, lineHeight: 1.3, color: '#8c8c8c' }}>
-                  {header.order_id}
-                </Text>
-              </div>
-            )}
+            {/* Divider before bottom section */}
+            <div
+              style={{
+                height: 1,
+                background: '#d9d9d9',
+                margin: '14px 0',
+              }}
+            />
+            {/* Bottom section: ID, Materials, Notes */}
+            <div>
+              <Row gutter={24}>
+                {header.order_id && (
+                  <Col>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
+                      ID ЗАКАЗА
+                    </Text>
+                    <Text style={{ fontSize: 15, lineHeight: 1.3, color: '#8c8c8c' }}>
+                      {header.order_id}
+                    </Text>
+                  </Col>
+                )}
+                <Col flex="auto">
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
+                    МАТЕРИАЛЫ ЗАКАЗА
+                  </Text>
+                  <div style={{ fontSize: 15, lineHeight: 1.3 }}>
+                    {materialsSummary === '—' ? (
+                      <Text style={{ color: '#8c8c8c' }}>—</Text>
+                    ) : (
+                      materialsData?.data?.map((material, index) => {
+                        const materialName = material.material_name || '';
+                        let color = '#00bfff'; // ярко-голубой по умолчанию
+
+                        // Определяем цвет по правилам
+                        if (materialName.includes('МДФ 18')) {
+                          color = '#0000ff'; // синий
+                        } else if (materialName.includes('МДФ 16')) {
+                          color = '#000000'; // черный
+                        } else if (materialName.includes('МДФ 10')) {
+                          color = '#8b4513'; // коричневый
+                        } else if (materialName.includes('МДФ 8')) {
+                          color = '#008000'; // зеленый
+                        } else if (materialName.toUpperCase().includes('ЛДСП')) {
+                          color = '#8b00ff'; // фиолетовый
+                        }
+
+                        return (
+                          <React.Fragment key={material.material_id}>
+                            {index > 0 && <span style={{ color: '#8c8c8c' }}>, </span>}
+                            <Text strong style={{ color }}>
+                              {materialName}
+                            </Text>
+                          </React.Fragment>
+                        );
+                      })
+                    )}
+                  </div>
+                </Col>
+              </Row>
+            </div>
           </Col>
 
           {/* Middle column - Dates */}
@@ -286,6 +336,23 @@ export const OrderHeaderSummary: React.FC = () => {
                 />
               </Col>
             </Row>
+            {/* Divider before notes */}
+            <div
+              style={{
+                height: 1,
+                background: '#d9d9d9',
+                margin: '14px 0',
+              }}
+            />
+            {/* Notes section - full width */}
+            <div style={{ minHeight: 44, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
+                ПРИМЕЧАНИЕ
+              </Text>
+              <Text style={{ fontSize: 15, lineHeight: 1.3 }}>
+                {header.notes || '—'}
+              </Text>
+            </div>
           </Col>
 
           {/* Right column - Financial summary */}
@@ -354,7 +421,7 @@ export const OrderHeaderSummary: React.FC = () => {
           }}
         >
           <Row gutter={16}>
-            <Col xs={12} sm={6}>
+            <Col xs={8}>
               <StatItem
                 label="Позиций"
                 value={formatNumber(totals.positions_count, 0)}
@@ -362,7 +429,7 @@ export const OrderHeaderSummary: React.FC = () => {
                 color="#000000"
               />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={8}>
               <StatItem
                 label="Деталей"
                 value={formatNumber(totals.parts_count, 0)}
@@ -371,7 +438,7 @@ export const OrderHeaderSummary: React.FC = () => {
                 color="#000000"
               />
             </Col>
-            <Col xs={12} sm={6}>
+            <Col xs={8}>
               <StatItem
                 label="Площадь"
                 value={formatNumber(totals.total_area, 2)}
@@ -379,28 +446,6 @@ export const OrderHeaderSummary: React.FC = () => {
                 size="large"
                 color="#000000"
               />
-            </Col>
-            <Col xs={12} sm={6}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, height: '100%' }}>
-                <Text type="secondary" style={{ fontSize: 9, whiteSpace: 'nowrap' }}>
-                  МАТЕРИАЛЫ ЗАКАЗА
-                </Text>
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      color: '#000000',
-                      lineHeight: 1,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title={materialsSummary}
-                  >
-                    {materialsSummary}
-                  </Text>
-                </div>
-              </div>
             </Col>
           </Row>
         </div>
