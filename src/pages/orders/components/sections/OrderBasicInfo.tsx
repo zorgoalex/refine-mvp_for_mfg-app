@@ -1,15 +1,20 @@
 // Order Basic Info Section
-// Contains: Client, Order Name, Date, Manager, Priority
+// Contains: Client, Order Name, Date, Manager, Priority, Notes
 
-import React from 'react';
-import { Form, Input, DatePicker, InputNumber, Row, Col, Select } from 'antd';
+import React, { useState } from 'react';
+import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
+import { ClientQuickCreate } from '../modals/ClientQuickCreate';
 import dayjs from 'dayjs';
+
+const { TextArea } = Input;
 
 export const OrderBasicInfo: React.FC = () => {
   const { header, updateHeaderField } = useOrderFormStore();
+  const [clientModalOpen, setClientModalOpen] = useState(false);
 
   // Load clients - with defaultValue to show current selection properly
   // IMPORTANT: only pass defaultValue if it exists to avoid null in GraphQL query
@@ -31,27 +36,42 @@ export const OrderBasicInfo: React.FC = () => {
   });
 
   return (
-    <Form layout="vertical">
-      <Row gutter={16}>
-        <Col span={12}>
-          <Form.Item
-            label="Клиент"
-            required
-            help={!header.client_id && 'Обязательное поле'}
-            validateStatus={!header.client_id ? 'error' : ''}
-          >
-            <Select
-              {...clientSelectProps}
-              value={header.client_id}
-              onChange={(value) => updateHeaderField('client_id', value)}
-              placeholder="Выберите клиента"
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-            />
-          </Form.Item>
-        </Col>
+    <>
+      <Form layout="vertical">
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item
+              label="Клиент"
+              required
+              help={!header.client_id && 'Обязательное поле'}
+              validateStatus={!header.client_id ? 'error' : ''}
+            >
+              <Select
+                {...clientSelectProps}
+                value={header.client_id}
+                onChange={(value) => updateHeaderField('client_id', value)}
+                placeholder="Выберите клиента"
+                showSearch
+                filterOption={(input, option) =>
+                  (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                }
+                dropdownRender={(menu) => (
+                  <>
+                    {menu}
+                    <Space style={{ padding: '8px' }}>
+                      <Button
+                        type="text"
+                        icon={<PlusOutlined />}
+                        onClick={() => setClientModalOpen(true)}
+                      >
+                        Создать клиента
+                      </Button>
+                    </Space>
+                  </>
+                )}
+              />
+            </Form.Item>
+          </Col>
 
         <Col span={12}>
           <Form.Item
@@ -122,6 +142,30 @@ export const OrderBasicInfo: React.FC = () => {
           </Form.Item>
         </Col>
       </Row>
-    </Form>
+
+      <Row gutter={16}>
+        <Col span={24}>
+          <Form.Item label="Примечание">
+            <TextArea
+              value={header.notes ?? ''}
+              onChange={(e) => updateHeaderField('notes', e.target.value || null)}
+              placeholder="Введите примечание к заказу"
+              rows={4}
+              maxLength={1000}
+              showCount
+            />
+          </Form.Item>
+        </Col>
+      </Row>
+      </Form>
+
+      <ClientQuickCreate
+        open={clientModalOpen}
+        onClose={() => setClientModalOpen(false)}
+        onSuccess={(clientId) => {
+          updateHeaderField('client_id', clientId);
+        }}
+      />
+    </>
   );
 };

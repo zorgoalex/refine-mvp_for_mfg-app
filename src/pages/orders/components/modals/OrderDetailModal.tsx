@@ -8,6 +8,8 @@ import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
+import { MillingTypeQuickCreate } from './MillingTypeQuickCreate';
+import { EdgeTypeQuickCreate } from './EdgeTypeQuickCreate';
 
 interface OrderDetailModalProps {
   open: boolean;
@@ -26,6 +28,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 }) => {
   const [form] = Form.useForm();
   const [calculatedArea, setCalculatedArea] = useState<number>(0);
+  const [millingTypeModalOpen, setMillingTypeModalOpen] = useState(false);
+  const [edgeTypeModalOpen, setEdgeTypeModalOpen] = useState(false);
 
   // Load reference data with search
   const { selectProps: materialSelectProps } = useSelect({
@@ -131,6 +135,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   };
 
   return (
+    <>
     <Modal
       title={mode === 'create' ? 'Добавить деталь' : 'Редактировать деталь'}
       open={open}
@@ -303,10 +308,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       <Button
                         type="text"
                         icon={<PlusOutlined />}
-                        onClick={() => {
-                          // TODO: Open MillingTypeQuickCreate modal
-                          // console.log('Open MillingTypeQuickCreate');
-                        }}
+                        onClick={() => setMillingTypeModalOpen(true)}
                       >
                         Создать тип фрезеровки
                       </Button>
@@ -332,10 +334,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       <Button
                         type="text"
                         icon={<PlusOutlined />}
-                        onClick={() => {
-                          // TODO: Open EdgeTypeQuickCreate modal
-                          // console.log('Open EdgeTypeQuickCreate');
-                        }}
+                        onClick={() => setEdgeTypeModalOpen(true)}
                       >
                         Создать тип кромки
                       </Button>
@@ -375,5 +374,22 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         </Form.Item>
       </Form>
     </Modal>
+
+    <MillingTypeQuickCreate
+      open={millingTypeModalOpen}
+      onClose={() => setMillingTypeModalOpen(false)}
+      onSuccess={(millingTypeId) => {
+        form.setFieldsValue({ milling_type_id: millingTypeId });
+      }}
+    />
+
+    <EdgeTypeQuickCreate
+      open={edgeTypeModalOpen}
+      onClose={() => setEdgeTypeModalOpen(false)}
+      onSuccess={(edgeTypeId) => {
+        form.setFieldsValue({ edge_type_id: edgeTypeId });
+      }}
+    />
+  </>
   );
 };
