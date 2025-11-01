@@ -747,9 +747,15 @@ export const dataProvider = (_apiUrl: string) => {
     getApiUrl: () => HASURA_URL,
 
     getList: async ({ resource, pagination, sorters, filters }: AnyObject) => {
-      const limit = pagination?.pageSize ?? 10;
+      // Handle pagination: mode 'off' means no limit/offset
+      const paginationMode = pagination?.mode;
+      const limit = paginationMode === 'off' ? null : (pagination?.pageSize ?? 10);
       const page = pagination?.current ?? 1;
-      const offset = (page - 1) * limit;
+      const offset = limit !== null ? (page - 1) * limit : 0;
+
+      // Build limit/offset clause for GraphQL
+      const limitClause = limit !== null ? `limit: ${limit}, offset: ${offset}` : '';
+
       const orderBy = buildOrderBy(resource, sorters);
 
       // Auto-add is_active filter for reference tables (unless explicitly overridden)
@@ -765,9 +771,18 @@ export const dataProvider = (_apiUrl: string) => {
       const selection = fieldsFor(resource);
       // For aggregate, remove leading comma from where clause
       const aggregateWhere = where ? `(${where.replace(/^,\s*/, '')})` : '';
+
+      // Build query arguments string
+      // limitClause is like "limit: 10, offset: 0" or ""
+      // orderBy is like ", order_by: [...]" or ""
+      // where is like ", where: {...}" or ""
+      const queryArgsStr = limitClause || orderBy || where
+        ? `(${limitClause}${orderBy}${where})`
+        : '';
+
       const query = `
         query {
-          ${resource}(limit: ${limit}, offset: ${offset}${orderBy}${where}) {
+          ${resource}${queryArgsStr} {
             ${selection}
           }
           ${resource}_aggregate${aggregateWhere} { aggregate { count } }

@@ -56,6 +56,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     optionLabel: 'material_name',
     optionValue: 'material_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled },
   });
   const { selectProps: millingTypeSelectProps } = useSelect({
@@ -64,6 +65,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     optionValue: 'milling_type_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
+    pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled },
   });
   const { selectProps: edgeTypeSelectProps } = useSelect({
@@ -72,6 +74,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     optionValue: 'edge_type_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
+    pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled },
   });
   const { selectProps: filmSelectProps, queryResult: filmQueryResult } = useSelect({
@@ -98,6 +101,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     optionValue: 'production_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
+    pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled },
   });
 
