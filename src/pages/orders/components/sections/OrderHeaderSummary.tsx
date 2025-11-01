@@ -17,6 +17,7 @@ import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormSto
 import { useShallow } from 'zustand/react/shallow';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
+import { getMaterialColor } from '../../../../config/displayColors';
 import dayjs from 'dayjs';
 
 const { Text, Title } = Typography;
@@ -263,20 +264,7 @@ export const OrderHeaderSummary: React.FC = () => {
                     ) : (
                       materialsData?.data?.map((material, index) => {
                         const materialName = material.material_name || '';
-                        let color = '#00bfff'; // ярко-голубой по умолчанию
-
-                        // Определяем цвет по правилам
-                        if (materialName.includes('МДФ 18')) {
-                          color = '#0000ff'; // синий
-                        } else if (materialName.includes('МДФ 16')) {
-                          color = '#000000'; // черный
-                        } else if (materialName.includes('МДФ 10')) {
-                          color = '#8b4513'; // коричневый
-                        } else if (materialName.includes('МДФ 8')) {
-                          color = '#008000'; // зеленый
-                        } else if (materialName.toUpperCase().includes('ЛДСП')) {
-                          color = '#8b00ff'; // фиолетовый
-                        }
+                        const color = getMaterialColor(materialName);
 
                         return (
                           <React.Fragment key={material.material_id}>

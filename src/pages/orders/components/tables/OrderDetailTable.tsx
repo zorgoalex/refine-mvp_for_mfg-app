@@ -10,6 +10,7 @@ import { useOne } from '@refinedev/core';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { formatNumber } from '../../../../utils/numberFormat';
+import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -34,6 +35,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
 
   const [form] = Form.useForm();
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
+  const [currentFilmId, setCurrentFilmId] = useState<number | null>(null);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
   const highlightedRowRef = useRef<HTMLElement | null>(null);
 
@@ -72,13 +74,24 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     sorters: [{ field: 'sort_order', order: 'asc' }],
     queryOptions: { enabled: selectsEnabled },
   });
-  const { selectProps: filmSelectProps } = useSelect({
+  const { selectProps: filmSelectProps, queryResult: filmQueryResult } = useSelect({
     resource: 'films',
     optionLabel: 'film_name',
     optionValue: 'film_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled },
+    defaultValue: currentFilmId ?? undefined,
   });
+
+  // Debug: log film select props when editing
+  React.useEffect(() => {
+    if (editingKey !== null && filmSelectProps.options) {
+      console.log('Film Select Props:', filmSelectProps);
+      console.log('Film Options:', filmSelectProps.options);
+      console.log('Current film_id:', form.getFieldValue('film_id'));
+    }
+  }, [editingKey, filmSelectProps.options]);
   const { selectProps: productionStatusSelectProps } = useSelect({
     resource: 'production_statuses',
     optionLabel: 'production_status_name',
@@ -90,6 +103,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
 
   const startEdit = (record: OrderDetail) => {
     setEditingKey(record.temp_id || record.detail_id || null);
+    setCurrentFilmId(record.film_id ?? null);
     form.setFieldsValue({
       height: record.height,
       width: record.width,
@@ -110,6 +124,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
 
   const cancelEdit = () => {
     setEditingKey(null);
+    setCurrentFilmId(null);
     form.resetFields();
   };
 
@@ -158,8 +173,8 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
-          <Form.Item name="height" style={{ margin: 0 }} rules={[{ required: true }]}> 
-            <InputNumber autoFocus style={{ width: '100%' }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="height" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+            <InputNumber autoFocus style={{ width: '100%', minWidth: '80px' }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         );
       },
@@ -182,8 +197,8 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
-          <Form.Item name="width" style={{ margin: 0 }} rules={[{ required: true }]}> 
-            <InputNumber style={{ width: '100%' }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="width" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+            <InputNumber style={{ width: '100%', minWidth: '80px' }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         );
       },
@@ -196,8 +211,8 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'right',
       render: (value, record) =>
         isEditing(record) ? (
-          <Form.Item name="quantity" style={{ margin: 0 }} rules={[{ required: true }]}> 
-            <InputNumber style={{ width: '100%' }} min={1} precision={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="quantity" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+            <InputNumber style={{ width: '100%', minWidth: '70px' }} min={1} precision={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           formatNumber(value, 0)
@@ -219,8 +234,8 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'right',
       render: (value, record) =>
         isEditing(record) ? (
-          <Form.Item name="area" style={{ margin: 0 }}> 
-            <InputNumber style={{ width: '100%' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="area" style={{ margin: 0, padding: '0 4px' }}>
+            <InputNumber style={{ width: '100%', minWidth: '85px' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           formatNumber(value, 2) + ' м²'
@@ -234,8 +249,15 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'center',
       render: (millingTypeId, record) =>
         isEditing(record) ? (
-          <Form.Item name="milling_type_id" style={{ margin: 0 }} rules={[{ required: true }]}> 
-            <Select {...millingTypeSelectProps} placeholder="Тип фрезеровки" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          <Form.Item name="milling_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+            <Select
+              {...millingTypeSelectProps}
+              placeholder="Тип фрезеровки"
+              showSearch
+              filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
+              dropdownMatchSelectWidth={false}
+              style={{ minWidth: 150, textAlign: 'left' }}
+            />
           </Form.Item>
         ) : (
           <MillingTypeCell millingTypeId={millingTypeId} />
@@ -249,8 +271,15 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'center',
       render: (edgeTypeId, record) =>
         isEditing(record) ? (
-          <Form.Item name="edge_type_id" style={{ margin: 0 }} rules={[{ required: true }]}> 
-            <Select {...edgeTypeSelectProps} placeholder="Тип кромки" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          <Form.Item name="edge_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+            <Select
+              {...edgeTypeSelectProps}
+              placeholder="Тип кромки"
+              showSearch
+              filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
+              dropdownMatchSelectWidth={false}
+              style={{ minWidth: 120, textAlign: 'left' }}
+            />
           </Form.Item>
         ) : (
           <EdgeTypeCell edgeTypeId={edgeTypeId} />
@@ -264,8 +293,15 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'center',
       render: (materialId, record) =>
         isEditing(record) ? (
-          <Form.Item name="material_id" style={{ margin: 0 }} rules={[{ required: true }]}> 
-            <Select {...materialSelectProps} placeholder="Материал" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          <Form.Item name="material_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+            <Select
+              {...materialSelectProps}
+              placeholder="Материал"
+              showSearch
+              filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
+              dropdownMatchSelectWidth={false}
+              style={{ minWidth: 180, textAlign: 'left' }}
+            />
           </Form.Item>
         ) : (
           <MaterialCell materialId={materialId} />
@@ -278,7 +314,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       width: 100,
       render: (text, record) =>
         isEditing(record) ? (
-          <Form.Item name="note" style={{ margin: 0 }}>
+          <Form.Item name="note" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Примечание" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
@@ -293,8 +329,8 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'right',
       render: (value, record) =>
         isEditing(record) ? (
-          <Form.Item name="milling_cost_per_sqm" style={{ margin: 0 }}> 
-            <InputNumber style={{ width: '100%' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="milling_cost_per_sqm" style={{ margin: 0, padding: '0 4px' }}>
+            <InputNumber style={{ width: '100%', minWidth: '90px' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           <span>
@@ -310,8 +346,8 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'right',
       render: (value, record) =>
         isEditing(record) ? (
-          <Form.Item name="detail_cost" style={{ margin: 0 }}>
-            <InputNumber style={{ width: '100%' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="detail_cost" style={{ margin: 0, padding: '0 4px' }}>
+            <InputNumber style={{ width: '100%', minWidth: '90px' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           <span>
@@ -326,8 +362,16 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       width: 120,
       render: (filmId, record) =>
         isEditing(record) ? (
-          <Form.Item name="film_id" style={{ margin: 0 }}> 
-            <Select {...filmSelectProps} allowClear placeholder="Плёнка" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          <Form.Item name="film_id" style={{ margin: 0, padding: '0 4px' }}>
+            <Select
+              {...filmSelectProps}
+              allowClear
+              placeholder="Плёнка"
+              showSearch
+              filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
+              dropdownMatchSelectWidth={false}
+              style={{ minWidth: 200, textAlign: 'left' }}
+            />
           </Form.Item>
         ) : (
           <span style={{ fontSize: '11px' }}>
@@ -343,8 +387,8 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'center',
       render: (value, record) =>
         isEditing(record) ? (
-          <Form.Item name="priority" style={{ margin: 0 }} rules={[{ required: true }]}> 
-            <InputNumber min={1} max={999} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="priority" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+            <InputNumber style={{ width: '100%', minWidth: '60px' }} min={1} max={999} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           formatNumber(value, 0)
@@ -357,8 +401,16 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       width: 120,
       render: (statusId, record) =>
         isEditing(record) ? (
-          <Form.Item name="production_status_id" style={{ margin: 0 }}> 
-            <Select {...productionStatusSelectProps} allowClear placeholder="Статус" showSearch filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())} />
+          <Form.Item name="production_status_id" style={{ margin: 0, padding: '0 4px' }}>
+            <Select
+              {...productionStatusSelectProps}
+              allowClear
+              placeholder="Статус"
+              showSearch
+              filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
+              dropdownMatchSelectWidth={false}
+              style={{ minWidth: 150, textAlign: 'left' }}
+            />
           </Form.Item>
         ) : (
           statusId ? <ProductionStatusCell statusId={statusId} /> : <Tag>Не назначен</Tag>
@@ -375,7 +427,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       width: 100,
       render: (text, record) =>
         isEditing(record) ? (
-          <Form.Item name="detail_name" style={{ margin: 0 }}> 
+          <Form.Item name="detail_name" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Название детали" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
@@ -456,14 +508,22 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         onRow={(record, index) => {
           const rowKey = record.temp_id || record.detail_id || 0;
           const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
+          const isCurrentlyEditing = isEditing(record);
 
           return {
             ref: isHighlighted ? highlightedRowRef : undefined,
             style: {
-              backgroundColor: isHighlighted
+              backgroundColor: isCurrentlyEditing
+                ? '#fffbe6' // Warm yellow for editing row
+                : isHighlighted
                 ? '#e6f7ff' // Light blue for highlighted row
                 : (index! % 2 === 0 ? '#ffffff' : '#f5f5f5'),
-              transition: 'background-color 0.3s ease',
+              boxShadow: isCurrentlyEditing ? '0 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
+              transform: isCurrentlyEditing ? 'scale(1.01)' : 'scale(1)',
+              position: isCurrentlyEditing ? 'relative' as const : 'relative' as const,
+              zIndex: isCurrentlyEditing ? 10 : 1,
+              transition: 'all 0.3s ease',
+              border: isCurrentlyEditing ? '2px solid #faad14' : 'none',
             },
             onDoubleClick: () => startEdit(record),
           };
@@ -483,7 +543,15 @@ const MaterialCell: React.FC<{ materialId: number }> = ({ materialId }) => {
 
   if (materialId === null || materialId === undefined) return <span style={{ color: '#999' }}>—</span>;
   if (isLoading) return <span style={{ color: '#999' }}>Загрузка...</span>;
-  return <span>{data?.data?.material_name || <span style={{ color: '#ff4d4f' }}>Не найден (ID: {materialId})</span>}</span>;
+
+  const materialName = data?.data?.material_name;
+  const color = getMaterialColor(materialName || '');
+
+  return materialName ? (
+    <span style={{ color }}>{materialName}</span>
+  ) : (
+    <span style={{ color: '#ff4d4f' }}>Не найден (ID: {materialId})</span>
+  );
 };
 
 const MillingTypeCell: React.FC<{ millingTypeId: number }> = ({ millingTypeId }) => {
@@ -495,7 +563,17 @@ const MillingTypeCell: React.FC<{ millingTypeId: number }> = ({ millingTypeId })
 
   if (millingTypeId === null || millingTypeId === undefined) return <span style={{ color: '#999' }}>—</span>;
   if (isLoading) return <span style={{ color: '#999' }}>Загрузка...</span>;
-  return <span>{data?.data?.milling_type_name || <span style={{ color: '#ff4d4f' }}>Не найден (ID: {millingTypeId})</span>}</span>;
+
+  const millingTypeName = data?.data?.milling_type_name;
+  const bgColor = getMillingBgColor(millingTypeName || '');
+
+  return millingTypeName ? (
+    <span style={{ backgroundColor: bgColor, padding: '2px 6px', borderRadius: '3px', display: 'inline-block' }}>
+      {millingTypeName}
+    </span>
+  ) : (
+    <span style={{ color: '#ff4d4f' }}>Не найден (ID: {millingTypeId})</span>
+  );
 };
 
 const EdgeTypeCell: React.FC<{ edgeTypeId: number }> = ({ edgeTypeId }) => {

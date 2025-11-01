@@ -7,6 +7,7 @@ import { FileTextOutlined, ColumnHeightOutlined } from '@ant-design/icons';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
 import { formatNumber } from '../../../../utils/numberFormat';
+import { CURRENCY_SYMBOL } from '../../../../config/currency';
 
 export const OrderAggregatesDisplay: React.FC = () => {
   const totals = useOrderFormStore(useShallow(selectTotals));
@@ -34,7 +35,7 @@ export const OrderAggregatesDisplay: React.FC = () => {
           <Statistic
             title="Оплачено"
             value={formatNumber(totals.total_paid, 2)}
-            suffix="₽"
+            suffix={CURRENCY_SYMBOL}
           />
         </Col>
       </Row>
