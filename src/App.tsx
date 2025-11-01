@@ -165,7 +165,7 @@ const App = () => {
   useEffect(() => {
     const devUserId = (import.meta as any).env.VITE_DEV_AUDIT_USER_ID ?? 1;
     // eslint-disable-next-line no-console
-    console.info(`[DEV] Current user_id (audit): ${devUserId}`);
+    // console.info(`[DEV] Current user_id (audit): ${devUserId}`);
   }, []);
 
   return (

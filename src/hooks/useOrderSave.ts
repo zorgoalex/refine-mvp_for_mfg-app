@@ -132,7 +132,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
           ref_key_1c: values.header.ref_key_1c === '' ? null : values.header.ref_key_1c,
         };
 
-        console.log('Creating order with data:', headerData);
+        // console.log('Creating order with data:', headerData);
 
         const orderResult = await dataProvider().create({
           resource: 'orders',
@@ -177,15 +177,15 @@ export const useOrderSave = (): UseOrderSaveResult => {
           } else {
             // Create new detail - exclude temp_id, detail_id and all audit/system fields
             const { temp_id, detail_id, created_at, updated_at, created_by, edited_by, version, ...detailData } = detail;
-            console.log('[useOrderSave] CREATE detail - original:', detail);
-            console.log('[useOrderSave] CREATE detail - excluded fields:', { temp_id, detail_id, created_at, updated_at, created_by, edited_by, version });
-            console.log('[useOrderSave] CREATE detail - cleaned data:', detailData);
+            // console.log('[useOrderSave] CREATE detail - original:', detail);
+            // console.log('[useOrderSave] CREATE detail - excluded fields:', { temp_id, detail_id, created_at, updated_at, created_by, edited_by, version });
+            // console.log('[useOrderSave] CREATE detail - cleaned data:', detailData);
             const createVariables = {
               ...detailData,
               order_id: createdOrderId,
               created_by: 1, // Always set created_by=1 for new records in dev mode
             };
-            console.log('[useOrderSave] CREATE detail - final variables:', createVariables);
+            // console.log('[useOrderSave] CREATE detail - final variables:', createVariables);
             return dataProvider().create({
               resource: 'order_details',
               variables: createVariables,

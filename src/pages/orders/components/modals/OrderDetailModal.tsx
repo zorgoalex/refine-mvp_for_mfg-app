@@ -95,15 +95,15 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     const height = form.getFieldValue('height');
     const width = form.getFieldValue('width');
 
-    console.log('[OrderDetailModal] handleDimensionChange - height:', height, 'width:', width);
+    // console.log('[OrderDetailModal] handleDimensionChange - height:', height, 'width:', width);
 
     if (height && width && height > 0 && width > 0) {
       const area = (height * width) / 1000000; // Convert mm² to m²
-      console.log('[OrderDetailModal] calculated area:', area, '(height * width / 1000000 =', height, '*', width, '/ 1000000)');
+      // console.log('[OrderDetailModal] calculated area:', area, '(height * width / 1000000 =', height, '*', width, '/ 1000000)');
       setCalculatedArea(area);
       form.setFieldsValue({ area });
     } else {
-      console.log('[OrderDetailModal] cannot calculate - invalid dimensions');
+      // console.log('[OrderDetailModal] cannot calculate - invalid dimensions');
     }
   };
 
@@ -111,8 +111,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     try {
       const values = await form.validateFields();
 
-      console.log('[OrderDetailModal] handleOk - form values:', values);
-      console.log('[OrderDetailModal] handleOk - calculatedArea:', calculatedArea);
+      // console.log('[OrderDetailModal] handleOk - form values:', values);
+      // console.log('[OrderDetailModal] handleOk - calculatedArea:', calculatedArea);
 
       // Prepare detail data
       const detailData: Omit<OrderDetail, 'temp_id'> = {
@@ -121,12 +121,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         area: calculatedArea,
       };
 
-      console.log('[OrderDetailModal] handleOk - final detailData:', detailData);
+      // console.log('[OrderDetailModal] handleOk - final detailData:', detailData);
 
       onSave(detailData);
       form.resetFields();
     } catch (error) {
-      console.error('Validation failed:', error);
+      // console.error('Validation failed:', error);
     }
   };
 
@@ -243,7 +243,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                         icon={<PlusOutlined />}
                         onClick={() => {
                           // TODO: Open MaterialQuickCreate modal
-                          console.log('Open MaterialQuickCreate');
+                          // console.log('Open MaterialQuickCreate');
                         }}
                       >
                         Создать материал
@@ -273,7 +273,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                         icon={<PlusOutlined />}
                         onClick={() => {
                           // TODO: Open FilmQuickCreate modal
-                          console.log('Open FilmQuickCreate');
+                          // console.log('Open FilmQuickCreate');
                         }}
                       >
                         Создать пленку
@@ -305,7 +305,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                         icon={<PlusOutlined />}
                         onClick={() => {
                           // TODO: Open MillingTypeQuickCreate modal
-                          console.log('Open MillingTypeQuickCreate');
+                          // console.log('Open MillingTypeQuickCreate');
                         }}
                       >
                         Создать тип фрезеровки
@@ -334,7 +334,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                         icon={<PlusOutlined />}
                         onClick={() => {
                           // TODO: Open EdgeTypeQuickCreate modal
-                          console.log('Open EdgeTypeQuickCreate');
+                          // console.log('Open EdgeTypeQuickCreate');
                         }}
                       >
                         Создать тип кромки

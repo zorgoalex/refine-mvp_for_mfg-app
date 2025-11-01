@@ -27,7 +27,7 @@ export const useHighlightRow = (idField: string = "id", dataSource?: any[]) => {
         setShouldScroll(true);
       } else {
         // Record not on this page - still show the highlight ID was received
-        console.log(`Record ${highlightId} not found on current page`);
+        // console.log(`Record ${highlightId} not found on current page`);
       }
     }
   }, [highlightId, dataSource, idField]);

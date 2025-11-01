@@ -2,7 +2,8 @@
 // Displays list of order details with inline editing capabilities
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Table, Button, Tag, Space, Form, InputNumber, Input, Select } from 'antd';
+import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown } from 'antd';
+import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -36,6 +37,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   const [form] = Form.useForm();
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
   const [currentFilmId, setCurrentFilmId] = useState<number | null>(null);
+  const [isSumEditable, setIsSumEditable] = useState(false);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
   const highlightedRowRef = useRef<HTMLElement | null>(null);
 
@@ -90,9 +92,9 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   // Debug: log film select props when editing
   React.useEffect(() => {
     if (editingKey !== null && filmSelectProps.options) {
-      console.log('Film Select Props:', filmSelectProps);
-      console.log('Film Options:', filmSelectProps.options);
-      console.log('Current film_id:', form.getFieldValue('film_id'));
+      // console.log('Film Select Props:', filmSelectProps);
+      // console.log('Film Options:', filmSelectProps.options);
+      // console.log('Current film_id:', form.getFieldValue('film_id'));
     }
   }, [editingKey, filmSelectProps.options]);
   const { selectProps: productionStatusSelectProps } = useSelect({
@@ -129,6 +131,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   const cancelEdit = () => {
     setEditingKey(null);
     setCurrentFilmId(null);
+    setIsSumEditable(false);
     form.resetFields();
   };
 
@@ -138,6 +141,19 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     if (height && width && height > 0 && width > 0) {
       const area = (height * width) / 1000000; // mm^2 -> m^2
       form.setFieldsValue({ area });
+      recalcSum(); // Also recalculate sum when area changes
+    }
+  };
+
+  const recalcSum = () => {
+    // Only auto-calculate if sum is not in manual edit mode
+    if (!isSumEditable) {
+      const area = form.getFieldValue('area');
+      const pricePerSqm = form.getFieldValue('milling_cost_per_sqm');
+      if (area && pricePerSqm && area > 0 && pricePerSqm > 0) {
+        const sum = area * pricePerSqm;
+        form.setFieldsValue({ detail_cost: Number(sum.toFixed(2)) });
+      }
     }
   };
 
@@ -334,7 +350,13 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       render: (value, record) =>
         isEditing(record) ? (
           <Form.Item name="milling_cost_per_sqm" style={{ margin: 0, padding: '0 4px' }}>
-            <InputNumber style={{ width: '100%', minWidth: '90px' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber
+              style={{ width: '100%', minWidth: '90px' }}
+              precision={2}
+              min={0}
+              onChange={recalcSum}
+              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+            />
           </Form.Item>
         ) : (
           <span>
@@ -351,7 +373,71 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       render: (value, record) =>
         isEditing(record) ? (
           <Form.Item name="detail_cost" style={{ margin: 0, padding: '0 4px' }}>
-            <InputNumber style={{ width: '100%', minWidth: '90px' }} precision={2} min={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber
+              style={{ width: '100%', minWidth: '90px' }}
+              precision={2}
+              min={0}
+              disabled={!isSumEditable}
+              onContextMenu={(e) => {
+                if (!isSumEditable) {
+                  e.preventDefault();
+                  e.stopPropagation();
+
+                  // Remove any existing context menus first
+                  const existingMenus = document.querySelectorAll('.sum-field-context-menu');
+                  existingMenus.forEach(menu => menu.remove());
+
+                  // Create context menu
+                  const menu = document.createElement('div');
+                  menu.className = 'ant-dropdown sum-field-context-menu';
+                  menu.style.position = 'fixed';
+                  menu.style.left = `${e.clientX}px`;
+                  menu.style.top = `${e.clientY}px`;
+                  menu.style.zIndex = '9999';
+
+                  const menuContent = `
+                    <ul class="ant-dropdown-menu" style="background: white; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;">
+                      <li class="ant-dropdown-menu-item" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                        <span role="img" aria-label="edit" style="color: #1890ff;">
+                          <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+                            <path d="M257.7 752c2 0 4-.2 6-.5L431.9 722c2-.4 3.9-1.3 5.3-2.8l423.9-423.9a9.96 9.96 0 000-14.1L694.9 114.9c-1.9-1.9-4.4-2.9-7.1-2.9s-5.2 1-7.1 2.9L256.8 538.8c-1.5 1.5-2.4 3.3-2.8 5.3l-29.5 168.2a33.5 33.5 0 009.4 29.8c6.6 6.4 14.9 9.9 23.8 9.9zm67.4-174.4L687.8 215l73.3 73.3-362.7 362.6-88.9 15.7 15.6-89zM880 836H144c-17.7 0-32 14.3-32 32v36c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-36c0-17.7-14.3-32-32-32z"></path>
+                          </svg>
+                        </span>
+                        <span style="color: #1890ff;">Изменить значение в ячейке</span>
+                      </li>
+                    </ul>
+                  `;
+                  menu.innerHTML = menuContent;
+                  document.body.appendChild(menu);
+
+                  const menuItem = menu.querySelector('.ant-dropdown-menu-item');
+                  menuItem?.addEventListener('click', () => {
+                    setIsSumEditable(true);
+                    menu.remove();
+                  });
+
+                  menuItem?.addEventListener('mouseenter', () => {
+                    (menuItem as HTMLElement).style.backgroundColor = '#e6f7ff';
+                  });
+
+                  menuItem?.addEventListener('mouseleave', () => {
+                    (menuItem as HTMLElement).style.backgroundColor = 'white';
+                  });
+
+                  const closeMenu = (event: MouseEvent) => {
+                    if (!menu.contains(event.target as Node)) {
+                      menu.remove();
+                      document.removeEventListener('click', closeMenu);
+                    }
+                  };
+
+                  setTimeout(() => {
+                    document.addEventListener('click', closeMenu);
+                  }, 0);
+                }
+              }}
+              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+            />
           </Form.Item>
         ) : (
           <span>
@@ -441,7 +527,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     {
       title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '11px' }}>Действия</span></div>,
       key: 'actions',
-      width: 70,
+      width: 50,
       fixed: 'right',
       render: (_, record) => (
         <Space size={2}>
@@ -450,7 +536,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
               <Button
                 type="text"
                 size="small"
-                icon={<CheckOutlined style={{ fontSize: '12px', color: '#52c41a' }} />}
+                icon={<CheckOutlined style={{ fontSize: '16px', color: '#52c41a' }} />}
                 onClick={() => saveEdit(record)}
                 style={{ padding: '0 4px' }}
               />
@@ -463,23 +549,13 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
               />
             </>
           ) : (
-            <>
-              <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined style={{ fontSize: '12px' }} />}
-                onClick={() => startEdit(record)}
-                style={{ padding: '0 4px' }}
-              />
-              <Button
-                type="text"
-                size="small"
-                danger
-                icon={<DeleteOutlined style={{ fontSize: '12px' }} />}
-                onClick={() => onDelete(record.temp_id!, record.detail_id)}
-                style={{ padding: '0 4px' }}
-              />
-            </>
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined style={{ fontSize: '12px' }} />}
+              onClick={() => startEdit(record)}
+              style={{ padding: '0 4px' }}
+            />
           )}
         </Space>
       ),
@@ -492,6 +568,17 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         onChange: onSelectChange,
       }
     : undefined;
+
+  // Context menu items
+  const getContextMenuItems = (record: OrderDetail): MenuProps['items'] => [
+    {
+      key: 'delete',
+      label: 'Удалить',
+      icon: <DeleteOutlined />,
+      danger: true,
+      onClick: () => onDelete(record.temp_id!, record.detail_id),
+    },
+  ];
 
   return (
     <Form form={form} component={false}>
@@ -530,6 +617,61 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
               border: isCurrentlyEditing ? '2px solid #faad14' : 'none',
             },
             onDoubleClick: () => startEdit(record),
+            onContextMenu: (e) => {
+              e.preventDefault();
+
+              // Remove any existing context menus first
+              const existingMenus = document.querySelectorAll('.order-detail-context-menu');
+              existingMenus.forEach(menu => menu.remove());
+
+              // Create context menu programmatically
+              const menu = document.createElement('div');
+              menu.className = 'ant-dropdown order-detail-context-menu';
+              menu.style.position = 'fixed';
+              menu.style.left = `${e.clientX}px`;
+              menu.style.top = `${e.clientY}px`;
+              menu.style.zIndex = '9999';
+
+              const menuContent = `
+                <ul class="ant-dropdown-menu" style="background: white; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;">
+                  <li class="ant-dropdown-menu-item ant-dropdown-menu-item-danger" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <span role="img" aria-label="delete" style="color: #ff4d4f;">
+                      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+                        <path d="M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72zm504 72H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM731.3 840H292.7l-24.2-512h487l-24.2 512z"></path>
+                      </svg>
+                    </span>
+                    <span style="color: #ff4d4f;">Удалить строку</span>
+                  </li>
+                </ul>
+              `;
+              menu.innerHTML = menuContent;
+              document.body.appendChild(menu);
+
+              const menuItem = menu.querySelector('.ant-dropdown-menu-item');
+              menuItem?.addEventListener('click', () => {
+                onDelete(record.temp_id!, record.detail_id);
+                menu.remove();
+              });
+
+              menuItem?.addEventListener('mouseenter', () => {
+                (menuItem as HTMLElement).style.backgroundColor = '#fff1f0';
+              });
+
+              menuItem?.addEventListener('mouseleave', () => {
+                (menuItem as HTMLElement).style.backgroundColor = 'white';
+              });
+
+              const closeMenu = (event: MouseEvent) => {
+                if (!menu.contains(event.target as Node)) {
+                  menu.remove();
+                  document.removeEventListener('click', closeMenu);
+                }
+              };
+
+              setTimeout(() => {
+                document.addEventListener('click', closeMenu);
+              }, 0);
+            },
           };
         }}
       />

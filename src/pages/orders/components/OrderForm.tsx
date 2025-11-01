@@ -145,8 +145,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       const result = orderFormSchema.safeParse(formValues);
       if (!result.success) {
         // Log full error for debugging
-        console.error('Validation failed:', result.error);
-        console.error('Form values:', formValues);
+        // console.error('Validation failed:', result.error);
+        // console.error('Form values:', formValues);
 
         // Show validation errors
         const errors = result.error?.errors || [];

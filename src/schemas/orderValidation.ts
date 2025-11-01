@@ -37,7 +37,7 @@ export const validateOrderNameUnique = async (
 
     return data.length === 0;
   } catch (error) {
-    console.error('Error validating order name uniqueness:', error);
+    // console.error('Error validating order name uniqueness:', error);
     // On error, allow the name (fail open)
     return true;
   }
