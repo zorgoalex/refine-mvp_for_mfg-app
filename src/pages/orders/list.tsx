@@ -2,6 +2,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table } from "antd";
 import { EyeOutlined, EditOutlined } from "@ant-design/icons";
+import { formatNumber } from "../../utils/numberFormat";
 import dayjs from "dayjs";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -35,8 +36,15 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="order_id" title="Order ID" sorter width={80} />
-        <Table.Column dataIndex="order_name" title="Order Name" sorter width={134} />
+        <Table.Column
+          dataIndex="order_id"
+          title="Order ID"
+          sorter
+          width={80}
+          className="col-order-id"
+          onHeaderCell={() => ({ className: 'col-order-id' })}
+        />
+        <Table.Column dataIndex="order_name" title="Order Name" sorter width={67} />
         <Table.Column
           dataIndex="order_date"
           title="Order Date"
@@ -44,11 +52,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           width={100}
           render={(value) => formatDate(value)}
         />
-        <Table.Column dataIndex="client_name" title="Client" width={210} />
-        <Table.Column dataIndex="milling_type_name" title="Milling Type" width={180} />
+        <Table.Column dataIndex="client_name" title="Client" width={126} />
+        <Table.Column dataIndex="milling_type_name" title="Milling Type" width={90} />
         <Table.Column dataIndex="material_name" title="Material" width={96} />
-        <Table.Column dataIndex="film_name" title="Film" width={150} />
-        <Table.Column dataIndex="priority" title="Priority" sorter width={48} />
+        <Table.Column
+          dataIndex="priority"
+          title="П"
+          sorter
+          width={48}
+          className="col-priority"
+          onHeaderCell={() => ({ className: 'col-priority' })}
+        />
         <Table.Column
           dataIndex="completion_date"
           title="Completion Date"
@@ -72,10 +86,34 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           width={100}
           render={(value) => formatDate(value)}
         />
-        <Table.Column dataIndex="total_amount" title="Total Amount" sorter width={110} />
-        <Table.Column dataIndex="discounted_amount" title="Discounted Amount" sorter width={112} />
-        <Table.Column dataIndex="discount" title="Discount" sorter width={80} />
-        <Table.Column dataIndex="paid_amount" title="Paid Amount" sorter width={110} />
+        <Table.Column
+          dataIndex="total_amount"
+          title="Total Amount"
+          sorter
+          width={110}
+          render={(value) => formatNumber(value as number, 0)}
+        />
+        <Table.Column
+          dataIndex="discounted_amount"
+          title="Discounted Amount"
+          sorter
+          width={112}
+          render={(value) => formatNumber(value as number, 0)}
+        />
+        <Table.Column
+          dataIndex="discount"
+          title="Discount"
+          sorter
+          width={80}
+          render={(value) => formatNumber(value as number, 0)}
+        />
+        <Table.Column
+          dataIndex="paid_amount"
+          title="Paid Amount"
+          sorter
+          width={110}
+          render={(value) => formatNumber(value as number, 0)}
+        />
         <Table.Column
           dataIndex="payment_date"
           title="Payment Date"
@@ -83,10 +121,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           width={100}
           render={(value) => formatDate(value)}
         />
-        <Table.Column dataIndex="notes" title="Notes" width={200} />
+        <Table.Column dataIndex="notes" title="Notes" width={140} />
         <Table.Column dataIndex="parts_count" title="Parts Count" sorter width={100} />
         <Table.Column dataIndex="total_area" title="Total Area" sorter width={80} />
         <Table.Column dataIndex="edge_type_name" title="Edge Type" width={80} />
+        <Table.Column dataIndex="film_name" title="Film" width={150} />
         <Table.Column
           title="Actions"
           width={80}

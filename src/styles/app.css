@@ -95,3 +95,14 @@
   padding-top: 8px;
   padding-bottom: 8px;
 }
+
+/* Narrow columns fine-tuning */
+.orders-table td.col-order-id,
+.orders-table th.col-order-id {
+  font-size: 12px;
+}
+
+.orders-table td.col-priority,
+.orders-table th.col-priority {
+  font-size: 12px;
+}
