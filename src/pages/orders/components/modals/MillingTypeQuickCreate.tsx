@@ -2,7 +2,7 @@
 // Allows creating a new milling type without leaving the order form
 
 import React from 'react';
-import { Modal, Form, Input, InputNumber, notification } from 'antd';
+import { Modal, Form, Input, InputNumber, notification, Collapse } from 'antd';
 import { useCreate } from '@refinedev/core';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 
@@ -98,26 +98,35 @@ export const MillingTypeQuickCreate: React.FC<MillingTypeQuickCreateProps> = ({
             placeholder="0.00"
             min={0}
             precision={2}
-            formatter={(value) => numberFormatter(value, 2)}
             parser={numberParser}
             style={{ width: '100%' }}
             addonAfter="₸/м²"
           />
         </Form.Item>
 
-        <Form.Item
-          label="Порядок сортировки"
-          name="sort_order"
-          tooltip="Определяет порядок отображения в списках"
-        >
-          <InputNumber
-            min={1}
-            max={32767}
-            formatter={(value) => numberFormatter(value, 0)}
-            parser={numberParser}
-            style={{ width: '100%' }}
-          />
-        </Form.Item>
+        <Collapse
+          defaultActiveKey={[]}
+          items={[
+            {
+              key: 'sort_order',
+              label: 'Порядок сортировки',
+              children: (
+                <Form.Item
+                  name="sort_order"
+                  tooltip="Определяет порядок отображения в списках"
+                >
+                  <InputNumber
+                    min={1}
+                    max={32767}
+                    formatter={(value) => numberFormatter(value, 0)}
+                    parser={numberParser}
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
+              ),
+            },
+          ]}
+        />
       </Form>
     </Modal>
   );

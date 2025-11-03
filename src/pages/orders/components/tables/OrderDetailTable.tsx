@@ -166,10 +166,10 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
 
   const columns: ColumnsType<OrderDetail> = [
     {
-      title: <div style={{ textAlign: 'center' }}>№</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '70%' }}>№</div>,
       dataIndex: 'detail_number',
       key: 'detail_number',
-      width: 50,
+      width: 40,
       fixed: 'left',
       defaultSortOrder: 'ascend',
       sorter: (a, b) => a.detail_number - b.detail_number,
@@ -177,15 +177,15 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     },
     {
       title: (
-        <div style={{ lineHeight: '1.2', textAlign: 'center' }}>
-          <span style={{ fontSize: '85%' }}>Высота</span>
+        <div style={{ lineHeight: '1.1', textAlign: 'center' }}>
+          <span style={{ fontSize: '75%' }}>Высота</span>
           <br />
-          <span style={{ fontSize: '75%', fontWeight: 'normal' }}>мм</span>
+          <span style={{ fontSize: '70%', fontWeight: 'normal' }}>мм</span>
         </div>
       ),
       dataIndex: 'height',
       key: 'height',
-      width: 60,
+      width: 54,
       align: 'right',
       render: (value, record) => {
         if (!isEditing(record)) {
@@ -201,15 +201,15 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     },
     {
       title: (
-        <div style={{ lineHeight: '1.2', textAlign: 'center' }}>
-          <span style={{ fontSize: '85%' }}>Ширина</span>
+        <div style={{ lineHeight: '1.1', textAlign: 'center' }}>
+          <span style={{ fontSize: '75%' }}>Ширина</span>
           <br />
-          <span style={{ fontSize: '75%', fontWeight: 'normal' }}>мм</span>
+          <span style={{ fontSize: '70%', fontWeight: 'normal' }}>мм</span>
         </div>
       ),
       dataIndex: 'width',
       key: 'width',
-      width: 60,
+      width: 54,
       align: 'right',
       render: (value, record) => {
         if (!isEditing(record)) {
@@ -224,10 +224,10 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       },
     },
     {
-      title: <div style={{ textAlign: 'center' }}>Кол-во</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Кол-во</div>,
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 60,
+      width: 54,
       align: 'right',
       render: (value, record) =>
         isEditing(record) ? (
@@ -240,17 +240,15 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     },
     {
       title: (
-        <div style={{ lineHeight: '1.2', textAlign: 'center' }}>
-          Площадь
+        <div style={{ lineHeight: '1.1', textAlign: 'center' }}>
+          <span style={{ fontSize: '75%' }}>Площадь</span>
           <br />
-          <span style={{ fontSize: '85%', fontWeight: 'normal' }}>м²</span>
-          <br />
-          <span style={{ fontSize: '75%', fontWeight: 'normal' }}>(до 2 зн.)</span>
+          <span style={{ fontSize: '70%', fontWeight: 'normal' }}>м²</span>
         </div>
       ),
       dataIndex: 'area',
       key: 'area',
-      width: 70,
+      width: 63,
       align: 'right',
       render: (value, record) =>
         isEditing(record) ? (
@@ -262,7 +260,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}>Фрезеровка</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Фрезеровка</div>,
       dataIndex: 'milling_type_id',
       key: 'milling_type_id',
       width: 85,
@@ -284,10 +282,10 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '85%' }}>Кромка</span></div>,
+      title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Кромка</span></div>,
       dataIndex: 'edge_type_id',
       key: 'edge_type_id',
-      width: 68,
+      width: 61,
       align: 'center',
       render: (edgeTypeId, record) =>
         isEditing(record) ? (
@@ -306,7 +304,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}>Материал</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Материал</div>,
       dataIndex: 'material_id',
       key: 'material_id',
       width: 80,
@@ -328,7 +326,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}>Прим-е</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Примечание</div>,
       dataIndex: 'note',
       key: 'note',
       width: 100,
@@ -342,7 +340,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}>Цена за кв.м.</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Цена за кв.м.</div>,
       dataIndex: 'milling_cost_per_sqm',
       key: 'milling_cost_per_sqm',
       width: 70,
@@ -365,7 +363,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}>Сумма</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Сумма</div>,
       dataIndex: 'detail_cost',
       key: 'detail_cost',
       width: 70,
@@ -446,7 +444,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}>Пленка</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Пленка</div>,
       dataIndex: 'film_id',
       key: 'film_id',
       width: 120,
@@ -470,7 +468,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}>Пр-т</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Пр-т</div>,
       dataIndex: 'priority',
       key: 'priority',
       width: 35,
@@ -485,7 +483,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}>Статус</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Статус</div>,
       dataIndex: 'production_status_id',
       key: 'production_status_id',
       width: 120,
@@ -525,7 +523,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '11px' }}>Действия</span></div>,
+      title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Действия</span></div>,
       key: 'actions',
       width: 50,
       fixed: 'right',

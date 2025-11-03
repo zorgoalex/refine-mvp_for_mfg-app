@@ -304,15 +304,16 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 dropdownRender={(menu) => (
                   <>
                     {menu}
-                    <Space style={{ padding: '8px' }}>
+                    <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px' }}>
                       <Button
-                        type="text"
+                        type="link"
                         icon={<PlusOutlined />}
                         onClick={() => setMillingTypeModalOpen(true)}
+                        style={{ width: '100%', textAlign: 'left' }}
                       >
                         Создать тип фрезеровки
                       </Button>
-                    </Space>
+                    </div>
                   </>
                 )}
               />
@@ -330,15 +331,16 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 dropdownRender={(menu) => (
                   <>
                     {menu}
-                    <Space style={{ padding: '8px' }}>
+                    <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px' }}>
                       <Button
-                        type="text"
+                        type="link"
                         icon={<PlusOutlined />}
                         onClick={() => setEdgeTypeModalOpen(true)}
+                        style={{ width: '100%', textAlign: 'left' }}
                       >
                         Создать тип кромки
                       </Button>
-                    </Space>
+                    </div>
                   </>
                 )}
               />

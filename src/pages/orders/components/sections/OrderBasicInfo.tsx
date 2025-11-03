@@ -2,7 +2,7 @@
 // Contains: Client, Order Name, Date, Manager, Priority, Notes
 
 import React, { useState } from 'react';
-import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space } from 'antd';
+import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Collapse } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -143,18 +143,29 @@ export const OrderBasicInfo: React.FC = () => {
         </Col>
       </Row>
 
-      <Row gutter={16}>
+      <Row gutter={16} style={{ marginTop: 16 }}>
         <Col span={24}>
-          <Form.Item label="Примечание">
-            <TextArea
-              value={header.notes ?? ''}
-              onChange={(e) => updateHeaderField('notes', e.target.value || null)}
-              placeholder="Введите примечание к заказу"
-              rows={4}
-              maxLength={1000}
-              showCount
-            />
-          </Form.Item>
+          <Collapse
+            defaultActiveKey={['notes']}
+            items={[
+              {
+                key: 'notes',
+                label: 'Примечание',
+                children: (
+                  <Form.Item style={{ marginBottom: 0 }}>
+                    <TextArea
+                      value={header.notes ?? ''}
+                      onChange={(e) => updateHeaderField('notes', e.target.value || null)}
+                      placeholder="Введите примечание к заказу"
+                      rows={4}
+                      maxLength={1000}
+                      showCount
+                    />
+                  </Form.Item>
+                ),
+              },
+            ]}
+          />
         </Col>
       </Row>
       </Form>

@@ -40,6 +40,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="discount" title="Discount" sorter />
         <Table.Column dataIndex="paid_amount" title="Paid Amount" sorter />
         <Table.Column dataIndex="payment_date" title="Payment Date" sorter />
+        <Table.Column dataIndex="notes" title="Notes" />
         <Table.Column dataIndex="parts_count" title="Parts Count" sorter />
         <Table.Column dataIndex="total_area" title="Total Area" sorter />
         <Table.Column dataIndex="edge_type_name" title="Edge Type" />
