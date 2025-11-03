@@ -86,3 +86,12 @@
 .highlighted-row:hover td {
   background-color: #fafafa !important;
 }
+
+/* Orders table: allow header titles to wrap within constrained widths */
+.orders-table .ant-table-thead > tr > th {
+  white-space: normal !important;
+  word-break: break-word;
+  line-height: 1.1;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
