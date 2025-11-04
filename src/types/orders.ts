@@ -44,6 +44,9 @@ export interface Order {
   link_cad_file?: string | null;
   link_pdf_file?: string | null;
 
+  // Notes
+  notes?: string | null;
+
   // Management and audit
   manager_id?: number | null;
   delete_flag?: boolean;

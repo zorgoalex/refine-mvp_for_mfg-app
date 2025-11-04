@@ -16,6 +16,7 @@ import { orderFormSchema } from '../../../schemas/orderSchema';
 import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
 import { OrderBasicInfo } from './sections/OrderBasicInfo';
 import { OrderStatusSection } from './sections/OrderStatusSection';
+import { OrderNotesSection } from './sections/OrderNotesSection';
 import { OrderDatesSection } from './sections/OrderDatesSection';
 import { OrderFinanceSection } from './sections/OrderFinanceSection';
 import { OrderLegacySection } from './sections/OrderLegacySection';
@@ -226,6 +227,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         <Space direction="vertical" style={{ width: '100%' }} size="large">
           <OrderBasicInfo />
           <OrderStatusSection />
+          <OrderNotesSection />
         </Space>
       ),
     },

@@ -101,6 +101,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "material_name",
     "link_cutting_file",
     "link_cutting_image_file",
+    "notes",
     "order_ref_key_1c",
     "client_ref_key_1c",
     "manager_id",
@@ -139,6 +140,8 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "link_cutting_image_file",
     "link_cad_file",
     "link_pdf_file",
+    // Notes
+    "notes",
     // Reference key
     "ref_key_1c",
     // Audit fields
