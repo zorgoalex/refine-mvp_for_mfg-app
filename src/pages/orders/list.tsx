@@ -1,11 +1,15 @@
+import React, { useState } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
-import { Space, Table } from "antd";
-import { EyeOutlined, EditOutlined } from "@ant-design/icons";
+import { Space, Table, Button } from "antd";
+import { EyeOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { formatNumber } from "../../utils/numberFormat";
 import dayjs from "dayjs";
+import { OrderCreateModal } from "./components/OrderCreateModal";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
@@ -23,8 +27,22 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   };
 
   return (
-    <List>
-      <Table
+    <>
+      <List
+        headerButtons={({ defaultButtons }) => (
+          <>
+            {defaultButtons}
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setCreateModalOpen(true)}
+            >
+              Создать заказ
+            </Button>
+          </>
+        )}
+      >
+        <Table
         {...tableProps}
         rowKey="order_id"
         sticky
@@ -149,5 +167,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         />
       </Table>
     </List>
+
+    <OrderCreateModal
+      open={createModalOpen}
+      onClose={() => setCreateModalOpen(false)}
+    />
+    </>
   );
 };

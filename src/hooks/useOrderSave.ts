@@ -132,7 +132,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
           ref_key_1c: values.header.ref_key_1c === '' ? null : values.header.ref_key_1c,
         };
 
-        // console.log('Creating order with data:', headerData);
+        console.log('[useOrderSave] Creating order with data:', headerData);
 
         const orderResult = await dataProvider().create({
           resource: 'orders',
@@ -141,6 +141,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
             created_by: values.header?.created_by ?? 1,
           },
         });
+
+        console.log('[useOrderSave] Order created successfully:', orderResult.data);
         createdOrderId = orderResult.data.order_id;
       }
 
@@ -375,6 +377,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
       return createdOrderId;
     } catch (err: any) {
       // Handle error silently in UI notifications
+      console.error('[useOrderSave] Error saving order:', err);
+      console.error('[useOrderSave] Error details:', JSON.stringify(err, null, 2));
       setError(err);
 
       // ========== ROLLBACK: Delete created order if this was a create operation ==========

@@ -54,12 +54,21 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
 
+  // Debug logging
+  React.useEffect(() => {
+    console.log('[OrderForm] Mode:', mode);
+    console.log('[OrderForm] statusesLoading:', statusesLoading);
+    console.log('[OrderForm] defaultOrderStatus:', defaultOrderStatus);
+    console.log('[OrderForm] defaultPaymentStatus:', defaultPaymentStatus);
+  }, [mode, statusesLoading, defaultOrderStatus, defaultPaymentStatus]);
+
   // Load existing order data in edit mode
+  const shouldLoadOrder = mode === 'edit' && !!orderId;
   const { data: orderData, isLoading: orderLoading } = useOne({
     resource: 'orders',
     id: orderId,
     queryOptions: {
-      enabled: mode === 'edit' && !!orderId,
+      enabled: shouldLoadOrder,
     },
   });
 
@@ -202,9 +211,18 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   // Show loading only for essential data
   const isLoadingEssential =
     statusesLoading ||
-    orderLoading ||
+    (shouldLoadOrder && orderLoading) ||
     (shouldLoadDetails && detailsLoading) ||
     (shouldLoadPayments && paymentsLoading);
+
+  // Debug loading state
+  React.useEffect(() => {
+    console.log('[OrderForm] isLoadingEssential:', isLoadingEssential);
+    console.log('[OrderForm] - statusesLoading:', statusesLoading);
+    console.log('[OrderForm] - shouldLoadOrder:', shouldLoadOrder, 'orderLoading:', orderLoading);
+    console.log('[OrderForm] - shouldLoadDetails:', shouldLoadDetails, 'detailsLoading:', detailsLoading);
+    console.log('[OrderForm] - shouldLoadPayments:', shouldLoadPayments, 'paymentsLoading:', paymentsLoading);
+  }, [isLoadingEssential, statusesLoading, shouldLoadOrder, orderLoading, shouldLoadDetails, detailsLoading, shouldLoadPayments, paymentsLoading]);
 
   if (isLoadingEssential) {
     return (
