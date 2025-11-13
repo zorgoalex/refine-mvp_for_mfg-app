@@ -2,7 +2,7 @@
 // Contains: Total Amount, Discount, Discounted Amount, Paid Amount, Payment Date
 
 import React, { useEffect } from 'react';
-import { Form, InputNumber, DatePicker, Row, Col, Collapse } from 'antd';
+import { Form, InputNumber, DatePicker, Row, Col, Collapse, Button } from 'antd';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
@@ -12,8 +12,20 @@ import dayjs from 'dayjs';
 const { Panel } = Collapse;
 
 export const OrderFinanceSection: React.FC = () => {
-  const { header, updateHeaderField } = useOrderFormStore();
+  const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual } =
+    useOrderFormStore();
   const totals = useOrderFormStore(useShallow(selectTotals));
+
+  const handleTotalAmountChange = (value: number | null) => {
+    if (!isTotalAmountManual) {
+      setTotalAmountManual(true);
+    }
+    updateHeaderField('total_amount', value ?? 0);
+  };
+
+  const handleRestoreAuto = () => {
+    setTotalAmountManual(false);
+  };
 
   // Auto-calculate discounted_amount when total_amount or discount changes
   useEffect(() => {
@@ -34,10 +46,24 @@ export const OrderFinanceSection: React.FC = () => {
         <Form layout="vertical">
           <Row gutter={16}>
             <Col span={6}>
-              <Form.Item label="Общая сумма">
+              <Form.Item
+                label="Общая сумма"
+                extra={
+                  isTotalAmountManual ? (
+                    <span>
+                      Ручной режим.{' '}
+                      <Button type="link" size="small" onClick={handleRestoreAuto}>
+                        Вернуть авторасчет
+                      </Button>
+                    </span>
+                  ) : (
+                    <span>Рассчитывается автоматически по сумме деталей</span>
+                  )
+                }
+              >
                 <InputNumber
                   value={header.total_amount}
-                  onChange={(value) => updateHeaderField('total_amount', value)}
+                  onChange={handleTotalAmountChange}
                   min={0}
                   precision={2}
                   formatter={(value) => numberFormatter(value, 2)}

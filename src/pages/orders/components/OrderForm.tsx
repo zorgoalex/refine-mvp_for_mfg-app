@@ -41,12 +41,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 }) => {
   const {
     header,
+    details,
     setHeader,
+    updateHeaderField,
     isDirty,
     reset,
     loadOrder,
     getFormValues,
     setDirty,
+    isTotalAmountManual,
   } = useOrderFormStore();
 
   const { defaultOrderStatus, defaultPaymentStatus, isLoading: statusesLoading } =
@@ -99,6 +102,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         priority: 100,
         discount: 0,
         paid_amount: 0,
+        total_amount: 0,
+        discounted_amount: 0,
       });
       setDirty(false); // Reset dirty flag after initial setup
     }
@@ -152,6 +157,87 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     paymentsLoading,
     shouldLoadDetails,
     shouldLoadPayments,
+  ]);
+
+  // Ensure legacy details always have a calculated sum
+  useEffect(() => {
+    if (!details || details.length === 0) {
+      return;
+    }
+
+    const store = useOrderFormStore.getState();
+    let patchedCount = 0;
+
+    details.forEach((detail) => {
+      const hasCost = detail.detail_cost !== undefined && detail.detail_cost !== null;
+      const hasArea = typeof detail.area === 'number';
+      const hasPrice = typeof detail.milling_cost_per_sqm === 'number';
+
+      if (!hasCost && hasArea && hasPrice) {
+        const autoCost = Number((detail.area! * detail.milling_cost_per_sqm!).toFixed(2));
+        const identifier = detail.temp_id || detail.detail_id;
+        if (identifier) {
+          store.updateDetail(identifier, { detail_cost: autoCost });
+          patchedCount += 1;
+        }
+      }
+    });
+
+    if (patchedCount > 0) {
+      console.log(`[OrderForm] Auto-filled detail_cost for ${patchedCount} legacy detail(s)`);
+    }
+  }, [details]);
+
+  // Auto-recalculate total_amount from details (unless overridden manually)
+  useEffect(() => {
+    if (orderLoading || detailsLoading) {
+      return;
+    }
+
+    if (!details || details.length === 0) {
+      if (header.total_amount === undefined || header.total_amount === null) {
+        return;
+      }
+    }
+
+    if (isTotalAmountManual) {
+      return;
+    }
+
+    const autoTotalRaw = details.reduce((sum, detail) => {
+      if (detail?.detail_cost !== undefined && detail?.detail_cost !== null) {
+        return sum + Number(detail.detail_cost);
+      }
+      const hasArea = typeof detail?.area === 'number';
+      const hasPrice = typeof detail?.milling_cost_per_sqm === 'number';
+      if (hasArea && hasPrice) {
+        return sum + Number(((detail.area as number) * (detail.milling_cost_per_sqm as number)).toFixed(2));
+      }
+      return sum;
+    }, 0);
+
+    const autoTotal = Number(autoTotalRaw.toFixed(2));
+    const currentTotal =
+      typeof header.total_amount === 'number'
+        ? Number(header.total_amount.toFixed(2))
+        : header.total_amount ?? 0;
+
+    const shouldUpdate =
+      header.total_amount === undefined ||
+      header.total_amount === null ||
+      Number.isNaN(currentTotal) ||
+      Math.abs(Number(currentTotal) - autoTotal) >= 0.01;
+
+    if (shouldUpdate) {
+      updateHeaderField('total_amount', autoTotal);
+    }
+  }, [
+    details,
+    header.total_amount,
+    isTotalAmountManual,
+    orderLoading,
+    detailsLoading,
+    updateHeaderField,
   ]);
 
   // Navigation

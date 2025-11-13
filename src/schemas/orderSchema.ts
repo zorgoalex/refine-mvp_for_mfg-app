@@ -164,7 +164,12 @@ export const orderDetailSchema = z.object({
 
   // Costs
   milling_cost_per_sqm: z.number().min(0, "Стоимость >= 0").nullable().optional(),
-  detail_cost: z.number().min(0, "Стоимость >= 0").nullable().optional(),
+  detail_cost: z
+    .number({
+      required_error: "Сумма детали обязательна",
+      invalid_type_error: "Сумма детали обязательна",
+    })
+    .min(0, "Стоимость >= 0"),
 
   // Additional
   note: z.string().max(1000, "Примечание не может превышать 1000 символов").nullable().optional(),

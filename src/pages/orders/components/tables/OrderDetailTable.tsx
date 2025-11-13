@@ -410,7 +410,11 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       align: 'right',
       render: (value, record) =>
         isEditing(record) ? (
-          <Form.Item name="detail_cost" style={{ margin: 0, padding: '0 4px' }}>
+          <Form.Item
+            name="detail_cost"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[{ required: true, message: 'Рассчитайте сумму детали' }]}
+          >
             <InputNumber
               style={{ width: '100%', minWidth: '90px' }}
               precision={2}
@@ -478,9 +482,27 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
             />
           </Form.Item>
         ) : (
-          <span>
-            {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
-          </span>
+          (() => {
+            const hasValue = value !== null && value !== undefined;
+            const manualOverride = isCostManuallyEdited(record);
+            const color = !hasValue
+              ? '#d32029'
+              : manualOverride
+              ? '#ad4e00'
+              : undefined;
+            const fontWeight = manualOverride || !hasValue ? 600 : undefined;
+            const title = !hasValue
+              ? 'Сумма не рассчитана'
+              : manualOverride
+              ? 'Значение отличается от авторасчета'
+              : undefined;
+
+            return (
+              <span style={{ color, fontWeight }} title={title}>
+                {hasValue ? formatNumber(value, 2) : '—'}
+              </span>
+            );
+          })()
         ),
     },
     {

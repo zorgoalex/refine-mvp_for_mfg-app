@@ -34,6 +34,7 @@ import {
     // Form metadata
     isDirty: boolean;
     version: number;
+    isTotalAmountManual: boolean;
 
     // Originals loaded from server for change detection (keyed by persistent ID)
     originalDetails: Record<number, OrderDetail>;
@@ -75,6 +76,7 @@ import {
   getFormValues: () => OrderFormValues;
     setDirty: (isDirty: boolean) => void;
     syncOriginals: () => void;
+    setTotalAmountManual: (isManual: boolean) => void;
 }
 
 // ============================================================================
@@ -93,6 +95,7 @@ import {
     deletedRequirements: [],
     isDirty: false,
     version: 0,
+    isTotalAmountManual: false,
     originalDetails: {},
     originalPayments: {},
     originalWorkshops: {},
@@ -372,6 +375,7 @@ export const useOrderFormStore = create<OrderFormState>()(
               deletedRequirements: [],
               isDirty: false,
               version: order.version || 0,
+              isTotalAmountManual: false,
               // Build original maps for change detection
               originalDetails:
                 order.details?.reduce((acc: Record<number, OrderDetail>, d) => {
@@ -453,6 +457,14 @@ export const useOrderFormStore = create<OrderFormState>()(
             false,
             'syncOriginals'
           ),
+        setTotalAmountManual: (isManual) =>
+          set(
+            () => ({
+              isTotalAmountManual: isManual,
+            }),
+            false,
+            'setTotalAmountManual'
+          ),
       }),
       {
         name: 'order-form-storage',
@@ -465,6 +477,7 @@ export const useOrderFormStore = create<OrderFormState>()(
           requirements: state.requirements,
           isDirty: state.isDirty,
           version: state.version,
+          isTotalAmountManual: state.isTotalAmountManual,
           // Do not persist originals to local storage
         }),
       }

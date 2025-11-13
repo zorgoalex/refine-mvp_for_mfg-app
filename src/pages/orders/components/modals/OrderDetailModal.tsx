@@ -142,12 +142,17 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       console.log('[OrderDetailModal] handleOk - form values:', values);
       console.log('[OrderDetailModal] handleOk - calculatedArea:', calculatedArea, 'calculatedCost:', calculatedCost);
 
+      const normalizedCost =
+        typeof values.detail_cost === 'number'
+          ? Number(values.detail_cost.toFixed(2))
+          : calculatedCost;
+
       // Prepare detail data
       const detailData: Omit<OrderDetail, 'temp_id'> = {
         ...detail, // Keep existing fields like detail_id, temp_id for edit mode
         ...values,
         area: calculatedArea,
-        detail_cost: calculatedCost,
+        detail_cost: normalizedCost,
       };
 
       console.log('[OrderDetailModal] handleOk - final detailData:', detailData);
@@ -399,7 +404,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             </Form.Item>
           </Col>
           <Col span={8}>
-            <Form.Item label="Сумма" name="detail_cost">
+            <Form.Item
+              label="Сумма"
+              name="detail_cost"
+              rules={[{ required: true, message: 'Сумма должна быть рассчитана' }]}
+            >
               <InputNumber
                 style={{ width: '100%' }}
                 disabled
