@@ -1,8 +1,27 @@
 import { useShow, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
-import { Typography, Row, Col } from "antd";
+import { Typography, Row, Col, Divider } from "antd";
 
-const { Title } = Typography;
+const { Title, Paragraph, Link } = Typography;
+
+const renderDate = (value?: string | Date | null) =>
+  value ? <DateField value={value} /> : <TextField value="-" />;
+
+const renderText = (value?: string | number | null) => (
+  <TextField value={value ?? "-"} />
+);
+
+const renderLink = (href?: string | null) =>
+  href ? (
+    <Link href={href} target="_blank" rel="noopener noreferrer">
+      {href}
+    </Link>
+  ) : (
+    <TextField value="-" />
+  );
+
+const renderBoolean = (value?: boolean | null) =>
+  value ? "Да" : "Нет";
 
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const { queryResult } = useShow({
@@ -30,24 +49,24 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
         <Col span={8}>
           <Title level={5}>Order Date</Title>
-          {record?.order_date ? <DateField value={record?.order_date} /> : <TextField value="-" />}
+          {renderDate(record?.order_date)}
         </Col>
         <Col span={8}>
           <Title level={5}>Completion Date</Title>
-          {record?.completion_date ? <DateField value={record?.completion_date} /> : <TextField value="-" />}
+          {renderDate(record?.completion_date)}
         </Col>
         <Col span={8}>
           <Title level={5}>Planned Completion Date</Title>
-          {record?.planned_completion_date ? <DateField value={record?.planned_completion_date} /> : <TextField value="-" />}
+          {renderDate(record?.planned_completion_date)}
         </Col>
 
         <Col span={8}>
           <Title level={5}>Issue Date</Title>
-          {record?.issue_date ? <DateField value={record?.issue_date} /> : <TextField value="-" />}
+          {renderDate(record?.issue_date)}
         </Col>
         <Col span={8}>
           <Title level={5}>Payment Date</Title>
-          {record?.payment_date ? <DateField value={record?.payment_date} /> : <TextField value="-" />}
+          {renderDate(record?.payment_date)}
         </Col>
         <Col span={8}>
           <Title level={5}>Priority</Title>
@@ -63,14 +82,36 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           <TextField value={record?.payment_status_name} />
         </Col>
         <Col span={8}>
-          <Title level={5}>Parts Count</Title>
-          <TextField value={record?.parts_count} />
+          <Title level={5}>Manager</Title>
+          {renderText(record?.manager_id)}
         </Col>
 
         <Col span={8}>
-          <Title level={5}>Total Area</Title>
-          <TextField value={record?.total_area} />
+          <Title level={5}>Parts Count</Title>
+          {renderText(record?.parts_count)}
         </Col>
+        <Col span={8}>
+          <Title level={5}>Total Area</Title>
+          {renderText(record?.total_area)}
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Total Amount</Title>
+          {renderText(record?.total_amount)}
+        </Col>
+
+        <Col span={8}>
+          <Title level={5}>Discount (%)</Title>
+          {renderText(record?.discount)}
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Discounted Amount</Title>
+          {renderText(record?.discounted_amount)}
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Paid Amount</Title>
+          {renderText(record?.paid_amount)}
+        </Col>
+
         <Col span={8}>
           <Title level={5}>Material</Title>
           <TextField value={record?.material_name} />
@@ -79,36 +120,69 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           <Title level={5}>Milling Type</Title>
           <TextField value={record?.milling_type_name} />
         </Col>
-
-        <Col span={8}>
-          <Title level={5}>Film</Title>
-          <TextField value={record?.film_name} />
-        </Col>
         <Col span={8}>
           <Title level={5}>Edge Type</Title>
           <TextField value={record?.edge_type_name} />
         </Col>
         <Col span={8}>
-          <Title level={5}>Manager ID</Title>
-          <TextField value={record?.manager_id} />
+          <Title level={5}>Film</Title>
+          <TextField value={record?.film_name} />
         </Col>
+      </Row>
 
+      <Divider>Файлы</Divider>
+      <Row gutter={[16, 8]}>
+        <Col span={12}>
+          <Title level={5}>Link Cutting File</Title>
+          {renderLink(record?.link_cutting_file)}
+        </Col>
+        <Col span={12}>
+          <Title level={5}>Link Cutting Image File</Title>
+          {renderLink(record?.link_cutting_image_file)}
+        </Col>
+        <Col span={12}>
+          <Title level={5}>Link CAD File</Title>
+          {renderLink(record?.link_cad_file)}
+        </Col>
+        <Col span={12}>
+          <Title level={5}>Link PDF File</Title>
+          {renderLink(record?.link_pdf_file)}
+        </Col>
+      </Row>
+
+      <Divider>Дополнительно</Divider>
+      <Row gutter={[16, 8]}>
+        <Col span={12}>
+          <Title level={5}>Reference (1C)</Title>
+          {renderText(record?.ref_key_1c)}
+        </Col>
+        <Col span={12}>
+          <Title level={5}>Version</Title>
+          {renderText(record?.version)}
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Delete Flag</Title>
+          <TextField value={renderBoolean(record?.delete_flag)} />
+        </Col>
         <Col span={8}>
           <Title level={5}>Created By</Title>
-          <TextField value={record?.created_by} />
-        </Col>
-        <Col span={8}>
-          <Title level={5}>Created At</Title>
-          {record?.created_at ? <DateField value={record?.created_at} /> : <TextField value="-" />}
+          {renderText(record?.created_by)}
         </Col>
         <Col span={8}>
           <Title level={5}>Edited By</Title>
-          <TextField value={record?.edited_by} />
+          {renderText(record?.edited_by)}
         </Col>
-
+        <Col span={8}>
+          <Title level={5}>Created At</Title>
+          {renderDate(record?.created_at)}
+        </Col>
         <Col span={8}>
           <Title level={5}>Updated At</Title>
-          {record?.updated_at ? <DateField value={record?.updated_at} /> : <TextField value="-" />}
+          {renderDate(record?.updated_at)}
+        </Col>
+        <Col span={24}>
+          <Title level={5}>Notes</Title>
+          <Paragraph>{record?.notes || "—"}</Paragraph>
         </Col>
       </Row>
     </Show>

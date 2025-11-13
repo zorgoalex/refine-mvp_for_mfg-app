@@ -1,7 +1,7 @@
 // Main Order Form Component
 // Master-Detail form with Tabs for child entities
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Tabs, Button, Space, Spin, notification } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
@@ -11,6 +11,7 @@ import { useUnsavedChangesWarning } from '../../../hooks/useUnsavedChangesWarnin
 import { useOrderSave } from '../../../hooks/useOrderSave';
 import { OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
+import dayjs from 'dayjs';
 
 // Sections
 import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
@@ -56,6 +57,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     useDefaultStatuses();
   const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
+  const [activeTab, setActiveTab] = useState('basic');
 
 
   // Load existing order data in edit mode
@@ -95,8 +97,12 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   // Initialize form with default values for create mode
   useEffect(() => {
     if (mode === 'create' && defaultOrderStatus && defaultPaymentStatus) {
+      const today = dayjs();
+      const orderDate = today.format('YYYY-MM-DD');
+      const plannedCompletion = today.add(10, 'day').format('YYYY-MM-DD');
       setHeader({
-        order_date: new Date().toISOString().split('T')[0], // Today's date
+        order_date: orderDate,
+        planned_completion_date: plannedCompletion,
         order_status_id: defaultOrderStatus,
         payment_status_id: defaultPaymentStatus,
         priority: 100,
@@ -389,6 +395,105 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
   };
 
+  const headerTabItems = useMemo(
+    () => [
+      {
+        key: 'basic',
+        label: 'Основная информация',
+        children: (
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <OrderBasicInfo />
+            <OrderStatusSection />
+            <OrderNotesSection />
+          </Space>
+        ),
+      },
+      {
+        key: 'dates',
+        label: 'Даты',
+        children: <OrderDatesSection />,
+      },
+      {
+        key: 'finance',
+        label: 'Финансы',
+        children: (
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <OrderFinanceSection />
+            <OrderAggregatesDisplay />
+          </Space>
+        ),
+      },
+      {
+        key: 'additional',
+        label: 'Дополнительно',
+        children: (
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <OrderLegacySection />
+            <OrderFilesSection />
+          </Space>
+        ),
+      },
+      {
+        key: 'details',
+        label: 'Детали заказа',
+        children: <OrderDetailsTab />,
+      },
+      {
+        key: 'payments',
+        label: 'Платежи',
+        children: <div>TODO: Payments Tab</div>,
+        disabled: mode === 'create' && !header.order_id,
+      },
+      {
+        key: 'workshops',
+        label: 'Цеха',
+        children: <div>TODO: Workshops Tab</div>,
+        disabled: mode === 'create' && !header.order_id,
+      },
+      {
+        key: 'requirements',
+        label: 'Потребности',
+        children: <div>TODO: Requirements Tab</div>,
+        disabled: mode === 'create' && !header.order_id,
+      },
+    ],
+    [mode, header.order_id]
+  );
+
+  const enabledTabKeys = useMemo(
+    () => headerTabItems.filter((item) => !item.disabled).map((item) => item.key as string),
+    [headerTabItems]
+  );
+
+  useEffect(() => {
+    if (!enabledTabKeys.includes(activeTab) && enabledTabKeys.length > 0) {
+      setActiveTab(enabledTabKeys[0]);
+    }
+  }, [enabledTabKeys, activeTab]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!event.ctrlKey) return;
+      if (event.key.toLowerCase() !== 'tab') return;
+      event.preventDefault();
+
+      if (enabledTabKeys.length === 0) {
+        return;
+      }
+
+      const direction = event.shiftKey ? -1 : 1;
+      const currentIndex = enabledTabKeys.indexOf(activeTab);
+      const startIndex = currentIndex === -1 ? 0 : currentIndex;
+      const nextIndex =
+        (startIndex + direction + enabledTabKeys.length) % enabledTabKeys.length;
+
+      setActiveTab(enabledTabKeys[nextIndex]);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [enabledTabKeys, activeTab]);
+
   // Handle cancel / close requests
   const handleCancel = () => {
     checkUnsavedChanges(exitForm);
@@ -415,68 +520,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     );
   }
 
-  const headerTabItems = [
-    {
-      key: 'basic',
-      label: 'Основная информация',
-      children: (
-        <Space direction="vertical" style={{ width: '100%' }} size="large">
-          <OrderBasicInfo />
-          <OrderStatusSection />
-          <OrderNotesSection />
-        </Space>
-      ),
-    },
-    {
-      key: 'dates',
-      label: 'Даты',
-      children: <OrderDatesSection />,
-    },
-    {
-      key: 'finance',
-      label: 'Финансы',
-      children: (
-        <Space direction="vertical" style={{ width: '100%' }} size="large">
-          <OrderFinanceSection />
-          <OrderAggregatesDisplay />
-        </Space>
-      ),
-    },
-    {
-      key: 'additional',
-      label: 'Дополнительно',
-      children: (
-        <Space direction="vertical" style={{ width: '100%' }} size="large">
-          <OrderLegacySection />
-          <OrderFilesSection />
-        </Space>
-      ),
-    },
-    {
-      key: 'details',
-      label: 'Детали заказа',
-      children: <OrderDetailsTab />,
-    },
-    {
-      key: 'payments',
-      label: 'Платежи',
-      children: <div>TODO: Payments Tab</div>,
-      disabled: mode === 'create' && !header.order_id,
-    },
-    {
-      key: 'workshops',
-      label: 'Цеха',
-      children: <div>TODO: Workshops Tab</div>,
-      disabled: mode === 'create' && !header.order_id,
-    },
-    {
-      key: 'requirements',
-      label: 'Потребности',
-      children: <div>TODO: Requirements Tab</div>,
-      disabled: mode === 'create' && !header.order_id,
-    },
-  ];
-
   const orderName = header.order_name?.trim();
   const cardTitle =
     mode === 'create'
@@ -497,11 +540,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           >
             Сохранить
           </Button>
-          {isDirty && (
-            <Button icon={<CloseOutlined />} onClick={handleCancel}>
-              Отмена
-            </Button>
-          )}
+          <Button icon={<CloseOutlined />} onClick={handleCancel}>
+            Закрыть
+          </Button>
         </Space>
       }
     >
@@ -510,7 +551,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
       {/* Editable tabs */}
       <Tabs
-        defaultActiveKey="basic"
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key)}
         items={headerTabItems}
         type="card"
       />
