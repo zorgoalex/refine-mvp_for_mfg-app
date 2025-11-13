@@ -400,7 +400,11 @@ export const useOrderFormStore = create<OrderFormState>()(
 
         getFormValues: () => {
           const state = get();
-          return {
+          console.log('[orderFormStore] getFormValues - state.header:', state.header);
+          console.log('[orderFormStore] getFormValues - state.details:', state.details);
+          console.log('[orderFormStore] getFormValues - details.length:', state.details.length);
+
+          const formValues = {
             header: state.header as Order,
             details: state.details,
             payments: state.payments,
@@ -413,6 +417,9 @@ export const useOrderFormStore = create<OrderFormState>()(
             isDirty: state.isDirty,
             version: state.version,
           };
+
+          console.log('[orderFormStore] getFormValues - returning:', formValues);
+          return formValues;
         },
 
         setDirty: (isDirty) => set({ isDirty }, false, 'setDirty'),

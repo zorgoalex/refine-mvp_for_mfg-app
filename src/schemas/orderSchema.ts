@@ -324,7 +324,7 @@ export const requirementSchema = z.object({
 export const orderFormSchema = z
   .object({
     header: orderHeaderSchema,
-    details: z.array(orderDetailSchema).min(1, "Добавьте хотя бы одну деталь"),
+    details: z.array(orderDetailSchema).min(1, "Необходимо добавить минимум одну позицию (деталь)"),
     payments: z.array(paymentSchema),
     workshops: z.array(workshopSchema),
     requirements: z.array(requirementSchema),

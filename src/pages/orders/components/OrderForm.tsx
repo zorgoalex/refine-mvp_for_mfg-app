@@ -54,13 +54,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
 
-  // Debug logging
-  React.useEffect(() => {
-    console.log('[OrderForm] Mode:', mode);
-    console.log('[OrderForm] statusesLoading:', statusesLoading);
-    console.log('[OrderForm] defaultOrderStatus:', defaultOrderStatus);
-    console.log('[OrderForm] defaultPaymentStatus:', defaultPaymentStatus);
-  }, [mode, statusesLoading, defaultOrderStatus, defaultPaymentStatus]);
 
   // Load existing order data in edit mode
   const shouldLoadOrder = mode === 'edit' && !!orderId;
@@ -148,37 +141,106 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   // Handle save
   const handleSave = async () => {
+    console.log('[OrderForm] ========== handleSave STARTED ==========');
+    console.log('[OrderForm] handleSave - mode:', mode);
+    console.log('[OrderForm] handleSave - orderId:', orderId);
+
     try {
       const formValues = getFormValues();
+      console.log('[OrderForm] handleSave - formValues:', formValues);
+      console.log('[OrderForm] handleSave - details count:', formValues.details?.length || 0);
 
       // Zod validation
       const result = orderFormSchema.safeParse(formValues);
+      console.log('[OrderForm] handleSave - validation result:', result.success);
+      console.log('[OrderForm] handleSave - full result object:', result);
+
       if (!result.success) {
-        // Log full error for debugging
-        // console.error('Validation failed:', result.error);
-        // console.error('Form values:', formValues);
-
         // Show validation errors
-        const errors = result.error?.errors || [];
-        const errorMessages = errors.length > 0
-          ? errors.map((err) => `${err.path.join('.')}: ${err.message}`).join('\n')
-          : 'Ошибка валидации данных';
+        console.log('[OrderForm] handleSave - result.error (FULL):', result.error);
+        console.log('[OrderForm] handleSave - result.error type:', typeof result.error);
+        console.log('[OrderForm] handleSave - result.error keys:', result.error ? Object.keys(result.error) : 'null');
+        console.log('[OrderForm] handleSave - result.error.issues:', result.error?.issues);
+        console.log('[OrderForm] handleSave - result.error.errors:', result.error?.errors);
 
-        notification.error({
-          message: 'Ошибка валидации',
-          description: (
-            <div style={{ whiteSpace: 'pre-line' }}>
-              {errorMessages}
-            </div>
-          ),
-          duration: 0, // Don't auto-hide
+        // Zod uses 'issues' property, not 'errors'!
+        const issues = result.error?.issues || [];
+        console.log('[OrderForm] handleSave - validation issues:', issues);
+        console.log('[OrderForm] handleSave - validation issues (detailed):', JSON.stringify(issues, null, 2));
+        console.log('[OrderForm] handleSave - validation issues length:', issues.length);
+
+        // Check if the error is about missing details (array too small)
+        const hasDetailsError = issues.some(err => {
+          const pathStr = err.path.join('.');
+          const isDetailsPath = pathStr === 'details';
+          const isTooSmall = err.code === 'too_small';
+          const hasMinimumText = err.message.includes('минимум');
+
+          console.log('[OrderForm] handleSave - checking error:', {
+            path: err.path,
+            pathStr,
+            code: err.code,
+            message: err.message,
+            isDetailsPath,
+            isTooSmall,
+            hasMinimumText,
+            result: isDetailsPath && (isTooSmall || hasMinimumText)
+          });
+
+          // Check if it's a 'details' error with too_small code (array length validation)
+          return isDetailsPath && (isTooSmall || hasMinimumText);
         });
+
+        console.log('[OrderForm] handleSave - hasDetailsError:', hasDetailsError);
+
+        if (hasDetailsError) {
+          // Special handling for missing details error - prominent notification
+          console.log('[OrderForm] handleSave - showing SPECIAL details error notification');
+          notification.error({
+            message: '⚠️ Невозможно сохранить заказ',
+            description: (
+              <div style={{ fontSize: '14px' }}>
+                <p style={{ marginBottom: '12px', fontWeight: 'bold', fontSize: '15px', color: '#ff4d4f' }}>
+                  Для создания заказа необходимо добавить минимум одну позицию (деталь).
+                </p>
+                <p style={{ marginBottom: '8px' }}>
+                  📋 Перейдите на вкладку <strong>"Позиции заказа"</strong>
+                </p>
+                <p style={{ marginBottom: 0 }}>
+                  ➕ Нажмите кнопку <strong>"Добавить"</strong> для создания позиции
+                </p>
+              </div>
+            ),
+            duration: 0, // Don't auto-hide
+          });
+        } else {
+          // Regular validation errors
+          console.log('[OrderForm] handleSave - showing REGULAR validation error notification');
+          const errorMessages = issues.length > 0
+            ? issues.map((err) => `${err.path.join('.')}: ${err.message}`).join('\n')
+            : 'Ошибка валидации данных';
+
+          console.log('[OrderForm] handleSave - errorMessages:', errorMessages);
+
+          notification.error({
+            message: 'Ошибка валидации',
+            description: (
+              <div style={{ whiteSpace: 'pre-line' }}>
+                {errorMessages}
+              </div>
+            ),
+            duration: 0, // Don't auto-hide
+          });
+        }
         return;
       }
 
+        console.log('[OrderForm] handleSave - calling saveOrder...');
         const savedOrderId = await saveOrder(formValues, mode === 'edit');
+        console.log('[OrderForm] handleSave - saveOrder returned:', savedOrderId);
 
       if (savedOrderId) {
+        console.log('[OrderForm] handleSave - save SUCCESS, processing result...');
         // On success: remain on the same page.
         // If this was a create, set header.order_id so tabs unlock and state reflects persisted record
         if (mode === 'create' && !header.order_id) {
@@ -190,11 +252,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         }
       }
     } catch (error) {
+      console.error('[OrderForm] handleSave - CATCH block, error:', error);
       notification.error({
         message: 'Ошибка при сохранении',
         description: error instanceof Error ? error.message : 'Неизвестная ошибка',
         duration: 0,
       });
+    } finally {
+      console.log('[OrderForm] ========== handleSave ENDED ==========');
     }
   };
 
@@ -215,14 +280,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     (shouldLoadDetails && detailsLoading) ||
     (shouldLoadPayments && paymentsLoading);
 
-  // Debug loading state
-  React.useEffect(() => {
-    console.log('[OrderForm] isLoadingEssential:', isLoadingEssential);
-    console.log('[OrderForm] - statusesLoading:', statusesLoading);
-    console.log('[OrderForm] - shouldLoadOrder:', shouldLoadOrder, 'orderLoading:', orderLoading);
-    console.log('[OrderForm] - shouldLoadDetails:', shouldLoadDetails, 'detailsLoading:', detailsLoading);
-    console.log('[OrderForm] - shouldLoadPayments:', shouldLoadPayments, 'paymentsLoading:', paymentsLoading);
-  }, [isLoadingEssential, statusesLoading, shouldLoadOrder, orderLoading, shouldLoadDetails, detailsLoading, shouldLoadPayments, paymentsLoading]);
 
   if (isLoadingEssential) {
     return (
