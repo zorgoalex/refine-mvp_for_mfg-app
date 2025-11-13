@@ -114,9 +114,27 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       const paymentsReady = !shouldLoadPayments || (!paymentsLoading && paymentsData);
 
       if (detailsReady && paymentsReady) {
+        // Auto-calculate empty detail_cost before loading into store
+        const processedDetails = (detailsData?.data || []).map((detail: any) => {
+          // If detail_cost is null/undefined but area and price are available, calculate it
+          if (!detail.detail_cost && detail.area && detail.milling_cost_per_sqm) {
+            const calculatedCost = Number((detail.area * detail.milling_cost_per_sqm).toFixed(2));
+            console.log(
+              '[OrderForm] Auto-calculating cost for detail #' + detail.detail_number +
+              ': area=' + detail.area + ' × price=' + detail.milling_cost_per_sqm +
+              ' = ' + calculatedCost
+            );
+            return {
+              ...detail,
+              detail_cost: calculatedCost,
+            };
+          }
+          return detail;
+        });
+
         loadOrder({
           header: orderData.data,
-          details: detailsData?.data || [],
+          details: processedDetails,
           payments: paymentsData?.data || [],
           workshops: [],
           requirements: [],

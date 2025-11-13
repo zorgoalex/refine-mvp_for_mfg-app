@@ -209,6 +209,52 @@ export const useOrderSave = (): UseOrderSaveResult => {
         await Promise.all(deleteDetailPromises);
       }
 
+      // ========== STEP 3.5: Recalculate and update total_amount ==========
+      // Fetch saved details from DB to get accurate data (including any DB-calculated fields)
+      console.log('[useOrderSave] Fetching saved details from DB for order:', createdOrderId);
+
+      const savedDetailsResult = await dataProvider().getList({
+        resource: 'order_details',
+        filters: [{ field: 'order_id', operator: 'eq', value: createdOrderId }],
+        pagination: { current: 1, pageSize: 1000 },
+      });
+
+      const savedDetails = savedDetailsResult.data || [];
+      console.log('[useOrderSave] Fetched', savedDetails.length, 'details from DB');
+
+      if (savedDetails.length > 0) {
+        console.log('[useOrderSave] Recalculating total_amount from saved details...');
+
+        // Calculate total_amount by summing detail_cost from all SAVED details
+        const totalAmount = savedDetails.reduce((sum, detail: any) => {
+          const cost = detail.detail_cost || 0;
+          console.log('[useOrderSave] Detail #' + detail.detail_number + ' cost:', cost);
+          return sum + cost;
+        }, 0);
+
+        console.log('[useOrderSave] Calculated total_amount:', totalAmount);
+
+        // Update order with calculated total_amount
+        await dataProvider().update({
+          resource: 'orders',
+          id: createdOrderId,
+          variables: {
+            total_amount: totalAmount,
+          },
+        });
+
+        console.log('[useOrderSave] Order total_amount updated successfully');
+      } else {
+        console.log('[useOrderSave] No details found, setting total_amount to 0');
+        await dataProvider().update({
+          resource: 'orders',
+          id: createdOrderId,
+          variables: {
+            total_amount: 0,
+          },
+        });
+      }
+
       // ========== STEP 4: Save payments ==========
       if (values.payments && values.payments.length > 0) {
         const { originalPayments } = useOrderFormStore.getState();

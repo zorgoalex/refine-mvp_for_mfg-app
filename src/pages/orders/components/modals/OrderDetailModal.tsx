@@ -28,6 +28,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 }) => {
   const [form] = Form.useForm();
   const [calculatedArea, setCalculatedArea] = useState<number>(0);
+  const [calculatedCost, setCalculatedCost] = useState<number>(0);
   const [millingTypeModalOpen, setMillingTypeModalOpen] = useState(false);
   const [edgeTypeModalOpen, setEdgeTypeModalOpen] = useState(false);
 
@@ -83,6 +84,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       if (mode === 'edit' && detail) {
         form.setFieldsValue(detail);
         setCalculatedArea(detail.area || 0);
+        setCalculatedCost(detail.detail_cost || 0);
       } else {
         form.resetFields();
         form.setFieldsValue({
@@ -90,6 +92,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           priority: 100,
         });
         setCalculatedArea(0);
+        setCalculatedCost(0);
       }
     }
   }, [open, mode, detail, form]);
@@ -99,15 +102,36 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     const height = form.getFieldValue('height');
     const width = form.getFieldValue('width');
 
-    // console.log('[OrderDetailModal] handleDimensionChange - height:', height, 'width:', width);
+    console.log('[OrderDetailModal] handleDimensionChange - height:', height, 'width:', width);
 
     if (height && width && height > 0 && width > 0) {
       const area = (height * width) / 1000000; // Convert mm² to m²
-      // console.log('[OrderDetailModal] calculated area:', area, '(height * width / 1000000 =', height, '*', width, '/ 1000000)');
+      console.log('[OrderDetailModal] calculated area:', area);
       setCalculatedArea(area);
       form.setFieldsValue({ area });
+
+      // Also recalculate cost when area changes
+      handleCostCalculation(area);
     } else {
-      // console.log('[OrderDetailModal] cannot calculate - invalid dimensions');
+      console.log('[OrderDetailModal] cannot calculate area - invalid dimensions');
+    }
+  };
+
+  // Auto-calculate cost when area or price changes
+  const handleCostCalculation = (areaOverride?: number) => {
+    const area = areaOverride !== undefined ? areaOverride : form.getFieldValue('area');
+    const pricePerSqm = form.getFieldValue('milling_cost_per_sqm');
+
+    console.log('[OrderDetailModal] handleCostCalculation - area:', area, 'pricePerSqm:', pricePerSqm);
+
+    if (area && pricePerSqm && area > 0 && pricePerSqm > 0) {
+      const cost = area * pricePerSqm;
+      const roundedCost = Number(cost.toFixed(2));
+      console.log('[OrderDetailModal] calculated cost:', cost, 'rounded:', roundedCost);
+      setCalculatedCost(roundedCost);
+      form.setFieldsValue({ detail_cost: roundedCost });
+    } else {
+      console.log('[OrderDetailModal] cannot calculate cost - invalid area or price');
     }
   };
 
@@ -115,22 +139,23 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     try {
       const values = await form.validateFields();
 
-      // console.log('[OrderDetailModal] handleOk - form values:', values);
-      // console.log('[OrderDetailModal] handleOk - calculatedArea:', calculatedArea);
+      console.log('[OrderDetailModal] handleOk - form values:', values);
+      console.log('[OrderDetailModal] handleOk - calculatedArea:', calculatedArea, 'calculatedCost:', calculatedCost);
 
       // Prepare detail data
       const detailData: Omit<OrderDetail, 'temp_id'> = {
         ...detail, // Keep existing fields like detail_id, temp_id for edit mode
         ...values,
         area: calculatedArea,
+        detail_cost: calculatedCost,
       };
 
-      // console.log('[OrderDetailModal] handleOk - final detailData:', detailData);
+      console.log('[OrderDetailModal] handleOk - final detailData:', detailData);
 
       onSave(detailData);
       form.resetFields();
     } catch (error) {
-      // console.error('Validation failed:', error);
+      console.error('[OrderDetailModal] Validation failed:', error);
     }
   };
 
@@ -358,13 +383,29 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               />
             </Form.Item>
           </Col>
-          <Col span={12}>
-            <Form.Item label="Стоимость фрезеровки (за м²)" name="milling_cost_per_sqm">
+        </Row>
+
+        <Row gutter={16}>
+          <Col span={8}>
+            <Form.Item label="Цена за м²" name="milling_cost_per_sqm">
               <InputNumber
                 style={{ width: '100%' }}
                 min={0}
                 precision={2}
                 parser={numberParser}
+                addonAfter={CURRENCY_SYMBOL}
+                onChange={() => handleCostCalculation()}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="Сумма" name="detail_cost">
+              <InputNumber
+                style={{ width: '100%' }}
+                disabled
+                value={calculatedCost}
+                precision={2}
+                formatter={(value) => numberFormatter(value, 2)}
                 addonAfter={CURRENCY_SYMBOL}
               />
             </Form.Item>

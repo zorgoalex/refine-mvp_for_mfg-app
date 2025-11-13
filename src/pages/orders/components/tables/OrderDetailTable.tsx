@@ -108,6 +108,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   });
 
   const startEdit = (record: OrderDetail) => {
+    console.log('[OrderDetailTable] startEdit - detail:', record);
     setEditingKey(record.temp_id || record.detail_id || null);
     setCurrentFilmId(record.film_id ?? null);
     form.setFieldsValue({
@@ -126,6 +127,15 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       production_status_id: record.production_status_id ?? null,
       detail_name: record.detail_name ?? '',
     });
+
+    // Trigger auto-calculation if area and price are already set
+    // Use setTimeout to ensure form values are set before calculation
+    setTimeout(() => {
+      if (record.area && record.milling_cost_per_sqm && !record.detail_cost) {
+        console.log('[OrderDetailTable] startEdit - triggering recalcSum for existing area and price');
+        recalcSum();
+      }
+    }, 0);
   };
 
   const cancelEdit = () => {
@@ -138,27 +148,57 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   const recalcArea = () => {
     const height = form.getFieldValue('height');
     const width = form.getFieldValue('width');
+    console.log('[OrderDetailTable] recalcArea - height:', height, 'width:', width);
+
     if (height && width && height > 0 && width > 0) {
       const area = (height * width) / 1000000; // mm^2 -> m^2
+      console.log('[OrderDetailTable] recalcArea - calculated area:', area);
       form.setFieldsValue({ area });
       recalcSum(); // Also recalculate sum when area changes
+    } else {
+      console.log('[OrderDetailTable] recalcArea - skipped (invalid height or width)');
     }
   };
 
   const recalcSum = () => {
+    console.log('[OrderDetailTable] recalcSum - isSumEditable:', isSumEditable);
+
     // Only auto-calculate if sum is not in manual edit mode
     if (!isSumEditable) {
       const area = form.getFieldValue('area');
       const pricePerSqm = form.getFieldValue('milling_cost_per_sqm');
+      console.log('[OrderDetailTable] recalcSum - area:', area, 'pricePerSqm:', pricePerSqm);
+
       if (area && pricePerSqm && area > 0 && pricePerSqm > 0) {
         const sum = area * pricePerSqm;
-        form.setFieldsValue({ detail_cost: Number(sum.toFixed(2)) });
+        const roundedSum = Number(sum.toFixed(2));
+        console.log('[OrderDetailTable] recalcSum - calculated sum:', sum, 'rounded:', roundedSum);
+        form.setFieldsValue({ detail_cost: roundedSum });
+      } else {
+        console.log('[OrderDetailTable] recalcSum - skipped (invalid area or price)');
       }
+    } else {
+      console.log('[OrderDetailTable] recalcSum - skipped (manual edit mode)');
     }
+  };
+
+  // Check if detail cost matches auto-calculated value
+  const isCostManuallyEdited = (detail: OrderDetail): boolean => {
+    if (!detail.area || !detail.milling_cost_per_sqm || !detail.detail_cost) {
+      return false;
+    }
+    const expectedCost = Number((detail.area * detail.milling_cost_per_sqm).toFixed(2));
+    const actualCost = Number(detail.detail_cost);
+    const diff = Math.abs(expectedCost - actualCost);
+    // Allow small rounding differences (< 0.01)
+    return diff >= 0.01;
   };
 
   const saveEdit = async (record: OrderDetail) => {
     const values = await form.validateFields();
+    console.log('[OrderDetailTable] saveEdit - form values:', values);
+    console.log('[OrderDetailTable] saveEdit - area:', values.area, 'price:', values.milling_cost_per_sqm, 'cost:', values.detail_cost);
+
     const tempId = record.temp_id || record.detail_id!;
     updateDetail(tempId, values);
     cancelEdit();
