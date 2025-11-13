@@ -8,8 +8,9 @@ export const OrderCreate: React.FC = () => {
   const navigate = useNavigate();
 
   const handleSaveSuccess = (orderId: number) => {
-    // Stay on the page after save (no navigation)
-    // Navigation is disabled per product requirement
+    // After successful create, redirect to edit page for this order
+    console.log('[OrderCreate] handleSaveSuccess - navigating to edit page for order:', orderId);
+    navigate(`/orders/edit/${orderId}`, { replace: true });
   };
 
   const handleCancel = () => {

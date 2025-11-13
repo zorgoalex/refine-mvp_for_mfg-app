@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Modal } from 'antd';
-import { useNavigation } from '@refinedev/core';
+import { useNavigate } from 'react-router-dom';
 import { OrderForm } from './OrderForm';
 import { useOrderFormStore } from '../../../stores/orderFormStore';
 
@@ -13,7 +13,7 @@ interface OrderCreateModalProps {
 }
 
 export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClose }) => {
-  const { edit } = useNavigation();
+  const navigate = useNavigate();
   const { reset } = useOrderFormStore();
   const [isReady, setIsReady] = useState(false);
 
@@ -34,14 +34,26 @@ export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClos
   }, [open, reset]);
 
   const handleSaveSuccess = (orderId: number) => {
+    console.log('[OrderCreateModal] ========== handleSaveSuccess STARTED ==========');
     console.log('[OrderCreateModal] Order saved successfully, orderId:', orderId);
+    console.log('[OrderCreateModal] Calling onClose()...');
+
     // Close modal
     onClose();
 
+    console.log('[OrderCreateModal] Modal closed, setting timeout for navigation...');
     // Navigate to edit page with the newly created order
     setTimeout(() => {
-      edit('orders', orderId);
+      console.log('[OrderCreateModal] Timeout executed, calling navigate(/orders/edit/' + orderId + ')...');
+      try {
+        navigate(`/orders/edit/${orderId}`);
+        console.log('[OrderCreateModal] Navigation successful!');
+      } catch (error) {
+        console.error('[OrderCreateModal] Navigation failed:', error);
+      }
     }, 100);
+
+    console.log('[OrderCreateModal] ========== handleSaveSuccess ENDED ==========');
   };
 
   const handleCancel = () => {

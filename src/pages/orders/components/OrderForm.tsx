@@ -241,14 +241,27 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
       if (savedOrderId) {
         console.log('[OrderForm] handleSave - save SUCCESS, processing result...');
+        console.log('[OrderForm] handleSave - mode:', mode);
+        console.log('[OrderForm] handleSave - header.order_id:', header.order_id);
+        console.log('[OrderForm] handleSave - savedOrderId:', savedOrderId);
+
         // On success: remain on the same page.
         // If this was a create, set header.order_id so tabs unlock and state reflects persisted record
         if (mode === 'create' && !header.order_id) {
+          console.log('[OrderForm] handleSave - setting header.order_id to:', savedOrderId);
           setHeader({ order_id: savedOrderId });
         }
+
+        console.log('[OrderForm] handleSave - setting dirty to false');
         setDirty(false);
+
+        console.log('[OrderForm] handleSave - onSaveSuccess callback exists?', !!onSaveSuccess);
         if (onSaveSuccess) {
+          console.log('[OrderForm] handleSave - calling onSaveSuccess with orderId:', savedOrderId);
           onSaveSuccess(savedOrderId);
+          console.log('[OrderForm] handleSave - onSaveSuccess called successfully');
+        } else {
+          console.warn('[OrderForm] handleSave - WARNING: onSaveSuccess callback is not defined!');
         }
       }
     } catch (error) {
