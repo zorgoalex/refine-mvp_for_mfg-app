@@ -6,6 +6,7 @@ import { EyeOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { formatNumber } from "../../utils/numberFormat";
 import dayjs from "dayjs";
 import { OrderCreateModal } from "./components/OrderCreateModal";
+import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -25,6 +26,10 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     if (!date) return '—';
     return dayjs(date).format('DD.MM.YYYY');
   };
+
+  const renderStatus = (value?: string | null) => (
+    <span className="orders-status-value">{value || '—'}</span>
+  );
 
   return (
     <>
@@ -62,17 +67,18 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           className="col-order-id"
           onHeaderCell={() => ({ className: 'col-order-id' })}
         />
-        <Table.Column dataIndex="order_name" title="Order Name" sorter width={67} />
+        <Table.Column dataIndex="order_name" title="Order Name" sorter width={60} className="orders-col narrow" />
         <Table.Column
           dataIndex="order_date"
           title="Order Date"
           sorter
-          width={100}
+          width={80}
+          className="orders-col"
           render={(value) => formatDate(value)}
         />
-        <Table.Column dataIndex="client_name" title="Client" width={126} />
-        <Table.Column dataIndex="milling_type_name" title="Milling Type" width={90} />
-        <Table.Column dataIndex="material_name" title="Material" width={96} />
+        <Table.Column dataIndex="client_name" title="Client" width={100} className="orders-col" />
+        <Table.Column dataIndex="milling_type_name" title="Milling Type" width={90} className="orders-col" />
+        <Table.Column dataIndex="material_name" title="Material" width={90} className="orders-col" />
         <Table.Column
           dataIndex="priority"
           title="П"
@@ -85,65 +91,85 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           dataIndex="completion_date"
           title="Completion Date"
           sorter
-          width={120}
+          width={90}
+          className="orders-col"
           render={(value) => formatDate(value)}
         />
         <Table.Column
           dataIndex="planned_completion_date"
           title="Planned Completion"
           sorter
-          width={104}
+          width={90}
+          className="orders-col"
           render={(value) => formatDate(value)}
         />
-        <Table.Column dataIndex="order_status_name" title="Order Status" width={110} />
-        <Table.Column dataIndex="payment_status_name" title="Payment Status" width={120} />
+        <Table.Column
+          dataIndex="order_status_name"
+          title="Order Status"
+          width={90}
+          className="orders-col status order-status"
+          render={(value) => renderStatus(value)}
+        />
+        <Table.Column
+          dataIndex="payment_status_name"
+          title="Payment Status"
+          width={90}
+          className="orders-col status payment-status"
+          render={(value) => renderStatus(value)}
+        />
         <Table.Column
           dataIndex="issue_date"
           title="Issue Date"
           sorter
-          width={100}
+          width={90}
+          className="orders-col"
           render={(value) => formatDate(value)}
         />
         <Table.Column
           dataIndex="total_amount"
           title="Total Amount"
           sorter
-          width={110}
+          width={90}
+          className="orders-col"
           render={(value) => formatNumber(value as number, 0)}
         />
         <Table.Column
           dataIndex="discounted_amount"
           title="Discounted Amount"
           sorter
-          width={112}
+          width={90}
+          className="orders-col"
           render={(value) => formatNumber(value as number, 0)}
         />
         <Table.Column
           dataIndex="discount"
           title="Discount"
           sorter
-          width={80}
+          width={70}
+          className="orders-col"
           render={(value) => formatNumber(value as number, 0)}
         />
         <Table.Column
           dataIndex="paid_amount"
           title="Paid Amount"
           sorter
-          width={110}
+          width={90}
+          className="orders-col"
           render={(value) => formatNumber(value as number, 0)}
         />
         <Table.Column
           dataIndex="payment_date"
           title="Payment Date"
           sorter
-          width={100}
+          width={90}
+          className="orders-col"
           render={(value) => formatDate(value)}
         />
-        <Table.Column dataIndex="notes" title="Notes" width={140} />
-        <Table.Column dataIndex="parts_count" title="Parts Count" sorter width={100} />
-        <Table.Column dataIndex="total_area" title="Total Area" sorter width={80} />
-        <Table.Column dataIndex="edge_type_name" title="Edge Type" width={80} />
-        <Table.Column dataIndex="film_name" title="Film" width={150} />
+        <Table.Column dataIndex="notes" title="Notes" width={120} className="orders-col" />
+        <Table.Column dataIndex="parts_count" title="Parts Count" sorter width={80} className="orders-col" />
+        <Table.Column dataIndex="total_area" title="Total Area" sorter width={70} className="orders-col" />
+        <Table.Column dataIndex="edge_type_name" title="Edge Type" width={70} className="orders-col" />
+        <Table.Column dataIndex="film_name" title="Film" width={120} className="orders-col" />
         <Table.Column
           title="Actions"
           width={80}

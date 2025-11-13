@@ -1,0 +1,20 @@
+.orders-table .ant-table-thead > tr > th,
+.orders-table .ant-table-tbody > tr > td {
+  word-break: break-word;
+  white-space: normal;
+}
+
+.orders-table td.orders-col {
+  font-size: 80%;
+}
+
+.orders-table td.orders-col.status {
+  font-size: 100%;
+}
+
+.orders-table .orders-status-value {
+  display: block;
+  hyphens: auto;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
