@@ -241,7 +241,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   ]);
 
   // Navigation
-  const { list, edit } = useNavigation();
+  const { list } = useNavigation();
 
   // Handle save
   const handleSave = async () => {
@@ -380,14 +380,18 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
   };
 
-  // Handle cancel
+  const exitForm = () => {
+    reset();
+    if (onCancel) {
+      onCancel();
+    } else {
+      list('orders');
+    }
+  };
+
+  // Handle cancel / close requests
   const handleCancel = () => {
-    checkUnsavedChanges(() => {
-      reset();
-      if (onCancel) {
-        onCancel();
-      }
-    });
+    checkUnsavedChanges(exitForm);
   };
 
   // Show loading only for essential data
@@ -473,9 +477,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     },
   ];
 
+  const orderName = header.order_name?.trim();
+  const cardTitle =
+    mode === 'create'
+      ? `Создание заказа${orderName ? ` «${orderName}»` : ''}`
+      : `Редактирование заказа${orderName ? ` «${orderName}»` : ''}`;
+
   return (
     <Card
-      title={mode === 'create' ? 'Создание заказа' : `Редактирование заказа ${header.order_name || ''}`}
+      title={cardTitle}
       extra={
         <Space>
           <Button

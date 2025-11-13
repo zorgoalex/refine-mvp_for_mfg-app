@@ -10,6 +10,7 @@ import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { MillingTypeQuickCreate } from './MillingTypeQuickCreate';
 import { EdgeTypeQuickCreate } from './EdgeTypeQuickCreate';
+import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 
 interface OrderDetailModalProps {
   open: boolean;
@@ -174,6 +175,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       width={800}
       okText="Сохранить"
       cancelText="Отмена"
+      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
     >
       <Form form={form} layout="vertical">
         <Row gutter={16}>

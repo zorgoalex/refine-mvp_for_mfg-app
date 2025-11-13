@@ -8,8 +8,7 @@ import { OrderDetailTable } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { OrderDetail } from '../../../../types/orders';
-
-const { confirm } = Modal;
+import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 
 export const OrderDetailsTab: React.FC = () => {
   const { details, addDetail, updateDetail, deleteDetail, reorderDetails } = useOrderFormStore();
@@ -75,12 +74,13 @@ export const OrderDetailsTab: React.FC = () => {
 
   // Handle delete single detail
   const handleDelete = (tempId: number, detailId?: number) => {
-    confirm({
+    Modal.confirm({
       title: 'Удалить деталь?',
       content: 'Это действие нельзя отменить.',
       okText: 'Удалить',
       okType: 'danger',
       cancelText: 'Отмена',
+      modalRender: (modal) => <DraggableModalWrapper>{modal}</DraggableModalWrapper>,
       onOk() {
         deleteDetail(tempId, detailId);
         message.success('Деталь удалена');
@@ -95,12 +95,13 @@ export const OrderDetailsTab: React.FC = () => {
       return;
     }
 
-    confirm({
+    Modal.confirm({
       title: `Удалить выбранные детали (${selectedRowKeys.length})?`,
       content: 'Это действие нельзя отменить.',
       okText: 'Удалить',
       okType: 'danger',
       cancelText: 'Отмена',
+      modalRender: (modal) => <DraggableModalWrapper>{modal}</DraggableModalWrapper>,
       onOk() {
         selectedRowKeys.forEach((key) => {
           const detail = details.find(

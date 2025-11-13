@@ -6,6 +6,7 @@ import { Modal } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { OrderForm } from './OrderForm';
 import { useOrderFormStore } from '../../../stores/orderFormStore';
+import { DraggableModalWrapper } from '../../../components/DraggableModalWrapper';
 
 interface OrderCreateModalProps {
   open: boolean;
@@ -71,6 +72,7 @@ export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClos
       style={{ top: 20 }}
       destroyOnClose
       title="Создание нового заказа"
+      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
     >
       {isReady && (
         <OrderForm

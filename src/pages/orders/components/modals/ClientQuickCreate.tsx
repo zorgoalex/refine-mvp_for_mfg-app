@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { Modal, Form, Input, notification } from 'antd';
 import { useCreate } from '@refinedev/core';
+import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 
 interface ClientQuickCreateProps {
   open: boolean;
@@ -69,6 +70,7 @@ export const ClientQuickCreate: React.FC<ClientQuickCreateProps> = ({
       okText="Создать"
       cancelText="Отмена"
       width={500}
+      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
     >
       <Form form={form} layout="vertical">
         <Form.Item

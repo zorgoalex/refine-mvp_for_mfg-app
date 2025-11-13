@@ -1,8 +1,9 @@
 // Hook for warning about unsaved changes
 // Prevents navigation and page close when form has unsaved changes
 
-import { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { Modal } from 'antd';
+import { DraggableModalWrapper } from '../components/DraggableModalWrapper';
 
 /**
  * Hook to warn users about unsaved changes
@@ -32,6 +33,7 @@ export const useUnsavedChangesWarning = (isDirty: boolean) => {
           content: 'У вас есть несохраненные изменения. Вы уверены, что хотите покинуть страницу?',
           okText: 'Покинуть',
           cancelText: 'Остаться',
+          modalRender: (modal) => React.createElement(DraggableModalWrapper, null, modal),
           onOk: () => {
             callback();
           },
