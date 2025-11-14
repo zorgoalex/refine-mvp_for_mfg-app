@@ -1,6 +1,35 @@
 import React, { useMemo, useState } from "react";
 import { Layout as AntLayout, Menu, Collapse, Button, Typography } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import {
+  PlusOutlined,
+  FileTextOutlined,
+  UserOutlined,
+  ShopOutlined,
+  DollarOutlined,
+  FileImageOutlined,
+  InboxOutlined,
+  ShoppingCartOutlined,
+  TagsOutlined,
+  CalculatorOutlined,
+  AppstoreOutlined,
+  BorderOutlined,
+  ToolOutlined,
+  CheckCircleOutlined,
+  DollarCircleOutlined,
+  SyncOutlined,
+  FileSearchOutlined,
+  CheckSquareOutlined,
+  HomeOutlined,
+  ApartmentOutlined,
+  CreditCardOutlined,
+  SwapOutlined,
+  TransactionOutlined,
+  IdcardOutlined,
+  ArrowsAltOutlined,
+  EnvironmentOutlined,
+  TeamOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
@@ -8,6 +37,47 @@ import { OrderCreateModal } from "../pages/orders/components/OrderCreateModal";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
+
+// Карта иконок для ресурсов
+const RESOURCE_ICONS: Record<string, React.ReactNode> = {
+  orders_view: <FileTextOutlined />,
+  clients: <UserOutlined />,
+  suppliers: <ShopOutlined />,
+  payments: <DollarOutlined />,
+  films: <FileImageOutlined />,
+  materials: <InboxOutlined />,
+  order_resource_requirements: <ShoppingCartOutlined />,
+  vendors: <ShopOutlined />,
+  film_vendors: <ShopOutlined />,
+  film_types: <TagsOutlined />,
+  units: <CalculatorOutlined />,
+  material_types: <AppstoreOutlined />,
+  edge_types: <BorderOutlined />,
+  milling_types: <ToolOutlined />,
+  order_statuses: <CheckCircleOutlined />,
+  payment_statuses: <DollarCircleOutlined />,
+  production_statuses: <SyncOutlined />,
+  requisition_statuses: <FileSearchOutlined />,
+  resource_requirements_statuses: <CheckSquareOutlined />,
+  workshops: <HomeOutlined />,
+  work_centers: <ApartmentOutlined />,
+  payment_types: <CreditCardOutlined />,
+  transaction_direction: <SwapOutlined />,
+  material_transaction_types: <TransactionOutlined />,
+  employees: <IdcardOutlined />,
+  users: <UserOutlined />,
+  movements_statuses: <ArrowsAltOutlined />,
+  order_workshops: <EnvironmentOutlined />,
+};
+
+// Карта иконок для категорий
+const CATEGORY_ICONS: Record<string, React.ReactNode> = {
+  "Контрагенты": <TeamOutlined />,
+  "Финансы": <DollarOutlined />,
+  "Материалы": <InboxOutlined />,
+  "Закуп": <ShoppingCartOutlined />,
+  "Справочники": <SettingOutlined />,
+};
 
 // Карта русских названий ресурсов из ru_table_name.md
 const RESOURCE_LABELS: Record<string, string> = {
@@ -148,6 +218,7 @@ export const CustomSider: React.FC = () => {
   const ordersMenuItem: MenuProps["items"] = [
     {
       key: "orders_view",
+      icon: RESOURCE_ICONS["orders_view"],
       label: ordersLabel,
       onClick: () => push(ordersRoute),
     },
@@ -233,6 +304,7 @@ export const CustomSider: React.FC = () => {
             // Создаем пункты меню для категории
             const categoryItems: MenuProps["items"] = items.map((item) => ({
               key: item.name,
+              icon: RESOURCE_ICONS[item.name],
               label: item.label,
               onClick: () => push(item.route),
             }));
@@ -242,7 +314,12 @@ export const CustomSider: React.FC = () => {
 
             return (
               <Panel
-                header={category}
+                header={
+                  <span>
+                    <span style={{ marginRight: '8px' }}>{CATEGORY_ICONS[category]}</span>
+                    {category}
+                  </span>
+                }
                 key={category}
                 style={{
                   color: "#E0E0E0",
