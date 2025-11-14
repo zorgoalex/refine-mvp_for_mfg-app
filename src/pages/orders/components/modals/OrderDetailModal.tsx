@@ -2,15 +2,21 @@
 // Modal for creating/editing order details with auto-calculation
 
 import React, { useEffect, useState } from 'react';
-import { Modal, Form, Input, InputNumber, Row, Col, Select, Space, Button } from 'antd';
+import { Modal, Form, Input, InputNumber, Row, Col, Select, Space, Button, Alert } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
+import { useOne } from '@refinedev/core';
 import { OrderDetail } from '../../../../types/orders';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { MillingTypeQuickCreate } from './MillingTypeQuickCreate';
 import { EdgeTypeQuickCreate } from './EdgeTypeQuickCreate';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import {
+  validateMaterialDimensions,
+  getMaterialDimensionDescription,
+  MaterialInfo
+} from '../../../../utils/materialDimensionValidation';
 
 interface OrderDetailModalProps {
   open: boolean;
@@ -32,6 +38,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [calculatedCost, setCalculatedCost] = useState<number>(0);
   const [millingTypeModalOpen, setMillingTypeModalOpen] = useState(false);
   const [edgeTypeModalOpen, setEdgeTypeModalOpen] = useState(false);
+  const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
+  const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
 
   // Load reference data with search
   const { selectProps: materialSelectProps } = useSelect({
@@ -79,6 +87,22 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     ...(detail?.production_status_id ? { defaultValue: detail.production_status_id } : {}),
   });
 
+  // Load selected material with type information
+  const { data: materialData } = useOne({
+    resource: 'materials',
+    id: selectedMaterialId || 0,
+    queryOptions: {
+      enabled: selectedMaterialId !== null && selectedMaterialId > 0,
+    },
+    meta: {
+      fields: [
+        'material_id',
+        'material_name',
+        { material_type: ['material_type_id', 'material_type_name'] }
+      ],
+    },
+  });
+
   // Initialize form when detail changes
   useEffect(() => {
     if (open) {
@@ -86,6 +110,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         form.setFieldsValue(detail);
         setCalculatedArea(detail.area || 0);
         setCalculatedCost(detail.detail_cost || 0);
+        setSelectedMaterialId(detail.material_id || null);
       } else {
         form.resetFields();
         form.setFieldsValue({
@@ -94,9 +119,37 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         });
         setCalculatedArea(0);
         setCalculatedCost(0);
+        setSelectedMaterialId(null);
+        setDimensionValidationError(null);
       }
     }
   }, [open, mode, detail, form]);
+
+  // Validate dimensions against material limits
+  const validateDimensions = () => {
+    const height = form.getFieldValue('height');
+    const width = form.getFieldValue('width');
+
+    if (!height || !width || !materialData?.data) {
+      setDimensionValidationError(null);
+      return;
+    }
+
+    const material: MaterialInfo = {
+      material_id: materialData.data.material_id,
+      material_name: materialData.data.material_name,
+      material_type_id: materialData.data.material_type?.material_type_id,
+      material_type_name: materialData.data.material_type?.material_type_name,
+    };
+
+    const validationResult = validateMaterialDimensions(height, width, material);
+
+    if (!validationResult.isValid) {
+      setDimensionValidationError(validationResult.errorMessage || null);
+    } else {
+      setDimensionValidationError(null);
+    }
+  };
 
   // Auto-calculate area when height or width changes
   const handleDimensionChange = () => {
@@ -116,7 +169,24 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     } else {
       console.log('[OrderDetailModal] cannot calculate area - invalid dimensions');
     }
+
+    // Validate dimensions against material limits
+    validateDimensions();
   };
+
+  // Handle material change
+  const handleMaterialChange = (materialId: number) => {
+    setSelectedMaterialId(materialId);
+    // Validation will be triggered by useEffect when materialData loads
+  };
+
+  // Trigger validation when material data loads
+  useEffect(() => {
+    if (materialData?.data) {
+      validateDimensions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materialData]);
 
   // Auto-calculate cost when area or price changes
   const handleCostCalculation = (areaOverride?: number) => {
@@ -138,6 +208,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
   const handleOk = async () => {
     try {
+      // Check dimension validation first
+      if (dimensionValidationError) {
+        console.error('[OrderDetailModal] Dimension validation failed:', dimensionValidationError);
+        return;
+      }
+
       const values = await form.validateFields();
 
       console.log('[OrderDetailModal] handleOk - form values:', values);
@@ -160,6 +236,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
       onSave(detailData);
       form.resetFields();
+      setDimensionValidationError(null);
     } catch (error) {
       console.error('[OrderDetailModal] Validation failed:', error);
     }
@@ -178,6 +255,33 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
     >
       <Form form={form} layout="vertical">
+        {/* Dimension validation error alert */}
+        {dimensionValidationError && (
+          <Alert
+            message="Ошибка размеров детали"
+            description={
+              <div>
+                <div>{dimensionValidationError}</div>
+                {materialData?.data && (
+                  <div style={{ marginTop: 8, fontSize: '12px', opacity: 0.8 }}>
+                    {getMaterialDimensionDescription({
+                      material_id: materialData.data.material_id,
+                      material_name: materialData.data.material_name,
+                      material_type_id: materialData.data.material_type?.material_type_id,
+                      material_type_name: materialData.data.material_type?.material_type_name,
+                    })}
+                  </div>
+                )}
+              </div>
+            }
+            type="error"
+            showIcon
+            closable
+            onClose={() => setDimensionValidationError(null)}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+
         <Row gutter={16}>
           <Col span={12}>
             <Form.Item
@@ -266,11 +370,22 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               label="Материал"
               name="material_id"
               rules={[{ required: true, message: 'Обязательное поле' }]}
+              tooltip={
+                materialData?.data
+                  ? getMaterialDimensionDescription({
+                      material_id: materialData.data.material_id,
+                      material_name: materialData.data.material_name,
+                      material_type_id: materialData.data.material_type?.material_type_id,
+                      material_type_name: materialData.data.material_type?.material_type_name,
+                    })
+                  : undefined
+              }
             >
               <Select
                 {...materialSelectProps}
                 showSearch
                 placeholder="Выберите материал"
+                onChange={handleMaterialChange}
                 dropdownRender={(menu) => (
                   <>
                     {menu}
