@@ -1,17 +1,9 @@
 // Order Header Summary (Read-only)
-// Improved visual design with grouping, hierarchy, and better scannability
+// Compact minimalist design - 3 rows with minimal padding
 
 import React, { useMemo } from 'react';
-import { Card, Row, Col, Tag, Space, Typography } from 'antd';
-import {
-  UserOutlined,
-  SolutionOutlined,
-  CalendarOutlined,
-  CheckCircleOutlined,
-  DollarOutlined,
-  BarChartOutlined,
-  StarOutlined,
-} from '@ant-design/icons';
+import { Tag, Space, Typography } from 'antd';
+import { StarOutlined } from '@ant-design/icons';
 import { useOne, useList } from '@refinedev/core';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -20,7 +12,7 @@ import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
 import dayjs from 'dayjs';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 export const OrderHeaderSummary: React.FC = () => {
   const { header, details } = useOrderFormStore();
@@ -61,15 +53,6 @@ export const OrderHeaderSummary: React.FC = () => {
     },
   });
 
-  // Load manager name
-  const { data: managerData } = useOne({
-    resource: 'employees',
-    id: header.manager_id,
-    queryOptions: {
-      enabled: !!header.manager_id,
-    },
-  });
-
   // Load materials list
   const { data: materialsData } = useList({
     resource: 'materials',
@@ -91,353 +74,193 @@ export const OrderHeaderSummary: React.FC = () => {
       .join(', ');
   }, [materialsData]);
 
-  // Info item component with icon
-  const InfoItem: React.FC<{
-    icon: React.ReactNode;
-    label: string;
-    value: React.ReactNode;
-    highlight?: boolean;
-  }> = ({ icon, label, value, highlight }) => (
-    <Space align="start" size={8} style={{ minHeight: 44 }}>
-      <div style={{ marginTop: 2, color: '#1890ff', fontSize: 16 }}>{icon}</div>
-      <div>
-        <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
-          {label.toUpperCase()}
-        </Text>
-        <Text strong={highlight} style={{ fontSize: 15, lineHeight: 1.3 }}>
-          {value}
-        </Text>
-      </div>
-    </Space>
+  // Row separator line
+  const RowSeparator = () => (
+    <div style={{ height: 1, background: '#E5E7EB', margin: 0 }} />
   );
-
-  // Date item component
-  const DateItem: React.FC<{ icon: React.ReactNode; label: string; date?: string }> = ({
-    icon,
-    label,
-    date,
-  }) => (
-    <div style={{ minHeight: 44, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-      <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>
-        {icon} {label.toUpperCase()}
-      </Text>
-      <Text strong style={{ fontSize: 16 }}>
-        {date ? dayjs(date).format('DD.MM.YYYY') : '—'}
-      </Text>
-    </div>
-  );
-
-  // Stat item for financial/production metrics
-  const StatItem: React.FC<{
-    label: string;
-    value: string | number;
-    suffix?: string;
-    color?: string;
-    size?: 'small' | 'medium' | 'large';
-  }> = ({ label, value, suffix, color, size = 'medium' }) => {
-    const fontSize = size === 'large' ? 16 : size === 'medium' ? 14 : 12;
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Text type="secondary" style={{ fontSize: 9 }}>
-          {label.toUpperCase()}
-        </Text>
-        <div>
-          <Text
-            strong
-            style={{
-              fontSize,
-              color: color || '#262626',
-              lineHeight: 1,
-            }}
-          >
-            {value}
-          </Text>
-          {suffix && (
-            <Text style={{ fontSize: fontSize * 0.55, marginLeft: 2, color: '#8c8c8c' }}>
-              {suffix}
-            </Text>
-          )}
-        </div>
-      </div>
-    );
-  };
 
   return (
-    <div style={{ marginBottom: 16 }}>
-      {/* Header bar with order name and status badges */}
+    <div
+      style={{
+        marginTop: -12,
+        marginBottom: 16,
+        border: '1px solid #1890ff',
+        borderRadius: 6,
+        background: '#FFFFFF',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Row 1: Order name, priority, status | Client | Total amount, payment status */}
       <div
         style={{
-          background: 'white',
-          border: '2px solid #1890ff',
-          padding: '12px 20px',
-          borderRadius: '8px 8px 0 0',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          padding: '6px 16px',
+          gap: 16,
         }}
       >
-        <Title level={5} style={{ margin: 0, color: '#262626', fontSize: 16 }}>
-          {header.order_name ? `ЗАКАЗ "${header.order_name}"` : 'НОВЫЙ ЗАКАЗ'}
-        </Title>
-        <Space size="middle">
-          <span style={{ display: 'inline-flex', alignItems: 'center', color: '#262626' }}>
-            <StarOutlined
-              style={{
-                fontSize: 16,
-                marginRight: 6,
-                color: header.priority && header.priority <= 50 ? '#faad14' : '#8c8c8c'
-              }}
-            />
-            <span style={{ fontSize: 16, fontWeight: 'normal' }}>
-              {header.priority !== undefined ? formatNumber(header.priority, 0) : '—'}
+        {/* Column 1: Order name + Priority + Order status */}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Text strong style={{ fontSize: 15, color: '#111827' }}>
+            {header.order_name || 'Новый заказ'}
+          </Text>
+          <Space size={8}>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <StarOutlined
+                style={{
+                  fontSize: 14,
+                  marginRight: 4,
+                  color: header.priority && header.priority <= 50 ? '#D97706' : '#6B7280'
+                }}
+              />
+              <Text style={{ fontSize: 13, color: '#111827' }}>
+                {header.priority !== undefined ? formatNumber(header.priority, 0) : '—'}
+              </Text>
             </span>
-          </span>
-          <Tag
-            color={orderStatusData?.data?.order_status_name === 'Готов к выдаче' ? '#87d068' : '#5b8ff9'}
-            style={{ fontSize: 11, padding: '4px 12px', margin: 0, fontWeight: 'bold', letterSpacing: '0.8px' }}
-          >
-            {orderStatusData?.data?.order_status_name?.toUpperCase() || 'НЕ НАЗНАЧЕН'}
-          </Tag>
+            <Tag
+              color={orderStatusData?.data?.order_status_name === 'Готов к выдаче' ? '#059669' : '#4F46E5'}
+              style={{ fontSize: '0.64em', padding: '2px 8px', margin: 0, fontWeight: 500, letterSpacing: '0.8px' }}
+            >
+              {orderStatusData?.data?.order_status_name?.toUpperCase() || 'НЕ НАЗНАЧЕН'}
+            </Tag>
+          </Space>
+        </div>
+
+        {/* Column 2: Client */}
+        <div style={{ flex: 1 }}>
+          <Text strong style={{ fontSize: 14, color: '#111827' }}>
+            {clientData?.data?.client_name || '—'}
+          </Text>
+        </div>
+
+        {/* Column 3: Total amount + Payment status */}
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+          <Text strong style={{ fontSize: 15, color: '#111827' }}>
+            {formatNumber(header.total_amount || 0, 2)} {CURRENCY_SYMBOL}
+          </Text>
           <Tag
             color={
-              paymentStatusData?.data?.payment_status_name === 'Оплачен' ? '#87d068' : '#ffc069'
+              paymentStatusData?.data?.payment_status_name === 'Оплачен' ? '#059669' : '#D97706'
             }
-            style={{ fontSize: 11, padding: '4px 12px', margin: 0, fontWeight: 'bold', letterSpacing: '0.8px' }}
+            style={{ fontSize: '0.64em', padding: '2px 8px', margin: 0, fontWeight: 500, letterSpacing: '0.8px' }}
           >
             {paymentStatusData?.data?.payment_status_name?.toUpperCase() || 'НЕ НАЗНАЧЕН'}
           </Tag>
-        </Space>
+        </div>
       </div>
 
-      {/* Main info section */}
-      <Card size="small" style={{ borderRadius: '0 0 8px 8px', border: '2px solid #1890ff', borderTop: 'none' }}>
-        <Row gutter={[24, 16]}>
-          {/* Left column - Key parties */}
-          <Col xs={24} md={12} lg={8}>
-            <InfoItem
-              icon={<UserOutlined />}
-              label="Клиент"
-              value={clientData?.data?.client_name || '—'}
-              highlight
-            />
-            {/* Divider */}
-            <div
-              style={{
-                height: 1,
-                background: '#d9d9d9',
-                margin: '14px 0',
-              }}
-            />
-            <InfoItem
-              icon={<SolutionOutlined />}
-              label="Менеджер"
-              value={managerData?.data?.full_name || '—'}
-            />
-            {/* Divider before bottom section */}
-            <div
-              style={{
-                height: 1,
-                background: '#d9d9d9',
-                margin: '14px 0',
-              }}
-            />
-            {/* Bottom section: ID, Materials, Notes */}
-            <div>
-              <Row gutter={24}>
-                {header.order_id && (
-                  <Col>
-                    <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
-                      ID ЗАКАЗА
-                    </Text>
-                    <Text style={{ fontSize: 15, lineHeight: 1.3, color: '#8c8c8c' }}>
-                      {header.order_id}
-                    </Text>
-                  </Col>
-                )}
-                <Col flex="auto">
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
-                    МАТЕРИАЛЫ ЗАКАЗА
-                  </Text>
-                  <div style={{ fontSize: 15, lineHeight: 1.3 }}>
-                    {materialsSummary === '—' ? (
-                      <Text style={{ color: '#8c8c8c' }}>—</Text>
-                    ) : (
-                      materialsData?.data?.map((material, index) => {
-                        const materialName = material.material_name || '';
-                        const color = getMaterialColor(materialName);
+      <RowSeparator />
 
-                        return (
-                          <React.Fragment key={material.material_id}>
-                            {index > 0 && <span style={{ color: '#8c8c8c' }}>, </span>}
-                            <Text strong style={{ color }}>
-                              {materialName}
-                            </Text>
-                          </React.Fragment>
-                        );
-                      })
-                    )}
-                  </div>
-                </Col>
-              </Row>
-            </div>
-          </Col>
+      {/* Row 2: Dates | Notes | Discounted amount & discount % */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '6px 16px',
+          gap: 16,
+        }}
+      >
+        {/* Column 1: Dates */}
+        <div style={{ flex: 1 }}>
+          <Text style={{ fontSize: 13, color: '#111827' }}>
+            {header.order_date ? dayjs(header.order_date).format('DD.MM.YYYY') : '—'}
+            {' → '}
+            {header.planned_completion_date ? dayjs(header.planned_completion_date).format('DD.MM.YYYY') : '—'}
+          </Text>
+        </div>
 
-          {/* Middle column - Dates */}
-          <Col xs={24} md={12} lg={8}>
-            <Row gutter={[12, 12]}>
-              <Col span={12}>
-                <DateItem
-                  icon={<CalendarOutlined />}
-                  label="Дата заказа"
-                  date={header.order_date}
-                />
-              </Col>
-              <Col span={12}>
-                <DateItem
-                  icon={<CalendarOutlined />}
-                  label="Плановая дата"
-                  date={header.planned_completion_date}
-                />
-              </Col>
-            </Row>
-            {/* Divider between date rows */}
-            <div
-              style={{
-                height: 1,
-                background: '#d9d9d9',
-                margin: '14px 0',
-              }}
-            />
-            <Row gutter={[12, 12]}>
-              <Col span={12}>
-                <DateItem
-                  icon={<CheckCircleOutlined />}
-                  label="Дата завершения"
-                  date={header.completion_date}
-                />
-              </Col>
-              <Col span={12}>
-                <DateItem
-                  icon={<CheckCircleOutlined />}
-                  label="Дата выдачи"
-                  date={header.issue_date}
-                />
-              </Col>
-            </Row>
-            {/* Divider before notes */}
-            <div
-              style={{
-                height: 1,
-                background: '#d9d9d9',
-                margin: '14px 0',
-              }}
-            />
-            {/* Notes section - full width */}
-            <div style={{ minHeight: 44, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <Text type="secondary" style={{ fontSize: 11, display: 'block', lineHeight: 1.2 }}>
-                ПРИМЕЧАНИЕ
-              </Text>
-              <Text style={{ fontSize: 15, lineHeight: 1.3 }}>
-                {header.notes || '—'}
-              </Text>
-            </div>
-          </Col>
+        {/* Column 2: Notes (with ellipsis) */}
+        <div style={{ flex: 1 }}>
+          <Text
+            style={{
+              fontSize: 13,
+              color: '#6B7280',
+              display: 'block',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+            title={header.notes || ''}
+          >
+            {header.notes || '—'}
+          </Text>
+        </div>
 
-          {/* Right column - Financial summary */}
-          <Col xs={24} lg={8} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <div
-              style={{
-                padding: 8,
-                background: '#fafafa',
-                border: '1px solid #e8e8e8',
-                borderRadius: 6,
-                width: '50%',
-              }}
-            >
-              <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                <Row justify="space-between">
-                  <Text type="secondary" style={{ fontSize: 10 }}>
-                    Сумма заказа
+        {/* Column 3: Discounted amount + discount % */}
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+          <Text strong style={{ fontSize: 14, color: '#4F46E5' }}>
+            {formatNumber(header.discounted_amount || 0, 2)} {CURRENCY_SYMBOL}
+          </Text>
+          <Text style={{ fontSize: 13, color: '#DC2626' }}>
+            -{formatNumber(header.discount || 0, 1)}%
+          </Text>
+        </div>
+      </div>
+
+      <RowSeparator />
+
+      {/* Row 3: ID + Materials + Production metrics */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '6px 16px',
+          gap: 16,
+          background: '#FAFBFC',
+        }}
+      >
+        {/* ID */}
+        {header.order_id && (
+          <Text style={{ fontSize: 12, color: '#6B7280' }}>
+            ID{header.order_id}
+          </Text>
+        )}
+
+        {/* Separator */}
+        {header.order_id && (
+          <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+        )}
+
+        {/* Materials */}
+        <div style={{ flex: 1 }}>
+          <Text style={{ fontSize: 12, color: '#6B7280' }}>Материал: </Text>
+          {materialsSummary === '—' ? (
+            <Text style={{ fontSize: 12, color: '#6B7280' }}>—</Text>
+          ) : (
+            materialsData?.data?.map((material, index) => {
+              const materialName = material.material_name || '';
+              const color = getMaterialColor(materialName);
+
+              return (
+                <React.Fragment key={material.material_id}>
+                  {index > 0 && <Text style={{ fontSize: 12, color: '#6B7280' }}>, </Text>}
+                  <Text strong style={{ fontSize: 12, color }}>
+                    {materialName}
                   </Text>
-                  <Text strong style={{ fontSize: 13 }}>
-                    {formatNumber(header.total_amount || 0, 2)} {CURRENCY_SYMBOL}
-                  </Text>
-                </Row>
-                <Row justify="space-between">
-                  <Text type="secondary" style={{ fontSize: 10 }}>
-                    Скидка
-                  </Text>
-                  <Text style={{ fontSize: 13, color: '#ff7875' }}>
-                    {formatNumber(header.discount || 0, 2)}%
-                  </Text>
-                </Row>
-                <Row justify="space-between" style={{ paddingTop: 4, borderTop: '1px solid #e8e8e8' }}>
-                  <Text type="secondary" style={{ fontSize: 10 }}>
-                    Со скидкой
-                  </Text>
-                  <Text strong style={{ fontSize: 14, color: '#5b8ff9' }}>
-                    {formatNumber(header.discounted_amount || 0, 2)} {CURRENCY_SYMBOL}
-                  </Text>
-                </Row>
-                <Row justify="space-between" style={{ paddingTop: 4, borderTop: '1px solid #e8e8e8' }}>
-                  <Text type="secondary" style={{ fontSize: 10 }}>
-                    Оплачено
-                  </Text>
-                  <Text
-                    strong
-                    style={{
-                      fontSize: 14,
-                      color: totals.total_paid > 0 ? '#389e0d' : '#595959',
-                    }}
-                  >
-                    {formatNumber(totals.total_paid, 2)} {CURRENCY_SYMBOL}
-                  </Text>
-                </Row>
-              </Space>
-            </div>
-          </Col>
-        </Row>
+                </React.Fragment>
+              );
+            })
+          )}
+        </div>
+
+        {/* Separator */}
+        <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
 
         {/* Production metrics */}
-        <div
-          style={{
-            marginTop: 16,
-            padding: '5px 6px',
-            background: '#fafafa',
-            border: '1px solid #e8e8e8',
-            borderRadius: 6,
-          }}
-        >
-          <Row gutter={16}>
-            <Col xs={8}>
-              <StatItem
-                label="Позиций"
-                value={formatNumber(totals.positions_count, 0)}
-                size="large"
-                color="#000000"
-              />
-            </Col>
-            <Col xs={8}>
-              <StatItem
-                label="Деталей"
-                value={formatNumber(totals.parts_count, 0)}
-                suffix="шт"
-                size="large"
-                color="#000000"
-              />
-            </Col>
-            <Col xs={8}>
-              <StatItem
-                label="Площадь"
-                value={formatNumber(totals.total_area, 2)}
-                suffix="м²"
-                size="large"
-                color="#000000"
-              />
-            </Col>
-          </Row>
-        </div>
-      </Card>
+        <Space size={16}>
+          <Text style={{ fontSize: 12, color: '#111827' }}>
+            Позиций: <Text strong>{formatNumber(totals.positions_count, 0)}</Text>
+          </Text>
+          <Text style={{ fontSize: 12, color: '#111827' }}>
+            Деталей: <Text strong>{formatNumber(totals.parts_count, 0)}</Text>
+          </Text>
+          <Text style={{ fontSize: 12, color: '#111827' }}>
+            Площадь: <Text strong>{formatNumber(totals.total_area, 2)} м²</Text>
+          </Text>
+        </Space>
+      </div>
     </div>
   );
 };

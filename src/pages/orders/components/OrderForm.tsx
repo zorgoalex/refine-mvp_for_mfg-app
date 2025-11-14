@@ -537,10 +537,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             onClick={handleSave}
             loading={isSaving}
             disabled={!isDirty}
+            style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
           >
             Сохранить
           </Button>
-          <Button icon={<CloseOutlined />} onClick={handleCancel}>
+          <Button
+            icon={<CloseOutlined />}
+            onClick={handleCancel}
+            style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
+          >
             Закрыть
           </Button>
         </Space>
