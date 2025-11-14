@@ -2,9 +2,9 @@
 // Displays list of order details with inline editing capabilities
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown } from 'antd';
+import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
-import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useOne } from '@refinedev/core';
@@ -12,6 +12,10 @@ import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
+import {
+  validateMaterialDimensions,
+  MaterialInfo
+} from '../../../../utils/materialDimensionValidation';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -38,6 +42,8 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
   const [currentFilmId, setCurrentFilmId] = useState<number | null>(null);
   const [isSumEditable, setIsSumEditable] = useState(false);
+  const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
+  const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
   const highlightedRowRef = useRef<HTMLElement | null>(null);
 
@@ -107,10 +113,62 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     queryOptions: { enabled: selectsEnabled },
   });
 
+  // Load selected material with type information for validation
+  const { data: materialData } = useOne({
+    resource: 'materials',
+    id: selectedMaterialId || 0,
+    queryOptions: {
+      enabled: selectedMaterialId !== null && selectedMaterialId > 0,
+    },
+    meta: {
+      fields: [
+        'material_id',
+        'material_name',
+        { material_type: ['material_type_id', 'material_type_name'] }
+      ],
+    },
+  });
+
+  // Validate dimensions against material limits
+  const validateDimensions = () => {
+    const height = form.getFieldValue('height');
+    const width = form.getFieldValue('width');
+
+    if (!height || !width || !materialData?.data) {
+      setDimensionValidationError(null);
+      return;
+    }
+
+    const material: MaterialInfo = {
+      material_id: materialData.data.material_id,
+      material_name: materialData.data.material_name,
+      material_type_id: materialData.data.material_type?.material_type_id,
+      material_type_name: materialData.data.material_type?.material_type_name,
+    };
+
+    const validationResult = validateMaterialDimensions(height, width, material);
+
+    if (!validationResult.isValid) {
+      setDimensionValidationError(validationResult.errorMessage || null);
+    } else {
+      setDimensionValidationError(null);
+    }
+  };
+
+  // Trigger validation when material data loads
+  useEffect(() => {
+    if (materialData?.data) {
+      validateDimensions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materialData]);
+
   const startEdit = (record: OrderDetail) => {
     console.log('[OrderDetailTable] startEdit - detail:', record);
     setEditingKey(record.temp_id || record.detail_id || null);
     setCurrentFilmId(record.film_id ?? null);
+    setSelectedMaterialId(record.material_id || null);
+    setDimensionValidationError(null);
     form.setFieldsValue({
       height: record.height,
       width: record.width,
@@ -141,6 +199,8 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   const cancelEdit = () => {
     setEditingKey(null);
     setCurrentFilmId(null);
+    setSelectedMaterialId(null);
+    setDimensionValidationError(null);
     setIsSumEditable(false);
     form.resetFields();
   };
@@ -158,6 +218,15 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     } else {
       console.log('[OrderDetailTable] recalcArea - skipped (invalid height or width)');
     }
+
+    // Validate dimensions against material limits
+    validateDimensions();
+  };
+
+  // Handle material change
+  const handleMaterialChange = (materialId: number) => {
+    setSelectedMaterialId(materialId);
+    // Validation will be triggered by useEffect when materialData loads
   };
 
   const recalcSum = () => {
@@ -195,6 +264,12 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   };
 
   const saveEdit = async (record: OrderDetail) => {
+    // Check dimension validation first
+    if (dimensionValidationError) {
+      console.error('[OrderDetailTable] saveEdit - dimension validation failed:', dimensionValidationError);
+      return;
+    }
+
     const values = await form.validateFields();
     console.log('[OrderDetailTable] saveEdit - form values:', values);
     console.log('[OrderDetailTable] saveEdit - area:', values.area, 'price:', values.milling_cost_per_sqm, 'cost:', values.detail_cost);
@@ -359,6 +434,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
               style={{ minWidth: 180, textAlign: 'left' }}
+              onChange={handleMaterialChange}
             />
           </Form.Item>
         ) : (
@@ -593,12 +669,18 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         <Space size={2}>
           {isEditing(record) ? (
             <>
+              {dimensionValidationError && (
+                <Tooltip title={dimensionValidationError}>
+                  <ExclamationCircleOutlined style={{ fontSize: '14px', color: '#ff4d4f', marginRight: '4px' }} />
+                </Tooltip>
+              )}
               <Button
                 type="text"
                 size="small"
-                icon={<CheckOutlined style={{ fontSize: '16px', color: '#52c41a' }} />}
+                icon={<CheckOutlined style={{ fontSize: '16px', color: dimensionValidationError ? '#d9d9d9' : '#52c41a' }} />}
                 onClick={() => saveEdit(record)}
                 style={{ padding: '0 4px' }}
+                disabled={!!dimensionValidationError}
               />
               <Button
                 type="text"

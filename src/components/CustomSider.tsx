@@ -274,6 +274,8 @@ export const CustomSider: React.FC = () => {
         /* Стили для меню Заказы */
         .orders-menu .ant-menu-item {
           color: #E0E0E0 !important;
+          font-size: 1em !important;
+          letter-spacing: 1px !important;
         }
         .orders-menu .ant-menu-item:hover {
           color: #90CAF9 !important;
@@ -287,6 +289,7 @@ export const CustomSider: React.FC = () => {
         .sidebar-collapse .ant-collapse-header {
           color: #E0E0E0 !important;
           font-weight: 500;
+          letter-spacing: 1px !important;
         }
         .sidebar-collapse .ant-collapse-header:hover {
           color: #90CAF9 !important;
@@ -297,6 +300,7 @@ export const CustomSider: React.FC = () => {
         .sidebar-collapse .ant-menu-item {
           font-size: 0.85em; /* Уменьшение на 15% */
           color: #E0E0E0 !important;
+          letter-spacing: 1px !important;
         }
         .sidebar-collapse .ant-menu-item:hover {
           color: #90CAF9 !important;
