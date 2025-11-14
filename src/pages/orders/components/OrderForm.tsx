@@ -424,24 +424,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         ),
       },
       {
-        key: 'additional',
-        label: 'Дополнительно',
-        children: (
-          <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <OrderLegacySection />
-            <OrderFilesSection />
-          </Space>
-        ),
-      },
-      {
         key: 'details',
         label: 'Детали заказа',
         children: <OrderDetailsTab />,
       },
       {
-        key: 'payments',
-        label: 'Платежи',
-        children: <div>TODO: Payments Tab</div>,
+        key: 'services',
+        label: 'Услуги/работы',
+        children: <div>TODO: Services Tab</div>,
         disabled: mode === 'create' && !header.order_id,
       },
       {
@@ -452,9 +442,19 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       },
       {
         key: 'requirements',
-        label: 'Потребности',
-        children: <div>TODO: Requirements Tab</div>,
+        label: 'Материалы',
+        children: <div>TODO: Materials Tab</div>,
         disabled: mode === 'create' && !header.order_id,
+      },
+      {
+        key: 'additional',
+        label: 'Дополнительно',
+        children: (
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <OrderLegacySection />
+            <OrderFilesSection />
+          </Space>
+        ),
       },
     ],
     [mode, header.order_id]
