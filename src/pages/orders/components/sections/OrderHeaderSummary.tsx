@@ -119,7 +119,13 @@ export const OrderHeaderSummary: React.FC = () => {
               </Text>
             </span>
             <Tag
-              color={orderStatusData?.data?.order_status_name === 'Готов к выдаче' ? '#059669' : '#4F46E5'}
+              color={
+                orderStatusData?.data?.order_status_name === 'Готов к выдаче'
+                  ? '#059669'
+                  : orderStatusData?.data?.order_status_name === 'Предварительный'
+                  ? '#91caff'
+                  : '#4F46E5'
+              }
               style={{ fontSize: '0.64em', padding: '2px 8px', margin: 0, fontWeight: 500, letterSpacing: '0.8px' }}
             >
               {orderStatusData?.data?.order_status_name?.toUpperCase() || 'НЕ НАЗНАЧЕН'}
