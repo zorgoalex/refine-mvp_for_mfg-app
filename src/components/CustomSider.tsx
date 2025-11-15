@@ -48,7 +48,6 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   materials: <InboxOutlined />,
   order_resource_requirements: <ShoppingCartOutlined />,
   vendors: <ShopOutlined />,
-  film_vendors: <ShopOutlined />,
   film_types: <TagsOutlined />,
   units: <CalculatorOutlined />,
   material_types: <AppstoreOutlined />,
@@ -89,7 +88,6 @@ const RESOURCE_LABELS: Record<string, string> = {
   materials: "Материалы",
   order_resource_requirements: "Потребности заказов",
   vendors: "Производители",
-  film_vendors: "Производители плёнок",
   film_types: "Типы плёнок",
   units: "Единицы измерения",
   material_types: "Типы материалов",
@@ -129,7 +127,6 @@ const CATEGORY_MAP: Record<string, string> = {
 
   // Справочники (все остальное)
   vendors: "Справочники",
-  film_vendors: "Справочники",
   film_types: "Справочники",
   units: "Справочники",
   material_types: "Справочники",

@@ -40,10 +40,6 @@ import { SupplierList } from "./pages/suppliers/list";
 import { SupplierCreate } from "./pages/suppliers/create";
 import { SupplierEdit } from "./pages/suppliers/edit";
 import { SupplierShow } from "./pages/suppliers/show";
-import { FilmVendorList } from "./pages/film_vendors/list";
-import { FilmVendorCreate } from "./pages/film_vendors/create";
-import { FilmVendorEdit } from "./pages/film_vendors/edit";
-import { FilmVendorShow } from "./pages/film_vendors/show";
 import { FilmTypeList } from "./pages/film_types/list";
 import { FilmTypeCreate } from "./pages/film_types/create";
 import { FilmTypeEdit } from "./pages/film_types/edit";
@@ -241,14 +237,6 @@ const App = () => {
                 edit: "/suppliers/edit/:id",
                 show: "/suppliers/show/:id",
                 meta: { idColumnName: "supplier_id" },
-              },
-              {
-                name: "film_vendors",
-                list: "/film-vendors",
-                create: "/film-vendors/create",
-                edit: "/film-vendors/edit/:id",
-                show: "/film-vendors/show/:id",
-                meta: { idColumnName: "film_vendor_id" },
               },
               {
                 name: "film_types",
@@ -471,12 +459,6 @@ const App = () => {
                   <Route path="create" element={<SupplierCreate />} />
                   <Route path="edit/:id" element={<SupplierEdit />} />
                   <Route path="show/:id" element={<SupplierShow />} />
-                </Route>
-                <Route path="/film-vendors" >
-                  <Route index element={<FilmVendorList />} />
-                  <Route path="create" element={<FilmVendorCreate />} />
-                  <Route path="edit/:id" element={<FilmVendorEdit />} />
-                  <Route path="show/:id" element={<FilmVendorShow />} />
                 </Route>
                 <Route path="/film-types" >
                   <Route index element={<FilmTypeList />} />

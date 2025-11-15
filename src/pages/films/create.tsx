@@ -14,9 +14,9 @@ export const FilmCreate: React.FC<IResourceComponentsProps> = () => {
     optionValue: "film_type_id",
   });
   const { selectProps: vendorSelectProps } = useSelect({
-    resource: "film_vendors",
-    optionLabel: "film_vendor_name",
-    optionValue: "film_vendor_id",
+    resource: "vendors",
+    optionLabel: "vendor_name",
+    optionValue: "vendor_id",
   });
 
   return (
@@ -36,7 +36,7 @@ export const FilmCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Film Type" name="film_type_id">
           <Select {...typeSelectProps} />
         </Form.Item>
-        <Form.Item label="Film Vendor" name="film_vendor_id">
+        <Form.Item label="Производитель" name="vendor_id">
           <Select {...vendorSelectProps} />
         </Form.Item>
         <Form.Item label="Texture" name="film_texture" valuePropName="checked">

@@ -30,7 +30,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
       Array.from(
         new Set(
           ((tableProps?.dataSource as any[]) || [])
-            .map((i) => i?.film_vendor_id)
+            .map((i) => i?.vendor_id)
             .filter((v) => v !== undefined && v !== null)
         )
       ),
@@ -38,7 +38,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
   );
 
   const { data: typesData } = useMany({ resource: "film_types", ids: typeIds, queryOptions: { enabled: typeIds.length > 0 } });
-  const { data: vendorsData } = useMany({ resource: "film_vendors", ids: vendorIds, queryOptions: { enabled: vendorIds.length > 0 } });
+  const { data: vendorsData } = useMany({ resource: "vendors", ids: vendorIds, queryOptions: { enabled: vendorIds.length > 0 } });
 
   const typeMap = useMemo(() => {
     const map: Record<string | number, string> = {};
@@ -47,7 +47,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
   }, [typesData]);
   const vendorMap = useMemo(() => {
     const map: Record<string | number, string> = {};
-    (vendorsData?.data || []).forEach((v: any) => (map[v.film_vendor_id] = v.film_vendor_name));
+    (vendorsData?.data || []).forEach((v: any) => (map[v.vendor_id] = v.vendor_name));
     return map;
   }, [vendorsData]);
 
@@ -71,9 +71,9 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
           render={(_, record: any) => typeMap[record?.film_type_id] ?? record?.film_type_id}
         />
         <Table.Column
-          dataIndex="film_vendor_id"
-          title="Film Vendor"
-          render={(_, record: any) => vendorMap[record?.film_vendor_id] ?? record?.film_vendor_id}
+          dataIndex="vendor_id"
+          title="Производитель"
+          render={(_, record: any) => vendorMap[record?.vendor_id] ?? record?.vendor_id}
         />
         <Table.Column dataIndex="film_texture" title="Texture" />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
