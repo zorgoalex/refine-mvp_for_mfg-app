@@ -1,8 +1,9 @@
-import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
+﻿import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
+import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table } from "antd";
 import { useMemo } from "react";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+import { LocalizedList } from "../../components/LocalizedList";
 
 export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -37,7 +38,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   }, [typesData]);
 
   return (
-    <List>
+    <LocalizedList title="Платежи">
       <Table
         {...tableProps}
         {...highlightProps}
@@ -48,13 +49,21 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="payment_id" title="Payment ID" sorter />
-        <Table.Column dataIndex="order_id" title="Order" render={(_, r: any) => orderMap[r?.order_id] ?? r?.order_id} />
-        <Table.Column dataIndex="type_paid_id" title="Payment Type" render={(_, r: any) => typeMap[r?.type_paid_id] ?? r?.type_paid_id} />
-        <Table.Column dataIndex="amount" title="Amount" sorter />
-        <Table.Column dataIndex="payment_date" title="Payment Date" sorter />
-        <Table.Column dataIndex="notes" title="Notes" />
-        <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
+        <Table.Column dataIndex="payment_id" title="id" sorter />
+        <Table.Column
+          dataIndex="order_id"
+          title="Заказ"
+          render={(_, r: any) => orderMap[r?.order_id] ?? r?.order_id}
+        />
+        <Table.Column
+          dataIndex="type_paid_id"
+          title="Тип оплаты"
+          render={(_, r: any) => typeMap[r?.type_paid_id] ?? r?.type_paid_id}
+        />
+        <Table.Column dataIndex="amount" title="Сумма" sorter />
+        <Table.Column dataIndex="payment_date" title="Дата платежа" sorter />
+        <Table.Column dataIndex="notes" title="Примечание" />
+        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
@@ -65,7 +74,6 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };
-

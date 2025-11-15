@@ -1,8 +1,9 @@
-import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
+﻿import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
+import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useMemo } from "react";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+import { LocalizedList } from "../../components/LocalizedList";
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -11,7 +12,11 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
       initial: [{ field: "film_id", order: "desc" }],
     },
   });
-  const { highlightProps } = useHighlightRow("film_id", tableProps.dataSource);
+
+  const { highlightProps } = useHighlightRow(
+    "film_id",
+    tableProps.dataSource,
+  );
   const { show } = useNavigation();
 
   const typeIds = useMemo(
@@ -20,39 +25,54 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         new Set(
           ((tableProps?.dataSource as any[]) || [])
             .map((i) => i?.film_type_id)
-            .filter((v) => v !== undefined && v !== null)
-        )
+            .filter((v) => v !== undefined && v !== null),
+        ),
       ),
-    [tableProps?.dataSource]
+    [tableProps?.dataSource],
   );
+
   const vendorIds = useMemo(
     () =>
       Array.from(
         new Set(
           ((tableProps?.dataSource as any[]) || [])
             .map((i) => i?.vendor_id)
-            .filter((v) => v !== undefined && v !== null)
-        )
+            .filter((v) => v !== undefined && v !== null),
+        ),
       ),
-    [tableProps?.dataSource]
+    [tableProps?.dataSource],
   );
 
-  const { data: typesData } = useMany({ resource: "film_types", ids: typeIds, queryOptions: { enabled: typeIds.length > 0 } });
-  const { data: vendorsData } = useMany({ resource: "vendors", ids: vendorIds, queryOptions: { enabled: vendorIds.length > 0 } });
+  const { data: typesData } = useMany({
+    resource: "film_types",
+    ids: typeIds,
+    queryOptions: { enabled: typeIds.length > 0 },
+  });
+
+  const { data: vendorsData } = useMany({
+    resource: "vendors",
+    ids: vendorIds,
+    queryOptions: { enabled: vendorIds.length > 0 },
+  });
 
   const typeMap = useMemo(() => {
     const map: Record<string | number, string> = {};
-    (typesData?.data || []).forEach((t: any) => (map[t.film_type_id] = t.film_type_name));
+    (typesData?.data || []).forEach((t: any) => {
+      map[t.film_type_id] = t.film_type_name;
+    });
     return map;
   }, [typesData]);
+
   const vendorMap = useMemo(() => {
     const map: Record<string | number, string> = {};
-    (vendorsData?.data || []).forEach((v: any) => (map[v.vendor_id] = v.vendor_name));
+    (vendorsData?.data || []).forEach((v: any) => {
+      map[v.vendor_id] = v.vendor_name;
+    });
     return map;
   }, [vendorsData]);
 
   return (
-    <List>
+    <LocalizedList title="Плёнки">
       <Table
         {...tableProps}
         {...highlightProps}
@@ -63,25 +83,32 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="film_id" title="Film ID" sorter />
-        <Table.Column dataIndex="film_name" title="Name" sorter />
+        <Table.Column dataIndex="film_id" title="id" sorter />
+        <Table.Column dataIndex="film_name" title="Название" sorter />
         <Table.Column
           dataIndex="film_type_id"
-          title="Film Type"
-          render={(_, record: any) => typeMap[record?.film_type_id] ?? record?.film_type_id}
+          title="Тип плёнки"
+          render={(_, record: any) =>
+            typeMap[record?.film_type_id] ?? record?.film_type_id
+          }
         />
         <Table.Column
           dataIndex="vendor_id"
-          title="Производитель"
-          render={(_, record: any) => vendorMap[record?.vendor_id] ?? record?.vendor_id}
+          title="Поставщик плёнки"
+          render={(_, record: any) =>
+            vendorMap[record?.vendor_id] ?? record?.vendor_id
+          }
         />
-        <Table.Column dataIndex="film_texture" title="Texture" />
-        <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
+        <Table.Column dataIndex="film_texture" title="Фактура" />
+        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
           render={(value: boolean) => (
-            <Badge status={value ? "success" : "default"} text={value ? "Активен" : "Неактивен"} />
+            <Badge
+              status={value ? "success" : "default"}
+              text={value ? "Активен" : "Неактивен"}
+            />
           )}
           filters={[
             { text: "Активен", value: true },
@@ -91,13 +118,21 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
-            <Space>
-              <ShowButton hideText size="small" recordItemId={record.film_id} />
-              <EditButton hideText size="small" recordItemId={record.film_id} />
+            <Space size={4}>
+              <ShowButton
+                hideText
+                size="small"
+                recordItemId={record.film_id}
+              />
+              <EditButton
+                hideText
+                size="small"
+                recordItemId={record.film_id}
+              />
             </Space>
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };

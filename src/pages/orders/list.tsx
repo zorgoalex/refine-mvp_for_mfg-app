@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
+import { List, useTable, ShowButton, EditButton, CreateButton } from "@refinedev/antd";
 import { Space, Table, Button } from "antd";
 import { EyeOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { formatNumber } from "../../utils/numberFormat";
@@ -34,9 +34,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   return (
     <>
       <List
-        headerButtons={({ defaultButtons }) => (
+        headerButtons={({ createButtonProps }) => (
           <>
-            {defaultButtons}
+            {createButtonProps && (
+              <CreateButton {...createButtonProps}>Создать</CreateButton>
+            )}
             <Button
               type="primary"
               icon={<PlusOutlined />}

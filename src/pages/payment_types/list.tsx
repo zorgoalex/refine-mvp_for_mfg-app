@@ -1,7 +1,8 @@
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
+﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+import { LocalizedList } from "../../components/LocalizedList";
 
 export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -10,11 +11,14 @@ export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
       initial: [{ field: "type_paid_id", order: "desc" }],
     },
   });
-  const { highlightProps } = useHighlightRow("type_paid_id", tableProps.dataSource);
+  const { highlightProps } = useHighlightRow(
+    "type_paid_id",
+    tableProps.dataSource,
+  );
   const { show } = useNavigation();
 
   return (
-    <List>
+    <LocalizedList title="Типы оплаты">
       <Table
         {...tableProps}
         {...highlightProps}
@@ -25,9 +29,17 @@ export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="type_paid_id" title="Payment Type ID" sorter />
-        <Table.Column dataIndex="type_paid_name" title="Name" sorter />
-        <Table.Column dataIndex="sort_order" title="Sort Order" sorter />
+        <Table.Column dataIndex="type_paid_id" title="id" sorter />
+        <Table.Column
+          dataIndex="type_paid_name"
+          title="Тип оплаты"
+          sorter
+        />
+        <Table.Column
+          dataIndex="sort_order"
+          title="Сортировка по умолчанию"
+          sorter
+        />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -43,18 +55,25 @@ export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
             { text: "Неактивен", value: false },
           ]}
         />
-        <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
+        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
-            <Space>
-              <ShowButton hideText size="small" recordItemId={record.type_paid_id} />
-              <EditButton hideText size="small" recordItemId={record.type_paid_id} />
+            <Space size={4}>
+              <ShowButton
+                hideText
+                size="small"
+                recordItemId={record.type_paid_id}
+              />
+              <EditButton
+                hideText
+                size="small"
+                recordItemId={record.type_paid_id}
+              />
             </Space>
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };
-

@@ -1,4 +1,4 @@
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 
@@ -12,7 +12,7 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <List>
+    <LocalizedList>
       <Table
         {...tableProps}
         rowKey="workshop_id"
@@ -23,12 +23,16 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="workshop_id" title="ID" sorter />
-        <Table.Column dataIndex="workshop_name" title="Название" sorter />
-        <Table.Column dataIndex="address" title="Адрес" />
+        <Table.Column
+          dataIndex="workshop_name"
+          title="Название цеха"
+          sorter
+        />
+        <Table.Column dataIndex="address" title="Адрес цеха" />
         <Table.Column
           dataIndex={["employee", "full_name"]}
           title="Ответственный"
-          render={(value, record: any) => record?.employee?.full_name || "-"}
+          render={(_, record: any) => record?.employee?.full_name || "-"}
         />
         <Table.Column
           dataIndex="is_active"
@@ -45,17 +49,25 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
             { text: "Неактивен", value: false },
           ]}
         />
-        <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
+        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
             <Space>
-              <ShowButton hideText size="small" recordItemId={record.workshop_id} />
-              <EditButton hideText size="small" recordItemId={record.workshop_id} />
+              <ShowButton
+                hideText
+                size="small"
+                recordItemId={record.workshop_id}
+              />
+              <EditButton
+                hideText
+                size="small"
+                recordItemId={record.workshop_id}
+              />
             </Space>
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };

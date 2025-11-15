@@ -1,7 +1,8 @@
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
+import { useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+import { LocalizedList } from "../../components/LocalizedList";
 
 export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -14,7 +15,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const { show } = useNavigation();
 
   return (
-    <List>
+    <LocalizedList title="Потребности заказов в ресурсах">
       <Table
         {...tableProps}
         {...highlightProps}
@@ -25,16 +26,16 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           },
         })}
       >
-        <Table.Column dataIndex="requirement_id" title="ID" sorter />
-        <Table.Column dataIndex="order_id" title="Order ID" sorter />
-        <Table.Column dataIndex="resource_type" title="Resource Type" sorter />
-        <Table.Column dataIndex="material_id" title="Material ID" />
-        <Table.Column dataIndex="film_id" title="Film ID" />
-        <Table.Column dataIndex="edge_type_id" title="Edge Type ID" />
-        <Table.Column dataIndex="required_quantity" title="Required Qty" sorter />
-        <Table.Column dataIndex="final_quantity" title="Final Qty" sorter />
-        <Table.Column dataIndex="unit_id" title="Unit ID" />
-        <Table.Column dataIndex="requirement_status_id" title="Status ID" sorter />
+        <Table.Column dataIndex="requirement_id" title="id" sorter />
+        <Table.Column dataIndex="order_id" title="Заказ" sorter />
+        <Table.Column dataIndex="resource_type" title="Тип ресурса" sorter />
+        <Table.Column dataIndex="material_id" title="Материал" />
+        <Table.Column dataIndex="film_id" title="Пленка" />
+        <Table.Column dataIndex="edge_type_id" title="Обкат" />
+        <Table.Column dataIndex="required_quantity" title="Количество" sorter />
+        <Table.Column dataIndex="final_quantity" title="Итоговое количество" sorter />
+        <Table.Column dataIndex="unit_id" title="Единица" />
+        <Table.Column dataIndex="requirement_status_id" title="Статус потребности" sorter />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -60,6 +61,6 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };

@@ -1,7 +1,8 @@
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
+﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+import { LocalizedList } from "../../components/LocalizedList";
 
 export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -14,7 +15,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <List>
+    <LocalizedList>
       <Table
         {...tableProps}
         {...highlightProps}
@@ -25,7 +26,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="client_id" title="Client ID" sorter />
+        <Table.Column dataIndex="client_id" title="id" sorter />
         <Table.Column dataIndex="client_name" title="Имя клиента" sorter />
         <Table.Column
           dataIndex="is_active"
@@ -53,7 +54,6 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };
-

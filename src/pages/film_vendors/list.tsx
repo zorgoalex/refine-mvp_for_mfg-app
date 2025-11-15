@@ -1,7 +1,8 @@
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
+﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+import { LocalizedList } from "../../components/LocalizedList";
 
 export const FilmVendorList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -14,7 +15,7 @@ export const FilmVendorList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <List>
+    <LocalizedList>
       <Table
         {...tableProps}
         {...highlightProps}
@@ -50,7 +51,6 @@ export const FilmVendorList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };
-

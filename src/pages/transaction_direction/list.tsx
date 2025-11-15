@@ -1,8 +1,11 @@
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
+﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
+import { LocalizedList } from "../../components/LocalizedList";
 
-export const TransactionDirectionList: React.FC<IResourceComponentsProps> = () => {
+export const TransactionDirectionList: React.FC<
+  IResourceComponentsProps
+> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
@@ -12,7 +15,7 @@ export const TransactionDirectionList: React.FC<IResourceComponentsProps> = () =
   const { show } = useNavigation();
 
   return (
-    <List>
+    <LocalizedList title="Направления движения">
       <Table
         {...tableProps}
         rowKey="direction_type_id"
@@ -23,9 +26,9 @@ export const TransactionDirectionList: React.FC<IResourceComponentsProps> = () =
         })}
       >
         <Table.Column dataIndex="direction_type_id" title="ID" sorter />
-        <Table.Column dataIndex="direction_code" title="Code" sorter />
-        <Table.Column dataIndex="direction_name" title="Name" sorter />
-        <Table.Column dataIndex="description" title="Description" />
+        <Table.Column dataIndex="direction_code" title="Код направления" sorter />
+        <Table.Column dataIndex="direction_name" title="Название направления" sorter />
+        <Table.Column dataIndex="description" title="Описание" />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -44,13 +47,21 @@ export const TransactionDirectionList: React.FC<IResourceComponentsProps> = () =
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
-            <Space>
-              <ShowButton hideText size="small" recordItemId={record.direction_type_id} />
-              <EditButton hideText size="small" recordItemId={record.direction_type_id} />
+            <Space size={4}>
+              <ShowButton
+                hideText
+                size="small"
+                recordItemId={record.direction_type_id}
+              />
+              <EditButton
+                hideText
+                size="small"
+                recordItemId={record.direction_type_id}
+              />
             </Space>
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };

@@ -1,6 +1,7 @@
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
+import { useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
 import { Space, Table } from "antd";
+import { LocalizedList } from "../../components/LocalizedList";
 
 export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -12,7 +13,7 @@ export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <List>
+    <LocalizedList title="Заказы по цехам">
       <Table
         {...tableProps}
         rowKey="order_workshop_id"
@@ -22,29 +23,29 @@ export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="order_workshop_id" title="ID" sorter />
-        <Table.Column dataIndex="order_id" title="Order ID" sorter />
-        <Table.Column dataIndex="workshop_id" title="Workshop ID" sorter />
-        <Table.Column dataIndex="production_status_id" title="Production Status" sorter />
-        <Table.Column dataIndex="sequence_order" title="Sequence" sorter />
+        <Table.Column dataIndex="order_workshop_id" title="id" sorter />
+        <Table.Column dataIndex="order_id" title="Заказ" sorter />
+        <Table.Column dataIndex="workshop_id" title="Цех" sorter />
+        <Table.Column dataIndex="production_status_id" title="Статус производства" sorter />
+        <Table.Column dataIndex="sequence_order" title="Последовательный номер этапа" sorter />
         <Table.Column
           dataIndex="received_date"
-          title="Received Date"
+          title="Дата поступления в цех"
           render={(value) => value && <DateField value={value} format="YYYY-MM-DD HH:mm" />}
         />
         <Table.Column
           dataIndex="started_date"
-          title="Started Date"
+          title="Дата начала работ"
           render={(value) => value && <DateField value={value} format="YYYY-MM-DD HH:mm" />}
         />
         <Table.Column
           dataIndex="completed_date"
-          title="Completed Date"
+          title="Дата завершения"
           render={(value) => value && <DateField value={value} format="YYYY-MM-DD HH:mm" />}
         />
         <Table.Column
           dataIndex="planned_completion_date"
-          title="Planned"
+          title="Плановая дата завершения"
           render={(value) => value && <DateField value={value} format="YYYY-MM-DD" />}
         />
         <Table.Column
@@ -57,6 +58,6 @@ export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };

@@ -1,6 +1,7 @@
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
+import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
+import { LocalizedList } from "../../components/LocalizedList";
 
 export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -12,7 +13,7 @@ export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <List>
+    <LocalizedList title="Участки цехов">
       <Table
         {...tableProps}
         rowKey="workcenter_id"
@@ -23,12 +24,16 @@ export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="workcenter_id" title="ID" sorter />
-        <Table.Column dataIndex="workcenter_code" title="Код" sorter />
-        <Table.Column dataIndex="workcenter_name" title="Название" sorter />
+        <Table.Column dataIndex="workcenter_code" title="Код участка" sorter />
+        <Table.Column
+          dataIndex="workcenter_name"
+          title="Название участка"
+          sorter
+        />
         <Table.Column
           dataIndex={["workshop", "workshop_name"]}
           title="Цех"
-          render={(value, record: any) => record?.workshop?.workshop_name || "-"}
+          render={(_, record: any) => record?.workshop?.workshop_name || "-"}
         />
         <Table.Column
           dataIndex="is_active"
@@ -45,17 +50,25 @@ export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
             { text: "Неактивен", value: false },
           ]}
         />
-        <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
+        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
-            <Space>
-              <ShowButton hideText size="small" recordItemId={record.workcenter_id} />
-              <EditButton hideText size="small" recordItemId={record.workcenter_id} />
+            <Space size={4}>
+              <ShowButton
+                hideText
+                size="small"
+                recordItemId={record.workcenter_id}
+              />
+              <EditButton
+                hideText
+                size="small"
+                recordItemId={record.workcenter_id}
+              />
             </Space>
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };

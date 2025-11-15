@@ -1,6 +1,7 @@
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
+﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
+import { LocalizedList } from "../../components/LocalizedList";
 
 export const UserList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -12,7 +13,7 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <List>
+    <LocalizedList>
       <Table
         {...tableProps}
         rowKey="user_id"
@@ -66,6 +67,6 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
-    </List>
+    </LocalizedList>
   );
 };
