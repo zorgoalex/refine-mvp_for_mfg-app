@@ -1,5 +1,6 @@
 ﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, EditButton } from "@refinedev/antd";
+import { useTable, ShowButton, EditButton } from "@refinedev/antd";
+import { LocalizedList } from "../../components/LocalizedList";
 import { Space, Table, Badge } from "antd";
 
 export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
@@ -12,7 +13,7 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <LocalizedList>
+    <LocalizedList title="Цеха">
       <Table
         {...tableProps}
         rowKey="workshop_id"
@@ -71,3 +72,7 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
     </LocalizedList>
   );
 };
+
+
+
+

@@ -15,7 +15,7 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <LocalizedList>
+    <LocalizedList title="Статусы перемещений">
       <Table
         {...tableProps}
         {...highlightProps}
@@ -26,10 +26,10 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="movement_status_id" title="ID" sorter />
-        <Table.Column dataIndex="movement_status_code" title="Code" sorter />
-        <Table.Column dataIndex="movement_status_name" title="Name" sorter />
-        <Table.Column dataIndex="sort_order" title="Sort Order" sorter />
+        <Table.Column dataIndex="movement_status_id" title="id" sorter />
+        <Table.Column dataIndex="movement_status_code" title="Код статуса" sorter />
+        <Table.Column dataIndex="movement_status_name" title="Название статуса" sorter />
+        <Table.Column dataIndex="sort_order" title="Сортировка по умолчанию" sorter />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -45,7 +45,7 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
             { text: "Неактивен", value: false },
           ]}
         />
-        <Table.Column dataIndex="description" title="Description" />
+        <Table.Column dataIndex="description" title="Описание" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
@@ -59,3 +59,6 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
     </LocalizedList>
   );
 };
+
+
+
