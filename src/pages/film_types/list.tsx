@@ -41,7 +41,7 @@ export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
           ]}
         />
         <Table.Column
-          title="Actions"
+          title="Действия"
           render={(_, record: any) => (
             <Space>
               <ShowButton hideText size="small" recordItemId={record.film_type_id} />

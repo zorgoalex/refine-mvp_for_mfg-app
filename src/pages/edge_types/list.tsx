@@ -45,7 +45,7 @@ export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
         <Table.Column
-          title="Actions"
+          title="Действия"
           render={(_, record: any) => (
             <Space>
               <ShowButton hideText size="small" recordItemId={record.edge_type_id} />

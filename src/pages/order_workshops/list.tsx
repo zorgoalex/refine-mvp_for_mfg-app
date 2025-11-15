@@ -48,7 +48,7 @@ export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
           render={(value) => value && <DateField value={value} format="YYYY-MM-DD" />}
         />
         <Table.Column
-          title="Actions"
+          title="Действия"
           render={(_, record: any) => (
             <Space>
               <ShowButton hideText size="small" recordItemId={record.order_workshop_id} />

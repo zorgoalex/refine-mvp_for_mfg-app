@@ -44,7 +44,7 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
           onFilter={(value, record: any) => record.is_active === value}
         />
         <Table.Column
-          title="Actions"
+          title="Действия"
           render={(_, record: any) => (
             <Space>
               <ShowButton hideText size="small" recordItemId={record.supplier_id} />

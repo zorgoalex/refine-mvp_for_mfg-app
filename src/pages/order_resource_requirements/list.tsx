@@ -51,7 +51,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           ]}
         />
         <Table.Column
-          title="Actions"
+          title="Действия"
           render={(_, record: any) => (
             <Space>
               <ShowButton hideText size="small" recordItemId={record.requirement_id} />

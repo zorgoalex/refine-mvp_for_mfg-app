@@ -45,7 +45,7 @@ export const RequisitionStatusList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column dataIndex="description" title="Description" />
         <Table.Column
-          title="Actions"
+          title="Действия"
           render={(_, record: any) => (
             <Space>
               <ShowButton hideText size="small" recordItemId={record.requisition_status_id} />

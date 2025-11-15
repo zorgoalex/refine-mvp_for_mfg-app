@@ -171,7 +171,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="edge_type_name" title="Edge Type" width={70} className="orders-col" />
         <Table.Column dataIndex="film_name" title="Film" width={120} className="orders-col" />
         <Table.Column
-          title="Actions"
+          title="Действия"
           width={80}
           fixed="right"
           render={(_, record: any) => (

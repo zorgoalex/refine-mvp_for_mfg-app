@@ -26,7 +26,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="client_id" title="Client ID" sorter />
-        <Table.Column dataIndex="client_name" title="Name" sorter />
+        <Table.Column dataIndex="client_name" title="Имя клиента" sorter />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -42,9 +42,9 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
             { text: "Неактивен", value: false },
           ]}
         />
-        <Table.Column dataIndex="ref_key_1c" title="Ref Key 1C" />
+        <Table.Column dataIndex="ref_key_1c" title="1С-key" />
         <Table.Column
-          title="Actions"
+          title="Действия"
           render={(_, record: any) => (
             <Space>
               <ShowButton hideText size="small" recordItemId={record.client_id} />
