@@ -75,57 +75,92 @@
     line-height: 1.1;
   }
 
+  /* Убираем ВСЕ вертикальные границы из ВСЕХ секций шапки */
+  .print-header .print-row .cell,
+  .additional-fields .print-row .cell,
+  .order-info .print-row .cell {
+    border-left: none !important;
+    border-right: none !important;
+  }
+
+  /* Первая строка шапки - БЕЗ границ */
+  .print-header .header-row-1 .cell {
+    border-top: none;
+    border-bottom: none;
+  }
+
+  /* Вторая строка шапки - только нижняя граница */
+  .print-header .header-row-2 .cell {
+    border-top: none;
+    border-bottom: 1px solid #000;
+  }
+
+  /* Дополнительные поля - только горизонтальные границы */
+  .additional-fields .print-row .cell {
+    border-top: none;
+    border-bottom: 1px solid #000;
+  }
+
+  /* Информация о заказе - только горизонтальные границы */
+  .order-info .print-row .cell {
+    border-top: none;
+    border-bottom: 1px solid #000;
+  }
+
   /* Специальные ячейки шапки */
-  .cell-year,
+  .cell-year {
+    font-weight: bold;
+    font-size: 11pt;
+    text-align: center;
+    width: 4%;
+  }
+
+  .cell-empty-narrow {
+    width: 2%;
+  }
+
   .cell-order-id {
     font-weight: bold;
     font-size: 11pt;
     text-align: center;
-    width: 5%;
+    width: 6%;
   }
 
-  .cell-empty-small {
-    width: 3%;
-  }
-
-  .cell-premier {
-    font-size: 6pt;
-    width: 7%;
+  .cell-attachment {
+    font-size: 1.5pt;
+    width: 8%;
     text-align: center;
     line-height: 1.0;
   }
 
-  .cell-premier.red-text {
+  .cell-attachment.red-text {
     color: #ff0000;
   }
 
   .cell-customer-label {
-    font-size: 7pt;
+    font-size: 8pt;
     text-align: center;
-    width: 35%;
+    width: 50%;
   }
 
   .cell-total-label {
-    font-size: 7pt;
+    font-size: 8pt;
     text-align: center;
-    width: 25%;
+    width: 30%;
   }
 
   .cell-customer-name {
     font-weight: bold;
     font-size: 9pt;
     text-align: center;
-    width: 51%;
+    width: 50%;
   }
 
-  .cell-total-sum.blue-bg {
-    background-color: #4472C4 !important;
-    color: white !important;
+  .cell-total-sum {
     font-weight: bold;
     font-size: 10pt;
-    text-align: right;
-    padding-right: 6px;
-    width: 25%;
+    text-align: center;
+    width: 30%;
   }
 
   /* Дополнительные поля */
@@ -144,25 +179,58 @@
   }
 
   /* Информация о заказе */
-  .order-info .cell.label {
-    font-weight: normal;
+  .order-info .cell.date-label {
+    font-style: italic;
     font-size: 7pt;
-    width: 10%;
+    width: 5%;
+    text-align: left;
   }
 
-  .order-info .cell.value {
+  .order-info .cell.date-value {
     font-weight: bold;
     font-size: 7pt;
     width: 10%;
+    text-align: left;
   }
 
-  .order-info .cell.label-value {
+  .order-info .cell.notes-value {
     font-size: 7pt;
-    width: 15%;
+    width: 30%;
+    text-align: left;
+    padding-left: 10px;
   }
 
-  .order-info .cell.label-value .label {
-    font-weight: normal;
+  .order-info .cell.spacer {
+    width: 25%;
+  }
+
+  .order-info .cell.area-label {
+    font-style: italic;
+    font-size: 7pt;
+    width: 12%;
+    text-align: right;
+    padding-right: 5px;
+  }
+
+  .order-info .cell.area-value {
+    font-weight: bold;
+    font-size: 7pt;
+    width: 6%;
+    text-align: right;
+  }
+
+  .order-info .cell.parts-label {
+    font-size: 7pt;
+    width: 8%;
+    text-align: center;
+    line-height: 1.0;
+  }
+
+  .order-info .cell.parts-value {
+    font-weight: bold;
+    font-size: 7pt;
+    width: 4%;
+    text-align: center;
   }
 
   /* Таблица деталей */

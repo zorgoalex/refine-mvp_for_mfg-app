@@ -31,6 +31,7 @@ interface Order {
   paid_amount: number | null;
   parts_count: number | null;
   total_area: number | null;
+  notes: string | null;
 }
 
 /**
@@ -81,24 +82,20 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
         <div className="print-header">
           <div className="print-row header-row-1">
             <div className="cell cell-year">{yearLastTwo}</div>
-            <div className="cell cell-empty-small"></div>
+            <div className="cell cell-empty-narrow"></div>
             <div className="cell cell-order-id">{order.order_id}</div>
-            <div className="cell cell-premier red-text">Нет<br/>премьера</div>
-            <div className="cell cell-empty-small"></div>
-            <div className="cell cell-empty-small"></div>
-            <div className="cell cell-empty-small"></div>
-            <div className="cell cell-empty-small"></div>
+            <div className="cell cell-attachment red-text">№ присадки</div>
             <div className="cell cell-customer-label">Заказчик</div>
             <div className="cell cell-total-label">общая сумма</div>
           </div>
 
           <div className="print-row header-row-2">
-            <div className="cell cell-empty-small"></div>
-            <div className="cell cell-empty-small"></div>
-            <div className="cell cell-empty-small"></div>
-            <div className="cell cell-empty-small"></div>
+            <div className="cell cell-empty-narrow"></div>
+            <div className="cell cell-empty-narrow"></div>
+            <div className="cell cell-empty-narrow"></div>
+            <div className="cell cell-empty-narrow"></div>
             <div className="cell cell-customer-name">{client?.client_name || 'Не указан'}</div>
-            <div className="cell cell-total-sum blue-bg">{formatPrice(totalAmount)} KZT</div>
+            <div className="cell cell-total-sum">{formatPrice(totalAmount)} KZT</div>
           </div>
         </div>
 
@@ -108,7 +105,7 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
             <div className="cell label">фрезеровка</div>
             <div className="cell value">{firstDetail?.milling_type?.milling_type_name || ''}</div>
             <div className="cell"></div>
-            <div className="cell label">облат</div>
+            <div className="cell label">обкат</div>
             <div className="cell value">{firstDetail?.edge_type?.edge_type_name || ''}</div>
             <div className="cell label">пленка</div>
             <div className="cell value">{firstDetail?.film?.film_name || ''}</div>
@@ -124,21 +121,14 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
         {/* Информация о заказе (строка 8) */}
         <div className="order-info">
           <div className="print-row">
-            <div className="cell"></div>
-            <div className="cell"></div>
-            <div className="cell label">Дата</div>
-            <div className="cell value">{formatDate(order.order_date)}</div>
-            <div className="cell"></div>
-            <div className="cell"></div>
-            <div className="cell"></div>
-            <div className="cell"></div>
-            <div className="cell"></div>
-            <div className="cell"></div>
-            <div className="cell label">общая площадь</div>
-            <div className="cell value">{formatArea(totalArea)}</div>
-            <div className="cell label-value">
-              <span className="label">кол-во деталей</span> {partsCount}
-            </div>
+            <div className="cell date-label">Дата</div>
+            <div className="cell date-value">{formatDate(order.order_date)}</div>
+            {order.notes && <div className="cell notes-value">{order.notes}</div>}
+            <div className="cell spacer"></div>
+            <div className="cell area-label">общая площадь</div>
+            <div className="cell area-value">{formatArea(totalArea)}</div>
+            <div className="cell parts-label">кол-во<br/>деталей</div>
+            <div className="cell parts-value">{partsCount}</div>
           </div>
         </div>
 
@@ -152,7 +142,7 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
               <th className="col-qty vertical-text">Кол-во</th>
               <th className="col-area">м²</th>
               <th className="col-type">Тип детали</th>
-              <th className="col-edge vertical-text">Облат</th>
+              <th className="col-edge vertical-text">Обкат</th>
               <th className="col-note highlight">Примечание</th>
               <th className="col-price">Цена за кв.м.</th>
               <th className="col-sum">Сумма</th>
