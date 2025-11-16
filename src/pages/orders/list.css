@@ -8,8 +8,25 @@
   font-size: 80%;
 }
 
+.orders-table td.orders-col--order-name,
+.orders-table td.orders-col--order-date,
+.orders-table td.orders-col--planned-date,
+.orders-table td.orders-col--amount,
+.orders-table td.orders-col--payment-date {
+  font-size: 96%;
+}
+
+.orders-table td.col-order-id {
+  font-size: 70%;
+}
+
 .orders-table td.orders-col.status {
   font-size: 100%;
+}
+
+.orders-table td.orders-col--client,
+.orders-table td.orders-col--wrap {
+  hyphens: auto;
 }
 
 .orders-table .orders-status-value {

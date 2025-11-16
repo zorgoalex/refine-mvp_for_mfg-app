@@ -12,7 +12,12 @@ import {
   CreateButton,
 } from "@refinedev/antd";
 import { Space, Table, Button } from "antd";
-import { EyeOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
+import {
+  EyeOutlined,
+  EditOutlined,
+  PlusOutlined,
+  StarFilled,
+} from "@ant-design/icons";
 import dayjs from "dayjs";
 
 import { formatNumber } from "../../utils/numberFormat";
@@ -102,9 +107,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         >
           <Table.Column
             dataIndex="order_id"
-            title="ID заказа"
+            title="ID"
             sorter
-            width={80}
+            width={60}
             className="col-order-id"
             onHeaderCell={() => ({ className: "col-order-id" })}
           />
@@ -112,72 +117,48 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             dataIndex="order_name"
             title="Заказ"
             sorter
-            width={120}
-            className="orders-col narrow"
+            width={80}
+            className="orders-col orders-col--order-name"
           />
           <Table.Column
             dataIndex="order_date"
             title="Дата заказа"
             sorter
             width={100}
-            className="orders-col"
+            className="orders-col orders-col--order-date"
             render={(value) => formatDate(value)}
           />
           <Table.Column
             dataIndex="client_name"
-            title="Имя клиента"
-            width={140}
-            className="orders-col"
+            title="Клиент"
+            width={110}
+            className="orders-col orders-col--client"
           />
           <Table.Column
             dataIndex="milling_type_name"
             title="Фрезеровка"
-            width={120}
-            className="orders-col"
+            width={100}
+            className="orders-col orders-col--wrap"
           />
           <Table.Column
             dataIndex="material_name"
             title="Материал"
-            width={120}
-            className="orders-col"
+            width={100}
+            className="orders-col orders-col--wrap"
+          />
+          <Table.Column
+            dataIndex="notes"
+            title="Примечание"
+            width={160}
+            className="orders-col orders-col--wrap"
           />
           <Table.Column
             dataIndex="priority"
-            title="Приоритет заказа"
+            title={<StarFilled />}
             sorter
-            width={80}
+            width={60}
             className="col-priority"
             onHeaderCell={() => ({ className: "col-priority" })}
-          />
-          <Table.Column
-            dataIndex="completion_date"
-            title="Дата выполнения"
-            sorter
-            width={110}
-            className="orders-col"
-            render={(value) => formatDate(value)}
-          />
-          <Table.Column
-            dataIndex="planned_completion_date"
-            title="Планируемая дата выполнения"
-            sorter
-            width={140}
-            className="orders-col"
-            render={(value) => formatDate(value)}
-          />
-          <Table.Column
-            dataIndex="order_status_name"
-            title="Статус заказа"
-            width={120}
-            className="orders-col status order-status"
-            render={(value) => renderStatus(value)}
-          />
-          <Table.Column
-            dataIndex="payment_status_name"
-            title="Статус оплаты заказа"
-            width={140}
-            className="orders-col status payment-status"
-            render={(value) => renderStatus(value)}
           />
           <Table.Column
             dataIndex="issue_date"
@@ -188,19 +169,48 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             render={(value) => formatDate(value)}
           />
           <Table.Column
+            dataIndex="parts_count"
+            title="Количество деталей"
+            sorter
+            width={120}
+            className="orders-col"
+          />
+          <Table.Column
+            dataIndex="planned_completion_date"
+            title="План. дата выполнения"
+            sorter
+            width={100}
+            className="orders-col orders-col--planned-date"
+            render={(value) => formatDate(value)}
+          />
+          <Table.Column
+            dataIndex="order_status_name"
+            title="Статус заказа"
+            width={90}
+            className="orders-col status order-status orders-col--wrap"
+            render={(value) => renderStatus(value)}
+          />
+          <Table.Column
+            dataIndex="payment_status_name"
+            title="Статус оплаты заказа"
+            width={100}
+            className="orders-col status payment-status orders-col--wrap"
+            render={(value) => renderStatus(value)}
+          />
+          <Table.Column
             dataIndex="total_amount"
             title="Сумма заказа"
             sorter
-            width={110}
-            className="orders-col"
+            width={90}
+            className="orders-col orders-col--amount"
             render={(value) => formatNumber(value as number, 0)}
           />
           <Table.Column
             dataIndex="discounted_amount"
             title="Сумма со скидкой"
             sorter
-            width={120}
-            className="orders-col"
+            width={90}
+            className="orders-col orders-col--amount"
             render={(value) => formatNumber(value as number, 0)}
           />
           <Table.Column
@@ -215,49 +225,44 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             dataIndex="paid_amount"
             title="Сумма оплаты"
             sorter
-            width={110}
-            className="orders-col"
+            width={90}
+            className="orders-col orders-col--amount"
             render={(value) => formatNumber(value as number, 0)}
           />
           <Table.Column
             dataIndex="payment_date"
-            title="Дата оплаты заказа"
+            title="Дата оплаты"
             sorter
-            width={130}
-            className="orders-col"
+            width={90}
+            className="orders-col orders-col--payment-date"
             render={(value) => formatDate(value)}
-          />
-          <Table.Column
-            dataIndex="notes"
-            title="Примечание"
-            width={160}
-            className="orders-col"
-          />
-          <Table.Column
-            dataIndex="parts_count"
-            title="Количество деталей"
-            sorter
-            width={130}
-            className="orders-col"
           />
           <Table.Column
             dataIndex="total_area"
             title="Площадь заказа"
             sorter
-            width={110}
+            width={120}
             className="orders-col"
+          />
+          <Table.Column
+            dataIndex="completion_date"
+            title="Дата выполнения"
+            sorter
+            width={120}
+            className="orders-col"
+            render={(value) => formatDate(value)}
           />
           <Table.Column
             dataIndex="edge_type_name"
             title="Обкат"
-            width={100}
-            className="orders-col"
+            width={90}
+            className="orders-col orders-col--wrap"
           />
           <Table.Column
             dataIndex="film_name"
             title="Пленка"
-            width={140}
-            className="orders-col"
+            width={120}
+            className="orders-col orders-col--wrap"
           />
           <Table.Column
             dataIndex="created_by"
@@ -299,3 +304,4 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     </>
   );
 };
+
