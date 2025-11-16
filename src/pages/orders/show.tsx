@@ -1,6 +1,6 @@
 import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
 import { Show } from "@refinedev/antd";
-import { Button, Collapse } from "antd";
+import { Button, Collapse, Table } from "antd";
 import { PrinterOutlined } from "@ant-design/icons";
 import { useRef } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -71,27 +71,60 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         value: record?.order_id,
       },
     ],
+    pagination: { pageSize: 1000 },
     queryOptions: {
       enabled: !!record?.order_id,
     },
-    meta: {
-      fields: [
-        "detail_id",
-        "length",
-        "width",
-        "quantity",
-        "area",
-        "notes",
-        "milling_cost_per_sqm",
-        "detail_cost",
-        { milling_type: ["milling_type_name"] },
-        { edge_type: ["edge_type_name"] },
-        { film: ["film_name"] },
-      ],
-    },
   });
 
-  const details = detailsData?.data || [];
+  const details = (detailsData?.data || []).sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0));
+
+  // Загрузка справочников для отображения названий
+  const { data: millingTypesData } = useList({
+    resource: "milling_types",
+    pagination: { pageSize: 10000 },
+  });
+
+  const { data: edgeTypesData } = useList({
+    resource: "edge_types",
+    pagination: { pageSize: 10000 },
+  });
+
+  const { data: filmsData } = useList({
+    resource: "films",
+    pagination: { pageSize: 10000 },
+    filters: [],  // Убираем любые фильтры чтобы загрузить все записи
+  });
+
+  // Создаем lookup maps для быстрого поиска
+  const millingTypesMap = new Map(
+    (millingTypesData?.data || []).map((item: any) => [item.milling_type_id, item.milling_type_name])
+  );
+  const edgeTypesMap = new Map(
+    (edgeTypesData?.data || []).map((item: any) => [item.edge_type_id, item.edge_type_name])
+  );
+  const filmsMap = new Map(
+    (filmsData?.data || []).map((item: any) => [item.film_id, item.film_name])
+  );
+
+  // DEBUG: Log loaded details (after maps are created)
+  console.log('[OrderShow] Loaded details count:', details.length);
+  console.log('[OrderShow] Films data sample:', filmsData?.data?.slice(0, 3));
+  if (details.length > 0) {
+    console.log('[OrderShow] First detail sample:', {
+      detail_id: details[0].detail_id,
+      detail_number: details[0].detail_number,
+      height: details[0].height,
+      note: details[0].note,
+      milling_cost_per_sqm: details[0].milling_cost_per_sqm,
+      detail_cost: details[0].detail_cost,
+      milling_type_id: details[0].milling_type_id,
+      film_id: details[0].film_id,
+    });
+    console.log('[OrderShow] Films map size:', filmsMap.size);
+    console.log('[OrderShow] Films map first entries:', Array.from(filmsMap.entries()).slice(0, 5));
+    console.log('[OrderShow] Film lookup for ID', details[0].film_id, '=', filmsMap.get(details[0].film_id));
+  }
 
   // Ref для печати
   const printRef = useRef<HTMLDivElement>(null);
@@ -174,6 +207,107 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             </Panel>
           </Collapse>
 
+          {/* Детали заказа - компактная таблица */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff', marginBottom: 8 }}>
+              Детали заказа
+            </div>
+            <Table
+              dataSource={details}
+              rowKey="detail_id"
+              size="small"
+              pagination={false}
+              bordered
+              scroll={{ x: 'max-content' }}
+              style={{ fontSize: 12 }}
+              rowClassName={(_, index) => index % 2 === 0 ? 'table-row-light' : 'table-row-dark'}
+              columns={[
+                {
+                  title: '№',
+                  dataIndex: 'detail_number',
+                  key: 'detail_number',
+                  width: 50,
+                  align: 'center',
+                },
+                {
+                  title: 'Высота',
+                  dataIndex: 'height',
+                  key: 'height',
+                  width: 72,
+                  align: 'center',
+                },
+                {
+                  title: 'Ширина',
+                  dataIndex: 'width',
+                  key: 'width',
+                  width: 72,
+                  align: 'center',
+                },
+                {
+                  title: 'Кол-во',
+                  dataIndex: 'quantity',
+                  key: 'quantity',
+                  width: 63,
+                  align: 'center',
+                },
+                {
+                  title: 'м²',
+                  dataIndex: 'area',
+                  key: 'area',
+                  width: 80,
+                  align: 'center',
+                  render: (value) => value ? value.toFixed(2) : '0.00',
+                },
+                {
+                  title: 'Тип детали',
+                  key: 'milling_type',
+                  width: 150,
+                  render: (_, record) => millingTypesMap.get(record.milling_type_id) || '—',
+                },
+                {
+                  title: 'Обкат',
+                  key: 'edge_type',
+                  width: 50,
+                  render: (_, record) => edgeTypesMap.get(record.edge_type_id) || '—',
+                },
+                {
+                  title: 'Примечание',
+                  dataIndex: 'note',
+                  key: 'note',
+                  width: 180,
+                  ellipsis: true,
+                  render: (value) => value || '—',
+                },
+                {
+                  title: 'Цена за кв.м.',
+                  dataIndex: 'milling_cost_per_sqm',
+                  key: 'milling_cost_per_sqm',
+                  width: 70,
+                  align: 'right',
+                  render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
+                },
+                {
+                  title: 'Сумма',
+                  dataIndex: 'detail_cost',
+                  key: 'detail_cost',
+                  width: 59,
+                  align: 'right',
+                  render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
+                },
+                {
+                  title: 'Пленка',
+                  key: 'film',
+                  width: 173,
+                  render: (_, record) => {
+                    if (!record.film_id) return '—';
+                    const filmName = filmsMap.get(record.film_id);
+                    return <span style={{ fontSize: '0.86em' }}>{filmName || '—'}</span>;
+                  },
+                },
+              ]}
+            />
+          </div>
+
           {/* Скрытый компонент для печати */}
           <OrderPrintView
             ref={printRef}
@@ -188,7 +322,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               total_area: record.total_area,
               notes: record.notes,
             }}
-            details={details}
+            details={details.map(detail => ({
+              ...detail,
+              milling_type: { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' },
+              edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
+              film: { film_name: filmsMap.get(detail.film_id) || '' },
+            }))}
             client={record.client_name ? { client_name: record.client_name } : undefined}
           />
         </>

@@ -81,10 +81,10 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
         {/* Шапка заказа */}
         <div className="print-header">
           <div className="print-row header-row-1">
-            <div className="cell cell-year">{yearLastTwo}</div>
+            <div className="cell cell-year"></div>
             <div className="cell cell-empty-narrow"></div>
             <div className="cell cell-order-id">{order.order_id}</div>
-            <div className="cell cell-attachment red-text">№ присадки</div>
+            <div className="cell cell-attachment red-text" style={{ fontSize: '0.5em' }}>№ присадки</div>
             <div className="cell cell-customer-label">Заказчик</div>
             <div className="cell cell-total-label">общая сумма</div>
           </div>
@@ -152,14 +152,14 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
           <tbody>
             {details.map((detail, idx) => (
               <tr key={detail.detail_id || idx}>
-                <td className="col-num">{idx + 1}</td>
-                <td className="col-height">{detail.length || ''}</td>
+                <td className="col-num">{detail.detail_number}</td>
+                <td className="col-height">{detail.height || ''}</td>
                 <td className="col-width">{detail.width || ''}</td>
                 <td className="col-qty">{detail.quantity}</td>
                 <td className="col-area">{formatArea(detail.area)}</td>
                 <td className="col-type">{detail.milling_type?.milling_type_name || ''}</td>
                 <td className="col-edge">{detail.edge_type?.edge_type_name || ''}</td>
-                <td className="col-note">{detail.notes || ''}</td>
+                <td className="col-note">{detail.note || ''}</td>
                 <td className="col-price">{formatPrice(detail.milling_cost_per_sqm)}</td>
                 <td className="col-sum">{formatPrice(detail.detail_cost)}</td>
                 <td className="col-film">{detail.film?.film_name || ''}</td>

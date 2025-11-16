@@ -106,3 +106,23 @@
 .orders-table th.col-priority {
   font-size: 12px;
 }
+
+/* Zebra striping for details table - alternating row colors */
+.table-row-light {
+  background-color: #ffffff !important;
+}
+
+.table-row-dark {
+  background-color: #fafafa !important;
+}
+
+.table-row-light:hover td,
+.table-row-dark:hover td {
+  background-color: #f0f0f0 !important;
+}
+
+/* Darker horizontal borders for details table */
+.table-row-light td,
+.table-row-dark td {
+  border-bottom: 1px solid #d9d9d9 !important;
+}
