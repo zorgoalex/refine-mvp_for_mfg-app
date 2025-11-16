@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { Typography, Tag } from 'antd';
+import { useOne } from '@refinedev/core';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -16,6 +17,24 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
     if (!date) return '—';
     return dayjs(date).format('DD.MM.YYYY HH:mm');
   };
+
+  // Загружаем данные пользователя, создавшего заказ
+  const { data: createdByUser } = useOne({
+    resource: 'users',
+    id: record?.created_by,
+    queryOptions: {
+      enabled: !!record?.created_by,
+    },
+  });
+
+  // Загружаем данные пользователя, редактировавшего заказ
+  const { data: editedByUser } = useOne({
+    resource: 'users',
+    id: record?.edited_by,
+    queryOptions: {
+      enabled: !!record?.edited_by,
+    },
+  });
 
   return (
     <div
@@ -80,7 +99,7 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
             Создал
           </Text>
           <Text style={{ fontSize: 13, color: '#262626' }}>
-            {record?.created_by || '—'}
+            {createdByUser?.data?.username || record?.created_by || '—'}
           </Text>
         </div>
 
@@ -89,7 +108,7 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
             Изменил
           </Text>
           <Text style={{ fontSize: 13, color: '#262626' }}>
-            {record?.edited_by || '—'}
+            {editedByUser?.data?.username || record?.edited_by || '—'}
           </Text>
         </div>
       </div>

@@ -73,8 +73,43 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
     const paidAmount = order.paid_amount || 0;
     const remainingAmount = totalAmount - paidAmount;
 
-    // Первая деталь для дополнительных полей (defaults)
-    const firstDetail = details[0];
+    // Вычисляем общие значения для всех деталей (показываем только если одинаковые)
+    const commonValues = useMemo(() => {
+      if (!details || details.length === 0) {
+        return {
+          millingTypeName: '',
+          edgeTypeName: '',
+          filmName: '',
+        };
+      }
+
+      // Проверяем milling_type
+      const millingTypeNames = details
+        .map(d => d.milling_type?.milling_type_name)
+        .filter(name => name && name.trim() !== '');
+      const uniqueMillingTypes = [...new Set(millingTypeNames)];
+      const millingTypeName = uniqueMillingTypes.length === 1 ? uniqueMillingTypes[0] : '';
+
+      // Проверяем edge_type
+      const edgeTypeNames = details
+        .map(d => d.edge_type?.edge_type_name)
+        .filter(name => name && name.trim() !== '');
+      const uniqueEdgeTypes = [...new Set(edgeTypeNames)];
+      const edgeTypeName = uniqueEdgeTypes.length === 1 ? uniqueEdgeTypes[0] : '';
+
+      // Проверяем film
+      const filmNames = details
+        .map(d => d.film?.film_name)
+        .filter(name => name && name.trim() !== '');
+      const uniqueFilms = [...new Set(filmNames)];
+      const filmName = uniqueFilms.length === 1 ? uniqueFilms[0] : '';
+
+      return {
+        millingTypeName,
+        edgeTypeName,
+        filmName,
+      };
+    }, [details]);
 
     return (
       <div ref={ref} className="order-print-view">
@@ -103,12 +138,12 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
         <div className="additional-fields">
           <div className="print-row">
             <div className="cell label">фрезеровка</div>
-            <div className="cell value">{firstDetail?.milling_type?.milling_type_name || ''}</div>
+            <div className="cell value">{commonValues.millingTypeName}</div>
             <div className="cell"></div>
             <div className="cell label">обкат</div>
-            <div className="cell value">{firstDetail?.edge_type?.edge_type_name || ''}</div>
+            <div className="cell value">{commonValues.edgeTypeName}</div>
             <div className="cell label">пленка</div>
-            <div className="cell value">{firstDetail?.film?.film_name || ''}</div>
+            <div className="cell value">{commonValues.filmName}</div>
             <div className="cell"></div>
             <div className="cell"></div>
             <div className="cell"></div>

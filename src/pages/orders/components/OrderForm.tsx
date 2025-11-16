@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Tabs, Button, Space, Spin, notification } from 'antd';
-import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
+import { SaveOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
 import { useOrderFormStore } from '../../../stores/orderFormStore';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
@@ -247,7 +247,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   ]);
 
   // Navigation
-  const { list } = useNavigation();
+  const { list, show } = useNavigation();
 
   // Handle save
   const handleSave = async () => {
@@ -531,6 +531,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       title={cardTitle}
       extra={
         <Space>
+          {mode === 'edit' && orderId && (
+            <Button
+              icon={<EyeOutlined />}
+              onClick={() => show('orders_view', orderId)}
+              style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
+            >
+              Просмотр
+            </Button>
+          )}
           <Button
             type={isDirty ? "primary" : "default"}
             icon={<SaveOutlined />}

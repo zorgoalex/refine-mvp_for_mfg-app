@@ -74,6 +74,72 @@ export const OrderHeaderSummary: React.FC = () => {
       .join(', ');
   }, [materialsData]);
 
+  // Load milling types, edge types, films для lookup
+  const { data: millingTypesData } = useList({
+    resource: 'milling_types',
+    pagination: { pageSize: 10000 },
+  });
+
+  const { data: edgeTypesData } = useList({
+    resource: 'edge_types',
+    pagination: { pageSize: 10000 },
+  });
+
+  const { data: filmsData } = useList({
+    resource: 'films',
+    pagination: { pageSize: 10000 },
+    filters: [],
+  });
+
+  // Создаем lookup maps
+  const millingTypesMap = new Map(
+    (millingTypesData?.data || []).map((item: any) => [item.milling_type_id, item.milling_type_name])
+  );
+  const edgeTypesMap = new Map(
+    (edgeTypesData?.data || []).map((item: any) => [item.edge_type_id, item.edge_type_name])
+  );
+  const filmsMap = new Map(
+    (filmsData?.data || []).map((item: any) => [item.film_id, item.film_name])
+  );
+
+  // Вычисляем общие значения для всех деталей
+  const commonProductionValues = useMemo(() => {
+    if (!details || details.length === 0) {
+      return {
+        millingTypeName: '—',
+        edgeTypeName: '—',
+        filmName: '—',
+      };
+    }
+
+    // Проверяем milling_type_id
+    const millingTypeIds = details.map(d => d.milling_type_id).filter(id => id !== null && id !== undefined);
+    const uniqueMillingTypeIds = [...new Set(millingTypeIds)];
+    const millingTypeName = uniqueMillingTypeIds.length === 1 && uniqueMillingTypeIds[0]
+      ? millingTypesMap.get(uniqueMillingTypeIds[0]) || '—'
+      : '—';
+
+    // Проверяем edge_type_id
+    const edgeTypeIds = details.map(d => d.edge_type_id).filter(id => id !== null && id !== undefined);
+    const uniqueEdgeTypeIds = [...new Set(edgeTypeIds)];
+    const edgeTypeName = uniqueEdgeTypeIds.length === 1 && uniqueEdgeTypeIds[0]
+      ? edgeTypesMap.get(uniqueEdgeTypeIds[0]) || '—'
+      : '—';
+
+    // Проверяем film_id
+    const filmIds = details.map(d => d.film_id).filter(id => id !== null && id !== undefined);
+    const uniqueFilmIds = [...new Set(filmIds)];
+    const filmName = uniqueFilmIds.length === 1 && uniqueFilmIds[0]
+      ? filmsMap.get(uniqueFilmIds[0]) || '—'
+      : '—';
+
+    return {
+      millingTypeName,
+      edgeTypeName,
+      filmName,
+    };
+  }, [details, millingTypesMap, edgeTypesMap, filmsMap]);
+
   // Row separator line
   const RowSeparator = () => (
     <div style={{ height: 1, background: '#E5E7EB', margin: 0 }} />
@@ -266,6 +332,43 @@ export const OrderHeaderSummary: React.FC = () => {
             Площадь: <Text strong>{formatNumber(totals.total_area, 2)} м²</Text>
           </Text>
         </Space>
+      </div>
+
+      <RowSeparator />
+
+      {/* Row 4: Production fields (показываются только если все детали имеют одинаковое значение) */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '6px 16px',
+          gap: 16,
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <Text style={{ fontSize: 12, color: '#8c8c8c' }}>Фрезеровка: </Text>
+          <Text strong style={{ fontSize: 13, color: '#262626' }}>
+            {commonProductionValues.millingTypeName}
+          </Text>
+        </div>
+
+        <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+
+        <div style={{ flex: 1 }}>
+          <Text style={{ fontSize: 12, color: '#8c8c8c' }}>Обкат: </Text>
+          <Text strong style={{ fontSize: 13, color: '#262626' }}>
+            {commonProductionValues.edgeTypeName}
+          </Text>
+        </div>
+
+        <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+
+        <div style={{ flex: 1 }}>
+          <Text style={{ fontSize: 12, color: '#8c8c8c' }}>Плёнка: </Text>
+          <Text strong style={{ fontSize: 13, color: '#262626' }}>
+            {commonProductionValues.filmName}
+          </Text>
+        </div>
       </div>
     </div>
   );

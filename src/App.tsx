@@ -180,7 +180,10 @@ const App = () => {
                 list: "/orders",
                 edit: "/orders/edit/:id",
                 show: "/orders/show/:id",
-                meta: { idColumnName: "order_id" },
+                meta: { 
+                  idColumnName: "order_id",
+                  label: "Заказы",
+                },
               },
               {
                 name: "materials",

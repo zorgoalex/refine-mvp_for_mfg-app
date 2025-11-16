@@ -1,9 +1,10 @@
 import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
-import { Show } from "@refinedev/antd";
-import { Button, Collapse, Table } from "antd";
-import { PrinterOutlined } from "@ant-design/icons";
+import { Show, BreadcrumbProps, EditButton, RefreshButton } from "@refinedev/antd";
+import { Button, Collapse, Table, Breadcrumb } from "antd";
+import { PrinterOutlined, HomeOutlined } from "@ant-design/icons";
 import { useRef } from "react";
 import { useReactToPrint } from "react-to-print";
+import { Link } from "react-router-dom";
 import { OrderPrintView } from "./components/print/OrderPrintView";
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
@@ -107,25 +108,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     (filmsData?.data || []).map((item: any) => [item.film_id, item.film_name])
   );
 
-  // DEBUG: Log loaded details (after maps are created)
-  console.log('[OrderShow] Loaded details count:', details.length);
-  console.log('[OrderShow] Films data sample:', filmsData?.data?.slice(0, 3));
-  if (details.length > 0) {
-    console.log('[OrderShow] First detail sample:', {
-      detail_id: details[0].detail_id,
-      detail_number: details[0].detail_number,
-      height: details[0].height,
-      note: details[0].note,
-      milling_cost_per_sqm: details[0].milling_cost_per_sqm,
-      detail_cost: details[0].detail_cost,
-      milling_type_id: details[0].milling_type_id,
-      film_id: details[0].film_id,
-    });
-    console.log('[OrderShow] Films map size:', filmsMap.size);
-    console.log('[OrderShow] Films map first entries:', Array.from(filmsMap.entries()).slice(0, 5));
-    console.log('[OrderShow] Film lookup for ID', details[0].film_id, '=', filmsMap.get(details[0].film_id));
-  }
-
   // Ref для печати
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -138,9 +120,24 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   return (
     <Show
       isLoading={isLoading || detailsLoading}
-      headerButtons={({ defaultButtons }) => (
+      title="Просмотр заказа"
+      breadcrumb={
+        <Breadcrumb>
+          <Breadcrumb.Item>
+            <Link to="/">
+              <HomeOutlined />
+            </Link>
+          </Breadcrumb.Item>
+          <Breadcrumb.Item>
+            <Link to="/orders">Заказы</Link>
+          </Breadcrumb.Item>
+          <Breadcrumb.Item>Просмотр</Breadcrumb.Item>
+        </Breadcrumb>
+      }
+      headerButtons={() => (
         <>
-          {defaultButtons}
+          <EditButton>Изменить</EditButton>
+          <RefreshButton>Обновить</RefreshButton>
           <Button
             type="primary"
             icon={<PrinterOutlined />}
@@ -186,7 +183,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#fa8c16', marginBottom: 8 }}>
                   Производство
                 </div>
-                <OrderProductionBlock record={record} />
+                <OrderProductionBlock 
+                  record={record} 
+                  details={details}
+                  millingTypesMap={millingTypesMap}
+                  edgeTypesMap={edgeTypesMap}
+                  filmsMap={filmsMap}
+                />
               </div>
               
               {/* Файлы */}
