@@ -36,3 +36,19 @@
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+
+/* Подсветка найденной строки */
+.orders-table .highlighted-row > td {
+  background-color: #fffbe6 !important;
+  animation: highlight-pulse 1s ease-in-out 3;
+  transition: background-color 0.3s ease;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% {
+    background-color: #fffbe6;
+  }
+  50% {
+    background-color: #fff1b8;
+  }
+}

@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import {
   IResourceComponentsProps,
   useMany,
   useNavigation,
   useList,
+  useOne,
+  HttpError,
 } from "@refinedev/core";
 import {
   List,
@@ -12,12 +14,13 @@ import {
   EditButton,
   CreateButton,
 } from "@refinedev/antd";
-import { Space, Table, Button } from "antd";
+import { Space, Table, Button, Input, message } from "antd";
 import {
   EyeOutlined,
   EditOutlined,
   PlusOutlined,
   StarFilled,
+  SearchOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 
@@ -27,8 +30,10 @@ import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [searchOrderId, setSearchOrderId] = useState<string>("");
+  const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
 
-  const { tableProps } = useTable({
+  const { tableProps, current, pageSize, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "order_id", order: "desc" }],
@@ -39,6 +44,112 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   });
 
   const { show } = useNavigation();
+
+  // Обработчик поиска заказа
+  const handleSearchOrder = useCallback(async () => {
+    if (!searchOrderId || searchOrderId.trim() === "") {
+      message.warning("Введите номер заказа для поиска");
+      return;
+    }
+
+    const orderName = searchOrderId.trim();
+
+    try {
+      // Шаг 1: Находим заказ по order_name
+      const response = await fetch(
+        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-hasura-admin-secret": import.meta.env.VITE_HASURA_ADMIN_SECRET || "",
+          },
+          body: JSON.stringify({
+            query: `
+              query FindOrder($orderName: String!) {
+                orders_view(
+                  where: { order_name: { _eq: $orderName } }
+                  limit: 1
+                ) {
+                  order_id
+                  order_name
+                }
+              }
+            `,
+            variables: { orderName },
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.errors && data.errors.length > 0) {
+        const errorMessage = data.errors[0]?.message || "Ошибка поиска";
+        message.error(errorMessage);
+        console.error("GraphQL ошибка:", data.errors);
+        return;
+      }
+
+      const orders = data.data?.orders_view || [];
+
+      if (orders.length === 0) {
+        message.error(`Заказ №${orderName} не найден`);
+        return;
+      }
+
+      const foundOrder = orders[0];
+      const foundOrderId = foundOrder.order_id;
+
+      // Шаг 2: Получаем количество заказов с ID больше найденного
+      const countResponse = await fetch(
+        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-hasura-admin-secret": import.meta.env.VITE_HASURA_ADMIN_SECRET || "",
+          },
+          body: JSON.stringify({
+            query: `
+              query GetGreaterCount($orderId: bigint!) {
+                orders_view_aggregate(
+                  where: { order_id: { _gt: $orderId } }
+                ) {
+                  aggregate {
+                    count
+                  }
+                }
+              }
+            `,
+            variables: { orderId: foundOrderId },
+          }),
+        }
+      );
+
+      const countData = await countResponse.json();
+      const greaterCount = countData.data?.orders_view_aggregate?.aggregate?.count || 0;
+
+      // Вычисляем номер страницы (поскольку сортировка DESC, большие ID сверху)
+      const targetPage = Math.floor(greaterCount / pageSize) + 1;
+
+      // Переключаем на нужную страницу
+      if (targetPage !== current) {
+        setCurrent(targetPage);
+      }
+
+      // Подсвечиваем найденную строку
+      setHighlightedOrderId(foundOrderId);
+      message.success(`Заказ №${orderName} найден`);
+
+      // Убираем подсветку через 3 секунды
+      setTimeout(() => {
+        setHighlightedOrderId(null);
+      }, 3000);
+    } catch (error) {
+      console.error("Ошибка поиска заказа:", error);
+      message.error("Ошибка при поиске заказа");
+    }
+  }, [searchOrderId, pageSize, current, setCurrent]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -213,6 +324,23 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             {createButtonProps && (
               <CreateButton {...createButtonProps}>Создать</CreateButton>
             )}
+            <Space.Compact style={{ marginRight: 8 }}>
+              <Input
+                placeholder="Поиск по номеру заказа"
+                value={searchOrderId}
+                onChange={(e) => setSearchOrderId(e.target.value)}
+                onPressEnter={handleSearchOrder}
+                style={{ width: 200 }}
+                allowClear
+              />
+              <Button
+                type="default"
+                icon={<SearchOutlined />}
+                onClick={handleSearchOrder}
+              >
+                Найти
+              </Button>
+            </Space.Compact>
             <Button
               type="primary"
               icon={<PlusOutlined />}
@@ -229,6 +357,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           sticky
           className="orders-table"
           scroll={{ x: "max-content", y: 600 }}
+          rowClassName={(record) =>
+            record.order_id === highlightedOrderId ? "highlighted-row" : ""
+          }
           onRow={(record) => ({
             onDoubleClick: () => {
               show("orders_view", record.order_id);
