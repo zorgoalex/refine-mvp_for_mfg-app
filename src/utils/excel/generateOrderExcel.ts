@@ -81,18 +81,31 @@ export const generateOrderExcel = async ({
     const yearLastTwoDigits = String(orderDate.getFullYear()).slice(-2);
 
     worksheet.getCell('A1').value = yearLastTwoDigits; // Последние 2 цифры года (25)
-    worksheet.getCell('C1').value = order.order_id; // Номер заказа (20)
+    worksheet.getCell('C1').value = order.order_name; // Название заказа (Заказ)
     worksheet.getCell('E2').value = client?.client_name || order.client?.client_name || 'Не указан'; // Заказчик
     worksheet.getCell('C8').value = formatDate(order.order_date); // Дата заказа (07.01.2025)
 
     // 4.1. Заполнить дополнительные поля (defaults для деталей)
-    // Берем из первой детали, если есть, иначе пусто
-    const firstDetail = details[0];
-    if (firstDetail) {
-      worksheet.getCell('A5').value = firstDetail.milling_type?.milling_type_name || ''; // Тип фрезеровки
-      worksheet.getCell('D5').value = firstDetail.edge_type?.edge_type_name || ''; // Обкат/кромка
-      worksheet.getCell('F5').value = firstDetail.film?.film_name || ''; // Пленка
-    }
+    // Заполняем только если значение одинаково для ВСЕХ деталей (умная агрегация)
+    
+    // Функция для получения общего значения (если одинаково для всех деталей)
+    const getCommonValue = (getValue: (detail: OrderDetail) => string | undefined | null): string => {
+      if (details.length === 0) return '';
+      
+      const values = details.map(getValue).filter(v => v); // Убрать null/undefined
+      if (values.length === 0) return '';
+      
+      const firstValue = values[0];
+      const allSame = values.every(v => v === firstValue);
+      
+      return allSame ? firstValue : '';
+    };
+
+    // Умная агрегация: показываем только если одинаково для всех деталей
+    worksheet.getCell('A5').value = getCommonValue(d => d.milling_type?.milling_type_name); // Фрезеровка
+    worksheet.getCell('D5').value = getCommonValue(d => d.edge_type?.edge_type_name); // Обкат
+    worksheet.getCell('F5').value = getCommonValue(d => d.film?.film_name); // Пленка
+    worksheet.getCell('H5').value = getCommonValue(d => d.material?.material_name); // Материал
 
     // ⚠️ НЕ заполняем ячейки с формулами:
     // - J2 (общая сумма) - рассчитывается формулой
