@@ -1,6 +1,10 @@
-import { useShow, IResourceComponentsProps } from "@refinedev/core";
+import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
-import { Typography, Row, Col, Divider } from "antd";
+import { Typography, Row, Col, Divider, Button } from "antd";
+import { PrinterOutlined } from "@ant-design/icons";
+import { useRef } from "react";
+import { useReactToPrint } from "react-to-print";
+import { OrderPrintView } from "./components/print/OrderPrintView";
 
 const { Title, Paragraph, Link } = Typography;
 
@@ -31,8 +35,64 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   const record = data?.data;
 
+  // Загрузка деталей заказа
+  const { data: detailsData, isLoading: detailsLoading } = useList({
+    resource: "order_details",
+    filters: [
+      {
+        field: "order_id",
+        operator: "eq",
+        value: record?.order_id,
+      },
+    ],
+    queryOptions: {
+      enabled: !!record?.order_id,
+    },
+    meta: {
+      fields: [
+        "detail_id",
+        "length",
+        "width",
+        "quantity",
+        "area",
+        "notes",
+        "milling_cost_per_sqm",
+        "detail_cost",
+        { milling_type: ["milling_type_name"] },
+        { edge_type: ["edge_type_name"] },
+        { film: ["film_name"] },
+      ],
+    },
+  });
+
+  const details = detailsData?.data || [];
+
+  // Ref для печати
+  const printRef = useRef<HTMLDivElement>(null);
+
+  // Функция печати
+  const handlePrint = useReactToPrint({
+    contentRef: printRef,
+    documentTitle: `Заказ-${record?.order_id}`,
+  });
+
   return (
-    <Show isLoading={isLoading}>
+    <Show
+      isLoading={isLoading || detailsLoading}
+      headerButtons={({ defaultButtons }) => (
+        <>
+          {defaultButtons}
+          <Button
+            type="primary"
+            icon={<PrinterOutlined />}
+            onClick={handlePrint}
+            disabled={!record || details.length === 0}
+          >
+            Печать
+          </Button>
+        </>
+      )}
+    >
       <Row gutter={[16, 8]}>
         <Col span={8}>
           <Title level={5}>Order ID</Title>
@@ -185,6 +245,25 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           <Paragraph>{record?.notes || "—"}</Paragraph>
         </Col>
       </Row>
+
+      {/* Скрытый компонент для печати */}
+      {record && (
+        <OrderPrintView
+          ref={printRef}
+          order={{
+            order_id: record.order_id,
+            order_name: record.order_name,
+            order_date: record.order_date,
+            total_amount: record.total_amount,
+            discounted_amount: record.discounted_amount,
+            paid_amount: record.paid_amount,
+            parts_count: record.parts_count,
+            total_area: record.total_area,
+          }}
+          details={details}
+          client={record.client_name ? { client_name: record.client_name } : undefined}
+        />
+      )}
     </Show>
   );
 };

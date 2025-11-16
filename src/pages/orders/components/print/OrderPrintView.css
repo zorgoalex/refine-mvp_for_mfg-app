@@ -1,0 +1,317 @@
+/**
+ * Стили для печати карточки заказа
+ * Визуально максимально похоже на Excel шаблон
+ */
+
+/* Скрыть на экране, показать только при печати */
+.order-print-view {
+  display: none;
+}
+
+/* Стили для печати */
+@media print {
+  /* Настройки страницы */
+  @page {
+    size: A4 portrait;
+    margin: 5mm 8mm;
+  }
+
+  /* Основной контейнер */
+  .order-print-view {
+    display: block;
+    width: 100%;
+    font-family: Arial, sans-serif;
+    font-size: 8pt;
+    color: #000;
+    background: white;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    position: relative;
+  }
+
+  /* Сброс стилей страницы */
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Убрать все остальные элементы при печати */
+  body > *:not(.order-print-view) {
+    display: none !important;
+  }
+
+  /* Водяной знак */
+  .watermark {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-45deg);
+    font-size: 72pt;
+    color: rgba(0, 0, 0, 0.05);
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  /* Шапка */
+  .print-header,
+  .additional-fields,
+  .order-info {
+    margin-bottom: 2px;
+  }
+
+  .print-row {
+    display: table;
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .print-row .cell {
+    display: table-cell;
+    border: 1px solid #000;
+    padding: 1px 3px;
+    font-size: 8pt;
+    vertical-align: middle;
+    min-height: 12px;
+    line-height: 1.1;
+  }
+
+  /* Специальные ячейки шапки */
+  .cell-year,
+  .cell-order-id {
+    font-weight: bold;
+    font-size: 11pt;
+    text-align: center;
+    width: 5%;
+  }
+
+  .cell-empty-small {
+    width: 3%;
+  }
+
+  .cell-premier {
+    font-size: 6pt;
+    width: 7%;
+    text-align: center;
+    line-height: 1.0;
+  }
+
+  .cell-premier.red-text {
+    color: #ff0000;
+  }
+
+  .cell-customer-label {
+    font-size: 7pt;
+    text-align: center;
+    width: 35%;
+  }
+
+  .cell-total-label {
+    font-size: 7pt;
+    text-align: center;
+    width: 25%;
+  }
+
+  .cell-customer-name {
+    font-weight: bold;
+    font-size: 9pt;
+    text-align: center;
+    width: 51%;
+  }
+
+  .cell-total-sum.blue-bg {
+    background-color: #4472C4 !important;
+    color: white !important;
+    font-weight: bold;
+    font-size: 10pt;
+    text-align: right;
+    padding-right: 6px;
+    width: 25%;
+  }
+
+  /* Дополнительные поля */
+  .additional-fields .cell {
+    font-size: 7pt;
+  }
+
+  .additional-fields .cell.label {
+    font-weight: normal;
+    width: 8%;
+  }
+
+  .additional-fields .cell.value {
+    font-weight: bold;
+    width: 10%;
+  }
+
+  /* Информация о заказе */
+  .order-info .cell.label {
+    font-weight: normal;
+    font-size: 7pt;
+    width: 10%;
+  }
+
+  .order-info .cell.value {
+    font-weight: bold;
+    font-size: 7pt;
+    width: 10%;
+  }
+
+  .order-info .cell.label-value {
+    font-size: 7pt;
+    width: 15%;
+  }
+
+  .order-info .cell.label-value .label {
+    font-weight: normal;
+  }
+
+  /* Таблица деталей */
+  .details-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 2px;
+    font-size: 7pt;
+  }
+
+  .details-table th,
+  .details-table td {
+    border: 1px solid #000;
+    padding: 1px 2px;
+    text-align: center;
+    vertical-align: middle;
+    line-height: 1.1;
+  }
+
+  .details-table th {
+    font-weight: bold;
+    background-color: #f0f0f0;
+    font-size: 7pt;
+    padding: 2px 2px;
+  }
+
+  /* Желтый фон для колонок Примечание и Пленка */
+  .details-table th.highlight {
+    background-color: #FFFF00 !important;
+  }
+
+  /* Вертикальный текст для колонок Кол-во и Облат */
+  .details-table th.vertical-text {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    padding: 4px 2px;
+  }
+
+  /* Ширины колонок */
+  .col-num {
+    width: 3%;
+  }
+
+  .col-height,
+  .col-width {
+    width: 6%;
+  }
+
+  .col-qty {
+    width: 4%;
+  }
+
+  .col-area {
+    width: 5%;
+    text-align: right;
+  }
+
+  .col-type {
+    width: 10%;
+  }
+
+  .col-edge {
+    width: 5%;
+  }
+
+  .col-note {
+    width: 15%;
+    text-align: left;
+  }
+
+  .col-price {
+    width: 8%;
+    text-align: right;
+  }
+
+  .col-sum {
+    width: 8%;
+    text-align: right;
+  }
+
+  .col-film {
+    width: 20%;
+    text-align: left;
+  }
+
+  /* Пустые строки */
+  .empty-row {
+    height: 11px;
+  }
+
+  .empty-row td {
+    font-size: 7pt;
+    color: #666;
+    padding: 0px 2px;
+  }
+
+  /* Футер */
+  .print-footer {
+    margin-top: 8px;
+    font-size: 6pt;
+    line-height: 1.2;
+    page-break-inside: avoid;
+  }
+
+  .print-footer p {
+    margin: 1px 0;
+    padding: 0;
+  }
+
+  .print-footer .note-1 {
+    font-weight: bold;
+  }
+
+  .print-footer .note-2 {
+    font-style: italic;
+  }
+
+  .print-footer .note-3 {
+    font-size: 6pt;
+  }
+
+  /* Предотвращение разрыва страницы */
+  .print-header,
+  .additional-fields,
+  .order-info {
+    page-break-inside: avoid;
+  }
+
+  .details-table {
+    page-break-inside: auto;
+  }
+
+  .details-table tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  .details-table thead {
+    display: table-header-group;
+  }
+
+  /* Футер на последней странице */
+  .print-footer {
+    page-break-before: avoid;
+  }
+
+  /* Убрать margin/padding у body при печати */
+  body {
+    margin: 0;
+    padding: 0;
+  }
+}
