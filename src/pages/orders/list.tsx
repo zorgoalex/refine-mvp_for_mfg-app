@@ -33,7 +33,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [searchOrderId, setSearchOrderId] = useState<string>("");
   const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
 
-  const { tableProps, current, pageSize, setCurrent } = useTable({
+  const { tableProps, current, pageSize, setCurrent, sorters, setSorters } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "order_id", order: "desc" }],
@@ -53,6 +53,19 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     }
 
     const orderName = searchOrderId.trim();
+
+    // Сбрасываем сортировку на order_id DESC перед поиском
+    const isDefaultSort = 
+      sorters.length === 1 && 
+      sorters[0].field === "order_id" && 
+      sorters[0].order === "desc";
+
+    if (!isDefaultSort) {
+      message.info("Сброс сортировки для поиска...");
+      setSorters([{ field: "order_id", order: "desc" }]);
+      // Даем время на применение сортировки
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
     try {
       // Шаг 1: Находим заказ по order_name
@@ -149,7 +162,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       console.error("Ошибка поиска заказа:", error);
       message.error("Ошибка при поиске заказа");
     }
-  }, [searchOrderId, pageSize, current, setCurrent]);
+  }, [searchOrderId, pageSize, current, setCurrent, sorters, setSorters]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
