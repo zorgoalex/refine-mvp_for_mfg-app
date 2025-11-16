@@ -12,7 +12,8 @@
 .orders-table td.orders-col--order-date,
 .orders-table td.orders-col--planned-date,
 .orders-table td.orders-col--amount,
-.orders-table td.orders-col--payment-date {
+.orders-table td.orders-col--payment-date,
+.orders-table td.orders-col--client {
   font-size: 96%;
 }
 

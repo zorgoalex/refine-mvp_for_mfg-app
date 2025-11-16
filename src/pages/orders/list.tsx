@@ -149,7 +149,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="notes"
             title="Примечание"
-            width={160}
+            width={130}
             className="orders-col orders-col--wrap"
           />
           <Table.Column
@@ -159,21 +159,6 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             width={60}
             className="col-priority"
             onHeaderCell={() => ({ className: "col-priority" })}
-          />
-          <Table.Column
-            dataIndex="issue_date"
-            title="Дата выдачи заказа"
-            sorter
-            width={120}
-            className="orders-col"
-            render={(value) => formatDate(value)}
-          />
-          <Table.Column
-            dataIndex="parts_count"
-            title="Количество деталей"
-            sorter
-            width={120}
-            className="orders-col"
           />
           <Table.Column
             dataIndex="planned_completion_date"
@@ -186,28 +171,36 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="order_status_name"
             title="Статус заказа"
-            width={90}
+            width={72}
             className="orders-col status order-status orders-col--wrap"
             render={(value) => renderStatus(value)}
           />
           <Table.Column
             dataIndex="payment_status_name"
             title="Статус оплаты заказа"
-            width={100}
+            width={80}
             className="orders-col status payment-status orders-col--wrap"
             render={(value) => renderStatus(value)}
           />
           <Table.Column
-            dataIndex="total_amount"
-            title="Сумма заказа"
+            dataIndex="discounted_amount"
+            title="Сумма, итого"
             sorter
             width={90}
             className="orders-col orders-col--amount"
             render={(value) => formatNumber(value as number, 0)}
           />
           <Table.Column
-            dataIndex="discounted_amount"
-            title="Сумма со скидкой"
+            dataIndex="paid_amount"
+            title="Сумма оплаты"
+            sorter
+            width={90}
+            className="orders-col orders-col--amount"
+            render={(value) => formatNumber(value as number, 0)}
+          />
+          <Table.Column
+            dataIndex="total_amount"
+            title="Сумма заказа"
             sorter
             width={90}
             className="orders-col orders-col--amount"
@@ -222,19 +215,19 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             render={(value) => formatNumber(value as number, 0)}
           />
           <Table.Column
-            dataIndex="paid_amount"
-            title="Сумма оплаты"
-            sorter
-            width={90}
-            className="orders-col orders-col--amount"
-            render={(value) => formatNumber(value as number, 0)}
-          />
-          <Table.Column
             dataIndex="payment_date"
             title="Дата оплаты"
             sorter
             width={90}
             className="orders-col orders-col--payment-date"
+            render={(value) => formatDate(value)}
+          />
+          <Table.Column
+            dataIndex="issue_date"
+            title="Дата выдачи заказа"
+            sorter
+            width={120}
+            className="orders-col"
             render={(value) => formatDate(value)}
           />
           <Table.Column
@@ -251,6 +244,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             width={120}
             className="orders-col"
             render={(value) => formatDate(value)}
+          />
+          <Table.Column
+            dataIndex="parts_count"
+            title="Количество деталей"
+            sorter
+            width={120}
+            className="orders-col"
           />
           <Table.Column
             dataIndex="edge_type_name"
