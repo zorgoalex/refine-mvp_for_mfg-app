@@ -97,6 +97,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     filters: [],  // Убираем любые фильтры чтобы загрузить все записи
   });
 
+  const { data: materialsData } = useList({
+    resource: "materials",
+    pagination: { pageSize: 10000 },
+  });
+
   // Создаем lookup maps для быстрого поиска
   const millingTypesMap = new Map(
     (millingTypesData?.data || []).map((item: any) => [item.milling_type_id, item.milling_type_name])
@@ -106,6 +111,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   );
   const filmsMap = new Map(
     (filmsData?.data || []).map((item: any) => [item.film_id, item.film_name])
+  );
+  const materialsMap = new Map(
+    (materialsData?.data || []).map((item: any) => [item.material_id, item.material_name])
   );
 
   // Ref для печати
@@ -152,10 +160,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       {record && (
         <>
           {/* Компактная шапка заказа (Read-only summary) */}
-          <OrderShowHeader record={record} details={details} />
+          <div style={{ marginBottom: 4 }}>
+            <OrderShowHeader record={record} details={details} />
+          </div>
           
           {/* Финансы */}
-          <Collapse defaultActiveKey={[]} style={{ marginBottom: 16 }}>
+          <Collapse defaultActiveKey={[]} style={{ marginBottom: 4 }}>
             <Panel 
               header={<span style={{ fontSize: 14, fontWeight: 600, color: '#faad14' }}>Финансы</span>} 
               key="finance"
@@ -224,6 +234,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               scroll={{ x: 'max-content' }}
               style={{ fontSize: 12 }}
               rowClassName={(_, index) => index % 2 === 0 ? 'table-row-light' : 'table-row-dark'}
+              components={{
+                header: {
+                  cell: (props: any) => <th {...props} style={{ ...props.style, padding: '2px 4px' }} />
+                },
+                body: {
+                  cell: (props: any) => <td {...props} style={{ ...props.style, padding: '2px 4px' }} />
+                }
+              }}
               columns={[
                 {
                   title: '№',
@@ -264,20 +282,32 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 {
                   title: 'Тип детали',
                   key: 'milling_type',
-                  width: 150,
+                  width: 128,
                   render: (_, record) => millingTypesMap.get(record.milling_type_id) || '—',
                 },
                 {
                   title: 'Обкат',
                   key: 'edge_type',
                   width: 50,
-                  render: (_, record) => edgeTypesMap.get(record.edge_type_id) || '—',
+                  render: (_, record) => {
+                    const edgeTypeName = edgeTypesMap.get(record.edge_type_id) || '—';
+                    return <span style={{ fontSize: '0.86em' }}>{edgeTypeName}</span>;
+                  },
+                },
+                {
+                  title: 'Материал',
+                  key: 'material',
+                  width: 50,
+                  render: (_, record) => {
+                    const materialName = materialsMap.get(record.material_id) || '—';
+                    return <span style={{ fontSize: '0.86em' }}>{materialName}</span>;
+                  },
                 },
                 {
                   title: 'Примечание',
                   dataIndex: 'note',
                   key: 'note',
-                  width: 180,
+                  width: 162,
                   ellipsis: true,
                   render: (value) => value || '—',
                 },
