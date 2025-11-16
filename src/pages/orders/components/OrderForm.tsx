@@ -20,6 +20,7 @@ import { OrderStatusSection } from './sections/OrderStatusSection';
 import { OrderNotesSection } from './sections/OrderNotesSection';
 import { OrderDatesSection } from './sections/OrderDatesSection';
 import { OrderFinanceSection } from './sections/OrderFinanceSection';
+import { OrderMaterialsTab } from './sections/OrderMaterialsTab';
 import { OrderLegacySection } from './sections/OrderLegacySection';
 import { OrderFilesSection } from './sections/OrderFilesSection';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
@@ -443,7 +444,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       {
         key: 'requirements',
         label: 'Материалы',
-        children: <div>TODO: Materials Tab</div>,
+        children: <OrderMaterialsTab />,
         disabled: mode === 'create' && !header.order_id,
       },
       {
