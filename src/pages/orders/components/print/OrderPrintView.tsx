@@ -118,7 +118,7 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
           <div className="print-row header-row-1">
             <div className="cell cell-year"></div>
             <div className="cell cell-empty-narrow"></div>
-            <div className="cell cell-order-id">{order.order_id}</div>
+            <div className="cell cell-order-id">{order.order_name}</div>
             <div className="cell cell-attachment red-text" style={{ fontSize: '0.5em' }}>№ присадки</div>
             <div className="cell cell-customer-label">Заказчик</div>
             <div className="cell cell-total-label">общая сумма</div>
