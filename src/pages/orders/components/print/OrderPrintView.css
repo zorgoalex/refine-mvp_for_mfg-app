@@ -40,18 +40,6 @@
     display: none !important;
   }
 
-  /* Водяной знак */
-  .watermark {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) rotate(-45deg);
-    font-size: 72pt;
-    color: rgba(0, 0, 0, 0.05);
-    z-index: -1;
-    pointer-events: none;
-  }
-
   /* Шапка */
   .print-header,
   .additional-fields,

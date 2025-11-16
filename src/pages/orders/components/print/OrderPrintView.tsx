@@ -232,9 +232,6 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
             Техникалық және технологиялық ерекшеліктерімен таныстым, саны және өлшемі дұрыс
           </p>
         </div>
-
-        {/* Водяной знак */}
-        <div className="watermark">Страница</div>
       </div>
     );
   }
