@@ -1,13 +1,16 @@
 // Order Finance Section
 // Contains: Total Amount, Discount, Discounted Amount, Paid Amount, Payment Date
 
-import React, { useEffect } from 'react';
-import { Form, InputNumber, DatePicker, Row, Col, Collapse, Button } from 'antd';
+import React, { useEffect, useMemo } from 'react';
+import { Form, InputNumber, DatePicker, Row, Col, Collapse, Button, Table, Typography } from 'antd';
+import { useList } from '@refinedev/core';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
-import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
+import { numberFormatter, numberParser, formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import dayjs from 'dayjs';
+
+const { Text } = Typography;
 
 const { Panel } = Collapse;
 
@@ -15,6 +18,55 @@ export const OrderFinanceSection: React.FC = () => {
   const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual } =
     useOrderFormStore();
   const totals = useOrderFormStore(useShallow(selectTotals));
+
+  // Загружаем платежи для текущего заказа
+  const { data: paymentsData } = useList({
+    resource: 'payments',
+    filters: [
+      {
+        field: 'order_id',
+        operator: 'eq',
+        value: header.order_id,
+      },
+    ],
+    pagination: {
+      pageSize: 1000,
+    },
+    queryOptions: {
+      enabled: !!header.order_id,
+    },
+  });
+
+  // Загружаем справочник типов оплаты
+  const { data: paymentTypesData } = useList({
+    resource: 'payment_types',
+    pagination: { pageSize: 1000 },
+  });
+
+  // Создаем lookup map для типов оплаты
+  const paymentTypesMap = useMemo(() => {
+    const map: Record<string | number, string> = {};
+    (paymentTypesData?.data || []).forEach((pt: any) => {
+      map[pt.type_paid_id] = pt.type_paid_name;
+    });
+    return map;
+  }, [paymentTypesData]);
+
+  const payments = paymentsData?.data || [];
+
+  // Считаем сумму всех платежей
+  const totalPaymentsAmount = useMemo(() => {
+    return payments.reduce((sum, p: any) => sum + (p.amount || 0), 0);
+  }, [payments]);
+
+  // Проверяем, совпадает ли сумма платежей с paid_amount
+  const paidAmount = header.paid_amount || 0;
+  const isAmountMismatch = Math.abs(totalPaymentsAmount - paidAmount) > 0.01;
+
+  const formatDate = (date: string | null) => {
+    if (!date) return '—';
+    return dayjs(date).format('DD.MM.YYYY');
+  };
 
   const handleTotalAmountChange = (value: number | null) => {
     if (!isTotalAmountManual) {
@@ -113,7 +165,11 @@ export const OrderFinanceSection: React.FC = () => {
                   precision={2}
                   formatter={(value) => numberFormatter(value, 2)}
                   parser={numberParser}
-                  style={{ width: '100%' }}
+                  style={{
+                    width: '100%',
+                    color: isAmountMismatch ? '#ff4d4f' : undefined,
+                    fontWeight: isAmountMismatch ? 'bold' : undefined,
+                  }}
                   addonAfter={CURRENCY_SYMBOL}
                 />
               </Form.Item>
@@ -134,6 +190,67 @@ export const OrderFinanceSection: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
+
+          {/* Таблица платежей */}
+          {payments.length > 0 && (
+            <Row gutter={16} style={{ marginTop: 24 }}>
+              <Col span={24}>
+                <div style={{ marginBottom: 8 }}>
+                  <Text style={{ fontSize: 14, fontWeight: 600 }}>Платежи по заказу</Text>
+                </div>
+                <Table
+                  dataSource={payments}
+                  rowKey="payment_id"
+                  size="small"
+                  pagination={false}
+                  bordered
+                  style={{ fontSize: 12 }}
+                  summary={() => (
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0} colSpan={2}>
+                        <Text strong style={{ fontSize: '1.2em' }}>Итого:</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={2} align="right">
+                        <Text strong style={{ fontSize: '1.2em' }}>
+                          {formatNumber(totalPaymentsAmount, 2)} {CURRENCY_SYMBOL}
+                        </Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  )}
+                  columns={[
+                    {
+                      title: 'Тип оплаты',
+                      dataIndex: 'type_paid_id',
+                      key: 'type_paid_id',
+                      width: 150,
+                      render: (value) => paymentTypesMap[value] || '—',
+                    },
+                    {
+                      title: 'Дата',
+                      dataIndex: 'payment_date',
+                      key: 'payment_date',
+                      width: 100,
+                      render: (value) => formatDate(value),
+                    },
+                    {
+                      title: 'Сумма',
+                      dataIndex: 'amount',
+                      key: 'amount',
+                      width: 120,
+                      align: 'right',
+                      render: (value) => `${formatNumber(value || 0, 2)} ${CURRENCY_SYMBOL}`,
+                    },
+                  ]}
+                />
+                {isAmountMismatch && (
+                  <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+                    ⚠ Сумма платежей ({formatNumber(totalPaymentsAmount, 2)} {CURRENCY_SYMBOL}) не
+                    совпадает с суммой оплаты заказа
+                  </Text>
+                )}
+              </Col>
+            </Row>
+          )}
         </Form>
       </Panel>
     </Collapse>
