@@ -1,10 +1,13 @@
 import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton, RefreshButton } from "@refinedev/antd";
-import { Button, Collapse, Table, Breadcrumb } from "antd";
-import { PrinterOutlined, HomeOutlined } from "@ant-design/icons";
-import { useRef } from "react";
+import { Button, Collapse, Table, Breadcrumb, message } from "antd";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined } from "@ant-design/icons";
+import { useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link } from "react-router-dom";
+import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
+import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
+import { handleExcelError } from "../../utils/excel/excelErrorHandler";
 import { OrderPrintView } from "./components/print/OrderPrintView";
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
@@ -119,11 +122,69 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Ref для печати
   const printRef = useRef<HTMLDivElement>(null);
 
+  // Состояние для экспорта
+  const [isExporting, setIsExporting] = useState(false);
+
   // Функция печати
   const handlePrint = useReactToPrint({
     contentRef: printRef,
     documentTitle: `Заказ-${record?.order_id}`,
   });
+
+  // Функция экспорта в Excel
+  const handleExportExcel = async () => {
+    if (!record) return;
+
+    setIsExporting(true);
+    try {
+      // Формат файла: заказ-Ф<ГГ>-<ID>-<название>-<клиент>.xlsx
+      const fileName = generateOrderFileName({
+        orderId: record.order_id,
+        orderName: record.order_name,
+        orderDate: record.order_date,
+        clientName: record.client_name,
+      });
+
+      // Генерация и скачивание Excel
+      await downloadOrderExcel(
+        {
+          order: {
+            order_id: record.order_id,
+            order_name: record.order_name,
+            order_date: record.order_date,
+            total_amount: record.total_amount,
+            discounted_amount: record.discounted_amount,
+            paid_amount: record.paid_amount,
+            client: record.client_name ? { client_name: record.client_name } : null,
+          },
+          details: details.map(detail => ({
+            detail_id: detail.detail_id,
+            length: detail.height, // ⚠️ В БД height = длина детали
+            width: detail.width,
+            quantity: detail.quantity,
+            area: detail.area,
+            milling_cost_per_sqm: detail.milling_cost_per_sqm,
+            detail_cost: detail.detail_cost,
+            notes: detail.note,
+            milling_type: { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' },
+            edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
+            film: { film_name: filmsMap.get(detail.film_id) || '' },
+            material: { material_name: materialsMap.get(detail.material_id) || '' },
+          })),
+          client: record.client_name ? { client_name: record.client_name } : null,
+        },
+        fileName
+      );
+
+      message.success('Excel файл успешно сгенерирован');
+    } catch (error) {
+      const errorMessage = handleExcelError(error);
+      message.error(errorMessage);
+      console.error('Ошибка экспорта:', error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <Show
@@ -153,6 +214,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             disabled={!record || details.length === 0}
           >
             Печать
+          </Button>
+          <Button
+            icon={<FileExcelOutlined />}
+            onClick={handleExportExcel}
+            loading={isExporting}
+            disabled={!record || details.length === 0}
+          >
+            Экспорт в Excel
           </Button>
         </>
       )}
