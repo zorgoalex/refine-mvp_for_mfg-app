@@ -3,6 +3,7 @@ import {
   IResourceComponentsProps,
   useMany,
   useNavigation,
+  useList,
 } from "@refinedev/core";
 import {
   List,
@@ -74,6 +75,135 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     return map;
   }, [usersData]);
 
+  // Получаем ID заказов на текущей странице
+  const orderIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          ((tableProps?.dataSource as any[]) || [])
+            .map((i) => i?.order_id)
+            .filter((v) => v !== undefined && v !== null),
+        ),
+      ),
+    [tableProps?.dataSource],
+  );
+
+  // Загружаем детали для заказов на текущей странице
+  const { data: detailsData } = useList({
+    resource: "order_details",
+    filters: [
+      {
+        field: "order_id",
+        operator: "in",
+        value: orderIds,
+      },
+    ],
+    pagination: {
+      pageSize: 10000,
+    },
+    queryOptions: {
+      enabled: orderIds.length > 0,
+    },
+  });
+
+  // Загружаем справочники
+  const { data: materialsData } = useList({
+    resource: "materials",
+    pagination: { pageSize: 10000 },
+  });
+
+  const { data: millingTypesData } = useList({
+    resource: "milling_types",
+    pagination: { pageSize: 10000 },
+  });
+
+  const { data: edgeTypesData } = useList({
+    resource: "edge_types",
+    pagination: { pageSize: 10000 },
+  });
+
+  const { data: filmsData } = useList({
+    resource: "films",
+    pagination: { pageSize: 10000 },
+  });
+
+  // Создаем lookup maps
+  const materialsMap = useMemo(() => {
+    const map: Record<string | number, string> = {};
+    (materialsData?.data || []).forEach((m: any) => {
+      map[m.material_id] = m.material_name;
+    });
+    return map;
+  }, [materialsData]);
+
+  const millingTypesMap = useMemo(() => {
+    const map: Record<string | number, string> = {};
+    (millingTypesData?.data || []).forEach((m: any) => {
+      map[m.milling_type_id] = m.milling_type_name;
+    });
+    return map;
+  }, [millingTypesData]);
+
+  const edgeTypesMap = useMemo(() => {
+    const map: Record<string | number, string> = {};
+    (edgeTypesData?.data || []).forEach((e: any) => {
+      map[e.edge_type_id] = e.edge_type_name;
+    });
+    return map;
+  }, [edgeTypesData]);
+
+  const filmsMap = useMemo(() => {
+    const map: Record<string | number, string> = {};
+    (filmsData?.data || []).forEach((f: any) => {
+      map[f.film_id] = f.film_name;
+    });
+    return map;
+  }, [filmsData]);
+
+  // Группируем детали по order_id
+  const detailsByOrderId = useMemo(() => {
+    const map: Record<string | number, any[]> = {};
+    (detailsData?.data || []).forEach((detail: any) => {
+      if (!map[detail.order_id]) {
+        map[detail.order_id] = [];
+      }
+      map[detail.order_id].push(detail);
+    });
+    return map;
+  }, [detailsData]);
+
+  // Функция: возвращает значение если оно одинаковое для всех деталей, иначе null
+  const getCommonValue = (orderId: number, fieldName: string) => {
+    const details = detailsByOrderId[orderId] || [];
+    if (details.length === 0) return null;
+
+    const values = details
+      .map((d) => d[fieldName])
+      .filter((v) => v !== null && v !== undefined);
+
+    if (values.length === 0) return null;
+
+    const uniqueValues = Array.from(new Set(values));
+    return uniqueValues.length === 1 ? uniqueValues[0] : null;
+  };
+
+  // Функция: возвращает уникальные значения материалов через запятую
+  const getMaterialsList = (orderId: number) => {
+    const details = detailsByOrderId[orderId] || [];
+    if (details.length === 0) return "—";
+
+    const materialIds = details
+      .map((d) => d.material_id)
+      .filter((v) => v !== null && v !== undefined);
+
+    const uniqueMaterialIds = Array.from(new Set(materialIds));
+    const materialNames = uniqueMaterialIds
+      .map((id) => materialsMap[id])
+      .filter((name) => name);
+
+    return materialNames.length > 0 ? materialNames.join(", ") : "—";
+  };
+
   return (
     <>
       <List
@@ -139,12 +269,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             title="Фрезеровка"
             width={100}
             className="orders-col orders-col--wrap"
+            render={(_, record: any) => {
+              const millingTypeId = getCommonValue(record.order_id, "milling_type_id");
+              return millingTypeId ? millingTypesMap[millingTypeId] || "—" : "—";
+            }}
           />
           <Table.Column
             dataIndex="material_name"
             title="Материал"
             width={100}
             className="orders-col orders-col--wrap"
+            render={(_, record: any) => getMaterialsList(record.order_id)}
           />
           <Table.Column
             dataIndex="notes"
@@ -257,12 +392,20 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             title="Обкат"
             width={90}
             className="orders-col orders-col--wrap"
+            render={(_, record: any) => {
+              const edgeTypeId = getCommonValue(record.order_id, "edge_type_id");
+              return edgeTypeId ? edgeTypesMap[edgeTypeId] || "—" : "—";
+            }}
           />
           <Table.Column
             dataIndex="film_name"
             title="Пленка"
             width={120}
             className="orders-col orders-col--wrap"
+            render={(_, record: any) => {
+              const filmId = getCommonValue(record.order_id, "film_id");
+              return filmId ? filmsMap[filmId] || "—" : "—";
+            }}
           />
           <Table.Column
             dataIndex="created_by"
