@@ -1,6 +1,6 @@
 import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
 import { Show } from "@refinedev/antd";
-import { Button } from "antd";
+import { Button, Collapse } from "antd";
 import { PrinterOutlined } from "@ant-design/icons";
 import { useRef } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -11,6 +11,8 @@ import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
 import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
+
+const { Panel } = Collapse;
 
 
 
@@ -123,44 +125,54 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           <OrderShowHeader record={record} details={details} />
           
           {/* Финансы */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#faad14', marginBottom: 8 }}>
-              Финансы
-            </div>
-            <OrderFinanceBlock record={record} />
-          </div>
+          <Collapse defaultActiveKey={[]} style={{ marginBottom: 16 }}>
+            <Panel 
+              header={<span style={{ fontSize: 14, fontWeight: 600, color: '#faad14' }}>Финансы</span>} 
+              key="finance"
+            >
+              <OrderFinanceBlock record={record} />
+            </Panel>
+          </Collapse>
           
-          {/* Даты */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#52c41a', marginBottom: 8 }}>
-              Даты
-            </div>
-            <OrderDatesBlock record={record} />
-          </div>
-          
-          {/* Производство */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#fa8c16', marginBottom: 8 }}>
-              Производство
-            </div>
-            <OrderProductionBlock record={record} />
-          </div>
-          
-          {/* Файлы */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#722ed1', marginBottom: 8 }}>
-              Файлы
-            </div>
-            <OrderFilesBlock record={record} />
-          </div>
-          
-          {/* Служебная информация */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#8c8c8c', marginBottom: 8 }}>
-              Служебная информация
-            </div>
-            <OrderMetaBlock record={record} />
-          </div>
+          {/* Дополнительная информация - схлопнутый блок */}
+          <Collapse defaultActiveKey={[]} style={{ marginBottom: 16 }}>
+            <Panel 
+              header={<span style={{ fontSize: 14, fontWeight: 600 }}>Дополнительная информация</span>} 
+              key="additional"
+            >
+              {/* Даты */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#52c41a', marginBottom: 8 }}>
+                  Даты
+                </div>
+                <OrderDatesBlock record={record} />
+              </div>
+              
+              {/* Производство */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#fa8c16', marginBottom: 8 }}>
+                  Производство
+                </div>
+                <OrderProductionBlock record={record} />
+              </div>
+              
+              {/* Файлы */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#722ed1', marginBottom: 8 }}>
+                  Файлы
+                </div>
+                <OrderFilesBlock record={record} />
+              </div>
+              
+              {/* Служебная информация */}
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#8c8c8c', marginBottom: 8 }}>
+                  Служебная информация
+                </div>
+                <OrderMetaBlock record={record} />
+              </div>
+            </Panel>
+          </Collapse>
 
           {/* Скрытый компонент для печати */}
           <OrderPrintView
