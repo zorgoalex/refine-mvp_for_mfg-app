@@ -39,6 +39,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       initial: [{ field: "order_id", order: "desc" }],
     },
     pagination: {
+      mode: "server",
       pageSize: 10,
     },
   });
@@ -375,7 +376,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           }
           onRow={(record) => ({
             onDoubleClick: () => {
-              show("orders_view", record.order_id);
+              show("orders_view", record.order_id, "push");
             },
           })}
         >
@@ -571,12 +572,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                   size="small"
                   icon={<EyeOutlined style={{ fontSize: 12 }} />}
                   recordItemId={record.order_id}
+                  meta={{ syncWithLocation: true }}
                 />
                 <EditButton
                   hideText
                   size="small"
                   icon={<EditOutlined style={{ fontSize: 12 }} />}
                   recordItemId={record.order_id}
+                  meta={{ syncWithLocation: true }}
                 />
               </Space>
             )}

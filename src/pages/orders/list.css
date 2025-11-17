@@ -4,6 +4,11 @@
   white-space: normal;
 }
 
+/* Уменьшенный размер шрифта для заголовков */
+.orders-table .ant-table-thead > tr > th {
+  font-size: 11px;
+}
+
 .orders-table td.orders-col {
   font-size: 80%;
 }
