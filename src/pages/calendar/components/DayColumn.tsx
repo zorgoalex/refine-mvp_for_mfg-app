@@ -2,14 +2,23 @@ import React from 'react';
 import { Empty } from 'antd';
 import { useDrop } from 'react-dnd';
 import OrderCard, { DRAG_TYPE } from './OrderCard';
-import { DayColumnProps, DragItem } from '../types/calendar';
+import OrderCardCompact from './OrderCardCompact';
+import DayColumnBrief from './DayColumnBrief';
+import { DayColumnProps, DragItem, ViewMode } from '../types/calendar';
 import { getDayName, formatDateKey, isToday } from '../utils/dateUtils';
 import { calculateTotalArea, areAllOrdersIssued } from '../utils/groupOrdersByDate';
 
 /**
  * Компонент колонки дня с заказами
  */
-const DayColumn: React.FC<DayColumnProps> = ({ date, orders, columnWidth, onDrop, onContextMenu }) => {
+const DayColumn: React.FC<DayColumnProps> = ({ 
+  date, 
+  orders, 
+  columnWidth, 
+  viewMode = ViewMode.STANDARD,
+  onDrop, 
+  onContextMenu 
+}) => {
   const dateKey = formatDateKey(date);
   const dayName = getDayName(date);
   const totalArea = calculateTotalArea(orders);
@@ -34,6 +43,14 @@ const DayColumn: React.FC<DayColumnProps> = ({ date, orders, columnWidth, onDrop
   // Форматируем дату для отображения (12.11.2025)
   const [day, month, year] = dateKey.split('.');
   const formattedDate = `${day}.${month}.${year}`;
+
+  // Если выбран краткий вид - используем специальный компонент
+  if (viewMode === ViewMode.BRIEF) {
+    return <DayColumnBrief date={date} orders={orders} columnWidth={columnWidth} />;
+  }
+
+  // Выбираем компонент карточки в зависимости от режима
+  const CardComponent = viewMode === ViewMode.COMPACT ? OrderCardCompact : OrderCard;
 
   return (
     <div
@@ -64,7 +81,7 @@ const DayColumn: React.FC<DayColumnProps> = ({ date, orders, columnWidth, onDrop
       <div className="day-column__orders">
         {orders.length > 0 ? (
           orders.map((order) => (
-            <OrderCard
+            <CardComponent
               key={order.order_id}
               order={order}
               sourceDate={dateKey}

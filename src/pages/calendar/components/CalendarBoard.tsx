@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Spin, Alert, Button, Space } from 'antd';
+import { Spin, Alert, Button, Space, Segmented } from 'antd';
 import { LeftOutlined, RightOutlined, CalendarOutlined } from '@ant-design/icons';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
@@ -10,7 +10,7 @@ import { useCalendarData } from '../hooks/useCalendarData';
 import { useOrderMove } from '../hooks/useOrderMove';
 import { useOrderStatuses } from '../hooks/useOrderStatuses';
 import { useOrderStatusUpdate } from '../hooks/useOrderStatusUpdate';
-import { DragItem, CalendarOrder } from '../types/calendar';
+import { DragItem, CalendarOrder, ViewMode } from '../types/calendar';
 import {
   calculateColumnsPerRow,
   groupDaysIntoRows,
@@ -24,6 +24,7 @@ import { formatDateKey } from '../utils/dateUtils';
 const CalendarBoard: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(1200);
+  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.STANDARD);
 
   // Генерация дней календаря
   const { days, startDate, endDate, goToToday, goForward, goBackward } =
@@ -146,31 +147,44 @@ const CalendarBoard: React.FC = () => {
       <div className="calendar-board" ref={containerRef}>
         {/* Навигация по календарю */}
         <div className="calendar-navigation">
-        <Space size="middle">
-          <Button
-            icon={<LeftOutlined />}
-            onClick={goBackward}
-            title="Назад на неделю"
-          >
-            Назад
-          </Button>
-          <Button
-            icon={<CalendarOutlined />}
-            onClick={goToToday}
-            title="Вернуться к сегодняшнему дню"
-          >
-            Сегодня
-          </Button>
-          <Button
-            icon={<RightOutlined />}
-            onClick={goForward}
-            title="Вперед на неделю"
-          >
-            Вперед
-          </Button>
-          <Button onClick={() => refetch()} loading={isLoading || isMoving}>
-            Обновить
-          </Button>
+        <Space size="middle" wrap>
+          <Space size="small">
+            <Button
+              icon={<LeftOutlined />}
+              onClick={goBackward}
+              title="Назад на неделю"
+            >
+              Назад
+            </Button>
+            <Button
+              icon={<CalendarOutlined />}
+              onClick={goToToday}
+              title="Вернуться к сегодняшнему дню"
+            >
+              Сегодня
+            </Button>
+            <Button
+              icon={<RightOutlined />}
+              onClick={goForward}
+              title="Вперед на неделю"
+            >
+              Вперед
+            </Button>
+            <Button onClick={() => refetch()} loading={isLoading || isMoving}>
+              Обновить
+            </Button>
+          </Space>
+          
+          {/* Переключатель режимов отображения */}
+          <Segmented
+            options={[
+              { label: 'Стандартный', value: ViewMode.STANDARD },
+              { label: 'Компактный', value: ViewMode.COMPACT },
+              { label: 'Краткий', value: ViewMode.BRIEF },
+            ]}
+            value={viewMode}
+            onChange={(value) => setViewMode(value as ViewMode)}
+          />
         </Space>
       </div>
 
@@ -198,6 +212,7 @@ const CalendarBoard: React.FC = () => {
                     columnWidth={columnWidth}
                     onDrop={handleDrop}
                     onContextMenu={handleContextMenu}
+                    viewMode={viewMode}
                   />
                 );
               })}

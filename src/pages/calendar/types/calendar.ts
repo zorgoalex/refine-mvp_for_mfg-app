@@ -3,6 +3,22 @@
  */
 
 /**
+ * Режимы отображения карточек заказов
+ */
+export enum ViewMode {
+  STANDARD = 'standard',  // Стандартный вид (текущий)
+  COMPACT = 'compact',    // Компактный вид
+  BRIEF = 'brief',        // Краткий вид
+}
+
+/**
+ * Настройки отображения календаря
+ */
+export interface CalendarViewSettings {
+  viewMode: ViewMode;
+}
+
+/**
  * Заказ для календаря (на основе orders_view)
  */
 export interface CalendarOrder {
@@ -111,6 +127,7 @@ export interface DayColumnProps {
   date: Date;
   orders: CalendarOrder[];
   columnWidth: number;
+  viewMode?: ViewMode;
   onDrop?: (item: DragItem, targetDate: Date, targetDateKey: string) => void;
   onOrderDrop?: (order: CalendarOrder, sourceDate: string, targetDate: string) => void;
   onOrderClick?: (order: CalendarOrder) => void;
