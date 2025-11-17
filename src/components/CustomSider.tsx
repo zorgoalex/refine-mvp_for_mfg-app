@@ -255,7 +255,9 @@ export const CustomSider: React.FC = () => {
       <div
         style={{
           background: "#37474F",
-          minHeight: "calc(100vh - 200px)",
+          height: "calc(100vh - 120px)",
+          overflowY: "auto",
+          overflowX: "hidden",
           padding: "8px 0",
         }}
       >
@@ -274,7 +276,7 @@ export const CustomSider: React.FC = () => {
         />
 
         {/* Кнопка "Новый Заказ" */}
-        <div style={{ padding: "8px 16px" }}>
+        <div style={{ padding: "8px 16px", marginTop: "72px" }}>
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -329,7 +331,7 @@ export const CustomSider: React.FC = () => {
                   style={{
                     border: "none",
                     background: "transparent",
-                    fontSize: "0.85em", // Уменьшение на 15%
+                    fontSize: "0.98em", // Увеличено на 15% от предыдущего размера
                   }}
                 />
               </Panel>
@@ -345,10 +347,26 @@ export const CustomSider: React.FC = () => {
       />
 
       <style>{`
+        /* Стили для скроллбара в меню */
+        .ant-layout-sider ::-webkit-scrollbar {
+          width: 6px;
+        }
+        .ant-layout-sider ::-webkit-scrollbar-track {
+          background: #263238;
+        }
+        .ant-layout-sider ::-webkit-scrollbar-thumb {
+          background: #546E7A;
+          border-radius: 3px;
+        }
+        .ant-layout-sider ::-webkit-scrollbar-thumb:hover {
+          background: #607D8B;
+        }
+
         /* Стили для меню Заказы */
         .orders-menu .ant-menu-item {
           color: #E0E0E0 !important;
-          font-size: 1em !important;
+          font-size: 14px !important;
+          font-weight: 500;
           letter-spacing: 1px !important;
         }
         .orders-menu .ant-menu-item:hover {
@@ -372,7 +390,7 @@ export const CustomSider: React.FC = () => {
           color: #E0E0E0 !important;
         }
         .sidebar-collapse .ant-menu-item {
-          font-size: 0.85em; /* Уменьшение на 15% */
+          font-size: 0.98em; /* Увеличено на 15% от предыдущего размера (0.85em * 1.15) */
           color: #E0E0E0 !important;
           letter-spacing: 1px !important;
         }

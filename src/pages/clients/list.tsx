@@ -15,7 +15,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <LocalizedList>
+    <LocalizedList title="Клиенты">
       <Table
         {...tableProps}
         {...highlightProps}

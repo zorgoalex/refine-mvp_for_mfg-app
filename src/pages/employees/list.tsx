@@ -13,7 +13,7 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
   const { show } = useNavigation();
 
   return (
-    <LocalizedList>
+    <LocalizedList title="Сотрудники">
       <Table
         {...tableProps}
         rowKey="employee_id"
