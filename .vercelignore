@@ -1,0 +1,39 @@
+# Документация проекта
+ai_docs/
+
+# Node modules (уже исключается по умолчанию, но для ясности)
+node_modules/
+
+# Локальные env файлы (используйте Environment Variables в Vercel Dashboard)
+.env
+.env.local
+.env*.local
+
+# Логи
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Тесты
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__/
+
+# Временные файлы
+*.tmp
+*.temp
