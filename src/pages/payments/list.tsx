@@ -27,7 +27,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
 
   const orderMap = useMemo(() => {
     const map: Record<string | number, string> = {};
-    (ordersData?.data || []).forEach((o: any) => (map[o.order_id] = o.order_number ?? o.order_id));
+    (ordersData?.data || []).forEach((o: any) => (map[o.order_id] = o.order_name ?? o.order_id));
     return map;
   }, [ordersData]);
 
