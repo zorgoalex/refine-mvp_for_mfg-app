@@ -143,14 +143,15 @@ export function getCardBorderColor(order: {
  * Проверяет, все ли статусы производства в "Готов"
  * @param order - объект заказа
  * @returns true если все 5 статусов в "Готов"
+ * 
+ * TODO: Статусы производства НЕ хранятся в orders/orders_view
+ * Они в order_details.production_status_id. Временно возвращаем false.
  */
-export function areAllProductionStagesReady(order: {
-  film_purchase_status?: string;
-  cutting_status?: string;
-  grinding_status?: string;
-  filming_status?: string;
-  packaging_status?: string;
-}): boolean {
+export function areAllProductionStagesReady(order: Record<string, any>): boolean {
+  // ВРЕМЕННО: всегда false, т.к. статусов производства нет в orders_view
+  return false;
+  
+  /* Когда будут добавлены поля в orders_view, раскомментировать:
   const stages = [
     order.film_purchase_status,
     order.cutting_status,
@@ -158,6 +159,6 @@ export function areAllProductionStagesReady(order: {
     order.filming_status,
     order.packaging_status,
   ];
-
   return stages.every((status) => String(status || '').toLowerCase().trim() === 'готов');
+  */
 }

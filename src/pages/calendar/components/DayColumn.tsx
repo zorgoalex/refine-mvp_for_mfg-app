@@ -9,7 +9,7 @@ import { calculateTotalArea, areAllOrdersIssued } from '../utils/groupOrdersByDa
 /**
  * Компонент колонки дня с заказами
  */
-const DayColumn: React.FC<DayColumnProps> = ({ date, orders, columnWidth, onDrop }) => {
+const DayColumn: React.FC<DayColumnProps> = ({ date, orders, columnWidth, onDrop, onContextMenu }) => {
   const dateKey = formatDateKey(date);
   const dayName = getDayName(date);
   const totalArea = calculateTotalArea(orders);
@@ -68,6 +68,7 @@ const DayColumn: React.FC<DayColumnProps> = ({ date, orders, columnWidth, onDrop
               key={order.order_id}
               order={order}
               sourceDate={dateKey}
+              onContextMenu={onContextMenu}
             />
           ))
         ) : (

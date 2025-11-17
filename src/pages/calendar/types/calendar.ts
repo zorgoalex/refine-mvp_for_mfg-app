@@ -24,17 +24,14 @@ export interface CalendarOrder {
   edge_type?: string; // Тип обката (если один для всех деталей)
   film?: string; // Пленка (если одна для всех деталей)
 
-  // Статусы производства
-  film_purchase_status?: string; // Закуп пленки (З)
-  cutting_status?: string; // Распил (Р)
-  grinding_status?: string; // Шлифовка (Ш)
-  filming_status?: string; // Пленка (П)
-  packaging_status?: string; // Упаковка (У)
-
   // Дополнительные поля
   cad_files_status?: string; // Статус CAD файлов
   is_drawn?: boolean; // Отрисован
   is_issued?: boolean; // Выдан
+  
+  // Заметка: Статусы производства (З Р Ш П У) НЕ хранятся в orders/orders_view
+  // Они хранятся в order_details.production_status_id и должны агрегироваться отдельно
+  // Для отображения в календаре нужно добавить эти поля в orders_view через агрегацию
 
   // Метаданные
   created_at?: string;
@@ -117,6 +114,7 @@ export interface DayColumnProps {
   onOrderDrop?: (order: CalendarOrder, sourceDate: string, targetDate: string) => void;
   onOrderClick?: (order: CalendarOrder) => void;
   onPrintDay?: (date: Date, orders: CalendarOrder[]) => void;
+  onContextMenu?: (e: React.MouseEvent, order: CalendarOrder) => void;
 }
 
 /**

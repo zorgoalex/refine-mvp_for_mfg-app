@@ -4,10 +4,13 @@ import { LeftOutlined, RightOutlined, CalendarOutlined } from '@ant-design/icons
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import DayColumn from './DayColumn';
+import OrderContextMenu from './OrderContextMenu';
 import { useCalendarDays } from '../hooks/useCalendarDays';
 import { useCalendarData } from '../hooks/useCalendarData';
 import { useOrderMove } from '../hooks/useOrderMove';
-import { DragItem } from '../types/calendar';
+import { useOrderStatuses } from '../hooks/useOrderStatuses';
+import { useOrderStatusUpdate } from '../hooks/useOrderStatusUpdate';
+import { DragItem, CalendarOrder } from '../types/calendar';
 import {
   calculateColumnsPerRow,
   groupDaysIntoRows,
@@ -34,6 +37,23 @@ const CalendarBoard: React.FC = () => {
 
   // Hook для перемещения заказов
   const { moveOrder, isMoving } = useOrderMove();
+  
+  // Hooks для статусов и их обновления
+  const { orderStatuses, paymentStatuses, isLoading: isLoadingStatuses } = useOrderStatuses();
+  const { updateStatus, isUpdating } = useOrderStatusUpdate();
+  
+  // State для контекстного меню
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    order: CalendarOrder | null;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    order: null,
+  });
 
   // Обработчик drop события
   const handleDrop = async (item: DragItem, targetDate: Date, targetDateKey: string) => {
@@ -41,6 +61,34 @@ const CalendarBoard: React.FC = () => {
 
     // Перемещаем заказ на новую дату
     await moveOrder(order, targetDate, sourceDate, targetDateKey);
+  };
+  
+  // Обработчик открытия контекстного меню
+  const handleContextMenu = (e: React.MouseEvent, order: CalendarOrder) => {
+    e.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      order,
+    });
+  };
+  
+  // Обработчик изменения статуса через контекстное меню
+  const handleStatusChange = async (fieldName: string, statusId: number, statusName: string) => {
+    if (!contextMenu.order) return;
+    
+    await updateStatus(contextMenu.order, fieldName, statusId, statusName);
+  };
+  
+  // Обработчик закрытия контекстного меню
+  const handleCloseContextMenu = () => {
+    setContextMenu({
+      visible: false,
+      x: 0,
+      y: 0,
+      order: null,
+    });
   };
 
   // Отслеживаем размер контейнера для адаптивного layout
@@ -149,12 +197,29 @@ const CalendarBoard: React.FC = () => {
                     orders={dayOrders}
                     columnWidth={columnWidth}
                     onDrop={handleDrop}
+                    onContextMenu={handleContextMenu}
                   />
                 );
               })}
             </div>
           ))}
         </div>
+      )}
+      
+      {/* Контекстное меню */}
+      {contextMenu.visible && contextMenu.order && (
+        <OrderContextMenu
+          order={contextMenu.order}
+          visible={contextMenu.visible}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={handleCloseContextMenu}
+          onStatusChange={handleStatusChange}
+          statuses={{
+            orderStatuses,
+            paymentStatuses,
+          }}
+        />
       )}
       </div>
     </DndProvider>

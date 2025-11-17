@@ -67,13 +67,14 @@ const OrderCard: React.FC<OrderCardProps> = ({
     ? order.materials.split(',').map((m) => m.trim())
     : [];
 
-  // Статусы производства
+  // Статусы производства - ВРЕМЕННО заглушка, т.к. их нет в orders_view
+  // TODO: Добавить агрегацию production_status из order_details в orders_view
   const productionStages = [
-    { key: 'З', label: 'Закуп пленки', status: order.film_purchase_status },
-    { key: 'Р', label: 'Распил', status: order.cutting_status },
-    { key: 'Ш', label: 'Шлифовка', status: order.grinding_status },
-    { key: 'П', label: 'Пленка', status: order.filming_status },
-    { key: 'У', label: 'Упаковка', status: order.packaging_status },
+    { key: 'З', label: 'Закуп пленки', status: undefined },
+    { key: 'Р', label: 'Распил', status: undefined },
+    { key: 'Ш', label: 'Шлифовка', status: undefined },
+    { key: 'П', label: 'Пленка', status: undefined },
+    { key: 'У', label: 'Упаковка', status: undefined },
   ];
 
   return (
