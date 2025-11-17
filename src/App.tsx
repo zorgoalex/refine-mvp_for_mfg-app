@@ -12,6 +12,7 @@ import "./styles/app.css";
 import { OrderList } from "./pages/orders/list";
 import { OrderShow } from "./pages/orders/show";
 import { OrderEdit } from "./pages/orders/edit";
+import { CalendarList } from "./pages/calendar";
 import { MaterialList } from "./pages/materials/list";
 import { MaterialCreate } from "./pages/materials/create";
 import { MaterialEdit } from "./pages/materials/edit";
@@ -180,9 +181,16 @@ const App = () => {
                 list: "/orders",
                 edit: "/orders/edit/:id",
                 show: "/orders/show/:id",
-                meta: { 
+                meta: {
                   idColumnName: "order_id",
                   label: "Заказы",
+                },
+              },
+              {
+                name: "calendar",
+                list: "/calendar",
+                meta: {
+                  label: "Календарь",
                 },
               },
               {
@@ -420,6 +428,9 @@ const App = () => {
                   <Route index element={<OrderList />} />
                   <Route path="edit/:id" element={<OrderEdit />} />
                   <Route path="show/:id" element={<OrderShow />} />
+                </Route>
+                <Route path="/calendar" >
+                  <Route index element={<CalendarList />} />
                 </Route>
                 <Route path="/materials" >
                   <Route index element={<MaterialList />} />

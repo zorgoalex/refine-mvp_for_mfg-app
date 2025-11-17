@@ -1,0 +1,350 @@
+/* ============================================
+   Производственный календарь - Стили
+   ============================================ */
+
+/* Страница календаря */
+.calendar-page {
+  padding: 0;
+  background: #f5f5f5;
+}
+
+/* Доска календаря */
+.calendar-board {
+  width: 100%;
+  min-height: calc(100vh - 200px);
+}
+
+/* Навигация */
+.calendar-navigation {
+  padding: 16px;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Индикатор загрузки */
+.calendar-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+  padding: 40px;
+}
+
+/* Сетка календаря */
+.calendar-grid {
+  padding: 0 16px 16px;
+}
+
+/* Ряд колонок */
+.calendar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.calendar-row:last-child {
+  margin-bottom: 0;
+}
+
+/* ============================================
+   Колонка дня
+   ============================================ */
+.day-column {
+  background: #fff;
+  border: 2px solid #e8e8e8;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 150px;
+  transition: all 0.2s ease;
+}
+
+/* Текущий день - подсветка */
+.day-column--today {
+  border-color: #1890ff;
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.15);
+}
+
+/* Все заказы выданы */
+.day-column--all-issued {
+  border-color: #52c41a;
+}
+
+/* Заголовок дня */
+.day-column__header {
+  padding: 12px;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  background: #fafafa;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+
+.day-column__header-left {
+  display: flex;
+  flex-direction: column;
+}
+
+.day-column__day-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #262626;
+  margin-bottom: 4px;
+}
+
+.day-column__date {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.day-column__header-right {
+  text-align: right;
+}
+
+.day-column__total-area {
+  font-weight: 600;
+  font-size: 13px;
+  color: #1890ff;
+}
+
+/* Список заказов в колонке */
+.day-column__orders {
+  flex: 1;
+  padding: 8px;
+  overflow-y: auto;
+  max-height: 70vh;
+}
+
+/* ============================================
+   Карточка заказа
+   ============================================ */
+.order-card {
+  background: #fff;
+  border: 2px solid #d9d9d9;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.order-card:last-child {
+  margin-bottom: 0;
+}
+
+.order-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+/* Перетаскиваемая карточка */
+.order-card--dragging {
+  opacity: 0.5;
+  cursor: move;
+}
+
+/* Заголовок карточки */
+.order-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.order-card__checkbox {
+  flex-shrink: 0;
+}
+
+.order-card__number {
+  flex: 1;
+  font-weight: 600;
+  font-size: 14px;
+  color: #1976d2;
+  cursor: pointer;
+  user-select: none;
+}
+
+.order-card__number:hover {
+  text-decoration: underline;
+}
+
+.order-card__edit-icon {
+  flex-shrink: 0;
+  color: #8c8c8c;
+  cursor: pointer;
+  font-size: 14px;
+  transition: color 0.2s;
+}
+
+.order-card__edit-icon:hover {
+  color: #1890ff;
+}
+
+/* Поля карточки */
+.order-card__milling,
+.order-card__area,
+.order-card__date,
+.order-card__client,
+.order-card__payment {
+  font-size: 12px;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+
+.order-card__milling {
+  font-weight: 500;
+  color: #262626;
+}
+
+.order-card__area {
+  color: #595959;
+}
+
+.order-card__date {
+  color: #8c8c8c;
+}
+
+.order-card__client {
+  color: #262626;
+  font-weight: 500;
+}
+
+.order-card__payment {
+  font-size: 11px;
+}
+
+/* Бейджи материалов */
+.order-card__materials {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Индикаторы статусов производства */
+.order-card__production-stages {
+  margin-top: 8px;
+  padding: 4px 6px;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  border-radius: 4px;
+  gap: 4px;
+}
+
+.production-stage {
+  font-weight: 700;
+  font-size: 11px;
+  cursor: help;
+  user-select: none;
+}
+
+/* ============================================
+   Responsive - Mobile
+   ============================================ */
+@media (max-width: 768px) {
+  .calendar-navigation {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .calendar-row {
+    gap: 12px;
+  }
+
+  .day-column__header {
+    padding: 10px;
+  }
+
+  .day-column__day-name {
+    font-size: 13px;
+  }
+
+  .day-column__date {
+    font-size: 11px;
+  }
+
+  .day-column__total-area {
+    font-size: 12px;
+  }
+
+  .order-card {
+    padding: 8px;
+  }
+
+  .order-card__number {
+    font-size: 13px;
+  }
+
+  .order-card__milling,
+  .order-card__area,
+  .order-card__date,
+  .order-card__client {
+    font-size: 11px;
+  }
+}
+
+/* ============================================
+   Анимации
+   ============================================ */
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(24, 144, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(24, 144, 255, 0);
+  }
+}
+
+.day-column--today .day-column__header {
+  animation: pulse 2s infinite;
+}
+
+/* Плавное появление карточек */
+.order-card {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================
+   Скроллбар
+   ============================================ */
+.day-column__orders::-webkit-scrollbar {
+  width: 6px;
+}
+
+.day-column__orders::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.day-column__orders::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.day-column__orders::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}

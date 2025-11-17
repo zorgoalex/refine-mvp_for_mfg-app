@@ -3,6 +3,7 @@ import { Layout as AntLayout, Menu, Collapse, Button, Typography } from "antd";
 import {
   PlusOutlined,
   FileTextOutlined,
+  CalendarOutlined,
   UserOutlined,
   ShopOutlined,
   DollarOutlined,
@@ -41,6 +42,7 @@ const { Title } = Typography;
 // Карта иконок для ресурсов
 const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
+  calendar: <CalendarOutlined />,
   clients: <UserOutlined />,
   suppliers: <ShopOutlined />,
   payments: <DollarOutlined />,
@@ -81,6 +83,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 // Карта русских названий ресурсов из ru_table_name.md
 const RESOURCE_LABELS: Record<string, string> = {
   orders_view: "Заказы",
+  calendar: "Календарь",
   clients: "Клиенты",
   suppliers: "Поставщики",
   payments: "Платежи",
@@ -165,8 +168,8 @@ export const CustomSider: React.FC = () => {
     };
 
     resources.forEach((resource) => {
-      // Пропускаем orders_view - он будет отдельным пунктом
-      if (resource.name === "orders_view") return;
+      // Пропускаем orders_view и calendar - они будут отдельными пунктами
+      if (resource.name === "orders_view" || resource.name === "calendar") return;
 
       const category = CATEGORY_MAP[resource.name] || "Справочники";
       const label = RESOURCE_LABELS[resource.name] || resource.meta?.label || resource.name;
@@ -212,12 +215,23 @@ export const CustomSider: React.FC = () => {
   const ordersRoute = typeof ordersResource?.list === "string" ? ordersResource.list : "/orders";
   const ordersLabel = RESOURCE_LABELS["orders_view"] || "Заказы";
 
-  const ordersMenuItem: MenuProps["items"] = [
+  // Calendar - отдельный пункт меню после Orders
+  const calendarResource = resources.find((r) => r.name === "calendar");
+  const calendarRoute = typeof calendarResource?.list === "string" ? calendarResource.list : "/calendar";
+  const calendarLabel = RESOURCE_LABELS["calendar"] || "Календарь";
+
+  const topMenuItems: MenuProps["items"] = [
     {
       key: "orders_view",
       icon: RESOURCE_ICONS["orders_view"],
       label: ordersLabel,
       onClick: () => push(ordersRoute),
+    },
+    {
+      key: "calendar",
+      icon: RESOURCE_ICONS["calendar"],
+      label: calendarLabel,
+      onClick: () => push(calendarRoute),
     },
   ];
 
@@ -261,11 +275,11 @@ export const CustomSider: React.FC = () => {
           padding: "8px 0",
         }}
       >
-        {/* Заказы */}
+        {/* Заказы и Календарь */}
         <Menu
           mode="inline"
-          selectedKeys={selectedKey === "orders_view" ? ["orders_view"] : []}
-          items={ordersMenuItem}
+          selectedKeys={selectedKey === "orders_view" || selectedKey === "calendar" ? [selectedKey] : []}
+          items={topMenuItems}
           style={{
             background: "transparent",
             border: "none",
