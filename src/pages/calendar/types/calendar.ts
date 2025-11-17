@@ -113,6 +113,7 @@ export interface DayColumnProps {
   date: Date;
   orders: CalendarOrder[];
   columnWidth: number;
+  onDrop?: (item: DragItem, targetDate: Date, targetDateKey: string) => void;
   onOrderDrop?: (order: CalendarOrder, sourceDate: string, targetDate: string) => void;
   onOrderClick?: (order: CalendarOrder) => void;
   onPrintDay?: (date: Date, orders: CalendarOrder[]) => void;

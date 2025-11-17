@@ -1,9 +1,13 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Spin, Alert, Button, Space } from 'antd';
 import { LeftOutlined, RightOutlined, CalendarOutlined } from '@ant-design/icons';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 import DayColumn from './DayColumn';
 import { useCalendarDays } from '../hooks/useCalendarDays';
 import { useCalendarData } from '../hooks/useCalendarData';
+import { useOrderMove } from '../hooks/useOrderMove';
+import { DragItem } from '../types/calendar';
 import {
   calculateColumnsPerRow,
   groupDaysIntoRows,
@@ -27,6 +31,17 @@ const CalendarBoard: React.FC = () => {
     startDate,
     endDate
   );
+
+  // Hook для перемещения заказов
+  const { moveOrder, isMoving } = useOrderMove();
+
+  // Обработчик drop события
+  const handleDrop = async (item: DragItem, targetDate: Date, targetDateKey: string) => {
+    const { order, sourceDate } = item;
+
+    // Перемещаем заказ на новую дату
+    await moveOrder(order, targetDate, sourceDate, targetDateKey);
+  };
 
   // Отслеживаем размер контейнера для адаптивного layout
   useEffect(() => {
@@ -79,9 +94,10 @@ const CalendarBoard: React.FC = () => {
   }
 
   return (
-    <div className="calendar-board" ref={containerRef}>
-      {/* Навигация по календарю */}
-      <div className="calendar-navigation">
+    <DndProvider backend={HTML5Backend}>
+      <div className="calendar-board" ref={containerRef}>
+        {/* Навигация по календарю */}
+        <div className="calendar-navigation">
         <Space size="middle">
           <Button
             icon={<LeftOutlined />}
@@ -104,7 +120,7 @@ const CalendarBoard: React.FC = () => {
           >
             Вперед
           </Button>
-          <Button onClick={() => refetch()} loading={isLoading}>
+          <Button onClick={() => refetch()} loading={isLoading || isMoving}>
             Обновить
           </Button>
         </Space>
@@ -132,6 +148,7 @@ const CalendarBoard: React.FC = () => {
                     date={day}
                     orders={dayOrders}
                     columnWidth={columnWidth}
+                    onDrop={handleDrop}
                   />
                 );
               })}
@@ -139,7 +156,8 @@ const CalendarBoard: React.FC = () => {
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </DndProvider>
   );
 };
 

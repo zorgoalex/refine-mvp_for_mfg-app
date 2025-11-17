@@ -2,7 +2,8 @@ import React from 'react';
 import { Checkbox, Tag, Tooltip } from 'antd';
 import { EditOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { OrderCardProps } from '../types/calendar';
+import { useDrag } from 'react-dnd';
+import { OrderCardProps, DragItem } from '../types/calendar';
 import {
   getStatusColor,
   getMaterialColor,
@@ -15,15 +16,27 @@ import { formatDateKey } from '../utils/dateUtils';
 /**
  * Компонент карточки заказа
  */
+// Константа для типа D&D item
+const DRAG_TYPE = 'ORDER_CARD';
+
 const OrderCard: React.FC<OrderCardProps> = ({
   order,
   sourceDate,
   onCheckboxChange,
   onContextMenu,
   onDoubleTap,
-  isDragging = false,
+  isDragging: isDraggingProp = false,
 }) => {
   const navigate = useNavigate();
+
+  // Настройка useDrag для перетаскивания карточки
+  const [{ isDragging }, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean }>({
+    type: DRAG_TYPE,
+    item: { order, sourceDate },
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+  });
 
   // Определяем цвета и стили
   const backgroundColor = getStatusColor(order.order_status || '');
@@ -65,10 +78,13 @@ const OrderCard: React.FC<OrderCardProps> = ({
 
   return (
     <div
-      className={`order-card ${isDragging ? 'order-card--dragging' : ''}`}
+      ref={dragRef}
+      className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''}`}
       style={{
         backgroundColor,
         borderColor,
+        cursor: 'move',
+        opacity: isDragging ? 0.5 : 1,
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
       onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}
@@ -181,4 +197,5 @@ const OrderCard: React.FC<OrderCardProps> = ({
   );
 };
 
+export { DRAG_TYPE };
 export default OrderCard;
