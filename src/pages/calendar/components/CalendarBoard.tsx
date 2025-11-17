@@ -39,7 +39,7 @@ const CalendarBoard: React.FC = () => {
   const { moveOrder, isMoving } = useOrderMove();
   
   // Hooks для статусов и их обновления
-  const { orderStatuses, paymentStatuses, isLoading: isLoadingStatuses } = useOrderStatuses();
+  const { orderStatuses, paymentStatuses, productionStatuses, isLoading: isLoadingStatuses } = useOrderStatuses();
   const { updateStatus, isUpdating } = useOrderStatusUpdate();
   
   // State для контекстного меню
@@ -218,6 +218,7 @@ const CalendarBoard: React.FC = () => {
           statuses={{
             orderStatuses,
             paymentStatuses,
+            productionStatuses,
           }}
         />
       )}

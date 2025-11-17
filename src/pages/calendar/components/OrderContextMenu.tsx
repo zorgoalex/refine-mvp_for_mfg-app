@@ -13,6 +13,7 @@ export interface OrderContextMenuProps {
   statuses: {
     orderStatuses: Array<{ id: number; name: string }>;
     paymentStatuses: Array<{ id: number; name: string }>;
+    productionStatuses: Array<{ id: number; name: string }>;
   };
 }
 
@@ -74,6 +75,16 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
     },
   }));
 
+  // Создаем пункты меню для статуса производства
+  const productionStatusItems: MenuProps['items'] = statuses.productionStatuses.map((status) => ({
+    key: `production_status_${status.id}`,
+    label: status.name,
+    onClick: () => {
+      onStatusChange('production_status', status.id, status.name);
+      onClose();
+    },
+  }));
+
   // Главное меню с подменю
   const menuItems: MenuProps['items'] = [
     {
@@ -92,6 +103,11 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
       key: 'payment_status',
       label: 'Статус оплаты',
       children: paymentStatusItems,
+    },
+    {
+      key: 'production_status',
+      label: 'Статус производства',
+      children: productionStatusItems,
     },
   ];
 

@@ -15,6 +15,7 @@ export interface CalendarOrder {
   total_area: number;
   order_status: string;
   payment_status: string;
+  production_status?: string; // Статус производства
   paid_amount: number;
   total_price: number;
 

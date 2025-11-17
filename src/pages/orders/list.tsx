@@ -463,6 +463,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             render={(value) => renderStatus(value)}
           />
           <Table.Column
+            dataIndex="production_status_name"
+            title="Статус производства"
+            width={90}
+            className="orders-col status production-status orders-col--wrap"
+            render={(value) => renderStatus(value)}
+          />
+          <Table.Column
             dataIndex="discounted_amount"
             title="Сумма, итого"
             sorter

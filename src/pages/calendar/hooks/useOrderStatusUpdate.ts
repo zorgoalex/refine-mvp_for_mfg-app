@@ -34,6 +34,7 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
     const fieldMapping: Record<string, string> = {
       'order_status': 'order_status_id',
       'payment_status': 'payment_status_id',
+      'production_status': 'production_status_id',
     };
 
     const dbField = fieldMapping[fieldName];
@@ -62,6 +63,7 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
               const fieldNames: Record<string, string> = {
                 'order_status': 'Статус заказа',
                 'payment_status': 'Статус оплаты',
+                'production_status': 'Статус производства',
               };
 
               const displayName = fieldNames[fieldName] || fieldName;
