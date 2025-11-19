@@ -1,10 +1,9 @@
-import { Refine, AuthProvider, Authenticated } from "@refinedev/core";
+import { Refine, Authenticated } from "@refinedev/core";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { notificationProvider } from "@refinedev/antd";
 import { CustomLayout } from "./components/CustomLayout";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
-import { useEffect } from "react";
 import { ConfigProvider } from "antd";
 import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
@@ -119,51 +118,11 @@ import { OrderResourceRequirementEdit } from "./pages/order_resource_requirement
 import { OrderResourceRequirementShow } from "./pages/order_resource_requirements/show";
 import { LoginPage } from "./pages/login";
 import { dataProvider } from "./utils/dataProvider";
+import { authProvider } from "./authProvider";
 
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
-const HASURA_ADMIN_SECRET = import.meta.env.VITE_HASURA_ADMIN_SECRET as string;
 
 const App = () => {
-  const dp = dataProvider(API_URL);
-
-  const authProvider: AuthProvider = {
-    login: async () => {
-      // Dev mode: token comes from .env; nothing to do
-      return { success: true, redirectTo: "/" };
-    },
-    logout: async () => {
-      // Dev mode: no token state to clear; allow navigating to login
-      return { success: true, redirectTo: "/login" };
-    },
-    check: async () => {
-      if (HASURA_ADMIN_SECRET && API_URL) {
-        return { authenticated: true };
-      }
-      return { authenticated: false, redirectTo: "/login" };
-    },
-    getPermissions: async () => null,
-    getIdentity: async () => {
-      try {
-        const userId = Number(((import.meta as any).env.VITE_DEV_AUDIT_USER_ID) ?? 1);
-        const { data } = await dp.getOne({ resource: "users", id: userId });
-        return {
-          id: data?.user_id ?? userId,
-          name: data?.employee?.full_name || data?.username || `user_${userId}`,
-          username: data?.username,
-          full_name: data?.employee?.full_name,
-        } as any;
-      } catch (e) {
-        return { id: 1, name: "Super Admin" } as any;
-      }
-    },
-  };
-
-  // Dev: persistent console output of current user_id (for audit overrides)
-  useEffect(() => {
-    const devUserId = (import.meta as any).env.VITE_DEV_AUDIT_USER_ID ?? 1;
-    // eslint-disable-next-line no-console
-    // console.info(`[DEV] Current user_id (audit): ${devUserId}`);
-  }, []);
 
   return (
     <BrowserRouter>

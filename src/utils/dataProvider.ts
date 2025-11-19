@@ -1,10 +1,11 @@
 // Minimal Hasura GraphQL data provider for Refine (MVP)
 // Implements: getList, getOne, create, update, deleteOne
 
+import { authStorage, isTokenExpired, refreshAccessToken } from './auth';
+
 type AnyObject = Record<string, any>;
 
 const HASURA_URL = (import.meta as any).env.VITE_HASURA_GRAPHQL_URL as string;
-const HASURA_ADMIN_SECRET = (import.meta as any).env.VITE_HASURA_ADMIN_SECRET as string;
 // Dev audit override: use env to inject edited_by on update; disable by setting VITE_DEV_FORCE_AUDIT=false
 const DEV_FORCE_AUDIT = String(((import.meta as any).env.VITE_DEV_FORCE_AUDIT ?? 'true')).toLowerCase() === 'true';
 const DEV_AUDIT_USER_ID = Number((import.meta as any).env.VITE_DEV_AUDIT_USER_ID ?? 1);
@@ -526,10 +527,25 @@ const FORCE_PK_ON_INSERT: Record<string, boolean> = {
   // film_vendors: true,  // REMOVED: now has IDENTITY in schema v11.4
 };
 
-const headers = () => ({
-  "Content-Type": "application/json",
-  "x-hasura-admin-secret": HASURA_ADMIN_SECRET,
-});
+/**
+ * Создает заголовки для GraphQL запросов
+ * Автоматически добавляет JWT токен из localStorage
+ * Обновляет токен если он истек
+ */
+const headers = async () => {
+  let token = authStorage.getAccessToken();
+
+  // Проверить и обновить токен если истек
+  if (token && isTokenExpired(token)) {
+    const newToken = await refreshAccessToken();
+    token = newToken || token;
+  }
+
+  return {
+    "Content-Type": "application/json",
+    ...(token && { "Authorization": `Bearer ${token}` }),
+  };
+};
 
 // Helper to parse PostgreSQL error messages into user-friendly text
 const parsePostgresError = (message: string): string => {
@@ -580,7 +596,7 @@ const parsePostgresError = (message: string): string => {
 const gqlRequest = async (query: string): Promise<any> => {
   const res = await fetch(HASURA_URL, {
     method: "POST",
-    headers: headers(),
+    headers: await headers(),
     body: JSON.stringify({ query }),
   });
   const json = await res.json();
