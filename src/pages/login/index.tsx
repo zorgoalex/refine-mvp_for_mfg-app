@@ -3,6 +3,9 @@ import { AuthPage } from "@refinedev/antd";
 /**
  * Страница входа в систему
  * Использует стандартный компонент AuthPage из Refine
+ *
+ * Примечание: AuthPage использует поле "email" по умолчанию.
+ * authProvider автоматически мапит email → username для API.
  */
 export const LoginPage: React.FC = () => {
   return (
@@ -20,7 +23,7 @@ export const LoginPage: React.FC = () => {
       }
       formProps={{
         initialValues: {
-          username: "",
+          email: "",
           password: "",
         },
       }}

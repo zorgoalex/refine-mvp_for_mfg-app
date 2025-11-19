@@ -10,9 +10,15 @@ export const authProvider: AuthBindings = {
   /**
    * Выполняет вход пользователя
    * Вызывает /api/login и сохраняет токены в localStorage
+   *
+   * Примечание: AuthPage передает "email", но API ожидает "username"
    */
-  login: async ({ username, password }: LoginCredentials) => {
+  login: async (credentials: any) => {
     try {
+      // AuthPage передает "email", но наш API ожидает "username"
+      const username = credentials.username || credentials.email;
+      const { password } = credentials;
+
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
