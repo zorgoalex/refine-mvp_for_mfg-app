@@ -50,7 +50,7 @@ export async function getUserByUsername(username: string): Promise<User | null> 
   const data = await hasuraAdminQuery<{ users: User[] }>(
     `
     query GetUser($username: citext!) {
-      users(where: {username: {_eq: $username}}) {
+      users(where: {_or: [{username: {_eq: $username}}, {email: {_eq: $username}}]}) {
         user_id
         username
         password_hash
@@ -68,8 +68,18 @@ export async function getUserByUsername(username: string): Promise<User | null> 
   const user = data.users[0];
   if (!user) return null;
 
-  // Маппинг ролей на allowed_roles (иерархия прав)
-  const roleMap: Record<string, string[]> = {
+  // Маппинг role_id на системные роли Hasura (английские названия)
+  const roleIdMap: Record<number, string> = {
+    1: 'admin',
+    10: 'manager',
+    11: 'operator',
+    15: 'top_manager',
+    20: 'worker',
+    100: 'viewer',
+  };
+
+  // Маппинг системных ролей на allowed_roles (иерархия прав)
+  const roleHierarchy: Record<string, string[]> = {
     admin: ['admin', 'manager', 'operator', 'top_manager', 'worker', 'viewer'],
     manager: ['manager', 'operator', 'viewer'],
     top_manager: ['top_manager', 'manager', 'operator', 'viewer'],
@@ -78,11 +88,18 @@ export async function getUserByUsername(username: string): Promise<User | null> 
     viewer: ['viewer'],
   };
 
-  const roleName = user.role.role_name;
+  // Определяем системную роль по ID
+  const systemRole = roleIdMap[user.role_id] || 'viewer';
+
+  // Определяем разрешенные роли
+  const allowedRoles = roleHierarchy[systemRole] || ['viewer'];
 
   return {
     ...user,
-    allowed_roles: roleMap[roleName] || ['viewer'],
+    // Важно: перезаписываем role_name на системное имя (admin, manager...), 
+    // так как в БД может быть русское название (Администратор)
+    role: { role_name: systemRole },
+    allowed_roles: allowedRoles,
   };
 }
 
