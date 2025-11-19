@@ -22,7 +22,8 @@
         },
         {
           "key": "Access-Control-Allow-Origin",
-          "value": "*"
+          "value": "*",
+          "comment": "ВАЖНО: Для production замените '*' на 'https://your-app.vercel.app'"
         },
         {
           "key": "Access-Control-Allow-Methods",
@@ -59,7 +60,8 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.vercel.app http://localhost:*; frame-src 'self'; object-src 'none'; base-uri 'self';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.vercel.app http://localhost:*; frame-src 'self'; object-src 'none'; base-uri 'self';",
+          "comment": "ВАЖНО: Добавьте ваш Hasura URL в connect-src: https://your-hasura-domain.com"
         }
       ]
     }
