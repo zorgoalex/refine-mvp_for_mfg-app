@@ -3,15 +3,12 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Playwright Configuration
  *
- * Использует vercel dev для запуска сервера (порт 3000 по умолчанию, или 3001 если 3000 занят)
- * Это позволяет тестировать Vercel Functions локально
- *
- * ВАЖНО: Текущая конфигурация использует порт 3001
- * Если ваш vercel dev запускается на другом порту - обновите baseURL и port ниже
+ * Использует Vite dev server (5173) + Vercel Functions (3001) через proxy
+ * Это обеспечивает полноценную работу фронтенда и API endpoints
  *
  * Для тестирования:
- * 1. npm run test:e2e - автоматически запустит vercel dev
- * 2. Или запустите вручную: npm run dev:vercel
+ * 1. npm run test:e2e - автоматически запустит оба сервера
+ * 2. Или запустите вручную: npm run dev:full
  */
 export default defineConfig({
     testDir: './tests',
@@ -21,7 +18,7 @@ export default defineConfig({
     workers: process.env.CI ? 1 : undefined,
     reporter: 'list',
     use: {
-        baseURL: 'http://localhost:3001',
+        baseURL: 'http://localhost:5173',
         trace: 'on-first-retry',
     },
     projects: [
@@ -31,9 +28,9 @@ export default defineConfig({
         },
     ],
     webServer: {
-        command: 'npm run dev:vercel',
-        port: 3001,
+        command: 'npm run dev:full',
+        port: 5173,
         reuseExistingServer: !process.env.CI,
-        timeout: 120000, // 2 минуты на запуск (vercel dev медленнее чем vite)
+        timeout: 120000, // 2 минуты на запуск (оба сервера)
     },
 });
