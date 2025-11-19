@@ -19,7 +19,6 @@
   "dependencies": {
     "@ffimnsr/refine-postgrest": "^1.0.1",
     "@hookform/resolvers": "^5.2.2",
-    "@playwright/test": "^1.56.0",
     "@refinedev/antd": "^5.0.0",
     "@refinedev/cli": "^2.16.40",
     "@refinedev/core": "^4.48.0",
@@ -44,7 +43,9 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@types/exceljs": "^0.5.3",
+    "@types/node": "^24.10.1",
     "@types/react-dnd": "^2.0.36",
     "@vitejs/plugin-react": "^4.0.0",
     "concurrently": "^9.2.1",

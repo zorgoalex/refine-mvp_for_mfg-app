@@ -11,7 +11,8 @@ test.describe('Authentication', () => {
             const postData = JSON.parse(route.request().postData() || '{}');
             const username = postData.username || postData.email;
 
-            if (username === 'admin' && postData.password === 'admin123') {
+            // Принимаем username='admin' или email='admin@mebelkz.local'
+            if ((username === 'admin' || username === 'admin@mebelkz.local') && postData.password === 'admin123') {
                 await route.fulfill({
                     status: 200,
                     contentType: 'application/json',
@@ -58,8 +59,8 @@ test.describe('Authentication', () => {
         await page.goto('/login');
         await page.waitForSelector('form', { timeout: 10000 });
 
-        // Заполняем форму (email может требовать @ для валидации)
-        await page.fill('#email', 'admin');
+        // Заполняем форму валидным email из БД
+        await page.fill('#email', 'admin@mebelkz.local');
         await page.fill('#password', 'admin123');
 
         // Кликаем на кнопку Sign in
@@ -79,7 +80,7 @@ test.describe('Authentication', () => {
         // Логинимся
         await page.goto('/login');
         await page.waitForSelector('form');
-        await page.fill('#email', 'admin');
+        await page.fill('#email', 'admin@mebelkz.local');
         await page.fill('#password', 'admin123');
         await page.click('button:has-text("Sign in")');
 
