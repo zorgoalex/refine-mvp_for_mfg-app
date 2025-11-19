@@ -163,16 +163,59 @@ VITE_HASURA_ADMIN_SECRET=your_dev_secret_here
 Важно: admin secret не использовать в продакшене. Для prod — Hasura роли и JWT.
 
 ## Установка и запуск
-1) Установить зависимости:
-```
+
+### 1. Установить зависимости
+```bash
 npm install
 ```
-2) Создать `.env` по примеру выше.
-3) Запуск в dev-режиме:
+
+### 2. Настроить Environment Variables
+Создать `.env` файл из примера:
+```bash
+cp .env.example .env
 ```
+
+Заполнить обязательные переменные:
+- `HASURA_URL` - URL вашего Hasura GraphQL endpoint
+- `HASURA_ADMIN_SECRET` - admin secret для Hasura
+- `JWT_SECRET` и `JWT_REFRESH_SECRET` - секреты для JWT токенов (256-bit base64)
+- `VITE_HASURA_GRAPHQL_URL` - то же что HASURA_URL (для frontend)
+
+**Генерация JWT секретов:**
+```bash
+node scripts/generate-jwt-secret.js
+```
+
+### 3. Выбрать режим запуска
+
+#### Вариант A: Vercel Dev (рекомендуется для работы с аутентификацией)
+```bash
+# Установить Vercel CLI (если еще не установлен)
+npm install -g vercel
+
+# Запустить с поддержкой Vercel Functions
+npm run dev:vercel
+```
+Приложение доступно на **`http://localhost:3000`**
+
+**Используйте этот режим когда:**
+- ✅ Тестируете аутентификацию (login/logout)
+- ✅ Работаете с API endpoints (`/api/login`, `/api/refresh`)
+- ✅ Запускаете E2E тесты
+
+**Подробнее:** См. `ai_docs/VERCEL_DEV_SETUP.md`
+
+#### Вариант B: Vite Dev (только для UI разработки без аутентификации)
+```bash
 npm run dev
 ```
-Приложение доступно на `http://localhost:5573`. Hasura должен быть доступен по `VITE_HASURA_GRAPHQL_URL`.
+Приложение доступно на **`http://localhost:5173`**
+
+**Используйте этот режим когда:**
+- ❌ Работаете только с UI (без аутентификации)
+- ❌ Нужна максимальная скорость hot reload
+
+**Важно:** API endpoints (`/api/*`) НЕ работают в этом режиме!
 
 ## Примечания по реализации
 

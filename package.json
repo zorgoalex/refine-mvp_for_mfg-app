@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "vite",
+    "dev:vercel": "vercel dev",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
