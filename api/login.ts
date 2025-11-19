@@ -3,36 +3,8 @@ import crypto from 'crypto';
 import { getUserByUsername, updateLastLogin, storeRefreshToken } from './_lib/db';
 import { comparePassword } from './_lib/password';
 import { generateAccessToken, generateRefreshToken } from './_lib/jwt';
-
-// Simple in-memory rate limiter for MVP
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-
-/**
- * Проверяет rate limit для логина
- * @param identifier - IP + username
- * @param maxAttempts - Максимум попыток (по умолчанию 5)
- * @param windowMs - Окно времени в мс (по умолчанию 15 минут)
- */
-function checkRateLimit(
-  identifier: string,
-  maxAttempts = 5,
-  windowMs = 15 * 60 * 1000
-): boolean {
-  const now = Date.now();
-  const record = loginAttempts.get(identifier);
-
-  if (!record || now > record.resetAt) {
-    loginAttempts.set(identifier, { count: 1, resetAt: now + windowMs });
-    return true;
-  }
-
-  if (record.count >= maxAttempts) {
-    return false;
-  }
-
-  record.count++;
-  return true;
-}
+import { rateLimit } from './_lib/rate-limit';
+import { logger } from './_lib/logger';
 
 /**
  * POST /api/login
@@ -67,10 +39,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Rate limiting
-    const identifier = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown') + ':' + username;
-    if (!checkRateLimit(identifier)) {
+    const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown';
+    const identifier = `${ip}:${username}`;
+
+    const limit = rateLimit(identifier, { windowMs: 15 * 60 * 1000, max: 5 });
+
+    if (!limit.success) {
+      logger.warn('Rate limit exceeded', { identifier, ip, username });
       return res.status(429).json({
-        error: 'Too many login attempts. Please try again later.'
+        error: 'Too many login attempts. Please try again later.',
+        retryAfter: limit.reset
       });
     }
 
@@ -78,10 +56,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const user = await getUserByUsername(username);
 
     if (!user) {
+      logger.info('Login failed: user not found', { username, ip });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     if (!user.is_active) {
+      logger.warn('Login blocked: account disabled', { username, userId: user.user_id });
       return res.status(401).json({ error: 'Account is disabled' });
     }
 
@@ -89,6 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const isValidPassword = await comparePassword(password, user.password_hash);
 
     if (!isValidPassword) {
+      logger.info('Login failed: invalid password', { username, userId: user.user_id, ip });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -115,11 +96,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       tokenHash,
       expiresAt,
       req.headers['user-agent'],
-      (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress
+      ip
     );
 
     // 5. Обновить last_login_at
     await updateLastLogin(String(user.user_id));
+
+    logger.info('User logged in successfully', { userId: user.user_id, username });
 
     // 6. Вернуть успешный ответ с токенами
     return res.status(200).json({
@@ -133,9 +116,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
   } catch (error) {
-    console.error('Login error:', error);
+    logger.error('Login error', error);
     return res.status(500).json({
-      error: 'Internal server error'
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 }

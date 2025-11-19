@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "keywords": [],
   "author": "",
@@ -43,6 +45,7 @@
     "@types/exceljs": "^0.5.3",
     "@types/react-dnd": "^2.0.36",
     "@vitejs/plugin-react": "^4.0.0",
-    "vite": "^4.2.0"
+    "vite": "^4.2.0",
+    "vitest": "^4.0.10"
   }
 }

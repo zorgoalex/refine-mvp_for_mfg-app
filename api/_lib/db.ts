@@ -16,7 +16,7 @@ const HASURA_ADMIN_SECRET = process.env.HASURA_ADMIN_SECRET!;
 /**
  * Выполняет GraphQL запрос к Hasura с правами администратора
  */
-async function hasuraAdminQuery<T = any>(
+export async function hasuraAdminQuery<T = any>(
   query: string,
   variables: any = {}
 ): Promise<T> {
@@ -162,9 +162,9 @@ export async function storeRefreshToken(
     `
     mutation StoreRefreshToken(
       $userId: bigint!,
-      $tokenHash: text!,
+      $tokenHash: String!,
       $expiresAt: timestamp!,
-      $userAgent: text,
+      $userAgent: String,
       $ipAddress: inet
     ) {
       insert_refresh_tokens_one(object: {
@@ -195,7 +195,7 @@ export async function storeRefreshToken(
 export async function verifyRefreshTokenHash(tokenHash: string): Promise<string | null> {
   const data = await hasuraAdminQuery<{ refresh_tokens: Array<{ user_id: string }> }>(
     `
-    query VerifyRefreshToken($tokenHash: text!) {
+    query VerifyRefreshToken($tokenHash: String!) {
       refresh_tokens(
         where: {
           token_hash: {_eq: $tokenHash},
@@ -219,7 +219,7 @@ export async function verifyRefreshTokenHash(tokenHash: string): Promise<string 
 export async function revokeRefreshToken(tokenHash: string): Promise<void> {
   await hasuraAdminQuery(
     `
-    mutation RevokeRefreshToken($tokenHash: text!) {
+    mutation RevokeRefreshToken($tokenHash: String!) {
       update_refresh_tokens(
         where: {token_hash: {_eq: $tokenHash}},
         _set: {revoked_at: "now()"}
