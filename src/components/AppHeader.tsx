@@ -1,11 +1,27 @@
 import React from "react";
-import { Layout, Space, Avatar, Typography, Tag } from "antd";
-import { useGetIdentity } from "@refinedev/core";
+import { Layout, Space, Avatar, Typography, Dropdown, Button } from "antd";
+import { UserOutlined, LogoutOutlined, DownOutlined } from "@ant-design/icons";
+import { useGetIdentity, useLogout } from "@refinedev/core";
+import type { UserIdentity } from "../types/auth";
 
 export const AppHeader: React.FC = () => {
-  const { data: identity } = useGetIdentity<{ id: number; name?: string; full_name?: string; username?: string }>();
-  const name = identity?.full_name || identity?.name || identity?.username || "User";
-  const devUserId = (import.meta as any).env.VITE_DEV_AUDIT_USER_ID ?? 1;
+  const { data: identity } = useGetIdentity<UserIdentity>();
+  const { mutate: logout } = useLogout();
+
+  const username = identity?.username || "Пользователь";
+  const role = identity?.role || "";
+
+  // Маппинг ролей на русские названия
+  const roleNames: Record<string, string> = {
+    admin: "Администратор",
+    manager: "Менеджер",
+    top_manager: "Топ-менеджер",
+    operator: "Оператор",
+    worker: "Работник",
+    viewer: "Наблюдатель",
+  };
+
+  const roleName = roleNames[role] || role;
 
   return (
     <Layout.Header
@@ -19,13 +35,57 @@ export const AppHeader: React.FC = () => {
       }}
     >
       <Space size="middle" align="center">
-        <Typography.Text strong>ERP Admin</Typography.Text>
+        <Typography.Text strong style={{ fontSize: 16 }}>
+          ERP MebelKZ
+        </Typography.Text>
       </Space>
+
       <Space size="middle" align="center">
-        <Tag color="blue">DEV</Tag>
-        <span style={{ color: "#999", fontSize: 12 }}>user_id: {String(devUserId)}</span>
-        <Avatar style={{ backgroundColor: "#1677ff" }}>{String(name).substring(0, 1).toUpperCase()}</Avatar>
-        <Typography.Text strong>{name}</Typography.Text>
+        {identity && (
+          <>
+            <Avatar
+              style={{ backgroundColor: "#1677ff" }}
+              icon={<UserOutlined />}
+            >
+              {username.substring(0, 1).toUpperCase()}
+            </Avatar>
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: "user-info",
+                    label: (
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{username}</div>
+                        <div style={{ fontSize: 12, color: "#8c8c8c" }}>
+                          {roleName}
+                        </div>
+                      </div>
+                    ),
+                    disabled: true,
+                  },
+                  {
+                    type: "divider",
+                  },
+                  {
+                    key: "logout",
+                    icon: <LogoutOutlined />,
+                    label: "Выйти",
+                    onClick: () => logout(),
+                  },
+                ],
+              }}
+              trigger={["click"]}
+            >
+              <Button type="text">
+                <Space>
+                  <Typography.Text strong>{username}</Typography.Text>
+                  <DownOutlined style={{ fontSize: 10 }} />
+                </Space>
+              </Button>
+            </Dropdown>
+          </>
+        )}
       </Space>
     </Layout.Header>
   );
