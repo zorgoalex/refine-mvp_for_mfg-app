@@ -25,11 +25,8 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="user_id" title="ID" sorter />
         <Table.Column dataIndex="username" title="Логин" sorter />
-        <Table.Column
-          dataIndex={["employee", "full_name"]}
-          title="Сотрудник"
-          render={(value, record: any) => record?.employee?.full_name || "-"}
-        />
+        <Table.Column dataIndex="email" title="Email" sorter />
+        <Table.Column dataIndex="full_name" title="Полное имя" sorter />
         <Table.Column
           dataIndex={["role", "role_name"]}
           title="Роль"
@@ -56,7 +53,6 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
           title="Последний вход"
           render={(value) => value && <DateField value={value} format="YYYY-MM-DD HH:mm" />}
         />
-        <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (

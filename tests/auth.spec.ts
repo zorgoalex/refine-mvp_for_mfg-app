@@ -59,12 +59,12 @@ test.describe('Authentication', () => {
         await page.goto('/login');
         await page.waitForSelector('form', { timeout: 10000 });
 
-        // Заполняем форму валидным email из БД
-        await page.fill('#email', 'admin@mebelkz.local');
+        // Заполняем форму валидным username
+        await page.fill('#username', 'admin');
         await page.fill('#password', 'admin123');
 
-        // Кликаем на кнопку Sign in
-        await page.click('button:has-text("Sign in")');
+        // Кликаем на кнопку Войти
+        await page.click('button:has-text("Войти")');
 
         // Ждем редирект
         await expect(page).toHaveURL(/\//, { timeout: 15000 });
@@ -80,9 +80,9 @@ test.describe('Authentication', () => {
         // Логинимся
         await page.goto('/login');
         await page.waitForSelector('form');
-        await page.fill('#email', 'admin@mebelkz.local');
+        await page.fill('#username', 'admin');
         await page.fill('#password', 'admin123');
-        await page.click('button:has-text("Sign in")');
+        await page.click('button:has-text("Войти")');
 
         // Ждем успешного логина
         await expect(page).toHaveURL(/\//, { timeout: 15000 });
