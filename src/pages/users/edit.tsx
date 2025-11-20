@@ -5,21 +5,38 @@ import { authStorage } from "../../utils/auth";
 import { useState } from "react";
 
 export const UserEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps, queryResult } = useForm();
+  const { formProps, saveButtonProps, queryResult } = useForm({
+    // Преобразуем данные при загрузке: role_id → role
+    queryOptions: {
+      select: (data) => {
+        const roleIdMap: Record<number, string> = {
+          1: 'admin',
+          10: 'manager',
+          11: 'operator',
+          15: 'top_manager',
+          20: 'worker',
+          100: 'viewer',
+        };
+
+        return {
+          ...data,
+          data: {
+            ...data.data,
+            role: data.data.role_id ? roleIdMap[data.data.role_id] : undefined,
+          },
+        };
+      },
+    },
+    // Преобразуем данные при сохранении: role → role_id
+    onMutationSuccess: () => {
+      message.success('Данные пользователя обновлены');
+    },
+  });
+
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordForm] = Form.useForm();
 
   const userId = queryResult?.data?.data?.user_id;
-
-  // Преобразуем role_id в role name для отображения
-  const roleIdMap: Record<number, string> = {
-    1: 'admin',
-    10: 'manager',
-    11: 'operator',
-    15: 'top_manager',
-    20: 'worker',
-    100: 'viewer',
-  };
 
   // Обратная карта для сохранения
   const roleNameToId: Record<string, number> = {
@@ -30,10 +47,6 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
     worker: 20,
     viewer: 100,
   };
-
-  // Преобразуем данные для отображения
-  const initialValues = queryResult?.data?.data;
-  const roleForDisplay = initialValues?.role_id ? roleIdMap[initialValues.role_id] : undefined;
 
   const handlePasswordChange = async (values: { new_password: string }) => {
     setPasswordLoading(true);

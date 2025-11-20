@@ -149,7 +149,7 @@
 
 ## Конфигурация и авторизация
 - Переменные окружения (Vite):
-  - `VITE_HASURA_GRAPHQL_URL` — URL Hasura GraphQL (например, `http://localhost:8585/v1/graphql` для dev, `https://hasura.app.mebelkz.app/v1/graphql` для prod).
+  - `VITE_HASURA_GRAPHQL_URL` — URL Hasura GraphQL (например, `http://localhost:8585/v1/graphql` для dev, `https://domain-for-prod/v1/graphql` для prod).
 
 - **Аутентификация:** JWT-based через Vercel Functions
   - Backend: `/api/login`, `/api/refresh` endpoints
