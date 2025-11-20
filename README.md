@@ -149,18 +149,21 @@
 
 ## Конфигурация и авторизация
 - Переменные окружения (Vite):
-  - `VITE_HASURA_GRAPHQL_URL` — URL Hasura GraphQL (например, `http://localhost:8585/v1/graphql`).
-  - `VITE_HASURA_ADMIN_SECRET` — admin secret для заголовка `x-hasura-admin-secret` (только для dev!).
-- Auth в `src/App.tsx` — минимальный `authProvider` для dev-режима: проверяет наличие `VITE_HASURA_GRAPHQL_URL` и `VITE_HASURA_ADMIN_SECRET`. Страница `/login` декоративна.
-- Data provider (`src/utils/dataProvider.ts`) использует Hasura GraphQL и пробрасывает `x-hasura-admin-secret`.
+  - `VITE_HASURA_GRAPHQL_URL` — URL Hasura GraphQL (например, `http://localhost:8585/v1/graphql` для dev, `https://hasura.app.mebelkz.app/v1/graphql` для prod).
 
-Пример `.env` (не коммитить в VCS):
+- **Аутентификация:** JWT-based через Vercel Functions
+  - Backend: `/api/login`, `/api/refresh` endpoints
+  - Frontend: `authProvider` с localStorage token management
+  - Hasura: JWT mode с role-based permissions
+
+- **Data Provider:** `src/utils/dataProvider.ts` использует JWT токены пользователя (`Authorization: Bearer <token>`)
+
+Пример `.env.local` для локальной разработки (не коммитить в VCS):
 ```
 VITE_HASURA_GRAPHQL_URL=http://localhost:8585/v1/graphql
-VITE_HASURA_ADMIN_SECRET=your_dev_secret_here
 ```
 
-Важно: admin secret не использовать в продакшене. Для prod — Hasura роли и JWT.
+**Production:** Все запросы используют JWT токены. Admin secret используется только в Vercel Functions на backend.
 
 ## Установка и запуск
 

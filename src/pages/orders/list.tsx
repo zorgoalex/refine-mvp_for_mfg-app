@@ -26,6 +26,7 @@ import dayjs from "dayjs";
 
 import { formatNumber } from "../../utils/numberFormat";
 import { OrderCreateModal } from "./components/OrderCreateModal";
+import { authStorage } from "../../utils/auth";
 import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -69,6 +70,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     }
 
     try {
+      // Получаем JWT токен пользователя
+      const token = authStorage.getAccessToken();
+      if (!token) {
+        message.error("Не авторизован. Пожалуйста, войдите в систему.");
+        return;
+      }
+
       // Шаг 1: Находим заказ по order_name
       const response = await fetch(
         `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
@@ -76,7 +84,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-hasura-admin-secret": import.meta.env.VITE_HASURA_ADMIN_SECRET || "",
+            "Authorization": `Bearer ${token}`,
           },
           body: JSON.stringify({
             query: `
@@ -121,7 +129,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-hasura-admin-secret": import.meta.env.VITE_HASURA_ADMIN_SECRET || "",
+            "Authorization": `Bearer ${token}`,
           },
           body: JSON.stringify({
             query: `
