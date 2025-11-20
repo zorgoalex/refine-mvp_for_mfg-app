@@ -3,6 +3,8 @@ import { Layout, Space, Avatar, Typography, Dropdown, Button } from "antd";
 import { UserOutlined, LogoutOutlined, DownOutlined } from "@ant-design/icons";
 import { useGetIdentity, useLogout } from "@refinedev/core";
 import type { UserIdentity } from "../types/auth";
+import { NotificationBell } from "./NotificationBell";
+// import { NotificationTestButton } from "./NotificationTestButton"; // DEV ONLY - закомментирован
 
 export const AppHeader: React.FC = () => {
   const { data: identity } = useGetIdentity<UserIdentity>();
@@ -38,11 +40,17 @@ export const AppHeader: React.FC = () => {
         <Typography.Text strong style={{ fontSize: 16 }}>
           ERP MebelKZ
         </Typography.Text>
+
+        {/* DEV ONLY: Кнопки для тестирования уведомлений закомментированы */}
+        {/* {import.meta.env.DEV && <NotificationTestButton />} */}
       </Space>
 
       <Space size="middle" align="center">
         {identity && (
           <>
+            {/* Колокольчик уведомлений */}
+            <NotificationBell />
+
             <Avatar
               style={{ backgroundColor: "#1677ff" }}
               icon={<UserOutlined />}

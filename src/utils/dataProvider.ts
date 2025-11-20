@@ -2,6 +2,7 @@
 // Implements: getList, getOne, create, update, deleteOne
 
 import { authStorage, isTokenExpired, refreshAccessToken } from './auth';
+import { logGraphQLError } from './notificationLogger';
 
 type AnyObject = Record<string, any>;
 
@@ -605,6 +606,10 @@ const gqlRequest = async (query: string): Promise<any> => {
     const rawMessage = json?.errors?.[0]?.message || res.statusText;
     const message = parsePostgresError(rawMessage);
     const statusCode = !res.ok ? res.status : 400;
+
+    // Логируем ошибку в систему уведомлений
+    logGraphQLError({ message, statusCode }, 'GraphQL запрос');
+
     throw { message, statusCode };
   }
 

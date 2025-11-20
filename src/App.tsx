@@ -1,6 +1,5 @@
 import { Refine, Authenticated } from "@refinedev/core";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
-import { notificationProvider } from "@refinedev/antd";
 import { CustomLayout } from "./components/CustomLayout";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
@@ -8,6 +7,8 @@ import { ConfigProvider } from "antd";
 import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
 import "./styles/app.css";
+import { createNotificationProvider } from "./providers/notificationProvider";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { OrderList } from "./pages/orders/list";
 import { OrderShow } from "./pages/orders/show";
 import { OrderEdit } from "./pages/orders/edit";
@@ -125,15 +126,16 @@ const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 const App = () => {
 
   return (
-    <BrowserRouter>
-      <RefineKbarProvider>
-        <ConfigProvider locale={ruRU}>
-          <Refine
-            dataProvider={dataProvider(API_URL)}
-            notificationProvider={notificationProvider}
-            routerProvider={routerProvider}
-            authProvider={authProvider}
-            Layout={CustomLayout}
+    <ErrorBoundary>
+      <BrowserRouter>
+        <RefineKbarProvider>
+          <ConfigProvider locale={ruRU}>
+            <Refine
+              dataProvider={dataProvider(API_URL)}
+              notificationProvider={createNotificationProvider()}
+              routerProvider={routerProvider}
+              authProvider={authProvider}
+              Layout={CustomLayout}
             resources={[
               {
                 name: "orders_view",
@@ -559,6 +561,7 @@ const App = () => {
         </ConfigProvider>
       </RefineKbarProvider>
     </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 

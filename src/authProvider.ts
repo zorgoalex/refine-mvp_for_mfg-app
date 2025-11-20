@@ -1,6 +1,7 @@
 import type { AuthBindings } from '@refinedev/core';
 import type { LoginCredentials, LoginResponse } from './types/auth';
 import { authStorage, isTokenExpired, refreshAccessToken } from './utils/auth';
+import { logAuthError } from './utils/notificationLogger';
 
 /**
  * AuthProvider для Refine
@@ -27,10 +28,15 @@ export const authProvider: AuthBindings = {
 
       if (!response.ok) {
         const error = await response.json();
+        const errorMessage = error.error || 'Неверный логин или пароль';
+
+        // Логируем ошибку входа
+        logAuthError({ message: errorMessage }, 'Вход в систему');
+
         return {
           success: false,
           error: {
-            message: error.error || 'Неверный логин или пароль',
+            message: errorMessage,
             name: 'LoginError',
           },
         };
@@ -47,6 +53,10 @@ export const authProvider: AuthBindings = {
       };
     } catch (error) {
       console.error('Login error:', error);
+
+      // Логируем сетевую ошибку
+      logAuthError(error, 'Подключение к серверу');
+
       return {
         success: false,
         error: {
@@ -114,6 +124,9 @@ export const authProvider: AuthBindings = {
       const newToken = await refreshAccessToken();
 
       if (!newToken) {
+        // Логируем неудачное обновление токена (сессия истекла)
+        logAuthError(error, 'Сессия истекла');
+
         return {
           logout: true,
           redirectTo: '/login',
@@ -123,6 +136,11 @@ export const authProvider: AuthBindings = {
 
       // Токен обновлён, запрос может быть повторен
       return {};
+    }
+
+    // Логируем прочие ошибки
+    if (error?.message) {
+      logAuthError(error, 'Ошибка авторизации');
     }
 
     return { error };
