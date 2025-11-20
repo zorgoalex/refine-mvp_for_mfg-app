@@ -2,6 +2,7 @@ import type { AuthBindings } from '@refinedev/core';
 import type { LoginCredentials, LoginResponse } from './types/auth';
 import { authStorage, isTokenExpired, refreshAccessToken } from './utils/auth';
 import { logAuthError } from './utils/notificationLogger';
+import { useNotificationStore } from './stores/notificationStore';
 
 /**
  * AuthProvider для Refine
@@ -69,10 +70,21 @@ export const authProvider: AuthBindings = {
 
   /**
    * Выполняет выход пользователя
-   * Очищает токены из localStorage
+   * Очищает токены из localStorage и личные уведомления
    */
   logout: async () => {
+    // Получаем userId перед очисткой authStorage
+    const user = authStorage.getUser();
+
+    // Очищаем токены
     authStorage.clear();
+
+    // Очищаем личные уведомления пользователя (оставляем системные)
+    if (user?.id) {
+      const { deleteAll } = useNotificationStore.getState();
+      deleteAll(user.id);
+    }
+
     return {
       success: true,
       redirectTo: '/login',

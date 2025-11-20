@@ -2,14 +2,13 @@ import { NotificationProvider } from '@refinedev/core';
 import { notificationProvider as antdNotificationProvider } from '@refinedev/antd';
 import { useNotificationStore } from '../stores/notificationStore';
 import type { NotificationLevel } from '../stores/notificationStore';
+import { authStorage } from '../utils/auth';
 
 /**
  * Кастомный notificationProvider который дублирует все сообщения
  * в систему уведомлений (колокольчик в header)
  */
-export const createNotificationProvider = (
-  userId?: string
-): NotificationProvider => {
+export const createNotificationProvider = (): NotificationProvider => {
   // Получаем стандартный provider от Ant Design
   const defaultProvider = antdNotificationProvider;
 
@@ -34,9 +33,13 @@ export const createNotificationProvider = (
         ? `${message}: ${description}`
         : message;
 
+      // Получаем текущего пользователя динамически
+      const currentUser = authStorage.getUser();
+
       // Добавляем в store
       const addNotification = useNotificationStore.getState().addNotification;
-      addNotification(fullMessage, level, userId ? { userId } : { isSystem: true });
+      // Все уведомления - личные (привязаны к текущему пользователю)
+      addNotification(fullMessage, level, currentUser?.id ? { userId: currentUser.id } : { isSystem: false });
     },
 
     close: (key) => {

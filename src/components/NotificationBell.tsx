@@ -8,9 +8,12 @@ import type { UserIdentity } from '../types/auth';
 
 export const NotificationBell: React.FC = () => {
   const { data: user } = useGetIdentity<UserIdentity>();
-  const getUnreadCount = useNotificationStore((state) => state.getUnreadCount);
 
-  const unreadCount = getUnreadCount(user?.id);
+  // Подписываемся на изменения notifications для автоматического обновления badge
+  const unreadCount = useNotificationStore((state) => {
+    const notifications = state.getNotificationsForUser(user?.id);
+    return notifications.filter((n) => !n.read).length;
+  });
 
   return (
     <Dropdown
