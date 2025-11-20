@@ -87,24 +87,26 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
     }
   };
 
+  // Кастомный onFinish для преобразования role → role_id
+  const handleFinish = (values: any) => {
+    const { role, ...rest } = values;
+
+    // Преобразуем role в role_id
+    const dataToSave = {
+      ...rest,
+      role_id: role ? roleNameToId[role] : undefined,
+    };
+
+    // Удаляем поле role, чтобы оно не попало в GraphQL
+    delete (dataToSave as any).role;
+
+    // Вызываем оригинальный onFinish с преобразованными данными
+    formProps.onFinish?.(dataToSave);
+  };
+
   return (
-    <Edit
-      saveButtonProps={{
-        ...saveButtonProps,
-        onClick: () => {
-          // Преобразуем role обратно в role_id перед сохранением
-          const values = formProps.form?.getFieldsValue();
-          if (values?.role) {
-            formProps.form?.setFieldsValue({
-              ...values,
-              role_id: roleNameToId[values.role],
-            });
-          }
-          saveButtonProps.onClick?.();
-        },
-      }}
-    >
-      <Form {...formProps} layout="vertical">
+    <Edit saveButtonProps={saveButtonProps}>
+      <Form {...formProps} layout="vertical" onFinish={handleFinish}>
         <Form.Item
           label="Логин"
           name="username"
@@ -130,7 +132,6 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item
           label="Роль"
           name="role"
-          initialValue={roleForDisplay}
           rules={[{ required: true, message: 'Пожалуйста, выберите роль' }]}
         >
           <Select placeholder="Выберите роль пользователя">
