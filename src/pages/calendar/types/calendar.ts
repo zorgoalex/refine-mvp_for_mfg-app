@@ -19,11 +19,14 @@ export interface CalendarViewSettings {
 }
 
 /**
- * Деталь заказа для вычисления фрезеровки
+ * Деталь заказа для вычисления фрезеровки и материалов
  */
 export interface CalendarOrderDetail {
   milling_type?: {
     milling_type_name: string;
+  };
+  material?: {
+    material_name: string;
   };
 }
 

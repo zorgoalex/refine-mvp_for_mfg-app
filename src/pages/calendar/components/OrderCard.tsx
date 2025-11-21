@@ -10,6 +10,7 @@ import {
   getProductionStageStyle,
   areAllProductionStagesReady,
   getMillingDisplayValue,
+  getMaterialsForCard,
 } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
 
@@ -64,15 +65,8 @@ const OrderCard: React.FC<OrderCardProps> = ({
     }
   };
 
-  // Парсим материалы
-  const allMaterials = order.materials
-    ? order.materials.split(',').map((m) => m.trim())
-    : [];
-
-  // Скрываем бейджи если только "16мм" (как в оригинале)
-  const materials = allMaterials.length === 1 && allMaterials[0].toLowerCase().includes('16')
-    ? []
-    : allMaterials;
+  // Получаем материалы из order_details с сокращенными именами (исключая МДФ 16мм)
+  const materials = getMaterialsForCard(order.order_details, true);
 
   // Статусы производства - ВРЕМЕННО заглушка
   const productionStages = [
@@ -123,13 +117,13 @@ const OrderCard: React.FC<OrderCardProps> = ({
         </span>
         {materials.length > 0 && (
           <div className="order-card__materials">
-            {materials.map((material, index) => (
+            {materials.map((mat, index) => (
               <Tag
-                key={`${material}-${index}`}
+                key={`${mat.fullName}-${index}`}
                 className="order-card__material-tag"
-                style={{ backgroundColor: getMaterialColor(material), border: 'none' }}
+                style={{ backgroundColor: getMaterialColor(mat.fullName), border: 'none' }}
               >
-                {material}
+                {mat.name}
               </Tag>
             ))}
           </div>

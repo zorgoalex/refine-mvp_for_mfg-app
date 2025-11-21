@@ -4,7 +4,7 @@ import { Empty } from 'antd';
 import { CalendarOrder } from '../types/calendar';
 import { getDayName, formatDateKey } from '../utils/dateUtils';
 import { calculateTotalArea } from '../utils/groupOrdersByDate';
-import { getMillingDisplayValue } from '../utils/statusColors';
+import { getMillingDisplayValue, getMaterialsForCard, getMaterialTextColor } from '../utils/statusColors';
 
 /**
  * Пропсы для DayColumnBrief
@@ -35,11 +35,6 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
     navigate(`/orders/show/${orderId}`);
   };
 
-  // Получаем материалы для заказа
-  const getMaterials = (order: CalendarOrder): string => {
-    if (!order.materials) return '—';
-    return order.materials.split(',').map((m) => m.trim()).join(', ');
-  };
 
   return (
     <div 
@@ -65,27 +60,42 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
       {/* Список заказов */}
       <div className="day-column-brief__order-list">
         {orders.length > 0 ? (
-          orders.map((order) => (
-            <div 
-              key={order.order_id}
-              className="day-column-brief__order-item"
-              onClick={() => handleOrderClick(order.order_id)}
-              style={{
-                cursor: 'pointer',
-                padding: '4px 0',
-                borderBottom: '1px solid #f0f0f0',
-              }}
-            >
-              {/* Формат: номер - площадь - материал - фрезеровка */}
-              <span style={{ fontWeight: 500 }}>{order.order_name}</span>
-              {' - '}
-              <span>{order.total_area > 0 ? `${order.total_area.toFixed(2)} кв.м.` : '—'}</span>
-              {' - '}
-              <span>{getMaterials(order)}</span>
-              {' - '}
-              <span>{getMillingDisplayValue(order.order_details) || '—'}</span>
-            </div>
-          ))
+          orders.map((order) => {
+            // Получаем материалы (кроме МДФ 16мм)
+            const materials = getMaterialsForCard(order.order_details, true);
+            const hasMaterials = materials.length > 0;
+
+            return (
+              <div
+                key={order.order_id}
+                className="day-column-brief__order-item"
+                onClick={() => handleOrderClick(order.order_id)}
+                style={{
+                  cursor: 'pointer',
+                  padding: '4px 0',
+                  borderBottom: '1px solid #f0f0f0',
+                }}
+              >
+                {/* Формат: номер - площадь - материал - фрезеровка */}
+                <span style={{ fontWeight: 500 }}>{order.order_name}</span>
+                {' - '}
+                <span>{order.total_area > 0 ? `${order.total_area.toFixed(2)} кв.м.` : '—'}</span>
+                {hasMaterials ? ' - ' : ' '}
+                {hasMaterials ? (
+                  materials.map((mat, idx) => (
+                    <span key={mat.fullName}>
+                      <span style={{ color: getMaterialTextColor(mat.fullName), fontWeight: 500 }}>
+                        {mat.name}
+                      </span>
+                      {idx < materials.length - 1 ? ', ' : ''}
+                    </span>
+                  ))
+                ) : null}
+                {' - '}
+                <span>{getMillingDisplayValue(order.order_details) || '—'}</span>
+              </div>
+            );
+          })
         ) : (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}

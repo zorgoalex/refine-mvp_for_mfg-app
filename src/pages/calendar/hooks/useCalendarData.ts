@@ -89,6 +89,13 @@ export const useCalendarData = (
     queryOptions: { staleTime: 60000 },
   });
 
+  // Загружаем справочник materials
+  const { data: materialsData } = useList({
+    resource: 'materials',
+    pagination: { pageSize: 1000 },
+    queryOptions: { staleTime: 60000 },
+  });
+
   // Создаём Map для быстрого поиска названия фрезеровки
   const millingTypesMap = useMemo(() => {
     const map = new Map<number, string>();
@@ -98,9 +105,21 @@ export const useCalendarData = (
     return map;
   }, [millingTypesData]);
 
-  // Группируем детали по order_id и добавляем milling_type_name
+  // Создаём Map для быстрого поиска названия материала
+  const materialsMap = useMemo(() => {
+    const map = new Map<number, string>();
+    (materialsData?.data || []).forEach((m: any) => {
+      map.set(m.material_id, m.material_name);
+    });
+    return map;
+  }, [materialsData]);
+
+  // Группируем детали по order_id и добавляем milling_type_name и material_name
   const detailsByOrderId = useMemo(() => {
-    const map: Record<number, Array<{ milling_type?: { milling_type_name: string } }>> = {};
+    const map: Record<number, Array<{
+      milling_type?: { milling_type_name: string };
+      material?: { material_name: string };
+    }>> = {};
     (detailsData?.data || []).forEach((detail: any) => {
       if (!map[detail.order_id]) {
         map[detail.order_id] = [];
@@ -109,10 +128,13 @@ export const useCalendarData = (
         milling_type: detail.milling_type_id
           ? { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' }
           : undefined,
+        material: detail.material_id
+          ? { material_name: materialsMap.get(detail.material_id) || '' }
+          : undefined,
       });
     });
     return map;
-  }, [detailsData, millingTypesMap]);
+  }, [detailsData, millingTypesMap, materialsMap]);
 
   // Группируем заказы по датам и добавляем order_details
   const ordersByDate = useMemo(() => {
