@@ -13,6 +13,46 @@ import {
 import { formatDateKey } from '../utils/dateUtils';
 
 /**
+ * Определяет отображаемое значение фрезеровки по правилам:
+ * - "Выборка" - если хотя бы одна деталь содержит слово "Выборка"
+ * - "Фрезеровка" - если есть что-то кроме "Модерн" и не содержит "Выборка"
+ * - "Модерн" - если все детали имеют "Модерн"
+ */
+function getMillingDisplayValue(millingType: string | undefined): string {
+  if (!millingType) return '';
+
+  const milling = millingType.toLowerCase();
+
+  // Приоритет 1: Выборка
+  if (milling.includes('выборка')) {
+    return 'Выборка';
+  }
+
+  // Приоритет 2: Если НЕ Модерн - показываем "Фрезеровка"
+  if (milling !== 'модерн' && !milling.includes('модерн')) {
+    return 'Фрезеровка';
+  }
+
+  // Если список через запятую - проверяем каждый элемент
+  if (milling.includes(',')) {
+    const types = milling.split(',').map(t => t.trim().toLowerCase());
+
+    // Если есть выборка
+    if (types.some(t => t.includes('выборка'))) {
+      return 'Выборка';
+    }
+
+    // Если есть что-то кроме модерн
+    if (types.some(t => t !== 'модерн' && !t.includes('модерн'))) {
+      return 'Фрезеровка';
+    }
+  }
+
+  // По умолчанию - Модерн
+  return 'Модерн';
+}
+
+/**
  * Компонент карточки заказа (стандартный вид)
  * Дизайн соответствует скринам из ai_docs/logs/
  */
@@ -139,7 +179,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
       {/* Строка 2: . Фрезеровка – Площадь */}
       <div className="order-card__milling-line">
         <span className="order-card__dot">.</span>
-        <span>{order.milling_type || 'Без фрезеровки'}</span>
+        <span>{getMillingDisplayValue(order.milling_type) || 'Без фрезеровки'}</span>
         <span className="order-card__separator"> – </span>
         <span>{order.total_area > 0 ? `${order.total_area.toFixed(2)} кв.м.` : '0 кв.м.'}</span>
       </div>

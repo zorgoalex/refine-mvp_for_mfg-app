@@ -2,27 +2,51 @@
    Производственный календарь - Стили
    ============================================ */
 
-/* Страница календаря */
+/* Убираем скролл у layout-content когда открыт календарь */
+.ant-layout-content.calendar-page-active {
+  overflow: hidden !important;
+  height: 100vh;
+}
+
+/* Переопределяем стили layout для страницы календаря */
+.calendar-page-wrapper {
+  height: calc(100vh - 64px); /* Вычитаем высоту header приложения */
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Страница календаря - без скролла */
 .calendar-page {
   padding: 0;
   background: #f5f5f5;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0; /* Важно для flex */
 }
 
 /* Доска календаря */
 .calendar-board {
   width: 100%;
-  min-height: calc(100vh - 200px);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 
-/* Навигация */
+/* Навигация - фиксированная шапка */
 .calendar-navigation {
+  flex-shrink: 0;
   padding: 16px;
   background: #fff;
   border-bottom: 1px solid #e8e8e8;
-  margin-bottom: 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 /* Индикатор загрузки */
@@ -34,9 +58,12 @@
   padding: 40px;
 }
 
-/* Сетка календаря */
+/* Сетка календаря - скроллящаяся область */
 .calendar-grid {
-  padding: 0 16px 16px;
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* Ряд колонок */
