@@ -19,36 +19,45 @@ export interface CalendarViewSettings {
 }
 
 /**
- * Заказ для календаря (на основе orders_view)
+ * Деталь заказа для вычисления фрезеровки
+ */
+export interface CalendarOrderDetail {
+  milling_type?: {
+    milling_type_name: string;
+  };
+}
+
+/**
+ * Заказ для календаря (на основе orders_view + order_details)
  */
 export interface CalendarOrder {
   order_id: number;
   order_name: string;
   order_date: string;
   planned_completion_date: string;
-  client_name: string;
   parts_count: number;
   total_area: number;
-  order_status: string;
-  payment_status: string;
-  production_status?: string; // Статус производства
   paid_amount: number;
-  total_price: number;
+  total_price?: number;
 
-  // Агрегированные данные по материалам, пленкам и т.д.
-  materials?: string; // Уникальные материалы через запятую
-  milling_type?: string; // Тип фрезеровки (если один для всех деталей)
-  edge_type?: string; // Тип обката (если один для всех деталей)
-  film?: string; // Пленка (если одна для всех деталей)
+  // Поля из orders_view
+  client_name?: string;
+  order_status_name?: string;
+  payment_status_name?: string;
+  production_status_name?: string;
+
+  // Детали заказа для вычисления фрезеровки (добавляются в useCalendarData)
+  order_details?: CalendarOrderDetail[];
+
+  // Агрегированные данные по материалам
+  materials?: string;
+  edge_type?: string;
+  film?: string;
 
   // Дополнительные поля
-  cad_files_status?: string; // Статус CAD файлов
-  is_drawn?: boolean; // Отрисован
-  is_issued?: boolean; // Выдан
-  
-  // Заметка: Статусы производства (З Р Ш П У) НЕ хранятся в orders/orders_view
-  // Они хранятся в order_details.production_status_id и должны агрегироваться отдельно
-  // Для отображения в календаре нужно добавить эти поля в orders_view через агрегацию
+  cad_files_status?: string;
+  is_drawn?: boolean;
+  is_issued?: boolean;
 
   // Метаданные
   created_at?: string;

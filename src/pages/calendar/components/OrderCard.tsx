@@ -9,48 +9,9 @@ import {
   getMaterialColor,
   getProductionStageStyle,
   areAllProductionStagesReady,
+  getMillingDisplayValue,
 } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
-
-/**
- * Определяет отображаемое значение фрезеровки по правилам:
- * - "Выборка" - если хотя бы одна деталь содержит слово "Выборка"
- * - "Фрезеровка" - если есть что-то кроме "Модерн" и не содержит "Выборка"
- * - "Модерн" - если все детали имеют "Модерн"
- */
-function getMillingDisplayValue(millingType: string | undefined): string {
-  if (!millingType) return '';
-
-  const milling = millingType.toLowerCase();
-
-  // Приоритет 1: Выборка
-  if (milling.includes('выборка')) {
-    return 'Выборка';
-  }
-
-  // Приоритет 2: Если НЕ Модерн - показываем "Фрезеровка"
-  if (milling !== 'модерн' && !milling.includes('модерн')) {
-    return 'Фрезеровка';
-  }
-
-  // Если список через запятую - проверяем каждый элемент
-  if (milling.includes(',')) {
-    const types = milling.split(',').map(t => t.trim().toLowerCase());
-
-    // Если есть выборка
-    if (types.some(t => t.includes('выборка'))) {
-      return 'Выборка';
-    }
-
-    // Если есть что-то кроме модерн
-    if (types.some(t => t !== 'модерн' && !t.includes('модерн'))) {
-      return 'Фрезеровка';
-    }
-  }
-
-  // По умолчанию - Модерн
-  return 'Модерн';
-}
 
 /**
  * Компонент карточки заказа (стандартный вид)
@@ -77,8 +38,11 @@ const OrderCard: React.FC<OrderCardProps> = ({
     }),
   });
 
+  // Вычисляем фрезеровку из деталей заказа
+  const millingDisplay = getMillingDisplayValue(order.order_details);
+
   // Определяем цвета и стили
-  const backgroundColor = getStatusColor(order.order_status || '');
+  const backgroundColor = getStatusColor(order.order_status_name || '');
   const allProductionReady = areAllProductionStagesReady(order);
 
   // Обработчик клика на номер заказа
@@ -119,15 +83,16 @@ const OrderCard: React.FC<OrderCardProps> = ({
   // Цвет номера заказа: коричневый для "К", синий для остальных
   const orderNumberColor = order.order_name?.startsWith('К') ? '#8B4513' : '#1976d2';
 
-  // Формируем строку даты + клиент + оплата
+  // Формируем строку даты + клиент
   const infoLine = [
     order.order_date ? formatDateKey(order.order_date) : null,
     order.client_name,
   ].filter(Boolean).join(' • ');
 
   // Статус оплаты
-  const isNotPaid = order.payment_status?.toLowerCase().includes('не оплачен');
-  const paymentText = order.payment_status || '';
+  const paymentStatus = order.payment_status_name || '';
+  const isNotPaid = paymentStatus.toLowerCase().includes('не оплачен');
+  const paymentText = paymentStatus;
 
   return (
     <div
@@ -179,7 +144,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
       {/* Строка 2: . Фрезеровка – Площадь */}
       <div className="order-card__milling-line">
         <span className="order-card__dot">.</span>
-        <span>{getMillingDisplayValue(order.milling_type) || 'Без фрезеровки'}</span>
+        <span>{millingDisplay}</span>
         <span className="order-card__separator"> – </span>
         <span>{order.total_area > 0 ? `${order.total_area.toFixed(2)} кв.м.` : '0 кв.м.'}</span>
       </div>

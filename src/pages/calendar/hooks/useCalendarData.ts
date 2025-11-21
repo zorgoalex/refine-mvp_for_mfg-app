@@ -18,7 +18,7 @@ export const useCalendarData = (
   const startDateStr = formatDateForApi(startDate);
   const endDateStr = formatDateForApi(endDate);
 
-  // Загружаем заказы из Hasura через Refine useList
+  // Загружаем заказы из orders_view
   const { data, isLoading, refetch, isError, error } = useList<CalendarOrder>({
     resource: 'orders_view',
     filters: [
@@ -34,7 +34,7 @@ export const useCalendarData = (
       },
     ],
     pagination: {
-      pageSize: 1000, // Загружаем до 1000 заказов (достаточно для 16 дней)
+      pageSize: 1000,
       current: 1,
     },
     sorters: [
@@ -48,21 +48,86 @@ export const useCalendarData = (
       },
     ],
     queryOptions: {
-      // Кэшируем данные на 30 секунд
       staleTime: 30000,
-      // Refetch при фокусировке окна
       refetchOnWindowFocus: true,
     },
   });
 
-  // Группируем заказы по датам
+  // Получаем order_id всех загруженных заказов
+  const orderIds = useMemo(() => {
+    return (data?.data || []).map((order) => order.order_id);
+  }, [data?.data]);
+
+  // Загружаем order_details отдельным запросом (как в list.tsx)
+  const { data: detailsData } = useList({
+    resource: 'order_details',
+    filters: [
+      {
+        field: 'order_id',
+        operator: 'in',
+        value: orderIds,
+      },
+      {
+        field: 'delete_flag',
+        operator: 'eq',
+        value: false,
+      },
+    ],
+    pagination: {
+      pageSize: 10000,
+    },
+    queryOptions: {
+      enabled: orderIds.length > 0,
+      staleTime: 30000,
+    },
+  });
+
+  // Загружаем справочник milling_types
+  const { data: millingTypesData } = useList({
+    resource: 'milling_types',
+    pagination: { pageSize: 1000 },
+    queryOptions: { staleTime: 60000 },
+  });
+
+  // Создаём Map для быстрого поиска названия фрезеровки
+  const millingTypesMap = useMemo(() => {
+    const map = new Map<number, string>();
+    (millingTypesData?.data || []).forEach((mt: any) => {
+      map.set(mt.milling_type_id, mt.milling_type_name);
+    });
+    return map;
+  }, [millingTypesData]);
+
+  // Группируем детали по order_id и добавляем milling_type_name
+  const detailsByOrderId = useMemo(() => {
+    const map: Record<number, Array<{ milling_type?: { milling_type_name: string } }>> = {};
+    (detailsData?.data || []).forEach((detail: any) => {
+      if (!map[detail.order_id]) {
+        map[detail.order_id] = [];
+      }
+      map[detail.order_id].push({
+        milling_type: detail.milling_type_id
+          ? { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' }
+          : undefined,
+      });
+    });
+    return map;
+  }, [detailsData, millingTypesMap]);
+
+  // Группируем заказы по датам и добавляем order_details
   const ordersByDate = useMemo(() => {
     if (!data?.data) {
       return {};
     }
 
-    return groupOrdersByDate(data.data);
-  }, [data?.data]);
+    // Добавляем order_details к каждому заказу
+    const ordersWithDetails = data.data.map((order) => ({
+      ...order,
+      order_details: detailsByOrderId[order.order_id] || [],
+    }));
+
+    return groupOrdersByDate(ordersWithDetails);
+  }, [data?.data, detailsByOrderId]);
 
   return {
     ordersByDate,

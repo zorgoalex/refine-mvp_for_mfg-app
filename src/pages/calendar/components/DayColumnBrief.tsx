@@ -4,6 +4,7 @@ import { Empty } from 'antd';
 import { CalendarOrder } from '../types/calendar';
 import { getDayName, formatDateKey } from '../utils/dateUtils';
 import { calculateTotalArea } from '../utils/groupOrdersByDate';
+import { getMillingDisplayValue } from '../utils/statusColors';
 
 /**
  * Пропсы для DayColumnBrief
@@ -82,7 +83,7 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
               {' - '}
               <span>{getMaterials(order)}</span>
               {' - '}
-              <span>{order.milling_type || '—'}</span>
+              <span>{getMillingDisplayValue(order.order_details) || '—'}</span>
             </div>
           ))
         ) : (

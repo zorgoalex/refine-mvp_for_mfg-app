@@ -162,3 +162,47 @@ export function areAllProductionStagesReady(order: Record<string, any>): boolean
   return stages.every((status) => String(status || '').toLowerCase().trim() === 'готов');
   */
 }
+
+/**
+ * Тип детали заказа для вычисления фрезеровки
+ */
+interface OrderDetailForMilling {
+  milling_type?: {
+    milling_type_name: string;
+  };
+}
+
+/**
+ * Вычисляет отображаемое значение фрезеровки из деталей заказа
+ * Правила:
+ * - "Выборка" — если хотя бы одна деталь содержит слово "Выборка"
+ * - "Фрезеровка" — если есть детали с фрезеровкой не равной "Модерн" и без слова "Выборка"
+ * - "Модерн" — если все детали имеют фрезеровку "Модерн"
+ * @param orderDetails - массив деталей заказа с milling_type
+ * @returns отображаемое значение
+ */
+export function getMillingDisplayValue(orderDetails: OrderDetailForMilling[] | undefined): string {
+  if (!orderDetails || orderDetails.length === 0) return '';
+
+  // Собираем все типы фрезеровки из деталей
+  const millingTypes = orderDetails
+    .map(d => d.milling_type?.milling_type_name)
+    .filter((name): name is string => !!name)
+    .map(name => name.toLowerCase());
+
+  if (millingTypes.length === 0) return '';
+
+  // Приоритет 1: Выборка — если хотя бы одна деталь содержит "Выборка"
+  if (millingTypes.some(t => t.includes('выборка'))) {
+    return 'Выборка';
+  }
+
+  // Приоритет 2: Фрезеровка — если есть что-то кроме "Модерн"
+  const hasNonModern = millingTypes.some(t => t !== 'модерн' && !t.includes('модерн'));
+  if (hasNonModern) {
+    return 'Фрезеровка';
+  }
+
+  // Все детали имеют "Модерн"
+  return 'Модерн';
+}
