@@ -75,35 +75,35 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       {/* Площадь */}
       {order.total_area > 0 && (
         <div className="order-card-compact__line">
-          Площадь: {order.total_area.toFixed(2)} кв.м.
+          {order.total_area.toFixed(2)} кв.м.
         </div>
       )}
 
       {/* Дата заказа */}
       {order.order_date && (
         <div className="order-card-compact__line">
-          Дата: {formatDateKey(order.order_date)}
+          {formatDateKey(order.order_date)}
         </div>
       )}
 
       {/* Клиент */}
       {order.client_name && (
         <div className="order-card-compact__line">
-          Клиент: {order.client_name}
+          {order.client_name}
         </div>
       )}
 
       {/* Материалы */}
       {materials.length > 0 && (
         <div className="order-card-compact__line">
-          Материалы: {materials.join(', ')}
+          {materials.join(', ')}
         </div>
       )}
 
       {/* Фрезеровка */}
       {millingDisplay && (
         <div className="order-card-compact__line">
-          Фрезеровка: {millingDisplay}
+          {millingDisplay}
         </div>
       )}
 
@@ -117,7 +117,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
               : 'inherit',
           }}
         >
-          Оплата: {paymentStatus}
+          {paymentStatus}
         </div>
       )}
     </div>
