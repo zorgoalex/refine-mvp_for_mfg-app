@@ -39,17 +39,20 @@ interface GenerateOrderExcelParams {
 }
 
 /**
- * Генерация Excel файла заказа на основе шаблона
- * 
+ * Генерация Excel буфера заказа на основе шаблона
+ *
+ * Базовая функция, которая возвращает ArrayBuffer для дальнейшей обработки
+ * (создание Blob, конвертация в base64, и т.д.)
+ *
  * ⚠️ ВАЖНО: Ячейки с формулами НЕ заполняются программно!
  * Формулы: A12-A51 (№), E12-E51 (площадь), J12-J51 (сумма детали),
  *          K8 (общая площадь), M8 (кол-во деталей), J2 (общая сумма), K4 (остаток)
  */
-export const generateOrderExcel = async ({
+export const buildOrderExcelBuffer = async ({
   order,
   details,
   client,
-}: GenerateOrderExcelParams): Promise<Blob> => {
+}: GenerateOrderExcelParams): Promise<ArrayBuffer> => {
   try {
     // 1. Загрузить шаблон
     const templateUrl = '/templates/order_template.xlsx';
@@ -87,17 +90,17 @@ export const generateOrderExcel = async ({
 
     // 4.1. Заполнить дополнительные поля (defaults для деталей)
     // Заполняем только если значение одинаково для ВСЕХ деталей (умная агрегация)
-    
+
     // Функция для получения общего значения (если одинаково для всех деталей)
     const getCommonValue = (getValue: (detail: OrderDetail) => string | undefined | null): string => {
       if (details.length === 0) return '';
-      
+
       const values = details.map(getValue).filter(v => v); // Убрать null/undefined
       if (values.length === 0) return '';
-      
+
       const firstValue = values[0];
       const allSame = values.every(v => v === firstValue);
-      
+
       return allSame ? firstValue : '';
     };
 
@@ -157,13 +160,9 @@ export const generateOrderExcel = async ({
       row.commit();
     }
 
-    // 7. Сгенерировать Blob
+    // 7. Сгенерировать и вернуть ArrayBuffer
     const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-
-    return blob;
+    return buffer;
   } catch (error) {
     console.error('Ошибка генерации Excel:', error);
     if (error instanceof ExcelGenerationError) {
@@ -174,6 +173,21 @@ export const generateOrderExcel = async ({
       error instanceof Error ? error : undefined
     );
   }
+};
+
+/**
+ * Генерация Excel Blob заказа на основе шаблона
+ *
+ * Обертка над buildOrderExcelBuffer для обратной совместимости
+ */
+export const generateOrderExcel = async (
+  params: GenerateOrderExcelParams
+): Promise<Blob> => {
+  const buffer = await buildOrderExcelBuffer(params);
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  return blob;
 };
 
 /**
