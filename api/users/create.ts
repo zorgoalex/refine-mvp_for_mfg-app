@@ -121,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         $username: citext!,
         $email: citext!,
         $password_hash: String!,
-        $role_id: Int!,
+        $role_id: smallint!,
         $full_name: String,
         $is_active: Boolean!
       ) {

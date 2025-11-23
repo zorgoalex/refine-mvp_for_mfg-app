@@ -47,6 +47,8 @@ next-env.d.ts
 ai_docs/
 .claude/
 .gemini/
+.factory/
+
 .vercel
 
 # Playwright

@@ -48,8 +48,11 @@ export const useOrderSave = (): UseOrderSaveResult => {
       // ========== STEP 1: Save/Update orders (header) ==========
       if (isEdit && values.header.order_id) {
         // Update existing order
+        // Exclude audit fields (auto-managed by Hasura permissions)
+        const { created_by, edited_by, created_at, updated_at, order_id, ...restHeader } = values.header;
+
         const headerData = {
-          ...values.header,
+          ...restHeader,
           // Convert Date objects to strings
           order_date: typeof values.header.order_date === 'string'
             ? values.header.order_date
@@ -97,8 +100,11 @@ export const useOrderSave = (): UseOrderSaveResult => {
         // Keep result as-is; surface conflict handling once server-side lock is available.
       } else {
         // Create new order
+        // Exclude audit fields (will be set by Hasura or explicitly below)
+        const { created_by, edited_by, created_at, updated_at, order_id, ...restHeader } = values.header;
+
         const headerData = {
-          ...values.header,
+          ...restHeader,
           // Convert Date objects to strings
           order_date: typeof values.header.order_date === 'string'
             ? values.header.order_date
