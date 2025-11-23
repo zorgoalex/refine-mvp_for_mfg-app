@@ -12,6 +12,7 @@ import { Readable } from 'stream';
  * Body:
  *   - fileName: string - имя файла (например: "заказ-Ф25-10111-1662-Клиент.xlsx")
  *   - base64: string - Excel файл в формате base64
+ *   - orderDate: string | Date - дата заказа для создания папок Год/Месяц
  *
  * Response:
  *   - ok: boolean
@@ -21,6 +22,12 @@ import { Readable } from 'stream';
  */
 
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+
+// Названия месяцев на русском языке
+const MONTH_NAMES = [
+  'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'
+];
 
 /**
  * Создает и авторизует Google Drive клиент через Service Account
@@ -43,6 +50,105 @@ function getDriveClient() {
   );
 
   return google.drive({ version: 'v3', auth });
+}
+
+/**
+ * Поиск папки по имени внутри родительской папки
+ */
+async function findFolderByName(
+  drive: ReturnType<typeof getDriveClient>,
+  folderName: string,
+  parentId: string
+): Promise<string | null> {
+  const query = [
+    `name='${folderName.replace(/'/g, "\\'")}'`,
+    `'${parentId}' in parents`,
+    `mimeType='application/vnd.google-apps.folder'`,
+    `trashed=false`
+  ].join(' and ');
+
+  const response = await drive.files.list({
+    q: query,
+    fields: 'files(id, name)',
+    pageSize: 1,
+  });
+
+  const folders = response.data.files || [];
+  return folders.length > 0 ? folders[0].id! : null;
+}
+
+/**
+ * Создание папки внутри родительской папки
+ */
+async function createFolder(
+  drive: ReturnType<typeof getDriveClient>,
+  folderName: string,
+  parentId: string
+): Promise<string> {
+  const fileMetadata = {
+    name: folderName,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: [parentId],
+  };
+
+  const response = await drive.files.create({
+    requestBody: fileMetadata,
+    fields: 'id',
+  });
+
+  console.log(`Created folder: ${folderName} (ID: ${response.data.id})`);
+  return response.data.id!;
+}
+
+/**
+ * Получение существующей папки или создание новой
+ */
+async function getOrCreateFolder(
+  drive: ReturnType<typeof getDriveClient>,
+  folderName: string,
+  parentId: string
+): Promise<string> {
+  // Сначала ищем существующую папку
+  let folderId = await findFolderByName(drive, folderName, parentId);
+
+  // Если не нашли - создаем новую
+  if (!folderId) {
+    folderId = await createFolder(drive, folderName, parentId);
+  }
+
+  return folderId;
+}
+
+/**
+ * Получение ID целевой папки для сохранения файла
+ * Создает иерархию: Корневая папка → Год → Месяц
+ */
+async function getTargetFolderId(
+  drive: ReturnType<typeof getDriveClient>,
+  orderDate: string | Date,
+  rootFolderId: string
+): Promise<string> {
+  // Парсим дату заказа
+  const date = typeof orderDate === 'string' ? new Date(orderDate) : orderDate;
+
+  if (isNaN(date.getTime())) {
+    throw new Error('Invalid order date');
+  }
+
+  const year = date.getFullYear().toString();
+  const monthIndex = date.getMonth();
+  const monthName = MONTH_NAMES[monthIndex];
+
+  console.log(`Processing folder hierarchy: ${year}/${monthName}`);
+
+  // 1. Получить/создать папку года
+  const yearFolderId = await getOrCreateFolder(drive, year, rootFolderId);
+
+  // 2. Получить/создать папку месяца внутри папки года
+  const monthFolderId = await getOrCreateFolder(drive, monthName, yearFolderId);
+
+  console.log(`Target folder: ${year}/${monthName} (ID: ${monthFolderId})`);
+  return monthFolderId;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -76,12 +182,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Валидация тела запроса
-    const { fileName, base64 } = req.body as { fileName?: string; base64?: string };
+    const { fileName, base64, orderDate } = req.body as {
+      fileName?: string;
+      base64?: string;
+      orderDate?: string | Date;
+    };
 
-    if (!fileName || !base64) {
+    if (!fileName || !base64 || !orderDate) {
       return res.status(400).json({
         ok: false,
-        error: 'Missing required fields: fileName and base64 are required'
+        error: 'Missing required fields: fileName, base64, and orderDate are required'
       });
     }
 
@@ -116,16 +226,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Инициализация Google Drive клиента
     const drive = getDriveClient();
 
-    // Получение ID папки назначения
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
-    if (!folderId) {
+    // Получение ID корневой папки
+    const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    if (!rootFolderId) {
       throw new Error('GOOGLE_DRIVE_FOLDER_ID is not configured');
     }
+
+    // Получение/создание иерархии папок: Год → Месяц
+    const targetFolderId = await getTargetFolderId(drive, orderDate, rootFolderId);
 
     // Метаданные файла
     const fileMetadata = {
       name: fileName,
-      parents: [folderId], // Загружаем в указанную папку
+      parents: [targetFolderId], // Загружаем в папку месяца
     };
 
     // Медиа контент (сам файл)

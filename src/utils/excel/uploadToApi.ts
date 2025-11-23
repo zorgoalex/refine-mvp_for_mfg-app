@@ -29,8 +29,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 /**
  * Загрузка Excel файла заказа на API сервис для экспорта в Google Drive
  *
- * @param params - Параметры генерации Excel (order, details, client)
- * @param fileName - Имя файла для сохранения
+ * @param params - Параметры генерации Excel (order, details, client, fileName)
  * @returns Ответ от API с информацией о загруженном файле
  */
 export async function uploadOrderExcelToApi(
@@ -67,6 +66,7 @@ export async function uploadOrderExcelToApi(
       body: JSON.stringify({
         fileName: params.fileName,
         base64,
+        orderDate: params.order.order_date, // Передаем дату заказа для создания папок Год/Месяц
       }),
     });
 
