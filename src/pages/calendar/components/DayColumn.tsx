@@ -64,16 +64,16 @@ const DayColumn: React.FC<DayColumnProps> = ({
         borderColor: isOver && canDrop ? '#1890ff' : undefined,
       }}
     >
-      {/* Заголовок дня */}
+      {/* Заголовок дня: Пн (17.11.2025) - 55.54 кв.м. */}
       <div className="day-column__header">
         <div className="day-column__header-left">
-          <div className="day-column__day-name">{dayName}</div>
-          <div className="day-column__date">{formattedDate}</div>
+          <span className="day-column__day-name">{dayName}</span>
+          <span className="day-column__date">({formattedDate})</span>
         </div>
         <div className="day-column__header-right">
-          <div className="day-column__total-area">
+          <span className="day-column__total-area">
             {totalArea > 0 ? `${totalArea.toFixed(2)} кв.м.` : '—'}
-          </div>
+          </span>
         </div>
       </div>
 

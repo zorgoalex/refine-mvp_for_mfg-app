@@ -9,6 +9,7 @@ import { useOrderFormStore } from '../../../stores/orderFormStore';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
 import { useUnsavedChangesWarning } from '../../../hooks/useUnsavedChangesWarning';
 import { useOrderSave } from '../../../hooks/useOrderSave';
+import { useOrderExport } from '../../../hooks/useOrderExport';
 import { OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import dayjs from 'dayjs';
@@ -58,6 +59,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     useDefaultStatuses();
   const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
+  const { exportToDrive, isUploading } = useOrderExport();
   const [activeTab, setActiveTab] = useState('basic');
 
 
@@ -373,6 +375,21 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           console.log('[OrderForm] handleSave - onSaveSuccess called successfully');
         } else {
           console.warn('[OrderForm] handleSave - WARNING: onSaveSuccess callback is not defined!');
+        }
+
+        // Auto-export to Google Drive
+        try {
+          console.log('[OrderForm] handleSave - starting auto-export to Google Drive');
+          await exportToDrive({
+            order_id: savedOrderId,
+            order_name: formValues.header.order_name,
+            order_date: formValues.header.order_date,
+            client: formValues.header.client,
+          });
+          console.log('[OrderForm] handleSave - auto-export completed successfully');
+        } catch (exportError) {
+          // Error already handled in useOrderExport hook (shows message.error)
+          console.error('[OrderForm] handleSave - auto-export failed:', exportError);
         }
       }
     } catch (error) {

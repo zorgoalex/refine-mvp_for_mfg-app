@@ -1,6 +1,6 @@
 import React from 'react';
 import { Checkbox, Tag, Tooltip } from 'antd';
-import { EditOutlined, FileTextOutlined } from '@ant-design/icons';
+import { EditOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDrag } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
@@ -8,15 +8,16 @@ import {
   getStatusColor,
   getMaterialColor,
   getProductionStageStyle,
-  getCardBorderColor,
   areAllProductionStagesReady,
+  getMillingDisplayValue,
+  getMaterialsForCard,
 } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
 
 /**
- * Компонент карточки заказа
+ * Компонент карточки заказа (стандартный вид)
+ * Дизайн соответствует скринам из ai_docs/logs/
  */
-// Константа для типа D&D item
 const DRAG_TYPE = 'ORDER_CARD';
 
 const OrderCard: React.FC<OrderCardProps> = ({
@@ -38,12 +39,14 @@ const OrderCard: React.FC<OrderCardProps> = ({
     }),
   });
 
+  // Вычисляем фрезеровку из деталей заказа
+  const millingDisplay = getMillingDisplayValue(order.order_details);
+
   // Определяем цвета и стили
-  const backgroundColor = getStatusColor(order.order_status || '');
-  const borderColor = getCardBorderColor(order);
+  const backgroundColor = getStatusColor(order.order_status_name || '');
   const allProductionReady = areAllProductionStagesReady(order);
 
-  // Обработчик клика на номер заказа - переход на страницу просмотра
+  // Обработчик клика на номер заказа
   const handleOrderClick = () => {
     navigate(`/orders/show/${order.order_id}`);
   };
@@ -62,20 +65,28 @@ const OrderCard: React.FC<OrderCardProps> = ({
     }
   };
 
-  // Парсим материалы
-  const materials = order.materials
-    ? order.materials.split(',').map((m) => m.trim())
-    : [];
+  // Получаем материалы из order_details с сокращенными именами (исключая МДФ 16мм)
+  const materials = getMaterialsForCard(order.order_details, true);
 
-  // Статусы производства - ВРЕМЕННО заглушка, т.к. их нет в orders_view
-  // TODO: Добавить агрегацию production_status из order_details в orders_view
+  // Статусы производства - ВРЕМЕННО заглушка
   const productionStages = [
     { key: 'З', label: 'Закуп пленки', status: undefined },
     { key: 'Р', label: 'Распил', status: undefined },
-    { key: 'Ш', label: 'Шлифовка', status: undefined },
-    { key: 'П', label: 'Пленка', status: undefined },
-    { key: 'У', label: 'Упаковка', status: undefined },
   ];
+
+  // Цвет номера заказа: коричневый для "К", синий для остальных
+  const orderNumberColor = order.order_name?.startsWith('К') ? '#8B4513' : '#1976d2';
+
+  // Формируем строку даты + клиент
+  const infoLine = [
+    order.order_date ? formatDateKey(order.order_date) : null,
+    order.client_name,
+  ].filter(Boolean).join(' • ');
+
+  // Статус оплаты
+  const paymentStatus = order.payment_status_name || '';
+  const isNotPaid = paymentStatus.toLowerCase().includes('не оплачен');
+  const paymentText = paymentStatus;
 
   return (
     <div
@@ -83,31 +94,40 @@ const OrderCard: React.FC<OrderCardProps> = ({
       className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''}`}
       style={{
         backgroundColor,
-        borderColor,
         cursor: 'move',
         opacity: isDragging ? 0.5 : 1,
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
       onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}
     >
-      {/* Заголовок карточки */}
+      {/* Строка 1: Чекбокс | Номер | Материалы | Edit */}
       <div className="order-card__header">
-        {/* Чекбокс */}
         <Checkbox
-          checked={
-            order.order_status?.toLowerCase() === 'выдан' || order.is_issued
-          }
+          checked={order.order_status?.toLowerCase() === 'выдан' || order.is_issued}
           onChange={handleCheckboxChange}
           onClick={(e) => e.stopPropagation()}
           className="order-card__checkbox"
         />
-
-        {/* Номер заказа (кликабельный) */}
-        <div className="order-card__number" onClick={handleOrderClick}>
+        <span
+          className="order-card__number"
+          onClick={handleOrderClick}
+          style={{ color: orderNumberColor }}
+        >
           {order.order_name}
-        </div>
-
-        {/* Иконка редактирования */}
+        </span>
+        {materials.length > 0 && (
+          <div className="order-card__materials">
+            {materials.map((mat, index) => (
+              <Tag
+                key={`${mat.fullName}-${index}`}
+                className="order-card__material-tag"
+                style={{ backgroundColor: getMaterialColor(mat.fullName), border: 'none' }}
+              >
+                {mat.name}
+              </Tag>
+            ))}
+          </div>
+        )}
         <EditOutlined
           className="order-card__edit-icon"
           onClick={handleEditClick}
@@ -115,73 +135,35 @@ const OrderCard: React.FC<OrderCardProps> = ({
         />
       </div>
 
-      {/* Тип обработки (фрезеровка) */}
-      {order.milling_type && (
-        <div className="order-card__milling">
-          {order.milling_type}
+      {/* Строка 2: . Фрезеровка – Площадь */}
+      <div className="order-card__milling-line">
+        <span className="order-card__dot">.</span>
+        <span>{millingDisplay}</span>
+        <span className="order-card__separator"> – </span>
+        <span>{order.total_area > 0 ? `${order.total_area.toFixed(2)} кв.м.` : '0 кв.м.'}</span>
+      </div>
+
+      {/* Строка 3: Дата • Клиент • */}
+      {infoLine && (
+        <div className="order-card__info-line">
+          {infoLine} •
         </div>
       )}
 
-      {/* Площадь заказа */}
-      {order.total_area > 0 && (
-        <div className="order-card__area">
-          {order.total_area.toFixed(2)} кв.м.
-        </div>
-      )}
-
-      {/* Дата заказа */}
-      {order.order_date && (
-        <div className="order-card__date">
-          {formatDateKey(order.order_date)}
-        </div>
-      )}
-
-      {/* Клиент */}
-      {order.client_name && (
-        <div className="order-card__client">{order.client_name}</div>
-      )}
-
-      {/* Статус оплаты */}
-      {order.payment_status && (
+      {/* Строка 4: Статус оплаты */}
+      {paymentText && (
         <div
           className="order-card__payment"
-          style={{
-            color: order.payment_status.toLowerCase().includes('не оплачен')
-              ? '#d32f2f'
-              : 'inherit',
-            fontStyle: order.payment_status.toLowerCase().includes('не оплачен')
-              ? 'italic'
-              : 'normal',
-            fontWeight: order.payment_status.toLowerCase().includes('не оплачен')
-              ? 500
-              : 'normal',
-          }}
+          style={{ color: isNotPaid ? '#d32f2f' : '#666666' }}
         >
-          {order.payment_status}
+          {paymentText}
         </div>
       )}
 
-      {/* Бейджи материалов */}
-      {materials.length > 0 && (
-        <div className="order-card__materials">
-          {materials.map((material, index) => (
-            <Tag
-              key={`${material}-${index}`}
-              color={getMaterialColor(material)}
-              style={{ marginBottom: 4 }}
-            >
-              {material}
-            </Tag>
-          ))}
-        </div>
-      )}
-
-      {/* Индикаторы статусов производства */}
+      {/* Строка 5: Индикаторы производства З Р */}
       <div
         className="order-card__production-stages"
-        style={{
-          background: allProductionReady ? '#ffd9bf' : 'transparent',
-        }}
+        style={{ background: allProductionReady ? '#ffd9bf' : 'transparent' }}
       >
         {productionStages.map((stage) => {
           const style = getProductionStageStyle(stage.status || '', backgroundColor);

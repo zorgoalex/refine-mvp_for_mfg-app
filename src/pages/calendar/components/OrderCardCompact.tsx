@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDrag } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
-import { getCardBorderColor } from '../utils/statusColors';
+import { getCardBorderColor, getMillingDisplayValue } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
 
 /**
@@ -28,6 +28,10 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       isDragging: monitor.isDragging(),
     }),
   });
+
+  // Вычисляем фрезеровку из деталей заказа
+  const millingDisplay = getMillingDisplayValue(order.order_details);
+  const paymentStatus = order.payment_status_name || '';
 
   const borderColor = getCardBorderColor(order);
 
@@ -71,49 +75,49 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       {/* Площадь */}
       {order.total_area > 0 && (
         <div className="order-card-compact__line">
-          Площадь: {order.total_area.toFixed(2)} кв.м.
+          {order.total_area.toFixed(2)} кв.м.
         </div>
       )}
 
       {/* Дата заказа */}
       {order.order_date && (
         <div className="order-card-compact__line">
-          Дата: {formatDateKey(order.order_date)}
+          {formatDateKey(order.order_date)}
         </div>
       )}
 
       {/* Клиент */}
       {order.client_name && (
         <div className="order-card-compact__line">
-          Клиент: {order.client_name}
+          {order.client_name}
         </div>
       )}
 
       {/* Материалы */}
       {materials.length > 0 && (
         <div className="order-card-compact__line">
-          Материалы: {materials.join(', ')}
+          {materials.join(', ')}
         </div>
       )}
 
       {/* Фрезеровка */}
-      {order.milling_type && (
+      {millingDisplay && (
         <div className="order-card-compact__line">
-          Фрезеровка: {order.milling_type}
+          {millingDisplay}
         </div>
       )}
 
       {/* Статус оплаты */}
-      {order.payment_status && (
-        <div 
+      {paymentStatus && (
+        <div
           className="order-card-compact__line"
           style={{
-            color: order.payment_status.toLowerCase().includes('не оплачен')
+            color: paymentStatus.toLowerCase().includes('не оплачен')
               ? '#d32f2f'
               : 'inherit',
           }}
         >
-          Оплата: {order.payment_status}
+          {paymentStatus}
         </div>
       )}
     </div>

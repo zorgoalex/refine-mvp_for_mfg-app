@@ -1,6 +1,6 @@
 import { useShow, IResourceComponentsProps, useOne } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
-import { Typography } from "antd";
+import { Typography, Row, Col, Divider } from "antd";
 
 const { Title } = Typography;
 
@@ -9,33 +9,93 @@ export const PaymentShow: React.FC<IResourceComponentsProps> = () => {
   const { data, isLoading } = queryResult;
   const record = data?.data;
 
-  const { data: orderOne } = useOne({ resource: "orders", id: record?.order_id, queryOptions: { enabled: !!record?.order_id } });
-  const { data: typeOne } = useOne({ resource: "payment_types", id: record?.type_paid_id, queryOptions: { enabled: !!record?.type_paid_id } });
+  const { data: orderOne } = useOne({
+    resource: "orders",
+    id: record?.order_id,
+    queryOptions: { enabled: !!record?.order_id },
+  });
+  const { data: typeOne } = useOne({
+    resource: "payment_types",
+    id: record?.type_paid_id,
+    queryOptions: { enabled: !!record?.type_paid_id },
+  });
 
   return (
-    <Show isLoading={isLoading}>
-      <Title level={5}>Payment ID</Title>
-      <TextField value={record?.payment_id} />
-      <Title level={5}>Order</Title>
-      <TextField value={orderOne?.data?.order_number ?? record?.order_id} />
-      <Title level={5}>Payment Type</Title>
-      <TextField value={typeOne?.data?.type_paid_name ?? record?.type_paid_id} />
-      <Title level={5}>Amount</Title>
-      <TextField value={record?.amount} />
-      <Title level={5}>Payment Date</Title>
-      <DateField value={record?.payment_date} format="YYYY-MM-DD" />
-      <Title level={5}>Notes</Title>
-      <TextField value={record?.notes || "-"} />
-      <Title level={5}>Ref Key 1C</Title>
-      <TextField value={record?.ref_key_1c} />
-      <Title level={5}>Создан</Title>
-      <TextField value={record?.created_by || "-"} />
-      <Title level={5}>Изменён</Title>
-      <TextField value={record?.edited_by || "-"} />
-      <Title level={5}>Создано</Title>
-      <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
-      <Title level={5}>Обновлено</Title>
-      <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
+    <Show isLoading={isLoading} title="Просмотр Платежа">
+      <Title level={5}>Основная информация</Title>
+      <Row gutter={[16, 16]}>
+        <Col span={8}>
+          <Title level={5}>ID</Title>
+          <TextField value={record?.payment_id} />
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Заказ</Title>
+          <TextField value={orderOne?.data?.order_number ?? record?.order_id} />
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Тип оплаты</Title>
+          <TextField
+            value={typeOne?.data?.type_paid_name ?? record?.type_paid_id}
+          />
+        </Col>
+      </Row>
+
+      <Divider />
+
+      <Row gutter={[16, 16]}>
+        <Col span={8}>
+          <Title level={5}>Сумма</Title>
+          <TextField value={record?.amount} />
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Дата платежа</Title>
+          <DateField value={record?.payment_date} format="YYYY-MM-DD" />
+        </Col>
+      </Row>
+
+      <Divider />
+
+      <Row gutter={[16, 16]}>
+        <Col span={24}>
+          <Title level={5}>Примечание</Title>
+          <TextField value={record?.notes || "-"} />
+        </Col>
+      </Row>
+
+      <Divider />
+
+      <Row gutter={[16, 16]}>
+        <Col span={8}>
+          <Title level={5}>Ключ 1C</Title>
+          <TextField value={record?.ref_key_1c} />
+        </Col>
+      </Row>
+
+      <Divider />
+
+      <Row gutter={[16, 16]}>
+        <Col span={8}>
+          <Title level={5}>Создан</Title>
+          <TextField value={record?.created_by || "-"} />
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Изменён</Title>
+          <TextField value={record?.edited_by || "-"} />
+        </Col>
+      </Row>
+
+      <Divider />
+
+      <Row gutter={[16, 16]}>
+        <Col span={8}>
+          <Title level={5}>Создано</Title>
+          <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Обновлено</Title>
+          <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
+        </Col>
+      </Row>
     </Show>
   );
 };

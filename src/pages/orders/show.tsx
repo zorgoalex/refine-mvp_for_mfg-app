@@ -349,7 +349,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   render: (value) => value ? value.toFixed(2) : '0.00',
                 },
                 {
-                  title: 'Тип детали',
+                  title: 'Фрезеровка',
                   key: 'milling_type',
                   width: 128,
                   render: (_, record) => millingTypesMap.get(record.milling_type_id) || '—',
