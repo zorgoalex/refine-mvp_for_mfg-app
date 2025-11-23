@@ -1,11 +1,13 @@
 /**
- * Утилиты для загрузки Excel файлов на API сервис
+ * Утилита для отправки данных заказа на Vercel API для безопасного экспорта в Google Drive
+ *
+ * Архитектура: Frontend → Vercel API → Google Apps Script → Google Drive
  */
 
-import { buildOrderExcelBuffer, type GenerateOrderExcelParams } from './generateOrderExcel';
+import type { GenerateOrderExcelParams } from './generateOrderExcel';
 
 /**
- * Кастомная ошибка загрузки на API
+ * Кастомная ошибка загрузки на GAS
  */
 export class UploadToApiError extends Error {
   constructor(message: string, public originalError?: unknown) {
@@ -15,127 +17,150 @@ export class UploadToApiError extends Error {
 }
 
 /**
- * Конвертация ArrayBuffer в base64 строку
+ * Формирование сводок (summary) из деталей
  */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const uint8Array = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < uint8Array.length; i++) {
-    binary += String.fromCharCode(uint8Array[i]);
-  }
-  return btoa(binary);
+function getCommonValue(details: any[], getValue: (detail: any) => string | null | undefined): string {
+  if (details.length === 0) return '';
+
+  const values = details.map(getValue).filter(v => v); // Убрать null/undefined
+  if (values.length === 0) return '';
+
+  const firstValue = values[0];
+  const allSame = values.every(v => v === firstValue);
+
+  return allSame ? firstValue : '';
 }
 
 /**
- * Загрузка Excel файла заказа на API сервис для экспорта в Google Drive
+ * Отправка данных заказа на Vercel API для безопасного экспорта в Google Drive
  *
- * @param params - Параметры генерации Excel (order, details, client)
- * @param fileName - Имя файла для сохранения
- * @returns Ответ от API с информацией о загруженном файле
+ * @param params - Параметры заказа (order, details, client)
+ * @returns Ответ от API с информацией о созданном файле на Google Drive
  */
 export async function uploadOrderExcelToApi(
   params: GenerateOrderExcelParams & { fileName: string }
 ): Promise<{
-  ok: boolean;
-  fileId?: string;
-  webViewLink?: string;
-  webContentLink?: string;
+  success: boolean;
+  fileName?: string;
+  folder?: string;
+  xlsxUrl?: string;
   error?: string;
 }> {
   try {
-    // 1. Генерация Excel буфера
-    const arrayBuffer = await buildOrderExcelBuffer(params);
+    const { order, details, client } = params;
 
-    // 2. Конвертация в base64
-    const base64 = arrayBufferToBase64(arrayBuffer);
+    // Парсинг даты заказа
+    const orderDate = typeof order.order_date === 'string'
+      ? new Date(order.order_date)
+      : order.order_date;
+    const orderYear = orderDate.getFullYear();
+    const orderMonth = orderDate.getMonth() + 1; // 1-12
 
-    // 3. Получение API-ключа из переменных окружения
-    const apiKey = import.meta.env.VITE_ORDER_EXPORT_API_SECRET;
-    if (!apiKey) {
-      throw new UploadToApiError(
-        'API ключ не настроен. Проверьте переменную окружения VITE_ORDER_EXPORT_API_SECRET.'
-      );
-    }
+    // Формирование сводок из деталей
+    const millingSummary = getCommonValue(details, d => d.milling_type?.milling_type_name);
+    const edgeSummary = getCommonValue(details, d => d.edge_type?.edge_type_name);
+    const filmSummary = getCommonValue(details, d => d.film?.film_name);
+    const materialSummary = getCommonValue(details, d => d.material?.material_name);
 
-    // 4. Отправка POST запроса на API
+    // Формирование массива items из деталей
+    const items = details.map(detail => ({
+      detailNumber: detail.detail_number || 0, // Номер позиции (с пропусками)
+      height: detail.length || 0, // В БД "length" = высота
+      width: detail.width || 0,
+      quantity: detail.quantity || 1,
+      itemType: detail.milling_type?.milling_type_name || '',
+      edge: detail.edge_type?.edge_type_name || '',
+      note: detail.notes || '',
+      price: detail.milling_cost_per_sqm || 0,
+      film: detail.film?.film_name || '',
+    }));
+
+    // Формирование JSON для отправки на Vercel API (без apiKey - добавится на сервере)
+    const orderPayload = {
+      orderName: order.order_name || '',
+      orderId: String(order.order_id),
+      prisadkaName: '—', // Заглушка, пока не реализовано
+      orderDate: order.order_date,
+      clientName: client?.client_name || 'Не указан',
+      clientPhone: client?.phone || '',
+      millingSummary,
+      edgeSummary,
+      filmSummary,
+      materialSummary,
+      orderYear,
+      orderMonth,
+      items,
+    };
+
+    console.log('[uploadToApi] Sending to Vercel API: /api/order-export-to-drive');
+    console.log('[uploadToApi] Payload:', orderPayload);
+
+    // Отправка POST запроса на Vercel API (безопасный прокси к GAS)
     const response = await fetch('/api/order-export-to-drive', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
       },
-      body: JSON.stringify({
-        fileName: params.fileName,
-        base64,
-      }),
+      body: JSON.stringify(orderPayload),
     });
 
-    // 5. Обработка ответа
     const data = await response.json();
 
-    if (!response.ok) {
+    console.log('[uploadToApi] API response:', data);
+
+    if (!data.success) {
       throw new UploadToApiError(
-        data.error || `Ошибка HTTP ${response.status}`,
+        data.error || 'Ошибка экспорта на Google Drive',
         { status: response.status, data }
       );
     }
 
     return data;
   } catch (error) {
-    console.error('Ошибка загрузки Excel на API:', error);
+    console.error('[uploadToApi] Ошибка отправки на API:', error);
 
     if (error instanceof UploadToApiError) {
       throw error;
     }
 
     throw new UploadToApiError(
-      'Не удалось загрузить файл на сервер',
+      'Не удалось отправить данные на сервер',
       error
     );
   }
 }
 
 /**
- * Обработка ошибок загрузки на API
- *
- * Возвращает понятное пользователю сообщение об ошибке
+ * Обработка ошибок загрузки
  */
 export function handleUploadError(error: unknown): string {
-  // Обработка кастомной ошибки UploadToApiError
   if (error instanceof UploadToApiError) {
     return error.message;
   }
 
-  // Обработка ошибок сети
   if (error instanceof TypeError && error.message.includes('fetch')) {
     return 'Ошибка сети. Проверьте подключение к интернету.';
   }
 
-  // Обработка ошибок по коду состояния
   if (typeof error === 'object' && error !== null) {
     const err = error as any;
 
-    // 403 Forbidden - неправильный API-ключ
     if (err.status === 403 || err.originalError?.status === 403) {
       return 'Доступ запрещен. Проверьте настройки API-ключа.';
     }
 
-    // 400 Bad Request - проблемы с данными
     if (err.status === 400 || err.originalError?.status === 400) {
-      return 'Некорректные данные файла. Попробуйте еще раз.';
+      return 'Некорректные данные. Попробуйте еще раз.';
     }
 
-    // 500 Internal Server Error - проблемы на сервере
     if (err.status === 500 || err.originalError?.status === 500) {
-      return 'Ошибка сервера. Попробуйте позже или обратитесь к администратору.';
+      return 'Ошибка Google Apps Script. Попробуйте позже.';
     }
 
-    // Timeout
     if (err.message?.toLowerCase().includes('timeout')) {
       return 'Превышено время ожидания. Попробуйте еще раз.';
     }
   }
 
-  // Общая ошибка
-  return 'Неизвестная ошибка при загрузке файла. Попробуйте еще раз.';
+  return 'Неизвестная ошибка при отправке данных. Попробуйте еще раз.';
 }
