@@ -104,11 +104,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     // Прокси запроса к Google Apps Script с timeout
+    // ВАЖНО: ЖДЕМ ответ от GAS, иначе файлы не создаются (serverless functions отменяют pending промисы)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 секунд timeout
+    const timeoutId = setTimeout(() => controller.abort(), 55000); // 55 секунд timeout (с запасом для cold start GAS)
 
     const fetchStartTime = Date.now();
-    console.log('[order-export-to-drive] Sending request to GAS...');
+    console.log('[order-export-to-drive] Sending request to GAS (awaiting response)...');
 
     const gasResponse = await fetch(gasUrl, {
       method: 'POST',
@@ -182,11 +183,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('[order-export-to-drive] Duration before error:', totalDuration, 'ms');
 
     if (err.name === 'AbortError') {
-      console.error('[order-export-to-drive] Request timeout (25s)');
+      console.error('[order-export-to-drive] Request timeout (55s) - GAS cold start or slow processing');
       return res.status(504).json({
         success: false,
         error: 'Request timeout - GAS took too long to respond',
-        details: 'The request to Google Apps Script exceeded 25 seconds'
+        details: 'The request to Google Apps Script exceeded 55 seconds. This may be due to cold start or slow processing.'
       });
     }
 
