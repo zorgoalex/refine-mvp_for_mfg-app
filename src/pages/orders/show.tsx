@@ -22,7 +22,7 @@ const { Panel } = Collapse;
 
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const { queryResult } = useShow({
-    meta: { 
+    meta: {
       idColumnName: "order_id",
       fields: [
         "order_id",
@@ -51,6 +51,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         "link_cutting_image_file",
         "link_cad_file",
         "link_pdf_file",
+        "doweling_order_id",
+        "doweling_order_name",
         "ref_key_1c",
         "version",
         "delete_flag",

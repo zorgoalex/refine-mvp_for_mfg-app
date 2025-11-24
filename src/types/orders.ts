@@ -47,6 +47,10 @@ export interface Order {
   // Notes
   notes?: string | null;
 
+  // Dowelling order (присадка) - linked 1:1
+  doweling_order_id?: number | null;
+  doweling_order_name?: string | null;
+
   // Management and audit
   manager_id?: number | null;
   delete_flag?: boolean;

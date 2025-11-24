@@ -64,10 +64,17 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
 
   // Load existing order data in edit mode
+  // Use relationship to load doweling_order in the same query (1:1 by order_id)
   const shouldLoadOrder = mode === 'edit' && !!orderId;
   const { data: orderData, isLoading: orderLoading } = useOne({
     resource: 'orders',
     id: orderId,
+    meta: {
+      fields: [
+        '*',
+        { doweling_orders: ['doweling_order_id', 'doweling_order_name'] }
+      ]
+    },
     queryOptions: {
       enabled: shouldLoadOrder,
     },
@@ -146,8 +153,17 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           return detail;
         });
 
+        // Extract doweling order fields from relationship (1:1, returns array with 0 or 1 element)
+        const dowelingOrders = orderData.data.doweling_orders || [];
+        const dowelingOrder = dowelingOrders[0];
+        const headerWithDoweling = {
+          ...orderData.data,
+          doweling_order_id: dowelingOrder?.doweling_order_id || null,
+          doweling_order_name: dowelingOrder?.doweling_order_name || null,
+        };
+
         loadOrder({
-          header: orderData.data,
+          header: headerWithDoweling,
           details: processedDetails,
           payments: paymentsData?.data || [],
           workshops: [],

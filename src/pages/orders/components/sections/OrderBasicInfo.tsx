@@ -8,11 +8,13 @@ import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { ClientQuickCreate } from '../modals/ClientQuickCreate';
+import { DowellingOrderQuickCreate } from '../modals/DowellingOrderQuickCreate';
 import dayjs from 'dayjs';
 
 export const OrderBasicInfo: React.FC = () => {
   const { header, updateHeaderField } = useOrderFormStore();
   const [clientModalOpen, setClientModalOpen] = useState(false);
+  const [dowellingModalOpen, setDowellingModalOpen] = useState(false);
 
   // Load clients - with defaultValue to show current selection properly
   // IMPORTANT: only pass defaultValue if it exists to avoid null in GraphQL query
@@ -141,6 +143,64 @@ export const OrderBasicInfo: React.FC = () => {
         </Col>
       </Row>
 
+      <Row gutter={16}>
+        <Col span={8}>
+          <Form.Item
+            label="ID Присадка"
+            tooltip="ID заказа на присадку (только для чтения)"
+          >
+            <Input
+              value={header.doweling_order_id ?? '—'}
+              disabled
+              style={{ color: 'rgba(0, 0, 0, 0.88)' }}
+            />
+          </Form.Item>
+        </Col>
+
+        <Col span={16}>
+          <Form.Item
+            label="Присадка"
+            tooltip="Номер заказа на присадку для данного заказа"
+          >
+            <Select
+              value={header.doweling_order_id}
+              onChange={(value) => {
+                updateHeaderField('doweling_order_id', value);
+                // Найти и установить doweling_order_name при выборе
+              }}
+              placeholder="Выберите или создайте присадку"
+              allowClear
+              showSearch
+              options={
+                header.doweling_order_id && header.doweling_order_name
+                  ? [
+                      {
+                        value: header.doweling_order_id,
+                        label: header.doweling_order_name,
+                      },
+                    ]
+                  : []
+              }
+              dropdownRender={(menu) => (
+                <>
+                  {menu}
+                  <Space style={{ padding: '8px' }}>
+                    <Button
+                      type="text"
+                      icon={<PlusOutlined />}
+                      onClick={() => setDowellingModalOpen(true)}
+                      disabled={!header.order_id}
+                    >
+                      Создать присадку
+                    </Button>
+                  </Space>
+                </>
+              )}
+            />
+          </Form.Item>
+        </Col>
+      </Row>
+
       </Form>
 
       <ClientQuickCreate
@@ -148,6 +208,17 @@ export const OrderBasicInfo: React.FC = () => {
         onClose={() => setClientModalOpen(false)}
         onSuccess={(clientId) => {
           updateHeaderField('client_id', clientId);
+        }}
+      />
+
+      <DowellingOrderQuickCreate
+        open={dowellingModalOpen}
+        onClose={() => setDowellingModalOpen(false)}
+        orderId={header.order_id}
+        orderDate={typeof header.order_date === 'string' ? header.order_date : undefined}
+        onSuccess={(dowellingOrderId, dowellingOrderName) => {
+          updateHeaderField('doweling_order_id', dowellingOrderId);
+          updateHeaderField('doweling_order_name', dowellingOrderName);
         }}
       />
     </>

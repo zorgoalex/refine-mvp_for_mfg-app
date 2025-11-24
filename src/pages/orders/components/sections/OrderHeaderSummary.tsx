@@ -295,6 +295,16 @@ export const OrderHeaderSummary: React.FC = () => {
           <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
         )}
 
+        {/* Doweling Order (Присадка) */}
+        {header.doweling_order_id && (
+          <>
+            <Text style={{ fontSize: 12, color: '#6B7280' }}>
+              Присадка: <Text strong style={{ color: '#111827' }}>{header.doweling_order_name || `ID${header.doweling_order_id}`}</Text>
+            </Text>
+            <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+          </>
+        )}
+
         {/* Materials */}
         <div style={{ flex: 1 }}>
           <Text style={{ fontSize: 12, color: '#6B7280' }}>Материал: </Text>
