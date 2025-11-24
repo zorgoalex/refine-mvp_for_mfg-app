@@ -404,6 +404,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             className="orders-col orders-col--order-name"
           />
           <Table.Column
+            dataIndex="doweling_order_name"
+            title="Присадка"
+            sorter
+            width={80}
+            className="orders-col orders-col--doweling-name"
+          />
+          <Table.Column
             dataIndex="order_date"
             title="Дата заказа"
             sorter
@@ -566,6 +573,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               const filmId = getCommonValue(record.order_id, "film_id");
               return filmId ? filmsMap[filmId] || "—" : "—";
             }}
+          />
+          <Table.Column
+            dataIndex="doweling_order_id"
+            title="ID Присадка"
+            sorter
+            width={60}
+            className="col-doweling-id"
+            onHeaderCell={() => ({ className: "col-doweling-id" })}
           />
           <Table.Column
             dataIndex="created_by"
