@@ -67,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 3. Проверить, существует ли пользователь с таким username или email
-    const existingUserData = await hasuraAdminQuery<{ users: Array<{ user_id: string }> }>(
+    const existingUserData = await hasuraAdminQuery<{ users: Array<{ user_id: string; username: string; email: string }> }>(
       `
       query CheckExistingUser($username: citext!, $email: citext!) {
         users(where: {_or: [{username: {_eq: $username}}, {email: {_eq: $email}}]}) {
