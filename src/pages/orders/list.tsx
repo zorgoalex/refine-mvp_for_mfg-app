@@ -37,7 +37,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps, current, pageSize, setCurrent, sorters, setSorters } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "order_id", order: "desc" }],
+      initial: [{ field: "order_date", order: "desc" }],
     },
     pagination: {
       mode: "server",
@@ -56,15 +56,15 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
     const orderName = searchOrderId.trim();
 
-    // Сбрасываем сортировку на order_id DESC перед поиском
-    const isDefaultSort = 
-      sorters.length === 1 && 
-      sorters[0].field === "order_id" && 
+    // Сбрасываем сортировку на order_date DESC перед поиском
+    const isDefaultSort =
+      sorters.length === 1 &&
+      sorters[0].field === "order_date" &&
       sorters[0].order === "desc";
 
     if (!isDefaultSort) {
       message.info("Сброс сортировки для поиска...");
-      setSorters([{ field: "order_id", order: "desc" }]);
+      setSorters([{ field: "order_date", order: "desc" }]);
       // Даем время на применение сортировки
       await new Promise(resolve => setTimeout(resolve, 500));
     }
