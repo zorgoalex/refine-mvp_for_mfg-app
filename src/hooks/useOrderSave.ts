@@ -142,10 +142,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
 
         const orderResult = await dataProvider().create({
           resource: 'orders',
-          variables: {
-            ...headerData,
-            created_by: values.header?.created_by ?? 1,
-          },
+          variables: headerData,
         });
 
         console.log('[useOrderSave] Order created successfully:', orderResult.data);
@@ -191,7 +188,6 @@ export const useOrderSave = (): UseOrderSaveResult => {
             const createVariables = {
               ...detailData,
               order_id: createdOrderId,
-              created_by: 1, // Always set created_by=1 for new records in dev mode
             };
             // console.log('[useOrderSave] CREATE detail - final variables:', createVariables);
             return dataProvider().create({
@@ -294,7 +290,6 @@ export const useOrderSave = (): UseOrderSaveResult => {
               variables: {
                 ...paymentData,
                 order_id: createdOrderId,
-                created_by: 1, // Always set created_by=1 for new records in dev mode
               },
             });
           }
@@ -336,7 +331,6 @@ export const useOrderSave = (): UseOrderSaveResult => {
               variables: {
                 ...workshopData,
                 order_id: createdOrderId,
-                created_by: 1, // Always set created_by=1 for new records in dev mode
               },
             });
           }
@@ -378,7 +372,6 @@ export const useOrderSave = (): UseOrderSaveResult => {
               variables: {
                 ...requirementData,
                 order_id: createdOrderId,
-                created_by: 1, // Always set created_by=1 for new records in dev mode
               },
             });
           }
