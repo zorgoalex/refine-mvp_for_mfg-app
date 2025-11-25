@@ -1,4 +1,22 @@
-/* Стиль строки-заголовка группы (как в Excel) */
+/* Чередование цветов строк для лучшей читаемости */
+.ant-table-tbody > tr:nth-child(even) > td {
+  background-color: #fafafa;
+}
+
+.ant-table-tbody > tr:nth-child(odd) > td {
+  background-color: #ffffff;
+}
+
+/* Сохраняем цвет при наведении */
+.ant-table-tbody > tr:nth-child(even):hover > td {
+  background-color: #f0f0f0 !important;
+}
+
+.ant-table-tbody > tr:nth-child(odd):hover > td {
+  background-color: #f5f5f5 !important;
+}
+
+/* Стиль строки-заголовка группы (как в Excel) - оставлено для будущего */
 .payment-group-header td {
   background-color: #e6f4ff !important;
   font-weight: 600;

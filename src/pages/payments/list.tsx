@@ -4,6 +4,8 @@ import { Space, Table, Button, Form, Row, Col, Select, DatePicker, InputNumber, 
 import { useMemo, useState } from "react";
 import { FilterOutlined, ClearOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+import { formatDate } from "../../utils/dateFormat";
+import { formatNumber } from "../../utils/numberFormat";
 import dayjs from "dayjs";
 import "./list.css";
 
@@ -258,8 +260,18 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           title="Тип оплаты"
           render={(_, r: any) => typeMap[r?.type_paid_id] ?? r?.type_paid_id}
         />
-        <Table.Column dataIndex="amount" title="Сумма" sorter />
-        <Table.Column dataIndex="payment_date" title="Дата платежа" sorter />
+        <Table.Column
+          dataIndex="amount"
+          title="Сумма"
+          sorter
+          render={(value) => formatNumber(value as number, 0)}
+        />
+        <Table.Column
+          dataIndex="payment_date"
+          title="Дата платежа"
+          sorter
+          render={(value) => formatDate(value)}
+        />
         <Table.Column dataIndex="notes" title="Примечание" />
         <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
