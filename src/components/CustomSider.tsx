@@ -251,7 +251,14 @@ export const CustomSider: React.FC = () => {
         />
 
         <div style={{ padding: "8px 16px", marginTop: "72px" }}>
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleNewOrder} block style={{ marginBottom: 8 }}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleNewOrder}
+            block
+            style={{ marginBottom: 8 }}
+            title={collapsed ? "Создать заказ" : undefined}
+          >
             {!collapsed && "Создать заказ"}
           </Button>
         </div>
