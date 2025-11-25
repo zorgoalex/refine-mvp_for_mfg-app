@@ -1,17 +1,19 @@
 ﻿import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { useTable, ShowButton, EditButton, List, useSelect } from "@refinedev/antd";
-import { Space, Table, Button, Form, Row, Col, Select, DatePicker, InputNumber, Card } from "antd";
+import { Space, Table, Button, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography } from "antd";
 import { useMemo, useState } from "react";
-import { FilterOutlined, ClearOutlined } from "@ant-design/icons";
+import { FilterOutlined, ClearOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import dayjs from "dayjs";
 import "./list.css";
 
 const { RangePicker } = DatePicker;
+const { Text } = Typography;
 
 export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const [form] = Form.useForm();
   const [filtersVisible, setFiltersVisible] = useState(false);
+  const [showResultCount, setShowResultCount] = useState(false);
 
   const { tableProps, filters, setFilters } = useTable({
     syncWithLocation: true,
@@ -68,11 +70,14 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const handleFilter = (values: any) => {
     const newFilters: any[] = [];
 
-    if (values.order_id) {
+    // Проверяем, что значение не пустое (не undefined, не null, не пустая строка)
+    const hasValue = (val: any) => val !== undefined && val !== null && val !== "";
+
+    if (hasValue(values.order_id)) {
       newFilters.push({ field: "order_id", operator: "eq", value: values.order_id });
     }
 
-    if (values.date_range && values.date_range.length === 2) {
+    if (values.date_range && Array.isArray(values.date_range) && values.date_range.length === 2) {
       newFilters.push({
         field: "payment_date",
         operator: "gte",
@@ -85,30 +90,35 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
       });
     }
 
-    if (values.amount_min !== undefined && values.amount_min !== null) {
+    if (hasValue(values.amount_min)) {
       newFilters.push({ field: "amount", operator: "gte", value: values.amount_min });
     }
 
-    if (values.amount_max !== undefined && values.amount_max !== null) {
+    if (hasValue(values.amount_max)) {
       newFilters.push({ field: "amount", operator: "lte", value: values.amount_max });
     }
 
-    if (values.type_paid_id) {
+    if (hasValue(values.type_paid_id)) {
       newFilters.push({ field: "type_paid_id", operator: "eq", value: values.type_paid_id });
     }
 
-    if (values.created_by) {
+    if (hasValue(values.created_by)) {
       newFilters.push({ field: "created_by", operator: "eq", value: values.created_by });
     }
 
-    setFilters(newFilters);
+    setFilters(newFilters, "replace");
+    setShowResultCount(true);
   };
 
   // Сброс фильтров
   const handleClearFilters = () => {
     form.resetFields();
     setFilters([], "replace");
+    setShowResultCount(false);
   };
+
+  // Получаем общее количество записей
+  const totalRecords = tableProps?.pagination?.total || 0;
 
   return (
     <List
@@ -193,13 +203,20 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
             </Row>
             <Row>
               <Col>
-                <Space>
-                  <Button type="primary" htmlType="submit" icon={<FilterOutlined />}>
-                    Применить
-                  </Button>
-                  <Button onClick={handleClearFilters} icon={<ClearOutlined />}>
-                    Сбросить
-                  </Button>
+                <Space size="large">
+                  <Space>
+                    <Button type="primary" htmlType="submit" icon={<FilterOutlined />}>
+                      Применить
+                    </Button>
+                    <Button onClick={handleClearFilters} icon={<ClearOutlined />}>
+                      Сбросить
+                    </Button>
+                  </Space>
+                  {showResultCount && (
+                    <Text strong style={{ color: '#52c41a', fontSize: '14px' }}>
+                      <CheckCircleOutlined /> Найдено записей: {totalRecords}
+                    </Text>
+                  )}
                 </Space>
               </Col>
             </Row>
