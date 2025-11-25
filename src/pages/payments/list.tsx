@@ -1,6 +1,6 @@
 ﻿import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { useTable, ShowButton, EditButton, List, useSelect } from "@refinedev/antd";
-import { Space, Table, Button, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography } from "antd";
+import { Space, Table, Button, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Input } from "antd";
 import { useMemo, useState } from "react";
 import { FilterOutlined, ClearOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
@@ -106,6 +106,10 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
       newFilters.push({ field: "created_by", operator: "eq", value: values.created_by });
     }
 
+    if (hasValue(values.notes)) {
+      newFilters.push({ field: "notes", operator: "contains", value: values.notes });
+    }
+
     setFilters(newFilters, "replace");
     setShowResultCount(true);
   };
@@ -201,23 +205,33 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
                 </Form.Item>
               </Col>
             </Row>
-            <Row>
-              <Col>
-                <Space size="large">
-                  <Space>
-                    <Button type="primary" htmlType="submit" icon={<FilterOutlined />}>
-                      Применить
-                    </Button>
-                    <Button onClick={handleClearFilters} icon={<ClearOutlined />}>
-                      Сбросить
-                    </Button>
+            <Row gutter={16} justify="space-between" align="bottom">
+              <Col xs={24} sm={12} md={8} lg={6}>
+                <Form.Item name="notes" label="Примечание">
+                  <Input
+                    allowClear
+                    placeholder="Поиск в примечаниях"
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={16} lg={18} style={{ textAlign: 'right' }}>
+                <Form.Item label=" " colon={false}>
+                  <Space size="large">
+                    <Space>
+                      <Button type="primary" htmlType="submit" icon={<FilterOutlined />}>
+                        Применить
+                      </Button>
+                      <Button onClick={handleClearFilters} icon={<ClearOutlined />}>
+                        Сбросить
+                      </Button>
+                    </Space>
+                    {showResultCount && (
+                      <Text strong style={{ color: '#52c41a', fontSize: '14px' }}>
+                        <CheckCircleOutlined /> Найдено записей: {totalRecords}
+                      </Text>
+                    )}
                   </Space>
-                  {showResultCount && (
-                    <Text strong style={{ color: '#52c41a', fontSize: '14px' }}>
-                      <CheckCircleOutlined /> Найдено записей: {totalRecords}
-                    </Text>
-                  )}
-                </Space>
+                </Form.Item>
               </Col>
             </Row>
           </Form>
