@@ -72,6 +72,7 @@
   flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 16px;
+  align-items: stretch; /* Все колонки в ряду имеют одинаковую высоту */
 }
 
 .calendar-row:last-child {
@@ -146,8 +147,8 @@
 .day-column__orders {
   flex: 1;
   padding: 8px;
-  overflow-y: auto;
-  max-height: 70vh;
+  /* Убран overflow-y и max-height - колонка отображается полностью без внутреннего скролла */
+  /* Высота ряда определяется самым высоким днём */
 }
 
 /* ============================================
@@ -365,25 +366,9 @@
 }
 
 /* ============================================
-   Скроллбар
+   Скроллбар (не используется - убран внутренний скролл)
    ============================================ */
-.day-column__orders::-webkit-scrollbar {
-  width: 6px;
-}
-
-.day-column__orders::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
-}
-
-.day-column__orders::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 3px;
-}
-
-.day-column__orders::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-}
+/* Скроллбар убран - колонки отображаются полностью без внутреннего скролла */
 
 /* ============================================
    Компактный вид карточки

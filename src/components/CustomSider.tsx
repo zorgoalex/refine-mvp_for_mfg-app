@@ -280,7 +280,8 @@ export const CustomSider: React.FC = () => {
             fontWeight: 600,
           }}
         >
-          ERP v.0.5
+          <span>ERP Zhihaz </span>
+          <span style={{ fontSize: "0.8em", fontWeight: 400 }}>v.0.5</span>
         </Title>
       </div>
 
@@ -446,4 +447,3 @@ export const CustomSider: React.FC = () => {
 };
 
 export default CustomSider;
-
