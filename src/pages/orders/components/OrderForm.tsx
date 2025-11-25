@@ -28,6 +28,7 @@ import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 
 // Tabs
 import { OrderDetailsTab } from './tabs/OrderDetailsTab';
+import { OrderPaymentsTab } from './tabs/OrderPaymentsTab';
 
 interface OrderFormProps {
   mode: OrderFormMode;
@@ -454,7 +455,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         children: (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <OrderFinanceSection />
-            <OrderAggregatesDisplay />
+            <OrderPaymentsTab />
           </Space>
         ),
       },
