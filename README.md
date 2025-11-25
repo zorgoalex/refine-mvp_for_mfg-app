@@ -1,4 +1,4 @@
-# Front Refine v1 — Refine + Hasura GraphQL Admin (MVP)
+﻿# Front Refine v1 — Refine + Hasura GraphQL Admin (MVP)
 
 Простой административный интерфейс на базе Refine + Ant Design, работающий с Hasura GraphQL. Проект ориентирован на MVP для сущностей БД и демонстрирует список, просмотр и CRUD-операции для ключевых ресурсов.
 
