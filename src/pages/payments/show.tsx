@@ -1,6 +1,7 @@
 import { useShow, IResourceComponentsProps, useOne } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Row, Col, Divider } from "antd";
+import { formatNumber } from "../../utils/numberFormat";
 
 const { Title } = Typography;
 
@@ -30,7 +31,7 @@ export const PaymentShow: React.FC<IResourceComponentsProps> = () => {
         </Col>
         <Col span={8}>
           <Title level={5}>Заказ</Title>
-          <TextField value={orderOne?.data?.order_number ?? record?.order_id} />
+          <TextField value={orderOne?.data?.order_name ?? record?.order_id} />
         </Col>
         <Col span={8}>
           <Title level={5}>Тип оплаты</Title>
@@ -45,11 +46,11 @@ export const PaymentShow: React.FC<IResourceComponentsProps> = () => {
       <Row gutter={[16, 16]}>
         <Col span={8}>
           <Title level={5}>Сумма</Title>
-          <TextField value={record?.amount} />
+          <TextField value={formatNumber(record?.amount, 0)} />
         </Col>
         <Col span={8}>
           <Title level={5}>Дата платежа</Title>
-          <DateField value={record?.payment_date} format="YYYY-MM-DD" />
+          <DateField value={record?.payment_date} format="DD.MM.YYYY" />
         </Col>
       </Row>
 
@@ -89,11 +90,11 @@ export const PaymentShow: React.FC<IResourceComponentsProps> = () => {
       <Row gutter={[16, 16]}>
         <Col span={8}>
           <Title level={5}>Создано</Title>
-          <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
+          <DateField value={record?.created_at} format="DD.MM.YYYY HH:mm:ss" />
         </Col>
         <Col span={8}>
           <Title level={5}>Обновлено</Title>
-          <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
+          <DateField value={record?.updated_at} format="DD.MM.YYYY HH:mm:ss" />
         </Col>
       </Row>
     </Show>
