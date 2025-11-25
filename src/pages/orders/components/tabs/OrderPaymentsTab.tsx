@@ -60,20 +60,19 @@ export const OrderPaymentsTab: React.FC = () => {
   const handleSave = (paymentData: Omit<Payment, 'temp_id'>) => {
     let rowKey: React.Key;
 
-    if (modalMode === 'create') {
-      addPayment(paymentData);
-      const lastPayment = [...payments].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
-      rowKey = lastPayment?.temp_id || Date.now();
-      message.success('Платеж добавлен');
-    } else if (editingPayment) {
+    // Check if we're editing by looking at editingPayment (more reliable than modalMode)
+    if (editingPayment && (editingPayment.payment_id || editingPayment.temp_id)) {
+      // Update existing payment
       const tempId = editingPayment.temp_id || editingPayment.payment_id!;
       updatePayment(tempId, paymentData);
       rowKey = tempId;
       message.success('Платеж обновлен');
     } else {
-      setModalOpen(false);
-      setEditingPayment(undefined);
-      return;
+      // Create new payment
+      addPayment(paymentData);
+      const lastPayment = [...payments].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
+      rowKey = lastPayment?.temp_id || Date.now();
+      message.success('Платеж добавлен');
     }
 
     setModalOpen(false);
