@@ -139,7 +139,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   placeholder="0.00"
                   min={0}
                   precision={2}
-                  formatter={numberFormatter}
+                  formatter={(value) => numberFormatter(value, 2)}
                   parser={numberParser}
                 />
               </Form.Item>

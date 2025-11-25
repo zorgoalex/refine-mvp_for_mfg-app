@@ -15,9 +15,12 @@ export const formatNumber = (
     return '0';
   }
 
+  // Ensure precision is a valid integer between 0 and 20
+  const validPrecision = Math.max(0, Math.min(20, Math.floor(precision || 0)));
+
   return new Intl.NumberFormat('ru-RU', {
-    minimumFractionDigits: precision,
-    maximumFractionDigits: precision,
+    minimumFractionDigits: validPrecision,
+    maximumFractionDigits: validPrecision,
   }).format(value);
 };
 
