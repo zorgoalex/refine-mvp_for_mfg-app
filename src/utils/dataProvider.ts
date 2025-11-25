@@ -831,7 +831,14 @@ export const dataProvider = (_apiUrl: string) => {
       // console.log('[dataProvider.create] incoming variables:', variables);
 
       // Omit PK from insert to let identity/defaults generate value
-      const { [idCol]: _omitId, ...restVars } = variables || {};
+      const {
+        [idCol]: _omitId,
+        created_by: _createdBy,
+        edited_by: _editedBy,
+        created_at: _createdAt,
+        updated_at: _updatedAt,
+        ...restVars
+      } = variables || {};
       // console.log('[dataProvider.create] after omitting PK:', restVars);
 
       // Sanitize and drop null/undefined to avoid NOT NULL violations on inserts

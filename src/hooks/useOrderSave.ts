@@ -155,19 +155,29 @@ export const useOrderSave = (): UseOrderSaveResult => {
       if (values.details && values.details.length > 0) {
         const { originalDetails } = useOrderFormStore.getState();
         const normalizeDetail = (d: any) => {
-          const { detail_id, order_id, temp_id, created_at, updated_at, created_by, edited_by, version, ...rest } = d || {};
+          const {
+            detail_id,
+            order_id,
+            temp_id,
+            created_at,
+            updated_at,
+            created_by,
+            edited_by,
+            version,
+            __typename,
+            ...rest
+          } = d || {};
           return rest;
         };
+        const buildDetailPayload = (detail: any) => ({
+          ...normalizeDetail(detail),
+          order_id: createdOrderId,
+        });
         const detailPromises = values.details.map((detail) => {
           if (detail.detail_id) {
             // Update only if changed
             const original = originalDetails[detail.detail_id];
-            // Exclude detail_id, temp_id from variables for update
-            const { detail_id, temp_id, ...detailData } = detail;
-            const updateData = {
-              ...detailData,
-              order_id: createdOrderId,
-            };
+            const updateData = buildDetailPayload(detail);
 
             const normalizedOriginal = normalizeDetail(original);
             const normalizedUpdate = normalizeDetail(updateData);
@@ -183,14 +193,10 @@ export const useOrderSave = (): UseOrderSaveResult => {
             });
           } else {
             // Create new detail - exclude temp_id, detail_id and all audit/system fields
-            const { temp_id, detail_id, created_at, updated_at, created_by, edited_by, version, ...detailData } = detail;
             // console.log('[useOrderSave] CREATE detail - original:', detail);
             // console.log('[useOrderSave] CREATE detail - excluded fields:', { temp_id, detail_id, created_at, updated_at, created_by, edited_by, version });
             // console.log('[useOrderSave] CREATE detail - cleaned data:', detailData);
-            const createVariables = {
-              ...detailData,
-              order_id: createdOrderId,
-            };
+            const createVariables = buildDetailPayload(detail);
             // console.log('[useOrderSave] CREATE detail - final variables:', createVariables);
             return dataProvider().create({
               resource: 'order_details',
