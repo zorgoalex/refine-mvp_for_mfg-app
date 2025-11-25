@@ -35,6 +35,7 @@ import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
 import { OrderCreateModal } from "../pages/orders/components/OrderCreateModal";
+import { authStorage } from "../utils/auth";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -75,9 +76,11 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Контрагенты": <TeamOutlined />,
   "Финансы": <DollarOutlined />,
+  "Производство": <ToolOutlined />,
   "Материалы": <InboxOutlined />,
   "Закуп": <ShoppingCartOutlined />,
   "Справочники": <SettingOutlined />,
+  "Настройки": <SettingOutlined />,
 };
 
 // Карта русских названий ресурсов из ru_table_name.md
@@ -117,9 +120,15 @@ const CATEGORY_MAP: Record<string, string> = {
   // Контрагенты
   clients: "Контрагенты",
   suppliers: "Контрагенты",
+  vendors: "Контрагенты",
 
   // Финансы
   payments: "Финансы",
+
+  // Производство
+  workshops: "Производство",
+  work_centers: "Производство",
+  order_workshops: "Производство",
 
   // Материалы
   films: "Материалы",
@@ -128,8 +137,11 @@ const CATEGORY_MAP: Record<string, string> = {
   // Закуп
   order_resource_requirements: "Закуп",
 
+  // Настройки (только для администраторов)
+  employees: "Настройки",
+  users: "Настройки",
+
   // Справочники (все остальное)
-  vendors: "Справочники",
   film_types: "Справочники",
   units: "Справочники",
   material_types: "Справочники",
@@ -140,15 +152,10 @@ const CATEGORY_MAP: Record<string, string> = {
   production_statuses: "Справочники",
   requisition_statuses: "Справочники",
   resource_requirements_statuses: "Справочники",
-  workshops: "Справочники",
-  work_centers: "Справочники",
   payment_types: "Справочники",
   transaction_direction: "Справочники",
   material_transaction_types: "Справочники",
-  employees: "Справочники",
-  users: "Справочники",
   movements_statuses: "Справочники",
-  order_workshops: "Справочники",
 };
 
 export const CustomSider: React.FC = () => {
@@ -157,14 +164,26 @@ export const CustomSider: React.FC = () => {
   const location = useLocation();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
+  // Получаем текущего пользователя для проверки прав доступа
+  const currentUser = useMemo(() => {
+    return authStorage.getUser();
+  }, []);
+
+  // Проверка: является ли пользователь администратором (role_id=1 или role="admin")
+  const isAdmin = useMemo(() => {
+    return currentUser?.role_id === 1 || currentUser?.role === "admin";
+  }, [currentUser]);
+
   // Группируем ресурсы по категориям
   const categorizedResources = useMemo(() => {
     const categories: Record<string, Array<{ name: string; label: string; route: string }>> = {
       "Контрагенты": [],
       "Финансы": [],
+      "Производство": [], // Добавляем категорию Производство
       "Материалы": [],
       "Закуп": [],
       "Справочники": [],
+      "Настройки": [], // Добавляем категорию Настройки
     };
 
     resources.forEach((resource) => {
@@ -197,7 +216,7 @@ export const CustomSider: React.FC = () => {
     });
 
     return categories;
-  }, [resources]);
+  }, [resources, isAdmin]);
 
   // Определяем выбранный пункт меню
   const selectedKey = useMemo(() => {
@@ -313,6 +332,9 @@ export const CustomSider: React.FC = () => {
           {Object.entries(categorizedResources).map(([category, items]) => {
             // Пропускаем пустые категории
             if (items.length === 0) return null;
+
+            // Пропускаем категорию "Настройки" если пользователь не администратор
+            if (category === "Настройки" && !isAdmin) return null;
 
             // Создаем пункты меню для категории
             const categoryItems: MenuProps["items"] = items.map((item) => ({

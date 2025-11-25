@@ -35,7 +35,7 @@ export const LoginPage: React.FC = () => {
       >
         <div style={{ textAlign: "center", marginBottom: 32 }}>
           <Title level={2} style={{ margin: 0, fontSize: 28, fontWeight: 600 }}>
-            ERP MebelKZ
+            ERP Zhihaz
           </Title>
           <Text type="secondary" style={{ fontSize: 14 }}>
             Система управления производством

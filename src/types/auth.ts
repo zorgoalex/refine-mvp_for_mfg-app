@@ -25,6 +25,7 @@ export interface UserIdentity {
   id: string;
   username: string;
   role: string;
+  role_id?: number; // Опциональный ID роли (1=admin, 2=manager, 3=viewer)
 }
 
 /**
