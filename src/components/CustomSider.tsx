@@ -145,7 +145,14 @@ export const CustomSider: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
 
   const currentUser = useMemo(() => authStorage.getUser(), []);
-  const isAdmin = useMemo(() => currentUser?.role_id === 1 || currentUser?.role === "admin", [currentUser]);
+  const isAdmin = useMemo(
+    () =>
+      currentUser?.role_id === 1 ||
+      currentUser?.role_id === 2 ||
+      currentUser?.role === "admin" ||
+      currentUser?.role === "superadmin",
+    [currentUser],
+  );
 
   const categorizedResources = useMemo(() => {
     const categories: Record<string, Array<{ name: string; label: string; route: string }>> = CATEGORY_ORDER.reduce(
@@ -164,6 +171,10 @@ export const CustomSider: React.FC = () => {
         route = resource.meta.route;
       }
       if (route) {
+        // Категория "Настройки" видима только для админов
+        if (category === "Настройки" && !isAdmin) {
+          return;
+        }
         categories[category].push({ name: resource.name, label, route });
       }
     });
@@ -199,7 +210,7 @@ export const CustomSider: React.FC = () => {
   };
 
   const flatMenuItems: MenuProps["items"] = CATEGORY_ORDER.flatMap((category) => {
-    if (category === "Системные" && !isAdmin) return [];
+    if (category === "Настройки" && !isAdmin) return [];
     const items = categorizedResources[category];
     if (!items || items.length === 0) return [];
     return items.map((item) => ({
@@ -276,7 +287,7 @@ export const CustomSider: React.FC = () => {
             {CATEGORY_ORDER.map((category) => {
               const items = categorizedResources[category];
               if (!items || items.length === 0) return null;
-              if (category === "Системные" && !isAdmin) return null;
+              if (category === "Настройки" && !isAdmin) return null;
 
               const categoryItems: MenuProps["items"] = items.map((item) => ({
                 key: item.name,
