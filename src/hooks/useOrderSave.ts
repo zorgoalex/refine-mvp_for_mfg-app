@@ -49,7 +49,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
       if (isEdit && values.header.order_id) {
         // Update existing order
         // Exclude audit fields (auto-managed by Hasura permissions)
-        const { created_by, edited_by, created_at, updated_at, order_id, ...restHeader } = values.header;
+        // Exclude doweling_orders fields (not in orders table, managed via separate relationship)
+        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, ...restHeader } = values.header;
 
         const headerData = {
           ...restHeader,
@@ -101,7 +102,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
       } else {
         // Create new order
         // Exclude audit fields (will be set by Hasura or explicitly below)
-        const { created_by, edited_by, created_at, updated_at, order_id, ...restHeader } = values.header;
+        // Exclude doweling_orders fields (not in orders table, managed via separate relationship)
+        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, ...restHeader } = values.header;
 
         const headerData = {
           ...restHeader,

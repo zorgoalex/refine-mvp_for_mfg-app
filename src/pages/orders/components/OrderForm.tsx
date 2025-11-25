@@ -156,8 +156,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         // Extract doweling order fields from relationship (1:1, returns array with 0 or 1 element)
         const dowelingOrders = orderData.data.doweling_orders || [];
         const dowelingOrder = dowelingOrders[0];
+        const { doweling_orders, ...orderDataWithoutRelationship } = orderData.data;
         const headerWithDoweling = {
-          ...orderData.data,
+          ...orderDataWithoutRelationship,
           doweling_order_id: dowelingOrder?.doweling_order_id || null,
           doweling_order_name: dowelingOrder?.doweling_order_name || null,
         };
