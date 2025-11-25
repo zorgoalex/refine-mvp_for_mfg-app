@@ -37,8 +37,10 @@ export const AppHeader: React.FC = () => {
       }}
     >
       <Space size="middle" align="center">
-        <Typography.Text strong style={{ fontSize: 16 }}>
-          ERP MebelKZ
+        <Typography.Text strong style={{ fontSize: 16, lineHeight: 1.1 }}>
+          ERP
+          <br />
+          <span style={{ fontSize: 12, fontWeight: 500 }}>Zhihaz</span>
         </Typography.Text>
 
         {/* DEV ONLY: Кнопки для тестирования уведомлений закомментированы */}

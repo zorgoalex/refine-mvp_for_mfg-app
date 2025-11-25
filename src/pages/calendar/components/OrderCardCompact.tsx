@@ -14,6 +14,7 @@ const DRAG_TYPE = 'ORDER_CARD';
 const OrderCardCompact: React.FC<OrderCardProps> = ({
   order,
   sourceDate,
+  cardScale = 1.0,
   onContextMenu,
   onDoubleTap,
   isDragging: isDraggingProp = false,
@@ -53,6 +54,9 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
         borderColor,
         cursor: 'move',
         opacity: isDragging ? 0.5 : 1,
+        transform: `scale(${cardScale})`,
+        transformOrigin: 'top left',
+        marginBottom: cardScale < 1 ? `${(1 - cardScale) * -30}px` : undefined, // Компенсируем уменьшение высоты
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
       onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}

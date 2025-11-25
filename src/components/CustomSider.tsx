@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 import { Layout as AntLayout, Menu, Collapse, Button, Typography } from "antd";
 import {
   PlusOutlined,
@@ -40,17 +40,26 @@ import { authStorage } from "../utils/auth";
 const { Panel } = Collapse;
 const { Title } = Typography;
 
-// Карта иконок для ресурсов
+const CATEGORY_ORDER = [
+  "Контрагенты",
+  "Финансы",
+  "Производство",
+  "Материалы",
+  "Справочники",
+  "Настройки",
+];
+
 const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
   calendar: <CalendarOutlined />,
   clients: <UserOutlined />,
   suppliers: <ShopOutlined />,
+  vendors: <ShopOutlined />,
+  film_vendors: <ShopOutlined />,
   payments: <DollarOutlined />,
   films: <FileImageOutlined />,
   materials: <InboxOutlined />,
   order_resource_requirements: <ShoppingCartOutlined />,
-  vendors: <ShopOutlined />,
   film_types: <TagsOutlined />,
   units: <CalculatorOutlined />,
   material_types: <AppstoreOutlined />,
@@ -72,90 +81,60 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   order_workshops: <EnvironmentOutlined />,
 };
 
-// Карта иконок для категорий
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Контрагенты": <TeamOutlined />,
   "Финансы": <DollarOutlined />,
   "Производство": <ToolOutlined />,
   "Материалы": <InboxOutlined />,
-  "Закуп": <ShoppingCartOutlined />,
   "Справочники": <SettingOutlined />,
   "Настройки": <SettingOutlined />,
 };
 
-// Карта русских названий ресурсов из ru_table_name.md
 const RESOURCE_LABELS: Record<string, string> = {
   orders_view: "Заказы",
   calendar: "Календарь",
   clients: "Клиенты",
   suppliers: "Поставщики",
+  vendors: "Производители",
+  film_vendors: "Производители плёнки",
   payments: "Платежи",
-  films: "Плёнки",
+  films: "Пленки",
   materials: "Материалы",
   order_resource_requirements: "Потребности заказов",
-  vendors: "Производители",
-  film_types: "Типы плёнок",
-  units: "Единицы измерения",
+  film_types: "Типы плёнки",
+  units: "Ед. измерения",
   material_types: "Типы материалов",
-  edge_types: "Типы обката",
-  milling_types: "Типы фрезеровок",
+  edge_types: "Типы кромок",
+  milling_types: "Типы фрезеровки",
   order_statuses: "Статусы заказов",
   payment_statuses: "Статусы оплат",
   production_statuses: "Статусы производства",
-  requisition_statuses: "Статусы заявок на покупку",
-  resource_requirements_statuses: "Статусы потребности заказов",
+  requisition_statuses: "Статусы заявок",
+  resource_requirements_statuses: "Статусы потребностей",
   workshops: "Цеха",
   work_centers: "Участки цехов",
-  payment_types: "Типы оплаты",
-  transaction_direction: "Типы направлений движений",
+  payment_types: "Типы оплат",
+  transaction_direction: "Направления движения",
   material_transaction_types: "Типы движений материалов",
   employees: "Сотрудники",
   users: "Пользователи",
   movements_statuses: "Статусы движений",
-  order_workshops: "Цеха заказов",
+  order_workshops: "Цеха заказа",
 };
 
-// Карта категорий из ru_table_name.md
 const CATEGORY_MAP: Record<string, string> = {
-  // Контрагенты
   clients: "Контрагенты",
   suppliers: "Контрагенты",
   vendors: "Контрагенты",
-
-  // Финансы
+  film_vendors: "Контрагенты",
   payments: "Финансы",
-
-  // Производство
+  order_workshops: "Производство",
   workshops: "Производство",
   work_centers: "Производство",
-  order_workshops: "Производство",
-
-  // Материалы
   films: "Материалы",
   materials: "Материалы",
-
-  // Закуп
-  order_resource_requirements: "Закуп",
-
-  // Настройки (только для администраторов)
   employees: "Настройки",
   users: "Настройки",
-
-  // Справочники (все остальное)
-  film_types: "Справочники",
-  units: "Справочники",
-  material_types: "Справочники",
-  edge_types: "Справочники",
-  milling_types: "Справочники",
-  order_statuses: "Справочники",
-  payment_statuses: "Справочники",
-  production_statuses: "Справочники",
-  requisition_statuses: "Справочники",
-  resource_requirements_statuses: "Справочники",
-  payment_types: "Справочники",
-  transaction_direction: "Справочники",
-  material_transaction_types: "Справочники",
-  movements_statuses: "Справочники",
 };
 
 export const CustomSider: React.FC = () => {
@@ -163,107 +142,76 @@ export const CustomSider: React.FC = () => {
   const { push } = useNavigation();
   const location = useLocation();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
-  // Получаем текущего пользователя для проверки прав доступа
-  const currentUser = useMemo(() => {
-    return authStorage.getUser();
-  }, []);
+  const currentUser = useMemo(() => authStorage.getUser(), []);
+  const isAdmin = useMemo(() => currentUser?.role_id === 1 || currentUser?.role === "admin", [currentUser]);
 
-  // Проверка: является ли пользователь администратором (role_id=1 или role="admin")
-  const isAdmin = useMemo(() => {
-    return currentUser?.role_id === 1 || currentUser?.role === "admin";
-  }, [currentUser]);
-
-  // Группируем ресурсы по категориям
   const categorizedResources = useMemo(() => {
-    const categories: Record<string, Array<{ name: string; label: string; route: string }>> = {
-      "Контрагенты": [],
-      "Финансы": [],
-      "Производство": [], // Добавляем категорию Производство
-      "Материалы": [],
-      "Закуп": [],
-      "Справочники": [],
-      "Настройки": [], // Добавляем категорию Настройки
-    };
+    const categories: Record<string, Array<{ name: string; label: string; route: string }>> = CATEGORY_ORDER.reduce(
+      (acc, cat) => ({ ...acc, [cat]: [] as Array<{ name: string; label: string; route: string }> }),
+      {} as Record<string, Array<{ name: string; label: string; route: string }>>,
+    );
 
     resources.forEach((resource) => {
-      // Пропускаем orders_view и calendar - они будут отдельными пунктами
       if (resource.name === "orders_view" || resource.name === "calendar") return;
-
       const category = CATEGORY_MAP[resource.name] || "Справочники";
       const label = RESOURCE_LABELS[resource.name] || resource.meta?.label || resource.name;
-
-      // Получаем маршрут из resource.list или формируем из meta
       let route = "";
       if (typeof resource.list === "string") {
         route = resource.list;
       } else if (resource.meta?.route) {
         route = resource.meta.route;
       }
-
       if (route) {
-        categories[category].push({
-          name: resource.name,
-          label,
-          route,
-        });
+        categories[category].push({ name: resource.name, label, route });
       }
     });
 
-    // Сортируем внутри категорий по алфавиту
-    Object.keys(categories).forEach((cat) => {
+    CATEGORY_ORDER.forEach((cat) => {
       categories[cat].sort((a, b) => a.label.localeCompare(b.label, "ru"));
     });
 
     return categories;
   }, [resources, isAdmin]);
 
-  // Определяем выбранный пункт меню
   const selectedKey = useMemo(() => {
-    const resource = resources.find((r) => {
-      if (typeof r.list === "string") {
-        return location.pathname.startsWith(r.list);
-      }
-      return false;
-    });
+    const resource = resources.find((r) => typeof r.list === "string" && location.pathname.startsWith(r.list as string));
     return resource?.name || "";
   }, [location.pathname, resources]);
 
-  // Orders - отдельный пункт меню сверху
   const ordersResource = resources.find((r) => r.name === "orders_view");
   const ordersRoute = typeof ordersResource?.list === "string" ? ordersResource.list : "/orders";
   const ordersLabel = RESOURCE_LABELS["orders_view"] || "Заказы";
 
-  // Calendar - отдельный пункт меню после Orders
   const calendarResource = resources.find((r) => r.name === "calendar");
   const calendarRoute = typeof calendarResource?.list === "string" ? calendarResource.list : "/calendar";
   const calendarLabel = RESOURCE_LABELS["calendar"] || "Календарь";
 
   const topMenuItems: MenuProps["items"] = [
-    {
-      key: "orders_view",
-      icon: RESOURCE_ICONS["orders_view"],
-      label: ordersLabel,
-      onClick: () => push(ordersRoute),
-    },
-    {
-      key: "calendar",
-      icon: RESOURCE_ICONS["calendar"],
-      label: calendarLabel,
-      onClick: () => push(calendarRoute),
-    },
+    { key: "orders_view", icon: RESOURCE_ICONS["orders_view"], label: ordersLabel, onClick: () => push(ordersRoute) },
+    { key: "calendar", icon: RESOURCE_ICONS["calendar"], label: calendarLabel, onClick: () => push(calendarRoute) },
   ];
 
   const handleNewOrder = () => {
-    // Сначала переходим на страницу списка заказов
     push(ordersRoute);
-    // Затем открываем модалку
     setIsCreateModalOpen(true);
   };
 
+  const flatMenuItems: MenuProps["items"] = CATEGORY_ORDER.flatMap((category) => {
+    if (category === "Системные" && !isAdmin) return [];
+    const items = categorizedResources[category];
+    if (!items || items.length === 0) return [];
+    return items.map((item) => ({
+      key: item.name,
+      icon: RESOURCE_ICONS[item.name],
+      label: item.label,
+      onClick: () => push(item.route),
+    }));
+  });
+
   return (
-    <AntLayout.Sider collapsible>
-      {/* Заголовок приложения */}
+    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={(val) => setCollapsed(val)}>
       <div
         style={{
           padding: "16px",
@@ -272,20 +220,18 @@ export const CustomSider: React.FC = () => {
           borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
         }}
       >
-        <Title
-          level={4}
-          style={{
-            color: "white",
-            margin: 0,
-            fontWeight: 600,
-          }}
-        >
-          <span>ERP Zhihaz </span>
-          <span style={{ fontSize: "0.8em", fontWeight: 400 }}>v.0.5</span>
+        <Title level={4} style={{ color: "white", margin: 0, fontWeight: 600 }}>
+          {collapsed ? (
+            <span>ERP</span>
+          ) : (
+            <>
+              <span>ERP Zhihaz </span>
+              <span style={{ fontSize: "0.8em", fontWeight: 400 }}>v.0.5</span>
+            </>
+          )}
         </Title>
       </div>
 
-      {/* Область меню с темно-серым фоном */}
       <div
         style={{
           background: "#37474F",
@@ -295,152 +241,88 @@ export const CustomSider: React.FC = () => {
           padding: "8px 0",
         }}
       >
-        {/* Заказы и Календарь */}
         <Menu
           mode="inline"
+          inlineCollapsed={collapsed}
           selectedKeys={selectedKey === "orders_view" || selectedKey === "calendar" ? [selectedKey] : []}
           items={topMenuItems}
-          style={{
-            background: "transparent",
-            border: "none",
-            marginBottom: 0,
-            color: "#E0E0E0",
-          }}
+          style={{ background: "transparent", border: "none", marginBottom: 0, color: "#E0E0E0" }}
           className="orders-menu"
         />
 
-        {/* Кнопка "Новый Заказ" */}
         <div style={{ padding: "8px 16px", marginTop: "72px" }}>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleNewOrder}
-            block
-            style={{ marginBottom: 8 }}
-          >
-            Новый Заказ
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleNewOrder} block style={{ marginBottom: 8 }}>
+            {!collapsed && "Создать заказ"}
           </Button>
         </div>
 
-        {/* Группированные категории */}
-        <Collapse
-          accordion
-          ghost
-          defaultActiveKey={undefined}
-          style={{ background: "transparent", border: "none" }}
-          className="sidebar-collapse"
-        >
-          {Object.entries(categorizedResources).map(([category, items]) => {
-            // Пропускаем пустые категории
-            if (items.length === 0) return null;
+        {collapsed ? (
+          <Menu
+            mode="inline"
+            inlineCollapsed={collapsed}
+            selectedKeys={selectedKey ? [selectedKey] : []}
+            items={flatMenuItems}
+            style={{ border: "none", background: "transparent", fontSize: "0.98em" }}
+          />
+        ) : (
+          <Collapse accordion ghost defaultActiveKey={undefined} style={{ background: "transparent", border: "none" }} className="sidebar-collapse">
+            {CATEGORY_ORDER.map((category) => {
+              const items = categorizedResources[category];
+              if (!items || items.length === 0) return null;
+              if (category === "Системные" && !isAdmin) return null;
 
-            // Пропускаем категорию "Настройки" если пользователь не администратор
-            if (category === "Настройки" && !isAdmin) return null;
+              const categoryItems: MenuProps["items"] = items.map((item) => ({
+                key: item.name,
+                icon: RESOURCE_ICONS[item.name],
+                label: item.label,
+                onClick: () => push(item.route),
+              }));
 
-            // Создаем пункты меню для категории
-            const categoryItems: MenuProps["items"] = items.map((item) => ({
-              key: item.name,
-              icon: RESOURCE_ICONS[item.name],
-              label: item.label,
-              onClick: () => push(item.route),
-            }));
+              const isSelected = items.some((item) => item.name === selectedKey);
 
-            // Проверяем, выбран ли какой-то пункт в этой категории
-            const isSelected = items.some((item) => item.name === selectedKey);
-
-            return (
-              <Panel
-                header={
-                  <span>
-                    <span style={{ marginRight: '8px' }}>{CATEGORY_ICONS[category]}</span>
-                    {category}
-                  </span>
-                }
-                key={category}
-                style={{
-                  color: "#E0E0E0",
-                }}
-              >
-                <Menu
-                  mode="inline"
-                  selectedKeys={isSelected ? [selectedKey] : []}
-                  items={categoryItems}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    fontSize: "0.98em", // Увеличено на 15% от предыдущего размера
-                  }}
-                />
-              </Panel>
-            );
-          })}
-        </Collapse>
+              return (
+                <Panel
+                  header={
+                    <span>
+                      <span style={{ marginRight: "8px" }}>{CATEGORY_ICONS[category]}</span>
+                      {category}
+                    </span>
+                  }
+                  key={category}
+                  style={{ color: "#E0E0E0" }}
+                >
+                  <Menu
+                    mode="inline"
+                    selectedKeys={isSelected ? [selectedKey] : []}
+                    items={categoryItems}
+                    style={{ border: "none", background: "transparent", fontSize: "0.98em" }}
+                  />
+                </Panel>
+              );
+            })}
+          </Collapse>
+        )}
       </div>
 
-      {/* Модалка создания заказа */}
-      <OrderCreateModal
-        open={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-      />
+      <OrderCreateModal open={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} />
 
       <style>{`
-        /* Стили для скроллбара в меню */
-        .ant-layout-sider ::-webkit-scrollbar {
-          width: 6px;
-        }
-        .ant-layout-sider ::-webkit-scrollbar-track {
-          background: #263238;
-        }
-        .ant-layout-sider ::-webkit-scrollbar-thumb {
-          background: #546E7A;
-          border-radius: 3px;
-        }
-        .ant-layout-sider ::-webkit-scrollbar-thumb:hover {
-          background: #607D8B;
-        }
+        .ant-layout-sider ::-webkit-scrollbar { width: 6px; }
+        .ant-layout-sider ::-webkit-scrollbar-track { background: #263238; }
+        .ant-layout-sider ::-webkit-scrollbar-thumb { background: #546E7A; border-radius: 3px; }
+        .ant-layout-sider ::-webkit-scrollbar-thumb:hover { background: #607D8B; }
 
-        /* Стили для меню Заказы */
-        .orders-menu .ant-menu-item {
-          color: #E0E0E0 !important;
-          font-size: 14px !important;
-          font-weight: 500;
-          letter-spacing: 1px !important;
-        }
-        .orders-menu .ant-menu-item:hover {
-          color: #90CAF9 !important;
-        }
-        .orders-menu .ant-menu-item-selected {
-          background-color: rgba(144, 202, 249, 0.2) !important;
-          color: #90CAF9 !important;
-        }
+        .orders-menu .ant-menu-item { color: #E0E0E0 !important; font-size: 14px !important; font-weight: 500; letter-spacing: 1px !important; }
+        .orders-menu .ant-menu-item:hover { color: #90CAF9 !important; }
+        .orders-menu .ant-menu-item-selected { background-color: rgba(144, 202, 249, 0.2) !important; color: #90CAF9 !important; }
 
-        /* Стили для аккордеона */
-        .sidebar-collapse .ant-collapse-header {
-          color: #E0E0E0 !important;
-          font-weight: 500;
-          letter-spacing: 1px !important;
-        }
-        .sidebar-collapse .ant-collapse-header:hover {
-          color: #90CAF9 !important;
-        }
-        .sidebar-collapse .ant-collapse-expand-icon {
-          color: #E0E0E0 !important;
-        }
-        .sidebar-collapse .ant-menu-item {
-          font-size: 0.98em; /* Увеличено на 15% от предыдущего размера (0.85em * 1.15) */
-          color: #E0E0E0 !important;
-          letter-spacing: 1px !important;
-        }
-        .sidebar-collapse .ant-menu-item:hover {
-          color: #90CAF9 !important;
-        }
-        .sidebar-collapse .ant-menu-item-selected {
-          background-color: rgba(144, 202, 249, 0.2) !important;
-          color: #90CAF9 !important;
-        }
-        .sidebar-collapse .ant-collapse-content {
-          background: transparent !important;
-        }
+        .sidebar-collapse .ant-collapse-header { color: #E0E0E0 !important; font-weight: 500; letter-spacing: 1px !important; }
+        .sidebar-collapse .ant-collapse-header:hover { color: #90CAF9 !important; }
+        .sidebar-collapse .ant-collapse-expand-icon { color: #E0E0E0 !important; }
+        .sidebar-collapse .ant-menu-item { font-size: 0.98em; color: #E0E0E0 !important; letter-spacing: 1px !important; }
+        .sidebar-collapse .ant-menu-item:hover { color: #90CAF9 !important; }
+        .sidebar-collapse .ant-menu-item-selected { background-color: rgba(144, 202, 249, 0.2) !important; color: #90CAF9 !important; }
+        .sidebar-collapse .ant-collapse-content { background: transparent !important; }
       `}</style>
     </AntLayout.Sider>
   );

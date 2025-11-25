@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Spin, Alert, Button, Space, Segmented } from 'antd';
-import { LeftOutlined, RightOutlined, CalendarOutlined } from '@ant-design/icons';
+import { Spin, Alert, Button, Space, Segmented, Tooltip } from 'antd';
+import { LeftOutlined, RightOutlined, CalendarOutlined, ZoomInOutlined, ZoomOutOutlined, UndoOutlined } from '@ant-design/icons';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import DayColumn from './DayColumn';
@@ -25,6 +25,9 @@ const CalendarBoard: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(1200);
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.STANDARD);
+  // Масштабирование карточек: 0.72 = дефолт (72%), от 1.0 (100%) до 1.44 (144%)
+  const [cardScale, setCardScale] = useState<number>(0.72);
+  const DEFAULT_SCALE = 0.72;
 
   // Генерация дней календаря
   const { days, startDate, endDate, goToToday, goForward, goBackward } =
@@ -92,6 +95,22 @@ const CalendarBoard: React.FC = () => {
     });
   };
 
+  // Обработчики масштабирования карточек
+  const handleZoomIn = () => {
+    setCardScale((prev) => Math.min(prev + 0.14, 1.44)); // Максимум 144% (шаг ~14%)
+  };
+
+  const handleZoomOut = () => {
+    setCardScale((prev) => Math.max(prev - 0.14, 1.0)); // Минимум 100% (шаг ~14%)
+  };
+
+  const handleZoomReset = () => {
+    setCardScale(DEFAULT_SCALE); // Дефолт 72%
+  };
+
+  // Проверка, доступно ли масштабирование для текущего режима
+  const isZoomAvailable = viewMode === ViewMode.STANDARD || viewMode === ViewMode.COMPACT;
+
   // Отслеживаем размер контейнера для адаптивного layout
   useEffect(() => {
     if (!containerRef.current) return;
@@ -115,10 +134,10 @@ const CalendarBoard: React.FC = () => {
     };
   }, []);
 
-  // Вычисляем layout (количество колонок и их ширину)
+  // Вычисляем layout (количество колонок и их ширину) с учетом масштаба
   const { columnWidth, columnsPerRow } = useMemo(() => {
-    return calculateColumnsPerRow(containerWidth, isMobileDevice(containerWidth));
-  }, [containerWidth]);
+    return calculateColumnsPerRow(containerWidth, isMobileDevice(containerWidth), cardScale);
+  }, [containerWidth, cardScale]);
 
   // Группируем дни по рядам
   const dayRows = useMemo(() => {
@@ -174,7 +193,7 @@ const CalendarBoard: React.FC = () => {
               Обновить
             </Button>
           </Space>
-          
+
           {/* Переключатель режимов отображения */}
           <Segmented
             options={[
@@ -185,6 +204,36 @@ const CalendarBoard: React.FC = () => {
             value={viewMode}
             onChange={(value) => setViewMode(value as ViewMode)}
           />
+
+          {/* Кнопки масштабирования (только для стандартного и компактного вида) */}
+          {isZoomAvailable && (
+            <Space size="small">
+              <Tooltip title="Уменьшить">
+                <Button
+                  icon={<ZoomOutOutlined />}
+                  onClick={handleZoomOut}
+                  disabled={cardScale <= 1.0}
+                />
+              </Tooltip>
+              <Tooltip title="Сбросить масштаб">
+                <Button
+                  icon={<UndoOutlined />}
+                  onClick={handleZoomReset}
+                  disabled={Math.abs(cardScale - DEFAULT_SCALE) < 0.01}
+                />
+              </Tooltip>
+              <Tooltip title="Увеличить">
+                <Button
+                  icon={<ZoomInOutlined />}
+                  onClick={handleZoomIn}
+                  disabled={cardScale >= 1.44}
+                />
+              </Tooltip>
+              <span style={{ fontSize: '12px', color: '#8c8c8c', minWidth: '40px', textAlign: 'center' }}>
+                {Math.round(cardScale * 100)}%
+              </span>
+            </Space>
+          )}
         </Space>
       </div>
 
@@ -213,6 +262,7 @@ const CalendarBoard: React.FC = () => {
                     onDrop={handleDrop}
                     onContextMenu={handleContextMenu}
                     viewMode={viewMode}
+                    cardScale={cardScale}
                   />
                 );
               })}

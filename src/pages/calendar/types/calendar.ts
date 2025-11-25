@@ -140,6 +140,7 @@ export interface DayColumnProps {
   orders: CalendarOrder[];
   columnWidth: number;
   viewMode?: ViewMode;
+  cardScale?: number; // Масштаб карточек (от 0.7 до 1.0)
   onDrop?: (item: DragItem, targetDate: Date, targetDateKey: string) => void;
   onOrderDrop?: (order: CalendarOrder, sourceDate: string, targetDate: string) => void;
   onOrderClick?: (order: CalendarOrder) => void;
@@ -153,6 +154,7 @@ export interface DayColumnProps {
 export interface OrderCardProps {
   order: CalendarOrder;
   sourceDate: string;
+  cardScale?: number; // Масштаб карточки (от 0.7 до 1.0)
   onContextMenu?: (e: React.MouseEvent, order: CalendarOrder) => void;
   onDoubleTap?: (e: React.TouchEvent, order: CalendarOrder) => void;
   onCheckboxChange?: (order: CalendarOrder, isChecked: boolean) => void;

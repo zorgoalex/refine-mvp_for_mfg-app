@@ -33,11 +33,13 @@ export interface LayoutCalculation {
  * Вычисляет количество колонок в ряду и их ширину
  * @param containerWidth - ширина контейнера календаря
  * @param isMobile - является ли устройство мобильным
+ * @param cardScale - масштаб карточек (от 1.0 до 1.44)
  * @returns объект с шириной колонки и количеством колонок в ряду
  */
 export function calculateColumnsPerRow(
   containerWidth: number,
-  isMobile: boolean = false
+  isMobile: boolean = false,
+  cardScale: number = 1.0
 ): LayoutCalculation {
   const {
     MOBILE_MIN_COLUMN_WIDTH,
@@ -51,11 +53,14 @@ export function calculateColumnsPerRow(
   const availableWidth = containerWidth - CONTAINER_PADDING;
 
   if (isMobile) {
-    // Мобильные устройства: адаптивный расчет
+    // Мобильные устройства: адаптивный расчет с учетом масштаба
+    const scaledMinWidth = MOBILE_MIN_COLUMN_WIDTH * cardScale;
+    const scaledMaxWidth = MOBILE_MAX_COLUMN_WIDTH * cardScale;
+
     // Очень узкие экраны - 2 колонки минимальной ширины
-    if (availableWidth < MOBILE_MIN_COLUMN_WIDTH * 2 + COLUMN_GAP) {
+    if (availableWidth < scaledMinWidth * 2 + COLUMN_GAP) {
       const width = Math.max(
-        MOBILE_MIN_COLUMN_WIDTH,
+        scaledMinWidth,
         Math.floor((availableWidth - COLUMN_GAP) / 2)
       );
       return { columnWidth: width, columnsPerRow: 2 };
@@ -63,25 +68,29 @@ export function calculateColumnsPerRow(
 
     // Более широкие мобильные экраны - автоматический расчет
     let cols = Math.floor(
-      (availableWidth + COLUMN_GAP) / (MOBILE_MIN_COLUMN_WIDTH + COLUMN_GAP)
+      (availableWidth + COLUMN_GAP) / (scaledMinWidth + COLUMN_GAP)
     );
     cols = Math.max(2, Math.min(cols, 3)); // от 2 до 3 колонок на мобильных
 
     const width = Math.min(
-      MOBILE_MAX_COLUMN_WIDTH,
+      scaledMaxWidth,
       Math.floor((availableWidth - COLUMN_GAP * (cols - 1)) / cols)
     );
 
     return { columnWidth: width, columnsPerRow: cols };
   }
 
-  // Десктоп и планшеты: используем фиксированную ширину
+  // Десктоп и планшеты: адаптивный расчет с учетом масштаба карточек
+  // Масштабированная ширина колонки
+  const scaledColumnWidth = DESKTOP_COLUMN_WIDTH * cardScale;
+
+  // Вычисляем количество колонок, которые поместятся с учетом масштаба
   const cols = Math.max(
     1,
-    Math.floor((availableWidth + COLUMN_GAP) / (DESKTOP_COLUMN_WIDTH + COLUMN_GAP))
+    Math.floor((availableWidth + COLUMN_GAP) / (scaledColumnWidth + COLUMN_GAP))
   );
 
-  return { columnWidth: DESKTOP_COLUMN_WIDTH, columnsPerRow: cols };
+  return { columnWidth: scaledColumnWidth, columnsPerRow: cols };
 }
 
 /**
