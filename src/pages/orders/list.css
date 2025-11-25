@@ -6,7 +6,7 @@
 
 /* Уменьшенный размер шрифта для заголовков */
 .orders-table .ant-table-thead > tr > th {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .orders-table td.orders-col {

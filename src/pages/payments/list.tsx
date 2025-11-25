@@ -1,14 +1,22 @@
 ﻿import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
-import { useTable, ShowButton, EditButton } from "@refinedev/antd";
-import { Space, Table } from "antd";
-import { useMemo } from "react";
+import { useTable, ShowButton, EditButton, List, useSelect } from "@refinedev/antd";
+import { Space, Table, Button, Form, Row, Col, Select, DatePicker, InputNumber, Card } from "antd";
+import { useMemo, useState } from "react";
+import { FilterOutlined, ClearOutlined } from "@ant-design/icons";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
-import { LocalizedList } from "../../components/LocalizedList";
+import dayjs from "dayjs";
+import "./list.css";
+
+const { RangePicker } = DatePicker;
 
 export const PaymentList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const [form] = Form.useForm();
+  const [filtersVisible, setFiltersVisible] = useState(false);
+
+  const { tableProps, filters, setFilters } = useTable({
     syncWithLocation: true,
     sorters: { initial: [{ field: "payment_id", order: "desc" }] },
+    pagination: { pageSize: 10 },
   });
   const { highlightProps } = useHighlightRow("payment_id", tableProps.dataSource);
   const { show } = useNavigation();
@@ -37,13 +45,172 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
     return map;
   }, [typesData]);
 
+  // useSelect для справочников в фильтрах
+  const { selectProps: orderSelectProps } = useSelect({
+    resource: "orders",
+    optionLabel: "order_name",
+    optionValue: "order_id",
+  });
+
+  const { selectProps: typeSelectProps } = useSelect({
+    resource: "payment_types",
+    optionLabel: "type_paid_name",
+    optionValue: "type_paid_id",
+  });
+
+  const { selectProps: userSelectProps } = useSelect({
+    resource: "users",
+    optionLabel: "username",
+    optionValue: "user_id",
+  });
+
+  // Применение фильтров
+  const handleFilter = (values: any) => {
+    const newFilters: any[] = [];
+
+    if (values.order_id) {
+      newFilters.push({ field: "order_id", operator: "eq", value: values.order_id });
+    }
+
+    if (values.date_range && values.date_range.length === 2) {
+      newFilters.push({
+        field: "payment_date",
+        operator: "gte",
+        value: values.date_range[0].format("YYYY-MM-DD"),
+      });
+      newFilters.push({
+        field: "payment_date",
+        operator: "lte",
+        value: values.date_range[1].format("YYYY-MM-DD"),
+      });
+    }
+
+    if (values.amount_min !== undefined && values.amount_min !== null) {
+      newFilters.push({ field: "amount", operator: "gte", value: values.amount_min });
+    }
+
+    if (values.amount_max !== undefined && values.amount_max !== null) {
+      newFilters.push({ field: "amount", operator: "lte", value: values.amount_max });
+    }
+
+    if (values.type_paid_id) {
+      newFilters.push({ field: "type_paid_id", operator: "eq", value: values.type_paid_id });
+    }
+
+    if (values.created_by) {
+      newFilters.push({ field: "created_by", operator: "eq", value: values.created_by });
+    }
+
+    setFilters(newFilters);
+  };
+
+  // Сброс фильтров
+  const handleClearFilters = () => {
+    form.resetFields();
+    setFilters([], "replace");
+  };
+
   return (
-    <LocalizedList title="Платежи">
+    <List
+      title="Платежи"
+      headerButtons={({ defaultButtons }) => (
+        <>
+          <Button
+            type={filtersVisible ? "primary" : "default"}
+            icon={<FilterOutlined />}
+            onClick={() => setFiltersVisible(!filtersVisible)}
+          >
+            {filtersVisible ? "Скрыть фильтры" : "Фильтры"}
+          </Button>
+          {defaultButtons}
+        </>
+      )}
+    >
+      {filtersVisible && (
+        <Card style={{ marginBottom: 16 }}>
+          <Form form={form} layout="vertical" onFinish={handleFilter}>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Form.Item name="order_id" label="Заказ">
+                  <Select
+                    {...orderSelectProps}
+                    allowClear
+                    placeholder="Выберите заказ"
+                    showSearch
+                    filterOption={(input, option) =>
+                      (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={6}>
+                <Form.Item name="date_range" label="Период дат">
+                  <RangePicker style={{ width: "100%" }} format="DD.MM.YYYY" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Form.Item name="amount_min" label="Сумма от">
+                  <InputNumber
+                    style={{ width: "100%" }}
+                    placeholder="Мин"
+                    min={0}
+                    precision={0}
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Form.Item name="amount_max" label="Сумма до">
+                  <InputNumber
+                    style={{ width: "100%" }}
+                    placeholder="Макс"
+                    min={0}
+                    precision={0}
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={3}>
+                <Form.Item name="type_paid_id" label="Тип оплаты">
+                  <Select
+                    {...typeSelectProps}
+                    allowClear
+                    placeholder="Тип"
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={3}>
+                <Form.Item name="created_by" label="Создал">
+                  <Select
+                    {...userSelectProps}
+                    allowClear
+                    placeholder="Пользователь"
+                    showSearch
+                    filterOption={(input, option) =>
+                      (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row>
+              <Col>
+                <Space>
+                  <Button type="primary" htmlType="submit" icon={<FilterOutlined />}>
+                    Применить
+                  </Button>
+                  <Button onClick={handleClearFilters} icon={<ClearOutlined />}>
+                    Сбросить
+                  </Button>
+                </Space>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
+      )}
       <Table
         {...tableProps}
         {...highlightProps}
         rowKey="payment_id"
-        onRow={(record) => ({
+        onRow={(record: any) => ({
           onDoubleClick: () => {
             show("payments", record.payment_id);
           },
@@ -74,6 +241,6 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
-    </LocalizedList>
+    </List>
   );
 };

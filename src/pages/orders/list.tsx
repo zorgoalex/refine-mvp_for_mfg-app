@@ -427,7 +427,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="milling_type_name"
             title="Фрезеровка"
-            width={100}
+            width={90}
             className="orders-col orders-col--wrap"
             render={(_, record: any) => {
               const millingTypeId = getCommonValue(record.order_id, "milling_type_id");
@@ -437,7 +437,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="material_name"
             title="Материал"
-            width={100}
+            width={90}
             className="orders-col orders-col--wrap"
             render={(_, record: any) => getMaterialsList(record.order_id)}
           />
