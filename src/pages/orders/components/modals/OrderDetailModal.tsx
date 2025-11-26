@@ -116,10 +116,13 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         form.setFieldsValue({
           quantity: 1,
           priority: 100,
+          material_id: 1, // МДФ 16мм
+          milling_type_id: 1, // Модерн
+          edge_type_id: 1, // р-1
         });
         setCalculatedArea(0);
         setCalculatedCost(0);
-        setSelectedMaterialId(null);
+        setSelectedMaterialId(1);
         setDimensionValidationError(null);
       }
     }
@@ -468,7 +471,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           </Col>
           <Col span={12}>
             <Form.Item
-              label="Тип кромки"
+              label="Тип обката"
               name="edge_type_id"
               rules={[{ required: true, message: 'Обязательное поле' }]}
             >
@@ -485,7 +488,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                         onClick={() => setEdgeTypeModalOpen(true)}
                         style={{ width: '100%', textAlign: 'left' }}
                       >
-                        Создать тип кромки
+                        Создать тип обката
                       </Button>
                     </div>
                   </>
