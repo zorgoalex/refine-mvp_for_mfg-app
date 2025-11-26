@@ -37,7 +37,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps, current, pageSize, setCurrent, sorters, setSorters } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "order_date", order: "desc" }],
+      initial: [
+        { field: "order_date", order: "desc" },
+      ],
+      permanent: [
+        { field: "order_id", order: "desc" }
+      ],
     },
     pagination: {
       mode: "server",
