@@ -154,23 +154,28 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     }
   };
 
-  // Auto-calculate area when height or width changes
+  // Auto-calculate area when height, width or quantity changes
   const handleDimensionChange = () => {
     const height = form.getFieldValue('height');
     const width = form.getFieldValue('width');
+    const quantity = form.getFieldValue('quantity') || 1;
 
-    console.log('[OrderDetailModal] handleDimensionChange - height:', height, 'width:', width);
+    console.log('[OrderDetailModal] handleDimensionChange - height:', height, 'width:', width, 'quantity:', quantity);
 
-    if (height && width && height > 0 && width > 0) {
-      const area = (height * width) / 1000000; // Convert mm² to m²
-      console.log('[OrderDetailModal] calculated area:', area);
+    if (height && width && height > 0 && width > 0 && quantity > 0) {
+      // Formula: ROUNDUP((height_mm / 1000) * (width_mm / 1000) * quantity, 2)
+      const areaPerPiece = (height / 1000) * (width / 1000);
+      const totalArea = areaPerPiece * quantity;
+      // Round UP to 2 decimal places: Math.ceil(value * 100) / 100
+      const area = Math.ceil(totalArea * 100) / 100;
+      console.log('[OrderDetailModal] calculated area:', area, '(per piece:', areaPerPiece, ', total before rounding:', totalArea, ')');
       setCalculatedArea(area);
       form.setFieldsValue({ area });
 
       // Also recalculate cost when area changes
       handleCostCalculation(area);
     } else {
-      console.log('[OrderDetailModal] cannot calculate area - invalid dimensions');
+      console.log('[OrderDetailModal] cannot calculate area - invalid dimensions or quantity');
     }
 
     // Validate dimensions against material limits
@@ -318,6 +323,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <InputNumber
                 style={{ width: '100%' }}
                 min={1}
+                onChange={handleDimensionChange}
               />
             </Form.Item>
           </Col>

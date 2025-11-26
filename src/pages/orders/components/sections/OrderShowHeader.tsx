@@ -181,12 +181,16 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
 
         {/* Column 3: Discounted amount + discount % */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-          <Text strong style={{ fontSize: 14, color: '#4F46E5' }}>
-            {formatNumber(record?.discounted_amount || 0, 2)} {CURRENCY_SYMBOL}
-          </Text>
-          <Text style={{ fontSize: 13, color: '#DC2626' }}>
-            -{formatNumber(record?.discount || 0, 1)}%
-          </Text>
+          {(record?.discounted_amount != null && Number(record.discounted_amount) > 0) && (
+            <Text strong style={{ fontSize: 14, color: '#4F46E5' }}>
+              {formatNumber(record.discounted_amount, 2)} {CURRENCY_SYMBOL}
+            </Text>
+          )}
+          {(record?.discount != null && Number(record.discount) > 0) && (
+            <Text style={{ fontSize: 13, color: '#DC2626' }}>
+              -{formatNumber(record.discount, 1)}%
+            </Text>
+          )}
         </div>
       </div>
 

@@ -262,20 +262,16 @@ export const OrderHeaderSummary: React.FC = () => {
 
         {/* Column 3: Discounted amount + discount % */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-          {(header.discounted_amount && Number(header.discounted_amount) > 0) || (header.discount && Number(header.discount) > 0) ? (
-            <>
-              {header.discounted_amount && Number(header.discounted_amount) > 0 && (
-                <Text strong style={{ fontSize: 14, color: '#4F46E5' }}>
-                  {formatNumber(header.discounted_amount, 2)} {CURRENCY_SYMBOL}
-                </Text>
-              )}
-              {header.discount && Number(header.discount) > 0 && (
-                <Text style={{ fontSize: 13, color: '#DC2626' }}>
-                  -{formatNumber(header.discount, 1)}%
-                </Text>
-              )}
-            </>
-          ) : null}
+          {(header.discounted_amount != null && Number(header.discounted_amount) > 0) && (
+            <Text strong style={{ fontSize: 14, color: '#4F46E5' }}>
+              {formatNumber(header.discounted_amount, 2)} {CURRENCY_SYMBOL}
+            </Text>
+          )}
+          {(header.discount != null && Number(header.discount) > 0) && (
+            <Text style={{ fontSize: 13, color: '#DC2626' }}>
+              -{formatNumber(header.discount, 1)}%
+            </Text>
+          )}
         </div>
       </div>
 
