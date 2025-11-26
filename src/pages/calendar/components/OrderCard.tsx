@@ -97,6 +97,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
         backgroundColor,
         cursor: 'move',
         opacity: isDragging ? 0.5 : 1,
+        width: `${100 / cardScale}%`, // Компенсируем scale, чтобы после transform вписаться в колонку
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
         marginBottom: cardScale < 1 ? `${(1 - cardScale) * -40}px` : undefined, // Компенсируем уменьшение высоты
