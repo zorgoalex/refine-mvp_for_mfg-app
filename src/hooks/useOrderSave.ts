@@ -276,8 +276,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
           if (payment.payment_id) {
             // Update only if changed
             const original = originalPayments[payment.payment_id];
-            // Exclude payment_id, temp_id from variables for update
-            const { payment_id, temp_id, ...paymentData } = payment;
+            // Exclude payment_id, temp_id and audit fields from variables for update
+            const { payment_id, temp_id, created_at, updated_at, created_by, edited_by, ...paymentData } = payment;
             const updateData = {
               ...paymentData,
               order_id: createdOrderId,
@@ -321,8 +321,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
       if (values.workshops && values.workshops.length > 0) {
         const workshopPromises = values.workshops.map((workshop) => {
           if (workshop.order_workshop_id) {
-            // Update existing workshop - exclude order_workshop_id, temp_id from variables
-            const { order_workshop_id, temp_id, ...workshopData } = workshop;
+            // Update existing workshop - exclude order_workshop_id, temp_id and audit fields from variables
+            const { order_workshop_id, temp_id, created_at, updated_at, created_by, edited_by, ...workshopData } = workshop;
             return dataProvider().update({
               resource: 'order_workshops',
               id: workshop.order_workshop_id,
@@ -362,8 +362,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
       if (values.requirements && values.requirements.length > 0) {
         const requirementPromises = values.requirements.map((requirement) => {
           if (requirement.requirement_id) {
-            // Update existing requirement - exclude requirement_id, temp_id from variables
-            const { requirement_id, temp_id, ...requirementData } = requirement;
+            // Update existing requirement - exclude requirement_id, temp_id and audit fields from variables
+            const { requirement_id, temp_id, created_at, updated_at, created_by, edited_by, ...requirementData } = requirement;
             return dataProvider().update({
               resource: 'order_resource_requirements',
               id: requirement.requirement_id,

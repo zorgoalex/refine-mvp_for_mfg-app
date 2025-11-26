@@ -89,17 +89,6 @@ export const orderHeaderSchema = z
   )
   .refine(
     (data) => {
-      // Validation: paid_amount <= final amount
-      const finalAmount = data.discounted_amount || data.total_amount || 0;
-      return data.paid_amount <= finalAmount;
-    },
-    {
-      message: "Оплачено больше финальной суммы заказа",
-      path: ["paid_amount"],
-    }
-  )
-  .refine(
-    (data) => {
       // Validation: completion_date >= order_date
       if (data.completion_date && data.order_date) {
         const completionDate = new Date(data.completion_date);
@@ -354,18 +343,6 @@ export const orderFormSchema = z
     {
       message: "Номера деталей должны быть уникальными",
       path: ["details"],
-    }
-  )
-  .refine(
-    (data) => {
-      // Validation: Total payments <= final order amount
-      const totalPaid = data.payments.reduce((sum, p) => sum + p.amount, 0);
-      const finalAmount = data.header.discounted_amount || data.header.total_amount || 0;
-      return totalPaid <= finalAmount;
-    },
-    {
-      message: "Сумма платежей превышает финальную сумму заказа",
-      path: ["payments"],
     }
   );
 
