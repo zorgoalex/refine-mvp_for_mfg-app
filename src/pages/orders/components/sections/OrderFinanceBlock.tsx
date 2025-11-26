@@ -55,7 +55,6 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
     return payments.reduce((sum, p: any) => sum + (p.amount || 0), 0);
   }, [payments]);
 
-  // Проверяем, совпадает ли сумма платежей с paid_amount
   const paidAmount = record?.paid_amount || 0;
   const isAmountMismatch = Math.abs(totalPaymentsAmount - paidAmount) > 0.01;
 
@@ -95,14 +94,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
           <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
             Оплачено
           </Text>
-          <Text
-            strong
-            style={{
-              fontSize: 13,
-              color: isAmountMismatch ? '#ff4d4f' : '#262626',
-              fontWeight: isAmountMismatch ? 'bold' : 'normal',
-            }}
-          >
+          <Text style={{ fontSize: 13, color: '#262626' }}>
             {formatNumber(paidAmount, 2)} {CURRENCY_SYMBOL}
           </Text>
         </div>
@@ -158,10 +150,12 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
           />
           {isAmountMismatch && (
             <Text
-              type="danger"
-              style={{ fontSize: 11, display: 'block', marginTop: 8 }}
+              style={{ fontSize: 11, display: 'block', marginTop: 8, color: '#ff4d4f' }}
             >
-              ⚠ Сумма платежей ({formatNumber(totalPaymentsAmount, 2)} {CURRENCY_SYMBOL}) не совпадает с суммой оплаты заказа
+              {totalPaymentsAmount > paidAmount
+                ? `Переплата: ${formatNumber(totalPaymentsAmount - paidAmount, 2)} ${CURRENCY_SYMBOL}`
+                : `Недоплата: ${formatNumber(paidAmount - totalPaymentsAmount, 2)} ${CURRENCY_SYMBOL}`
+              }
             </Text>
           )}
         </div>

@@ -200,23 +200,10 @@ export const OrderPaymentsTab: React.FC = () => {
     },
   ];
 
-  // Check if amounts match
-  const paidAmount = header?.paid_amount || 0;
-  const isAmountMismatch = Math.abs(totalPaymentsAmount - paidAmount) > 0.01;
-
   return (
     <Card
       size="small"
-      title={
-        <Space>
-          <span>Платежи по заказу</span>
-          {isAmountMismatch && (
-            <Text type="danger" style={{ fontSize: 12 }}>
-              ⚠ Расхождение сумм
-            </Text>
-          )}
-        </Space>
-      }
+      title="Платежи по заказу"
       extra={
         <Space>
           <Button
@@ -261,17 +248,11 @@ export const OrderPaymentsTab: React.FC = () => {
               <Text strong>Итого:</Text>
             </Table.Summary.Cell>
             <Table.Summary.Cell index={2} align="right">
-              <Text strong style={{ color: isAmountMismatch ? '#ff4d4f' : undefined }}>
+              <Text strong>
                 {formatNumber(totalPaymentsAmount, 2)} {CURRENCY_SYMBOL}
               </Text>
             </Table.Summary.Cell>
-            <Table.Summary.Cell index={3} colSpan={2}>
-              {isAmountMismatch && (
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Оплачено в заказе: {formatNumber(paidAmount, 2)} {CURRENCY_SYMBOL}
-                </Text>
-              )}
-            </Table.Summary.Cell>
+            <Table.Summary.Cell index={3} colSpan={2} />
           </Table.Summary.Row>
         )}
       />
