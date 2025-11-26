@@ -8,8 +8,8 @@ export const LAYOUT_CONFIG = {
   // Максимальная ширина колонки на мобильных устройствах
   MOBILE_MAX_COLUMN_WIDTH: 200,
 
-  // Фиксированная ширина колонки на десктопе
-  DESKTOP_COLUMN_WIDTH: 220,
+  // Базовая ширина колонки на десктопе (уменьшена на 10% для оптимальных пропорций)
+  DESKTOP_COLUMN_WIDTH: 252,
 
   // Отступ между колонками
   COLUMN_GAP: 16,
@@ -33,7 +33,7 @@ export interface LayoutCalculation {
  * Вычисляет количество колонок в ряду и их ширину
  * @param containerWidth - ширина контейнера календаря
  * @param isMobile - является ли устройство мобильным
- * @param cardScale - масштаб карточек (от 1.0 до 1.44)
+ * @param cardScale - масштаб карточек (от 0.7 до 1.5)
  * @returns объект с шириной колонки и количеством колонок в ряду
  */
 export function calculateColumnsPerRow(
@@ -80,17 +80,18 @@ export function calculateColumnsPerRow(
     return { columnWidth: width, columnsPerRow: cols };
   }
 
-  // Десктоп и планшеты: адаптивный расчет с учетом масштаба карточек
-  // Масштабированная ширина колонки
-  const scaledColumnWidth = DESKTOP_COLUMN_WIDTH * cardScale;
+  // Десктоп и планшеты: фиксированная ширина колонки, масштабирование через transform
+  // Визуальная ширина карточки после масштабирования
+  const visualCardWidth = DESKTOP_COLUMN_WIDTH * cardScale;
 
-  // Вычисляем количество колонок, которые поместятся с учетом масштаба
+  // Вычисляем количество колонок с учетом визуального размера масштабированных карточек
   const cols = Math.max(
     1,
-    Math.floor((availableWidth + COLUMN_GAP) / (scaledColumnWidth + COLUMN_GAP))
+    Math.floor((availableWidth + COLUMN_GAP) / (visualCardWidth + COLUMN_GAP))
   );
 
-  return { columnWidth: scaledColumnWidth, columnsPerRow: cols };
+  // Колонка имеет фиксированную ширину (карточки масштабируются через transform: scale)
+  return { columnWidth: DESKTOP_COLUMN_WIDTH, columnsPerRow: cols };
 }
 
 /**

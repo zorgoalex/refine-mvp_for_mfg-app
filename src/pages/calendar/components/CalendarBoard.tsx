@@ -25,9 +25,12 @@ const CalendarBoard: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(1200);
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.STANDARD);
-  // Масштабирование карточек: 0.72 = дефолт (72%), от 1.0 (100%) до 1.44 (144%)
-  const [cardScale, setCardScale] = useState<number>(0.72);
-  const DEFAULT_SCALE = 0.72;
+  // Масштабирование карточек: 1.0 = дефолт (100%), диапазон от 0.7 (70%) до 1.5 (150%)
+  const [cardScale, setCardScale] = useState<number>(1.0);
+  const DEFAULT_SCALE = 1.0;
+  const MIN_SCALE = 0.7;
+  const MAX_SCALE = 1.5;
+  const SCALE_STEP = 0.1;
 
   // Генерация дней календаря
   const { days, startDate, endDate, goToToday, goForward, goBackward } =
@@ -97,15 +100,15 @@ const CalendarBoard: React.FC = () => {
 
   // Обработчики масштабирования карточек
   const handleZoomIn = () => {
-    setCardScale((prev) => Math.min(prev + 0.14, 1.44)); // Максимум 144% (шаг ~14%)
+    setCardScale((prev) => Math.min(prev + SCALE_STEP, MAX_SCALE)); // Максимум 150% (шаг 10%)
   };
 
   const handleZoomOut = () => {
-    setCardScale((prev) => Math.max(prev - 0.14, 1.0)); // Минимум 100% (шаг ~14%)
+    setCardScale((prev) => Math.max(prev - SCALE_STEP, MIN_SCALE)); // Минимум 70% (шаг 10%)
   };
 
   const handleZoomReset = () => {
-    setCardScale(DEFAULT_SCALE); // Дефолт 72%
+    setCardScale(DEFAULT_SCALE); // Дефолт 100%
   };
 
   // Проверка, доступно ли масштабирование для текущего режима
@@ -212,7 +215,7 @@ const CalendarBoard: React.FC = () => {
                 <Button
                   icon={<ZoomOutOutlined />}
                   onClick={handleZoomOut}
-                  disabled={cardScale <= 1.0}
+                  disabled={cardScale <= MIN_SCALE}
                 />
               </Tooltip>
               <Tooltip title="Сбросить масштаб">
@@ -226,7 +229,7 @@ const CalendarBoard: React.FC = () => {
                 <Button
                   icon={<ZoomInOutlined />}
                   onClick={handleZoomIn}
-                  disabled={cardScale >= 1.44}
+                  disabled={cardScale >= MAX_SCALE}
                 />
               </Tooltip>
               <span style={{ fontSize: '12px', color: '#8c8c8c', minWidth: '40px', textAlign: 'center' }}>

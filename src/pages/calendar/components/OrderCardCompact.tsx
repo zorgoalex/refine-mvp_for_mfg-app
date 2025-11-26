@@ -55,7 +55,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
         cursor: 'move',
         opacity: isDragging ? 0.5 : 1,
         transform: `scale(${cardScale})`,
-        transformOrigin: 'top left',
+        transformOrigin: 'top center',
         marginBottom: cardScale < 1 ? `${(1 - cardScale) * -30}px` : undefined, // Компенсируем уменьшение высоты
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}

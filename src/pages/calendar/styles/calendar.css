@@ -160,7 +160,7 @@
   border-left: 4px solid #fa8c16;
   border-radius: 6px;
   padding: 10px 12px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
@@ -375,7 +375,7 @@
    ============================================ */
 .order-card--compact {
   padding: 6px 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .order-card-compact__number {
