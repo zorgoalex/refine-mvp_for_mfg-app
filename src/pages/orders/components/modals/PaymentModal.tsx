@@ -5,7 +5,7 @@ import React, { useEffect } from 'react';
 import { Modal, Form, InputNumber, Row, Col, Select, Input, DatePicker } from 'antd';
 import { useSelect } from '@refinedev/antd';
 import { Payment } from '../../../../types/orders';
-import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
+import { numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import dayjs from 'dayjs';
@@ -139,7 +139,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   placeholder="0.00"
                   min={0}
                   precision={2}
-                  formatter={(value) => numberFormatter(value, 2)}
                   parser={numberParser}
                 />
               </Form.Item>
