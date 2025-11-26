@@ -116,7 +116,7 @@ export const OrderFinanceSection: React.FC = () => {
                 min={0}
                 max={100}
                 precision={2}
-                formatter={(value) => numberFormatter(value, 2)}
+                formatter={(value) => !value || value === 0 ? '' : numberFormatter(value, 2)}
                 parser={numberParser}
                 style={{ width: '100%' }}
                 addonAfter="%"
@@ -131,7 +131,7 @@ export const OrderFinanceSection: React.FC = () => {
                 onChange={(value) => updateHeaderField('discounted_amount', value)}
                 min={0}
                 precision={2}
-                formatter={(value) => numberFormatter(value, 2)}
+                formatter={(value) => !value || value === 0 ? '' : numberFormatter(value, 2)}
                 parser={numberParser}
                 style={{ width: '100%' }}
                 addonAfter={CURRENCY_SYMBOL}
