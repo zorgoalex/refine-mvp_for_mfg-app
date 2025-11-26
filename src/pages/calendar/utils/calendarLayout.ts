@@ -9,7 +9,7 @@ export const LAYOUT_CONFIG = {
   MOBILE_MAX_COLUMN_WIDTH: 200,
 
   // Базовая ширина колонки на десктопе (оптимизирована для альбомных пропорций)
-  DESKTOP_COLUMN_WIDTH: 239,
+  DESKTOP_COLUMN_WIDTH: 216,
 
   // Отступ между колонками
   COLUMN_GAP: 16,
@@ -80,18 +80,18 @@ export function calculateColumnsPerRow(
     return { columnWidth: width, columnsPerRow: cols };
   }
 
-  // Десктоп и планшеты: ширина колонки масштабируется вместе с карточками
-  // Масштабированная ширина колонки
-  const scaledColumnWidth = DESKTOP_COLUMN_WIDTH * cardScale;
+  // Десктоп и планшеты: фиксированная ширина колонки, масштабирование только карточек
+  // Визуальная ширина карточки после масштабирования
+  const visualCardWidth = DESKTOP_COLUMN_WIDTH * cardScale;
 
-  // Вычисляем количество колонок с учетом масштабированной ширины
+  // Вычисляем количество колонок с учетом визуального размера масштабированных карточек
   const cols = Math.max(
     1,
-    Math.floor((availableWidth + COLUMN_GAP) / (scaledColumnWidth + COLUMN_GAP))
+    Math.floor((availableWidth + COLUMN_GAP) / (visualCardWidth + COLUMN_GAP))
   );
 
-  // Колонка масштабируется вместе с карточками для оптимального использования пространства
-  return { columnWidth: scaledColumnWidth, columnsPerRow: cols };
+  // Колонка имеет фиксированную ширину, только карточки масштабируются через transform
+  return { columnWidth: DESKTOP_COLUMN_WIDTH, columnsPerRow: cols };
 }
 
 /**

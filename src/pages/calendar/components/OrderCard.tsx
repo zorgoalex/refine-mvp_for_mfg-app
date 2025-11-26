@@ -89,6 +89,13 @@ const OrderCard: React.FC<OrderCardProps> = ({
   const isNotPaid = paymentStatus.toLowerCase().includes('не оплачен');
   const paymentText = paymentStatus;
 
+  // Компенсация margin-bottom при масштабировании
+  // Базовый margin из CSS: 6px
+  // После scale margin визуально становится 6 * cardScale
+  // Чтобы вернуть к 6px, нужно добавить 6 * (1 - cardScale)
+  const baseMargin = 6;
+  const marginCompensation = cardScale !== 1 ? `${baseMargin * (1 - cardScale)}px` : undefined;
+
   return (
     <div
       ref={dragRef}
@@ -97,10 +104,9 @@ const OrderCard: React.FC<OrderCardProps> = ({
         backgroundColor,
         cursor: 'move',
         opacity: isDragging ? 0.5 : 1,
-        width: `${100 / cardScale}%`, // Компенсируем scale, чтобы после transform вписаться в колонку
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
-        marginBottom: cardScale < 1 ? `${(1 - cardScale) * -40}px` : undefined, // Компенсируем уменьшение высоты
+        marginBottom: marginCompensation,
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
       onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}

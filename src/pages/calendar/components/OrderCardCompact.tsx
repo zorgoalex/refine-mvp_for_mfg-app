@@ -46,6 +46,13 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
     ? order.materials.split(',').map((m) => m.trim())
     : [];
 
+  // Компенсация margin-bottom при масштабировании
+  // Базовый margin из CSS: 4px для компактного вида
+  // После scale margin визуально становится 4 * cardScale
+  // Чтобы вернуть к 4px, нужно добавить 4 * (1 - cardScale)
+  const baseMargin = 4;
+  const marginCompensation = cardScale !== 1 ? `${baseMargin * (1 - cardScale)}px` : undefined;
+
   return (
     <div
       ref={dragRef}
@@ -54,10 +61,9 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
         borderColor,
         cursor: 'move',
         opacity: isDragging ? 0.5 : 1,
-        width: `${100 / cardScale}%`, // Компенсируем scale, чтобы после transform вписаться в колонку
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
-        marginBottom: cardScale < 1 ? `${(1 - cardScale) * -30}px` : undefined, // Компенсируем уменьшение высоты
+        marginBottom: marginCompensation,
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
       onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}
