@@ -130,7 +130,11 @@ const App = () => {
     <ErrorBoundary>
       <BrowserRouter>
         <RefineKbarProvider>
-          <ConfigProvider locale={ruRU}>
+          <ConfigProvider
+            locale={ruRU}
+            tooltip={{ mouseEnterDelay: 1 }}
+            table={{ showSorterTooltip: { mouseEnterDelay: 1 } }}
+          >
             <Refine
               dataProvider={dataProvider(API_URL)}
               notificationProvider={createNotificationProvider()}

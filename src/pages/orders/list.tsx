@@ -389,6 +389,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           sticky
           className="orders-table"
           scroll={{ x: "max-content", y: 600 }}
+          showSorterTooltip={{ mouseEnterDelay: 1 }}
           rowClassName={(record) =>
             record.order_id === highlightedOrderId ? "highlighted-row" : ""
           }
