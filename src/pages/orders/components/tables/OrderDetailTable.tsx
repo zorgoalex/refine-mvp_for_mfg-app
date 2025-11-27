@@ -44,6 +44,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   const [isSumEditable, setIsSumEditable] = useState(false);
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState(20);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
   const highlightedRowRef = useRef<HTMLElement | null>(null);
 
@@ -730,9 +731,11 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         rowKey={(record) => record.temp_id || record.detail_id || 0}
         rowSelection={rowSelection}
         pagination={{
-          pageSize: 20,
+          pageSize: pageSize,
           showSizeChanger: true,
           showTotal: (total) => `Всего: ${total} позиций`,
+          onShowSizeChange: (current, size) => setPageSize(size),
+          onChange: (page, size) => setPageSize(size),
         }}
         scroll={{ x: 1500, y: 500 }}
         size="small"
