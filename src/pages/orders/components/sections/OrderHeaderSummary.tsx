@@ -262,7 +262,7 @@ export const OrderHeaderSummary: React.FC = () => {
 
         {/* Column 3: Discounted amount + discount % */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-          {(header.discounted_amount != null && Number(header.discounted_amount) > 0) && (
+          {(header.discounted_amount != null && Number(header.discounted_amount) > 0 && Math.abs(Number(header.discounted_amount) - Number(header.total_amount || 0)) > 0.01) && (
             <Text strong style={{ fontSize: 14, color: '#4F46E5' }}>
               {formatNumber(header.discounted_amount, 2)} {CURRENCY_SYMBOL}
             </Text>

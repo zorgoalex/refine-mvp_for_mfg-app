@@ -181,7 +181,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
 
         {/* Column 3: Discounted amount + discount % */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-          {(record?.discounted_amount != null && Number(record.discounted_amount) > 0) && (
+          {(record?.discounted_amount != null && Number(record.discounted_amount) > 0 && Math.abs(Number(record.discounted_amount) - Number(record.total_amount || 0)) > 0.01) && (
             <Text strong style={{ fontSize: 14, color: '#4F46E5' }}>
               {formatNumber(record.discounted_amount, 2)} {CURRENCY_SYMBOL}
             </Text>
