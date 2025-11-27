@@ -39,9 +39,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     sorters: {
       initial: [
         { field: "order_date", order: "desc" },
-      ],
-      permanent: [
-        { field: "order_id", order: "desc" }
+        { field: "order_id", order: "desc" },
       ],
     },
     pagination: {
@@ -61,15 +59,18 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
     const orderName = searchOrderId.trim();
 
-    // Сбрасываем сортировку на order_date DESC перед поиском
+    // Сбрасываем сортировку на order_date DESC + order_id DESC перед поиском
     const isDefaultSort =
-      sorters.length === 1 &&
+      sorters.length >= 1 &&
       sorters[0].field === "order_date" &&
       sorters[0].order === "desc";
 
     if (!isDefaultSort) {
       message.info("Сброс сортировки для поиска...");
-      setSorters([{ field: "order_date", order: "desc" }]);
+      setSorters([
+        { field: "order_date", order: "desc" },
+        { field: "order_id", order: "desc" },
+      ]);
       // Даем время на применение сортировки
       await new Promise(resolve => setTimeout(resolve, 500));
     }
