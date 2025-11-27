@@ -1,7 +1,7 @@
 // Order Details Table
 // Displays list of order details with inline editing capabilities
 
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
@@ -25,13 +25,20 @@ interface OrderDetailTableProps {
   highlightedRowKey?: React.Key | null;
 }
 
-export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
+// Exposed methods via ref
+export interface OrderDetailTableRef {
+  startEditRow: (detail: OrderDetail) => void;
+  saveCurrentAndStartNew: (newDetail: OrderDetail) => Promise<boolean>;
+  isEditing: () => boolean;
+}
+
+export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTableProps>(({
   onEdit,
   onDelete,
   selectedRowKeys = [],
   onSelectChange,
   highlightedRowKey = null,
-}) => {
+}, ref) => {
   const { details, updateDetail } = useOrderFormStore();
   const sortedDetails = useMemo(
     () => [...details].sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0)),
@@ -196,6 +203,48 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       }
     }, 0);
   };
+
+  // Save current editing row and return success status
+  const saveCurrentRow = async (): Promise<boolean> => {
+    if (editingKey === null) return true; // Nothing to save
+
+    // Find the record being edited
+    const record = details.find(d => (d.temp_id || d.detail_id) === editingKey);
+    if (!record) return true;
+
+    // Check dimension validation
+    if (dimensionValidationError) {
+      console.log('[OrderDetailTable] saveCurrentRow - dimension validation failed');
+      return false;
+    }
+
+    try {
+      const values = await form.validateFields();
+      const tempId = record.temp_id || record.detail_id!;
+      updateDetail(tempId, values);
+      cancelEdit();
+      return true;
+    } catch (error) {
+      console.log('[OrderDetailTable] saveCurrentRow - validation failed:', error);
+      return false;
+    }
+  };
+
+  // Expose methods via ref for external calls (e.g., quick add)
+  useImperativeHandle(ref, () => ({
+    startEditRow: startEdit,
+    isEditing: () => editingKey !== null,
+    saveCurrentAndStartNew: async (newDetail: OrderDetail) => {
+      const saved = await saveCurrentRow();
+      if (saved) {
+        // Start editing the new detail after a short delay
+        setTimeout(() => {
+          startEdit(newDetail);
+        }, 50);
+      }
+      return saved;
+    },
+  }));
 
   const cancelEdit = () => {
     setEditingKey(null);
@@ -830,7 +879,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       />
     </Form>
   );
-};
+});
 
 // Helper components for loading reference data
 const MaterialCell: React.FC<{ materialId: number }> = ({ materialId }) => {

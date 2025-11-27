@@ -302,7 +302,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               size="small"
               pagination={false}
               bordered
-              scroll={{ x: 'max-content' }}
+              tableLayout="fixed"
               style={{ fontSize: 12 }}
               rowClassName={(_, index) => index % 2 === 0 ? 'table-row-light' : 'table-row-dark'}
               components={{
@@ -346,7 +346,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   title: 'м²',
                   dataIndex: 'area',
                   key: 'area',
-                  width: 80,
+                  width: 72,
                   align: 'center',
                   render: (value) => value ? value.toFixed(2) : '0.00',
                 },
@@ -359,7 +359,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 {
                   title: 'Обкат',
                   key: 'edge_type',
-                  width: 50,
+                  width: 60,
                   render: (_, record) => {
                     const edgeTypeName = edgeTypesMap.get(record.edge_type_id) || '—';
                     return <span style={{ fontSize: '0.86em' }}>{edgeTypeName}</span>;
@@ -368,7 +368,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 {
                   title: 'Материал',
                   key: 'material',
-                  width: 50,
+                  width: 100,
                   render: (_, record) => {
                     const materialName = materialsMap.get(record.material_id) || '—';
                     return <span style={{ fontSize: '0.86em' }}>{materialName}</span>;
@@ -378,9 +378,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   title: 'Примечание',
                   dataIndex: 'note',
                   key: 'note',
-                  width: 162,
-                  ellipsis: true,
-                  render: (value) => value || '—',
+                  // Без фиксированной ширины - занимает оставшееся пространство
+                  render: (value) => (
+                    <span style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                      {value || '—'}
+                    </span>
+                  ),
                 },
                 {
                   title: 'Цена за кв.м.',
@@ -394,7 +397,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   title: 'Сумма',
                   dataIndex: 'detail_cost',
                   key: 'detail_cost',
-                  width: 59,
+                  width: 65,
                   align: 'right',
                   render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
                 },
