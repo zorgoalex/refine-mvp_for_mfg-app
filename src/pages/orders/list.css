@@ -4,6 +4,11 @@
   white-space: normal;
 }
 
+/* Более тёмные горизонтальные линии между строками */
+.orders-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #c0c0c0;
+}
+
 /* Уменьшенный размер шрифта для заголовков */
 .orders-table .ant-table-thead > tr > th {
   font-size: 10px;
@@ -14,11 +19,9 @@
 }
 
 .orders-table td.orders-col--order-name,
-.orders-table td.orders-col--order-date,
 .orders-table td.orders-col--planned-date,
 .orders-table td.orders-col--amount,
-.orders-table td.orders-col--payment-date,
-.orders-table td.orders-col--client {
+.orders-table td.orders-col--payment-date {
   font-size: 96%;
 }
 

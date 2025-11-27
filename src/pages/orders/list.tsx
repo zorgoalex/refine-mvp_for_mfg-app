@@ -425,14 +425,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             dataIndex="order_date"
             title="Дата заказа"
             sorter
-            width={100}
+            width={90}
             className="orders-col orders-col--order-date"
             render={(value) => formatDate(value)}
           />
           <Table.Column
             dataIndex="client_name"
             title="Клиент"
-            width={110}
+            width={99}
             className="orders-col orders-col--client"
           />
           <Table.Column

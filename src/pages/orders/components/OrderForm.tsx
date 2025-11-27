@@ -445,6 +445,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         ),
       },
       {
+        key: 'details',
+        label: 'Детали заказа',
+        children: <OrderDetailsTab />,
+      },
+      {
         key: 'dates',
         label: 'Даты',
         children: <OrderDatesSection />,
@@ -458,11 +463,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <OrderPaymentsTab />
           </Space>
         ),
-      },
-      {
-        key: 'details',
-        label: 'Детали заказа',
-        children: <OrderDetailsTab />,
       },
       {
         key: 'services',
