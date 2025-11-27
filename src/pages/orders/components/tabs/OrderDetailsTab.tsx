@@ -176,6 +176,26 @@ export const OrderDetailsTab: React.FC = () => {
     }
   };
 
+  // Handle insert new row after current - insert empty row with defaults after selected
+  const handleInsertAfter = async (detail: OrderDetail) => {
+    const afterTempId = detail.temp_id || detail.detail_id;
+    if (!afterTempId) return;
+
+    // Insert new row with defaults after the selected row
+    insertDetailAfter(afterTempId, QUICK_ADD_DEFAULTS as Omit<OrderDetail, 'temp_id'>);
+
+    // Get the newly inserted detail and start editing it
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const updatedDetails = useOrderFormStore.getState().details;
+
+    // Find the detail that was just inserted (it will have the highest temp_id)
+    const newDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
+
+    if (newDetail && tableRef.current) {
+      tableRef.current.startEditRow(newDetail);
+    }
+  };
+
   return (
     <Card size="small">
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -206,6 +226,7 @@ export const OrderDetailsTab: React.FC = () => {
           onEdit={handleEdit}
           onDelete={handleDelete}
           onQuickAdd={handleQuickAdd}
+          onInsertAfter={handleInsertAfter}
           onCopyRow={handleCopyRow}
           selectedRowKeys={selectedRowKeys}
           onSelectChange={handleSelectChange}

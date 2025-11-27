@@ -21,6 +21,7 @@ interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
   onDelete: (tempId: number, detailId?: number) => void;
   onQuickAdd?: () => void;
+  onInsertAfter?: (detail: OrderDetail) => void;
   onCopyRow?: (detail: OrderDetail) => void;
   selectedRowKeys?: React.Key[];
   onSelectChange?: (selectedRowKeys: React.Key[]) => void;
@@ -38,6 +39,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   onEdit,
   onDelete,
   onQuickAdd,
+  onInsertAfter,
   onCopyRow,
   selectedRowKeys = [],
   onSelectChange,
@@ -872,14 +874,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
               const menuContent = `
                 <ul class="ant-dropdown-menu" style="background: white; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;">
-                  <li class="ant-dropdown-menu-item menu-item-add" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                    <span role="img" aria-label="plus" style="color: #1890ff;">
+                  <li class="ant-dropdown-menu-item menu-item-insert" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <span role="img" aria-label="insert" style="color: #1890ff;">
                       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
                         <path d="M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"></path>
                         <path d="M176 474h672q8 0 8 8v60q0 8-8 8H176q-8 0-8-8v-60q0-8 8-8z"></path>
                       </svg>
                     </span>
-                    <span style="color: #1890ff;">Добавить строку</span>
+                    <span style="color: #1890ff;">Вставить строку</span>
                   </li>
                   <li class="ant-dropdown-menu-item menu-item-copy" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
                     <span role="img" aria-label="copy" style="color: #52c41a;">
@@ -903,17 +905,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               menu.innerHTML = menuContent;
               document.body.appendChild(menu);
 
-              // Add item handler
-              const addItem = menu.querySelector('.menu-item-add');
-              addItem?.addEventListener('click', () => {
-                onQuickAdd?.();
+              // Insert item handler
+              const insertItem = menu.querySelector('.menu-item-insert');
+              insertItem?.addEventListener('click', () => {
+                onInsertAfter?.(record);
                 menu.remove();
               });
-              addItem?.addEventListener('mouseenter', () => {
-                (addItem as HTMLElement).style.backgroundColor = '#e6f7ff';
+              insertItem?.addEventListener('mouseenter', () => {
+                (insertItem as HTMLElement).style.backgroundColor = '#e6f7ff';
               });
-              addItem?.addEventListener('mouseleave', () => {
-                (addItem as HTMLElement).style.backgroundColor = 'white';
+              insertItem?.addEventListener('mouseleave', () => {
+                (insertItem as HTMLElement).style.backgroundColor = 'white';
               });
 
               // Copy item handler
