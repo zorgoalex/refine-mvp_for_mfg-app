@@ -294,10 +294,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const recalcArea = () => {
     const height = form.getFieldValue('height');
     const width = form.getFieldValue('width');
-    console.log('[OrderDetailTable] recalcArea - height:', height, 'width:', width);
+    const quantity = form.getFieldValue('quantity') || 1;
+    console.log('[OrderDetailTable] recalcArea - height:', height, 'width:', width, 'quantity:', quantity);
 
     if (height && width && height > 0 && width > 0) {
-      const area = (height * width) / 1000000; // mm^2 -> m^2
+      const area = (height * width * quantity) / 1000000; // mm^2 * qty -> m^2
       console.log('[OrderDetailTable] recalcArea - calculated area:', area);
       form.setFieldsValue({ area });
       recalcSum(); // Also recalculate sum when area changes
@@ -370,11 +371,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '70%' }}>№</div>,
       dataIndex: 'detail_number',
       key: 'detail_number',
-      width: 40,
+      width: 27,
       fixed: 'left',
       defaultSortOrder: 'ascend',
       sorter: (a, b) => a.detail_number - b.detail_number,
-      render: (value) => <span style={{ color: '#999' }}>{value}</span>,
+      render: (value) => <span style={{ color: '#999', fontSize: '67%' }}>{value}</span>,
     },
     {
       title: (
@@ -436,7 +437,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (value, record) =>
         isEditing(record) ? (
           <Form.Item name="quantity" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber style={{ width: '100%', minWidth: '70px' }} min={1} precision={0} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber style={{ width: '100%', minWidth: '70px' }} min={1} precision={0} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           formatNumber(value, 0)
@@ -488,10 +489,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         ),
     },
     {
-      title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Кромка</span></div>,
+      title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Обкат</span></div>,
       dataIndex: 'edge_type_id',
       key: 'edge_type_id',
-      width: 61,
+      width: 52,
       align: 'center',
       render: (edgeTypeId, record) =>
         isEditing(record) ? (
@@ -544,7 +545,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             <Input placeholder="Примечание" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{text || '—'}</span>
+          <span style={{ fontSize: '90%' }}>{text || ''}</span>
         ),
     },
     {
@@ -804,6 +805,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     ? {
         selectedRowKeys,
         onChange: onSelectChange,
+        columnWidth: 24,
       }
     : undefined;
 

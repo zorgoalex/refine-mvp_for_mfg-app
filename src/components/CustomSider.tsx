@@ -142,7 +142,7 @@ export const CustomSider: React.FC = () => {
   const { push } = useNavigation();
   const location = useLocation();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   const currentUser = useMemo(() => authStorage.getUser(), []);
   const isAdmin = useMemo(
