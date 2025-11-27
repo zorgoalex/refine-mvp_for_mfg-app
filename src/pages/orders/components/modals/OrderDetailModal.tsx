@@ -291,25 +291,33 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         )}
 
         <Row gutter={16}>
-          <Col span={12}>
+          <Col span={6}>
             <Form.Item
-              label="Название детали"
-              name="detail_name"
+              label="Высота (мм)"
+              name="height"
+              rules={[{ required: true, message: 'Обязательное поле' }]}
             >
-              <Input placeholder="Опционально" />
+              <InputNumber
+                style={{ width: '100%' }}
+                min={0}
+                precision={2}
+                parser={numberParser}
+                onChange={handleDimensionChange}
+              />
             </Form.Item>
           </Col>
           <Col span={6}>
             <Form.Item
-              label="Приоритет"
-              name="priority"
-              initialValue={100}
-              tooltip="1 — наивысший приоритет, большее число — ниже"
+              label="Ширина (мм)"
+              name="width"
+              rules={[{ required: true, message: 'Обязательное поле' }]}
             >
               <InputNumber
                 style={{ width: '100%' }}
-                min={1}
-                max={999}
+                min={0}
+                precision={2}
+                parser={numberParser}
+                onChange={handleDimensionChange}
               />
             </Form.Item>
           </Col>
@@ -327,40 +335,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               />
             </Form.Item>
           </Col>
-        </Row>
-
-        <Row gutter={16}>
-          <Col span={8}>
-            <Form.Item
-              label="Высота (мм)"
-              name="height"
-              rules={[{ required: true, message: 'Обязательное поле' }]}
-            >
-              <InputNumber
-                style={{ width: '100%' }}
-                min={0}
-                precision={2}
-                parser={numberParser}
-                onChange={handleDimensionChange}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item
-              label="Ширина (мм)"
-              name="width"
-              rules={[{ required: true, message: 'Обязательное поле' }]}
-            >
-              <InputNumber
-                style={{ width: '100%' }}
-                min={0}
-                precision={2}
-                parser={numberParser}
-                onChange={handleDimensionChange}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
+          <Col span={6}>
             <Form.Item label="Площадь (м²)" name="area">
               <InputNumber
                 style={{ width: '100%' }}
@@ -505,18 +480,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         </Row>
 
         <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item label="Статус производства" name="production_status_id">
-              <Select
-                {...productionStatusSelectProps}
-                placeholder="Выберите статус"
-                allowClear
-              />
-            </Form.Item>
-          </Col>
-        </Row>
-
-        <Row gutter={16}>
           <Col span={8}>
             <Form.Item label="Цена за м²" name="milling_cost_per_sqm">
               <InputNumber
@@ -542,6 +505,40 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 precision={2}
                 formatter={(value) => numberFormatter(value, 2)}
                 addonAfter={CURRENCY_SYMBOL}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item
+              label="Название детали"
+              name="detail_name"
+            >
+              <Input placeholder="Опционально" />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item
+              label="Приоритет"
+              name="priority"
+              initialValue={100}
+              tooltip="1 — наивысший приоритет, большее число — ниже"
+            >
+              <InputNumber
+                style={{ width: '100%' }}
+                min={1}
+                max={999}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item label="Статус производства" name="production_status_id">
+              <Select
+                {...productionStatusSelectProps}
+                placeholder="Выберите статус"
+                allowClear
               />
             </Form.Item>
           </Col>
