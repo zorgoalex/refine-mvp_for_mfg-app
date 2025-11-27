@@ -402,11 +402,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         >
           <Table.Column
             dataIndex="order_id"
-            title="ID"
+            title={<span style={{ fontSize: '42%' }}>id</span>}
             sorter
-            width={60}
+            width={39}
             className="col-order-id"
             onHeaderCell={() => ({ className: "col-order-id" })}
+            render={(value) => <span style={{ fontSize: '75%', whiteSpace: 'nowrap' }}>{value}</span>}
           />
           <Table.Column
             dataIndex="order_name"
@@ -417,7 +418,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           />
           <Table.Column
             dataIndex="doweling_order_name"
-            title="Присадка"
+            title="Прис."
             sorter
             width={80}
             className="orders-col orders-col--doweling-name"
@@ -438,12 +439,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           />
           <Table.Column
             dataIndex="milling_type_name"
-            title="Фрезеровка"
-            width={90}
-            className="orders-col orders-col--wrap"
+            title="Фрез-ка"
+            width={72}
+            className="orders-col"
             render={(_, record: any) => {
               const millingTypeId = getCommonValue(record.order_id, "milling_type_id");
-              return millingTypeId ? millingTypesMap[millingTypeId] || "—" : "—";
+              const value = millingTypeId ? millingTypesMap[millingTypeId] || "—" : "—";
+              return (
+                <Tooltip title={value} placement="topLeft">
+                  <span className="orders-status-value">{value}</span>
+                </Tooltip>
+              );
             }}
           />
           <Table.Column
@@ -460,16 +466,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             className="orders-col orders-col--wrap"
           />
           <Table.Column
-            dataIndex="priority"
-            title={<StarFilled />}
-            sorter
-            width={60}
-            className="col-priority"
-            onHeaderCell={() => ({ className: "col-priority" })}
-          />
-          <Table.Column
             dataIndex="planned_completion_date"
-            title="План. дата выполнения"
+            title="План. дата вып-я"
             sorter
             width={100}
             className="orders-col orders-col--planned-date"
@@ -485,22 +483,20 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="payment_status_name"
             title="Статус оплаты заказа"
-            width={80}
+            width={45}
             className="orders-col status payment-status orders-col--wrap"
             render={(value) => {
+              const displayValue = value || "—";
               // "Не оплачен" (payment_status_id=1) - красный цвет
               if (value === 'Не оплачен') {
-                return <span style={{ color: '#ff4d4f', fontWeight: 500 }}>{value}</span>;
+                return (
+                  <Tooltip title={displayValue} placement="topLeft">
+                    <span className="orders-status-value" style={{ color: '#ff4d4f', fontWeight: 500 }}>{displayValue}</span>
+                  </Tooltip>
+                );
               }
               return renderStatus(value);
             }}
-          />
-          <Table.Column
-            dataIndex="production_status_name"
-            title="Статус производства"
-            width={90}
-            className="orders-col status production-status orders-col--wrap"
-            render={(value) => renderStatus(value)}
           />
           <Table.Column
             dataIndex="discounted_amount"
@@ -509,6 +505,21 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             width={90}
             className="orders-col orders-col--amount"
             render={(value) => formatNumber(value as number, 0)}
+          />
+          <Table.Column
+            dataIndex="production_status_name"
+            title="Статус произ-ва"
+            width={90}
+            className="orders-col status production-status orders-col--wrap"
+            render={(value) => renderStatus(value)}
+          />
+          <Table.Column
+            dataIndex="priority"
+            title={<StarFilled />}
+            sorter
+            width={60}
+            className="col-priority"
+            onHeaderCell={() => ({ className: "col-priority" })}
           />
           <Table.Column
             dataIndex="paid_amount"
@@ -530,7 +541,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             dataIndex="discount"
             title="Скидка"
             sorter
-            width={80}
+            width={88}
             className="orders-col"
             render={(value) => formatNumber(value as number, 0)}
           />
@@ -546,30 +557,31 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             dataIndex="issue_date"
             title="Дата выдачи заказа"
             sorter
-            width={120}
+            width={86}
             className="orders-col"
-            render={(value) => formatDate(value)}
+            render={(value) => <span style={{ fontSize: '80%' }}>{formatDate(value)}</span>}
           />
           <Table.Column
             dataIndex="total_area"
             title="Площадь заказа"
             sorter
-            width={120}
+            width={86}
             className="orders-col"
+            render={(value) => <span style={{ fontSize: '80%' }}>{value ?? ''}</span>}
           />
           <Table.Column
             dataIndex="completion_date"
             title="Дата выполнения"
             sorter
-            width={120}
+            width={86}
             className="orders-col"
-            render={(value) => formatDate(value)}
+            render={(value) => <span style={{ fontSize: '80%' }}>{formatDate(value)}</span>}
           />
           <Table.Column
             dataIndex="parts_count"
-            title="Количество деталей"
+            title="Кол-во деталей"
             sorter
-            width={120}
+            width={80}
             className="orders-col"
           />
           <Table.Column
@@ -595,11 +607,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="created_by"
             title="Создано"
-            width={120}
+            width={86}
             className="orders-col"
-            render={(_, record: any) =>
-              createdByMap[record?.created_by] ?? record?.created_by
-            }
+            render={(_, record: any) => (
+              <span style={{ fontSize: '80%' }}>
+                {createdByMap[record?.created_by] ?? record?.created_by}
+              </span>
+            )}
           />
           <Table.Column
             title="Действия"

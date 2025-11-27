@@ -113,12 +113,12 @@
 }
 
 .table-row-dark {
-  background-color: #fafafa !important;
+  background-color: #fefefe !important;
 }
 
 .table-row-light:hover td,
 .table-row-dark:hover td {
-  background-color: #f0f0f0 !important;
+  background-color: #f8f8f8 !important;
 }
 
 /* Darker horizontal borders for details table */
@@ -129,7 +129,7 @@
 
 /* Глобальное чередование цветов строк во всех таблицах для улучшения читаемости */
 .ant-table-tbody > tr:nth-child(even) > td {
-  background-color: #fafafa;
+  background-color: #fefefe;
 }
 
 .ant-table-tbody > tr:nth-child(odd) > td {
@@ -138,9 +138,9 @@
 
 /* Сохраняем цвет при наведении */
 .ant-table-tbody > tr:nth-child(even):hover > td {
-  background-color: #f0f0f0 !important;
+  background-color: #f8f8f8 !important;
 }
 
 .ant-table-tbody > tr:nth-child(odd):hover > td {
-  background-color: #f5f5f5 !important;
+  background-color: #fafafa !important;
 }
