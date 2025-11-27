@@ -138,20 +138,27 @@ export const useOrderFormStore = create<OrderFormState>()(
         // ========== DETAILS ACTIONS ==========
         addDetail: (detail) =>
           set(
-            (state) => ({
-              details: [
-                ...state.details,
-                {
-                  ...detail,
-                  temp_id: Date.now(),
-                  detail_number: state.details.length + 1,
-                  priority: detail.priority || 100,
-                  quantity: detail.quantity,
-                  delete_flag: false,
-                },
-              ],
-              isDirty: true,
-            }),
+            (state) => {
+              // Calculate max detail_number
+              const maxDetailNumber = state.details.reduce(
+                (max, d) => Math.max(max, d.detail_number || 0),
+                0
+              );
+
+              const newDetail = {
+                ...detail,
+                temp_id: Date.now(),
+                detail_number: maxDetailNumber + 1,
+                priority: detail.priority || 100,
+                quantity: detail.quantity,
+                delete_flag: false,
+              };
+
+              return {
+                details: [...state.details, newDetail],
+                isDirty: true,
+              };
+            },
             false,
             'addDetail'
           ),
@@ -159,35 +166,35 @@ export const useOrderFormStore = create<OrderFormState>()(
         insertDetailAfter: (afterTempId, detail) =>
           set(
             (state) => {
-              // Find index of the detail to insert after
-              const sortedDetails = [...state.details].sort(
-                (a, b) => (a.detail_number || 0) - (b.detail_number || 0)
-              );
-              const afterIndex = sortedDetails.findIndex(
+              // Find the detail to insert after
+              const afterDetail = state.details.find(
                 (d) => d.temp_id === afterTempId || d.detail_id === afterTempId
               );
 
+              // Get the new detail_number (after the found detail, or max+1 if not found)
+              const afterNumber = afterDetail?.detail_number || 0;
+              const newDetailNumber = afterNumber + 1;
+
+              // Shift all details with detail_number >= newDetailNumber
+              const shiftedDetails = state.details.map((d) => ({
+                ...d,
+                detail_number: (d.detail_number || 0) >= newDetailNumber
+                  ? (d.detail_number || 0) + 1
+                  : d.detail_number,
+              }));
+
+              // Add new detail with the calculated number
               const newDetail = {
                 ...detail,
                 temp_id: Date.now(),
-                detail_number: 0, // Will be reassigned
+                detail_number: newDetailNumber,
                 priority: detail.priority || 100,
                 quantity: detail.quantity,
                 delete_flag: false,
               };
 
-              // Insert after the found index
-              const insertIndex = afterIndex >= 0 ? afterIndex + 1 : sortedDetails.length;
-              sortedDetails.splice(insertIndex, 0, newDetail);
-
-              // Renumber all details
-              const renumberedDetails = sortedDetails.map((d, idx) => ({
-                ...d,
-                detail_number: idx + 1,
-              }));
-
               return {
-                details: renumberedDetails,
+                details: [...shiftedDetails, newDetail],
                 isDirty: true,
               };
             },

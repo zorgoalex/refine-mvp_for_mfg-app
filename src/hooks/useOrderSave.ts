@@ -173,7 +173,19 @@ export const useOrderSave = (): UseOrderSaveResult => {
         console.log(`[useOrderSave] Skipped ${skippedCount} unfilled detail(s)`);
       }
 
-      if (filledDetails.length > 0) {
+      // ========== NORMALIZE DETAIL NUMBERS ==========
+      // Sort by current detail_number and renumber sequentially 1, 2, 3...
+      // This fixes any duplicates or gaps in numbering
+      const sortedDetails = [...filledDetails].sort((a, b) =>
+        (a.detail_number || 0) - (b.detail_number || 0)
+      );
+      const normalizedDetails = sortedDetails.map((detail, index) => ({
+        ...detail,
+        detail_number: index + 1,
+      }));
+      console.log(`[useOrderSave] Normalized ${normalizedDetails.length} detail numbers`);
+
+      if (normalizedDetails.length > 0) {
         const { originalDetails } = useOrderFormStore.getState();
         const normalizeDetail = (d: any) => {
           const {
@@ -194,7 +206,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
           ...normalizeDetail(detail),
           order_id: createdOrderId,
         });
-        const detailPromises = filledDetails.map((detail) => {
+        const detailPromises = normalizedDetails.map((detail) => {
           if (detail.detail_id) {
             // Update only if changed
             const original = originalDetails[detail.detail_id];
