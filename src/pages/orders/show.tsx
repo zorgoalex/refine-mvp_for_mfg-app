@@ -307,10 +307,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               rowClassName={(_, index) => index % 2 === 0 ? 'table-row-light' : 'table-row-dark'}
               components={{
                 header: {
-                  cell: (props: any) => <th {...props} style={{ ...props.style, padding: '2px 4px' }} />
+                  cell: (props: any) => <th {...props} style={{ ...props.style, padding: '2px 4px', fontSize: '70%', textAlign: 'center' }} />
                 },
                 body: {
-                  cell: (props: any) => <td {...props} style={{ ...props.style, padding: '2px 4px' }} />
+                  cell: (props: any) => <td {...props} style={{ ...props.style, padding: '2px 4px', fontSize: '80%' }} />
                 }
               }}
               columns={[
@@ -318,7 +318,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   title: '№',
                   dataIndex: 'detail_number',
                   key: 'detail_number',
-                  width: 50,
+                  width: 43,
                   align: 'center',
                 },
                 {
@@ -359,7 +359,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 {
                   title: 'Обкат',
                   key: 'edge_type',
-                  width: 60,
+                  width: 51,
                   render: (_, record) => {
                     const edgeTypeName = edgeTypesMap.get(record.edge_type_id) || '—';
                     return <span style={{ fontSize: '0.86em' }}>{edgeTypeName}</span>;
@@ -368,20 +368,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 {
                   title: 'Материал',
                   key: 'material',
-                  width: 100,
+                  width: 77,
                   render: (_, record) => {
                     const materialName = materialsMap.get(record.material_id) || '—';
                     return <span style={{ fontSize: '0.86em' }}>{materialName}</span>;
                   },
                 },
                 {
-                  title: 'Примечание',
+                  title: 'Пр-е',
                   dataIndex: 'note',
                   key: 'note',
                   // Без фиксированной ширины - занимает оставшееся пространство
                   render: (value) => (
                     <span style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
-                      {value || '—'}
+                      {value || ''}
                     </span>
                   ),
                 },
@@ -404,11 +404,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 {
                   title: 'Пленка',
                   key: 'film',
-                  width: 173,
+                  width: 208,
                   render: (_, record) => {
-                    if (!record.film_id) return '—';
+                    if (!record.film_id) return '';
                     const filmName = filmsMap.get(record.film_id);
-                    return <span style={{ fontSize: '0.86em' }}>{filmName || '—'}</span>;
+                    return <span style={{ fontSize: '0.86em' }}>{filmName || ''}</span>;
                   },
                 },
               ]}
