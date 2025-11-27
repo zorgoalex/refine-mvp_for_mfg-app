@@ -303,6 +303,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'height',
       width: 54,
       align: 'right',
+      sorter: (a, b) => (a.height || 0) - (b.height || 0),
       render: (value, record) => {
         if (!isEditing(record)) {
           const num = Number(value);
@@ -327,6 +328,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'width',
       width: 54,
       align: 'right',
+      sorter: (a, b) => (a.width || 0) - (b.width || 0),
       render: (value, record) => {
         if (!isEditing(record)) {
           const num = Number(value);
@@ -345,6 +347,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'quantity',
       width: 54,
       align: 'right',
+      sorter: (a, b) => (a.quantity || 0) - (b.quantity || 0),
       render: (value, record) =>
         isEditing(record) ? (
           <Form.Item name="quantity" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
@@ -366,6 +369,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'area',
       width: 63,
       align: 'right',
+      sorter: (a, b) => (a.area || 0) - (b.area || 0),
       render: (value, record) =>
         isEditing(record) ? (
           <Form.Item name="area" style={{ margin: 0, padding: '0 4px' }}>
@@ -381,6 +385,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'milling_type_id',
       width: 85,
       align: 'center',
+      sorter: (a, b) => (a.milling_type_id || 0) - (b.milling_type_id || 0),
       render: (millingTypeId, record) =>
         isEditing(record) ? (
           <Form.Item name="milling_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
@@ -425,6 +430,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'material_id',
       width: 80,
       align: 'center',
+      sorter: (a, b) => (a.material_id || 0) - (b.material_id || 0),
       render: (materialId, record) =>
         isEditing(record) ? (
           <Form.Item name="material_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
@@ -485,6 +491,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       key: 'detail_cost',
       width: 70,
       align: 'right',
+      sorter: (a, b) => (a.detail_cost || 0) - (b.detail_cost || 0),
       render: (value, record) =>
         isEditing(record) ? (
           <Form.Item
@@ -587,6 +594,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       dataIndex: 'film_id',
       key: 'film_id',
       width: 120,
+      sorter: (a, b) => (a.film_id || 0) - (b.film_id || 0),
       render: (filmId, record) =>
         isEditing(record) ? (
           <Form.Item name="film_id" style={{ margin: 0, padding: '0 4px' }}>
