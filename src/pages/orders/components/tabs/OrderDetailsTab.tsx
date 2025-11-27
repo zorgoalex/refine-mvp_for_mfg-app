@@ -20,7 +20,7 @@ const QUICK_ADD_DEFAULTS = {
 };
 
 export const OrderDetailsTab: React.FC = () => {
-  const { details, addDetail, updateDetail, deleteDetail, reorderDetails } = useOrderFormStore();
+  const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails } = useOrderFormStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
@@ -163,6 +163,19 @@ export const OrderDetailsTab: React.FC = () => {
     setSelectedRowKeys(newSelectedRowKeys);
   };
 
+  // Handle copy row - duplicate the row and insert after original
+  const handleCopyRow = (detail: OrderDetail) => {
+    // Create copy without identifiers
+    const { temp_id, detail_id, detail_number, ...detailData } = detail;
+
+    // Insert copy after the original
+    const afterTempId = temp_id || detail_id;
+    if (afterTempId) {
+      insertDetailAfter(afterTempId, detailData as Omit<OrderDetail, 'temp_id'>);
+      message.success('Строка скопирована');
+    }
+  };
+
   return (
     <Card size="small">
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -192,6 +205,8 @@ export const OrderDetailsTab: React.FC = () => {
           ref={tableRef}
           onEdit={handleEdit}
           onDelete={handleDelete}
+          onQuickAdd={handleQuickAdd}
+          onCopyRow={handleCopyRow}
           selectedRowKeys={selectedRowKeys}
           onSelectChange={handleSelectChange}
           highlightedRowKey={highlightedRowKey}
