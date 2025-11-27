@@ -48,6 +48,7 @@ import {
 
   // ========== ACTIONS: DETAILS ==========
   addDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
+  insertDetailAfter: (afterTempId: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   updateDetail: (tempId: number, data: Partial<OrderDetail>) => void;
   deleteDetail: (tempId: number, detailId?: number) => void;
   reorderDetails: () => void; // Renumber detail_number
@@ -153,6 +154,45 @@ export const useOrderFormStore = create<OrderFormState>()(
             }),
             false,
             'addDetail'
+          ),
+
+        insertDetailAfter: (afterTempId, detail) =>
+          set(
+            (state) => {
+              // Find index of the detail to insert after
+              const sortedDetails = [...state.details].sort(
+                (a, b) => (a.detail_number || 0) - (b.detail_number || 0)
+              );
+              const afterIndex = sortedDetails.findIndex(
+                (d) => d.temp_id === afterTempId || d.detail_id === afterTempId
+              );
+
+              const newDetail = {
+                ...detail,
+                temp_id: Date.now(),
+                detail_number: 0, // Will be reassigned
+                priority: detail.priority || 100,
+                quantity: detail.quantity || 1,
+                delete_flag: false,
+              };
+
+              // Insert after the found index
+              const insertIndex = afterIndex >= 0 ? afterIndex + 1 : sortedDetails.length;
+              sortedDetails.splice(insertIndex, 0, newDetail);
+
+              // Renumber all details
+              const renumberedDetails = sortedDetails.map((d, idx) => ({
+                ...d,
+                detail_number: idx + 1,
+              }));
+
+              return {
+                details: renumberedDetails,
+                isDirty: true,
+              };
+            },
+            false,
+            'insertDetailAfter'
           ),
 
         updateDetail: (tempId, data) =>

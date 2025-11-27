@@ -486,7 +486,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             title="Статус оплаты заказа"
             width={80}
             className="orders-col status payment-status orders-col--wrap"
-            render={(value) => renderStatus(value)}
+            render={(value) => {
+              // "Не оплачен" (payment_status_id=1) - красный цвет
+              if (value === 'Не оплачен') {
+                return <span style={{ color: '#ff4d4f', fontWeight: 500 }}>{value}</span>;
+              }
+              return renderStatus(value);
+            }}
           />
           <Table.Column
             dataIndex="production_status_name"

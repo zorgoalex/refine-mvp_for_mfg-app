@@ -1,7 +1,7 @@
 // Order Details Table
 // Displays list of order details with inline editing capabilities
 
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
@@ -20,18 +20,29 @@ import {
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
   onDelete: (tempId: number, detailId?: number) => void;
+  onQuickAdd?: () => void;
+  onCopyRow?: (detail: OrderDetail) => void;
   selectedRowKeys?: React.Key[];
   onSelectChange?: (selectedRowKeys: React.Key[]) => void;
   highlightedRowKey?: React.Key | null;
 }
 
-export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
+// Exposed methods via ref
+export interface OrderDetailTableRef {
+  startEditRow: (detail: OrderDetail) => void;
+  saveCurrentAndStartNew: (newDetail: OrderDetail) => Promise<boolean>;
+  isEditing: () => boolean;
+}
+
+export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTableProps>(({
   onEdit,
   onDelete,
+  onQuickAdd,
+  onCopyRow,
   selectedRowKeys = [],
   onSelectChange,
   highlightedRowKey = null,
-}) => {
+}, ref) => {
   const { details, updateDetail } = useOrderFormStore();
   const sortedDetails = useMemo(
     () => [...details].sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0)),
@@ -46,6 +57,22 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
+
+  // Watch required fields to show visual indication for empty fields
+  const watchedHeight = Form.useWatch('height', form);
+  const watchedWidth = Form.useWatch('width', form);
+  const watchedMaterialId = Form.useWatch('material_id', form);
+  const watchedMillingTypeId = Form.useWatch('milling_type_id', form);
+  const watchedEdgeTypeId = Form.useWatch('edge_type_id', form);
+  const watchedDetailCost = Form.useWatch('detail_cost', form);
+
+  // Style for empty required fields - red bottom border
+  const getRequiredFieldStyle = (value: any): React.CSSProperties => {
+    const isEmpty = value === null || value === undefined || value === '';
+    return isEmpty && editingKey !== null
+      ? { borderBottomColor: '#ff4d4f', borderBottomWidth: '2px' }
+      : {};
+  };
   const highlightedRowRef = useRef<HTMLElement | null>(null);
 
   // Scroll to highlighted row when it changes
@@ -197,6 +224,62 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     }, 0);
   };
 
+  // Save current editing row and return success status
+  const saveCurrentRow = async (): Promise<boolean> => {
+    if (editingKey === null) return true; // Nothing to save
+
+    // Find the record being edited
+    const record = details.find(d => (d.temp_id || d.detail_id) === editingKey);
+    if (!record) return true;
+
+    // Check dimension validation
+    if (dimensionValidationError) {
+      console.log('[OrderDetailTable] saveCurrentRow - dimension validation failed');
+      return false;
+    }
+
+    try {
+      const values = await form.validateFields();
+      const tempId = record.temp_id || record.detail_id!;
+      updateDetail(tempId, values);
+      cancelEdit();
+      return true;
+    } catch (error) {
+      console.log('[OrderDetailTable] saveCurrentRow - validation failed:', error);
+      return false;
+    }
+  };
+
+  // Handle Tab on last field - save and add new row
+  const handleTabOnLastField = async (e: React.KeyboardEvent, record: OrderDetail) => {
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault();
+
+      // Save current row
+      const saved = await saveCurrentRow();
+      if (saved && onQuickAdd) {
+        // Add new row and start editing it
+        onQuickAdd();
+      }
+    }
+  };
+
+  // Expose methods via ref for external calls (e.g., quick add)
+  useImperativeHandle(ref, () => ({
+    startEditRow: startEdit,
+    isEditing: () => editingKey !== null,
+    saveCurrentAndStartNew: async (newDetail: OrderDetail) => {
+      const saved = await saveCurrentRow();
+      if (saved) {
+        // Start editing the new detail after a short delay
+        setTimeout(() => {
+          startEdit(newDetail);
+        }, 50);
+      }
+      return saved;
+    },
+  }));
+
   const cancelEdit = () => {
     setEditingKey(null);
     setCurrentFilmId(null);
@@ -311,7 +394,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         }
         return (
           <Form.Item name="height" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber autoFocus style={{ width: '100%', minWidth: '80px' }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber autoFocus style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         );
       },
@@ -336,7 +419,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
         }
         return (
           <Form.Item name="width" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber style={{ width: '100%', minWidth: '80px' }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         );
       },
@@ -395,7 +478,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
-              style={{ minWidth: 150, textAlign: 'left' }}
+              style={{ minWidth: 150, textAlign: 'left', ...getRequiredFieldStyle(watchedMillingTypeId) }}
             />
           </Form.Item>
         ) : (
@@ -417,7 +500,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
-              style={{ minWidth: 120, textAlign: 'left' }}
+              style={{ minWidth: 120, textAlign: 'left', ...getRequiredFieldStyle(watchedEdgeTypeId) }}
             />
           </Form.Item>
         ) : (
@@ -440,7 +523,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
-              style={{ minWidth: 180, textAlign: 'left' }}
+              style={{ minWidth: 180, textAlign: 'left', ...getRequiredFieldStyle(watchedMaterialId) }}
               onChange={handleMaterialChange}
             />
           </Form.Item>
@@ -500,7 +583,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
             rules={[{ required: true, message: 'Рассчитайте сумму детали' }]}
           >
             <InputNumber
-              style={{ width: '100%', minWidth: '90px' }}
+              style={{ width: '100%', minWidth: '90px', ...getRequiredFieldStyle(watchedDetailCost) }}
               precision={2}
               min={0}
               disabled={!isSumEditable}
@@ -663,7 +746,16 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       render: (text, record) =>
         isEditing(record) ? (
           <Form.Item name="detail_name" style={{ margin: 0, padding: '0 4px' }}>
-            <Input placeholder="Название детали" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <Input
+              placeholder="Название детали"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                } else if (e.key === 'Tab' && !e.shiftKey) {
+                  handleTabOnLastField(e, record);
+                }
+              }}
+            />
           </Form.Item>
         ) : (
           text || '—'
@@ -672,7 +764,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
     {
       title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Действия</span></div>,
       key: 'actions',
-      width: 50,
+      width: 40,
       fixed: 'right',
       render: (_, record) => (
         <Space size={2}>
@@ -690,13 +782,6 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
                 onClick={() => saveEdit(record)}
                 style={{ padding: '0 4px' }}
                 disabled={!!dimensionValidationError}
-              />
-              <Button
-                type="text"
-                size="small"
-                icon={<CloseOutlined style={{ fontSize: '12px', color: '#ff4d4f' }} />}
-                onClick={cancelEdit}
-                style={{ padding: '0 4px' }}
               />
             </>
           ) : (
@@ -787,7 +872,25 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
 
               const menuContent = `
                 <ul class="ant-dropdown-menu" style="background: white; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;">
-                  <li class="ant-dropdown-menu-item ant-dropdown-menu-item-danger" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                  <li class="ant-dropdown-menu-item menu-item-add" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <span role="img" aria-label="plus" style="color: #1890ff;">
+                      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+                        <path d="M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"></path>
+                        <path d="M176 474h672q8 0 8 8v60q0 8-8 8H176q-8 0-8-8v-60q0-8 8-8z"></path>
+                      </svg>
+                    </span>
+                    <span style="color: #1890ff;">Добавить строку</span>
+                  </li>
+                  <li class="ant-dropdown-menu-item menu-item-copy" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <span role="img" aria-label="copy" style="color: #52c41a;">
+                      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+                        <path d="M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v530.7c0 8.5 3.4 16.6 9.4 22.6l173.3 173.3c2.2 2.2 4.7 4 7.4 5.5v1.9h4.2c3.5 1.3 7.2 2 11 2H704c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32zM350 856.2L263.9 770H350v86.2zM664 888H414V746c0-22.1-17.9-40-40-40H232V264h432v624z"></path>
+                      </svg>
+                    </span>
+                    <span style="color: #52c41a;">Скопировать строку</span>
+                  </li>
+                  <li style="border-top: 1px solid #f0f0f0; margin: 4px 0;"></li>
+                  <li class="ant-dropdown-menu-item ant-dropdown-menu-item-danger menu-item-delete" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
                     <span role="img" aria-label="delete" style="color: #ff4d4f;">
                       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
                         <path d="M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72zm504 72H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM731.3 840H292.7l-24.2-512h487l-24.2 512z"></path>
@@ -800,18 +903,43 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
               menu.innerHTML = menuContent;
               document.body.appendChild(menu);
 
-              const menuItem = menu.querySelector('.ant-dropdown-menu-item');
-              menuItem?.addEventListener('click', () => {
+              // Add item handler
+              const addItem = menu.querySelector('.menu-item-add');
+              addItem?.addEventListener('click', () => {
+                onQuickAdd?.();
+                menu.remove();
+              });
+              addItem?.addEventListener('mouseenter', () => {
+                (addItem as HTMLElement).style.backgroundColor = '#e6f7ff';
+              });
+              addItem?.addEventListener('mouseleave', () => {
+                (addItem as HTMLElement).style.backgroundColor = 'white';
+              });
+
+              // Copy item handler
+              const copyItem = menu.querySelector('.menu-item-copy');
+              copyItem?.addEventListener('click', () => {
+                onCopyRow?.(record);
+                menu.remove();
+              });
+              copyItem?.addEventListener('mouseenter', () => {
+                (copyItem as HTMLElement).style.backgroundColor = '#f6ffed';
+              });
+              copyItem?.addEventListener('mouseleave', () => {
+                (copyItem as HTMLElement).style.backgroundColor = 'white';
+              });
+
+              // Delete item handler
+              const deleteItem = menu.querySelector('.menu-item-delete');
+              deleteItem?.addEventListener('click', () => {
                 onDelete(record.temp_id!, record.detail_id);
                 menu.remove();
               });
-
-              menuItem?.addEventListener('mouseenter', () => {
-                (menuItem as HTMLElement).style.backgroundColor = '#fff1f0';
+              deleteItem?.addEventListener('mouseenter', () => {
+                (deleteItem as HTMLElement).style.backgroundColor = '#fff1f0';
               });
-
-              menuItem?.addEventListener('mouseleave', () => {
-                (menuItem as HTMLElement).style.backgroundColor = 'white';
+              deleteItem?.addEventListener('mouseleave', () => {
+                (deleteItem as HTMLElement).style.backgroundColor = 'white';
               });
 
               const closeMenu = (event: MouseEvent) => {
@@ -830,7 +958,7 @@ export const OrderDetailTable: React.FC<OrderDetailTableProps> = ({
       />
     </Form>
   );
-};
+});
 
 // Helper components for loading reference data
 const MaterialCell: React.FC<{ materialId: number }> = ({ materialId }) => {

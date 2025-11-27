@@ -345,19 +345,94 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             duration: 0, // Don't auto-hide
           });
         } else {
-          // Regular validation errors
+          // Regular validation errors - format them nicely
           console.log('[OrderForm] handleSave - showing REGULAR validation error notification');
-          const errorMessages = issues.length > 0
-            ? issues.map((err) => `${err.path.join('.')}: ${err.message}`).join('\n')
-            : 'Ошибка валидации данных';
 
-          console.log('[OrderForm] handleSave - errorMessages:', errorMessages);
+          // Field name mappings for human-readable messages
+          const fieldLabels: Record<string, string> = {
+            // Header fields
+            'header.order_name': 'Название заказа',
+            'header.client_id': 'Клиент',
+            'header.order_date': 'Дата заказа',
+            'header.order_status_id': 'Статус заказа',
+            'header.payment_status_id': 'Статус оплаты',
+            'header.planned_completion_date': 'Плановая дата завершения',
+            'header.total_amount': 'Сумма заказа',
+            'header.discount': 'Скидка',
+            'header.paid_amount': 'Оплачено',
+            // Detail fields
+            'height': 'Высота',
+            'width': 'Ширина',
+            'quantity': 'Количество',
+            'area': 'Площадь',
+            'material_id': 'Материал',
+            'milling_type_id': 'Тип фрезеровки',
+            'edge_type_id': 'Тип обката',
+            'detail_cost': 'Сумма детали',
+            'milling_cost_per_sqm': 'Цена за м²',
+          };
+
+          // Group errors by section (header vs details)
+          const headerErrors: string[] = [];
+          const detailErrors: Map<number, string[]> = new Map();
+
+          issues.forEach((err) => {
+            const pathStr = err.path.join('.');
+
+            // Check if it's a detail error (e.g., details.0.height)
+            const detailMatch = pathStr.match(/^details\.(\d+)\.(.+)$/);
+            if (detailMatch) {
+              const detailIndex = parseInt(detailMatch[1], 10);
+              const fieldName = detailMatch[2];
+              const label = fieldLabels[fieldName] || fieldName;
+
+              if (!detailErrors.has(detailIndex)) {
+                detailErrors.set(detailIndex, []);
+              }
+              detailErrors.get(detailIndex)!.push(label);
+            } else {
+              // Header error
+              const label = fieldLabels[pathStr] || pathStr;
+              headerErrors.push(label);
+            }
+          });
 
           notification.error({
-            message: 'Ошибка валидации',
+            message: '⚠️ Не удалось сохранить заказ',
             description: (
-              <div style={{ whiteSpace: 'pre-line' }}>
-                {errorMessages}
+              <div style={{ fontSize: '14px' }}>
+                <p style={{ marginBottom: '12px', fontWeight: 'bold', color: '#ff4d4f' }}>
+                  Пожалуйста, заполните обязательные поля:
+                </p>
+
+                {headerErrors.length > 0 && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>📋 Основная информация:</div>
+                    <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                      {headerErrors.map((field, idx) => (
+                        <li key={idx} style={{ color: '#595959' }}>{field}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {detailErrors.size > 0 && (
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>📦 Детали заказа:</div>
+                    {Array.from(detailErrors.entries()).map(([detailIdx, fields]) => (
+                      <div key={detailIdx} style={{ marginBottom: '8px' }}>
+                        <div style={{ color: '#fa8c16', fontWeight: 500 }}>
+                          Позиция #{detailIdx + 1}:
+                        </div>
+                        <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                          {fields.map((field, idx) => (
+                            <li key={idx} style={{ color: '#595959' }}>{field}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ),
             duration: 0, // Don't auto-hide

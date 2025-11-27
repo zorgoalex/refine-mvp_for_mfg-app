@@ -1,28 +1,67 @@
 // Order Details Tab
 // Container for managing order details with toolbar and CRUD operations
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, Button, Space, Modal, message } from 'antd';
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
-import { OrderDetailTable } from '../tables/OrderDetailTable';
+import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 
+// Default values for quick add
+const QUICK_ADD_DEFAULTS = {
+  material_id: 1,      // МДФ 16мм
+  milling_type_id: 1,  // Модерн
+  edge_type_id: 1,     // р-1
+  quantity: 1,
+  priority: 100,
+};
+
 export const OrderDetailsTab: React.FC = () => {
-  const { details, addDetail, updateDetail, deleteDetail, reorderDetails } = useOrderFormStore();
+  const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails } = useOrderFormStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
+  const tableRef = useRef<OrderDetailTableRef>(null);
 
-  // Handle create new detail
+  // Handle create new detail via modal
   const handleCreate = () => {
     setModalMode('create');
     setEditingDetail(undefined);
     setModalOpen(true);
+  };
+
+  // Handle quick inline add
+  const handleQuickAdd = async () => {
+    // Add new detail with defaults
+    addDetail(QUICK_ADD_DEFAULTS as Omit<OrderDetail, 'temp_id'>);
+
+    // Get the newly added detail
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const updatedDetails = useOrderFormStore.getState().details;
+    const lastDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
+
+    if (!lastDetail || !tableRef.current) return;
+
+    // If currently editing another row, save it first then start new
+    if (tableRef.current.isEditing()) {
+      const saved = await tableRef.current.saveCurrentAndStartNew(lastDetail);
+      if (!saved) {
+        // Validation failed - remove the just-added detail
+        const tempId = lastDetail.temp_id || lastDetail.detail_id;
+        if (tempId) {
+          deleteDetail(tempId, lastDetail.detail_id);
+        }
+        message.warning('Сначала заполните обязательные поля текущей позиции');
+      }
+    } else {
+      // No row being edited, just start editing the new one
+      tableRef.current.startEditRow(lastDetail);
+    }
   };
 
   // Handle edit existing detail
@@ -124,13 +163,29 @@ export const OrderDetailsTab: React.FC = () => {
     setSelectedRowKeys(newSelectedRowKeys);
   };
 
+  // Handle copy row - duplicate the row and insert after original
+  const handleCopyRow = (detail: OrderDetail) => {
+    // Create copy without identifiers
+    const { temp_id, detail_id, detail_number, ...detailData } = detail;
+
+    // Insert copy after the original
+    const afterTempId = temp_id || detail_id;
+    if (afterTempId) {
+      insertDetailAfter(afterTempId, detailData as Omit<OrderDetail, 'temp_id'>);
+      message.success('Строка скопирована');
+    }
+  };
+
   return (
     <Card size="small">
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         {/* Toolbar */}
         <Space>
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-            Добавить деталь
+          <Button type="primary" icon={<ThunderboltOutlined />} onClick={handleQuickAdd}>
+            Быстрое добавление
+          </Button>
+          <Button icon={<PlusOutlined />} onClick={handleCreate}>
+            Добавить (форма)
           </Button>
           <Button
             danger
@@ -147,8 +202,11 @@ export const OrderDetailsTab: React.FC = () => {
 
         {/* Table */}
         <OrderDetailTable
+          ref={tableRef}
           onEdit={handleEdit}
           onDelete={handleDelete}
+          onQuickAdd={handleQuickAdd}
+          onCopyRow={handleCopyRow}
           selectedRowKeys={selectedRowKeys}
           onSelectChange={handleSelectChange}
           highlightedRowKey={highlightedRowKey}
