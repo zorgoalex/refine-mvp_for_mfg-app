@@ -26,10 +26,6 @@
   font-size: 70%;
 }
 
-.orders-table td.orders-col.status {
-  font-size: 100%;
-}
-
 .orders-table td.orders-col--client,
 .orders-table td.orders-col--wrap {
   hyphens: auto;
@@ -37,9 +33,10 @@
 
 .orders-table .orders-status-value {
   display: block;
-  hyphens: auto;
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45px;
 }
 
 /* Подсветка найденной строки */

@@ -14,7 +14,7 @@ import {
   EditButton,
   CreateButton,
 } from "@refinedev/antd";
-import { Space, Table, Button, Input, message } from "antd";
+import { Space, Table, Button, Input, message, Tooltip } from "antd";
 import {
   EyeOutlined,
   EditOutlined,
@@ -183,9 +183,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     return dayjs(date).format("DD.MM.YYYY");
   };
 
-  const renderStatus = (value?: string | null) => (
-    <span className="orders-status-value">{value || "—"}</span>
-  );
+  const renderStatus = (value?: string | null) => {
+    const displayValue = value || "—";
+    return (
+      <Tooltip title={displayValue} placement="topLeft">
+        <span className="orders-status-value">{displayValue}</span>
+      </Tooltip>
+    );
+  };
 
   const createdByIds = useMemo(
     () =>
@@ -471,7 +476,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="order_status_name"
             title="Статус заказа"
-            width={72}
+            width={45}
             className="orders-col status order-status orders-col--wrap"
             render={(value) => renderStatus(value)}
           />
