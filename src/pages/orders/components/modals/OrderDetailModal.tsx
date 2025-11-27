@@ -114,7 +114,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       } else {
         form.resetFields();
         form.setFieldsValue({
-          quantity: 1,
           priority: 100,
           material_id: 1, // МДФ 16мм
           milling_type_id: 1, // Модерн
@@ -158,11 +157,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const handleDimensionChange = () => {
     const height = form.getFieldValue('height');
     const width = form.getFieldValue('width');
-    const quantity = form.getFieldValue('quantity') || 1;
+    const quantity = form.getFieldValue('quantity');
 
     console.log('[OrderDetailModal] handleDimensionChange - height:', height, 'width:', width, 'quantity:', quantity);
 
-    if (height && width && height > 0 && width > 0 && quantity > 0) {
+    if (height && width && quantity && height > 0 && width > 0 && quantity > 0) {
       // Formula: ROUNDUP((height_mm / 1000) * (width_mm / 1000) * quantity, 2)
       const areaPerPiece = (height / 1000) * (width / 1000);
       const totalArea = areaPerPiece * quantity;

@@ -152,7 +152,28 @@ export const useOrderSave = (): UseOrderSaveResult => {
       }
 
       // ========== STEP 2: Save order_details ==========
-      if (values.details && values.details.length > 0) {
+      // Filter out unfilled details (new details with only default values)
+      const isDetailUnfilled = (detail: any): boolean => {
+        // Only check new details (no detail_id)
+        if (detail.detail_id) return false;
+
+        // Check if essential fields are empty/null/zero
+        const hasNoHeight = !detail.height || detail.height === 0;
+        const hasNoWidth = !detail.width || detail.width === 0;
+        const hasNoArea = !detail.area || detail.area === 0;
+
+        // If height, width, and area are all empty - consider unfilled
+        return hasNoHeight && hasNoWidth && hasNoArea;
+      };
+
+      // Filter details to exclude unfilled ones
+      const filledDetails = (values.details || []).filter(detail => !isDetailUnfilled(detail));
+      const skippedCount = (values.details?.length || 0) - filledDetails.length;
+      if (skippedCount > 0) {
+        console.log(`[useOrderSave] Skipped ${skippedCount} unfilled detail(s)`);
+      }
+
+      if (filledDetails.length > 0) {
         const { originalDetails } = useOrderFormStore.getState();
         const normalizeDetail = (d: any) => {
           const {
@@ -173,7 +194,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
           ...normalizeDetail(detail),
           order_id: createdOrderId,
         });
-        const detailPromises = values.details.map((detail) => {
+        const detailPromises = filledDetails.map((detail) => {
           if (detail.detail_id) {
             // Update only if changed
             const original = originalDetails[detail.detail_id];

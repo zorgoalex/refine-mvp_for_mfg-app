@@ -1,6 +1,6 @@
-import { Create } from "@refinedev/antd";
+import { Create, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
-import { Form, Input, Checkbox } from "antd";
+import { Form, Input, Select, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 
 export const VendorCreate: React.FC<IResourceComponentsProps> = () => {
@@ -9,13 +9,22 @@ export const VendorCreate: React.FC<IResourceComponentsProps> = () => {
     idField: "vendor_id",
   });
 
+  const { selectProps: materialTypeSelectProps } = useSelect({
+    resource: "material_types",
+    optionLabel: "material_type_name",
+    optionValue: "material_type_id",
+  });
+
   return (
     <Create saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
-        <Form.Item label="Name" name="vendor_name" rules={[{ required: true }]}>
+        <Form.Item label="Название" name="vendor_name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        <Form.Item label="Contact Info" name="contact_info">
+        <Form.Item label="Тип материала" name="material_type_id">
+          <Select {...materialTypeSelectProps} allowClear />
+        </Form.Item>
+        <Form.Item label="Контактная информация" name="contact_info">
           <Input />
         </Form.Item>
         <Form.Item label="Ref Key 1C" name="ref_key_1c">

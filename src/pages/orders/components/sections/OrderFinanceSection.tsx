@@ -25,13 +25,30 @@ export const OrderFinanceSection: React.FC = () => {
     setTotalAmountManual(false);
   };
 
-  // Auto-calculate discounted_amount when total_amount or discount changes
-  useEffect(() => {
-    if (header.total_amount && header.discount) {
-      const discountedAmount = header.total_amount * (1 - header.discount / 100);
+  // Two-way discount calculation handlers
+  const handleDiscountChange = (value: number | null) => {
+    const discount = value || 0;
+    updateHeaderField('discount', discount);
+
+    // Calculate discounted_amount from discount
+    const totalAmount = header.total_amount || 0;
+    if (totalAmount > 0) {
+      const discountedAmount = totalAmount * (1 - discount / 100);
       updateHeaderField('discounted_amount', Number(discountedAmount.toFixed(2)));
     }
-  }, [header.total_amount, header.discount]);
+  };
+
+  const handleDiscountedAmountChange = (value: number | null) => {
+    const discountedAmount = value || 0;
+    updateHeaderField('discounted_amount', discountedAmount);
+
+    // Calculate discount from discounted_amount
+    const totalAmount = header.total_amount || 0;
+    if (totalAmount > 0) {
+      const discount = (1 - discountedAmount / totalAmount) * 100;
+      updateHeaderField('discount', Number(discount.toFixed(2)));
+    }
+  };
 
   // Update paid_amount from payments totals
   useEffect(() => {
@@ -112,7 +129,7 @@ export const OrderFinanceSection: React.FC = () => {
             <Form.Item label={<span style={{ fontSize: 12 }}>Скидка (%)</span>} style={{ marginBottom: 0 }}>
               <InputNumber
                 value={header.discount}
-                onChange={(value) => updateHeaderField('discount', value || 0)}
+                onChange={handleDiscountChange}
                 min={0}
                 max={100}
                 precision={2}
@@ -128,7 +145,7 @@ export const OrderFinanceSection: React.FC = () => {
             <Form.Item label={<span style={{ fontSize: 12 }}>Сумма со скидкой</span>} style={{ marginBottom: 0 }}>
               <InputNumber
                 value={header.discounted_amount}
-                onChange={(value) => updateHeaderField('discounted_amount', value)}
+                onChange={handleDiscountedAmountChange}
                 min={0}
                 precision={2}
                 formatter={(value) => !value || value === 0 ? '' : numberFormatter(value, 2)}

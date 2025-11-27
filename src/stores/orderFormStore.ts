@@ -146,7 +146,7 @@ export const useOrderFormStore = create<OrderFormState>()(
                   temp_id: Date.now(),
                   detail_number: state.details.length + 1,
                   priority: detail.priority || 100,
-                  quantity: detail.quantity || 1,
+                  quantity: detail.quantity,
                   delete_flag: false,
                 },
               ],
@@ -172,7 +172,7 @@ export const useOrderFormStore = create<OrderFormState>()(
                 temp_id: Date.now(),
                 detail_number: 0, // Will be reassigned
                 priority: detail.priority || 100,
-                quantity: detail.quantity || 1,
+                quantity: detail.quantity,
                 delete_flag: false,
               };
 

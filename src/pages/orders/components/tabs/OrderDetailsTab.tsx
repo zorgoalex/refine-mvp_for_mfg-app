@@ -15,7 +15,6 @@ const QUICK_ADD_DEFAULTS = {
   material_id: 1,      // МДФ 16мм
   milling_type_id: 1,  // Модерн
   edge_type_id: 1,     // р-1
-  quantity: 1,
   priority: 100,
 };
 

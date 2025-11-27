@@ -54,6 +54,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     getFormValues,
     setDirty,
     isTotalAmountManual,
+    deleteDetail,
   } = useOrderFormStore();
 
   const { defaultOrderStatus, defaultPaymentStatus, isLoading: statusesLoading } =
@@ -281,6 +282,24 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       console.log('[OrderForm] handleSave - formValues:', formValues);
       console.log('[OrderForm] handleSave - details count:', formValues.details?.length || 0);
 
+      // Filter out unfilled details before validation (new details with only default values)
+      const isDetailUnfilled = (detail: any): boolean => {
+        // Only check new details (no detail_id)
+        if (detail.detail_id) return false;
+        // Check if essential fields are empty/null/zero
+        const hasNoHeight = !detail.height || detail.height === 0;
+        const hasNoWidth = !detail.width || detail.width === 0;
+        const hasNoArea = !detail.area || detail.area === 0;
+        return hasNoHeight && hasNoWidth && hasNoArea;
+      };
+
+      const filteredDetails = (formValues.details || []).filter(detail => !isDetailUnfilled(detail));
+      const skippedCount = (formValues.details?.length || 0) - filteredDetails.length;
+      if (skippedCount > 0) {
+        console.log(`[OrderForm] handleSave - filtered out ${skippedCount} unfilled detail(s)`);
+      }
+      formValues.details = filteredDetails;
+
       // Zod validation
       const result = orderFormSchema.safeParse(formValues);
       console.log('[OrderForm] handleSave - validation result:', result.success);
@@ -460,6 +479,25 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
         console.log('[OrderForm] handleSave - setting dirty to false');
         setDirty(false);
+
+        // Clean up unfilled details from the store
+        const currentDetails = useOrderFormStore.getState().details;
+        const unfilledDetails = currentDetails.filter(detail => {
+          if (detail.detail_id) return false;
+          const hasNoHeight = !detail.height || detail.height === 0;
+          const hasNoWidth = !detail.width || detail.width === 0;
+          const hasNoArea = !detail.area || detail.area === 0;
+          return hasNoHeight && hasNoWidth && hasNoArea;
+        });
+        if (unfilledDetails.length > 0) {
+          console.log(`[OrderForm] handleSave - removing ${unfilledDetails.length} unfilled detail(s) from store`);
+          unfilledDetails.forEach(detail => {
+            const tempId = detail.temp_id || detail.detail_id;
+            if (tempId) {
+              deleteDetail(tempId, detail.detail_id);
+            }
+          });
+        }
 
         console.log('[OrderForm] handleSave - onSaveSuccess callback exists?', !!onSaveSuccess);
         if (onSaveSuccess) {
