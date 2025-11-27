@@ -545,8 +545,19 @@ const headers = async () => {
   };
 };
 
-// Helper to parse PostgreSQL error messages into user-friendly text
+// Helper to parse error messages into user-friendly text
 const parsePostgresError = (message: string): string => {
+  // Authentication errors from Hasura
+  if (message.includes('Missing') && message.includes('Authorization')) {
+    return 'Сессия истекла. Пожалуйста, войдите в систему заново.';
+  }
+  if (message.includes('JWT') && message.includes('authentication')) {
+    return 'Сессия истекла. Пожалуйста, войдите в систему заново.';
+  }
+  if (message.includes('Could not verify JWT')) {
+    return 'Ошибка авторизации. Пожалуйста, войдите в систему заново.';
+  }
+
   // Unique constraint violations
   if (message.includes('duplicate key value violates unique constraint')) {
     const constraintMatch = message.match(/constraint "(.+?)"/);

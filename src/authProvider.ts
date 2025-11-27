@@ -126,19 +126,32 @@ export const authProvider: AuthBindings = {
    * Пытается обновить токен при 401 ошибке
    */
   onError: async (error) => {
-    // Обработка 401 ошибок (Unauthorized)
-    if (error?.statusCode === 401 || error?.message?.includes('Unauthorized')) {
+    // Проверка на ошибку отсутствия авторизации от Hasura
+    const isAuthMissingError =
+      error?.message?.includes('Missing') && error?.message?.includes('Authorization') ||
+      error?.message?.includes('JWT') ||
+      error?.statusCode === 400 && error?.message?.includes('authentication');
+
+    // Обработка 401 ошибок (Unauthorized) или ошибок отсутствия токена
+    if (error?.statusCode === 401 || error?.message?.includes('Unauthorized') || isAuthMissingError) {
       // Попытаться обновить токен
       const newToken = await refreshAccessToken();
 
       if (!newToken) {
+        // Создаём понятную ошибку для пользователя
+        const userFriendlyError = {
+          message: 'Сессия истекла',
+          name: 'SessionExpired',
+          statusCode: error?.statusCode,
+        };
+
         // Логируем неудачное обновление токена (сессия истекла)
-        logAuthError(error, 'Сессия истекла');
+        logAuthError(userFriendlyError, 'Сессия истекла. Пожалуйста, войдите в систему заново.');
 
         return {
           logout: true,
           redirectTo: '/login',
-          error,
+          error: userFriendlyError,
         };
       }
 
@@ -146,9 +159,17 @@ export const authProvider: AuthBindings = {
       return {};
     }
 
-    // Логируем прочие ошибки
+    // Логируем прочие ошибки с понятным сообщением
     if (error?.message) {
-      logAuthError(error, 'Ошибка авторизации');
+      // Преобразуем технические сообщения в понятные
+      let userMessage = error.message;
+      if (error.message.includes('network') || error.message.includes('fetch')) {
+        userMessage = 'Ошибка сети. Проверьте подключение к интернету.';
+      } else if (error.message.includes('timeout')) {
+        userMessage = 'Сервер не отвечает. Попробуйте позже.';
+      }
+
+      logAuthError({ ...error, message: userMessage }, 'Ошибка');
     }
 
     return { error };
