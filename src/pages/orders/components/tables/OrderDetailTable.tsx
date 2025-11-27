@@ -252,16 +252,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     }
   };
 
-  // Handle Tab on last field - save and add new row
+  // Handle Tab on last field - save and optionally add new row
   const handleTabOnLastField = async (e: React.KeyboardEvent, record: OrderDetail) => {
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
 
       // Save current row
       const saved = await saveCurrentRow();
-      if (saved && onQuickAdd) {
-        // Add new row and start editing it
-        onQuickAdd();
+      if (saved) {
+        // Check if current row is the last one in the list
+        const recordKey = record.temp_id || record.detail_id;
+        const lastDetail = sortedDetails[sortedDetails.length - 1];
+        const lastKey = lastDetail?.temp_id || lastDetail?.detail_id;
+        const isLastRow = recordKey === lastKey;
+
+        // Only add new row if current row is the last one
+        if (isLastRow && onQuickAdd) {
+          onQuickAdd();
+        }
       }
     }
   };
@@ -294,16 +302,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const recalcArea = () => {
     const height = form.getFieldValue('height');
     const width = form.getFieldValue('width');
-    const quantity = form.getFieldValue('quantity') || 1;
+    const quantity = form.getFieldValue('quantity');
     console.log('[OrderDetailTable] recalcArea - height:', height, 'width:', width, 'quantity:', quantity);
 
-    if (height && width && height > 0 && width > 0) {
+    if (height && width && quantity && height > 0 && width > 0 && quantity > 0) {
       const area = (height * width * quantity) / 1000000; // mm^2 * qty -> m^2
       console.log('[OrderDetailTable] recalcArea - calculated area:', area);
       form.setFieldsValue({ area });
       recalcSum(); // Also recalculate sum when area changes
     } else {
-      console.log('[OrderDetailTable] recalcArea - skipped (invalid height or width)');
+      console.log('[OrderDetailTable] recalcArea - skipped (height, width or quantity missing)');
     }
 
     // Validate dimensions against material limits
@@ -692,6 +700,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
               style={{ minWidth: 200, textAlign: 'left' }}
+              onKeyDown={(e) => {
+                if (e.key === 'Tab' && !e.shiftKey) {
+                  handleTabOnLastField(e, record);
+                }
+              }}
             />
           </Form.Item>
         ) : (
@@ -709,7 +722,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (value, record) =>
         isEditing(record) ? (
           <Form.Item name="priority" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber style={{ width: '100%', minWidth: '60px' }} min={1} max={999} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber style={{ width: '100%', minWidth: '60px' }} min={1} max={999} tabIndex={-1} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           formatNumber(value, 0)
@@ -731,6 +744,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
               style={{ minWidth: 150, textAlign: 'left' }}
+              tabIndex={-1}
             />
           </Form.Item>
         ) : (
@@ -751,13 +765,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           <Form.Item name="detail_name" style={{ margin: 0, padding: '0 4px' }}>
             <Input
               placeholder="Название детали"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                } else if (e.key === 'Tab' && !e.shiftKey) {
-                  handleTabOnLastField(e, record);
-                }
-              }}
+              tabIndex={-1}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); } }}
             />
           </Form.Item>
         ) : (
@@ -827,6 +836,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         columns={columns}
         rowKey={(record) => record.temp_id || record.detail_id || 0}
         rowSelection={rowSelection}
+        showSorterTooltip={false}
         pagination={{
           pageSize: pageSize,
           showSizeChanger: true,

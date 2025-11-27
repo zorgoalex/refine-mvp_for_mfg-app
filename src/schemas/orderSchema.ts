@@ -142,7 +142,7 @@ export const orderDetailSchema = z.object({
   detail_number: z.number().int().positive("Номер детали должен быть > 0"),
   height: z.number().positive("Высота должна быть положительной"),
   width: z.number().positive("Ширина должна быть положительной"),
-  quantity: z.number().int().positive("Количество должно быть > 0").default(1),
+  quantity: z.number().int().positive("Количество должно быть > 0"),
   area: z.number().min(0, "Площадь должна быть >= 0"),
 
   // Materials and processing
