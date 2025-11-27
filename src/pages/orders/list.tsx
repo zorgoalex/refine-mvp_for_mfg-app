@@ -586,14 +586,6 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             }}
           />
           <Table.Column
-            dataIndex="doweling_order_id"
-            title="ID Присадка"
-            sorter
-            width={60}
-            className="col-doweling-id"
-            onHeaderCell={() => ({ className: "col-doweling-id" })}
-          />
-          <Table.Column
             dataIndex="created_by"
             title="Создано"
             width={120}
