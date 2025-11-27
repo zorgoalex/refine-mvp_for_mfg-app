@@ -233,7 +233,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
       console.log('[useOrderSave] Fetched', savedDetails.length, 'details from DB');
 
       if (savedDetails.length > 0) {
-        console.log('[useOrderSave] Recalculating total_amount from saved details...');
+        console.log('[useOrderSave] Recalculating totals from saved details...');
 
         // Calculate total_amount by summing detail_cost from all SAVED details
         const totalAmount = savedDetails.reduce((sum, detail: any) => {
@@ -242,25 +242,39 @@ export const useOrderSave = (): UseOrderSaveResult => {
           return sum + cost;
         }, 0);
 
-        console.log('[useOrderSave] Calculated total_amount:', totalAmount);
+        // Calculate total_area by summing area from all details
+        const totalArea = savedDetails.reduce((sum, detail: any) => {
+          return sum + (detail.area || 0);
+        }, 0);
 
-        // Update order with calculated total_amount
+        // Calculate parts_count by summing quantity from all details
+        const partsCount = savedDetails.reduce((sum, detail: any) => {
+          return sum + (detail.quantity || 0);
+        }, 0);
+
+        console.log('[useOrderSave] Calculated totals - total_amount:', totalAmount, ', total_area:', totalArea, ', parts_count:', partsCount);
+
+        // Update order with calculated totals
         await dataProvider().update({
           resource: 'orders',
           id: createdOrderId,
           variables: {
             total_amount: totalAmount,
+            total_area: totalArea,
+            parts_count: partsCount,
           },
         });
 
-        console.log('[useOrderSave] Order total_amount updated successfully');
+        console.log('[useOrderSave] Order totals updated successfully');
       } else {
-        console.log('[useOrderSave] No details found, setting total_amount to 0');
+        console.log('[useOrderSave] No details found, setting totals to 0');
         await dataProvider().update({
           resource: 'orders',
           id: createdOrderId,
           variables: {
             total_amount: 0,
+            total_area: 0,
+            parts_count: 0,
           },
         });
       }

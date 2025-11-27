@@ -3,7 +3,7 @@
 
 import React, { useState, useRef } from 'react';
 import { Card, Button, Space, Modal, message } from 'antd';
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -20,7 +20,7 @@ const QUICK_ADD_DEFAULTS = {
 };
 
 export const OrderDetailsTab: React.FC = () => {
-  const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails } = useOrderFormStore();
+  const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField } = useOrderFormStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
@@ -196,6 +196,51 @@ export const OrderDetailsTab: React.FC = () => {
     }
   };
 
+  // Handle recalculate all sums
+  const handleRecalculateSums = () => {
+    if (details.length === 0) {
+      message.warning('Нет позиций для пересчёта');
+      return;
+    }
+
+    let updatedCount = 0;
+    let totalAmount = 0;
+
+    // Recalculate detail_cost for each detail
+    details.forEach((detail) => {
+      const area = detail.area || 0;
+      const pricePerSqm = detail.milling_cost_per_sqm || 0;
+      const newDetailCost = Number((area * pricePerSqm).toFixed(2));
+
+      // Update detail if cost changed
+      const identifier = detail.temp_id || detail.detail_id;
+      if (identifier && newDetailCost !== detail.detail_cost) {
+        updateDetail(identifier, { detail_cost: newDetailCost });
+        updatedCount++;
+      }
+
+      totalAmount += newDetailCost;
+    });
+
+    // Round total amount
+    totalAmount = Number(totalAmount.toFixed(2));
+
+    // Update total_amount in header
+    updateHeaderField('total_amount', totalAmount);
+
+    // Calculate discounted_amount if discount > 0
+    const discount = header.discount || 0;
+    if (discount > 0) {
+      const discountedAmount = Number((totalAmount * (1 - discount / 100)).toFixed(2));
+      updateHeaderField('discounted_amount', discountedAmount);
+      message.success(`Пересчитано: ${updatedCount} позиций. Сумма: ${totalAmount.toLocaleString('ru-RU')} ₸, со скидкой ${discount}%: ${discountedAmount.toLocaleString('ru-RU')} ₸`);
+    } else {
+      // If no discount, discounted_amount equals total_amount
+      updateHeaderField('discounted_amount', totalAmount);
+      message.success(`Пересчитано: ${updatedCount} позиций. Общая сумма: ${totalAmount.toLocaleString('ru-RU')} ₸`);
+    }
+  };
+
   return (
     <Card size="small">
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -214,6 +259,13 @@ export const OrderDetailsTab: React.FC = () => {
             disabled={selectedRowKeys.length === 0}
           >
             Удалить выбранные ({selectedRowKeys.length})
+          </Button>
+          <Button
+            icon={<CalculatorOutlined />}
+            onClick={handleRecalculateSums}
+            disabled={details.length === 0}
+          >
+            Пересчитать суммы
           </Button>
           <span style={{ marginLeft: 16, color: '#666' }}>
             Всего позиций: {details.length}
