@@ -73,36 +73,9 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
         padding: '10px 16px',
       }}
     >
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
-            Менеджер
-          </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
-            {record?.manager_id || '—'}
-          </Text>
-        </div>
-
-        <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
-            Оплачено
-          </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
-            {formatNumber(paidAmount, 2)} {CURRENCY_SYMBOL}
-          </Text>
-        </div>
-      </div>
-
       {/* Таблица платежей */}
       {payments.length > 0 && (
-        <div style={{ marginTop: 12 }}>
+        <div>
           <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 8 }}>
             Платежи по заказу
           </Text>
