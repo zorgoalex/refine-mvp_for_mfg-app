@@ -487,15 +487,29 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             className="orders-col status payment-status orders-col--wrap"
             render={(value) => {
               const displayValue = value || "—";
-              // "Не оплачен" (payment_status_id=1) - красный цвет
+
+              // Определяем цвет в зависимости от статуса
+              let color = undefined;
               if (value === 'Не оплачен') {
-                return (
-                  <Tooltip title={displayValue} placement="topLeft">
-                    <span className="orders-status-value" style={{ color: '#ff4d4f', fontWeight: 500 }}>{displayValue}</span>
-                  </Tooltip>
-                );
+                color = '#ff4d4f'; // красный
+              } else if (value === 'Частично оплачен') {
+                color = '#d4a574'; // светло-коричневый
+              } else if (value === 'Оплачен') {
+                color = '#52c41a'; // зеленый
               }
-              return renderStatus(value);
+
+              return (
+                <Tooltip title={displayValue} placement="topLeft">
+                  <span
+                    className="orders-status-value"
+                    style={{
+                      ...(color && { color, fontWeight: 500 })
+                    }}
+                  >
+                    {displayValue}
+                  </span>
+                </Tooltip>
+              );
             }}
           />
           <Table.Column

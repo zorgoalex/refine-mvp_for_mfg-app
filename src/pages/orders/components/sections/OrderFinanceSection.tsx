@@ -2,8 +2,9 @@
 // Contains: Total Amount, Discount, Discounted Amount, Paid Amount, Payment Date
 
 import React, { useEffect, useState } from 'react';
-import { Form, InputNumber, DatePicker, Row, Col, Button } from 'antd';
+import { Form, InputNumber, DatePicker, Row, Col, Button, Select } from 'antd';
 import { CalculatorOutlined, DownOutlined } from '@ant-design/icons';
+import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
@@ -11,13 +12,22 @@ import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import dayjs from 'dayjs';
 
 export const OrderFinanceSection: React.FC = () => {
-  const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual, payments } =
+  const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual, isPaymentStatusManual, setPaymentStatusManual, payments } =
     useOrderFormStore();
   const totals = useOrderFormStore(useShallow(selectTotals));
 
   // State for showing/hiding percent input field
   const [showPercentInput, setShowPercentInput] = useState(false);
   const [percentValue, setPercentValue] = useState<number | null>(null);
+
+  // Load payment statuses for manual selection
+  const { selectProps: paymentStatusSelectProps } = useSelect({
+    resource: 'payment_statuses',
+    optionLabel: 'payment_status_name',
+    optionValue: 'payment_status_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
+  });
 
   const handleTotalAmountChange = (value: number | null) => {
     if (!isTotalAmountManual) {
@@ -28,6 +38,13 @@ export const OrderFinanceSection: React.FC = () => {
 
   const handleRestoreAuto = () => {
     setTotalAmountManual(false);
+  };
+
+  const handlePaymentStatusChange = (value: number) => {
+    if (!isPaymentStatusManual) {
+      setPaymentStatusManual(true);
+    }
+    updateHeaderField('payment_status_id', value);
   };
 
   // Calculate discount percent from absolute discount amount
@@ -113,6 +130,31 @@ export const OrderFinanceSection: React.FC = () => {
       }
     }
   }, [payments, updateHeaderField]);
+
+  // Auto-update payment_status_id based on paid_amount and discounted_amount
+  // Only if not manually overridden
+  useEffect(() => {
+    // Skip auto-update if status was manually changed
+    if (isPaymentStatusManual) return;
+
+    const paidAmount = header.paid_amount || 0;
+    const discountedAmount = header.discounted_amount || header.total_amount || 0;
+
+    let newPaymentStatusId: number;
+
+    if (paidAmount === 0) {
+      newPaymentStatusId = 1; // Не оплачено
+    } else if (paidAmount < discountedAmount) {
+      newPaymentStatusId = 2; // Частично оплачено
+    } else {
+      newPaymentStatusId = 3; // Оплачено
+    }
+
+    // Only update if changed to avoid unnecessary re-renders
+    if (header.payment_status_id !== newPaymentStatusId) {
+      updateHeaderField('payment_status_id', newPaymentStatusId);
+    }
+  }, [header.paid_amount, header.discounted_amount, header.total_amount, header.payment_status_id, isPaymentStatusManual, updateHeaderField]);
 
   return (
     <div
@@ -262,6 +304,30 @@ export const OrderFinanceSection: React.FC = () => {
                 }
                 style={{ width: '100%' }}
                 format="DD.MM.YYYY"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={8} style={{ marginTop: 8 }}>
+          <Col span={5}>
+            <Form.Item
+              label={
+                <span style={{ fontSize: 12 }}>
+                  Статус оплаты
+                  {isPaymentStatusManual && (
+                    <span style={{ fontSize: 10, color: '#faad14', marginLeft: 4 }}>(ручной)</span>
+                  )}
+                </span>
+              }
+              style={{ marginBottom: 0 }}
+            >
+              <Select
+                {...paymentStatusSelectProps}
+                value={header.payment_status_id}
+                onChange={handlePaymentStatusChange}
+                style={{ width: '100%' }}
+                placeholder="Выберите статус"
               />
             </Form.Item>
           </Col>

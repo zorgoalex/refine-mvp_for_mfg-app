@@ -15,7 +15,7 @@ import dayjs from 'dayjs';
 const { Text } = Typography;
 
 export const OrderHeaderSummary: React.FC = () => {
-  const { header, details } = useOrderFormStore();
+  const { header, details, isPaymentStatusManual } = useOrderFormStore();
   const totals = useOrderFormStore(useShallow(selectTotals));
 
   // Get unique material IDs from details
@@ -228,7 +228,17 @@ export const OrderHeaderSummary: React.FC = () => {
             color={
               paymentStatusData?.data?.payment_status_name === 'Оплачен' ? '#059669' : '#D97706'
             }
-            style={{ fontSize: '0.64em', padding: '2px 8px', margin: 0, fontWeight: 500, letterSpacing: '0.8px' }}
+            style={{
+              fontSize: '0.64em',
+              padding: '2px 8px',
+              margin: 0,
+              fontWeight: 500,
+              letterSpacing: '0.8px',
+              ...(isPaymentStatusManual && {
+                border: '2px solid #000',
+                boxShadow: '0 0 0 1px #000'
+              })
+            }}
           >
             {paymentStatusData?.data?.payment_status_name?.toUpperCase() || 'НЕ НАЗНАЧЕН'}
           </Tag>

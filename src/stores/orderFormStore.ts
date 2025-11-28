@@ -35,6 +35,7 @@ import {
     isDirty: boolean;
     version: number;
     isTotalAmountManual: boolean;
+    isPaymentStatusManual: boolean;
     isDetailEditing: boolean;
 
     // Originals loaded from server for change detection (keyed by persistent ID)
@@ -79,6 +80,7 @@ import {
     setDirty: (isDirty: boolean) => void;
     syncOriginals: () => void;
     setTotalAmountManual: (isManual: boolean) => void;
+    setPaymentStatusManual: (isManual: boolean) => void;
     setDetailEditing: (isEditing: boolean) => void;
 }
 
@@ -99,6 +101,7 @@ import {
     isDirty: false,
     version: 0,
     isTotalAmountManual: false,
+    isPaymentStatusManual: false,
     isDetailEditing: false,
     originalDetails: {},
     originalPayments: {},
@@ -515,6 +518,14 @@ export const useOrderFormStore = create<OrderFormState>()(
             }),
             false,
             'setTotalAmountManual'
+          ),
+        setPaymentStatusManual: (isManual) =>
+          set(
+            () => ({
+              isPaymentStatusManual: isManual,
+            }),
+            false,
+            'setPaymentStatusManual'
           ),
 
         setDetailEditing: (isEditing) =>
