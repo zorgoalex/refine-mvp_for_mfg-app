@@ -213,11 +213,17 @@ export const OrderHeaderSummary: React.FC = () => {
               {formatNumber(header.discounted_amount, 2)} {CURRENCY_SYMBOL}
             </Text>
           )}
-          {(header.discount != null && Number(header.discount) > 0) && (
-            <Text style={{ fontSize: 13, color: '#DC2626' }}>
-              -{formatNumber(header.discount, 1)}%
-            </Text>
-          )}
+          {(header.discount != null && Number(header.discount) > 0) && (() => {
+            // Calculate discount percent from absolute discount amount
+            const totalAmount = Number(header.total_amount) || 0;
+            const discountAmount = Number(header.discount) || 0;
+            const discountPercent = totalAmount > 0 ? (discountAmount / totalAmount) * 100 : 0;
+            return (
+              <Text style={{ fontSize: 13, color: '#DC2626' }}>
+                -{formatNumber(discountPercent, 1)}%
+              </Text>
+            );
+          })()}
           <Tag
             color={
               paymentStatusData?.data?.payment_status_name === 'Оплачен' ? '#059669' : '#D97706'

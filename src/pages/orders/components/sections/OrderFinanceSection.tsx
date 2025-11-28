@@ -1,8 +1,9 @@
 // Order Finance Section
 // Contains: Total Amount, Discount, Discounted Amount, Paid Amount, Payment Date
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Form, InputNumber, DatePicker, Row, Col, Button } from 'antd';
+import { CalculatorOutlined, DownOutlined } from '@ant-design/icons';
 import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
 import { useShallow } from 'zustand/react/shallow';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
@@ -13,6 +14,10 @@ export const OrderFinanceSection: React.FC = () => {
   const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual, payments } =
     useOrderFormStore();
   const totals = useOrderFormStore(useShallow(selectTotals));
+
+  // State for showing/hiding percent input field
+  const [showPercentInput, setShowPercentInput] = useState(false);
+  const [percentValue, setPercentValue] = useState<number | null>(null);
 
   const handleTotalAmountChange = (value: number | null) => {
     if (!isTotalAmountManual) {
@@ -25,29 +30,60 @@ export const OrderFinanceSection: React.FC = () => {
     setTotalAmountManual(false);
   };
 
-  // Two-way discount calculation handlers
+  // Calculate discount percent from absolute discount amount
+  const discountPercent = (() => {
+    const totalAmount = header.total_amount || 0;
+    const discount = header.discount || 0;
+    if (totalAmount > 0 && discount > 0) {
+      return (discount / totalAmount) * 100;
+    }
+    return 0;
+  })();
+
+  // Handler for absolute discount amount (primary field)
   const handleDiscountChange = (value: number | null) => {
     const discount = value || 0;
     updateHeaderField('discount', discount);
 
-    // Calculate discounted_amount from discount
+    // Calculate discounted_amount from absolute discount
     const totalAmount = header.total_amount || 0;
-    if (totalAmount > 0) {
-      const discountedAmount = totalAmount * (1 - discount / 100);
-      updateHeaderField('discounted_amount', Number(discountedAmount.toFixed(2)));
-    }
+    const discountedAmount = totalAmount - discount;
+    updateHeaderField('discounted_amount', Number(discountedAmount.toFixed(2)));
+  };
+
+  // Handler for percent input (calculator mode)
+  const handlePercentChange = (value: number | null) => {
+    setPercentValue(value);
+
+    const percent = value || 0;
+    const totalAmount = header.total_amount || 0;
+
+    // Calculate absolute discount from percent
+    const absoluteDiscount = (totalAmount * percent) / 100;
+    updateHeaderField('discount', Number(absoluteDiscount.toFixed(2)));
+
+    // Calculate discounted_amount
+    const discountedAmount = totalAmount - absoluteDiscount;
+    updateHeaderField('discounted_amount', Number(discountedAmount.toFixed(2)));
   };
 
   const handleDiscountedAmountChange = (value: number | null) => {
     const discountedAmount = value || 0;
     updateHeaderField('discounted_amount', discountedAmount);
 
-    // Calculate discount from discounted_amount
+    // Calculate absolute discount from discounted_amount
     const totalAmount = header.total_amount || 0;
-    if (totalAmount > 0) {
-      const discount = (1 - discountedAmount / totalAmount) * 100;
-      updateHeaderField('discount', Number(discount.toFixed(2)));
+    const discount = totalAmount - discountedAmount;
+    updateHeaderField('discount', Number(discount.toFixed(2)));
+  };
+
+  // Toggle calculator mode
+  const togglePercentInput = () => {
+    if (!showPercentInput) {
+      // Opening: sync percent value with current discount
+      setPercentValue(discountPercent > 0 ? Number(discountPercent.toFixed(2)) : null);
     }
+    setShowPercentInput(!showPercentInput);
   };
 
   // Update paid_amount from payments totals
@@ -96,7 +132,7 @@ export const OrderFinanceSection: React.FC = () => {
             <Form.Item
               label={
                 <span style={{ fontSize: 12 }}>
-                  Общая сумма
+                  Общая сумма ({CURRENCY_SYMBOL})
                   {isTotalAmountManual && (
                     <Button
                       type="link"
@@ -117,48 +153,92 @@ export const OrderFinanceSection: React.FC = () => {
                 onChange={handleTotalAmountChange}
                 min={0}
                 precision={2}
-                formatter={(value) => numberFormatter(value, 2)}
+                placeholder="0.00"
                 parser={numberParser}
                 style={{ width: '100%' }}
-                addonAfter={CURRENCY_SYMBOL}
               />
             </Form.Item>
           </Col>
 
           <Col span={4}>
-            <Form.Item label={<span style={{ fontSize: 12 }}>Скидка (%)</span>} style={{ marginBottom: 0 }}>
+            <Form.Item
+              label={
+                <span style={{ fontSize: 12 }}>
+                  Скидка{discountPercent > 0 ? ` (${discountPercent.toFixed(2)}%)` : ''}
+                </span>
+              }
+              style={{ marginBottom: 0 }}
+            >
               <InputNumber
                 value={header.discount}
                 onChange={handleDiscountChange}
                 min={0}
-                max={100}
                 precision={2}
-                formatter={(value) => !value || value === 0 ? '' : numberFormatter(value, 2)}
+                placeholder="0.00"
                 parser={numberParser}
                 style={{ width: '100%' }}
-                addonAfter="%"
+                addonAfter={
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <DownOutlined
+                      onClick={togglePercentInput}
+                      style={{
+                        cursor: 'pointer',
+                        color: showPercentInput ? '#1890ff' : '#8c8c8c',
+                        fontSize: 10,
+                        transform: showPercentInput ? 'rotate(180deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.3s ease'
+                      }}
+                      title="Показать/скрыть калькулятор процентов"
+                    />
+                    <CalculatorOutlined
+                      onClick={togglePercentInput}
+                      style={{
+                        cursor: 'pointer',
+                        color: showPercentInput ? '#1890ff' : '#8c8c8c',
+                        fontSize: 14
+                      }}
+                      title="Калькулятор процентов"
+                    />
+                    <span>{CURRENCY_SYMBOL}</span>
+                  </span>
+                }
               />
+              {showPercentInput && (
+                <div style={{ marginTop: 4 }}>
+                  <InputNumber
+                    value={percentValue}
+                    onChange={handlePercentChange}
+                    min={0}
+                    max={100}
+                    precision={2}
+                    placeholder="0.00"
+                    parser={numberParser}
+                    style={{ width: '100%' }}
+                    addonAfter="%"
+                    size="small"
+                  />
+                </div>
+              )}
             </Form.Item>
           </Col>
 
           <Col span={5}>
-            <Form.Item label={<span style={{ fontSize: 12 }}>Сумма со скидкой</span>} style={{ marginBottom: 0 }}>
+            <Form.Item label={<span style={{ fontSize: 12 }}>Сумма со скидкой ({CURRENCY_SYMBOL})</span>} style={{ marginBottom: 0 }}>
               <InputNumber
                 value={header.discounted_amount}
                 onChange={handleDiscountedAmountChange}
                 min={0}
                 precision={2}
-                formatter={(value) => !value || value === 0 ? '' : numberFormatter(value, 2)}
+                placeholder="0.00"
                 parser={numberParser}
                 style={{ width: '100%' }}
-                addonAfter={CURRENCY_SYMBOL}
               />
             </Form.Item>
           </Col>
 
           <Col span={5}>
             <Form.Item
-              label={<span style={{ fontSize: 12 }}>Оплачено</span>}
+              label={<span style={{ fontSize: 12 }}>Оплачено ({CURRENCY_SYMBOL})</span>}
               tooltip="Вычисляется автоматически из платежей"
               style={{ marginBottom: 0 }}
             >
@@ -166,10 +246,9 @@ export const OrderFinanceSection: React.FC = () => {
                 value={header.paid_amount}
                 readOnly
                 precision={2}
-                formatter={(value) => numberFormatter(value, 2)}
+                placeholder="0.00"
                 parser={numberParser}
                 style={{ width: '100%' }}
-                addonAfter={CURRENCY_SYMBOL}
               />
             </Form.Item>
           </Col>

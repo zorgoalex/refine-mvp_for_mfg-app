@@ -10,7 +10,7 @@ import { z } from 'zod';
 // Financial validation helper
 const financialSchema = z.object({
   total_amount: z.number().min(0, "Сумма должна быть >= 0").nullable().optional(),
-  discount: z.number().min(0, "Скидка должна быть >= 0").max(100, "Скидка не может превышать 100%").default(0),
+  discount: z.number().min(0, "Скидка должна быть >= 0").default(0), // Absolute amount in currency
   discounted_amount: z.number().min(0, "Сумма со скидкой должна быть >= 0").nullable().optional(),
   paid_amount: z.number().min(0, "Оплаченная сумма должна быть >= 0").default(0),
   payment_date: z.date().nullable().optional().or(z.string().nullable().optional()),
