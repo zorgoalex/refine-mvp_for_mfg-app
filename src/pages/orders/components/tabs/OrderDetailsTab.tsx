@@ -210,33 +210,56 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     }
   };
 
-  // Handle recalculate all sums
+  // Handle recalculate all areas and sums
   const handleRecalculateSums = () => {
     if (details.length === 0) {
       message.warning('Нет позиций для пересчёта');
       return;
     }
 
-    let updatedCount = 0;
+    let areaUpdatedCount = 0;
+    let costUpdatedCount = 0;
+    let totalArea = 0;
     let totalAmount = 0;
 
-    // Recalculate detail_cost for each detail
+    // First pass: recalculate area for each detail, then cost
     details.forEach((detail) => {
-      const area = detail.area || 0;
-      const pricePerSqm = detail.milling_cost_per_sqm || 0;
-      const newDetailCost = Number((area * pricePerSqm).toFixed(2));
+      const height = detail.height || 0;
+      const width = detail.width || 0;
+      const quantity = detail.quantity || 0;
 
-      // Update detail if cost changed
-      const identifier = detail.temp_id || detail.detail_id;
-      if (identifier && newDetailCost !== detail.detail_cost) {
-        updateDetail(identifier, { detail_cost: newDetailCost });
-        updatedCount++;
+      // Calculate area with CEILING: Math.ceil((height/1000) * (width/1000) * quantity * 100) / 100
+      let newArea = 0;
+      if (height > 0 && width > 0 && quantity > 0) {
+        const rawArea = (height / 1000) * (width / 1000) * quantity;
+        newArea = Math.ceil(rawArea * 100) / 100; // Round up to 2 decimal places
       }
 
+      const identifier = detail.temp_id || detail.detail_id;
+
+      // Update area if changed
+      if (identifier && newArea !== detail.area) {
+        updateDetail(identifier, { area: newArea });
+        areaUpdatedCount++;
+      }
+
+      // Use new area for cost calculation
+      const areaForCost = newArea || detail.area || 0;
+      const pricePerSqm = detail.milling_cost_per_sqm || 0;
+      const newDetailCost = Number((areaForCost * pricePerSqm).toFixed(2));
+
+      // Update cost if changed
+      if (identifier && newDetailCost !== detail.detail_cost) {
+        updateDetail(identifier, { detail_cost: newDetailCost });
+        costUpdatedCount++;
+      }
+
+      totalArea += areaForCost;
       totalAmount += newDetailCost;
     });
 
-    // Round total amount
+    // Round totals
+    totalArea = Number(totalArea.toFixed(2));
     totalAmount = Number(totalAmount.toFixed(2));
 
     // Update total_amount in header
@@ -247,11 +270,18 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     if (discount > 0) {
       const discountedAmount = Number((totalAmount * (1 - discount / 100)).toFixed(2));
       updateHeaderField('discounted_amount', discountedAmount);
-      message.success(`Пересчитано: ${updatedCount} позиций. Сумма: ${totalAmount.toLocaleString('ru-RU')} ₸, со скидкой ${discount}%: ${discountedAmount.toLocaleString('ru-RU')} ₸`);
+      message.success(
+        `Пересчитано: площадь ${areaUpdatedCount} поз., стоимость ${costUpdatedCount} поз. ` +
+        `Площадь: ${totalArea.toLocaleString('ru-RU')} м², ` +
+        `Сумма: ${totalAmount.toLocaleString('ru-RU')} ₸, со скидкой ${discount}%: ${discountedAmount.toLocaleString('ru-RU')} ₸`
+      );
     } else {
       // If no discount, discounted_amount equals total_amount
       updateHeaderField('discounted_amount', totalAmount);
-      message.success(`Пересчитано: ${updatedCount} позиций. Общая сумма: ${totalAmount.toLocaleString('ru-RU')} ₸`);
+      message.success(
+        `Пересчитано: площадь ${areaUpdatedCount} поз., стоимость ${costUpdatedCount} поз. ` +
+        `Площадь: ${totalArea.toLocaleString('ru-RU')} м², Сумма: ${totalAmount.toLocaleString('ru-RU')} ₸`
+      );
     }
   };
 

@@ -316,8 +316,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     console.log('[OrderDetailTable] recalcArea - height:', height, 'width:', width, 'quantity:', quantity);
 
     if (height && width && quantity && height > 0 && width > 0 && quantity > 0) {
-      const area = (height * width * quantity) / 1000000; // mm^2 * qty -> m^2
-      console.log('[OrderDetailTable] recalcArea - calculated area:', area);
+      // Formula: CEILING((height/1000) * (width/1000) * quantity, 2 decimals)
+      const rawArea = (height / 1000) * (width / 1000) * quantity;
+      const area = Math.ceil(rawArea * 100) / 100; // Round up to 2 decimal places
+      console.log('[OrderDetailTable] recalcArea - calculated area:', area, '(raw:', rawArea, ')');
       form.setFieldsValue({ area });
       recalcSum(); // Also recalculate sum when area changes
     } else {
