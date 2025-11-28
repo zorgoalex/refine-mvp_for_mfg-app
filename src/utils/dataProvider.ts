@@ -40,6 +40,7 @@ const ID_COLUMNS: Record<string, string> = {
   order_resource_requirements: "requirement_id",
   order_details: "detail_id",
   payments: "payment_id",
+  client_phones: "phone_id",
 };
 
 // Resources with is_active field - automatically filter by is_active = true in getList
@@ -212,6 +213,18 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "ref_key_1c",
     "is_active",
     "notes",
+    "created_by",
+    "edited_by",
+    "created_at",
+    "updated_at",
+  ],
+  client_phones: [
+    "phone_id",
+    "client_id",
+    "phone_number",
+    "phone_type",
+    "is_primary",
+    "ref_key_1c",
     "created_by",
     "edited_by",
     "created_at",
