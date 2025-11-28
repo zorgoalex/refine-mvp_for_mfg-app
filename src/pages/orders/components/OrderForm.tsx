@@ -27,7 +27,7 @@ import { OrderFilesSection } from './sections/OrderFilesSection';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 
 // Tabs
-import { OrderDetailsTab } from './tabs/OrderDetailsTab';
+import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
 import { OrderPaymentsTab } from './tabs/OrderPaymentsTab';
 
 interface OrderFormProps {
@@ -49,6 +49,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     setHeader,
     updateHeaderField,
     isDirty,
+    isDetailEditing,
     reset,
     loadOrder,
     getFormValues,
@@ -57,12 +58,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     deleteDetail,
   } = useOrderFormStore();
 
+  // Ref for OrderDetailsTab to apply current edits before save
+  const detailsTabRef = useRef<OrderDetailsTabRef>(null);
+
   const { defaultOrderStatus, defaultPaymentStatus, isLoading: statusesLoading } =
     useDefaultStatuses();
   const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
   const { exportToDrive, isUploading } = useOrderExport();
-  const [activeTab, setActiveTab] = useState('basic');
+  const [activeTab, setActiveTab] = useState('details');
 
 
   // Load existing order data in edit mode
@@ -276,6 +280,21 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     console.log('[OrderForm] ========== handleSave STARTED ==========');
     console.log('[OrderForm] handleSave - mode:', mode);
     console.log('[OrderForm] handleSave - orderId:', orderId);
+
+    // Apply current edits from detail table before saving
+    if (detailsTabRef.current) {
+      console.log('[OrderForm] handleSave - applying current edits from detail table...');
+      const applied = await detailsTabRef.current.applyCurrentEdits();
+      if (!applied) {
+        console.log('[OrderForm] handleSave - failed to apply current edits, aborting save');
+        notification.warning({
+          message: 'Ошибка валидации',
+          description: 'Заполните обязательные поля в редактируемой позиции',
+        });
+        return;
+      }
+      console.log('[OrderForm] handleSave - current edits applied successfully');
+    }
 
     try {
       const formValues = getFormValues();
@@ -590,7 +609,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       {
         key: 'details',
         label: 'Детали заказа',
-        children: <OrderDetailsTab />,
+        children: <OrderDetailsTab ref={detailsTabRef} />,
       },
       {
         key: 'dates',
@@ -720,11 +739,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             </Button>
           )}
           <Button
-            type={isDirty ? "primary" : "default"}
+            type={(isDirty || isDetailEditing) ? "primary" : "default"}
             icon={<SaveOutlined />}
             onClick={handleSave}
             loading={isSaving}
-            disabled={!isDirty}
+            disabled={!isDirty && !isDetailEditing}
             style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
           >
             Сохранить

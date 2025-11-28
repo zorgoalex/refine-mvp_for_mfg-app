@@ -1,7 +1,7 @@
 // Order Details Tab
 // Container for managing order details with toolbar and CRUD operations
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Card, Button, Space, Modal, message } from 'antd';
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
@@ -9,6 +9,11 @@ import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+
+// Exposed methods via ref
+export interface OrderDetailsTabRef {
+  applyCurrentEdits: () => Promise<boolean>;
+}
 
 // Default values for quick add
 const QUICK_ADD_DEFAULTS = {
@@ -18,7 +23,7 @@ const QUICK_ADD_DEFAULTS = {
   priority: 100,
 };
 
-export const OrderDetailsTab: React.FC = () => {
+export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField } = useOrderFormStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -26,6 +31,16 @@ export const OrderDetailsTab: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
   const tableRef = useRef<OrderDetailTableRef>(null);
+
+  // Expose methods via ref for parent (OrderForm) to call
+  useImperativeHandle(ref, () => ({
+    applyCurrentEdits: async () => {
+      if (tableRef.current) {
+        return await tableRef.current.applyCurrentEdits();
+      }
+      return true;
+    },
+  }));
 
   // Handle create new detail via modal
   const handleCreate = () => {
@@ -298,4 +313,4 @@ export const OrderDetailsTab: React.FC = () => {
       </Space>
     </Card>
   );
-};
+});

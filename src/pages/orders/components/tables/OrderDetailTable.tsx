@@ -2,9 +2,10 @@
 // Displays list of order details with inline editing capabilities
 
 import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip } from 'antd';
+import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider } from 'antd';
 import type { MenuProps } from 'antd';
-import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useOne } from '@refinedev/core';
@@ -33,6 +34,7 @@ export interface OrderDetailTableRef {
   startEditRow: (detail: OrderDetail) => void;
   saveCurrentAndStartNew: (newDetail: OrderDetail) => Promise<boolean>;
   isEditing: () => boolean;
+  applyCurrentEdits: () => Promise<boolean>;
 }
 
 export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTableProps>(({
@@ -45,7 +47,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   onSelectChange,
   highlightedRowKey = null,
 }, ref) => {
-  const { details, updateDetail } = useOrderFormStore();
+  const { details, updateDetail, setDetailEditing } = useOrderFormStore();
   const sortedDetails = useMemo(
     () => [...details].sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0)),
     [details]
@@ -58,6 +60,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
+  const [filmQuickCreateOpen, setFilmQuickCreateOpen] = useState(false);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
 
   // Watch required fields to show visual indication for empty fields
@@ -199,6 +202,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     setCurrentFilmId(record.film_id ?? null);
     setSelectedMaterialId(record.material_id || null);
     setDimensionValidationError(null);
+    setDetailEditing(true); // Mark form as dirty when editing starts
     form.setFieldsValue({
       height: record.height,
       width: record.width,
@@ -288,6 +292,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       }
       return saved;
     },
+    // Apply current edits without starting new row (for form save)
+    applyCurrentEdits: async () => {
+      if (editingKey === null) return true; // Nothing to save
+      return await saveCurrentRow();
+    },
   }));
 
   const cancelEdit = () => {
@@ -296,6 +305,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     setSelectedMaterialId(null);
     setDimensionValidationError(null);
     setIsSumEditable(false);
+    setDetailEditing(false);
     form.resetFields();
   };
 
@@ -705,6 +715,23 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                   handleTabOnLastField(e, record);
                 }
               }}
+              dropdownRender={(menu) => (
+                <>
+                  {menu}
+                  <Divider style={{ margin: '8px 0' }} />
+                  <Button
+                    type="text"
+                    icon={<PlusOutlined />}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFilmQuickCreateOpen(true);
+                    }}
+                    style={{ width: '100%', textAlign: 'left', color: '#1890ff' }}
+                  >
+                    Создать плёнку
+                  </Button>
+                </>
+              )}
             />
           </Form.Item>
         ) : (
@@ -829,7 +856,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     },
   ];
 
+  // Handle film quick create success
+  const handleFilmCreated = (filmId: number) => {
+    // Set the newly created film in the current editing row
+    form.setFieldsValue({ film_id: filmId });
+    // Refetch film options to include the new film
+    filmQueryResult.refetch();
+  };
+
   return (
+    <>
     <Form form={form} component={false}>
       <Table<OrderDetail>
         dataSource={sortedDetails}
@@ -971,6 +1007,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         }}
       />
     </Form>
+    <FilmQuickCreate
+      open={filmQuickCreateOpen}
+      onClose={() => setFilmQuickCreateOpen(false)}
+      onSuccess={handleFilmCreated}
+    />
+    </>
   );
 });
 

@@ -35,6 +35,7 @@ import {
     isDirty: boolean;
     version: number;
     isTotalAmountManual: boolean;
+    isDetailEditing: boolean;
 
     // Originals loaded from server for change detection (keyed by persistent ID)
     originalDetails: Record<number, OrderDetail>;
@@ -78,6 +79,7 @@ import {
     setDirty: (isDirty: boolean) => void;
     syncOriginals: () => void;
     setTotalAmountManual: (isManual: boolean) => void;
+    setDetailEditing: (isEditing: boolean) => void;
 }
 
 // ============================================================================
@@ -97,6 +99,7 @@ import {
     isDirty: false,
     version: 0,
     isTotalAmountManual: false,
+    isDetailEditing: false,
     originalDetails: {},
     originalPayments: {},
     originalWorkshops: {},
@@ -423,6 +426,7 @@ export const useOrderFormStore = create<OrderFormState>()(
               isDirty: false,
               version: order.version || 0,
               isTotalAmountManual: false,
+              isDetailEditing: false,
               // Build original maps for change detection
               originalDetails:
                 order.details?.reduce((acc: Record<number, OrderDetail>, d) => {
@@ -511,6 +515,17 @@ export const useOrderFormStore = create<OrderFormState>()(
             }),
             false,
             'setTotalAmountManual'
+          ),
+
+        setDetailEditing: (isEditing) =>
+          set(
+            (state) => ({
+              isDetailEditing: isEditing,
+              // When starting edit, mark form as dirty
+              isDirty: isEditing ? true : state.isDirty,
+            }),
+            false,
+            'setDetailEditing'
           ),
       }),
       {
