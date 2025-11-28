@@ -156,7 +156,7 @@ export const OrderHeaderSummary: React.FC = () => {
         overflow: 'hidden',
       }}
     >
-      {/* Row 1: Order name, priority, status | Client | Total amount, payment status */}
+      {/* Row 1: Order name, priority, status | Client | Discounted amount, discount %, payment status */}
       <div
         style={{
           display: 'flex',
@@ -206,11 +206,18 @@ export const OrderHeaderSummary: React.FC = () => {
           </Text>
         </div>
 
-        {/* Column 3: Total amount + Payment status */}
+        {/* Column 3: Discounted amount + discount % + Payment status */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-          <Text strong style={{ fontSize: 15, color: '#111827' }}>
-            {formatNumber(header.total_amount || 0, 2)} {CURRENCY_SYMBOL}
-          </Text>
+          {(header.discounted_amount != null && Number(header.discounted_amount) > 0 && Math.abs(Number(header.discounted_amount) - Number(header.total_amount || 0)) > 0.01) && (
+            <Text strong style={{ fontSize: 15, color: '#4F46E5' }}>
+              {formatNumber(header.discounted_amount, 2)} {CURRENCY_SYMBOL}
+            </Text>
+          )}
+          {(header.discount != null && Number(header.discount) > 0) && (
+            <Text style={{ fontSize: 13, color: '#DC2626' }}>
+              -{formatNumber(header.discount, 1)}%
+            </Text>
+          )}
           <Tag
             color={
               paymentStatusData?.data?.payment_status_name === 'Оплачен' ? '#059669' : '#D97706'
@@ -224,7 +231,7 @@ export const OrderHeaderSummary: React.FC = () => {
 
       <RowSeparator />
 
-      {/* Row 2: Dates | Notes | Discounted amount & discount % */}
+      {/* Row 2: Dates | Notes | Total amount */}
       <div
         style={{
           display: 'flex',
@@ -260,18 +267,11 @@ export const OrderHeaderSummary: React.FC = () => {
           </Text>
         </div>
 
-        {/* Column 3: Discounted amount + discount % */}
+        {/* Column 3: Total amount */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-          {(header.discounted_amount != null && Number(header.discounted_amount) > 0 && Math.abs(Number(header.discounted_amount) - Number(header.total_amount || 0)) > 0.01) && (
-            <Text strong style={{ fontSize: 14, color: '#4F46E5' }}>
-              {formatNumber(header.discounted_amount, 2)} {CURRENCY_SYMBOL}
-            </Text>
-          )}
-          {(header.discount != null && Number(header.discount) > 0) && (
-            <Text style={{ fontSize: 13, color: '#DC2626' }}>
-              -{formatNumber(header.discount, 1)}%
-            </Text>
-          )}
+          <Text strong style={{ fontSize: 14, color: '#111827' }}>
+            {formatNumber(header.total_amount || 0, 2)} {CURRENCY_SYMBOL}
+          </Text>
         </div>
       </div>
 

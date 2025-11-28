@@ -75,7 +75,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
         overflow: 'hidden',
       }}
     >
-      {/* Row 1: Order name, priority, status | Client | Total amount, payment status */}
+      {/* Row 1: Order name, priority, status | Client | Discounted amount, discount %, payment status */}
       <div
         style={{
           display: 'flex',
@@ -125,11 +125,18 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
           </Text>
         </div>
 
-        {/* Column 3: Total amount + Payment status */}
+        {/* Column 3: Discounted amount + discount % + Payment status */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-          <Text strong style={{ fontSize: 15, color: '#111827' }}>
-            {formatNumber(record?.total_amount || 0, 2)} {CURRENCY_SYMBOL}
-          </Text>
+          {(record?.discounted_amount != null && Number(record.discounted_amount) > 0 && Math.abs(Number(record.discounted_amount) - Number(record.total_amount || 0)) > 0.01) && (
+            <Text strong style={{ fontSize: 15, color: '#4F46E5' }}>
+              {formatNumber(record.discounted_amount, 2)} {CURRENCY_SYMBOL}
+            </Text>
+          )}
+          {(record?.discount != null && Number(record.discount) > 0) && (
+            <Text style={{ fontSize: 13, color: '#DC2626' }}>
+              -{formatNumber(record.discount, 1)}%
+            </Text>
+          )}
           <Tag
             color={
               record?.payment_status_name === 'Оплачен' ? '#059669' : '#D97706'
@@ -143,7 +150,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
 
       <RowSeparator />
 
-      {/* Row 2: Dates | Notes | Discounted amount & discount % */}
+      {/* Row 2: Dates | Notes | Total amount */}
       <div
         style={{
           display: 'flex',
@@ -179,18 +186,11 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
           </Text>
         </div>
 
-        {/* Column 3: Discounted amount + discount % */}
+        {/* Column 3: Total amount */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-          {(record?.discounted_amount != null && Number(record.discounted_amount) > 0 && Math.abs(Number(record.discounted_amount) - Number(record.total_amount || 0)) > 0.01) && (
-            <Text strong style={{ fontSize: 14, color: '#4F46E5' }}>
-              {formatNumber(record.discounted_amount, 2)} {CURRENCY_SYMBOL}
-            </Text>
-          )}
-          {(record?.discount != null && Number(record.discount) > 0) && (
-            <Text style={{ fontSize: 13, color: '#DC2626' }}>
-              -{formatNumber(record.discount, 1)}%
-            </Text>
-          )}
+          <Text strong style={{ fontSize: 14, color: '#111827' }}>
+            {formatNumber(record?.total_amount || 0, 2)} {CURRENCY_SYMBOL}
+          </Text>
         </div>
       </div>
 
