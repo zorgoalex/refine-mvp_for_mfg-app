@@ -27,7 +27,7 @@ import { OrderFilesSection } from './sections/OrderFilesSection';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 
 // Tabs
-import { OrderDetailsTab } from './tabs/OrderDetailsTab';
+import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
 import { OrderPaymentsTab } from './tabs/OrderPaymentsTab';
 
 interface OrderFormProps {
@@ -49,6 +49,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     setHeader,
     updateHeaderField,
     isDirty,
+    isDetailEditing,
     reset,
     loadOrder,
     getFormValues,
@@ -57,12 +58,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     deleteDetail,
   } = useOrderFormStore();
 
+  // Ref for OrderDetailsTab to apply current edits before save
+  const detailsTabRef = useRef<OrderDetailsTabRef>(null);
+
   const { defaultOrderStatus, defaultPaymentStatus, isLoading: statusesLoading } =
     useDefaultStatuses();
   const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
   const { exportToDrive, isUploading } = useOrderExport();
-  const [activeTab, setActiveTab] = useState('basic');
+  const [activeTab, setActiveTab] = useState('details');
 
 
   // Load existing order data in edit mode
@@ -277,6 +281,21 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     console.log('[OrderForm] handleSave - mode:', mode);
     console.log('[OrderForm] handleSave - orderId:', orderId);
 
+    // Apply current edits from detail table before saving
+    if (detailsTabRef.current) {
+      console.log('[OrderForm] handleSave - applying current edits from detail table...');
+      const applied = await detailsTabRef.current.applyCurrentEdits();
+      if (!applied) {
+        console.log('[OrderForm] handleSave - failed to apply current edits, aborting save');
+        notification.warning({
+          message: 'Ошибка валидации',
+          description: 'Заполните обязательные поля в редактируемой позиции',
+        });
+        return;
+      }
+      console.log('[OrderForm] handleSave - current edits applied successfully');
+    }
+
     try {
       const formValues = getFormValues();
       console.log('[OrderForm] handleSave - formValues:', formValues);
@@ -298,7 +317,17 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       if (skippedCount > 0) {
         console.log(`[OrderForm] handleSave - filtered out ${skippedCount} unfilled detail(s)`);
       }
-      formValues.details = filteredDetails;
+
+      // Normalize detail_numbers: sort by current number and renumber sequentially 1, 2, 3...
+      // This fixes any duplicates or gaps in numbering before validation
+      const sortedDetails = [...filteredDetails].sort((a, b) =>
+        (a.detail_number || 0) - (b.detail_number || 0)
+      );
+      formValues.details = sortedDetails.map((detail, index) => ({
+        ...detail,
+        detail_number: index + 1,
+      }));
+      console.log(`[OrderForm] handleSave - normalized ${formValues.details.length} detail numbers`);
 
       // Zod validation
       const result = orderFormSchema.safeParse(formValues);
@@ -394,9 +423,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           // Group errors by section (header vs details)
           const headerErrors: string[] = [];
           const detailErrors: Map<number, string[]> = new Map();
+          const generalDetailErrors: string[] = [];
 
           issues.forEach((err) => {
             const pathStr = err.path.join('.');
+
+            // Check if it's a general details error (e.g., "details" without index)
+            if (pathStr === 'details' && err.message) {
+              generalDetailErrors.push(err.message);
+              return;
+            }
 
             // Check if it's a detail error (e.g., details.0.height)
             const detailMatch = pathStr.match(/^details\.(\d+)\.(.+)$/);
@@ -420,9 +456,22 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             message: '⚠️ Не удалось сохранить заказ',
             description: (
               <div style={{ fontSize: '14px' }}>
-                <p style={{ marginBottom: '12px', fontWeight: 'bold', color: '#ff4d4f' }}>
-                  Пожалуйста, заполните обязательные поля:
-                </p>
+                {generalDetailErrors.length === 0 && (headerErrors.length > 0 || detailErrors.size > 0) && (
+                  <p style={{ marginBottom: '12px', fontWeight: 'bold', color: '#ff4d4f' }}>
+                    Пожалуйста, заполните обязательные поля:
+                  </p>
+                )}
+
+                {generalDetailErrors.length > 0 && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '4px', color: '#ff4d4f' }}>⚠️ Ошибка в деталях:</div>
+                    <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                      {generalDetailErrors.map((msg, idx) => (
+                        <li key={idx} style={{ color: '#595959' }}>{msg}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {headerErrors.length > 0 && (
                   <div style={{ marginBottom: '12px' }}>
@@ -560,7 +609,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       {
         key: 'details',
         label: 'Детали заказа',
-        children: <OrderDetailsTab />,
+        children: <OrderDetailsTab ref={detailsTabRef} />,
       },
       {
         key: 'dates',
@@ -690,11 +739,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             </Button>
           )}
           <Button
-            type={isDirty ? "primary" : "default"}
+            type={(isDirty || isDetailEditing) ? "primary" : "default"}
             icon={<SaveOutlined />}
             onClick={handleSave}
             loading={isSaving}
-            disabled={!isDirty}
+            disabled={!isDirty && !isDetailEditing}
             style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
           >
             Сохранить
