@@ -124,7 +124,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     optionValue: 'film_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     pagination: { mode: 'off' },
-    queryOptions: { enabled: selectsEnabled },
+    queryOptions: {
+      // Load immediately when tab mounts (not waiting for edit mode)
+      staleTime: 5 * 60 * 1000, // 5 minutes cache
+      refetchOnWindowFocus: true, // Refresh when user returns to browser tab
+    },
     defaultValue: currentFilmId ?? undefined,
   });
 
