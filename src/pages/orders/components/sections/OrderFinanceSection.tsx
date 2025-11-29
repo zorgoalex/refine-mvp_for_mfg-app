@@ -12,7 +12,7 @@ import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import dayjs from 'dayjs';
 
 export const OrderFinanceSection: React.FC = () => {
-  const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual, isPaymentStatusManual, setPaymentStatusManual, payments } =
+  const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual, isPaymentStatusManual, setPaymentStatusManual, payments, details } =
     useOrderFormStore();
   const totals = useOrderFormStore(useShallow(selectTotals));
 
@@ -103,10 +103,36 @@ export const OrderFinanceSection: React.FC = () => {
     setShowPercentInput(!showPercentInput);
   };
 
+  // Auto-update total_amount from details totals
+  // Only if not manually overridden
+  useEffect(() => {
+    // Skip auto-update if amount was manually changed
+    if (isTotalAmountManual) return;
+
+    const calculatedTotal = totals.total_amount;
+
+    // Only update if changed to avoid unnecessary re-renders
+    if (header.total_amount !== calculatedTotal) {
+      updateHeaderField('total_amount', calculatedTotal);
+    }
+  }, [totals.total_amount, header.total_amount, isTotalAmountManual, updateHeaderField]);
+
   // Update paid_amount from payments totals
   useEffect(() => {
     updateHeaderField('paid_amount', totals.total_paid);
   }, [totals.total_paid]);
+
+  // Auto-update discounted_amount when total_amount or discount changes
+  useEffect(() => {
+    const totalAmount = header.total_amount || 0;
+    const discount = header.discount || 0;
+    const expectedDiscountedAmount = Number((totalAmount - discount).toFixed(2));
+
+    // Only update if changed to avoid unnecessary re-renders
+    if (header.discounted_amount !== expectedDiscountedAmount) {
+      updateHeaderField('discounted_amount', expectedDiscountedAmount);
+    }
+  }, [header.total_amount, header.discount, header.discounted_amount, updateHeaderField]);
 
   // Update payment_date with the latest payment date
   useEffect(() => {

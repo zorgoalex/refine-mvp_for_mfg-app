@@ -44,7 +44,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     },
     pagination: {
       mode: "server",
-      pageSize: 10,
+      pageSize: 20,
     },
   });
 

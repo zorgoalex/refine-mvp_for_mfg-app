@@ -59,7 +59,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [isSumEditable, setIsSumEditable] = useState(false);
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(50);
   const [filmQuickCreateOpen, setFilmQuickCreateOpen] = useState(false);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
 
