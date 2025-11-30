@@ -126,7 +126,8 @@ export const OrderFinanceSection: React.FC = () => {
   useEffect(() => {
     const totalAmount = header.total_amount || 0;
     const discount = header.discount || 0;
-    const expectedDiscountedAmount = Number((totalAmount - discount).toFixed(2));
+    // Ensure discounted_amount is never negative (min 0)
+    const expectedDiscountedAmount = Math.max(0, Number((totalAmount - discount).toFixed(2)));
 
     // Only update if changed to avoid unnecessary re-renders
     if (header.discounted_amount !== expectedDiscountedAmount) {

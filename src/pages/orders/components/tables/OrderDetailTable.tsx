@@ -1,7 +1,11 @@
 // Order Details Table
 // Displays list of order details with inline editing capabilities
+//
+// FIX: InputNumber стрелки теперь работают корректно при быстрых кликах
+// Проблема: race condition между внутренним состоянием InputNumber и Form.Item
+// Решение: используем useRef для синхронного хранения значений полей
 
-import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined } from '@ant-design/icons';
@@ -37,6 +41,19 @@ export interface OrderDetailTableRef {
   applyCurrentEdits: () => Promise<boolean>;
 }
 
+// ============================================================================
+// FIX: Интерфейс для хранения значений полей в useRef
+// Это позволяет избежать race condition при быстрых кликах на стрелки InputNumber
+// ============================================================================
+interface FieldValues {
+  height: number | null;
+  width: number | null;
+  quantity: number | null;
+  area: number | null;
+  milling_cost_per_sqm: number | null;
+  detail_cost: number | null;
+}
+
 export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTableProps>(({
   onEdit,
   onDelete,
@@ -62,6 +79,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [pageSize, setPageSize] = useState(50);
   const [filmQuickCreateOpen, setFilmQuickCreateOpen] = useState(false);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
+
+  // ============================================================================
+  // FIX: useRef для синхронного хранения значений полей
+  // Решает проблему race condition при быстрых кликах на стрелки InputNumber
+  // ============================================================================
+  const fieldValuesRef = useRef<FieldValues>({
+    height: null,
+    width: null,
+    quantity: null,
+    area: null,
+    milling_cost_per_sqm: null,
+    detail_cost: null,
+  });
 
   // Watch required fields to show visual indication for empty fields
   const watchedHeight = Form.useWatch('height', form);
@@ -163,9 +193,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   });
 
   // Validate dimensions against material limits
-  const validateDimensions = () => {
-    const height = form.getFieldValue('height');
-    const width = form.getFieldValue('width');
+  const validateDimensions = useCallback(() => {
+    const height = fieldValuesRef.current.height ?? form.getFieldValue('height');
+    const width = fieldValuesRef.current.width ?? form.getFieldValue('width');
 
     if (!height || !width || !materialData?.data) {
       setDimensionValidationError(null);
@@ -186,15 +216,94 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     } else {
       setDimensionValidationError(null);
     }
-  };
+  }, [form, materialData]);
 
   // Trigger validation when material data loads
   useEffect(() => {
     if (materialData?.data) {
       validateDimensions();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [materialData]);
+  }, [materialData, validateDimensions]);
+
+  // ============================================================================
+  // FIX: Обновлённая функция recalcSum с использованием useRef
+  // ============================================================================
+  const recalcSum = useCallback((changedField?: keyof FieldValues, newValue?: number | null) => {
+    console.log('[OrderDetailTable] recalcSum - isSumEditable:', isSumEditable, '(changed:', changedField, '=', newValue, ')');
+
+    // Only auto-calculate if sum is not in manual edit mode
+    if (!isSumEditable) {
+      // FIX: Обновляем ref синхронно
+      if (changedField && (changedField === 'area' || changedField === 'milling_cost_per_sqm')) {
+        fieldValuesRef.current[changedField] = newValue ?? null;
+      }
+
+      // FIX: Читаем значения из ref
+      const area = fieldValuesRef.current.area;
+      const pricePerSqm = fieldValuesRef.current.milling_cost_per_sqm;
+      console.log('[OrderDetailTable] recalcSum - area:', area, 'pricePerSqm:', pricePerSqm);
+
+      if (area && pricePerSqm && area > 0 && pricePerSqm > 0) {
+        const sum = area * pricePerSqm;
+        const roundedSum = Number(sum.toFixed(2));
+        console.log('[OrderDetailTable] recalcSum - calculated sum:', sum, 'rounded:', roundedSum);
+
+        // FIX: Сохраняем в ref
+        fieldValuesRef.current.detail_cost = roundedSum;
+
+        // FIX: Отложенное обновление формы
+        queueMicrotask(() => {
+          form.setFieldsValue({ detail_cost: roundedSum });
+        });
+      } else {
+        console.log('[OrderDetailTable] recalcSum - skipped (invalid area or price)');
+      }
+    } else {
+      console.log('[OrderDetailTable] recalcSum - skipped (manual edit mode)');
+    }
+  }, [form, isSumEditable]);
+
+  // ============================================================================
+  // FIX: Обновлённая функция recalcArea с использованием useRef
+  // Теперь значения читаются синхронно из ref, а не из формы
+  // ============================================================================
+  const recalcArea = useCallback((changedField?: keyof FieldValues, newValue?: number | null) => {
+    // FIX: Обновляем ref синхронно ПЕРЕД расчётом
+    if (changedField && (changedField === 'height' || changedField === 'width' || changedField === 'quantity')) {
+      fieldValuesRef.current[changedField] = newValue ?? null;
+    }
+
+    // FIX: Читаем значения из ref (синхронно) вместо form (асинхронно)
+    const height = fieldValuesRef.current.height;
+    const width = fieldValuesRef.current.width;
+    const quantity = fieldValuesRef.current.quantity;
+
+    console.log('[OrderDetailTable] recalcArea - height:', height, 'width:', width, 'quantity:', quantity, '(changed:', changedField, '=', newValue, ')');
+
+    if (height && width && quantity && height > 0 && width > 0 && quantity > 0) {
+      // Formula: CEILING((height/1000) * (width/1000) * quantity, 2 decimals)
+      const rawArea = (height / 1000) * (width / 1000) * quantity;
+      const area = Math.ceil(rawArea * 100) / 100; // Round up to 2 decimal places
+      console.log('[OrderDetailTable] recalcArea - calculated area:', area, '(raw:', rawArea, ')');
+
+      // FIX: Сохраняем area в ref
+      fieldValuesRef.current.area = area;
+
+      // FIX: Используем queueMicrotask для отложенного обновления формы
+      // Это позволяет InputNumber завершить свой цикл обновления
+      queueMicrotask(() => {
+        form.setFieldsValue({ area });
+      });
+
+      // Pass calculated area to recalcSum to avoid reading stale value
+      recalcSum('area', area);
+    } else {
+      console.log('[OrderDetailTable] recalcArea - skipped (height, width or quantity missing)');
+    }
+
+    // Validate dimensions against material limits
+    validateDimensions();
+  }, [form, validateDimensions, recalcSum]);
 
   const startEdit = (record: OrderDetail) => {
     console.log('[OrderDetailTable] startEdit - detail:', record);
@@ -203,6 +312,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     setSelectedMaterialId(record.material_id || null);
     setDimensionValidationError(null);
     setDetailEditing(true); // Mark form as dirty when editing starts
+
+    // FIX: Инициализируем ref значениями из записи
+    fieldValuesRef.current = {
+      height: record.height ?? null,
+      width: record.width ?? null,
+      quantity: record.quantity ?? null,
+      area: record.area ?? null,
+      milling_cost_per_sqm: record.milling_cost_per_sqm ?? null,
+      detail_cost: record.detail_cost ?? null,
+    };
+
     form.setFieldsValue({
       height: record.height,
       width: record.width,
@@ -307,55 +427,22 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     setIsSumEditable(false);
     setDetailEditing(false);
     form.resetFields();
-  };
 
-  const recalcArea = () => {
-    const height = form.getFieldValue('height');
-    const width = form.getFieldValue('width');
-    const quantity = form.getFieldValue('quantity');
-    console.log('[OrderDetailTable] recalcArea - height:', height, 'width:', width, 'quantity:', quantity);
-
-    if (height && width && quantity && height > 0 && width > 0 && quantity > 0) {
-      // Formula: CEILING((height/1000) * (width/1000) * quantity, 2 decimals)
-      const rawArea = (height / 1000) * (width / 1000) * quantity;
-      const area = Math.ceil(rawArea * 100) / 100; // Round up to 2 decimal places
-      console.log('[OrderDetailTable] recalcArea - calculated area:', area, '(raw:', rawArea, ')');
-      form.setFieldsValue({ area });
-      recalcSum(); // Also recalculate sum when area changes
-    } else {
-      console.log('[OrderDetailTable] recalcArea - skipped (height, width or quantity missing)');
-    }
-
-    // Validate dimensions against material limits
-    validateDimensions();
+    // FIX: Сбрасываем ref значения
+    fieldValuesRef.current = {
+      height: null,
+      width: null,
+      quantity: null,
+      area: null,
+      milling_cost_per_sqm: null,
+      detail_cost: null,
+    };
   };
 
   // Handle material change
   const handleMaterialChange = (materialId: number) => {
     setSelectedMaterialId(materialId);
     // Validation will be triggered by useEffect when materialData loads
-  };
-
-  const recalcSum = () => {
-    console.log('[OrderDetailTable] recalcSum - isSumEditable:', isSumEditable);
-
-    // Only auto-calculate if sum is not in manual edit mode
-    if (!isSumEditable) {
-      const area = form.getFieldValue('area');
-      const pricePerSqm = form.getFieldValue('milling_cost_per_sqm');
-      console.log('[OrderDetailTable] recalcSum - area:', area, 'pricePerSqm:', pricePerSqm);
-
-      if (area && pricePerSqm && area > 0 && pricePerSqm > 0) {
-        const sum = area * pricePerSqm;
-        const roundedSum = Number(sum.toFixed(2));
-        console.log('[OrderDetailTable] recalcSum - calculated sum:', sum, 'rounded:', roundedSum);
-        form.setFieldsValue({ detail_cost: roundedSum });
-      } else {
-        console.log('[OrderDetailTable] recalcSum - skipped (invalid area or price)');
-      }
-    } else {
-      console.log('[OrderDetailTable] recalcSum - skipped (manual edit mode)');
-    }
   };
 
   // Check if detail cost matches auto-calculated value
@@ -385,6 +472,25 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     updateDetail(tempId, values);
     cancelEdit();
   };
+
+  // ============================================================================
+  // FIX: Обработчики onChange для InputNumber с использованием ref
+  // ============================================================================
+  const handleHeightChange = useCallback((value: number | null) => {
+    recalcArea('height', value);
+  }, [recalcArea]);
+
+  const handleWidthChange = useCallback((value: number | null) => {
+    recalcArea('width', value);
+  }, [recalcArea]);
+
+  const handleQuantityChange = useCallback((value: number | null) => {
+    recalcArea('quantity', value);
+  }, [recalcArea]);
+
+  const handleMillingCostChange = useCallback((value: number | null) => {
+    recalcSum('milling_cost_per_sqm', value);
+  }, [recalcSum]);
 
   const columns: ColumnsType<OrderDetail> = [
     {
@@ -417,7 +523,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         }
         return (
           <Form.Item name="height" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber autoFocus style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber
+              autoFocus
+              style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }}
+              min={0}
+              precision={2}
+              onChange={handleHeightChange}
+              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+            />
           </Form.Item>
         );
       },
@@ -442,7 +555,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         }
         return (
           <Form.Item name="width" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }} min={0} precision={2} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber
+              style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }}
+              min={0}
+              precision={2}
+              onChange={handleWidthChange}
+              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+            />
           </Form.Item>
         );
       },
@@ -457,7 +576,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (value, record) =>
         isEditing(record) ? (
           <Form.Item name="quantity" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber style={{ width: '100%', minWidth: '70px' }} min={1} precision={0} onChange={recalcArea} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber
+              style={{ width: '100%', minWidth: '70px' }}
+              min={1}
+              precision={0}
+              onChange={handleQuantityChange}
+              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+            />
           </Form.Item>
         ) : (
           formatNumber(value, 0)
@@ -581,7 +706,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               style={{ width: '100%', minWidth: '90px' }}
               precision={2}
               min={0}
-              onChange={recalcSum}
+              onChange={handleMillingCostChange}
               onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
             />
           </Form.Item>
@@ -751,7 +876,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (value, record) =>
         isEditing(record) ? (
           <Form.Item name="priority" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber style={{ width: '100%', minWidth: '60px' }} min={1} max={999} tabIndex={-1} onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber
+              style={{ width: '100%', minWidth: '60px' }}
+              min={1}
+              max={999}
+              tabIndex={-1}
+              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+            />
           </Form.Item>
         ) : (
           formatNumber(value, 0)
