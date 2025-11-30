@@ -525,6 +525,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           <Form.Item name="height" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
               autoFocus
+              controls={false}
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }}
               min={0}
               precision={2}
@@ -556,6 +557,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return (
           <Form.Item name="width" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
+              controls={false}
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }}
               min={0}
               precision={2}
@@ -577,6 +579,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         isEditing(record) ? (
           <Form.Item name="quantity" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
+              controls={false}
               style={{ width: '100%', minWidth: '70px' }}
               min={1}
               precision={0}
@@ -703,6 +706,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         isEditing(record) ? (
           <Form.Item name="milling_cost_per_sqm" style={{ margin: 0, padding: '0 4px' }}>
             <InputNumber
+              controls={false}
               style={{ width: '100%', minWidth: '90px' }}
               precision={2}
               min={0}
@@ -731,6 +735,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             rules={[{ required: true, message: 'Рассчитайте сумму детали' }]}
           >
             <InputNumber
+              controls={false}
               style={{ width: '100%', minWidth: '90px', ...getRequiredFieldStyle(watchedDetailCost) }}
               precision={2}
               min={0}
@@ -877,6 +882,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         isEditing(record) ? (
           <Form.Item name="priority" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
+              controls={false}
               style={{ width: '100%', minWidth: '60px' }}
               min={1}
               max={999}
