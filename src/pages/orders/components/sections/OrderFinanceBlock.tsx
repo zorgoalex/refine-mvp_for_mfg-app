@@ -1,8 +1,8 @@
 // Order Finance Block (Read-only for show page)
-// Minimalist design with gold border
+// Table-style layout with borders
 
 import React, { useMemo } from 'react';
-import { Typography, Table, Row, Col } from 'antd';
+import { Typography, Table } from 'antd';
 import { useList } from '@refinedev/core';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
@@ -13,14 +13,6 @@ const { Text } = Typography;
 interface OrderFinanceBlockProps {
   record: any;
 }
-
-// Helper component for read-only field display
-const FinanceField: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color }) => (
-  <div>
-    <Text style={{ fontSize: 10, color: '#8c8c8c', display: 'block' }}>{label}</Text>
-    <Text strong style={{ fontSize: 13, color: color || '#262626' }}>{value}</Text>
-  </div>
-);
 
 export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) => {
   // Загружаем платежи для текущего заказа
@@ -81,15 +73,6 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
     return 0;
   }, [record?.total_amount, record?.discount]);
 
-  // Calculate remaining amount to pay
-  const remainingAmount = useMemo(() => {
-    const discounted = record?.discounted_amount || 0;
-    const paid = paidAmount;
-    return Math.max(0, discounted - paid);
-  }, [record?.discounted_amount, paidAmount]);
-
-  const hasPaidAmount = paidAmount > 0;
-
   // Payment status color
   const getPaymentStatusColor = (statusName: string | null) => {
     if (!statusName) return '#262626';
@@ -97,6 +80,28 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
     if (statusName === 'Частично оплачен') return '#d4a574';
     if (statusName === 'Не оплачен') return '#ff4d4f';
     return '#262626';
+  };
+
+  // Стили для ячеек таблицы финансов
+  const cellStyle: React.CSSProperties = {
+    border: '1px solid #d9d9d9',
+    padding: '4px 8px',
+    textAlign: 'center',
+    verticalAlign: 'middle',
+  };
+
+  const headerCellStyle: React.CSSProperties = {
+    ...cellStyle,
+    background: '#fafafa',
+    fontSize: 11,
+    color: '#8c8c8c',
+    fontWeight: 500,
+  };
+
+  const valueCellStyle: React.CSSProperties = {
+    ...cellStyle,
+    fontSize: 13,
+    fontWeight: 600,
   };
 
   return (
@@ -109,59 +114,37 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
         padding: '12px 16px',
       }}
     >
-      {/* Read-only finance summary row */}
-      <Row gutter={12} style={{ marginBottom: payments.length > 0 ? 16 : 0 }}>
-        <Col span={4}>
-          <FinanceField
-            label={`Общая сумма (${CURRENCY_SYMBOL})`}
-            value={formatNumber(record?.total_amount || 0, 2)}
-          />
-        </Col>
-        <Col span={3}>
-          <FinanceField
-            label={`Скидка${discountPercent > 0 ? ` (${discountPercent.toFixed(1)}%)` : ''}`}
-            value={formatNumber(record?.discount || 0, 2)}
-            color={record?.discount > 0 ? '#cf1322' : undefined}
-          />
-        </Col>
-        <Col span={4}>
-          <FinanceField
-            label={`Сумма со скидкой (${CURRENCY_SYMBOL})`}
-            value={formatNumber(record?.discounted_amount || 0, 2)}
-            color="#1890ff"
-          />
-        </Col>
-        <Col span={3}>
-          <FinanceField
-            label={`Оплачено (${CURRENCY_SYMBOL})`}
-            value={formatNumber(paidAmount, 2)}
-            color="#52c41a"
-          />
-        </Col>
-        <Col span={3}>
-          <FinanceField
-            label="Дата оплаты"
-            value={formatDate(record?.payment_date)}
-          />
-        </Col>
-        {/* Осталось оплатить - показывается только если есть оплата */}
-        {hasPaidAmount && (
-          <Col span={3}>
-            <FinanceField
-              label={`Осталось (${CURRENCY_SYMBOL})`}
-              value={formatNumber(remainingAmount, 2)}
-              color={remainingAmount > 0 ? '#d4380d' : '#389e0d'}
-            />
-          </Col>
-        )}
-        <Col span={hasPaidAmount ? 4 : 7}>
-          <FinanceField
-            label="Статус оплаты"
-            value={record?.payment_status_name || '—'}
-            color={getPaymentStatusColor(record?.payment_status_name)}
-          />
-        </Col>
-      </Row>
+      {/* Finance summary as table row */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: payments.length > 0 ? 16 : 0 }}>
+        <thead>
+          <tr>
+            <th style={headerCellStyle}>Общая сумма ({CURRENCY_SYMBOL})</th>
+            <th style={headerCellStyle}>Скидка{discountPercent > 0 ? ` (${discountPercent.toFixed(1)}%)` : ''}</th>
+            <th style={headerCellStyle}>Сумма со скидкой ({CURRENCY_SYMBOL})</th>
+            <th style={headerCellStyle}>Оплачено ({CURRENCY_SYMBOL})</th>
+            <th style={headerCellStyle}>Дата оплаты</th>
+            <th style={headerCellStyle}>Статус оплаты</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style={valueCellStyle}>{formatNumber(record?.total_amount || 0, 2)}</td>
+            <td style={{ ...valueCellStyle, color: record?.discount > 0 ? '#cf1322' : '#8c8c8c' }}>
+              {formatNumber(record?.discount || 0, 2)}
+            </td>
+            <td style={{ ...valueCellStyle, color: record?.discount > 0 ? '#1890ff' : '#8c8c8c' }}>
+              {formatNumber(record?.discounted_amount || 0, 2)}
+            </td>
+            <td style={{ ...valueCellStyle, color: '#52c41a' }}>
+              {formatNumber(paidAmount, 2)}
+            </td>
+            <td style={valueCellStyle}>{formatDate(record?.payment_date)}</td>
+            <td style={{ ...valueCellStyle, color: getPaymentStatusColor(record?.payment_status_name) }}>
+              {record?.payment_status_name || '—'}
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
       {/* Таблица платежей */}
       {payments.length > 0 && (
@@ -175,6 +158,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
             size="small"
             pagination={false}
             bordered
+            className="payments-table-dark-borders"
             style={{ fontSize: 12 }}
             summary={() => (
               <Table.Summary.Row>

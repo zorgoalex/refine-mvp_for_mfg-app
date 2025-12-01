@@ -159,3 +159,23 @@
 .compact-collapse .ant-collapse-arrow {
   font-size: 10px !important;
 }
+
+/* Тёмные границы для таблицы платежей */
+.payments-table-dark-borders.ant-table-wrapper .ant-table {
+  border: 1px solid #b8b8b8 !important;
+}
+
+.payments-table-dark-borders .ant-table-thead > tr > th {
+  border-bottom: 1px solid #b8b8b8 !important;
+  border-right: 1px solid #b8b8b8 !important;
+}
+
+.payments-table-dark-borders .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #b8b8b8 !important;
+  border-right: 1px solid #b8b8b8 !important;
+}
+
+.payments-table-dark-borders .ant-table-summary > tr > td {
+  border-bottom: 1px solid #b8b8b8 !important;
+  border-right: 1px solid #b8b8b8 !important;
+}
