@@ -11,7 +11,7 @@ import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import dayjs from 'dayjs';
 
 export const OrderFinanceSection: React.FC = () => {
-  const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual, isPaymentStatusManual, setPaymentStatusManual, payments, details } =
+  const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual, payments, details } =
     useOrderFormStore();
 
   // FIX: Calculate totals directly from details/payments for proper reactivity
@@ -49,9 +49,6 @@ export const OrderFinanceSection: React.FC = () => {
   };
 
   const handlePaymentStatusChange = (value: number) => {
-    if (!isPaymentStatusManual) {
-      setPaymentStatusManual(true);
-    }
     updateHeaderField('payment_status_id', value);
   };
 
@@ -144,10 +141,15 @@ export const OrderFinanceSection: React.FC = () => {
   }, [payments, updateHeaderField]);
 
   // Auto-update payment_status_id based on paid_amount and discounted_amount
-  // Only if not manually overridden
+  // Only auto-update if current status is 1 (не оплачено), 2 (частично), or 3 (оплачено)
+  // If user set a custom status (other than 1,2,3), don't auto-update
   useEffect(() => {
-    // Skip auto-update if status was manually changed
-    if (isPaymentStatusManual) return;
+    // Skip auto-update if current status is not one of the standard payment statuses (1, 2, 3)
+    // This means user manually set a custom status and we shouldn't override it
+    const currentStatus = header.payment_status_id;
+    if (currentStatus && currentStatus !== 1 && currentStatus !== 2 && currentStatus !== 3) {
+      return;
+    }
 
     const paidAmount = header.paid_amount || 0;
     const discountedAmount = header.discounted_amount || header.total_amount || 0;
@@ -166,7 +168,7 @@ export const OrderFinanceSection: React.FC = () => {
     if (header.payment_status_id !== newPaymentStatusId) {
       updateHeaderField('payment_status_id', newPaymentStatusId);
     }
-  }, [header.paid_amount, header.discounted_amount, header.total_amount, header.payment_status_id, isPaymentStatusManual, updateHeaderField]);
+  }, [header.paid_amount, header.discounted_amount, header.total_amount, header.payment_status_id, updateHeaderField]);
 
   // Calculate remaining amount to pay
   const remainingAmount = useMemo(() => {
@@ -365,14 +367,7 @@ export const OrderFinanceSection: React.FC = () => {
           {/* Статус оплаты */}
           <Col span={hasPaidAmount ? 4 : 7}>
             <Form.Item
-              label={
-                <span style={{ fontSize: 11 }}>
-                  Статус оплаты
-                  {isPaymentStatusManual && (
-                    <span style={{ fontSize: 9, color: '#faad14', marginLeft: 2 }}>(руч.)</span>
-                  )}
-                </span>
-              }
+              label={<span style={{ fontSize: 11 }}>Статус оплаты</span>}
               style={{ marginBottom: 0 }}
             >
               <Select

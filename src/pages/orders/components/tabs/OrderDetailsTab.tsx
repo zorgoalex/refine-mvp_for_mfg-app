@@ -223,33 +223,43 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     let totalAmount = 0;
 
     // First pass: recalculate area for each detail, then cost
-    details.forEach((detail) => {
-      const height = detail.height || 0;
-      const width = detail.width || 0;
-      const quantity = detail.quantity || 0;
+    details.forEach((detail, index) => {
+      const height = Number(detail.height) || 0;
+      const width = Number(detail.width) || 0;
+      const quantity = Number(detail.quantity) || 0;
 
-      // Calculate area with CEILING: Math.ceil((height/1000) * (width/1000) * quantity * 100) / 100
+      // Calculate area using INTEGER MATH to avoid floating point errors
+      // height and width are in mm (integers), so we calculate in mm² first
+      // Example: 550mm * 200mm * 2 = 220000 mm²
+      // Then: ceil(220000 / 10000) / 100 = ceil(22) / 100 = 0.22 m²
       let newArea = 0;
       if (height > 0 && width > 0 && quantity > 0) {
-        const rawArea = (height / 1000) * (width / 1000) * quantity;
-        newArea = Math.ceil(rawArea * 100) / 100; // Round up to 2 decimal places
+        const areaMm2 = height * width * quantity; // Integer arithmetic - no floating point errors!
+        newArea = Math.ceil(areaMm2 / 10000) / 100; // Convert to m² with 2 decimal places, round up
       }
 
       const identifier = detail.temp_id || detail.detail_id;
+      const currentArea = Number(detail.area) || 0;
 
-      // Update area if changed
-      if (identifier && newArea !== detail.area) {
+      console.log(`[Recalc] #${index + 1}: h=${height}, w=${width}, q=${quantity}, rawArea=${(height/1000)*(width/1000)*quantity}, newArea=${newArea}, currentArea=${currentArea}, diff=${Math.abs(newArea - currentArea)}, identifier=${identifier}`);
+
+      // Update area if changed (compare as numbers with tolerance)
+      if (identifier && Math.abs(newArea - currentArea) > 0.001) {
+        console.log(`[Recalc] #${index + 1}: UPDATING area from ${currentArea} to ${newArea}`);
         updateDetail(identifier, { area: newArea });
         areaUpdatedCount++;
+      } else {
+        console.log(`[Recalc] #${index + 1}: SKIPPED - no identifier or no change`);
       }
 
       // Use new area for cost calculation
-      const areaForCost = newArea || detail.area || 0;
-      const pricePerSqm = detail.milling_cost_per_sqm || 0;
+      const areaForCost = newArea > 0 ? newArea : currentArea;
+      const pricePerSqm = Number(detail.milling_cost_per_sqm) || 0;
       const newDetailCost = Number((areaForCost * pricePerSqm).toFixed(2));
+      const currentDetailCost = Number(detail.detail_cost) || 0;
 
-      // Update cost if changed
-      if (identifier && newDetailCost !== detail.detail_cost) {
+      // Update cost if changed (compare as numbers with tolerance)
+      if (identifier && Math.abs(newDetailCost - currentDetailCost) > 0.001) {
         updateDetail(identifier, { detail_cost: newDetailCost });
         costUpdatedCount++;
       }

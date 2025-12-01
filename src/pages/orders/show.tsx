@@ -1,7 +1,7 @@
-import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
-import { Show, BreadcrumbProps, EditButton, RefreshButton } from "@refinedev/antd";
+import { useShow, useList, useUpdate, IResourceComponentsProps } from "@refinedev/core";
+import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Collapse, Table, Breadcrumb, message } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link } from "react-router-dom";
@@ -127,6 +127,76 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Состояние для экспорта
   const [isExporting, setIsExporting] = useState(false);
 
+  // Hook for updating order
+  const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
+
+  // Загрузка платежей для расчёта статуса оплаты
+  const { data: paymentsData, refetch: refetchPayments } = useList({
+    resource: 'payments',
+    filters: [
+      {
+        field: 'order_id',
+        operator: 'eq',
+        value: record?.order_id,
+      },
+    ],
+    pagination: { pageSize: 1000 },
+    queryOptions: {
+      enabled: !!record?.order_id,
+    },
+  });
+
+  const payments = paymentsData?.data || [];
+  const totalPaymentsAmount = payments.reduce((sum, p: any) => sum + (p.amount || 0), 0);
+
+  // Функция обновления статуса оплаты
+  const handleRefreshPaymentStatus = async () => {
+    if (!record?.order_id) return;
+
+    // Refetch payments to get latest data
+    const { data: freshPaymentsData } = await refetchPayments();
+    const freshPayments = freshPaymentsData?.data || [];
+    const freshTotalAmount = freshPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+
+    const discountedAmount = record.discounted_amount || record.total_amount || 0;
+
+    // Calculate what payment status should be
+    let newPaymentStatusId: number;
+    if (freshTotalAmount === 0) {
+      newPaymentStatusId = 1; // Не оплачено
+    } else if (freshTotalAmount < discountedAmount) {
+      newPaymentStatusId = 2; // Частично оплачено
+    } else {
+      newPaymentStatusId = 3; // Оплачено
+    }
+
+    // Update paid_amount and payment_status_id in database
+    updateOrder(
+      {
+        resource: 'orders',
+        id: record.order_id,
+        values: {
+          paid_amount: freshTotalAmount,
+          payment_status_id: newPaymentStatusId,
+        },
+        meta: {
+          idColumnName: 'order_id',
+        },
+      },
+      {
+        onSuccess: () => {
+          message.success('Статус оплаты обновлён');
+          // Refetch order data
+          queryResult.refetch();
+        },
+        onError: (error) => {
+          message.error('Ошибка при обновлении статуса оплаты');
+          console.error('Update error:', error);
+        },
+      }
+    );
+  };
+
   // Функция печати
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -208,7 +278,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       headerButtons={() => (
         <>
           <EditButton>Изменить</EditButton>
-          <RefreshButton>Обновить</RefreshButton>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={handleRefreshPaymentStatus}
+            loading={isUpdating}
+          >
+            Обновить
+          </Button>
           <Button
             type="primary"
             icon={<PrinterOutlined />}

@@ -281,10 +281,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     console.log('[OrderDetailTable] recalcArea - height:', height, 'width:', width, 'quantity:', quantity, '(changed:', changedField, '=', newValue, ')');
 
     if (height && width && quantity && height > 0 && width > 0 && quantity > 0) {
-      // Formula: CEILING((height/1000) * (width/1000) * quantity, 2 decimals)
-      const rawArea = (height / 1000) * (width / 1000) * quantity;
-      const area = Math.ceil(rawArea * 100) / 100; // Round up to 2 decimal places
-      console.log('[OrderDetailTable] recalcArea - calculated area:', area, '(raw:', rawArea, ')');
+      // Calculate area using INTEGER MATH to avoid floating point errors
+      // height and width are in mm (integers), so we calculate in mm² first
+      // Example: 550mm * 200mm * 2 = 220000 mm²
+      // Then: ceil(220000 / 10000) / 100 = ceil(22) / 100 = 0.22 m²
+      const areaMm2 = height * width * quantity; // Integer arithmetic - no floating point errors!
+      const area = Math.ceil(areaMm2 / 10000) / 100; // Convert to m² with 2 decimal places, round up
+      console.log('[OrderDetailTable] recalcArea - calculated area:', area, '(areaMm2:', areaMm2, ')');
 
       // FIX: Сохраняем area в ref
       fieldValuesRef.current.area = area;
