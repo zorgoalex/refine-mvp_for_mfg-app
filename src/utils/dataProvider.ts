@@ -78,6 +78,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   orders_view: [
     "order_id",
     "order_name",
+    "client_id",
     "client_name",
     "order_date",
     "priority",

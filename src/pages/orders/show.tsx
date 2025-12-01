@@ -27,6 +27,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       fields: [
         "order_id",
         "order_name",
+        "client_id",
         "client_name",
         "order_date",
         "planned_completion_date",

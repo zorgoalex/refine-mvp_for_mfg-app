@@ -51,6 +51,37 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
     },
   });
 
+  // Load client phones
+  const { data: clientPhonesData } = useList({
+    resource: 'client_phones',
+    filters: [
+      { field: 'client_id', operator: 'eq', value: record?.client_id },
+    ],
+    pagination: { pageSize: 100 },
+    queryOptions: {
+      enabled: !!record?.client_id,
+    },
+  });
+
+  // Format phone number as "8 xxx xxx xxxx"
+  const formatPhone = (phone: string): string => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 11) {
+      return `8 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7, 11)}`;
+    } else if (digits.length === 10) {
+      return `8 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 10)}`;
+    }
+    return phone;
+  };
+
+  // Find primary phone (or first available)
+  const primaryPhone = useMemo(() => {
+    const phones = clientPhonesData?.data || [];
+    const primary = phones.find((p: any) => p.is_primary);
+    const phoneNumber = primary?.phone_number || phones[0]?.phone_number;
+    return phoneNumber ? formatPhone(phoneNumber) : null;
+  }, [clientPhonesData]);
+
   // Create materials summary string
   const materialsSummary = useMemo(() => {
     if (!materialsData?.data || materialsData.data.length === 0) return '—';
@@ -118,11 +149,19 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
           </Space>
         </div>
 
-        {/* Column 2: Client */}
-        <div style={{ flex: 1 }}>
-          <Text strong style={{ fontSize: 14, color: '#111827' }}>
+        {/* Column 2: Client + Phone */}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+          <Text strong style={{ fontSize: 16, color: '#111827' }}>
             {record?.client_name || '—'}
           </Text>
+          {primaryPhone && (
+            <>
+              <span style={{ margin: '0 16px', color: '#E5E7EB' }}>|</span>
+              <Text style={{ fontSize: 12.8, fontStyle: 'italic', color: '#111827' }}>
+                <span style={{ fontVariant: 'small-caps' }}>Тел.:</span> {primaryPhone}
+              </Text>
+            </>
+          )}
         </div>
 
         {/* Column 3: Discounted amount + discount % + Payment status */}
