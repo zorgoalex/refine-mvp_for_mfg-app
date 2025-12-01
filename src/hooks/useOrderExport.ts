@@ -121,6 +121,7 @@ export const useOrderExport = (): UseOrderExportResult => {
 
       // 3. Загрузить клиента (если указан)
       let clientData = null;
+      let clientPhone = '';
       if (fullOrder.client_id) {
         console.log('[useOrderExport] Fetching client from DB...');
         try {
@@ -130,6 +131,27 @@ export const useOrderExport = (): UseOrderExportResult => {
           });
           clientData = client;
           console.log('[useOrderExport] Client loaded:', clientData);
+
+          // Загрузить телефоны клиента
+          const phonesResult = await dataProvider().getList({
+            resource: 'client_phones',
+            filters: [{ field: 'client_id', operator: 'eq', value: fullOrder.client_id }],
+            pagination: { current: 1, pageSize: 100 },
+          });
+          const phones = phonesResult.data || [];
+          const primaryPhone = phones.find((p: any) => p.is_primary) || phones[0];
+          if (primaryPhone?.phone_number) {
+            // Форматировать телефон как "8 xxx xxx xxxx"
+            const digits = primaryPhone.phone_number.replace(/\D/g, '');
+            if (digits.length === 11) {
+              clientPhone = `8 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7, 11)}`;
+            } else if (digits.length === 10) {
+              clientPhone = `8 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 10)}`;
+            } else {
+              clientPhone = primaryPhone.phone_number;
+            }
+          }
+          console.log('[useOrderExport] Client phone:', clientPhone);
         } catch (err) {
           console.warn('[useOrderExport] Failed to load client:', err);
         }
@@ -235,6 +257,7 @@ export const useOrderExport = (): UseOrderExportResult => {
         order: fullOrder, // Передаем ПОЛНЫЙ заказ со всеми полями
         details: detailsWithNames,
         client: clientData, // Передаем объект клиента, а не ID
+        clientPhone, // Телефон клиента (форматированный)
         fileName,
       });
 

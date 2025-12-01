@@ -47,7 +47,7 @@ export async function uploadOrderExcelToApi(
   error?: string;
 }> {
   try {
-    const { order, details, client } = params;
+    const { order, details, client, clientPhone } = params;
 
     // Парсинг даты заказа
     const orderDate = typeof order.order_date === 'string'
@@ -82,7 +82,7 @@ export async function uploadOrderExcelToApi(
       prisadkaName: '—', // Заглушка, пока не реализовано
       orderDate: order.order_date,
       clientName: client?.client_name || 'Не указан',
-      clientPhone: client?.phone || '',
+      clientPhone: clientPhone || '',
       millingSummary,
       edgeSummary,
       filmSummary,

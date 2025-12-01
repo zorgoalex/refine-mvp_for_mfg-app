@@ -108,6 +108,35 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     pagination: { pageSize: 10000 },
   });
 
+  // Загрузка телефонов клиента для экспорта
+  const { data: clientPhonesData } = useList({
+    resource: "client_phones",
+    filters: [
+      { field: "client_id", operator: "eq", value: record?.client_id },
+    ],
+    pagination: { pageSize: 100 },
+    queryOptions: {
+      enabled: !!record?.client_id,
+    },
+  });
+
+  // Форматирование телефона клиента
+  const formatPhone = (phone: string): string => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 11) {
+      return `8 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7, 11)}`;
+    } else if (digits.length === 10) {
+      return `8 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 10)}`;
+    }
+    return phone;
+  };
+
+  const clientPhone = (() => {
+    const phones = clientPhonesData?.data || [];
+    const primary = phones.find((p: any) => p.is_primary) || phones[0];
+    return primary?.phone_number ? formatPhone(primary.phone_number) : '';
+  })();
+
   // Создаем lookup maps для быстрого поиска
   const millingTypesMap = new Map(
     (millingTypesData?.data || []).map((item: any) => [item.milling_type_id, item.milling_type_name])
@@ -245,6 +274,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             material: { material_name: materialsMap.get(detail.material_id) || '' },
           })),
           client: record.client_name ? { client_name: record.client_name } : null,
+          clientPhone,
         },
         fileName
       );

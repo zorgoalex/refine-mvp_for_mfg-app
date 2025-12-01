@@ -32,10 +32,11 @@ interface Order {
   client?: { client_name: string } | null;
 }
 
-interface GenerateOrderExcelParams {
+export interface GenerateOrderExcelParams {
   order: Order;
   details: OrderDetail[];
   client?: { client_name: string } | null;
+  clientPhone?: string | null;
 }
 
 /**
@@ -52,6 +53,7 @@ export const buildOrderExcelBuffer = async ({
   order,
   details,
   client,
+  clientPhone,
 }: GenerateOrderExcelParams): Promise<ArrayBuffer> => {
   try {
     // 1. Загрузить шаблон
@@ -87,6 +89,7 @@ export const buildOrderExcelBuffer = async ({
     worksheet.getCell('C1').value = order.order_name; // Название заказа (Заказ)
     worksheet.getCell('E2').value = client?.client_name || order.client?.client_name || 'Не указан'; // Заказчик
     worksheet.getCell('C8').value = formatDate(order.order_date); // Дата заказа (07.01.2025)
+    worksheet.getCell('H8').value = clientPhone || ''; // Телефон клиента
 
     // 4.1. Заполнить дополнительные поля (defaults для деталей)
     // Заполняем только если значение одинаково для ВСЕХ деталей (умная агрегация)
