@@ -108,14 +108,9 @@ export const OrderFinanceSection: React.FC = () => {
     setShowPercentInput(!showPercentInput);
   };
 
-  // NOTE: Auto-update of total_amount and discounted_amount is now handled in OrderForm.tsx
-  // (always-mounted component) to ensure recalculation happens regardless of active tab.
-  // See OrderForm.tsx useEffect for total_amount and discounted_amount.
-
-  // Update paid_amount from payments totals
-  useEffect(() => {
-    updateHeaderField('paid_amount', totals.total_paid);
-  }, [totals.total_paid, updateHeaderField]);
+  // NOTE: Auto-update of total_amount, discounted_amount, paid_amount, and payment_status_id
+  // is now handled in OrderForm.tsx (always-mounted component) to ensure recalculation
+  // happens regardless of active tab.
 
   // Update payment_date with the latest payment date
   useEffect(() => {
@@ -139,36 +134,6 @@ export const OrderFinanceSection: React.FC = () => {
       }
     }
   }, [payments, updateHeaderField]);
-
-  // Auto-update payment_status_id based on paid_amount and discounted_amount
-  // Only auto-update if current status is 1 (не оплачено), 2 (частично), or 3 (оплачено)
-  // If user set a custom status (other than 1,2,3), don't auto-update
-  useEffect(() => {
-    // Skip auto-update if current status is not one of the standard payment statuses (1, 2, 3)
-    // This means user manually set a custom status and we shouldn't override it
-    const currentStatus = header.payment_status_id;
-    if (currentStatus && currentStatus !== 1 && currentStatus !== 2 && currentStatus !== 3) {
-      return;
-    }
-
-    const paidAmount = header.paid_amount || 0;
-    const discountedAmount = header.discounted_amount || header.total_amount || 0;
-
-    let newPaymentStatusId: number;
-
-    if (paidAmount === 0) {
-      newPaymentStatusId = 1; // Не оплачено
-    } else if (paidAmount < discountedAmount) {
-      newPaymentStatusId = 2; // Частично оплачено
-    } else {
-      newPaymentStatusId = 3; // Оплачено
-    }
-
-    // Only update if changed to avoid unnecessary re-renders
-    if (header.payment_status_id !== newPaymentStatusId) {
-      updateHeaderField('payment_status_id', newPaymentStatusId);
-    }
-  }, [header.paid_amount, header.discounted_amount, header.total_amount, header.payment_status_id, updateHeaderField]);
 
   // Calculate remaining amount to pay
   const remainingAmount = useMemo(() => {

@@ -46,6 +46,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const {
     header,
     details,
+    payments,
     setHeader,
     updateHeaderField,
     isDirty,
@@ -293,6 +294,57 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     header.total_amount,
     header.discount,
     header.discounted_amount,
+    orderLoading,
+    detailsLoading,
+    updateHeaderField,
+  ]);
+
+  // Auto-recalculate paid_amount from payments
+  useEffect(() => {
+    if (orderLoading || detailsLoading) return;
+
+    const totalPaid = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    const roundedPaid = Number(totalPaid.toFixed(2));
+
+    if (header.paid_amount !== roundedPaid) {
+      updateHeaderField('paid_amount', roundedPaid);
+    }
+  }, [payments, header.paid_amount, orderLoading, detailsLoading, updateHeaderField]);
+
+  // Auto-update payment_status_id based on paid_amount and discounted_amount
+  // Only auto-update if current status is 1 (не оплачено), 2 (частично), or 3 (оплачено)
+  // If user set a custom status (other than 1,2,3), don't auto-update
+  useEffect(() => {
+    if (orderLoading || detailsLoading) return;
+
+    // Skip auto-update if current status is not one of the standard payment statuses (1, 2, 3)
+    const currentStatus = header.payment_status_id;
+    if (currentStatus && currentStatus !== 1 && currentStatus !== 2 && currentStatus !== 3) {
+      return;
+    }
+
+    const paidAmount = header.paid_amount || 0;
+    const discountedAmount = header.discounted_amount || header.total_amount || 0;
+
+    let newPaymentStatusId: number;
+
+    if (paidAmount === 0) {
+      newPaymentStatusId = 1; // Не оплачено
+    } else if (paidAmount < discountedAmount) {
+      newPaymentStatusId = 2; // Частично оплачено
+    } else {
+      newPaymentStatusId = 3; // Оплачено
+    }
+
+    // Only update if changed to avoid unnecessary re-renders
+    if (header.payment_status_id !== newPaymentStatusId) {
+      updateHeaderField('payment_status_id', newPaymentStatusId);
+    }
+  }, [
+    header.paid_amount,
+    header.discounted_amount,
+    header.total_amount,
+    header.payment_status_id,
     orderLoading,
     detailsLoading,
     updateHeaderField,
