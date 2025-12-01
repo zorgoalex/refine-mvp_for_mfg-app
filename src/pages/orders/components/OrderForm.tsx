@@ -272,6 +272,32 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     updateHeaderField,
   ]);
 
+  // Auto-recalculate discounted_amount when total_amount or discount changes
+  // This useEffect is in OrderForm (always mounted) to ensure recalculation
+  // happens regardless of which tab is active
+  useEffect(() => {
+    if (orderLoading || detailsLoading) {
+      return;
+    }
+
+    const totalAmount = header.total_amount || 0;
+    const discount = header.discount || 0;
+    // discount is absolute amount, not percent
+    const expectedDiscountedAmount = Math.max(0, Number((totalAmount - discount).toFixed(2)));
+
+    // Only update if changed (avoid infinite loops)
+    if (header.discounted_amount !== expectedDiscountedAmount) {
+      updateHeaderField('discounted_amount', expectedDiscountedAmount);
+    }
+  }, [
+    header.total_amount,
+    header.discount,
+    header.discounted_amount,
+    orderLoading,
+    detailsLoading,
+    updateHeaderField,
+  ]);
+
   // Navigation
   const { list, show } = useNavigation();
 

@@ -5,8 +5,7 @@ import React, { useMemo } from 'react';
 import { Tag, Space, Typography } from 'antd';
 import { StarOutlined } from '@ant-design/icons';
 import { useOne, useList } from '@refinedev/core';
-import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
-import { useShallow } from 'zustand/react/shallow';
+import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
@@ -15,8 +14,16 @@ import dayjs from 'dayjs';
 const { Text } = Typography;
 
 export const OrderHeaderSummary: React.FC = () => {
-  const { header, details, isPaymentStatusManual } = useOrderFormStore();
-  const totals = useOrderFormStore(useShallow(selectTotals));
+  const { header, details, payments, isPaymentStatusManual } = useOrderFormStore();
+
+  // FIX: Calculate totals directly from details/payments for proper reactivity
+  const totals = useMemo(() => ({
+    positions_count: details.length,
+    parts_count: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
+    total_area: details.reduce((sum, d) => sum + (d.area || 0), 0),
+    total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
+    total_amount: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
+  }), [details, payments]);
 
   // Get unique material IDs from details
   const uniqueMaterialIds = useMemo(() => {

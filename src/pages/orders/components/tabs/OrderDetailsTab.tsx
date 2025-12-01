@@ -265,19 +265,20 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     // Update total_amount in header
     updateHeaderField('total_amount', totalAmount);
 
-    // Calculate discounted_amount if discount > 0
+    // Calculate discounted_amount
+    // Note: discount is now stored as absolute amount (not percent)
     const discount = header.discount || 0;
+    const discountedAmount = Math.max(0, Number((totalAmount - discount).toFixed(2)));
+    updateHeaderField('discounted_amount', discountedAmount);
+
     if (discount > 0) {
-      const discountedAmount = Number((totalAmount * (1 - discount / 100)).toFixed(2));
-      updateHeaderField('discounted_amount', discountedAmount);
+      const discountPercent = totalAmount > 0 ? (discount / totalAmount) * 100 : 0;
       message.success(
         `Пересчитано: площадь ${areaUpdatedCount} поз., стоимость ${costUpdatedCount} поз. ` +
         `Площадь: ${totalArea.toLocaleString('ru-RU')} м², ` +
-        `Сумма: ${totalAmount.toLocaleString('ru-RU')} ₸, со скидкой ${discount}%: ${discountedAmount.toLocaleString('ru-RU')} ₸`
+        `Сумма: ${totalAmount.toLocaleString('ru-RU')} ₸, скидка ${discount.toLocaleString('ru-RU')} ₸ (${discountPercent.toFixed(1)}%): ${discountedAmount.toLocaleString('ru-RU')} ₸`
       );
     } else {
-      // If no discount, discounted_amount equals total_amount
-      updateHeaderField('discounted_amount', totalAmount);
       message.success(
         `Пересчитано: площадь ${areaUpdatedCount} поз., стоимость ${costUpdatedCount} поз. ` +
         `Площадь: ${totalArea.toLocaleString('ru-RU')} м², Сумма: ${totalAmount.toLocaleString('ru-RU')} ₸`

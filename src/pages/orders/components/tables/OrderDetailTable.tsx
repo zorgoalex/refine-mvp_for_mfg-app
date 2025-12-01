@@ -64,7 +64,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   onSelectChange,
   highlightedRowKey = null,
 }, ref) => {
-  const { details, updateDetail, setDetailEditing } = useOrderFormStore();
+  const { details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
   const sortedDetails = useMemo(
     () => [...details].sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0)),
     [details]
@@ -357,6 +357,28 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     // Find the record being edited
     const record = details.find(d => (d.temp_id || d.detail_id) === editingKey);
     if (!record) return true;
+
+    // Check if this is an "empty" detail (only default values, no essential data)
+    // Such details should be cancelled, not validated
+    const currentValues = form.getFieldsValue();
+    const isEmptyDetail = (
+      !record.detail_id && // Only for new details (not existing ones)
+      (!currentValues.height || currentValues.height === 0) &&
+      (!currentValues.width || currentValues.width === 0) &&
+      (!currentValues.quantity || currentValues.quantity === 0) &&
+      (!currentValues.area || currentValues.area === 0)
+    );
+
+    if (isEmptyDetail) {
+      console.log('[OrderDetailTable] saveCurrentRow - empty detail detected, removing from store');
+      // Remove empty detail from store so it won't cause validation errors
+      const tempId = record.temp_id || record.detail_id;
+      if (tempId) {
+        deleteDetail(tempId, record.detail_id);
+      }
+      cancelEdit();
+      return true; // Allow save to continue
+    }
 
     // Check dimension validation
     if (dimensionValidationError) {

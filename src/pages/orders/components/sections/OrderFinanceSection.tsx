@@ -1,12 +1,11 @@
 // Order Finance Section
 // Contains: Total Amount, Discount, Discounted Amount, Paid Amount, Payment Date
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Form, InputNumber, DatePicker, Row, Col, Button, Select } from 'antd';
 import { CalculatorOutlined, DownOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
-import { useOrderFormStore, selectTotals } from '../../../../stores/orderFormStore';
-import { useShallow } from 'zustand/react/shallow';
+import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import dayjs from 'dayjs';
@@ -14,7 +13,16 @@ import dayjs from 'dayjs';
 export const OrderFinanceSection: React.FC = () => {
   const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual, isPaymentStatusManual, setPaymentStatusManual, payments, details } =
     useOrderFormStore();
-  const totals = useOrderFormStore(useShallow(selectTotals));
+
+  // FIX: Calculate totals directly from details/payments for proper reactivity
+  // Previously used useShallow(selectTotals) which didn't react to details changes
+  const totals = useMemo(() => ({
+    positions_count: details.length,
+    parts_count: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
+    total_area: details.reduce((sum, d) => sum + (d.area || 0), 0),
+    total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
+    total_amount: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
+  }), [details, payments]);
 
   // State for showing/hiding percent input field
   const [showPercentInput, setShowPercentInput] = useState(false);
@@ -103,37 +111,14 @@ export const OrderFinanceSection: React.FC = () => {
     setShowPercentInput(!showPercentInput);
   };
 
-  // Auto-update total_amount from details totals
-  // Only if not manually overridden
-  useEffect(() => {
-    // Skip auto-update if amount was manually changed
-    if (isTotalAmountManual) return;
-
-    const calculatedTotal = totals.total_amount;
-
-    // Only update if changed to avoid unnecessary re-renders
-    if (header.total_amount !== calculatedTotal) {
-      updateHeaderField('total_amount', calculatedTotal);
-    }
-  }, [totals.total_amount, header.total_amount, isTotalAmountManual, updateHeaderField]);
+  // NOTE: Auto-update of total_amount and discounted_amount is now handled in OrderForm.tsx
+  // (always-mounted component) to ensure recalculation happens regardless of active tab.
+  // See OrderForm.tsx useEffect for total_amount and discounted_amount.
 
   // Update paid_amount from payments totals
   useEffect(() => {
     updateHeaderField('paid_amount', totals.total_paid);
-  }, [totals.total_paid]);
-
-  // Auto-update discounted_amount when total_amount or discount changes
-  useEffect(() => {
-    const totalAmount = header.total_amount || 0;
-    const discount = header.discount || 0;
-    // Ensure discounted_amount is never negative (min 0)
-    const expectedDiscountedAmount = Math.max(0, Number((totalAmount - discount).toFixed(2)));
-
-    // Only update if changed to avoid unnecessary re-renders
-    if (header.discounted_amount !== expectedDiscountedAmount) {
-      updateHeaderField('discounted_amount', expectedDiscountedAmount);
-    }
-  }, [header.total_amount, header.discount, header.discounted_amount, updateHeaderField]);
+  }, [totals.total_paid, updateHeaderField]);
 
   // Update payment_date with the latest payment date
   useEffect(() => {
