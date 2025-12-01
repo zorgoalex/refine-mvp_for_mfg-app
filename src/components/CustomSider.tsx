@@ -222,22 +222,22 @@ export const CustomSider: React.FC = () => {
   });
 
   return (
-    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={(val) => setCollapsed(val)}>
+    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={(val) => setCollapsed(val)} width={156} collapsedWidth={48}>
       <div
         style={{
-          padding: "16px",
+          padding: "8px 4px",
           textAlign: "center",
           background: "#001529",
           borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
         }}
       >
-        <Title level={4} style={{ color: "white", margin: 0, fontWeight: 600 }}>
+        <Title level={5} style={{ color: "white", margin: 0, fontWeight: 600, fontSize: collapsed ? 11 : 20 }}>
           {collapsed ? (
             <span>ERP</span>
           ) : (
             <>
-              <span>ERP Zhihaz </span>
-              <span style={{ fontSize: "0.8em", fontWeight: 400 }}>v.0.5</span>
+              <span>ERP </span>
+              <span style={{ fontSize: "0.75em", fontWeight: 400 }}>v.0.5</span>
             </>
           )}
         </Title>
@@ -261,12 +261,12 @@ export const CustomSider: React.FC = () => {
           className="orders-menu"
         />
 
-        <div style={{ padding: "8px 16px", marginTop: "72px" }}>
+        <div style={{ padding: collapsed ? "8px 4px" : "8px 16px", marginTop: "72px", textAlign: "center" }}>
           <Button
             type="primary"
-            icon={<PlusOutlined />}
+            icon={collapsed ? <PlusOutlined /> : undefined}
             onClick={handleNewOrder}
-            block
+            block={!collapsed}
             style={{ marginBottom: 8 }}
             title={collapsed ? "Создать заказ" : undefined}
           >

@@ -343,19 +343,27 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           </div>
           
           {/* Финансы */}
-          <Collapse defaultActiveKey={[]} style={{ marginBottom: 4 }}>
-            <Panel 
-              header={<span style={{ fontSize: 14, fontWeight: 600, color: '#faad14' }}>Финансы</span>} 
+          <Collapse
+            defaultActiveKey={[]}
+            style={{ marginBottom: 4 }}
+            className="compact-collapse"
+          >
+            <Panel
+              header={<span style={{ fontSize: 12, fontWeight: 600, color: '#faad14' }}>Финансы</span>}
               key="finance"
             >
               <OrderFinanceBlock record={record} />
             </Panel>
           </Collapse>
-          
+
           {/* Дополнительная информация - схлопнутый блок */}
-          <Collapse defaultActiveKey={[]} style={{ marginBottom: 16 }}>
-            <Panel 
-              header={<span style={{ fontSize: 14, fontWeight: 600 }}>Дополнительная информация</span>} 
+          <Collapse
+            defaultActiveKey={[]}
+            style={{ marginBottom: 16 }}
+            className="compact-collapse"
+          >
+            <Panel
+              header={<span style={{ fontSize: 12, fontWeight: 600 }}>Дополнительная информация</span>}
               key="additional"
             >
               {/* Даты */}
