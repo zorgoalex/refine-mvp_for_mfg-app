@@ -168,31 +168,38 @@ export const OrderFinanceSection: React.FC = () => {
     }
   }, [header.paid_amount, header.discounted_amount, header.total_amount, header.payment_status_id, isPaymentStatusManual, updateHeaderField]);
 
+  // Calculate remaining amount to pay
+  const remainingAmount = useMemo(() => {
+    const discounted = header.discounted_amount || 0;
+    const paid = header.paid_amount || 0;
+    return Math.max(0, discounted - paid);
+  }, [header.discounted_amount, header.paid_amount]);
+
+  const hasPaidAmount = (header.paid_amount || 0) > 0;
+
   return (
     <div
       style={{
-        padding: '16px',
+        padding: '12px 16px',
         border: '1px solid #d9d9d9',
         borderRadius: '6px',
         background: '#fafafa',
       }}
     >
-      <div style={{ marginBottom: 12, fontSize: 14, fontWeight: 600 }}>
-        Финансовая информация
-      </div>
       <Form layout="vertical" size="small">
         <Row gutter={8}>
-          <Col span={5}>
+          {/* Общая сумма */}
+          <Col span={4}>
             <Form.Item
               label={
-                <span style={{ fontSize: 12 }}>
+                <span style={{ fontSize: 11 }}>
                   Общая сумма ({CURRENCY_SYMBOL})
                   {isTotalAmountManual && (
                     <Button
                       type="link"
                       size="small"
                       onClick={handleRestoreAuto}
-                      style={{ padding: '0 0 0 4px', height: 'auto', fontSize: 10 }}
+                      style={{ padding: '0 0 0 2px', height: 'auto', fontSize: 9 }}
                       title="Вернуть авторасчет"
                     >
                       (авто)
@@ -208,17 +215,19 @@ export const OrderFinanceSection: React.FC = () => {
                 min={0}
                 precision={2}
                 placeholder="0.00"
+                formatter={(value) => numberFormatter(value, 2)}
                 parser={numberParser}
                 style={{ width: '100%' }}
               />
             </Form.Item>
           </Col>
 
-          <Col span={4}>
+          {/* Скидка */}
+          <Col span={3}>
             <Form.Item
               label={
-                <span style={{ fontSize: 12 }}>
-                  Скидка{discountPercent > 0 ? ` (${discountPercent.toFixed(2)}%)` : ''}
+                <span style={{ fontSize: 11 }}>
+                  Скидка{discountPercent > 0 ? ` (${discountPercent.toFixed(1)}%)` : ''}
                 </span>
               }
               style={{ marginBottom: 0 }}
@@ -229,31 +238,29 @@ export const OrderFinanceSection: React.FC = () => {
                 min={0}
                 precision={2}
                 placeholder="0.00"
+                formatter={(value) => numberFormatter(value, 2)}
                 parser={numberParser}
                 style={{ width: '100%' }}
                 addonAfter={
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <DownOutlined
                       onClick={togglePercentInput}
                       style={{
                         cursor: 'pointer',
                         color: showPercentInput ? '#1890ff' : '#8c8c8c',
-                        fontSize: 10,
+                        fontSize: 9,
                         transform: showPercentInput ? 'rotate(180deg)' : 'rotate(0deg)',
                         transition: 'transform 0.3s ease'
                       }}
-                      title="Показать/скрыть калькулятор процентов"
                     />
                     <CalculatorOutlined
                       onClick={togglePercentInput}
                       style={{
                         cursor: 'pointer',
                         color: showPercentInput ? '#1890ff' : '#8c8c8c',
-                        fontSize: 14
+                        fontSize: 12
                       }}
-                      title="Калькулятор процентов"
                     />
-                    <span>{CURRENCY_SYMBOL}</span>
                   </span>
                 }
               />
@@ -265,7 +272,8 @@ export const OrderFinanceSection: React.FC = () => {
                     min={0}
                     max={100}
                     precision={2}
-                    placeholder="0.00"
+                    placeholder="%"
+                    formatter={(value) => numberFormatter(value, 2)}
                     parser={numberParser}
                     style={{ width: '100%' }}
                     addonAfter="%"
@@ -276,24 +284,30 @@ export const OrderFinanceSection: React.FC = () => {
             </Form.Item>
           </Col>
 
-          <Col span={5}>
-            <Form.Item label={<span style={{ fontSize: 12 }}>Сумма со скидкой ({CURRENCY_SYMBOL})</span>} style={{ marginBottom: 0 }}>
+          {/* Сумма со скидкой */}
+          <Col span={4}>
+            <Form.Item
+              label={<span style={{ fontSize: 11 }}>Сумма со скидкой ({CURRENCY_SYMBOL})</span>}
+              style={{ marginBottom: 0 }}
+            >
               <InputNumber
                 value={header.discounted_amount}
                 onChange={handleDiscountedAmountChange}
                 min={0}
                 precision={2}
                 placeholder="0.00"
+                formatter={(value) => numberFormatter(value, 2)}
                 parser={numberParser}
                 style={{ width: '100%' }}
               />
             </Form.Item>
           </Col>
 
-          <Col span={5}>
+          {/* Оплачено */}
+          <Col span={3}>
             <Form.Item
-              label={<span style={{ fontSize: 12 }}>Оплачено ({CURRENCY_SYMBOL})</span>}
-              tooltip="Вычисляется автоматически из платежей"
+              label={<span style={{ fontSize: 11 }}>Оплачено ({CURRENCY_SYMBOL})</span>}
+              tooltip="Из платежей"
               style={{ marginBottom: 0 }}
             >
               <InputNumber
@@ -301,14 +315,19 @@ export const OrderFinanceSection: React.FC = () => {
                 readOnly
                 precision={2}
                 placeholder="0.00"
+                formatter={(value) => numberFormatter(value, 2)}
                 parser={numberParser}
-                style={{ width: '100%' }}
+                style={{ width: '100%', background: '#f5f5f5' }}
               />
             </Form.Item>
           </Col>
 
-          <Col span={5}>
-            <Form.Item label={<span style={{ fontSize: 12 }}>Дата оплаты</span>} style={{ marginBottom: 0 }}>
+          {/* Дата оплаты */}
+          <Col span={3}>
+            <Form.Item
+              label={<span style={{ fontSize: 11 }}>Дата оплаты</span>}
+              style={{ marginBottom: 0 }}
+            >
               <DatePicker
                 value={header.payment_date ? dayjs(header.payment_date) : null}
                 onChange={(date) =>
@@ -319,16 +338,38 @@ export const OrderFinanceSection: React.FC = () => {
               />
             </Form.Item>
           </Col>
-        </Row>
 
-        <Row gutter={8} style={{ marginTop: 8 }}>
-          <Col span={5}>
+          {/* Осталось оплатить - показывается только если есть оплата */}
+          {hasPaidAmount && (
+            <Col span={3}>
+              <Form.Item
+                label={<span style={{ fontSize: 11 }}>Осталось ({CURRENCY_SYMBOL})</span>}
+                style={{ marginBottom: 0 }}
+              >
+                <InputNumber
+                  value={remainingAmount}
+                  readOnly
+                  precision={2}
+                  formatter={(value) => numberFormatter(value, 2)}
+                  parser={numberParser}
+                  style={{
+                    width: '100%',
+                    background: remainingAmount > 0 ? '#fff2e8' : '#f6ffed',
+                    color: remainingAmount > 0 ? '#d4380d' : '#389e0d',
+                  }}
+                />
+              </Form.Item>
+            </Col>
+          )}
+
+          {/* Статус оплаты */}
+          <Col span={hasPaidAmount ? 4 : 7}>
             <Form.Item
               label={
-                <span style={{ fontSize: 12 }}>
+                <span style={{ fontSize: 11 }}>
                   Статус оплаты
                   {isPaymentStatusManual && (
-                    <span style={{ fontSize: 10, color: '#faad14', marginLeft: 4 }}>(ручной)</span>
+                    <span style={{ fontSize: 9, color: '#faad14', marginLeft: 2 }}>(руч.)</span>
                   )}
                 </span>
               }
@@ -339,7 +380,7 @@ export const OrderFinanceSection: React.FC = () => {
                 value={header.payment_status_id}
                 onChange={handlePaymentStatusChange}
                 style={{ width: '100%' }}
-                placeholder="Выберите статус"
+                placeholder="Статус"
               />
             </Form.Item>
           </Col>
