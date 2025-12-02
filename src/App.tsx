@@ -117,6 +117,9 @@ import { OrderResourceRequirementList } from "./pages/order_resource_requirement
 import { OrderResourceRequirementCreate } from "./pages/order_resource_requirements/create";
 import { OrderResourceRequirementEdit } from "./pages/order_resource_requirements/edit";
 import { OrderResourceRequirementShow } from "./pages/order_resource_requirements/show";
+import { DowelOrderList } from "./pages/doweling_orders/list";
+import { DowelOrderShow } from "./pages/doweling_orders/show";
+import { DowelOrderEdit } from "./pages/doweling_orders/edit";
 import { LoginPage } from "./pages/login";
 import { dataProvider } from "./utils/dataProvider";
 import { authProvider } from "./authProvider";
@@ -158,6 +161,16 @@ const App = () => {
                   list: "/calendar",
                   meta: {
                     label: "Календарь",
+                  },
+                },
+                {
+                  name: "doweling_orders_view",
+                  list: "/doweling-orders",
+                  edit: "/doweling-orders/edit/:id",
+                  show: "/doweling-orders/show/:id",
+                  meta: {
+                    idColumnName: "doweling_order_id",
+                    label: "Присадка",
                   },
                 },
                 {
@@ -426,6 +439,11 @@ const App = () => {
                   </Route>
                   <Route path="/calendar" >
                     <Route index element={<CalendarList />} />
+                  </Route>
+                  <Route path="/doweling-orders" >
+                    <Route index element={<DowelOrderList />} />
+                    <Route path="edit/:id" element={<DowelOrderEdit />} />
+                    <Route path="show/:id" element={<DowelOrderShow />} />
                   </Route>
                   <Route path="/materials" >
                     <Route index element={<MaterialList />} />

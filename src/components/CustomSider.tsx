@@ -52,6 +52,7 @@ const CATEGORY_ORDER = [
 const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
   calendar: <CalendarOutlined />,
+  doweling_orders_view: <ToolOutlined />,
   clients: <UserOutlined />,
   suppliers: <ShopOutlined />,
   vendors: <ShopOutlined />,
@@ -93,6 +94,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 const RESOURCE_LABELS: Record<string, string> = {
   orders_view: "Заказы",
   calendar: "Календарь",
+  doweling_orders_view: "Присадка",
   clients: "Клиенты",
   suppliers: "Поставщики",
   vendors: "Производители",
@@ -128,6 +130,7 @@ const CATEGORY_MAP: Record<string, string> = {
   vendors: "Контрагенты",
   film_vendors: "Контрагенты",
   payments: "Финансы",
+  doweling_orders_view: "Производство",
   order_workshops: "Производство",
   workshops: "Производство",
   work_centers: "Производство",
