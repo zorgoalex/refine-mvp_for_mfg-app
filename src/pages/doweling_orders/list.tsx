@@ -97,6 +97,16 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
           width={120}
         />
         <Table.Column
+          dataIndex="design_engineer"
+          title="Конструктор"
+          width={120}
+        />
+        <Table.Column
+          dataIndex="operator"
+          title="Оператор"
+          width={120}
+        />
+        <Table.Column
           dataIndex="material_name"
           title="Материал"
           width={100}

@@ -573,6 +573,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             render={(value) => formatDate(value)}
           />
           <Table.Column
+            dataIndex="design_engineer"
+            title="Конструктор"
+            width={100}
+          />
+          <Table.Column
             dataIndex="issue_date"
             title="Дата выдачи заказа"
             sorter

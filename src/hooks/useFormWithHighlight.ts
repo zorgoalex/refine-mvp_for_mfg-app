@@ -20,12 +20,16 @@ export const useFormWithHighlight = <
   resource: string;
   idField: string;
   action?: "create" | "edit";
+  listUrl?: string; // Optional custom list URL for redirect
   formProps?: UseFormProps<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>;
 }): UseFormReturnType<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError> => {
-  const { resource, idField, action = "create", formProps: additionalProps } = props;
+  const { resource, idField, action = "create", listUrl, formProps: additionalProps } = props;
 
   const formReturn = useRefineForm<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>({
     ...additionalProps,
+    resource,
+    action,
+    meta: { idColumnName: idField, ...additionalProps?.meta },
     redirect: false,
     onMutationSuccess: (data, variables, context, isAutoSave) => {
       // Call original onMutationSuccess if provided
@@ -35,7 +39,9 @@ export const useFormWithHighlight = <
       const recordId = data.data?.[idField];
       if (recordId) {
         // Navigate to list page with highlight parameter
-        const baseUrl = `${window.location.origin}/${resource}`;
+        // Use custom listUrl if provided, otherwise derive from resource name
+        const listPath = listUrl || `/${resource.replace(/_/g, '-')}`;
+        const baseUrl = `${window.location.origin}${listPath}`;
         window.location.href = `${baseUrl}?highlightId=${recordId}`;
       }
     },

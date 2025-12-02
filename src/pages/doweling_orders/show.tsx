@@ -116,6 +116,20 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
 
           <Divider />
 
+          <Title level={5}>Ответственные</Title>
+          <Row gutter={[16, 16]}>
+            <Col span={8}>
+              <Title level={5}>Конструктор</Title>
+              <TextField value={record.design_engineer || "—"} />
+            </Col>
+            <Col span={8}>
+              <Title level={5}>Оператор</Title>
+              <TextField value={record.operator || "—"} />
+            </Col>
+          </Row>
+
+          <Divider />
+
           <Title level={5}>Финансы</Title>
           <Row gutter={[16, 16]}>
             <Col span={6}>

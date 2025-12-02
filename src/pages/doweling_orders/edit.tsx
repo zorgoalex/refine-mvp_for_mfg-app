@@ -2,13 +2,20 @@ import { Edit, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, DatePicker, Select } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
+import { useParams } from "react-router-dom";
 import dayjs from "dayjs";
 
 export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
+  const { id } = useParams<{ id: string }>();
+
   const { formProps, saveButtonProps, queryResult } = useFormWithHighlight({
     resource: "doweling_orders",
     idField: "doweling_order_id",
     action: "edit",
+    listUrl: "/doweling-orders",
+    formProps: {
+      id,
+    },
   });
 
   const record = queryResult?.data?.data;
@@ -18,7 +25,7 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
     resource: "orders",
     optionLabel: "order_name",
     optionValue: "order_id",
-    defaultValue: record?.order_id,
+    defaultValue: record?.order_id ?? undefined,
     pagination: { mode: "server", pageSize: 100 },
   });
 
@@ -27,7 +34,7 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
     resource: "payment_statuses",
     optionLabel: "payment_status_name",
     optionValue: "payment_status_id",
-    defaultValue: record?.payment_status_id,
+    defaultValue: record?.payment_status_id ?? undefined,
   });
 
   // Справочник статусов производства
@@ -35,7 +42,14 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
     resource: "production_statuses",
     optionLabel: "production_status_name",
     optionValue: "production_status_id",
-    defaultValue: record?.production_status_id,
+    defaultValue: record?.production_status_id ?? undefined,
+  });
+
+  // Справочник сотрудников (для конструктора и оператора)
+  const { selectProps: employeeSelectProps } = useSelect({
+    resource: "employees",
+    optionLabel: "full_name",
+    optionValue: "employee_id",
   });
 
   return (
@@ -108,6 +122,40 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
             {...productionStatusSelectProps}
             placeholder="Выберите статус"
             allowClear
+          />
+        </Form.Item>
+
+        <Form.Item
+          label="Конструктор"
+          name="design_engineer_id"
+          rules={[{ required: true, message: "Обязательное поле" }]}
+        >
+          <Select
+            {...employeeSelectProps}
+            placeholder="Выберите конструктора"
+            showSearch
+            filterOption={(input, option) =>
+              String(option?.label ?? "")
+                .toLowerCase()
+                .includes(input.toLowerCase())
+            }
+          />
+        </Form.Item>
+
+        <Form.Item
+          label="Оператор"
+          name="operator_id"
+          rules={[{ required: true, message: "Обязательное поле" }]}
+        >
+          <Select
+            {...employeeSelectProps}
+            placeholder="Выберите оператора"
+            showSearch
+            filterOption={(input, option) =>
+              String(option?.label ?? "")
+                .toLowerCase()
+                .includes(input.toLowerCase())
+            }
           />
         </Form.Item>
 
