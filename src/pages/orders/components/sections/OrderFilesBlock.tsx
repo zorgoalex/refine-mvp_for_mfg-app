@@ -29,12 +29,12 @@ export const OrderFilesBlock: React.FC<OrderFilesBlockProps> = ({ record }) => {
   };
 
   return (
-    <div style={{ padding: '10px 16px' }}>
+    <div style={{ padding: '4px 16px' }}>
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: 16,
+          gap: 12,
         }}
       >
         <div>

@@ -251,23 +251,21 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
           background: '#FAFBFC',
         }}
       >
-        {/* ID */}
-        {record?.order_id && (
-          <Text style={{ fontSize: 12, color: '#6B7280' }}>
-            ID{record.order_id}
-          </Text>
-        )}
-
-        {/* Separator */}
-        {record?.order_id && (
-          <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
-        )}
-
         {/* Doweling Order (Присадка) */}
         {record?.doweling_order_id && (
           <>
             <Text style={{ fontSize: 12, color: '#6B7280' }}>
-              Присадка: <Text strong style={{ color: '#111827' }}>{record.doweling_order_name || `ID${record.doweling_order_id}`}</Text>
+              Присадка: <Text strong style={{ color: '#C62828' }}>{record.doweling_order_name || `ID${record.doweling_order_id}`}</Text>
+            </Text>
+            <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+          </>
+        )}
+
+        {/* Design Engineer (Конструктор) */}
+        {record?.design_engineer && (
+          <>
+            <Text style={{ fontSize: 12, color: '#6B7280' }}>
+              Конструктор: <Text strong style={{ color: '#111827' }}>{record.design_engineer}</Text>
             </Text>
             <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
           </>

@@ -41,10 +41,19 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: 16,
-        padding: '10px 16px',
+        gap: 12,
+        padding: '4px 16px',
       }}
     >
+        <div>
+          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+            ID заказа
+          </Text>
+          <Text style={{ fontSize: 13, color: '#262626', fontWeight: 600 }}>
+            {record?.order_id || '—'}
+          </Text>
+        </div>
+
         <div>
           <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
             Ссылка 1C

@@ -18,12 +18,12 @@ export const OrderDatesBlock: React.FC<OrderDatesBlockProps> = ({ record }) => {
   };
 
   return (
-    <div style={{ padding: '10px 16px' }}>
+    <div style={{ padding: '4px 16px' }}>
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 16,
+          gap: 12,
         }}
       >
         <div>

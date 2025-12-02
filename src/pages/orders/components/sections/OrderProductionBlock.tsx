@@ -60,12 +60,12 @@ export const OrderProductionBlock: React.FC<OrderProductionBlockProps> = ({
   }, [details, millingTypesMap, edgeTypesMap, filmsMap]);
 
   return (
-    <div style={{ padding: '10px 16px' }}>
+    <div style={{ padding: '4px 16px' }}>
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 16,
+          gap: 12,
         }}
       >
         <div>
@@ -92,6 +92,24 @@ export const OrderProductionBlock: React.FC<OrderProductionBlockProps> = ({
           </Text>
           <Text style={{ fontSize: 13, color: '#262626' }}>
             {commonValues.filmName}
+          </Text>
+        </div>
+
+        <div>
+          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+            Присадка
+          </Text>
+          <Text style={{ fontSize: 13, color: '#262626' }}>
+            {record?.doweling_order_name || '—'}
+          </Text>
+        </div>
+
+        <div>
+          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+            Конструктор
+          </Text>
+          <Text style={{ fontSize: 13, color: '#262626' }}>
+            {record?.design_engineer || '—'}
           </Text>
         </div>
       </div>
