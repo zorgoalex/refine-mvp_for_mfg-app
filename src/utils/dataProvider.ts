@@ -84,6 +84,8 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "client_name",
     "order_date",
     "priority",
+    "doweling_order_id",
+    "doweling_order_name",
     "completion_date",
     "planned_completion_date",
     "order_status_name",

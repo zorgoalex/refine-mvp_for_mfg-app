@@ -422,6 +422,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             sorter
             width={80}
             className="orders-col orders-col--doweling-name"
+            render={(value) => (
+              <span style={{ color: '#C62828', fontWeight: 600 }}>
+                {value || ''}
+              </span>
+            )}
           />
           <Table.Column
             dataIndex="order_date"
