@@ -47,7 +47,8 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
       }
 
       // Получаем ID текущего пользователя
-      const userId = authStorage.getUserId();
+      const user = authStorage.getUser();
+      const userId = user?.id ? Number(user.id) : null;
       if (!userId) {
         notification.error({
           message: 'Ошибка авторизации',
@@ -63,23 +64,28 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
       const designEngineerName = selectedEmployee?.label as string | undefined;
 
       // Создаем заказ на присадку
+      const createValues = {
+        doweling_order_name: values.doweling_order_name.trim(),
+        doweling_order_date: orderDate || new Date().toISOString().split('T')[0],
+        order_id: orderId,
+        design_engineer_id: values.design_engineer_id,
+        operator_id: values.design_engineer_id, // По умолчанию тот же что и конструктор
+        payment_status_id: 1, // По умолчанию - первый статус (обычно "Не оплачен")
+        production_status_id: 1, // По умолчанию - первый статус
+        discount: 0,
+        paid_amount: 0,
+        parts_count: 0,
+        delete_flag: false,
+        version: 0,
+        created_by: userId,
+      };
+
+      console.log('[DowellingOrderQuickCreate] Creating with values:', createValues);
+
       createDowellingOrder(
         {
           resource: 'doweling_orders',
-          values: {
-            doweling_order_name: values.doweling_order_name.trim(),
-            doweling_order_date: orderDate || new Date().toISOString().split('T')[0],
-            order_id: orderId,
-            design_engineer_id: values.design_engineer_id,
-            operator_id: values.design_engineer_id, // По умолчанию тот же что и конструктор
-            payment_status_id: 1, // По умолчанию - первый статус (обычно "Не оплачен")
-            discount: 0,
-            paid_amount: 0,
-            parts_count: 0,
-            delete_flag: false,
-            version: 0,
-            created_by: userId,
-          },
+          values: createValues,
         },
         {
           onSuccess: (data) => {
@@ -99,8 +105,18 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
           },
         }
       );
-    } catch (error) {
-      // Validation failed
+    } catch (error: any) {
+      // Validation failed - show error
+      console.error('[DowellingOrderQuickCreate] Validation error:', error);
+      if (error?.errorFields) {
+        const firstError = error.errorFields[0]?.errors?.[0];
+        if (firstError) {
+          notification.warning({
+            message: 'Ошибка валидации',
+            description: firstError,
+          });
+        }
+      }
     }
   };
 
@@ -127,11 +143,15 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
           name="doweling_order_name"
           rules={[
             { required: true, message: 'Обязательное поле' },
-            { min: 1, message: 'Минимум 1 символ' },
+            { whitespace: true, message: 'Номер не может состоять только из пробелов' },
             { max: 200, message: 'Максимум 200 символов' },
             {
-              pattern: /^(?!\s)(?!.*\s$)/,
-              message: 'Номер не должен начинаться или заканчиваться пробелом',
+              validator: (_, value) => {
+                if (value && (value.startsWith(' ') || value.endsWith(' '))) {
+                  return Promise.reject('Номер не должен начинаться или заканчиваться пробелом');
+                }
+                return Promise.resolve();
+              },
             },
           ]}
           extra="Номер заказа присадки для данного заказа"

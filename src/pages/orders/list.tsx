@@ -568,7 +568,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             dataIndex="payment_date"
             title="Дата оплаты"
             sorter
-            width={90}
+            width={104}
             className="orders-col orders-col--payment-date"
             render={(value) => formatDate(value)}
           />
@@ -576,6 +576,22 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             dataIndex="design_engineer"
             title="Конструктор"
             width={100}
+            className="orders-col"
+            render={(value) => (
+              <Tooltip title={value} placement="topLeft">
+                <span
+                  style={{
+                    display: 'block',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: 100,
+                  }}
+                >
+                  {value || ''}
+                </span>
+              </Tooltip>
+            )}
           />
           <Table.Column
             dataIndex="issue_date"
@@ -590,8 +606,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             title="Площадь заказа"
             sorter
             width={86}
-            className="orders-col"
-            render={(value) => <span style={{ fontSize: '80%' }}>{value ?? ''}</span>}
+            className="orders-col orders-col--amount"
+            render={(value) => value ?? ''}
           />
           <Table.Column
             dataIndex="completion_date"

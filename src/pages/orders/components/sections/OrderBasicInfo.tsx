@@ -1,5 +1,7 @@
 // Order Basic Info Section
-// Contains: Client, Order Name, Date, Manager, Priority
+// Row 1: Client, Order Name, Order Date
+// Row 2: Doweling Order, Design Engineer, Manager
+// Row 3: Order Status, Payment Status, Priority
 
 import React, { useState } from 'react';
 import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, notification } from 'antd';
@@ -20,8 +22,7 @@ export const OrderBasicInfo: React.FC = () => {
   // Hook for updating doweling_order's design_engineer_id
   const { mutate: updateDowellingOrder } = useUpdate();
 
-  // Load clients - with defaultValue to show current selection properly
-  // IMPORTANT: only pass defaultValue if it exists to avoid null in GraphQL query
+  // Load clients
   const { selectProps: clientSelectProps } = useSelect({
     resource: 'clients',
     optionLabel: 'client_name',
@@ -30,7 +31,7 @@ export const OrderBasicInfo: React.FC = () => {
     ...(header.client_id ? { defaultValue: header.client_id } : {}),
   });
 
-  // Load employees (for manager) - with defaultValue only if exists
+  // Load employees (for manager)
   const { selectProps: employeeSelectProps } = useSelect({
     resource: 'employees',
     optionLabel: 'full_name',
@@ -54,6 +55,24 @@ export const OrderBasicInfo: React.FC = () => {
     optionValue: 'employee_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     ...(header.design_engineer_id ? { defaultValue: header.design_engineer_id } : {}),
+  });
+
+  // Load order statuses
+  const { selectProps: orderStatusProps } = useSelect({
+    resource: 'order_statuses',
+    optionLabel: 'order_status_name',
+    optionValue: 'order_status_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
+  });
+
+  // Load payment statuses
+  const { selectProps: paymentStatusProps } = useSelect({
+    resource: 'payment_statuses',
+    optionLabel: 'payment_status_name',
+    optionValue: 'payment_status_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
   });
 
   // Helper to get design_engineer info from selected doweling order
@@ -106,8 +125,9 @@ export const OrderBasicInfo: React.FC = () => {
   return (
     <>
       <Form layout="vertical">
+        {/* Row 1: Клиент, Название заказа, Дата заказа */}
         <Row gutter={16}>
-          <Col span={12}>
+          <Col span={8}>
             <Form.Item
               label="Клиент"
               required
@@ -141,139 +161,172 @@ export const OrderBasicInfo: React.FC = () => {
             </Form.Item>
           </Col>
 
-        <Col span={12}>
-          <Form.Item
-            label="Название заказа"
-            required
-            help={!header.order_name && 'Обязательное поле'}
-            validateStatus={!header.order_name ? 'error' : ''}
-          >
-            <Input
-              value={header.order_name}
-              onChange={(e) => updateHeaderField('order_name', e.target.value)}
-              placeholder="Введите название заказа"
-              maxLength={200}
-            />
-          </Form.Item>
-        </Col>
-      </Row>
+          <Col span={8}>
+            <Form.Item
+              label="Название заказа"
+              required
+              help={!header.order_name && 'Обязательное поле'}
+              validateStatus={!header.order_name ? 'error' : ''}
+            >
+              <Input
+                value={header.order_name}
+                onChange={(e) => updateHeaderField('order_name', e.target.value)}
+                placeholder="Введите название заказа"
+                maxLength={200}
+              />
+            </Form.Item>
+          </Col>
 
-      <Row gutter={16}>
-        <Col span={8}>
-          <Form.Item
-            label="Дата заказа"
-            required
-            help={!header.order_date && 'Обязательное поле'}
-            validateStatus={!header.order_date ? 'error' : ''}
-          >
-            <DatePicker
-              value={header.order_date ? dayjs(header.order_date) : null}
-              onChange={(date) =>
-                updateHeaderField('order_date', date ? date.format('YYYY-MM-DD') : '')
-              }
-              style={{ width: '100%' }}
-              format="DD.MM.YYYY"
-            />
-          </Form.Item>
-        </Col>
+          <Col span={8}>
+            <Form.Item
+              label="Дата заказа"
+              required
+              help={!header.order_date && 'Обязательное поле'}
+              validateStatus={!header.order_date ? 'error' : ''}
+            >
+              <DatePicker
+                value={header.order_date ? dayjs(header.order_date) : null}
+                onChange={(date) =>
+                  updateHeaderField('order_date', date ? date.format('YYYY-MM-DD') : '')
+                }
+                style={{ width: '100%' }}
+                format="DD.MM.YYYY"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
 
-        <Col span={8}>
-          <Form.Item label="Менеджер">
-            <Select
-              {...employeeSelectProps}
-              value={header.manager_id}
-              onChange={(value) => updateHeaderField('manager_id', value)}
-              placeholder="Выберите менеджера"
-              allowClear
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-            />
-          </Form.Item>
-        </Col>
+        {/* Row 2: Присадка, Конструктор присадки, Менеджер */}
+        <Row gutter={16}>
+          <Col span={8}>
+            <Form.Item
+              label="Присадка"
+              tooltip="Номер заказа на присадку для данного заказа"
+            >
+              <Select
+                {...dowellingSelectProps}
+                value={header.doweling_order_id}
+                onChange={(value, option: any) => {
+                  updateHeaderField('doweling_order_id', value);
+                  updateHeaderField('doweling_order_name', option?.label || null);
+                  // Get design_engineer info from the selected doweling order
+                  const dowellingInfo = getDowellingOrderInfo(value);
+                  updateHeaderField('design_engineer', dowellingInfo?.design_engineer || null);
+                  updateHeaderField('design_engineer_id', dowellingInfo?.design_engineer_id || null);
+                }}
+                placeholder="Выберите или создайте присадку"
+                allowClear
+                showSearch
+                filterOption={(input, option) =>
+                  (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                }
+                dropdownRender={(menu) => (
+                  <>
+                    {menu}
+                    <Space style={{ padding: '8px' }}>
+                      <Button
+                        type="text"
+                        icon={<PlusOutlined />}
+                        onClick={() => setDowellingModalOpen(true)}
+                        disabled={!header.order_id}
+                      >
+                        Создать присадку
+                      </Button>
+                    </Space>
+                  </>
+                )}
+              />
+            </Form.Item>
+          </Col>
 
-        <Col span={8}>
-          <Form.Item
-            label="Приоритет"
-            tooltip="1 — наивысший приоритет, большее число — ниже"
-          >
-            <InputNumber
-              value={header.priority}
-              onChange={(value) => updateHeaderField('priority', value ?? 100)}
-              min={1}
-              max={100}
-              formatter={(value) => numberFormatter(value, 0)}
-              parser={numberParser}
-              style={{ width: '100%' }}
-            />
-          </Form.Item>
-        </Col>
-      </Row>
+          <Col span={8}>
+            <Form.Item
+              label="Конструктор присадки"
+              tooltip="Конструктор, назначенный на присадку. Изменение обновит запись присадки."
+            >
+              <Select
+                {...designEngineerSelectProps}
+                value={header.design_engineer_id || undefined}
+                onChange={handleDesignEngineerChange}
+                placeholder={header.doweling_order_id ? "Выберите конструктора" : "Сначала выберите присадку"}
+                disabled={!header.doweling_order_id}
+                allowClear
+                showSearch
+                filterOption={(input, option) =>
+                  (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())
+                }
+              />
+            </Form.Item>
+          </Col>
 
-      <Row gutter={16}>
-        <Col span={12}>
-          <Form.Item
-            label="Присадка"
-            tooltip="Номер заказа на присадку для данного заказа"
-          >
-            <Select
-              {...dowellingSelectProps}
-              value={header.doweling_order_id}
-              onChange={(value, option: any) => {
-                updateHeaderField('doweling_order_id', value);
-                updateHeaderField('doweling_order_name', option?.label || null);
-                // Get design_engineer info from the selected doweling order
-                const dowellingInfo = getDowellingOrderInfo(value);
-                updateHeaderField('design_engineer', dowellingInfo?.design_engineer || null);
-                updateHeaderField('design_engineer_id', dowellingInfo?.design_engineer_id || null);
-              }}
-              placeholder="Выберите или создайте присадку"
-              allowClear
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-              dropdownRender={(menu) => (
-                <>
-                  {menu}
-                  <Space style={{ padding: '8px' }}>
-                    <Button
-                      type="text"
-                      icon={<PlusOutlined />}
-                      onClick={() => setDowellingModalOpen(true)}
-                      disabled={!header.order_id}
-                    >
-                      Создать присадку
-                    </Button>
-                  </Space>
-                </>
-              )}
-            />
-          </Form.Item>
-        </Col>
+          <Col span={8}>
+            <Form.Item label="Менеджер">
+              <Select
+                {...employeeSelectProps}
+                value={header.manager_id}
+                onChange={(value) => updateHeaderField('manager_id', value)}
+                placeholder="Выберите менеджера"
+                allowClear
+                showSearch
+                filterOption={(input, option) =>
+                  (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                }
+              />
+            </Form.Item>
+          </Col>
+        </Row>
 
-        <Col span={12}>
-          <Form.Item
-            label="Конструктор присадки"
-            tooltip="Конструктор, назначенный на присадку. Изменение обновит запись присадки."
-          >
-            <Select
-              {...designEngineerSelectProps}
-              value={header.design_engineer_id || undefined}
-              onChange={handleDesignEngineerChange}
-              placeholder={header.doweling_order_id ? "Выберите конструктора" : "Сначала выберите присадку"}
-              disabled={!header.doweling_order_id}
-              allowClear
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())
-              }
-            />
-          </Form.Item>
-        </Col>
-      </Row>
+        {/* Row 3: Статус заказа, Статус оплаты, Приоритет */}
+        <Row gutter={16}>
+          <Col span={8}>
+            <Form.Item
+              label="Статус заказа"
+              required
+              help={!header.order_status_id && 'Обязательное поле'}
+              validateStatus={!header.order_status_id ? 'error' : ''}
+            >
+              <Select
+                {...orderStatusProps}
+                value={header.order_status_id}
+                onChange={(value) => updateHeaderField('order_status_id', value)}
+                placeholder="Выберите статус заказа"
+              />
+            </Form.Item>
+          </Col>
 
+          <Col span={8}>
+            <Form.Item
+              label="Статус оплаты"
+              required
+              help={!header.payment_status_id && 'Обязательное поле'}
+              validateStatus={!header.payment_status_id ? 'error' : ''}
+            >
+              <Select
+                {...paymentStatusProps}
+                value={header.payment_status_id}
+                onChange={(value) => updateHeaderField('payment_status_id', value)}
+                placeholder="Выберите статус оплаты"
+              />
+            </Form.Item>
+          </Col>
+
+          <Col span={8}>
+            <Form.Item
+              label="Приоритет"
+              tooltip="1 — наивысший приоритет, большее число — ниже"
+            >
+              <InputNumber
+                value={header.priority}
+                onChange={(value) => updateHeaderField('priority', value ?? 100)}
+                min={1}
+                max={100}
+                formatter={(value) => numberFormatter(value, 0)}
+                parser={numberParser}
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
       </Form>
 
       <ClientQuickCreate
