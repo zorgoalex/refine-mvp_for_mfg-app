@@ -79,7 +79,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     meta: {
       fields: [
         '*',
-        { doweling_orders: ['doweling_order_id', 'doweling_order_name'] }
+        { doweling_orders: ['doweling_order_id', 'doweling_order_name', 'design_engineer_id', 'design_engineer'] }
       ]
     },
     queryOptions: {
@@ -168,6 +168,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           ...orderDataWithoutRelationship,
           doweling_order_id: dowelingOrder?.doweling_order_id || null,
           doweling_order_name: dowelingOrder?.doweling_order_name || null,
+          design_engineer_id: dowelingOrder?.design_engineer_id || null,
+          design_engineer: dowelingOrder?.design_engineer || null,
         };
 
         loadOrder({

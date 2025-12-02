@@ -2,9 +2,10 @@
 // Contains: Client, Order Name, Date, Manager, Priority
 
 import React, { useState } from 'react';
-import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space } from 'antd';
+import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, notification } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
+import { useUpdate } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { ClientQuickCreate } from '../modals/ClientQuickCreate';
@@ -15,6 +16,9 @@ export const OrderBasicInfo: React.FC = () => {
   const { header, updateHeaderField } = useOrderFormStore();
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [dowellingModalOpen, setDowellingModalOpen] = useState(false);
+
+  // Hook for updating doweling_order's design_engineer_id
+  const { mutate: updateDowellingOrder } = useUpdate();
 
   // Load clients - with defaultValue to show current selection properly
   // IMPORTANT: only pass defaultValue if it exists to avoid null in GraphQL query
@@ -34,6 +38,70 @@ export const OrderBasicInfo: React.FC = () => {
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     ...(header.manager_id ? { defaultValue: header.manager_id } : {}),
   });
+
+  // Load doweling orders from view (has design_engineer field)
+  const { selectProps: dowellingSelectProps, queryResult: dowellingQueryResult } = useSelect({
+    resource: 'doweling_orders_view',
+    optionLabel: 'doweling_order_name',
+    optionValue: 'doweling_order_id',
+    ...(header.doweling_order_id ? { defaultValue: header.doweling_order_id } : {}),
+  });
+
+  // Load employees for design_engineer selector
+  const { selectProps: designEngineerSelectProps } = useSelect({
+    resource: 'employees',
+    optionLabel: 'full_name',
+    optionValue: 'employee_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    ...(header.design_engineer_id ? { defaultValue: header.design_engineer_id } : {}),
+  });
+
+  // Helper to get design_engineer info from selected doweling order
+  const getDowellingOrderInfo = (dowellingOrderId: number | undefined) => {
+    if (!dowellingOrderId) return null;
+    const dowellingOrder = dowellingQueryResult?.data?.data?.find(
+      (item: any) => item.doweling_order_id === dowellingOrderId
+    );
+    return dowellingOrder || null;
+  };
+
+  // Handle design_engineer change - update both UI and backend
+  const handleDesignEngineerChange = (employeeId: number | undefined, option: any) => {
+    const employeeName = option?.label || null;
+
+    // Update local state
+    updateHeaderField('design_engineer_id', employeeId || null);
+    updateHeaderField('design_engineer', employeeName);
+
+    // Update doweling_order in backend if it exists
+    if (header.doweling_order_id) {
+      updateDowellingOrder(
+        {
+          resource: 'doweling_orders',
+          id: header.doweling_order_id,
+          values: {
+            design_engineer_id: employeeId || null,
+          },
+        },
+        {
+          onSuccess: () => {
+            notification.success({
+              message: 'Конструктор обновлён',
+              description: employeeName
+                ? `Конструктор присадки изменён на "${employeeName}"`
+                : 'Конструктор присадки удалён',
+            });
+          },
+          onError: (error: any) => {
+            notification.error({
+              message: 'Ошибка обновления',
+              description: error?.message || 'Не удалось обновить конструктора присадки',
+            });
+          },
+        }
+      );
+    }
+  };
 
   return (
     <>
@@ -144,42 +212,27 @@ export const OrderBasicInfo: React.FC = () => {
       </Row>
 
       <Row gutter={16}>
-        <Col span={8}>
-          <Form.Item
-            label="ID Присадка"
-            tooltip="ID заказа на присадку (только для чтения)"
-          >
-            <Input
-              value={header.doweling_order_id ?? '—'}
-              disabled
-              style={{ color: 'rgba(0, 0, 0, 0.88)' }}
-            />
-          </Form.Item>
-        </Col>
-
-        <Col span={16}>
+        <Col span={12}>
           <Form.Item
             label="Присадка"
             tooltip="Номер заказа на присадку для данного заказа"
           >
             <Select
+              {...dowellingSelectProps}
               value={header.doweling_order_id}
-              onChange={(value) => {
+              onChange={(value, option: any) => {
                 updateHeaderField('doweling_order_id', value);
-                // Найти и установить doweling_order_name при выборе
+                updateHeaderField('doweling_order_name', option?.label || null);
+                // Get design_engineer info from the selected doweling order
+                const dowellingInfo = getDowellingOrderInfo(value);
+                updateHeaderField('design_engineer', dowellingInfo?.design_engineer || null);
+                updateHeaderField('design_engineer_id', dowellingInfo?.design_engineer_id || null);
               }}
               placeholder="Выберите или создайте присадку"
               allowClear
               showSearch
-              options={
-                header.doweling_order_id && header.doweling_order_name
-                  ? [
-                      {
-                        value: header.doweling_order_id,
-                        label: header.doweling_order_name,
-                      },
-                    ]
-                  : []
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
               }
               dropdownRender={(menu) => (
                 <>
@@ -196,6 +249,26 @@ export const OrderBasicInfo: React.FC = () => {
                   </Space>
                 </>
               )}
+            />
+          </Form.Item>
+        </Col>
+
+        <Col span={12}>
+          <Form.Item
+            label="Конструктор присадки"
+            tooltip="Конструктор, назначенный на присадку. Изменение обновит запись присадки."
+          >
+            <Select
+              {...designEngineerSelectProps}
+              value={header.design_engineer_id || undefined}
+              onChange={handleDesignEngineerChange}
+              placeholder={header.doweling_order_id ? "Выберите конструктора" : "Сначала выберите присадку"}
+              disabled={!header.doweling_order_id}
+              allowClear
+              showSearch
+              filterOption={(input, option) =>
+                (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())
+              }
             />
           </Form.Item>
         </Col>
@@ -216,9 +289,11 @@ export const OrderBasicInfo: React.FC = () => {
         onClose={() => setDowellingModalOpen(false)}
         orderId={header.order_id}
         orderDate={typeof header.order_date === 'string' ? header.order_date : undefined}
-        onSuccess={(dowellingOrderId, dowellingOrderName) => {
+        onSuccess={(dowellingOrderId, dowellingOrderName, designEngineerId, designEngineer) => {
           updateHeaderField('doweling_order_id', dowellingOrderId);
           updateHeaderField('doweling_order_name', dowellingOrderName);
+          updateHeaderField('design_engineer_id', designEngineerId || null);
+          updateHeaderField('design_engineer', designEngineer || null);
         }}
       />
     </>

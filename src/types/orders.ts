@@ -50,6 +50,8 @@ export interface Order {
   // Dowelling order (присадка) - linked 1:1
   doweling_order_id?: number | null;
   doweling_order_name?: string | null;
+  design_engineer_id?: number | null;
+  design_engineer?: string | null;
 
   // Management and audit
   manager_id?: number | null;

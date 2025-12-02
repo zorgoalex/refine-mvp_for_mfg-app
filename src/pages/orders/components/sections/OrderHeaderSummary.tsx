@@ -349,12 +349,20 @@ export const OrderHeaderSummary: React.FC = () => {
           background: '#FAFBFC',
         }}
       >
-        {/* Doweling Order (Присадка) */}
+        {/* Doweling Order (Присадка) + Design Engineer */}
         {header.doweling_order_id && (
           <>
             <Text style={{ fontSize: 12, color: '#6B7280' }}>
               Присадка: <Text strong style={{ color: '#C62828' }}>{header.doweling_order_name || `ID${header.doweling_order_id}`}</Text>
             </Text>
+            {header.design_engineer && (
+              <>
+                <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+                <Text style={{ fontSize: 12, color: '#6B7280' }}>
+                  Конструктор: <Text strong style={{ color: '#262626' }}>{header.design_engineer}</Text>
+                </Text>
+              </>
+            )}
             <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
           </>
         )}

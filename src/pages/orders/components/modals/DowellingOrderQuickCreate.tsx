@@ -2,15 +2,16 @@
 // Allows creating a new dowelling order linked to the main order
 
 import React from 'react';
-import { Modal, Form, Input, notification } from 'antd';
+import { Modal, Form, Input, Select, notification } from 'antd';
 import { useCreate } from '@refinedev/core';
+import { useSelect } from '@refinedev/antd';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { authStorage } from '../../../../utils/auth';
 
 interface DowellingOrderQuickCreateProps {
   open: boolean;
   onClose: () => void;
-  onSuccess: (dowellingOrderId: number, dowellingOrderName: string) => void;
+  onSuccess: (dowellingOrderId: number, dowellingOrderName: string, designEngineerId?: number, designEngineer?: string) => void;
   orderId?: number; // ID основного заказа (для связи)
   orderDate?: string; // Дата заказа (для doweling_order_date)
 }
@@ -24,6 +25,14 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
 }) => {
   const [form] = Form.useForm();
   const { mutate: createDowellingOrder, isLoading } = useCreate();
+
+  // Load employees for design_engineer selector
+  const { selectProps: employeeSelectProps } = useSelect({
+    resource: 'employees',
+    optionLabel: 'full_name',
+    optionValue: 'employee_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+  });
 
   const handleOk = async () => {
     try {
@@ -47,6 +56,12 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
         return;
       }
 
+      // Находим имя конструктора для передачи в onSuccess
+      const selectedEmployee = employeeSelectProps.options?.find(
+        (opt: any) => opt.value === values.design_engineer_id
+      );
+      const designEngineerName = selectedEmployee?.label as string | undefined;
+
       // Создаем заказ на присадку
       createDowellingOrder(
         {
@@ -55,6 +70,8 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
             doweling_order_name: values.doweling_order_name.trim(),
             doweling_order_date: orderDate || new Date().toISOString().split('T')[0],
             order_id: orderId,
+            design_engineer_id: values.design_engineer_id,
+            operator_id: values.design_engineer_id, // По умолчанию тот же что и конструктор
             payment_status_id: 1, // По умолчанию - первый статус (обычно "Не оплачен")
             discount: 0,
             paid_amount: 0,
@@ -71,7 +88,7 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
               description: `Заказ на присадку "${values.doweling_order_name}" успешно создан`,
             });
             form.resetFields();
-            onSuccess(data.data.doweling_order_id, data.data.doweling_order_name);
+            onSuccess(data.data.doweling_order_id, data.data.doweling_order_name, values.design_engineer_id, designEngineerName);
             onClose();
           },
           onError: (error: any) => {
@@ -123,6 +140,22 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
             placeholder="Введите номер заказа присадки"
             maxLength={200}
             autoFocus
+          />
+        </Form.Item>
+
+        <Form.Item
+          label="Конструктор"
+          name="design_engineer_id"
+          rules={[{ required: true, message: 'Обязательное поле' }]}
+          extra="Конструктор, ответственный за присадку"
+        >
+          <Select
+            {...employeeSelectProps}
+            placeholder="Выберите конструктора"
+            showSearch
+            filterOption={(input, option) =>
+              (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())
+            }
           />
         </Form.Item>
       </Form>
