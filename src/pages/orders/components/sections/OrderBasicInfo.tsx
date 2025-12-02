@@ -316,7 +316,7 @@ export const OrderBasicInfo: React.FC = () => {
               tooltip="1 — наивысший приоритет, большее число — ниже"
             >
               <InputNumber
-                value={header.priority}
+                value={header.priority || 100}
                 onChange={(value) => updateHeaderField('priority', value ?? 100)}
                 min={1}
                 max={100}

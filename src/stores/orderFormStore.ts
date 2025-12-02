@@ -402,7 +402,11 @@ export const useOrderFormStore = create<OrderFormState>()(
         loadOrder: (order) =>
           set(
             {
-              header: order.header || {},
+              header: {
+                ...(order.header || {}),
+                // Ensure priority defaults to 100 if not set or 0 (validation requires >= 1)
+                priority: order.header?.priority || 100,
+              },
               details:
                 order.details?.map((d) => ({
                   ...d,
