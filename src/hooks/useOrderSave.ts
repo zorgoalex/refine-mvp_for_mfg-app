@@ -50,7 +50,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
         // Update existing order
         // Exclude audit fields (auto-managed by Hasura permissions)
         // Exclude doweling fields (managed via order_doweling_links table)
-        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, doweling_links, ...restHeader } = values.header;
+        // Exclude VIEW-only fields (design_engineer, design_engineer_id come from doweling_orders, not orders table)
+        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, doweling_links, design_engineer, design_engineer_id, ...restHeader } = values.header;
 
         const headerData = {
           ...restHeader,
@@ -103,7 +104,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
         // Create new order
         // Exclude audit fields (will be set by Hasura or explicitly below)
         // Exclude doweling fields (managed via order_doweling_links table)
-        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, doweling_links, ...restHeader } = values.header;
+        // Exclude VIEW-only fields (design_engineer, design_engineer_id come from doweling_orders, not orders table)
+        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, doweling_links, design_engineer, design_engineer_id, ...restHeader } = values.header;
 
         const headerData = {
           ...restHeader,
