@@ -463,7 +463,11 @@ export const useOrderFormStore = create<OrderFormState>()(
         loadOrder: (order) =>
           set(
             {
-              header: order.header || {},
+              header: {
+                ...(order.header || {}),
+                // Ensure priority defaults to 100 if not set or invalid
+                priority: (order.header?.priority && order.header.priority >= 1) ? order.header.priority : 100,
+              },
               details:
                 order.details?.map((d) => ({
                   ...d,
@@ -621,7 +625,7 @@ export const useOrderFormStore = create<OrderFormState>()(
       }),
       {
         name: 'order-form-storage',
-        version: 2, // Increment to force migration from old storage
+        version: 3, // Increment to force migration from old storage
         // Only persist essential data for draft recovery
         partialize: (state) => ({
           header: state.header,
@@ -637,12 +641,10 @@ export const useOrderFormStore = create<OrderFormState>()(
         }),
         // Migrate old storage versions
         migrate: (persistedState: any, version: number) => {
-          if (version < 2) {
-            // Fix priority default value
-            if (persistedState?.header) {
-              if (!persistedState.header.priority || persistedState.header.priority < 1) {
-                persistedState.header.priority = 100;
-              }
+          // Fix priority default value (always check, regardless of version)
+          if (persistedState?.header) {
+            if (!persistedState.header.priority || persistedState.header.priority < 1) {
+              persistedState.header.priority = 100;
             }
           }
           return persistedState;
