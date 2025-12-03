@@ -334,6 +334,7 @@ export const OrderBasicInfo: React.FC = () => {
 
                 {/* Выбор существующей или создание новой присадки */}
                 <Select
+                  key={`doweling-select-${dowelingLinks.length}`}
                   options={dowelingSelectProps.options}
                   loading={dowelingSelectProps.loading}
                   value={selectedDowelingId}
