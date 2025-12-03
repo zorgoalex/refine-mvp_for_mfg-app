@@ -271,6 +271,58 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     pagination: { pageSize: 10000 },
   });
 
+  // Загружаем связи с присадками для заказов на текущей странице
+  const { data: dowelingLinksData } = useList({
+    resource: "order_doweling_links",
+    filters: [
+      {
+        field: "order_id",
+        operator: "in",
+        value: orderIds,
+      },
+    ],
+    pagination: { pageSize: 10000 },
+    queryOptions: {
+      enabled: orderIds.length > 0,
+    },
+  });
+
+  // Загружаем сотрудников для lookup конструктора
+  const { data: employeesData } = useList({
+    resource: "employees",
+    pagination: { pageSize: 1000 },
+  });
+
+  // Map сотрудников для lookup по employee_id
+  const employeesMap = useMemo(() => {
+    const map: Record<string | number, string> = {};
+    (employeesData?.data || []).forEach((e: any) => {
+      map[e.employee_id] = e.full_name;
+    });
+    return map;
+  }, [employeesData]);
+
+  // Группируем связи с присадками по order_id
+  const dowelingLinksByOrderId = useMemo(() => {
+    const map: Record<string | number, any[]> = {};
+    (dowelingLinksData?.data || []).forEach((link: any) => {
+      if (!map[link.order_id]) {
+        map[link.order_id] = [];
+      }
+      map[link.order_id].push(link);
+    });
+    return map;
+  }, [dowelingLinksData]);
+
+  // Функция для получения последней (свежей) присадки для заказа
+  const getLatestDoweling = (orderId: number) => {
+    const links = dowelingLinksByOrderId[orderId] || [];
+    if (links.length === 0) return null;
+    // Сортируем по order_doweling_link_id по убыванию (последняя = самая свежая)
+    const sorted = [...links].sort((a, b) => b.order_doweling_link_id - a.order_doweling_link_id);
+    return sorted[0];
+  };
+
   // Создаем lookup maps
   const materialsMap = useMemo(() => {
     const map: Record<string | number, string> = {};
@@ -422,6 +474,22 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             sorter
             width={80}
             className="orders-col orders-col--doweling-name"
+            render={(_, record: any) => {
+              const latestLink = getLatestDoweling(record.order_id);
+              const dowelingName = latestLink?.doweling_order?.doweling_order_name;
+              return dowelingName || "—";
+            }}
+          />
+          <Table.Column
+            key="design_engineer"
+            title="Конструктор"
+            width={100}
+            className="orders-col orders-col--wrap"
+            render={(_, record: any) => {
+              const latestLink = getLatestDoweling(record.order_id);
+              const engineerId = latestLink?.doweling_order?.design_engineer_id;
+              return engineerId ? employeesMap[engineerId] || "—" : "—";
+            }}
           />
           <Table.Column
             dataIndex="order_date"
