@@ -5,12 +5,12 @@ import { Space, Table, Tooltip } from "antd";
 import { EyeOutlined, EditOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
-import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 
 export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
   // Используем doweling_orders_view - одна строка = одна пара присадка-заказ (через order_doweling_links)
   const { tableProps } = useTable({
+    resource: "doweling_orders_view",
     syncWithLocation: true,
     sorters: {
       initial: [
@@ -23,11 +23,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
     },
   });
 
-  const { highlightProps } = useHighlightRow(
-    "doweling_order_id",
-    tableProps.dataSource,
-  );
-  const { show, edit } = useNavigation();
+  const { edit } = useNavigation();
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -55,8 +51,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
     <LocalizedList title="Присадка">
       <Table
         {...tableProps}
-        {...highlightProps}
-        rowKey="doweling_order_id"
+        rowKey={(record: any) => `${record.doweling_order_id}-${record.order_id}`}
         sticky
         scroll={{ x: "max-content", y: 600 }}
         showSorterTooltip={{ mouseEnterDelay: 1 }}
