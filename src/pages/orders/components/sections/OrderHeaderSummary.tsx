@@ -14,7 +14,7 @@ import dayjs from 'dayjs';
 const { Text } = Typography;
 
 export const OrderHeaderSummary: React.FC = () => {
-  const { header, details, payments, isPaymentStatusManual } = useOrderFormStore();
+  const { header, details, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
 
   // FIX: Calculate totals directly from details/payments for proper reactivity
   const totals = useMemo(() => ({
@@ -24,6 +24,13 @@ export const OrderHeaderSummary: React.FC = () => {
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
     total_amount: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
   }), [details, payments]);
+
+  // Get the latest (last added) doweling link for header display
+  const latestDowelingLink = useMemo(() => {
+    if (!dowelingLinks || dowelingLinks.length === 0) return null;
+    // Return the last one (most recently added)
+    return dowelingLinks[dowelingLinks.length - 1];
+  }, [dowelingLinks]);
 
   // Get unique material IDs from details
   const uniqueMaterialIds = useMemo(() => {
@@ -349,23 +356,37 @@ export const OrderHeaderSummary: React.FC = () => {
           background: '#FAFBFC',
         }}
       >
-        {/* ID */}
-        {header.order_id && (
-          <Text style={{ fontSize: 12, color: '#6B7280' }}>
-            ID{header.order_id}
-          </Text>
+        {/* Doweling Order (Присадка) - показываем последнюю */}
+        {latestDowelingLink && (
+          <>
+            <Text style={{ fontSize: 12, color: '#6B7280' }}>
+              Присадка: <Text strong style={{ color: '#111827' }}>
+                {latestDowelingLink.doweling_order?.doweling_order_name || `ID${latestDowelingLink.doweling_order_id}`}
+              </Text>
+              {latestDowelingLink.doweling_order?.design_engineer && (
+                <span style={{ marginLeft: 8, color: '#6B7280' }}>
+                  (Констр.: <Text strong style={{ color: '#111827' }}>{latestDowelingLink.doweling_order.design_engineer}</Text>)
+                </span>
+              )}
+              {dowelingLinks.length > 1 && (
+                <span style={{ marginLeft: 4, color: '#6B7280' }}>
+                  +{dowelingLinks.length - 1}
+                </span>
+              )}
+            </Text>
+            <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+          </>
         )}
-
-        {/* Separator */}
-        {header.order_id && (
-          <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
-        )}
-
-        {/* Doweling Order (Присадка) */}
-        {header.doweling_order_id && (
+        {/* Fallback для обратной совместимости */}
+        {!latestDowelingLink && header.doweling_order_id && (
           <>
             <Text style={{ fontSize: 12, color: '#6B7280' }}>
               Присадка: <Text strong style={{ color: '#111827' }}>{header.doweling_order_name || `ID${header.doweling_order_id}`}</Text>
+              {header.design_engineer && (
+                <span style={{ marginLeft: 8, color: '#6B7280' }}>
+                  (Констр.: <Text strong style={{ color: '#111827' }}>{header.design_engineer}</Text>)
+                </span>
+              )}
             </Text>
             <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
           </>

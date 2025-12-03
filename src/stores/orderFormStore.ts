@@ -9,6 +9,7 @@ import {
   Payment,
   OrderWorkshop,
   OrderResourceRequirement,
+  OrderDowelingLink,
   OrderFormValues,
   OrderTotals,
 } from '../types/orders';
@@ -24,12 +25,14 @@ import {
   payments: Payment[];
   workshops: OrderWorkshop[];
   requirements: OrderResourceRequirement[];
+  dowelingLinks: OrderDowelingLink[];
 
   // Deleted items (track for deletion on server)
   deletedDetails: number[];
   deletedPayments: number[];
   deletedWorkshops: number[];
   deletedRequirements: number[];
+  deletedDowelingLinks: number[];
 
     // Form metadata
     isDirty: boolean;
@@ -43,6 +46,7 @@ import {
     originalPayments: Record<number, Payment>;
     originalWorkshops: Record<number, OrderWorkshop>;
     originalRequirements: Record<number, OrderResourceRequirement>;
+    originalDowelingLinks: Record<number, OrderDowelingLink>;
 
   // ========== ACTIONS: HEADER ==========
   setHeader: (data: Partial<Order>) => void;
@@ -70,6 +74,11 @@ import {
   updateRequirement: (tempId: number, data: Partial<OrderResourceRequirement>) => void;
   deleteRequirement: (tempId: number, requirementId?: number) => void;
 
+  // ========== ACTIONS: DOWELING LINKS ==========
+  addDowelingLink: (link: Omit<OrderDowelingLink, 'temp_id'>) => void;
+  updateDowelingLink: (tempId: number, data: Partial<OrderDowelingLink>) => void;
+  deleteDowelingLink: (tempId: number, linkId?: number) => void;
+
   // ========== COMPUTED ==========
   calculatedTotals: () => OrderTotals;
 
@@ -89,15 +98,19 @@ import {
 // ============================================================================
 
   const initialState = {
-    header: {},
+    header: {
+      priority: 100,
+    },
     details: [],
     payments: [],
     workshops: [],
     requirements: [],
+    dowelingLinks: [],
     deletedDetails: [],
     deletedPayments: [],
     deletedWorkshops: [],
     deletedRequirements: [],
+    deletedDowelingLinks: [],
     isDirty: false,
     version: 0,
     isTotalAmountManual: false,
@@ -107,6 +120,7 @@ import {
     originalPayments: {},
     originalWorkshops: {},
     originalRequirements: {},
+    originalDowelingLinks: {},
   };
 
 // ============================================================================
@@ -384,6 +398,53 @@ export const useOrderFormStore = create<OrderFormState>()(
             'deleteRequirement'
           ),
 
+        // ========== DOWELING LINKS ACTIONS ==========
+        addDowelingLink: (link) =>
+          set(
+            (state) => ({
+              dowelingLinks: [
+                ...state.dowelingLinks,
+                {
+                  ...link,
+                  temp_id: Date.now(),
+                  delete_flag: false,
+                },
+              ],
+              isDirty: true,
+            }),
+            false,
+            'addDowelingLink'
+          ),
+
+        updateDowelingLink: (tempId, data) =>
+          set(
+            (state) => ({
+              dowelingLinks: state.dowelingLinks.map((l) =>
+                (l.temp_id === tempId || l.order_doweling_link_id === tempId)
+                  ? { ...l, ...data }
+                  : l
+              ),
+              isDirty: true,
+            }),
+            false,
+            'updateDowelingLink'
+          ),
+
+        deleteDowelingLink: (tempId, linkId) =>
+          set(
+            (state) => ({
+              dowelingLinks: state.dowelingLinks.filter(
+                (l) => l.temp_id !== tempId && l.order_doweling_link_id !== tempId
+              ),
+              deletedDowelingLinks: linkId
+                ? [...state.deletedDowelingLinks, linkId]
+                : state.deletedDowelingLinks,
+              isDirty: true,
+            }),
+            false,
+            'deleteDowelingLink'
+          ),
+
         // ========== COMPUTED ==========
         calculatedTotals: () => {
           const state = get();
@@ -423,10 +484,16 @@ export const useOrderFormStore = create<OrderFormState>()(
                   ...r,
                   temp_id: r.requirement_id || Date.now() + Math.random(),
                 })) || [],
+              dowelingLinks:
+                order.dowelingLinks?.map((l) => ({
+                  ...l,
+                  temp_id: l.order_doweling_link_id || Date.now() + Math.random(),
+                })) || [],
               deletedDetails: [],
               deletedPayments: [],
               deletedWorkshops: [],
               deletedRequirements: [],
+              deletedDowelingLinks: [],
               isDirty: false,
               version: order.version || 0,
               isTotalAmountManual: false,
@@ -452,6 +519,11 @@ export const useOrderFormStore = create<OrderFormState>()(
                   if (r.requirement_id) acc[r.requirement_id] = { ...r } as OrderResourceRequirement;
                   return acc;
                 }, {}) || {},
+              originalDowelingLinks:
+                order.dowelingLinks?.reduce((acc: Record<number, OrderDowelingLink>, l) => {
+                  if (l.order_doweling_link_id) acc[l.order_doweling_link_id] = { ...l } as OrderDowelingLink;
+                  return acc;
+                }, {}) || {},
             },
             false,
             'loadOrder'
@@ -469,10 +541,12 @@ export const useOrderFormStore = create<OrderFormState>()(
             payments: state.payments,
             workshops: state.workshops,
             requirements: state.requirements,
+            dowelingLinks: state.dowelingLinks,
             deletedDetails: state.deletedDetails,
             deletedPayments: state.deletedPayments,
             deletedWorkshops: state.deletedWorkshops,
             deletedRequirements: state.deletedRequirements,
+            deletedDowelingLinks: state.deletedDowelingLinks,
             isDirty: state.isDirty,
             version: state.version,
           };
@@ -503,11 +577,16 @@ export const useOrderFormStore = create<OrderFormState>()(
                 if (r.requirement_id) acc[r.requirement_id] = { ...r } as OrderResourceRequirement;
                 return acc;
               }, {}),
+              originalDowelingLinks: state.dowelingLinks.reduce((acc: Record<number, OrderDowelingLink>, l) => {
+                if (l.order_doweling_link_id) acc[l.order_doweling_link_id] = { ...l } as OrderDowelingLink;
+                return acc;
+              }, {}),
               // Clear deleted trackers after sync
               deletedDetails: [],
               deletedPayments: [],
               deletedWorkshops: [],
               deletedRequirements: [],
+              deletedDowelingLinks: [],
             }),
             false,
             'syncOriginals'
@@ -542,6 +621,7 @@ export const useOrderFormStore = create<OrderFormState>()(
       }),
       {
         name: 'order-form-storage',
+        version: 2, // Increment to force migration from old storage
         // Only persist essential data for draft recovery
         partialize: (state) => ({
           header: state.header,
@@ -549,10 +629,36 @@ export const useOrderFormStore = create<OrderFormState>()(
           payments: state.payments,
           workshops: state.workshops,
           requirements: state.requirements,
+          dowelingLinks: state.dowelingLinks,
           isDirty: state.isDirty,
           version: state.version,
           isTotalAmountManual: state.isTotalAmountManual,
           // Do not persist originals to local storage
+        }),
+        // Migrate old storage versions
+        migrate: (persistedState: any, version: number) => {
+          if (version < 2) {
+            // Fix priority default value
+            if (persistedState?.header) {
+              if (!persistedState.header.priority || persistedState.header.priority < 1) {
+                persistedState.header.priority = 100;
+              }
+            }
+          }
+          return persistedState;
+        },
+        // Merge persisted state with initial state, ensuring defaults
+        merge: (persistedState: any, currentState) => ({
+          ...currentState,
+          ...persistedState,
+          header: {
+            ...currentState.header,
+            ...persistedState?.header,
+            // Ensure priority defaults to 100 if not set or invalid
+            priority: (persistedState?.header?.priority && persistedState.header.priority >= 1)
+              ? persistedState.header.priority
+              : 100,
+          },
         }),
       }
     ),
@@ -571,5 +677,6 @@ export const selectDetails = (state: OrderFormState) => state.details;
 export const selectPayments = (state: OrderFormState) => state.payments;
 export const selectWorkshops = (state: OrderFormState) => state.workshops;
 export const selectRequirements = (state: OrderFormState) => state.requirements;
+export const selectDowelingLinks = (state: OrderFormState) => state.dowelingLinks;
 export const selectIsDirty = (state: OrderFormState) => state.isDirty;
 export const selectTotals = (state: OrderFormState) => state.calculatedTotals();

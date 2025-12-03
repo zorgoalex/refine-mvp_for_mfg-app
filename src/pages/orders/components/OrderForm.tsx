@@ -17,7 +17,6 @@ import dayjs from 'dayjs';
 // Sections
 import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
 import { OrderBasicInfo } from './sections/OrderBasicInfo';
-import { OrderStatusSection } from './sections/OrderStatusSection';
 import { OrderNotesSection } from './sections/OrderNotesSection';
 import { OrderDatesSection } from './sections/OrderDatesSection';
 import { OrderFinanceSection } from './sections/OrderFinanceSection';
@@ -71,7 +70,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
 
   // Load existing order data in edit mode
-  // Use relationship to load doweling_order in the same query (1:1 by order_id)
+  // Use relationship to load doweling links via order_doweling_links (many-to-many)
   const shouldLoadOrder = mode === 'edit' && !!orderId;
   const { data: orderData, isLoading: orderLoading } = useOne({
     resource: 'orders',
@@ -79,7 +78,12 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     meta: {
       fields: [
         '*',
-        { doweling_orders: ['doweling_order_id', 'doweling_order_name'] }
+        { order_doweling_links: [
+          'order_doweling_link_id',
+          'order_id',
+          'doweling_order_id',
+          { doweling_order: ['doweling_order_id', 'doweling_order_name', 'design_engineer_id'] }
+        ]}
       ]
     },
     queryOptions: {
@@ -160,14 +164,17 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           return detail;
         });
 
-        // Extract doweling order fields from relationship (1:1, returns array with 0 or 1 element)
-        const dowelingOrders = orderData.data.doweling_orders || [];
-        const dowelingOrder = dowelingOrders[0];
-        const { doweling_orders, ...orderDataWithoutRelationship } = orderData.data;
+        // Extract doweling links from relationship (many-to-many via order_doweling_links)
+        const dowelingLinks = orderData.data.order_doweling_links || [];
+        const { order_doweling_links, ...orderDataWithoutRelationship } = orderData.data;
+
+        // Для обратной совместимости: заполняем doweling_order_id/name из первой связи
+        const firstLink = dowelingLinks[0];
         const headerWithDoweling = {
           ...orderDataWithoutRelationship,
-          doweling_order_id: dowelingOrder?.doweling_order_id || null,
-          doweling_order_name: dowelingOrder?.doweling_order_name || null,
+          doweling_order_id: firstLink?.doweling_order?.doweling_order_id || null,
+          doweling_order_name: firstLink?.doweling_order?.doweling_order_name || null,
+          doweling_links: dowelingLinks,
         };
 
         loadOrder({
@@ -176,6 +183,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           payments: paymentsData?.data || [],
           workshops: [],
           requirements: [],
+          dowelingLinks: dowelingLinks,
         });
         setDirty(false);
         didInit.current = true;
@@ -679,7 +687,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         children: (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <OrderBasicInfo />
-            <OrderStatusSection />
             <OrderNotesSection />
           </Space>
         ),

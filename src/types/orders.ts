@@ -47,9 +47,12 @@ export interface Order {
   // Notes
   notes?: string | null;
 
-  // Dowelling order (присадка) - linked 1:1
+  // Dowelling orders (присадки) - many-to-many через order_doweling_links
+  // Для обратной совместимости оставляем старые поля (будут заполняться из первой связи)
   doweling_order_id?: number | null;
   doweling_order_name?: string | null;
+  // Массив всех связанных присадок
+  doweling_links?: OrderDowelingLink[];
 
   // Management and audit
   manager_id?: number | null;
@@ -211,6 +214,36 @@ export interface OrderResourceRequirement {
 }
 
 // ============================================================================
+// ORDER DOWELING LINKS (Many-to-Many связь заказов и присадок)
+// ============================================================================
+
+export interface OrderDowelingLink {
+  order_doweling_link_id?: number;
+  order_id: number;
+  doweling_order_id: number;
+
+  // Данные присадки (из join)
+  doweling_order?: {
+    doweling_order_id: number;
+    doweling_order_name: string;
+    design_engineer_id?: number | null;
+    design_engineer?: string | null;
+  };
+
+  // Management and audit
+  delete_flag?: boolean;
+  version?: number;
+  ref_key_1c?: string | null;
+  created_by?: number;
+  edited_by?: number | null;
+  created_at?: Date | string;
+  updated_at?: Date | string;
+
+  // Client-side only
+  temp_id?: number;
+}
+
+// ============================================================================
 // FORM VALUES (Combined type for the entire order form)
 // ============================================================================
 
@@ -223,12 +256,14 @@ export interface OrderFormValues {
   payments: Payment[];
   workshops: OrderWorkshop[];
   requirements: OrderResourceRequirement[];
+  dowelingLinks: OrderDowelingLink[];
 
   // Deleted items (track for deletion on server)
   deletedDetails?: number[];
   deletedPayments?: number[];
   deletedWorkshops?: number[];
   deletedRequirements?: number[];
+  deletedDowelingLinks?: number[];
 
   // Form metadata
   isDirty?: boolean;

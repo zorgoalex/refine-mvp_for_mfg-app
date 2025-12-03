@@ -31,6 +31,13 @@ export const OrderNotesSection: React.FC = () => {
           </Form.Item>
         </Col>
       </Row>
+
+      {/* ID заказа (read-only) - в самом низу, мелким шрифтом */}
+      {header.order_id && (
+        <div style={{ fontSize: '0.75em', color: '#999', marginTop: 8 }}>
+          ID заказа: {header.order_id}
+        </div>
+      )}
     </Form>
   );
 };

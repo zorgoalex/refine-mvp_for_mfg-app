@@ -13,6 +13,9 @@ import { OrderList } from "./pages/orders/list";
 import { OrderShow } from "./pages/orders/show";
 import { OrderEdit } from "./pages/orders/edit";
 import { CalendarList } from "./pages/calendar";
+import { DowelOrderList } from "./pages/doweling_orders/list";
+import { DowelOrderEdit } from "./pages/doweling_orders/edit";
+import { DowelOrderShow } from "./pages/doweling_orders/show";
 import { MaterialList } from "./pages/materials/list";
 import { MaterialCreate } from "./pages/materials/create";
 import { MaterialEdit } from "./pages/materials/edit";
@@ -395,6 +398,21 @@ const App = () => {
                   show: "/order-resource-requirements/show/:id",
                   meta: { idColumnName: "requirement_id", label: "Order Resource Requirements" },
                 },
+                {
+                  name: "order_doweling_links",
+                  meta: { idColumnName: "order_doweling_link_id" },
+                },
+                {
+                  name: "doweling_orders_view",
+                  list: "/doweling-orders",
+                  edit: "/doweling-orders/edit/:id",
+                  show: "/doweling-orders/show/:id",
+                  meta: { idColumnName: "doweling_order_id", label: "Присадка" },
+                },
+                {
+                  name: "doweling_orders",
+                  meta: { idColumnName: "doweling_order_id" },
+                },
               ]}
               options={{
                 syncWithLocation: true,
@@ -426,6 +444,11 @@ const App = () => {
                   </Route>
                   <Route path="/calendar" >
                     <Route index element={<CalendarList />} />
+                  </Route>
+                  <Route path="/doweling-orders" >
+                    <Route index element={<DowelOrderList />} />
+                    <Route path="edit/:id" element={<DowelOrderEdit />} />
+                    <Route path="show/:id" element={<DowelOrderShow />} />
                   </Route>
                   <Route path="/materials" >
                     <Route index element={<MaterialList />} />

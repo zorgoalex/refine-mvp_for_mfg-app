@@ -30,6 +30,7 @@ import {
   EnvironmentOutlined,
   TeamOutlined,
   SettingOutlined,
+  AimOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -79,6 +80,7 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   users: <UserOutlined />,
   movements_statuses: <ArrowsAltOutlined />,
   order_workshops: <EnvironmentOutlined />,
+  doweling_orders_view: <AimOutlined />,
 };
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -120,6 +122,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   users: "Пользователи",
   movements_statuses: "Статусы движений",
   order_workshops: "Цеха заказа",
+  doweling_orders_view: "Присадка",
 };
 
 const CATEGORY_MAP: Record<string, string> = {
@@ -131,6 +134,7 @@ const CATEGORY_MAP: Record<string, string> = {
   order_workshops: "Производство",
   workshops: "Производство",
   work_centers: "Производство",
+  doweling_orders_view: "Производство",
   films: "Материалы",
   materials: "Материалы",
   employees: "Настройки",

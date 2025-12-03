@@ -49,8 +49,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
       if (isEdit && values.header.order_id) {
         // Update existing order
         // Exclude audit fields (auto-managed by Hasura permissions)
-        // Exclude doweling_orders fields (not in orders table, managed via separate relationship)
-        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, ...restHeader } = values.header;
+        // Exclude doweling fields (managed via order_doweling_links table)
+        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, doweling_links, ...restHeader } = values.header;
 
         const headerData = {
           ...restHeader,
@@ -102,8 +102,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
       } else {
         // Create new order
         // Exclude audit fields (will be set by Hasura or explicitly below)
-        // Exclude doweling_orders fields (not in orders table, managed via separate relationship)
-        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, ...restHeader } = values.header;
+        // Exclude doweling fields (managed via order_doweling_links table)
+        const { created_by, edited_by, created_at, updated_at, order_id, doweling_order_id, doweling_order_name, doweling_links, ...restHeader } = values.header;
 
         const headerData = {
           ...restHeader,
@@ -446,7 +446,53 @@ export const useOrderSave = (): UseOrderSaveResult => {
         await Promise.all(deleteRequirementPromises);
       }
 
-      // ========== STEP 10: Invalidate queries ==========
+      // ========== STEP 10: Delete removed doweling links ==========
+      if (values.deletedDowelingLinks && values.deletedDowelingLinks.length > 0) {
+        const deleteDowelingLinkPromises = values.deletedDowelingLinks.map((linkId) =>
+          dataProvider().deleteOne({
+            resource: 'order_doweling_links',
+            id: linkId,
+          })
+        );
+        await Promise.all(deleteDowelingLinkPromises);
+      }
+
+      // ========== STEP 10.1: Create new order_doweling_links ==========
+      if (values.dowelingLinks && values.dowelingLinks.length > 0) {
+        const newLinks = values.dowelingLinks.filter((link) => !link.order_doweling_link_id);
+        if (newLinks.length > 0) {
+          const createLinkPromises = newLinks.map((link) =>
+            dataProvider().create({
+              resource: 'order_doweling_links',
+              variables: {
+                order_id: createdOrderId,
+                doweling_order_id: link.doweling_order_id,
+                delete_flag: false,
+                version: 0,
+              },
+            })
+          );
+          await Promise.all(createLinkPromises);
+        }
+      }
+
+      // ========== STEP 10.2: Update doweling_orders (design_engineer_id) ==========
+      if (values.dowelingLinks && values.dowelingLinks.length > 0) {
+        const updateDowelingOrderPromises = values.dowelingLinks
+          .filter((link) => link.doweling_order?.doweling_order_id && link.doweling_order?.design_engineer_id !== undefined)
+          .map((link) =>
+            dataProvider().update({
+              resource: 'doweling_orders',
+              id: link.doweling_order!.doweling_order_id,
+              variables: {
+                design_engineer_id: link.doweling_order!.design_engineer_id,
+              },
+            })
+          );
+        await Promise.all(updateDowelingOrderPromises);
+      }
+
+      // ========== STEP 11: Invalidate queries ==========
       await invalidate({
         resource: 'orders',
         invalidates: ['list', 'detail'],
@@ -462,6 +508,9 @@ export const useOrderSave = (): UseOrderSaveResult => {
       // Ensure child lists are refreshed for the current order
       await invalidate({ resource: 'order_details', invalidates: ['list'] });
       await invalidate({ resource: 'payments', invalidates: ['list'] });
+      await invalidate({ resource: 'order_doweling_links', invalidates: ['list'] });
+      await invalidate({ resource: 'doweling_orders', invalidates: ['list'] });
+      await invalidate({ resource: 'doweling_orders_view', invalidates: ['list'] });
 
       // ========== SUCCESS ==========
       notification.success({
