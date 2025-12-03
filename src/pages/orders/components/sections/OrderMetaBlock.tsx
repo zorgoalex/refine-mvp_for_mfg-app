@@ -47,6 +47,15 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
     >
         <div>
           <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+            ID заказа
+          </Text>
+          <Text style={{ fontSize: 13, color: '#262626' }}>
+            {record?.order_id || '—'}
+          </Text>
+        </div>
+
+        <div>
+          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
             Ссылка 1C
           </Text>
           <Text style={{ fontSize: 13, color: '#262626' }}>
@@ -88,10 +97,6 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
           <Text style={{ fontSize: 13, color: '#262626' }}>
             {formatDate(record?.updated_at)}
           </Text>
-        </div>
-
-        <div>
-          {/* Empty for alignment */}
         </div>
 
         <div>

@@ -363,7 +363,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         <>
           {/* Компактная шапка заказа (Read-only summary) */}
           <div style={{ marginBottom: 4 }}>
-            <OrderShowHeader record={record} details={details} />
+            <OrderShowHeader record={record} details={details} dowelingLinks={dowelingLinks} />
           </div>
           
           {/* Финансы */}

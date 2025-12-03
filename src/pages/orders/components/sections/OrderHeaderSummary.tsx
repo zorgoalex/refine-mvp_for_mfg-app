@@ -32,6 +32,16 @@ export const OrderHeaderSummary: React.FC = () => {
     return dowelingLinks[dowelingLinks.length - 1];
   }, [dowelingLinks]);
 
+  // Load employees for design_engineer lookup
+  const { data: employeesData } = useList({
+    resource: 'employees',
+    pagination: { pageSize: 1000 },
+  });
+
+  const employeesMap = useMemo(() => new Map(
+    (employeesData?.data || []).map((e: any) => [e.employee_id, e.full_name])
+  ), [employeesData]);
+
   // Get unique material IDs from details
   const uniqueMaterialIds = useMemo(() => {
     const ids = details
@@ -360,12 +370,14 @@ export const OrderHeaderSummary: React.FC = () => {
         {latestDowelingLink && (
           <>
             <Text style={{ fontSize: 12, color: '#6B7280' }}>
-              Присадка: <Text strong style={{ color: '#111827' }}>
+              Присадка: <Text strong style={{ color: '#DC2626' }}>
                 {latestDowelingLink.doweling_order?.doweling_order_name || '—'}
               </Text>
-              {latestDowelingLink.doweling_order?.design_engineer && (
-                <span style={{ marginLeft: 8, color: '#6B7280' }}>
-                  (Констр.: <Text strong style={{ color: '#111827' }}>{latestDowelingLink.doweling_order.design_engineer}</Text>)
+              {latestDowelingLink.doweling_order?.design_engineer_id && (
+                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#6B7280' }}>
+                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#111827' }}>
+                    {employeesMap.get(latestDowelingLink.doweling_order.design_engineer_id) || '—'}
+                  </Text>
                 </span>
               )}
               {dowelingLinks.length > 1 && (
@@ -381,10 +393,12 @@ export const OrderHeaderSummary: React.FC = () => {
         {!latestDowelingLink && header.doweling_order_id && (
           <>
             <Text style={{ fontSize: 12, color: '#6B7280' }}>
-              Присадка: <Text strong style={{ color: '#111827' }}>{header.doweling_order_name || '—'}</Text>
-              {header.design_engineer && (
-                <span style={{ marginLeft: 8, color: '#6B7280' }}>
-                  (Констр.: <Text strong style={{ color: '#111827' }}>{header.design_engineer}</Text>)
+              Присадка: <Text strong style={{ color: '#DC2626' }}>{header.doweling_order_name || '—'}</Text>
+              {header.design_engineer_id && (
+                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#6B7280' }}>
+                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#111827' }}>
+                    {employeesMap.get(header.design_engineer_id) || '—'}
+                  </Text>
                 </span>
               )}
             </Text>

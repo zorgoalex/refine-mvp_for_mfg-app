@@ -15,9 +15,26 @@ const { Text } = Typography;
 interface OrderShowHeaderProps {
   record: any; // order record from orders_view
   details: any[]; // order details array
+  dowelingLinks?: any[]; // doweling links with nested doweling_order
 }
 
-export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, details }) => {
+export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, details, dowelingLinks = [] }) => {
+  // Get the latest (last added) doweling link for header display
+  const latestDowelingLink = useMemo(() => {
+    if (!dowelingLinks || dowelingLinks.length === 0) return null;
+    return dowelingLinks[dowelingLinks.length - 1];
+  }, [dowelingLinks]);
+
+  // Load employees for design_engineer lookup
+  const { data: employeesData } = useList({
+    resource: 'employees',
+    pagination: { pageSize: 1000 },
+  });
+
+  const employeesMap = useMemo(() => new Map(
+    (employeesData?.data || []).map((e: any) => [e.employee_id, e.full_name])
+  ), [employeesData]);
+
   // Calculate totals from details
   const totals = useMemo(() => {
     const positions_count = details.length;
@@ -251,26 +268,37 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
           background: '#FAFBFC',
         }}
       >
-        {/* ID */}
-        {record?.order_id && (
-          <Text style={{ fontSize: 12, color: '#6B7280' }}>
-            ID{record.order_id}
-          </Text>
-        )}
-
-        {/* Separator */}
-        {record?.order_id && (
-          <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
-        )}
-
-        {/* Doweling Order (Присадка) - from view */}
-        {record?.doweling_order_name && (
+        {/* Doweling Order (Присадка) - показываем последнюю из many-to-many */}
+        {latestDowelingLink && (
           <>
             <Text style={{ fontSize: 12, color: '#6B7280' }}>
-              Присадка: <Text strong style={{ color: '#111827' }}>{record.doweling_order_name}</Text>
+              Присадка: <Text strong style={{ color: '#DC2626' }}>
+                {latestDowelingLink.doweling_order?.doweling_order_name || '—'}
+              </Text>
+              {latestDowelingLink.doweling_order?.design_engineer_id && (
+                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#6B7280' }}>
+                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#111827' }}>
+                    {employeesMap.get(latestDowelingLink.doweling_order.design_engineer_id) || '—'}
+                  </Text>
+                </span>
+              )}
+              {dowelingLinks.length > 1 && (
+                <span style={{ marginLeft: 4, color: '#6B7280' }}>
+                  +{dowelingLinks.length - 1}
+                </span>
+              )}
+            </Text>
+            <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+          </>
+        )}
+        {/* Fallback для обратной совместимости (из orders_view) */}
+        {!latestDowelingLink && record?.doweling_order_name && (
+          <>
+            <Text style={{ fontSize: 12, color: '#6B7280' }}>
+              Присадка: <Text strong style={{ color: '#DC2626' }}>{record.doweling_order_name}</Text>
               {record?.design_engineer && (
-                <span style={{ marginLeft: 8, color: '#6B7280' }}>
-                  (Констр.: <Text strong style={{ color: '#111827' }}>{record.design_engineer}</Text>)
+                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#6B7280' }}>
+                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#111827' }}>{record.design_engineer}</Text>
                 </span>
               )}
             </Text>
