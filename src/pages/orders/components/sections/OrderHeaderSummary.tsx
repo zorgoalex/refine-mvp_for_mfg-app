@@ -361,7 +361,7 @@ export const OrderHeaderSummary: React.FC = () => {
           <>
             <Text style={{ fontSize: 12, color: '#6B7280' }}>
               Присадка: <Text strong style={{ color: '#111827' }}>
-                {latestDowelingLink.doweling_order?.doweling_order_name || `ID${latestDowelingLink.doweling_order_id}`}
+                {latestDowelingLink.doweling_order?.doweling_order_name || '—'}
               </Text>
               {latestDowelingLink.doweling_order?.design_engineer && (
                 <span style={{ marginLeft: 8, color: '#6B7280' }}>
@@ -381,7 +381,7 @@ export const OrderHeaderSummary: React.FC = () => {
         {!latestDowelingLink && header.doweling_order_id && (
           <>
             <Text style={{ fontSize: 12, color: '#6B7280' }}>
-              Присадка: <Text strong style={{ color: '#111827' }}>{header.doweling_order_name || `ID${header.doweling_order_id}`}</Text>
+              Присадка: <Text strong style={{ color: '#111827' }}>{header.doweling_order_name || '—'}</Text>
               {header.design_engineer && (
                 <span style={{ marginLeft: 8, color: '#6B7280' }}>
                   (Констр.: <Text strong style={{ color: '#111827' }}>{header.design_engineer}</Text>)

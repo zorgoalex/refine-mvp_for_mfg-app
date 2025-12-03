@@ -75,17 +75,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const { data: orderData, isLoading: orderLoading } = useOne({
     resource: 'orders',
     id: orderId,
-    meta: {
-      fields: [
-        '*',
-        { order_doweling_links: [
-          'order_doweling_link_id',
-          'order_id',
-          'doweling_order_id',
-          { doweling_order: ['doweling_order_id', 'doweling_order_name', 'design_engineer_id'] }
-        ]}
-      ]
-    },
     queryOptions: {
       enabled: shouldLoadOrder,
     },
@@ -136,8 +125,23 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
   }, [mode, defaultOrderStatus, defaultPaymentStatus]);
 
-  // Load order data in edit mode (one-time)
+  // Reset store and didInit when orderId changes (handles navigation between orders)
   const didInit = useRef(false);
+  const prevOrderIdRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    // If orderId changed, reset the store and allow re-initialization
+    if (prevOrderIdRef.current !== orderId) {
+      if (prevOrderIdRef.current !== undefined) {
+        // Only reset if we had a previous order (not initial mount)
+        reset();
+      }
+      didInit.current = false;
+      prevOrderIdRef.current = orderId;
+    }
+  }, [orderId, reset]);
+
+  // Load order data in edit mode (one-time per orderId)
   useEffect(() => {
     if (didInit.current) return;
     if (mode === 'edit' && orderData?.data) {

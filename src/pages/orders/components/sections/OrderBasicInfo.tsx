@@ -108,7 +108,7 @@ export const OrderBasicInfo: React.FC = () => {
       dataIndex: ['doweling_order', 'doweling_order_name'],
       key: 'name',
       render: (_: any, record: any) =>
-        record.doweling_order?.doweling_order_name || `Присадка #${record.doweling_order_id}`,
+        record.doweling_order?.doweling_order_name || '—',
     },
     {
       title: 'Конструктор',

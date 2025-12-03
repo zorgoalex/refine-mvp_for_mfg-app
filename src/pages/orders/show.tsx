@@ -179,6 +179,30 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const payments = paymentsData?.data || [];
   const totalPaymentsAmount = payments.reduce((sum, p: any) => sum + (p.amount || 0), 0);
 
+  // Загрузка связей с присадками (many-to-many)
+  const { data: dowelingLinksData } = useList({
+    resource: 'order_doweling_links',
+    filters: [
+      { field: 'order_id', operator: 'eq', value: record?.order_id },
+    ],
+    pagination: { pageSize: 100 },
+    queryOptions: {
+      enabled: !!record?.order_id,
+    },
+  });
+
+  const dowelingLinks = dowelingLinksData?.data || [];
+
+  // Загрузка сотрудников для отображения имени конструктора
+  const { data: employeesData } = useList({
+    resource: 'employees',
+    pagination: { pageSize: 1000 },
+  });
+
+  const employeesMap = new Map(
+    (employeesData?.data || []).map((item: any) => [item.employee_id, item.full_name])
+  );
+
   // Функция обновления статуса оплаты
   const handleRefreshPaymentStatus = async () => {
     if (!record?.order_id) return;
@@ -379,15 +403,53 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#fa8c16', marginBottom: 8 }}>
                   Производство
                 </div>
-                <OrderProductionBlock 
-                  record={record} 
+                <OrderProductionBlock
+                  record={record}
                   details={details}
                   millingTypesMap={millingTypesMap}
                   edgeTypesMap={edgeTypesMap}
                   filmsMap={filmsMap}
                 />
               </div>
-              
+
+              {/* Присадки */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#13c2c2', marginBottom: 8 }}>
+                  Присадки
+                </div>
+                {dowelingLinks.length > 0 ? (
+                  <Table
+                    dataSource={dowelingLinks}
+                    rowKey="order_doweling_link_id"
+                    size="small"
+                    pagination={false}
+                    bordered
+                    style={{ fontSize: 12 }}
+                    columns={[
+                      {
+                        title: 'Номер присадки',
+                        key: 'name',
+                        render: (_, link: any) => (
+                          <Link to={`/doweling_orders/show/${link.doweling_order?.doweling_order_id}`}>
+                            {link.doweling_order?.doweling_order_name || '—'}
+                          </Link>
+                        ),
+                      },
+                      {
+                        title: 'Конструктор',
+                        key: 'engineer',
+                        render: (_, link: any) => {
+                          const engineerId = link.doweling_order?.design_engineer_id;
+                          return engineerId ? employeesMap.get(engineerId) || '—' : '—';
+                        },
+                      },
+                    ]}
+                  />
+                ) : (
+                  <span style={{ color: '#8c8c8c', fontStyle: 'italic' }}>Нет связанных присадок</span>
+                )}
+              </div>
+
               {/* Файлы */}
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#722ed1', marginBottom: 8 }}>

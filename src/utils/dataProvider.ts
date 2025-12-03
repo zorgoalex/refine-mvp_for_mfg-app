@@ -152,6 +152,8 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "created_at",
     "updated_at",
     "version",
+    // Relationship: doweling links (many-to-many)
+    "order_doweling_links { order_doweling_link_id order_id doweling_order_id doweling_order { doweling_order_id doweling_order_name design_engineer_id } }",
   ],
   materials: [
     "material_id",
@@ -570,6 +572,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "order_doweling_link_id",
     "order_id",
     "doweling_order_id",
+    "doweling_order { doweling_order_id doweling_order_name design_engineer_id }",
     "created_by",
     "edited_by",
     "created_at",

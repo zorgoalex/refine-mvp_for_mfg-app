@@ -21,6 +21,7 @@ export const OrderEdit: React.FC = () => {
 
   return (
     <OrderForm
+      key={orderId}
       mode="edit"
       orderId={orderId}
       onSaveSuccess={handleSaveSuccess}
