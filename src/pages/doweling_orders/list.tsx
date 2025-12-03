@@ -2,13 +2,14 @@ import React from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Tooltip } from "antd";
-import { EyeOutlined, EditOutlined, StarFilled } from "@ant-design/icons";
+import { EyeOutlined, EditOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 
 export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
+  // Используем doweling_orders_view - одна строка = одна пара присадка-заказ (через order_doweling_links)
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
@@ -26,7 +27,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
     "doweling_order_id",
     tableProps.dataSource,
   );
-  const { show } = useNavigation();
+  const { show, edit } = useNavigation();
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -67,7 +68,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         }}
         onRow={(record) => ({
           onDoubleClick: () => {
-            show("doweling_orders_view", record.doweling_order_id);
+            edit("doweling_orders", record.doweling_order_id);
           },
         })}
       >
@@ -83,12 +84,14 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
           title="Присадка"
           sorter
           width={100}
+          render={(value) => <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{value || "—"}</span>}
         />
         <Table.Column
           dataIndex="order_name"
           title="Заказ"
           sorter
           width={100}
+          render={(value) => <span style={{ color: '#1890ff', letterSpacing: '0.5px' }}>{value || "—"}</span>}
         />
         <Table.Column
           dataIndex="doweling_order_date"
