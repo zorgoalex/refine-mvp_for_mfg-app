@@ -39,7 +39,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     sorters: {
       initial: [
         { field: "order_date", order: "desc" },
-        { field: "order_id", order: "desc" },
+        { field: "order_name_numeric", order: "desc" },
       ],
     },
     pagination: {
@@ -59,17 +59,19 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
     const orderName = searchOrderId.trim();
 
-    // Сбрасываем сортировку на order_date DESC + order_id DESC перед поиском
+    // Сбрасываем сортировку на order_date DESC + order_name_numeric DESC перед поиском
     const isDefaultSort =
-      sorters.length >= 1 &&
+      sorters.length >= 2 &&
       sorters[0].field === "order_date" &&
-      sorters[0].order === "desc";
+      sorters[0].order === "desc" &&
+      sorters[1].field === "order_name_numeric" &&
+      sorters[1].order === "desc";
 
     if (!isDefaultSort) {
       message.info("Сброс сортировки для поиска...");
       setSorters([
         { field: "order_date", order: "desc" },
-        { field: "order_id", order: "desc" },
+        { field: "order_name_numeric", order: "desc" },
       ]);
       // Даем время на применение сортировки
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -101,6 +103,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 ) {
                   order_id
                   order_name
+                  order_name_numeric
+                  order_date
                 }
               }
             `,
@@ -127,8 +131,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
       const foundOrder = orders[0];
       const foundOrderId = foundOrder.order_id;
+      const foundOrderNameNumeric = foundOrder.order_name_numeric;
+      const foundOrderDate = foundOrder.order_date;
 
-      // Шаг 2: Получаем количество заказов с ID больше найденного
+      // Шаг 2: Получаем количество заказов выше найденного
+      // Сортировка уже проверена и сброшена в начале функции (строки 63-78)
+      // Считаем заказы "выше" найденного (с учетом сортировки order_date DESC, order_name_numeric DESC):
+      // 1. Все заказы с order_date > foundOrderDate
+      // 2. ПЛЮС заказы с order_date = foundOrderDate И order_name_numeric > foundOrderNameNumeric
       const countResponse = await fetch(
         `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
         {
@@ -139,9 +149,19 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           },
           body: JSON.stringify({
             query: `
-              query GetGreaterCount($orderId: bigint!) {
+              query GetGreaterCount($orderDate: date!, $orderNameNumeric: Int) {
                 orders_view_aggregate(
-                  where: { order_id: { _gt: $orderId } }
+                  where: {
+                    _or: [
+                      { order_date: { _gt: $orderDate } }
+                      {
+                        _and: [
+                          { order_date: { _eq: $orderDate } }
+                          { order_name_numeric: { _gt: $orderNameNumeric } }
+                        ]
+                      }
+                    ]
+                  }
                 ) {
                   aggregate {
                     count
@@ -149,12 +169,23 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 }
               }
             `,
-            variables: { orderId: foundOrderId },
+            variables: {
+              orderDate: foundOrderDate,
+              orderNameNumeric: foundOrderNameNumeric,
+            },
           }),
         }
       );
 
       const countData = await countResponse.json();
+
+      if (countData.errors && countData.errors.length > 0) {
+        const errorMessage = countData.errors[0]?.message || "Ошибка подсчета";
+        message.error(errorMessage);
+        console.error("GraphQL ошибка при подсчете:", countData.errors);
+        return;
+      }
+
       const greaterCount = countData.data?.orders_view_aggregate?.aggregate?.count || 0;
 
       // Вычисляем номер страницы (поскольку сортировка DESC, большие ID сверху)
