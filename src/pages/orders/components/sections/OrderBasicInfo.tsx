@@ -404,8 +404,9 @@ export const OrderBasicInfo: React.FC = () => {
         onClose={() => setDowellingModalOpen(false)}
         orderId={header.order_id}
         orderDate={typeof header.order_date === 'string' ? header.order_date : undefined}
-        onSuccess={(dowellingOrderId, dowellingOrderName, designEngineerId, designEngineer) => {
+        onSuccess={(dowellingOrderId, dowellingOrderName, designEngineerId, designEngineer, linkId) => {
           addDowelingLink({
+            order_doweling_link_id: linkId,
             order_id: header.order_id!,
             doweling_order_id: dowellingOrderId,
             doweling_order: {

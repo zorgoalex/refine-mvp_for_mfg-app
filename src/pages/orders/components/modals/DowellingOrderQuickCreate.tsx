@@ -10,7 +10,7 @@ import { DraggableModalWrapper } from '../../../../components/DraggableModalWrap
 interface DowellingOrderQuickCreateProps {
   open: boolean;
   onClose: () => void;
-  onSuccess: (dowellingOrderId: number, dowellingOrderName: string, designEngineerId?: number, designEngineer?: string) => void;
+  onSuccess: (dowellingOrderId: number, dowellingOrderName: string, designEngineerId?: number, designEngineer?: string, linkId?: number) => void;
   orderId?: number; // ID основного заказа (для связи через order_doweling_links)
   orderDate?: string; // Дата заказа (для doweling_order_date)
 }
@@ -78,7 +78,7 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
         const newDowelingOrderName = dowelingResult.data.doweling_order_name;
 
         // Шаг 2: Создаем связь в order_doweling_links
-        await createDowelingLink({
+        const linkResult = await createDowelingLink({
           resource: 'order_doweling_links',
           values: {
             order_id: orderId,
@@ -88,12 +88,14 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
           },
         });
 
+        const newLinkId = linkResult.data.order_doweling_link_id;
+
         notification.success({
           message: 'Присадка создана',
           description: `Заказ на присадку "${newDowelingOrderName}" успешно создан и связан с заказом`,
         });
         form.resetFields();
-        onSuccess(newDowelingOrderId, newDowelingOrderName, values.design_engineer_id, designEngineerName);
+        onSuccess(newDowelingOrderId, newDowelingOrderName, values.design_engineer_id, designEngineerName, newLinkId);
         onClose();
       } catch (error: any) {
         console.error('[DowellingOrderQuickCreate] Error:', error);
