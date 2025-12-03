@@ -15,8 +15,8 @@ export const OrderEdit: React.FC = () => {
   };
 
   const handleCancel = () => {
-    // Navigate back to orders list
-    navigate('/orders');
+    // Navigate back to previous page (preserves pagination state)
+    navigate(-1);
   };
 
   return (
