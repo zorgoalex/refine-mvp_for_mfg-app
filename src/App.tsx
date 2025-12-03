@@ -3,7 +3,8 @@ import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { CustomLayout } from "./components/CustomLayout";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
-import { ConfigProvider } from "antd";
+import { ConfigProvider, notification } from "antd";
+import { useEffect } from "react";
 import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
 import "./styles/app.css";
@@ -128,6 +129,14 @@ import { i18nProvider } from "./utils/i18nProvider";
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 
 const App = () => {
+  // Configure notifications globally
+  useEffect(() => {
+    notification.config({
+      placement: 'bottomRight',
+      duration: 2, // 2 seconds instead of default 4.5
+      maxCount: 3, // Limit visible notifications
+    });
+  }, []);
 
   return (
     <ErrorBoundary>
