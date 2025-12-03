@@ -19,6 +19,7 @@
 }
 
 .orders-table td.orders-col--order-name,
+.orders-table td.orders-col--doweling-name,
 .orders-table td.orders-col--planned-date,
 .orders-table td.orders-col--amount,
 .orders-table td.orders-col--payment-date {

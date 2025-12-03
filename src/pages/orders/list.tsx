@@ -467,6 +467,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             sorter
             width={80}
             className="orders-col orders-col--order-name"
+            render={(value) => (
+              <span style={{ letterSpacing: '0.5px' }}>{value}</span>
+            )}
           />
           <Table.Column
             dataIndex="doweling_order_name"
@@ -477,18 +480,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             render={(_, record: any) => {
               const latestLink = getLatestDoweling(record.order_id);
               const dowelingName = latestLink?.doweling_order?.doweling_order_name;
-              return dowelingName || "—";
-            }}
-          />
-          <Table.Column
-            key="design_engineer"
-            title="Конструктор"
-            width={100}
-            className="orders-col orders-col--wrap"
-            render={(_, record: any) => {
-              const latestLink = getLatestDoweling(record.order_id);
-              const engineerId = latestLink?.doweling_order?.design_engineer_id;
-              return engineerId ? employeesMap[engineerId] || "—" : "—";
+              return dowelingName ? (
+                <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{dowelingName}</span>
+              ) : "—";
             }}
           />
           <Table.Column
@@ -628,10 +622,21 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             render={(value) => formatNumber(value as number, 0)}
           />
           <Table.Column
+            key="design_engineer"
+            title="Конструктор"
+            width={100}
+            className="orders-col orders-col--wrap"
+            render={(_, record: any) => {
+              const latestLink = getLatestDoweling(record.order_id);
+              const engineerId = latestLink?.doweling_order?.design_engineer_id;
+              return engineerId ? employeesMap[engineerId] || "—" : "—";
+            }}
+          />
+          <Table.Column
             dataIndex="payment_date"
             title="Дата оплаты"
             sorter
-            width={90}
+            width={104}
             className="orders-col orders-col--payment-date"
             render={(value) => formatDate(value)}
           />
