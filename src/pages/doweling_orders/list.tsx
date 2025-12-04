@@ -170,7 +170,23 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
           render={(value) => formatNumber(value as number, 0)}
         />
         <Table.Column
-          dataIndex="discounted_amount"
+          dataIndex="discount"
+          title="Скидка"
+          sorter
+          width={70}
+          align="right"
+          render={(value) => formatNumber(value as number, 0)}
+        />
+        <Table.Column
+          dataIndex="surcharge"
+          title="Наценка"
+          sorter
+          width={93}
+          align="right"
+          render={(value) => formatNumber(value as number, 0)}
+        />
+        <Table.Column
+          dataIndex="final_amount"
           title="Итого"
           sorter
           width={90}

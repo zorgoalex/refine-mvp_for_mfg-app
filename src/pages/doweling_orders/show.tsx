@@ -142,7 +142,7 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
             </Col>
             <Col span={6}>
               <Title level={5}>Итого со скидкой</Title>
-              <Text strong>{formatNumber(record.discounted_amount, 0)} ₽</Text>
+              <Text strong>{formatNumber(record.final_amount, 0)} ₽</Text>
             </Col>
             <Col span={6}>
               <Title level={5}>Оплачено</Title>

@@ -27,7 +27,7 @@ interface Order {
   order_name: string;
   order_date: string | Date;
   total_amount: number | null;
-  discounted_amount: number | null;
+  final_amount: number | null;
   paid_amount: number | null;
   parts_count: number | null;
   total_area: number | null;
@@ -69,7 +69,7 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
 
     const partsCount = useMemo(() => details.length, [details]);
 
-    const totalAmount = order.discounted_amount || order.total_amount || 0;
+    const totalAmount = order.final_amount || order.total_amount || 0;
     const paidAmount = order.paid_amount || 0;
     const remainingAmount = totalAmount - paidAmount;
 

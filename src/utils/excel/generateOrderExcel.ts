@@ -27,7 +27,7 @@ interface Order {
   order_name: string;
   order_date: string | Date;
   total_amount?: number | null;
-  discounted_amount?: number | null;
+  final_amount?: number | null;
   paid_amount?: number | null;
   client?: { client_name: string } | null;
 }

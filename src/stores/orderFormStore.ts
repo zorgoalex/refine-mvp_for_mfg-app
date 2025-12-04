@@ -593,14 +593,14 @@ export const useOrderFormStore = create<OrderFormState>()(
               // Check if any calculated field has a real difference from original
               const hasRealChanges =
                 !numbersEqual(current.total_amount, original.total_amount) ||
-                !numbersEqual(current.discounted_amount, original.discounted_amount) ||
+                !numbersEqual(current.final_amount, original.final_amount) ||
                 !numbersEqual(current.paid_amount, original.paid_amount) ||
                 (current.payment_status_id !== original.payment_status_id && original.payment_status_id !== undefined);
 
               if (hasRealChanges) {
                 console.log('[orderFormStore] finalizeInitialization - detected real changes during recalculation:', {
                   total_amount: { original: original.total_amount, current: current.total_amount },
-                  discounted_amount: { original: original.discounted_amount, current: current.discounted_amount },
+                  final_amount: { original: original.final_amount, current: current.final_amount },
                   paid_amount: { original: original.paid_amount, current: current.paid_amount },
                   payment_status_id: { original: original.payment_status_id, current: current.payment_status_id },
                 });

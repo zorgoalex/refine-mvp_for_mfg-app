@@ -35,7 +35,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         "issue_date",
         "payment_date",
         "total_amount",
-        "discounted_amount",
+        "final_amount",
         "discount",
         "paid_amount",
         "priority",
@@ -212,7 +212,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     const freshPayments = freshPaymentsData?.data || [];
     const freshTotalAmount = freshPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
 
-    const discountedAmount = record.discounted_amount || record.total_amount || 0;
+    const discountedAmount = record.final_amount || record.total_amount || 0;
 
     // Calculate what payment status should be
     let newPaymentStatusId: number;
@@ -279,7 +279,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             order_name: record.order_name,
             order_date: record.order_date,
             total_amount: record.total_amount,
-            discounted_amount: record.discounted_amount,
+            final_amount: record.final_amount,
             paid_amount: record.paid_amount,
             client: record.client_name ? { client_name: record.client_name } : null,
           },
@@ -600,7 +600,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               order_name: record.order_name,
               order_date: record.order_date,
               total_amount: record.total_amount,
-              discounted_amount: record.discounted_amount,
+              final_amount: record.final_amount,
               paid_amount: record.paid_amount,
               parts_count: record.parts_count,
               total_area: record.total_area,

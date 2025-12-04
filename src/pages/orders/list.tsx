@@ -295,12 +295,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       newFilters.push({ field: "payment_status_name", operator: "eq", value: values.payment_status_name });
     }
 
-    if (hasValue(values.discounted_amount_min)) {
-      newFilters.push({ field: "discounted_amount", operator: "gte", value: values.discounted_amount_min });
+    if (hasValue(values.final_amount_min)) {
+      newFilters.push({ field: "final_amount", operator: "gte", value: values.final_amount_min });
     }
 
-    if (hasValue(values.discounted_amount_max)) {
-      newFilters.push({ field: "discounted_amount", operator: "lte", value: values.discounted_amount_max });
+    if (hasValue(values.final_amount_max)) {
+      newFilters.push({ field: "final_amount", operator: "lte", value: values.final_amount_max });
     }
 
     if (hasValue(values.paid_amount_min)) {
@@ -661,7 +661,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               </Row>
               <Row gutter={16}>
                 <Col xs={12} sm={6} md={4} lg={3}>
-                  <Form.Item name="discounted_amount_min" label="Сумма от">
+                  <Form.Item name="final_amount_min" label="Сумма от">
                     <InputNumber
                       style={{ width: "100%" }}
                       placeholder="Мин"
@@ -673,7 +673,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                   </Form.Item>
                 </Col>
                 <Col xs={12} sm={6} md={4} lg={3}>
-                  <Form.Item name="discounted_amount_max" label="Сумма до">
+                  <Form.Item name="final_amount_max" label="Сумма до">
                     <InputNumber
                       style={{ width: "100%" }}
                       placeholder="Макс"
@@ -882,7 +882,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             }}
           />
           <Table.Column
-            dataIndex="discounted_amount"
+            dataIndex="final_amount"
             title="Сумма, итого"
             sorter
             width={90}
@@ -925,6 +925,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             title="Скидка"
             sorter
             width={88}
+            className="orders-col"
+            render={(value) => formatNumber(value as number, 0)}
+          />
+          <Table.Column
+            dataIndex="surcharge"
+            title="Наценка"
+            sorter
+            width={93}
             className="orders-col"
             render={(value) => formatNumber(value as number, 0)}
           />

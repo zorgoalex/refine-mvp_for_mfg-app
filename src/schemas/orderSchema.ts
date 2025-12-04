@@ -11,7 +11,7 @@ import { z } from 'zod';
 const financialSchema = z.object({
   total_amount: z.number().min(0, "Сумма должна быть >= 0").nullable().optional(),
   discount: z.number().min(0, "Скидка должна быть >= 0").default(0), // Absolute amount in currency
-  discounted_amount: z.number().min(0, "Сумма со скидкой должна быть >= 0").nullable().optional(),
+  final_amount: z.number().min(0, "Сумма со скидкой должна быть >= 0").nullable().optional(),
   paid_amount: z.number().min(0, "Оплаченная сумма должна быть >= 0").default(0),
   payment_date: z.date().nullable().optional().or(z.string().nullable().optional()),
 });
@@ -41,7 +41,7 @@ export const orderHeaderSchema = z
     // Financial fields
     total_amount: financialSchema.shape.total_amount,
     discount: financialSchema.shape.discount,
-    discounted_amount: financialSchema.shape.discounted_amount,
+    final_amount: financialSchema.shape.final_amount,
     paid_amount: financialSchema.shape.paid_amount,
     payment_date: financialSchema.shape.payment_date,
 
@@ -76,15 +76,15 @@ export const orderHeaderSchema = z
   })
   .refine(
     (data) => {
-      // Validation: discounted_amount <= total_amount
-      if (data.discounted_amount && data.total_amount) {
-        return data.discounted_amount <= data.total_amount;
+      // Validation: final_amount <= total_amount
+      if (data.final_amount && data.total_amount) {
+        return data.final_amount <= data.total_amount;
       }
       return true;
     },
     {
       message: "Сумма со скидкой не может превышать исходную сумму",
-      path: ["discounted_amount"],
+      path: ["final_amount"],
     }
   )
   .refine(

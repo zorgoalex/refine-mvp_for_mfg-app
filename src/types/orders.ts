@@ -23,7 +23,7 @@ export interface Order {
 
   // Financial fields
   total_amount?: number | null;
-  discounted_amount?: number | null;
+  final_amount?: number | null;
   discount: number;
   paid_amount: number;
   payment_date?: Date | string | null;

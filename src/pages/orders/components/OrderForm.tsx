@@ -120,7 +120,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         discount: 0,
         paid_amount: 0,
         total_amount: 0,
-        discounted_amount: 0,
+        final_amount: 0,
       });
       setDirty(false); // Reset dirty flag after initial setup
     }
@@ -288,7 +288,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     updateHeaderField,
   ]);
 
-  // Auto-recalculate discounted_amount when total_amount or discount changes
+  // Auto-recalculate final_amount when total_amount or discount changes
   // This useEffect is in OrderForm (always mounted) to ensure recalculation
   // happens regardless of which tab is active
   useEffect(() => {
@@ -302,13 +302,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     const expectedDiscountedAmount = Math.max(0, Number((totalAmount - discount).toFixed(2)));
 
     // Only update if changed (avoid infinite loops)
-    if (header.discounted_amount !== expectedDiscountedAmount) {
-      updateHeaderField('discounted_amount', expectedDiscountedAmount);
+    if (header.final_amount !== expectedDiscountedAmount) {
+      updateHeaderField('final_amount', expectedDiscountedAmount);
     }
   }, [
     header.total_amount,
     header.discount,
-    header.discounted_amount,
+    header.final_amount,
     orderLoading,
     detailsLoading,
     updateHeaderField,
@@ -326,7 +326,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
   }, [payments, header.paid_amount, orderLoading, detailsLoading, updateHeaderField]);
 
-  // Auto-update payment_status_id based on paid_amount and discounted_amount
+  // Auto-update payment_status_id based on paid_amount and final_amount
   // Only auto-update if current status is 1 (не оплачено), 2 (частично), or 3 (оплачено)
   // If user set a custom status (other than 1,2,3), don't auto-update
   useEffect(() => {
@@ -339,7 +339,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
 
     const paidAmount = header.paid_amount || 0;
-    const discountedAmount = header.discounted_amount || header.total_amount || 0;
+    const discountedAmount = header.final_amount || header.total_amount || 0;
 
     let newPaymentStatusId: number;
 
@@ -357,7 +357,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
   }, [
     header.paid_amount,
-    header.discounted_amount,
+    header.final_amount,
     header.total_amount,
     header.payment_status_id,
     orderLoading,

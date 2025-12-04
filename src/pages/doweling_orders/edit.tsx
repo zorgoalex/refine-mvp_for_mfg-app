@@ -185,7 +185,7 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
           />
         </Form.Item>
 
-        <Form.Item label="Итого со скидкой" name="discounted_amount">
+        <Form.Item label="Итого со скидкой" name="final_amount">
           <InputNumber
             min={0}
             precision={2}

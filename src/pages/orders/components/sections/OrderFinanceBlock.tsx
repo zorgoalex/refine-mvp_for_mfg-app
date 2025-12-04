@@ -133,7 +133,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
               {formatNumber(record?.discount || 0, 2)}
             </td>
             <td style={{ ...valueCellStyle, color: record?.discount > 0 ? '#1890ff' : '#8c8c8c' }}>
-              {formatNumber(record?.discounted_amount || 0, 2)}
+              {formatNumber(record?.final_amount || 0, 2)}
             </td>
             <td style={{ ...valueCellStyle, color: '#52c41a' }}>
               {formatNumber(paidAmount, 2)}

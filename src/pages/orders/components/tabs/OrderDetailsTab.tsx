@@ -275,11 +275,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     // Update total_amount in header
     updateHeaderField('total_amount', totalAmount);
 
-    // Calculate discounted_amount
+    // Calculate final_amount
     // Note: discount is now stored as absolute amount (not percent)
     const discount = header.discount || 0;
     const discountedAmount = Math.max(0, Number((totalAmount - discount).toFixed(2)));
-    updateHeaderField('discounted_amount', discountedAmount);
+    updateHeaderField('final_amount', discountedAmount);
 
     if (discount > 0) {
       const discountPercent = totalAmount > 0 ? (discount / totalAmount) * 100 : 0;

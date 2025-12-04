@@ -67,10 +67,10 @@ export const OrderFinanceSection: React.FC = () => {
     const discount = value || 0;
     updateHeaderField('discount', discount);
 
-    // Calculate discounted_amount from absolute discount
+    // Calculate final_amount from absolute discount
     const totalAmount = header.total_amount || 0;
     const discountedAmount = totalAmount - discount;
-    updateHeaderField('discounted_amount', Number(discountedAmount.toFixed(2)));
+    updateHeaderField('final_amount', Number(discountedAmount.toFixed(2)));
   };
 
   // Handler for percent input (calculator mode)
@@ -84,16 +84,16 @@ export const OrderFinanceSection: React.FC = () => {
     const absoluteDiscount = (totalAmount * percent) / 100;
     updateHeaderField('discount', Number(absoluteDiscount.toFixed(2)));
 
-    // Calculate discounted_amount
+    // Calculate final_amount
     const discountedAmount = totalAmount - absoluteDiscount;
-    updateHeaderField('discounted_amount', Number(discountedAmount.toFixed(2)));
+    updateHeaderField('final_amount', Number(discountedAmount.toFixed(2)));
   };
 
   const handleDiscountedAmountChange = (value: number | null) => {
     const discountedAmount = value || 0;
-    updateHeaderField('discounted_amount', discountedAmount);
+    updateHeaderField('final_amount', discountedAmount);
 
-    // Calculate absolute discount from discounted_amount
+    // Calculate absolute discount from final_amount
     const totalAmount = header.total_amount || 0;
     const discount = totalAmount - discountedAmount;
     updateHeaderField('discount', Number(discount.toFixed(2)));
@@ -108,7 +108,7 @@ export const OrderFinanceSection: React.FC = () => {
     setShowPercentInput(!showPercentInput);
   };
 
-  // NOTE: Auto-update of total_amount, discounted_amount, paid_amount, and payment_status_id
+  // NOTE: Auto-update of total_amount, final_amount, paid_amount, and payment_status_id
   // is now handled in OrderForm.tsx (always-mounted component) to ensure recalculation
   // happens regardless of active tab.
 
@@ -137,10 +137,10 @@ export const OrderFinanceSection: React.FC = () => {
 
   // Calculate remaining amount to pay
   const remainingAmount = useMemo(() => {
-    const discounted = header.discounted_amount || 0;
+    const discounted = header.final_amount || 0;
     const paid = header.paid_amount || 0;
     return Math.max(0, discounted - paid);
-  }, [header.discounted_amount, header.paid_amount]);
+  }, [header.final_amount, header.paid_amount]);
 
   const hasPaidAmount = (header.paid_amount || 0) > 0;
 
@@ -258,7 +258,7 @@ export const OrderFinanceSection: React.FC = () => {
               style={{ marginBottom: 0 }}
             >
               <InputNumber
-                value={header.discounted_amount}
+                value={header.final_amount}
                 onChange={handleDiscountedAmountChange}
                 min={0}
                 precision={2}
