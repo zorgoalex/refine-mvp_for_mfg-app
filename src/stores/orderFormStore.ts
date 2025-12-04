@@ -36,10 +36,14 @@ import {
 
     // Form metadata
     isDirty: boolean;
+    isInitializing: boolean;
     version: number;
     isTotalAmountManual: boolean;
     isPaymentStatusManual: boolean;
     isDetailEditing: boolean;
+
+    // Original header values loaded from server (for change detection after recalculations)
+    originalHeader: Partial<Order>;
 
     // Originals loaded from server for change detection (keyed by persistent ID)
     originalDetails: Record<number, OrderDetail>;
@@ -87,6 +91,8 @@ import {
   loadOrder: (order: OrderFormValues) => void;
   getFormValues: () => OrderFormValues;
     setDirty: (isDirty: boolean) => void;
+    setInitializing: (isInitializing: boolean) => void;
+    finalizeInitialization: () => void;
     syncOriginals: () => void;
     setTotalAmountManual: (isManual: boolean) => void;
     setPaymentStatusManual: (isManual: boolean) => void;
@@ -112,10 +118,12 @@ import {
     deletedRequirements: [],
     deletedDowelingLinks: [],
     isDirty: false,
+    isInitializing: false,
     version: 0,
     isTotalAmountManual: false,
     isPaymentStatusManual: false,
     isDetailEditing: false,
+    originalHeader: {},
     originalDetails: {},
     originalPayments: {},
     originalWorkshops: {},
@@ -149,7 +157,8 @@ export const useOrderFormStore = create<OrderFormState>()(
           set(
             (state) => ({
               header: { ...state.header, [field]: value },
-              isDirty: true,
+              // Не устанавливаем isDirty во время инициализации (пересчёты после loadOrder)
+              isDirty: state.isInitializing ? state.isDirty : true,
             }),
             false,
             'updateHeaderField'
@@ -499,9 +508,12 @@ export const useOrderFormStore = create<OrderFormState>()(
               deletedRequirements: [],
               deletedDowelingLinks: [],
               isDirty: false,
+              isInitializing: true, // Mark as initializing to prevent isDirty from being set during recalculations
               version: order.version || 0,
               isTotalAmountManual: false,
               isDetailEditing: false,
+              // Save original header values for comparison after recalculations
+              originalHeader: { ...(order.header || {}) },
               // Build original maps for change detection
               originalDetails:
                 order.details?.reduce((acc: Record<number, OrderDetail>, d) => {
@@ -560,6 +572,48 @@ export const useOrderFormStore = create<OrderFormState>()(
         },
 
         setDirty: (isDirty) => set({ isDirty }, false, 'setDirty'),
+
+        setInitializing: (isInitializing) => set({ isInitializing }, false, 'setInitializing'),
+
+        // Finalize initialization: compare current header with original and set isDirty if there are real changes
+        finalizeInitialization: () =>
+          set(
+            (state) => {
+              // Compare calculated fields with original values
+              const original = state.originalHeader;
+              const current = state.header;
+
+              // Helper to compare numbers with tolerance for floating point errors
+              const numbersEqual = (a: number | undefined | null, b: number | undefined | null, tolerance = 0.01): boolean => {
+                const valA = a ?? 0;
+                const valB = b ?? 0;
+                return Math.abs(valA - valB) < tolerance;
+              };
+
+              // Check if any calculated field has a real difference from original
+              const hasRealChanges =
+                !numbersEqual(current.total_amount, original.total_amount) ||
+                !numbersEqual(current.discounted_amount, original.discounted_amount) ||
+                !numbersEqual(current.paid_amount, original.paid_amount) ||
+                (current.payment_status_id !== original.payment_status_id && original.payment_status_id !== undefined);
+
+              if (hasRealChanges) {
+                console.log('[orderFormStore] finalizeInitialization - detected real changes during recalculation:', {
+                  total_amount: { original: original.total_amount, current: current.total_amount },
+                  discounted_amount: { original: original.discounted_amount, current: current.discounted_amount },
+                  paid_amount: { original: original.paid_amount, current: current.paid_amount },
+                  payment_status_id: { original: original.payment_status_id, current: current.payment_status_id },
+                });
+              }
+
+              return {
+                isInitializing: false,
+                isDirty: hasRealChanges,
+              };
+            },
+            false,
+            'finalizeInitialization'
+          ),
 
         // Rebuild originals from current state (after successful save)
         syncOriginals: () =>

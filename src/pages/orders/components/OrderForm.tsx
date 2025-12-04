@@ -54,6 +54,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     loadOrder,
     getFormValues,
     setDirty,
+    finalizeInitialization,
     isTotalAmountManual,
     deleteDetail,
   } = useOrderFormStore();
@@ -189,8 +190,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           requirements: [],
           dowelingLinks: dowelingLinks,
         });
-        setDirty(false);
         didInit.current = true;
+        // После пересчётов проверяем реальные изменения и устанавливаем isDirty соответственно
+        // Увеличена задержка для гарантии завершения всех useEffect пересчётов
+        setTimeout(() => finalizeInitialization(), 200);
       }
     }
   }, [
