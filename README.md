@@ -18,11 +18,12 @@
   ## Обзор
   - Backend: Hasura GraphQL доступен локально по `http://localhost:8585/v1/graphql`.
   - Frontend: Refine (+ AntD) на Vite/React.
-  - Схема БД: **v12-4**
+  - Схема БД: **v12-5**
   - Dev server: `http://localhost:5576`
   - Статус: **MVP+ завершен** (2025-11-01) — полнофункциональная форма заказов с деталями и платежами
   - **Печать/экспорт** (2025-11-16) — готовность к production
   - **Экспорт в Google Drive** (2025-11-24) — защищённый прокси через Vercel API → GAS
+  - **Конфигурация и фильтры** (2025-12-04) — admin-панель настроек, расширенные фильтры заказов
 
   ## Ключевые фичи
   - **CRUD** для 29 ресурсов + комплексная форма заказов (детали, платежи, статусы)
@@ -32,10 +33,12 @@
   - **Производственный календарь** (16 дней: 5 назад + 10 вперед): адаптивный layout, Drag & Drop, контекстное меню статусов заказа/оплаты/производства, три вида карточек (стандарт/компакт/краткий), цветовая кодировка материалов
   - **Автоэкспорт заказов в Google Drive**: Vercel API proxy → Google Apps Script, JSON payload без фронтовых секретов, автоэкспорт после сохранения
   - **Аудит через Hasura presets**: created_by/edited_by проставляются сервером, без dev-override
-  - **Row Highlight и быстрые переходы**: подсветка новых/отредактированных записей, двойной клик открывает show-
-  страницу
+  - **Row Highlight и быстрые переходы**: подсветка новых/отредактированных записей, двойной клик открывает show-страницу
   - **Сортировка DESC по ID**, **is_active** фильтры, фиксированный sidebar, цветовая кодировка материалов
   - **Печать и экспорт**: react-to-print под A4 и ExcelJS экспорт по шаблону с формулами
+  - **Конфигурация (admin-only)**: страница настроек приложения (`app_settings`), вкладки Заказы/Финансы/Видимость, inline-редактирование по двойному клику
+  - **Расширенные фильтры заказов**: поиск по вхождению (LIKE), диапазоны дат/сумм, фильтры по клиенту/статусам/присадке
+  - **Присадки many-to-many**: связь orders ↔ doweling_orders через `order_doweling_links`, колонки в списке заказов
 
   ## Стек и зависимости
   - React 18, Vite 4
@@ -95,10 +98,12 @@
     - Work Centers: `src/pages/work_centers/{list,create,edit,show}.tsx`
     - Production Statuses: `src/pages/production_statuses/{list,create,edit,show}.tsx`
     - Resource Requirements Statuses: `src/pages/resource_requirements_statuses/{list,create,edit,show}.tsx`
+  - Configuration (admin-only): `src/pages/configuration/index.tsx` — настройки приложения (вкладки: Заказы, Финансы, Видимость)
   - Хуки:
     - `src/hooks/useFormWithHighlight.ts` — навигация с подсветкой после create/edit
     - `src/hooks/useHighlightRow.ts` — подсветка и скролл к строке в таблице
     - `src/hooks/useOrderSave.ts` — delta-save для заказа, деталей, платежей
+    - `src/hooks/useAppSettings.ts` — CRUD для таблицы `app_settings` (namespaced keys)
   - Печать и экспорт:
     - `src/pages/orders/components/print/OrderPrintView.tsx` — компонент печатной формы заказа
     - `public/templates/order_template.xlsx` — шаблон Excel для экспорта
@@ -159,14 +164,15 @@
   - Env: заполняем HASURA_URL, HASURA_ADMIN_SECRET, JWT_SECRET/REFRESH_SECRET, VITE_HASURA_GRAPHQL_URL, при экспорте также GAS_WEBAPP_URL/GAS_API_KEY.
 
   ## Примечания по реализации
-  - Orders: детали (inline), платежи (вкладка Финансы, итоги, автодата), присадки, Zod-валидация, delta save, очистка audit-полей, optimistic locking, печать/Excel, автоэкспорт в GDrive.
+  - Orders: детали (inline), платежи (вкладка Финансы, итоги, автодата), присадки many-to-many, Zod-валидация, delta save, очистка audit-полей, optimistic locking, печать/Excel, автоэкспорт в GDrive, расширенные фильтры (LIKE-поиск, диапазоны, статусы).
   - Календарь: 16 дней, три вида карточек, Drag&Drop, ПКМ статусов, сокращённые материалы, фиксированная шапка.
+  - Конфигурация: admin-only страница с `app_settings` (JSONB), namespaced keys (`orders.*`, `app.*`), inline-редактирование.
   - Общие: `meta.idColumnName` во всех ресурсах, `CustomSider` с календарём и заказами на верхнем уровне, локаль ruRU.
 
   ## Известные ограничения
   - Проверить CORS и роли Hasura перед prod; типизация базовая; автотесты минимальны (unit для auth, E2E логин).
 
   ## Дальнейшие шаги (Roadmap)
-  - Done: CRUD orders, Печать/экспорт, Payments Tab (25.11.2025).
+  - Done: CRUD orders, Печать/экспорт, Payments Tab (25.11.2025), Конфигурация + фильтры заказов (04.12.2025).
   - Календарь ~60% (осталось: печать плана дня, фильтры/поиск).
-  - План: Workshops/Materials Tabs, Quick Create для справочников, nested insert/upsert, динамическая видимость ресурсов по ролям, виртуализация таблиц, soft-delete/версионирование, E2E.
+  - План: Workshops/Materials Tabs, Quick Create для справочников, динамическая видимость ресурсов по ролям, виртуализация таблиц, soft-delete/версионирование, E2E.
