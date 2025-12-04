@@ -50,6 +50,20 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   const { show } = useNavigation();
 
+  // Автоскролл к найденной строке после загрузки данных
+  useEffect(() => {
+    if (highlightedOrderId && tableProps?.dataSource) {
+      // Даём время на рендер таблицы
+      const timeoutId = setTimeout(() => {
+        const row = document.querySelector(`tr[data-row-key="${highlightedOrderId}"]`);
+        if (row) {
+          row.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [highlightedOrderId, tableProps?.dataSource]);
+
   // Обработчик поиска заказа
   const handleSearchOrder = useCallback(async () => {
     if (!searchOrderId || searchOrderId.trim() === "") {
@@ -85,7 +99,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         return;
       }
 
-      // Шаг 1: Находим заказ по order_name
+      // Шаг 1: Находим заказ по order_name (LIKE поиск)
       const response = await fetch(
         `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
         {
@@ -96,9 +110,10 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           },
           body: JSON.stringify({
             query: `
-              query FindOrder($orderName: String!) {
+              query FindOrder($orderNamePattern: String!) {
                 orders_view(
-                  where: { order_name: { _eq: $orderName } }
+                  where: { order_name: { _ilike: $orderNamePattern } }
+                  order_by: [{ order_date: desc }, { order_name_numeric: desc }]
                   limit: 1
                 ) {
                   order_id
@@ -108,7 +123,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 }
               }
             `,
-            variables: { orderName },
+            variables: { orderNamePattern: `%${orderName}%` },
           }),
         }
       );
@@ -125,7 +140,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       const orders = data.data?.orders_view || [];
 
       if (orders.length === 0) {
-        message.error(`Заказ №${orderName} не найден`);
+        message.error(`Заказ с "${orderName}" не найден`);
         return;
       }
 
@@ -198,7 +213,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
       // Подсвечиваем найденную строку
       setHighlightedOrderId(foundOrderId);
-      message.success(`Заказ №${orderName} найден`);
+      message.success(`Заказ №${foundOrder.order_name} найден`);
 
       // Убираем подсветку через 3 секунды
       setTimeout(() => {
