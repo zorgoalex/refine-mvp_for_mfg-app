@@ -4,8 +4,6 @@ import {
   useMany,
   useNavigation,
   useList,
-  useOne,
-  HttpError,
 } from "@refinedev/core";
 import {
   List,
@@ -13,16 +11,23 @@ import {
   ShowButton,
   EditButton,
   CreateButton,
+  useSelect,
 } from "@refinedev/antd";
-import { Space, Table, Button, Input, message, Tooltip } from "antd";
+import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography } from "antd";
 import {
   EyeOutlined,
   EditOutlined,
   PlusOutlined,
   StarFilled,
   SearchOutlined,
+  FilterOutlined,
+  ClearOutlined,
+  CheckCircleOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
+
+const { RangePicker } = DatePicker;
+const { Text } = Typography;
 
 import { formatNumber } from "../../utils/numberFormat";
 import { OrderCreateModal } from "./components/OrderCreateModal";
@@ -34,8 +39,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [searchOrderId, setSearchOrderId] = useState<string>("");
   const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
+  const [form] = Form.useForm();
+  const [filtersVisible, setFiltersVisible] = useState(false);
+  const [showResultCount, setShowResultCount] = useState(false);
 
-  const { tableProps, current, pageSize, setCurrent, sorters, setSorters } = useTable({
+  const { tableProps, current, pageSize, setCurrent, sorters, setSorters, setFilters } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [
@@ -225,6 +233,103 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       message.error("Ошибка при поиске заказа");
     }
   }, [searchOrderId, pageSize, current, setCurrent, sorters, setSorters]);
+
+  // useSelect для справочников в фильтрах
+  const { selectProps: clientSelectProps } = useSelect({
+    resource: "clients",
+    optionLabel: "client_name",
+    optionValue: "client_id",
+  });
+
+  const { selectProps: userSelectProps } = useSelect({
+    resource: "users",
+    optionLabel: "username",
+    optionValue: "user_id",
+  });
+
+  const { selectProps: orderStatusSelectProps } = useSelect({
+    resource: "order_statuses",
+    optionLabel: "order_status_name",
+    optionValue: "order_status_name",
+  });
+
+  const { selectProps: paymentStatusSelectProps } = useSelect({
+    resource: "payment_statuses",
+    optionLabel: "payment_status_name",
+    optionValue: "payment_status_name",
+  });
+
+  const { selectProps: dowelingSelectProps } = useSelect({
+    resource: "doweling_orders",
+    optionLabel: "doweling_order_name",
+    optionValue: "doweling_order_name",
+  });
+
+  // Применение фильтров
+  const handleFilter = (values: any) => {
+    const newFilters: any[] = [];
+    const hasValue = (val: any) => val !== undefined && val !== null && val !== "";
+
+    if (hasValue(values.order_name)) {
+      newFilters.push({ field: "order_name", operator: "contains", value: values.order_name });
+    }
+
+    if (values.order_date_range && Array.isArray(values.order_date_range) && values.order_date_range.length === 2) {
+      newFilters.push({ field: "order_date", operator: "gte", value: values.order_date_range[0].format("YYYY-MM-DD") });
+      newFilters.push({ field: "order_date", operator: "lte", value: values.order_date_range[1].format("YYYY-MM-DD") });
+    }
+
+    if (hasValue(values.client_id)) {
+      newFilters.push({ field: "client_id", operator: "eq", value: values.client_id });
+    }
+
+    if (hasValue(values.created_by)) {
+      newFilters.push({ field: "created_by", operator: "eq", value: values.created_by });
+    }
+
+    if (hasValue(values.order_status_name)) {
+      newFilters.push({ field: "order_status_name", operator: "eq", value: values.order_status_name });
+    }
+
+    if (hasValue(values.payment_status_name)) {
+      newFilters.push({ field: "payment_status_name", operator: "eq", value: values.payment_status_name });
+    }
+
+    if (hasValue(values.discounted_amount_min)) {
+      newFilters.push({ field: "discounted_amount", operator: "gte", value: values.discounted_amount_min });
+    }
+
+    if (hasValue(values.discounted_amount_max)) {
+      newFilters.push({ field: "discounted_amount", operator: "lte", value: values.discounted_amount_max });
+    }
+
+    if (hasValue(values.paid_amount_min)) {
+      newFilters.push({ field: "paid_amount", operator: "gte", value: values.paid_amount_min });
+    }
+
+    if (hasValue(values.paid_amount_max)) {
+      newFilters.push({ field: "paid_amount", operator: "lte", value: values.paid_amount_max });
+    }
+
+    if (hasValue(values.doweling_order_name)) {
+      newFilters.push({ field: "doweling_order_name", operator: "eq", value: values.doweling_order_name });
+    }
+
+    setFilters(newFilters, "replace");
+    setCurrent(1); // Сброс на первую страницу при фильтрации
+    setShowResultCount(true);
+  };
+
+  // Сброс фильтров
+  const handleClearFilters = () => {
+    form.resetFields();
+    setFilters([], "replace");
+    setCurrent(1); // Сброс на первую страницу
+    setShowResultCount(false);
+  };
+
+  // Количество записей
+  const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -487,6 +592,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               </Button>
             </Space.Compact>
             <Button
+              type={filtersVisible ? "primary" : "default"}
+              icon={<FilterOutlined />}
+              onClick={() => setFiltersVisible(!filtersVisible)}
+            >
+              {filtersVisible ? "Скрыть фильтры" : "Фильтры"}
+            </Button>
+            <Button
               type="primary"
               icon={<PlusOutlined />}
               onClick={() => setCreateModalOpen(true)}
@@ -496,6 +608,140 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           </>
         )}
       >
+        {filtersVisible && (
+          <Card style={{ marginBottom: 16 }}>
+            <Form form={form} layout="vertical" onFinish={handleFilter}>
+              <Row gutter={16}>
+                <Col xs={24} sm={12} md={6} lg={4}>
+                  <Form.Item name="order_name" label="Заказ">
+                    <Input allowClear placeholder="Номер заказа" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={8} lg={5}>
+                  <Form.Item name="order_date_range" label="Дата заказа">
+                    <RangePicker style={{ width: "100%" }} format="DD.MM.YYYY" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={6} lg={4}>
+                  <Form.Item name="client_id" label="Клиент">
+                    <Select
+                      {...clientSelectProps}
+                      allowClear
+                      placeholder="Выберите"
+                      showSearch
+                      filterOption={(input, option) =>
+                        (option?.label ?? "").toString().toLowerCase().includes(input.toLowerCase())
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={6} lg={3}>
+                  <Form.Item name="created_by" label="Создано">
+                    <Select
+                      {...userSelectProps}
+                      allowClear
+                      placeholder="Пользователь"
+                      showSearch
+                      filterOption={(input, option) =>
+                        (option?.label ?? "").toString().toLowerCase().includes(input.toLowerCase())
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={6} lg={4}>
+                  <Form.Item name="order_status_name" label="Статус заказа">
+                    <Select {...orderStatusSelectProps} allowClear placeholder="Статус" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={6} lg={4}>
+                  <Form.Item name="payment_status_name" label="Статус оплаты">
+                    <Select {...paymentStatusSelectProps} allowClear placeholder="Статус" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col xs={12} sm={6} md={4} lg={3}>
+                  <Form.Item name="discounted_amount_min" label="Сумма от">
+                    <InputNumber
+                      style={{ width: "100%" }}
+                      placeholder="Мин"
+                      min={0}
+                      precision={0}
+                      formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                      parser={(value) => value?.replace(/\s/g, '') as unknown as number}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={12} sm={6} md={4} lg={3}>
+                  <Form.Item name="discounted_amount_max" label="Сумма до">
+                    <InputNumber
+                      style={{ width: "100%" }}
+                      placeholder="Макс"
+                      min={0}
+                      precision={0}
+                      formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                      parser={(value) => value?.replace(/\s/g, '') as unknown as number}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={12} sm={6} md={4} lg={3}>
+                  <Form.Item name="paid_amount_min" label="Оплата от">
+                    <InputNumber
+                      style={{ width: "100%" }}
+                      placeholder="Мин"
+                      min={0}
+                      precision={0}
+                      formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                      parser={(value) => value?.replace(/\s/g, '') as unknown as number}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={12} sm={6} md={4} lg={3}>
+                  <Form.Item name="paid_amount_max" label="Оплата до">
+                    <InputNumber
+                      style={{ width: "100%" }}
+                      placeholder="Макс"
+                      min={0}
+                      precision={0}
+                      formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                      parser={(value) => value?.replace(/\s/g, '') as unknown as number}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={12} md={6} lg={4}>
+                  <Form.Item name="doweling_order_name" label="Присадка">
+                    <Select
+                      {...dowelingSelectProps}
+                      allowClear
+                      placeholder="Выберите"
+                      showSearch
+                      filterOption={(input, option) =>
+                        (option?.label ?? "").toString().toLowerCase().includes(input.toLowerCase())
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={24} md={24} lg={8} style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+                  <Form.Item label=" " colon={false}>
+                    <Space size="middle">
+                      <Button type="primary" htmlType="submit" icon={<FilterOutlined />}>
+                        Применить
+                      </Button>
+                      <Button onClick={handleClearFilters} icon={<ClearOutlined />}>
+                        Сбросить
+                      </Button>
+                      {showResultCount && (
+                        <Text strong style={{ color: '#52c41a', fontSize: '14px' }}>
+                          <CheckCircleOutlined /> Найдено: {totalRecords}
+                        </Text>
+                      )}
+                    </Space>
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Form>
+          </Card>
+        )}
         <Table
           {...tableProps}
           rowKey="order_id"
@@ -599,14 +845,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="order_status_name"
             title="Статус заказа"
-            width={45}
+            width={100}
             className="orders-col status order-status orders-col--wrap"
             render={(value) => renderStatus(value)}
           />
           <Table.Column
             dataIndex="payment_status_name"
-            title="Статус оплаты заказа"
-            width={45}
+            title="Статус оплаты"
+            width={100}
             className="orders-col status payment-status orders-col--wrap"
             render={(value) => {
               const displayValue = value || "—";
