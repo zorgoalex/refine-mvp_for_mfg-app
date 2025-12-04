@@ -258,7 +258,6 @@ export const CustomSider: React.FC = () => {
       >
         <Menu
           mode="inline"
-          inlineCollapsed={collapsed}
           selectedKeys={selectedKey === "orders_view" || selectedKey === "calendar" ? [selectedKey] : []}
           items={topMenuItems}
           style={{ background: "transparent", border: "none", marginBottom: 0, color: "#E0E0E0" }}
@@ -281,7 +280,6 @@ export const CustomSider: React.FC = () => {
         {collapsed ? (
           <Menu
             mode="inline"
-            inlineCollapsed={collapsed}
             selectedKeys={selectedKey ? [selectedKey] : []}
             items={flatMenuItems}
             style={{ border: "none", background: "transparent", fontSize: "0.98em" }}
