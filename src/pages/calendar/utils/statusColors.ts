@@ -320,14 +320,14 @@ export function getMaterialsForBriefView(orderDetails: OrderDetailForDisplay[] |
 export function getMaterialTextColor(material: string): string {
   const mat = String(material || '').toLowerCase().trim();
 
-  // 18мм - темно-желтый/оранжевый
-  if (mat.includes('18')) {
-    return '#b8860b';
+  // МДФ 16мм - черный (стандартный материал)
+  if (mat.includes('мдф') && mat.includes('16')) {
+    return '#333333';
   }
 
-  // 16мм - темно-желтый
-  if (mat.includes('16')) {
-    return '#996600';
+  // МДФ 18мм - яркий оранжевый
+  if (mat.includes('мдф') && mat.includes('18')) {
+    return '#ff6600';
   }
 
   // 10мм - темно-синий
@@ -345,7 +345,7 @@ export function getMaterialTextColor(material: string): string {
     return '#7b1fa2';
   }
 
-  // МДФ - темно-оранжевый
+  // МДФ (другие толщины) - темно-оранжевый
   if (mat.includes('мдф')) {
     return '#e65100';
   }

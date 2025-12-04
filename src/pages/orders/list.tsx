@@ -27,6 +27,7 @@ import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
 import { OrderCreateModal } from "./components/OrderCreateModal";
 import { authStorage } from "../../utils/auth";
+import { getMaterialTextColor } from "../calendar/utils/statusColors";
 import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -429,10 +430,10 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     return uniqueValues.length === 1 ? uniqueValues[0] : null;
   };
 
-  // Функция: возвращает уникальные значения материалов через запятую
+  // Функция: возвращает уникальные материалы с цветовой кодировкой
   const getMaterialsList = (orderId: number) => {
     const details = detailsByOrderId[orderId] || [];
-    if (details.length === 0) return "—";
+    if (details.length === 0) return null;
 
     const materialIds = details
       .map((d) => d.material_id)
@@ -441,9 +442,22 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     const uniqueMaterialIds = Array.from(new Set(materialIds));
     const materialNames = uniqueMaterialIds
       .map((id) => materialsMap[id])
-      .filter((name) => name);
+      .filter((name) => name && name.toLowerCase() !== "нд" && !["—", "-", "–"].includes(name.trim()));
 
-    return materialNames.length > 0 ? materialNames.join(", ") : "—";
+    if (materialNames.length === 0) return null;
+
+    return (
+      <>
+        {materialNames.map((name, index) => (
+          <span key={index}>
+            <span style={{ color: getMaterialTextColor(name), fontWeight: 500 }}>
+              {name}
+            </span>
+            {index < materialNames.length - 1 && ", "}
+          </span>
+        ))}
+      </>
+    );
   };
 
   return (
@@ -528,7 +542,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               const dowelingName = latestLink?.doweling_order?.doweling_order_name;
               return dowelingName ? (
                 <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{dowelingName}</span>
-              ) : "—";
+              ) : null;
             }}
           />
           <Table.Column
@@ -552,7 +566,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             className="orders-col"
             render={(_, record: any) => {
               const millingTypeId = getCommonValue(record.order_id, "milling_type_id");
-              const value = millingTypeId ? millingTypesMap[millingTypeId] || "—" : "—";
+              const value = millingTypeId ? millingTypesMap[millingTypeId] : null;
+              if (!value) return null;
               return (
                 <Tooltip title={value} placement="topLeft">
                   <span className="orders-status-value">{value}</span>
@@ -563,7 +578,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="material_name"
             title="Материал"
-            width={90}
+            width={95}
             className="orders-col orders-col--wrap"
             render={(_, record: any) => getMaterialsList(record.order_id)}
           />
@@ -675,7 +690,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             render={(_, record: any) => {
               const latestLink = getLatestDoweling(record.order_id);
               const engineerId = latestLink?.doweling_order?.design_engineer_id;
-              return engineerId ? employeesMap[engineerId] || "—" : "—";
+              return engineerId ? employeesMap[engineerId] : null;
             }}
           />
           <Table.Column
@@ -724,7 +739,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             className="orders-col orders-col--wrap"
             render={(_, record: any) => {
               const edgeTypeId = getCommonValue(record.order_id, "edge_type_id");
-              return edgeTypeId ? edgeTypesMap[edgeTypeId] || "—" : "—";
+              return edgeTypeId ? edgeTypesMap[edgeTypeId] : null;
             }}
           />
           <Table.Column
@@ -734,7 +749,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             className="orders-col orders-col--wrap"
             render={(_, record: any) => {
               const filmId = getCommonValue(record.order_id, "film_id");
-              return filmId ? filmsMap[filmId] || "—" : "—";
+              return filmId ? filmsMap[filmId] : null;
             }}
           />
           <Table.Column
