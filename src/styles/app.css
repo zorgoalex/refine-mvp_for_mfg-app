@@ -39,7 +39,7 @@
 
 /* Adjust content area to account for fixed sidebar */
 .ant-layout-content {
-  margin-left: 156px !important; /* Expanded width */
+  margin-left: 176px !important; /* Expanded width */
   transition: margin-left 0.2s;
   overflow-y: auto;
   min-height: 100vh;
@@ -48,7 +48,7 @@
 /* When sidebar is expanded */
 .ant-layout-sider:not(.ant-layout-sider-collapsed) + * .ant-layout-content,
 .ant-layout-has-sider .ant-layout-content {
-  margin-left: 156px !important;
+  margin-left: 176px !important;
 }
 
 /* When sidebar is collapsed */

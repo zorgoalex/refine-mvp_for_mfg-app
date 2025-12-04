@@ -81,6 +81,7 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   movements_statuses: <ArrowsAltOutlined />,
   order_workshops: <EnvironmentOutlined />,
   doweling_orders_view: <AimOutlined />,
+  configuration: <SettingOutlined />,
 };
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -123,6 +124,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   movements_statuses: "Статусы движений",
   order_workshops: "Цеха заказа",
   doweling_orders_view: "Присадка",
+  configuration: "Конфигурация",
 };
 
 const CATEGORY_MAP: Record<string, string> = {
@@ -139,6 +141,7 @@ const CATEGORY_MAP: Record<string, string> = {
   materials: "Материалы",
   employees: "Настройки",
   users: "Настройки",
+  configuration: "Настройки",
 };
 
 export const CustomSider: React.FC = () => {
@@ -226,7 +229,7 @@ export const CustomSider: React.FC = () => {
   });
 
   return (
-    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={(val) => setCollapsed(val)} width={156} collapsedWidth={48}>
+    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={(val) => setCollapsed(val)} width={195} collapsedWidth={48}>
       <div
         style={{
           padding: "8px 4px",

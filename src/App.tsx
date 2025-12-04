@@ -122,6 +122,7 @@ import { OrderResourceRequirementCreate } from "./pages/order_resource_requireme
 import { OrderResourceRequirementEdit } from "./pages/order_resource_requirements/edit";
 import { OrderResourceRequirementShow } from "./pages/order_resource_requirements/show";
 import { LoginPage } from "./pages/login";
+import { ConfigurationPage } from "./pages/configuration";
 import { dataProvider } from "./utils/dataProvider";
 import { authProvider } from "./authProvider";
 import { i18nProvider } from "./utils/i18nProvider";
@@ -422,6 +423,11 @@ const App = () => {
                   name: "doweling_orders",
                   meta: { idColumnName: "doweling_order_id" },
                 },
+                {
+                  name: "configuration",
+                  list: "/configuration",
+                  meta: { label: "Конфигурация" },
+                },
               ]}
               options={{
                 syncWithLocation: true,
@@ -590,6 +596,7 @@ const App = () => {
                     <Route path="edit/:id" element={<UserEdit />} />
                     <Route path="show/:id" element={<UserShow />} />
                   </Route>
+                  <Route path="/configuration" element={<ConfigurationPage />} />
                   <Route path="/workshops" >
                     <Route index element={<WorkshopList />} />
                     <Route path="create" element={<WorkshopCreate />} />
