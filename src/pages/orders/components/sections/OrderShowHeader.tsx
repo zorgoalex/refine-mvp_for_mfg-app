@@ -131,6 +131,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
           alignItems: 'center',
           padding: '6px 16px',
           gap: 16,
+          whiteSpace: 'nowrap',
         }}
       >
         {/* Column 1: Order name + Priority + Order status */}
@@ -181,27 +182,16 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
           )}
         </div>
 
-        {/* Column 3: Discounted amount + discount % + Payment status */}
+        {/* Column 3: Final amount + Payment status */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-          {(record?.final_amount != null && Number(record.final_amount) > 0 && Math.abs(Number(record.final_amount) - Number(record.total_amount || 0)) > 0.01) && (
-            <Text strong style={{ fontSize: 15, color: '#4F46E5' }}>
-              {formatNumber(record.final_amount, 2)} {CURRENCY_SYMBOL}
-            </Text>
-          )}
-          {(record?.discount != null && Number(record.discount) > 0) && (() => {
-            // Calculate discount percent from absolute discount amount
-            const totalAmount = Number(record.total_amount) || 0;
-            const discountAmount = Number(record.discount) || 0;
-            const discountPercent = totalAmount > 0 ? (discountAmount / totalAmount) * 100 : 0;
-            return (
-              <Text style={{ fontSize: 13, color: '#DC2626' }}>
-                -{formatNumber(discountPercent, 1)}%
-              </Text>
-            );
-          })()}
+          <Text strong style={{ fontSize: 15, color: '#4F46E5' }}>
+            {formatNumber(record?.final_amount || record?.total_amount || 0, 2)} {CURRENCY_SYMBOL}
+          </Text>
           <Tag
             color={
-              record?.payment_status_name === 'Оплачен' ? '#059669' : '#D97706'
+              record?.payment_status_name === 'Оплачен' ? '#059669'
+              : record?.payment_status_name === 'Частично оплачен' ? '#D97706'
+              : '#D97706'
             }
             style={{ fontSize: '0.64em', padding: '2px 8px', margin: 0, fontWeight: 500, letterSpacing: '0.8px' }}
           >
@@ -248,11 +238,83 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
           </Text>
         </div>
 
-        {/* Column 3: Total amount */}
+        {/* Column 3: Discount/Surcharge | Paid | Remaining - двухстрочный стиль */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-          <Text strong style={{ fontSize: 14, color: '#111827' }}>
-            {formatNumber(record?.total_amount || 0, 2)} {CURRENCY_SYMBOL}
-          </Text>
+          {(() => {
+            const discount = Number(record?.discount) || 0;
+            const surcharge = Number(record?.surcharge) || 0;
+            const paidAmount = Number(record?.paid_amount) || 0;
+            const finalAmount = Number(record?.final_amount) || Number(record?.total_amount) || 0;
+            const remainingAmount = Math.max(0, finalAmount - paidAmount);
+
+            const items: React.ReactNode[] = [];
+
+            // Скидка (если > 0)
+            if (discount > 0) {
+              const totalAmount = Number(record?.total_amount) || 0;
+              const discountPercent = totalAmount > 0 ? (discount / totalAmount) * 100 : 0;
+              items.push(
+                <span key="discount" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
+                    Скидка {formatNumber(discountPercent, 1)}%:
+                  </Text>
+                  <Text style={{ fontSize: 12, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
+                    -{formatNumber(discount, 2)} {CURRENCY_SYMBOL}
+                  </Text>
+                </span>
+              );
+            }
+
+            // Наценка (если > 0)
+            if (surcharge > 0) {
+              items.push(
+                <span key="surcharge" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#059669' }}>
+                    Наценка:
+                  </Text>
+                  <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#059669' }}>
+                    +{formatNumber(surcharge, 2)} {CURRENCY_SYMBOL}
+                  </Text>
+                </span>
+              );
+            }
+
+            // Оплачено (если > 0)
+            if (paidAmount > 0) {
+              items.push(
+                <span key="paid" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#52c41a' }}>
+                    Оплачено:
+                  </Text>
+                  <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#52c41a' }}>
+                    {formatNumber(paidAmount, 2)} {CURRENCY_SYMBOL}
+                  </Text>
+                </span>
+              );
+            }
+
+            // Осталось оплатить (если > 0)
+            if (remainingAmount > 0) {
+              items.push(
+                <span key="remaining" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#D97706' }}>
+                    Остаток оплаты:
+                  </Text>
+                  <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#D97706' }}>
+                    {formatNumber(remainingAmount, 2)} {CURRENCY_SYMBOL}
+                  </Text>
+                </span>
+              );
+            }
+
+            // Добавляем разделители между элементами
+            return items.map((item, index) => (
+              <React.Fragment key={index}>
+                {index > 0 && <span style={{ color: '#E5E7EB', margin: '0 4px' }}>|</span>}
+                {item}
+              </React.Fragment>
+            ));
+          })()}
         </div>
       </div>
 
