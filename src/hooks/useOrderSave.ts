@@ -86,8 +86,17 @@ export const useOrderSave = (): UseOrderSaveResult => {
           link_pdf_file: values.header.link_pdf_file || null,
           // Convert empty strings to null for ref_key_1c
           ref_key_1c: values.header.ref_key_1c || null,
+          // Ensure discount and surcharge are numbers (not null/undefined)
+          discount: values.header.discount || 0,
+          surcharge: values.header.surcharge || 0,
           version: values.version, // For optimistic locking
         };
+
+        console.log('[useOrderSave] Updating order with data:', headerData);
+        console.log('[useOrderSave] Financial fields - total_amount:', headerData.total_amount,
+          'discount:', headerData.discount,
+          'surcharge:', headerData.surcharge,
+          'final_amount:', headerData.final_amount);
 
         const orderResult = await dataProvider().update({
           resource: 'orders',
@@ -140,9 +149,16 @@ export const useOrderSave = (): UseOrderSaveResult => {
           link_pdf_file: values.header.link_pdf_file === '' ? null : values.header.link_pdf_file,
           // Convert empty strings to null for ref_key_1c
           ref_key_1c: values.header.ref_key_1c === '' ? null : values.header.ref_key_1c,
+          // Ensure discount and surcharge are numbers (not null/undefined)
+          discount: values.header.discount || 0,
+          surcharge: values.header.surcharge || 0,
         };
 
         console.log('[useOrderSave] Creating order with data:', headerData);
+        console.log('[useOrderSave] Financial fields - total_amount:', headerData.total_amount,
+          'discount:', headerData.discount,
+          'surcharge:', headerData.surcharge,
+          'final_amount:', headerData.final_amount);
 
         const orderResult = await dataProvider().create({
           resource: 'orders',

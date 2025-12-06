@@ -11,7 +11,8 @@ import { z } from 'zod';
 const financialSchema = z.object({
   total_amount: z.number().min(0, "Сумма должна быть >= 0").nullable().optional(),
   discount: z.number().min(0, "Скидка должна быть >= 0").default(0), // Absolute amount in currency
-  final_amount: z.number().min(0, "Сумма со скидкой должна быть >= 0").nullable().optional(),
+  surcharge: z.number().min(0, "Наценка должна быть >= 0").nullable().optional().default(0), // Absolute amount in currency
+  final_amount: z.number().min(0, "Финальная сумма должна быть >= 0").nullable().optional(),
   paid_amount: z.number().min(0, "Оплаченная сумма должна быть >= 0").default(0),
   payment_date: z.date().nullable().optional().or(z.string().nullable().optional()),
 });
@@ -41,6 +42,7 @@ export const orderHeaderSchema = z
     // Financial fields
     total_amount: financialSchema.shape.total_amount,
     discount: financialSchema.shape.discount,
+    surcharge: financialSchema.shape.surcharge,
     final_amount: financialSchema.shape.final_amount,
     paid_amount: financialSchema.shape.paid_amount,
     payment_date: financialSchema.shape.payment_date,
@@ -76,14 +78,31 @@ export const orderHeaderSchema = z
   })
   .refine(
     (data) => {
-      // Validation: final_amount <= total_amount
-      if (data.final_amount && data.total_amount) {
-        return data.final_amount <= data.total_amount;
-      }
-      return true;
+      // Validation: discount and surcharge are mutually exclusive
+      const hasDiscount = (data.discount || 0) > 0;
+      const hasSurcharge = (data.surcharge || 0) > 0;
+      return !(hasDiscount && hasSurcharge);
     },
     {
-      message: "Сумма со скидкой не может превышать исходную сумму",
+      message: "Скидка и наценка не могут быть применены одновременно",
+      path: ["discount"],
+    }
+  )
+  .refine(
+    (data) => {
+      // Validation: final_amount consistency based on discount/surcharge
+      // Formula: final_amount = total_amount - discount + surcharge
+      if (data.final_amount == null || data.total_amount == null) return true;
+
+      const discount = data.discount || 0;
+      const surcharge = data.surcharge || 0;
+      const expectedFinal = Number((data.total_amount - discount + surcharge).toFixed(2));
+
+      // Allow small tolerance for floating point errors
+      return Math.abs(data.final_amount - expectedFinal) < 0.01;
+    },
+    {
+      message: "Финальная сумма не соответствует формуле: сумма - скидка + наценка",
       path: ["final_amount"],
     }
   )

@@ -25,6 +25,7 @@ export interface Order {
   total_amount?: number | null;
   final_amount?: number | null;
   discount: number;
+  surcharge?: number | null;
   paid_amount: number;
   payment_date?: Date | string | null;
 

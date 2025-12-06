@@ -81,6 +81,59 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     queryOptions: {
       enabled: shouldLoadOrder,
     },
+    meta: {
+      fields: [
+        'order_id',
+        'order_name',
+        'client_id',
+        'order_date',
+        'priority',
+        'completion_date',
+        'planned_completion_date',
+        'issue_date',
+        'order_status_id',
+        'payment_status_id',
+        'total_amount',
+        'final_amount',
+        'discount',
+        'surcharge',
+        'paid_amount',
+        'payment_date',
+        'parts_count',
+        'total_area',
+        'milling_type_id',
+        'edge_type_id',
+        'film_id',
+        'material_id',
+        'link_cutting_file',
+        'link_cutting_image_file',
+        'link_cad_file',
+        'link_pdf_file',
+        'notes',
+        'manager_id',
+        'delete_flag',
+        'version',
+        'ref_key_1c',
+        'created_by',
+        'edited_by',
+        'created_at',
+        'updated_at',
+        {
+          order_doweling_links: [
+            'order_doweling_link_id',
+            'order_id',
+            'doweling_order_id',
+            {
+              doweling_order: [
+                'doweling_order_id',
+                'doweling_order_name',
+                'design_engineer_id',
+              ],
+            },
+          ],
+        },
+      ],
+    },
   });
 
   // Load order details in edit mode (only if orderId is valid number)
@@ -120,6 +173,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         payment_status_id: defaultPaymentStatus,
         priority: 100,
         discount: 0,
+        surcharge: 0,
         paid_amount: 0,
         total_amount: 0,
         final_amount: 0,
@@ -290,7 +344,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     updateHeaderField,
   ]);
 
-  // Auto-recalculate final_amount when total_amount or discount changes
+  // Auto-recalculate final_amount when total_amount, discount or surcharge changes
   // This useEffect is in OrderForm (always mounted) to ensure recalculation
   // happens regardless of which tab is active
   useEffect(() => {
@@ -300,16 +354,21 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
     const totalAmount = header.total_amount || 0;
     const discount = header.discount || 0;
-    // discount is absolute amount, not percent
-    const expectedDiscountedAmount = Math.max(0, Number((totalAmount - discount).toFixed(2)));
+    const surcharge = header.surcharge || 0;
+    // discount/surcharge are absolute amounts, not percent
+    // Only one can be active at a time (mutually exclusive)
+    const expectedFinalAmount = surcharge > 0
+      ? Number((totalAmount + surcharge).toFixed(2))
+      : Math.max(0, Number((totalAmount - discount).toFixed(2)));
 
     // Only update if changed (avoid infinite loops)
-    if (header.final_amount !== expectedDiscountedAmount) {
-      updateHeaderField('final_amount', expectedDiscountedAmount);
+    if (header.final_amount !== expectedFinalAmount) {
+      updateHeaderField('final_amount', expectedFinalAmount);
     }
   }, [
     header.total_amount,
     header.discount,
+    header.surcharge,
     header.final_amount,
     orderLoading,
     detailsLoading,

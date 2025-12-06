@@ -2,7 +2,7 @@
 // Contains: Total Amount, Discount, Discounted Amount, Paid Amount, Payment Date
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { Form, InputNumber, DatePicker, Row, Col, Button, Select } from 'antd';
+import { Form, InputNumber, DatePicker, Row, Col, Button, Select, Switch } from 'antd';
 import { CalculatorOutlined, DownOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -28,6 +28,24 @@ export const OrderFinanceSection: React.FC = () => {
   const [showPercentInput, setShowPercentInput] = useState(false);
   const [percentValue, setPercentValue] = useState<number | null>(null);
 
+  // State for discount/surcharge mode - determine from header values
+  const [adjustmentMode, setAdjustmentMode] = useState<'discount' | 'surcharge'>(() => {
+    // If surcharge > 0, use surcharge mode, otherwise default to discount
+    return (header.surcharge || 0) > 0 ? 'surcharge' : 'discount';
+  });
+
+  // Sync adjustmentMode when header changes (e.g., on order load)
+  useEffect(() => {
+    const hasDiscount = (header.discount || 0) > 0;
+    const hasSurcharge = (header.surcharge || 0) > 0;
+    if (hasSurcharge && !hasDiscount) {
+      setAdjustmentMode('surcharge');
+    } else if (hasDiscount && !hasSurcharge) {
+      setAdjustmentMode('discount');
+    }
+    // If both are 0, keep current mode
+  }, [header.discount, header.surcharge]);
+
   // Load payment statuses for manual selection
   const { selectProps: paymentStatusSelectProps } = useSelect({
     resource: 'payment_statuses',
@@ -52,25 +70,47 @@ export const OrderFinanceSection: React.FC = () => {
     updateHeaderField('payment_status_id', value);
   };
 
-  // Calculate discount percent from absolute discount amount
-  const discountPercent = (() => {
+  // Get current adjustment value (either discount or surcharge based on mode)
+  const currentAdjustmentValue = adjustmentMode === 'discount'
+    ? (header.discount || 0)
+    : (header.surcharge || 0);
+
+  // Calculate adjustment percent from absolute amount
+  const adjustmentPercent = (() => {
     const totalAmount = header.total_amount || 0;
-    const discount = header.discount || 0;
-    if (totalAmount > 0 && discount > 0) {
-      return (discount / totalAmount) * 100;
+    if (totalAmount > 0 && currentAdjustmentValue > 0) {
+      return (currentAdjustmentValue / totalAmount) * 100;
     }
     return 0;
   })();
 
-  // Handler for absolute discount amount (primary field)
-  const handleDiscountChange = (value: number | null) => {
-    const discount = value || 0;
-    updateHeaderField('discount', discount);
-
-    // Calculate final_amount from absolute discount
+  // Handler for mode change (discount <-> surcharge)
+  const handleModeChange = (mode: 'discount' | 'surcharge') => {
+    setAdjustmentMode(mode);
+    // Clear both values and recalculate final_amount
+    updateHeaderField('discount', 0);
+    updateHeaderField('surcharge', 0);
     const totalAmount = header.total_amount || 0;
-    const discountedAmount = totalAmount - discount;
-    updateHeaderField('final_amount', Number(discountedAmount.toFixed(2)));
+    updateHeaderField('final_amount', totalAmount);
+    setPercentValue(null);
+  };
+
+  // Handler for absolute adjustment amount (primary field)
+  const handleAdjustmentChange = (value: number | null) => {
+    const amount = value || 0;
+    const totalAmount = header.total_amount || 0;
+
+    if (adjustmentMode === 'discount') {
+      updateHeaderField('discount', amount);
+      updateHeaderField('surcharge', 0);
+      const finalAmount = totalAmount - amount;
+      updateHeaderField('final_amount', Number(finalAmount.toFixed(2)));
+    } else {
+      updateHeaderField('surcharge', amount);
+      updateHeaderField('discount', 0);
+      const finalAmount = totalAmount + amount;
+      updateHeaderField('final_amount', Number(finalAmount.toFixed(2)));
+    }
   };
 
   // Handler for percent input (calculator mode)
@@ -79,31 +119,46 @@ export const OrderFinanceSection: React.FC = () => {
 
     const percent = value || 0;
     const totalAmount = header.total_amount || 0;
+    const absoluteAmount = (totalAmount * percent) / 100;
 
-    // Calculate absolute discount from percent
-    const absoluteDiscount = (totalAmount * percent) / 100;
-    updateHeaderField('discount', Number(absoluteDiscount.toFixed(2)));
-
-    // Calculate final_amount
-    const discountedAmount = totalAmount - absoluteDiscount;
-    updateHeaderField('final_amount', Number(discountedAmount.toFixed(2)));
+    if (adjustmentMode === 'discount') {
+      updateHeaderField('discount', Number(absoluteAmount.toFixed(2)));
+      updateHeaderField('surcharge', 0);
+      const finalAmount = totalAmount - absoluteAmount;
+      updateHeaderField('final_amount', Number(finalAmount.toFixed(2)));
+    } else {
+      updateHeaderField('surcharge', Number(absoluteAmount.toFixed(2)));
+      updateHeaderField('discount', 0);
+      const finalAmount = totalAmount + absoluteAmount;
+      updateHeaderField('final_amount', Number(finalAmount.toFixed(2)));
+    }
   };
 
-  const handleDiscountedAmountChange = (value: number | null) => {
-    const discountedAmount = value || 0;
-    updateHeaderField('final_amount', discountedAmount);
+  const handleFinalAmountChange = (value: number | null) => {
+    const finalAmount = value || 0;
+    updateHeaderField('final_amount', finalAmount);
 
-    // Calculate absolute discount from final_amount
     const totalAmount = header.total_amount || 0;
-    const discount = totalAmount - discountedAmount;
-    updateHeaderField('discount', Number(discount.toFixed(2)));
+    const difference = Math.abs(totalAmount - finalAmount);
+
+    if (adjustmentMode === 'discount') {
+      // final_amount < total_amount means discount
+      const discount = Math.max(0, totalAmount - finalAmount);
+      updateHeaderField('discount', Number(discount.toFixed(2)));
+      updateHeaderField('surcharge', 0);
+    } else {
+      // final_amount > total_amount means surcharge
+      const surcharge = Math.max(0, finalAmount - totalAmount);
+      updateHeaderField('surcharge', Number(surcharge.toFixed(2)));
+      updateHeaderField('discount', 0);
+    }
   };
 
   // Toggle calculator mode
   const togglePercentInput = () => {
     if (!showPercentInput) {
-      // Opening: sync percent value with current discount
-      setPercentValue(discountPercent > 0 ? Number(discountPercent.toFixed(2)) : null);
+      // Opening: sync percent value with current adjustment
+      setPercentValue(adjustmentPercent > 0 ? Number(adjustmentPercent.toFixed(2)) : null);
     }
     setShowPercentInput(!showPercentInput);
   };
@@ -156,7 +211,7 @@ export const OrderFinanceSection: React.FC = () => {
       <Form layout="vertical" size="small">
         <Row gutter={8}>
           {/* Общая сумма */}
-          <Col span={4}>
+          <Col span={3}>
             <Form.Item
               label={
                 <span style={{ fontSize: 11 }}>
@@ -189,19 +244,30 @@ export const OrderFinanceSection: React.FC = () => {
             </Form.Item>
           </Col>
 
-          {/* Скидка */}
-          <Col span={3}>
+          {/* Скидка / Наценка */}
+          <Col span={5}>
             <Form.Item
               label={
-                <span style={{ fontSize: 11 }}>
-                  Скидка{discountPercent > 0 ? ` (${discountPercent.toFixed(1)}%)` : ''}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: adjustmentMode === 'discount' ? '#111827' : '#8c8c8c' }}>
+                    Скидка{adjustmentMode === 'discount' && adjustmentPercent > 0 ? ` ${adjustmentPercent.toFixed(1)}%` : ''}
+                  </span>
+                  <Switch
+                    size="small"
+                    checked={adjustmentMode === 'surcharge'}
+                    onChange={(checked) => handleModeChange(checked ? 'surcharge' : 'discount')}
+                    style={{ minWidth: 28 }}
+                  />
+                  <span style={{ fontSize: 11, color: adjustmentMode === 'surcharge' ? '#111827' : '#8c8c8c' }}>
+                    Наценка{adjustmentMode === 'surcharge' && adjustmentPercent > 0 ? ` ${adjustmentPercent.toFixed(1)}%` : ''}
+                  </span>
+                </div>
               }
               style={{ marginBottom: 0 }}
             >
               <InputNumber
-                value={header.discount}
-                onChange={handleDiscountChange}
+                value={currentAdjustmentValue}
+                onChange={handleAdjustmentChange}
                 min={0}
                 precision={2}
                 placeholder="0.00"
@@ -251,15 +317,19 @@ export const OrderFinanceSection: React.FC = () => {
             </Form.Item>
           </Col>
 
-          {/* Сумма со скидкой */}
-          <Col span={4}>
+          {/* Сумма со скидкой / Сумма с наценкой */}
+          <Col span={3}>
             <Form.Item
-              label={<span style={{ fontSize: 11 }}>Сумма со скидкой ({CURRENCY_SYMBOL})</span>}
+              label={
+                <span style={{ fontSize: 11 }}>
+                  {adjustmentMode === 'discount' ? 'Сумма со скидкой' : 'Сумма с наценкой'} ({CURRENCY_SYMBOL})
+                </span>
+              }
               style={{ marginBottom: 0 }}
             >
               <InputNumber
                 value={header.final_amount}
-                onChange={handleDiscountedAmountChange}
+                onChange={handleFinalAmountChange}
                 min={0}
                 precision={2}
                 placeholder="0.00"
@@ -293,6 +363,7 @@ export const OrderFinanceSection: React.FC = () => {
           <Col span={3}>
             <Form.Item
               label={<span style={{ fontSize: 11 }}>Дата оплаты</span>}
+              tooltip="Дата последнего платежа"
               style={{ marginBottom: 0 }}
             >
               <DatePicker
