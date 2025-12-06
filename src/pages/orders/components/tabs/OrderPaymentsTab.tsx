@@ -1,78 +1,109 @@
 // Order Payments Tab
-// Container for managing order payments with CRUD operations
+// Container for managing order payments with inline editing (like OrderDetailsTab)
 
-import React, { useState, useMemo } from 'react';
-import { Card, Button, Space, Modal, message, Table, Typography } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
-import { useList } from '@refinedev/core';
+import React, { useState, useRef, forwardRef, useImperativeHandle } from 'react';
+import { Card, Button, Space, Modal, message } from 'antd';
+import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { OrderPaymentTable, OrderPaymentTableRef } from '../tables/OrderPaymentTable';
+import { PaymentModal } from '../modals/PaymentModal';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { Payment } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
-import { PaymentModal } from '../modals/PaymentModal';
 import dayjs from 'dayjs';
-import { formatNumber } from '../../../../utils/numberFormat';
-import { CURRENCY_SYMBOL } from '../../../../config/currency';
 
-const { Text } = Typography;
+// Exposed methods via ref
+export interface OrderPaymentsTabRef {
+  applyCurrentEdits: () => Promise<boolean>;
+}
 
-export const OrderPaymentsTab: React.FC = () => {
-  const { payments, addPayment, updatePayment, deletePayment, header } = useOrderFormStore();
+// Default values for quick add
+const QUICK_ADD_DEFAULTS = {
+  type_paid_id: 1,  // Первый тип оплаты (обычно "Наличные" или аналог)
+  amount: 0,
+  payment_date: dayjs().format('YYYY-MM-DD'),
+};
+
+export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
+  const { payments, addPayment, deletePayment } = useOrderFormStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingPayment, setEditingPayment] = useState<Payment | undefined>();
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
+  const tableRef = useRef<OrderPaymentTableRef>(null);
 
-  // Load payment types for display
-  const { data: paymentTypesData } = useList({
-    resource: 'payment_types',
-    pagination: { pageSize: 1000 },
-  });
+  // Expose methods via ref for parent (OrderForm) to call
+  useImperativeHandle(ref, () => ({
+    applyCurrentEdits: async () => {
+      if (tableRef.current) {
+        return await tableRef.current.applyCurrentEdits();
+      }
+      return true;
+    },
+  }));
 
-  const paymentTypesMap = useMemo(() => {
-    const map: Record<string | number, string> = {};
-    (paymentTypesData?.data || []).forEach((pt: any) => {
-      map[pt.type_paid_id] = pt.type_paid_name;
-    });
-    return map;
-  }, [paymentTypesData]);
-
-  // Calculate total payments amount
-  const totalPaymentsAmount = useMemo(() => {
-    return payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-  }, [payments]);
-
-  // Handle create new payment
+  // Handle create new payment via modal
   const handleCreate = () => {
     setModalMode('create');
     setEditingPayment(undefined);
     setModalOpen(true);
   };
 
-  // Handle edit existing payment
+  // Handle quick inline add
+  const handleQuickAdd = async () => {
+    // Add new payment with defaults
+    addPayment(QUICK_ADD_DEFAULTS as Omit<Payment, 'temp_id'>);
+
+    // Get the newly added payment
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const updatedPayments = useOrderFormStore.getState().payments;
+    const lastPayment = [...updatedPayments].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
+
+    if (!lastPayment || !tableRef.current) return;
+
+    // If currently editing another row, save it first then start new
+    if (tableRef.current.isEditing()) {
+      const saved = await tableRef.current.saveCurrentAndStartNew(lastPayment);
+      if (!saved) {
+        // Validation failed - remove the just-added payment
+        const tempId = lastPayment.temp_id || lastPayment.payment_id;
+        if (tempId) {
+          deletePayment(tempId, lastPayment.payment_id);
+        }
+        message.warning('Сначала заполните обязательные поля текущего платежа');
+      }
+    } else {
+      // No row being edited, just start editing the new one
+      tableRef.current.startEditRow(lastPayment);
+    }
+  };
+
+  // Handle edit existing payment (via modal - legacy support)
   const handleEdit = (payment: Payment) => {
     setModalMode('edit');
     setEditingPayment(payment);
     setModalOpen(true);
   };
 
-  // Handle save (create or update)
+  // Handle save (create or update from modal)
   const handleSave = (paymentData: Omit<Payment, 'temp_id'>) => {
     let rowKey: React.Key;
 
-    // Check if we're editing by looking at editingPayment (more reliable than modalMode)
-    if (editingPayment && (editingPayment.payment_id || editingPayment.temp_id)) {
-      // Update existing payment
-      const tempId = editingPayment.temp_id || editingPayment.payment_id!;
-      updatePayment(tempId, paymentData);
-      rowKey = tempId;
-      message.success('Платеж обновлен');
-    } else {
-      // Create new payment
+    if (modalMode === 'create') {
       addPayment(paymentData);
       const lastPayment = [...payments].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
       rowKey = lastPayment?.temp_id || Date.now();
       message.success('Платеж добавлен');
+    } else if (editingPayment) {
+      const tempId = editingPayment.temp_id || editingPayment.payment_id!;
+      const { updatePayment } = useOrderFormStore.getState();
+      updatePayment(tempId, paymentData);
+      rowKey = tempId;
+      message.success('Платеж обновлен');
+    } else {
+      setModalOpen(false);
+      setEditingPayment(undefined);
+      return;
     }
 
     setModalOpen(false);
@@ -131,145 +162,66 @@ export const OrderPaymentsTab: React.FC = () => {
             deletePayment(tempId, payment.payment_id);
           }
         });
-        setSelectedRowKeys([]);
         message.success(`Удалено платежей: ${selectedRowKeys.length}`);
+        setSelectedRowKeys([]);
       },
     });
   };
 
-  const formatDate = (date: string | Date | null | undefined) => {
-    if (!date) return '—';
-    return dayjs(date).format('DD.MM.YYYY');
+  // Handle row selection change
+  const handleSelectChange = (newSelectedRowKeys: React.Key[]) => {
+    setSelectedRowKeys(newSelectedRowKeys);
   };
 
-  const columns = [
-    {
-      title: 'Тип оплаты',
-      dataIndex: 'type_paid_id',
-      key: 'type_paid_id',
-      width: 200,
-      render: (value: number) => paymentTypesMap[value] || '—',
-    },
-    {
-      title: 'Дата',
-      dataIndex: 'payment_date',
-      key: 'payment_date',
-      width: 120,
-      render: (value: string | Date) => formatDate(value),
-    },
-    {
-      title: 'Сумма',
-      dataIndex: 'amount',
-      key: 'amount',
-      width: 150,
-      align: 'right' as const,
-      render: (value: number) => `${formatNumber(value || 0, 2)} ${CURRENCY_SYMBOL}`,
-    },
-    {
-      title: 'Примечание',
-      dataIndex: 'notes',
-      key: 'notes',
-      ellipsis: true,
-      render: (value: string | null) => value || '—',
-    },
-    {
-      title: 'Действия',
-      key: 'actions',
-      width: 100,
-      align: 'center' as const,
-      render: (_: any, record: Payment) => {
-        const tempId = record.temp_id || record.payment_id!;
-        return (
-          <Space size="small">
-            <Button
-              type="link"
-              icon={<EditOutlined />}
-              size="small"
-              onClick={() => handleEdit(record)}
-            />
-            <Button
-              type="link"
-              danger
-              icon={<DeleteOutlined />}
-              size="small"
-              onClick={() => handleDelete(tempId, record.payment_id)}
-            />
-          </Space>
-        );
-      },
-    },
-  ];
-
   return (
-    <Card
-      size="small"
-      title="Платежи по заказу"
-      extra={
+    <Card size="small">
+      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        {/* Toolbar */}
         <Space>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            size="small"
-            onClick={handleCreate}
-          >
-            Создать оплату
+          <Button type="primary" icon={<ThunderboltOutlined />} onClick={handleQuickAdd}>
+            Быстрое добавление
           </Button>
-          {selectedRowKeys.length > 0 && (
-            <Button
-              danger
-              icon={<DeleteOutlined />}
-              size="small"
-              onClick={handleDeleteSelected}
-            >
-              Удалить ({selectedRowKeys.length})
-            </Button>
-          )}
+          <Button icon={<PlusOutlined />} onClick={handleCreate}>
+            Добавить (форма)
+          </Button>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            onClick={handleDeleteSelected}
+            disabled={selectedRowKeys.length === 0}
+          >
+            Удалить выбранные ({selectedRowKeys.length})
+          </Button>
+          <span style={{ marginLeft: 16, color: '#666' }}>
+            Всего платежей: {payments.length}
+          </span>
         </Space>
-      }
-    >
-      <Table
-        dataSource={payments}
-        columns={columns}
-        rowKey={(record) => record.temp_id || record.payment_id!}
-        size="small"
-        pagination={false}
-        bordered
-        rowSelection={{
-          selectedRowKeys,
-          onChange: setSelectedRowKeys,
-        }}
-        rowClassName={(record) => {
-          const rowKey = record.temp_id || record.payment_id!;
-          return highlightedRowKey === rowKey ? 'highlighted-row' : '';
-        }}
-        summary={() => (
-          <Table.Summary.Row>
-            <Table.Summary.Cell index={0} colSpan={2}>
-              <Text strong>Итого:</Text>
-            </Table.Summary.Cell>
-            <Table.Summary.Cell index={2} align="right">
-              <Text strong>
-                {formatNumber(totalPaymentsAmount, 2)} {CURRENCY_SYMBOL}
-              </Text>
-            </Table.Summary.Cell>
-            <Table.Summary.Cell index={3} colSpan={2} />
-          </Table.Summary.Row>
-        )}
-      />
 
-      {/* Payment Modal */}
-      {modalOpen && (
-        <PaymentModal
-          mode={modalMode}
-          payment={editingPayment}
-          open={modalOpen}
-          onSave={handleSave}
-          onCancel={() => {
-            setModalOpen(false);
-            setEditingPayment(undefined);
-          }}
+        {/* Table with inline editing */}
+        <OrderPaymentTable
+          ref={tableRef}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onQuickAdd={handleQuickAdd}
+          selectedRowKeys={selectedRowKeys}
+          onSelectChange={handleSelectChange}
+          highlightedRowKey={highlightedRowKey}
         />
-      )}
+
+        {/* Modal (for legacy "Add via form" button) */}
+        {modalOpen && (
+          <PaymentModal
+            mode={modalMode}
+            payment={editingPayment}
+            open={modalOpen}
+            onSave={handleSave}
+            onCancel={() => {
+              setModalOpen(false);
+              setEditingPayment(undefined);
+            }}
+          />
+        )}
+      </Space>
     </Card>
   );
-};
+});

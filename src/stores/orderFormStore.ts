@@ -41,6 +41,7 @@ import {
     isTotalAmountManual: boolean;
     isPaymentStatusManual: boolean;
     isDetailEditing: boolean;
+    isPaymentEditing: boolean;
 
     // Original header values loaded from server (for change detection after recalculations)
     originalHeader: Partial<Order>;
@@ -97,6 +98,7 @@ import {
     setTotalAmountManual: (isManual: boolean) => void;
     setPaymentStatusManual: (isManual: boolean) => void;
     setDetailEditing: (isEditing: boolean) => void;
+    setPaymentEditing: (isEditing: boolean) => void;
 }
 
 // ============================================================================
@@ -123,6 +125,7 @@ import {
     isTotalAmountManual: false,
     isPaymentStatusManual: false,
     isDetailEditing: false,
+    isPaymentEditing: false,
     originalHeader: {},
     originalDetails: {},
     originalPayments: {},
@@ -512,6 +515,7 @@ export const useOrderFormStore = create<OrderFormState>()(
               version: order.version || 0,
               isTotalAmountManual: false,
               isDetailEditing: false,
+              isPaymentEditing: false,
               // Save original header values for comparison after recalculations
               originalHeader: { ...(order.header || {}) },
               // Build original maps for change detection
@@ -675,6 +679,17 @@ export const useOrderFormStore = create<OrderFormState>()(
             }),
             false,
             'setDetailEditing'
+          ),
+
+        setPaymentEditing: (isEditing) =>
+          set(
+            (state) => ({
+              isPaymentEditing: isEditing,
+              // When starting edit, mark form as dirty
+              isDirty: isEditing ? true : state.isDirty,
+            }),
+            false,
+            'setPaymentEditing'
           ),
       }),
       {

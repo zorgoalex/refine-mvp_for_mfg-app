@@ -27,7 +27,7 @@ import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 
 // Tabs
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
-import { OrderPaymentsTab } from './tabs/OrderPaymentsTab';
+import { OrderPaymentsTab, OrderPaymentsTabRef } from './tabs/OrderPaymentsTab';
 
 interface OrderFormProps {
   mode: OrderFormMode;
@@ -50,6 +50,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     updateHeaderField,
     isDirty,
     isDetailEditing,
+    isPaymentEditing,
     reset,
     loadOrder,
     getFormValues,
@@ -59,8 +60,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     deleteDetail,
   } = useOrderFormStore();
 
-  // Ref for OrderDetailsTab to apply current edits before save
+  // Refs for tabs to apply current edits before save
   const detailsTabRef = useRef<OrderDetailsTabRef>(null);
+  const paymentsTabRef = useRef<OrderPaymentsTabRef>(null);
 
   const { defaultOrderStatus, defaultPaymentStatus, isLoading: statusesLoading } =
     useDefaultStatuses();
@@ -389,6 +391,21 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       console.log('[OrderForm] handleSave - current edits applied successfully');
     }
 
+    // Apply current edits from payments table before saving
+    if (paymentsTabRef.current) {
+      console.log('[OrderForm] handleSave - applying current edits from payments table...');
+      const applied = await paymentsTabRef.current.applyCurrentEdits();
+      if (!applied) {
+        console.log('[OrderForm] handleSave - failed to apply payment edits, aborting save');
+        notification.warning({
+          message: 'Ошибка валидации',
+          description: 'Заполните обязательные поля в редактируемом платеже',
+        });
+        return;
+      }
+      console.log('[OrderForm] handleSave - payment edits applied successfully');
+    }
+
     try {
       const formValues = getFormValues();
       console.log('[OrderForm] handleSave - formValues:', formValues);
@@ -714,7 +731,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         children: (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <OrderFinanceSection />
-            <OrderPaymentsTab />
+            <OrderPaymentsTab ref={paymentsTabRef} />
           </Space>
         ),
       },
@@ -831,11 +848,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             </Button>
           )}
           <Button
-            type={(isDirty || isDetailEditing) ? "primary" : "default"}
+            type={(isDirty || isDetailEditing || isPaymentEditing) ? "primary" : "default"}
             icon={<SaveOutlined />}
             onClick={handleSave}
             loading={isSaving}
-            disabled={!isDirty && !isDetailEditing}
+            disabled={!isDirty && !isDetailEditing && !isPaymentEditing}
             style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
           >
             Сохранить
