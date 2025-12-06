@@ -58,6 +58,15 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
   const paidAmount = record?.paid_amount || 0;
   const isAmountMismatch = Math.abs(totalPaymentsAmount - paidAmount) > 0.01;
 
+  // Calculate remaining amount to pay
+  const remainingAmount = useMemo(() => {
+    const discounted = record?.final_amount || 0;
+    const paid = paidAmount;
+    return Math.max(0, discounted - paid);
+  }, [record?.final_amount, paidAmount]);
+
+  const showRemaining = remainingAmount > 0;
+
   const formatDate = (date: string | null) => {
     if (!date) return '—';
     return dayjs(date).format('DD.MM.YYYY');
@@ -122,6 +131,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
             <th style={headerCellStyle}>Скидка{discountPercent > 0 ? ` (${discountPercent.toFixed(1)}%)` : ''}</th>
             <th style={headerCellStyle}>Сумма со скидкой ({CURRENCY_SYMBOL})</th>
             <th style={headerCellStyle}>Оплачено ({CURRENCY_SYMBOL})</th>
+            {showRemaining && <th style={headerCellStyle}>Осталось ({CURRENCY_SYMBOL})</th>}
             <th style={headerCellStyle}>Дата оплаты</th>
             <th style={headerCellStyle}>Статус оплаты</th>
           </tr>
@@ -138,6 +148,11 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
             <td style={{ ...valueCellStyle, color: '#52c41a' }}>
               {formatNumber(paidAmount, 2)}
             </td>
+            {showRemaining && (
+              <td style={{ ...valueCellStyle, color: '#d4380d', background: '#fff2e8' }}>
+                {formatNumber(remainingAmount, 2)}
+              </td>
+            )}
             <td style={valueCellStyle}>{formatDate(record?.payment_date)}</td>
             <td style={{ ...valueCellStyle, color: getPaymentStatusColor(record?.payment_status_name) }}>
               {record?.payment_status_name || '—'}
