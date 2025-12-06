@@ -244,21 +244,21 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
             const discount = Number(record?.discount) || 0;
             const surcharge = Number(record?.surcharge) || 0;
             const paidAmount = Number(record?.paid_amount) || 0;
-            const finalAmount = Number(record?.final_amount) || Number(record?.total_amount) || 0;
+            const totalAmount = Number(record?.total_amount) || 0;
+            const finalAmount = Number(record?.final_amount) || totalAmount || 0;
             const remainingAmount = Math.max(0, finalAmount - paidAmount);
 
             const items: React.ReactNode[] = [];
 
             // Скидка (если > 0)
             if (discount > 0) {
-              const totalAmount = Number(record?.total_amount) || 0;
               const discountPercent = totalAmount > 0 ? (discount / totalAmount) * 100 : 0;
               items.push(
                 <span key="discount" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#cf1322', fontWeight: 600 }}>
                     Скидка {formatNumber(discountPercent, 1)}%:
                   </Text>
-                  <Text style={{ fontSize: 12, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
+                  <Text style={{ fontSize: 12, fontStyle: 'italic', color: '#cf1322', fontWeight: 600 }}>
                     -{formatNumber(discount, 2)} {CURRENCY_SYMBOL}
                   </Text>
                 </span>
@@ -267,12 +267,13 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
 
             // Наценка (если > 0)
             if (surcharge > 0) {
+              const surchargePercent = totalAmount > 0 ? (surcharge / totalAmount) * 100 : 0;
               items.push(
                 <span key="surcharge" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#059669' }}>
-                    Наценка:
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
+                    Наценка {formatNumber(surchargePercent, 1)}%:
                   </Text>
-                  <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#059669' }}>
+                  <Text style={{ fontSize: 12, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
                     +{formatNumber(surcharge, 2)} {CURRENCY_SYMBOL}
                   </Text>
                 </span>

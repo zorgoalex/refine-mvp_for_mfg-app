@@ -249,7 +249,13 @@ export const OrderFinanceSection: React.FC = () => {
             <Form.Item
               label={
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 11, color: adjustmentMode === 'discount' ? '#111827' : '#8c8c8c' }}>
+                  <span style={{
+                    fontSize: 11,
+                    fontWeight: (header.discount || 0) > 0 && adjustmentMode === 'discount' ? 600 : 400,
+                    color: adjustmentMode === 'discount'
+                      ? ((header.discount || 0) > 0 ? '#cf1322' : '#111827')  // красный если скидка > 0, иначе чёрный
+                      : '#8c8c8c'  // неактивный серый
+                  }}>
                     Скидка{adjustmentMode === 'discount' && adjustmentPercent > 0 ? ` ${adjustmentPercent.toFixed(1)}%` : ''}
                   </span>
                   <Switch
@@ -258,7 +264,13 @@ export const OrderFinanceSection: React.FC = () => {
                     onChange={(checked) => handleModeChange(checked ? 'surcharge' : 'discount')}
                     style={{ minWidth: 28 }}
                   />
-                  <span style={{ fontSize: 11, color: adjustmentMode === 'surcharge' ? '#111827' : '#8c8c8c' }}>
+                  <span style={{
+                    fontSize: 11,
+                    fontWeight: (header.surcharge || 0) > 0 && adjustmentMode === 'surcharge' ? 600 : 400,
+                    color: adjustmentMode === 'surcharge'
+                      ? ((header.surcharge || 0) > 0 ? '#fa8c16' : '#111827')  // ярко-оранжевый если наценка > 0, иначе чёрный
+                      : '#8c8c8c'  // неактивный серый
+                  }}>
                     Наценка{adjustmentMode === 'surcharge' && adjustmentPercent > 0 ? ` ${adjustmentPercent.toFixed(1)}%` : ''}
                   </span>
                 </div>

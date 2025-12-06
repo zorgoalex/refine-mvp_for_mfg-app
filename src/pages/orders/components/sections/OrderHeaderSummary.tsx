@@ -346,11 +346,84 @@ export const OrderHeaderSummary: React.FC = () => {
           </Text>
         </div>
 
-        {/* Column 3: Total amount */}
+        {/* Column 3: Discount/Surcharge | Paid | Remaining - двухстрочный стиль */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-          <Text strong style={{ fontSize: 14, color: '#111827' }}>
-            {formatNumber(header.total_amount || 0, 2)} {CURRENCY_SYMBOL}
-          </Text>
+          {(() => {
+            const discount = Number(header.discount) || 0;
+            const surcharge = Number(header.surcharge) || 0;
+            const paidAmount = Number(header.paid_amount) || 0;
+            const finalAmount = Number(header.final_amount) || Number(header.total_amount) || 0;
+            const remainingAmount = Math.max(0, finalAmount - paidAmount);
+            const totalAmount = Number(header.total_amount) || 0;
+
+            const items: React.ReactNode[] = [];
+
+            // Скидка (если > 0)
+            if (discount > 0) {
+              const discountPercent = totalAmount > 0 ? (discount / totalAmount) * 100 : 0;
+              items.push(
+                <span key="discount" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#cf1322', fontWeight: 600 }}>
+                    Скидка {formatNumber(discountPercent, 1)}%:
+                  </Text>
+                  <Text style={{ fontSize: 12, fontStyle: 'italic', color: '#cf1322', fontWeight: 600 }}>
+                    -{formatNumber(discount, 2)} {CURRENCY_SYMBOL}
+                  </Text>
+                </span>
+              );
+            }
+
+            // Наценка (если > 0)
+            if (surcharge > 0) {
+              const surchargePercent = totalAmount > 0 ? (surcharge / totalAmount) * 100 : 0;
+              items.push(
+                <span key="surcharge" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
+                    Наценка {formatNumber(surchargePercent, 1)}%:
+                  </Text>
+                  <Text style={{ fontSize: 12, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
+                    +{formatNumber(surcharge, 2)} {CURRENCY_SYMBOL}
+                  </Text>
+                </span>
+              );
+            }
+
+            // Оплачено (если > 0)
+            if (paidAmount > 0) {
+              items.push(
+                <span key="paid" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#52c41a' }}>
+                    Оплачено:
+                  </Text>
+                  <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#52c41a' }}>
+                    {formatNumber(paidAmount, 2)} {CURRENCY_SYMBOL}
+                  </Text>
+                </span>
+              );
+            }
+
+            // Осталось оплатить (если > 0)
+            if (remainingAmount > 0) {
+              items.push(
+                <span key="remaining" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#D97706' }}>
+                    Остаток оплаты:
+                  </Text>
+                  <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#D97706' }}>
+                    {formatNumber(remainingAmount, 2)} {CURRENCY_SYMBOL}
+                  </Text>
+                </span>
+              );
+            }
+
+            // Добавляем разделители между элементами
+            return items.map((item, index) => (
+              <React.Fragment key={index}>
+                {index > 0 && <span style={{ color: '#E5E7EB', margin: '0 4px' }}>|</span>}
+                {item}
+              </React.Fragment>
+            ));
+          })()}
         </div>
       </div>
 

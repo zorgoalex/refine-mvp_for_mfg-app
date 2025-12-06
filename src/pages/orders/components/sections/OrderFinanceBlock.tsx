@@ -72,15 +72,44 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
     return dayjs(date).format('DD.MM.YYYY');
   };
 
-  // Calculate discount percent
+  // Calculate discount/surcharge values and percents
+  const discount = record?.discount || 0;
+  const surcharge = record?.surcharge || 0;
+  const totalAmount = record?.total_amount || 0;
+
   const discountPercent = useMemo(() => {
-    const totalAmount = record?.total_amount || 0;
-    const discount = record?.discount || 0;
     if (totalAmount > 0 && discount > 0) {
       return (discount / totalAmount) * 100;
     }
     return 0;
-  }, [record?.total_amount, record?.discount]);
+  }, [totalAmount, discount]);
+
+  const surchargePercent = useMemo(() => {
+    if (totalAmount > 0 && surcharge > 0) {
+      return (surcharge / totalAmount) * 100;
+    }
+    return 0;
+  }, [totalAmount, surcharge]);
+
+  // Determine final amount label based on discount/surcharge
+  const finalAmountLabel = useMemo(() => {
+    if (discount > 0) return 'Сумма со скидкой';
+    if (surcharge > 0) return 'Сумма с наценкой';
+    return 'Сумма, итого';
+  }, [discount, surcharge]);
+
+  // Show total amount field if there's discount or surcharge
+  const showTotalAmount = discount > 0 || surcharge > 0;
+
+  // Count visible columns for dynamic width
+  const visibleColumnsCount = useMemo(() => {
+    let count = 4; // Final amount, Paid, Payment date, Payment status (always visible)
+    if (showTotalAmount) count++; // Total amount (only if discount or surcharge)
+    if (discount > 0) count++; // Discount
+    if (surcharge > 0) count++; // Surcharge
+    if (showRemaining) count++; // Remaining
+    return count;
+  }, [showTotalAmount, discount, surcharge, showRemaining]);
 
   // Payment status color
   const getPaymentStatusColor = (statusName: string | null) => {
@@ -124,25 +153,53 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
       }}
     >
       {/* Finance summary as table row */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: payments.length > 0 ? 16 : 0 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: payments.length > 0 ? 16 : 0, tableLayout: 'fixed' }}>
         <thead>
           <tr>
-            <th style={headerCellStyle}>Общая сумма ({CURRENCY_SYMBOL})</th>
-            <th style={headerCellStyle}>Скидка{discountPercent > 0 ? ` (${discountPercent.toFixed(1)}%)` : ''}</th>
-            <th style={headerCellStyle}>Сумма со скидкой ({CURRENCY_SYMBOL})</th>
-            <th style={headerCellStyle}>Оплачено ({CURRENCY_SYMBOL})</th>
-            {showRemaining && <th style={headerCellStyle}>Осталось ({CURRENCY_SYMBOL})</th>}
-            <th style={headerCellStyle}>Дата оплаты</th>
-            <th style={headerCellStyle}>Статус оплаты</th>
+            {showTotalAmount && (
+              <th style={{ ...headerCellStyle, width: `${100 / visibleColumnsCount}%` }}>
+                Сумма заказа ({CURRENCY_SYMBOL})
+              </th>
+            )}
+            {discount > 0 && (
+              <th style={{ ...headerCellStyle, width: `${100 / visibleColumnsCount}%` }}>
+                Скидка {discountPercent.toFixed(1)}%
+              </th>
+            )}
+            {surcharge > 0 && (
+              <th style={{ ...headerCellStyle, width: `${100 / visibleColumnsCount}%` }}>
+                Наценка {surchargePercent.toFixed(1)}%
+              </th>
+            )}
+            <th style={{ ...headerCellStyle, width: `${100 / visibleColumnsCount}%` }}>
+              {finalAmountLabel} ({CURRENCY_SYMBOL})
+            </th>
+            <th style={{ ...headerCellStyle, width: `${100 / visibleColumnsCount}%` }}>Оплачено ({CURRENCY_SYMBOL})</th>
+            {showRemaining && (
+              <th style={{ ...headerCellStyle, width: `${100 / visibleColumnsCount}%` }}>Осталось ({CURRENCY_SYMBOL})</th>
+            )}
+            <th style={{ ...headerCellStyle, width: `${100 / visibleColumnsCount}%` }}>Дата оплаты</th>
+            <th style={{ ...headerCellStyle, width: `${100 / visibleColumnsCount}%` }}>Статус оплаты</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td style={valueCellStyle}>{formatNumber(record?.total_amount || 0, 2)}</td>
-            <td style={{ ...valueCellStyle, color: record?.discount > 0 ? '#cf1322' : '#8c8c8c' }}>
-              {formatNumber(record?.discount || 0, 2)}
-            </td>
-            <td style={{ ...valueCellStyle, color: record?.discount > 0 ? '#1890ff' : '#8c8c8c' }}>
+            {showTotalAmount && (
+              <td style={valueCellStyle}>
+                {formatNumber(totalAmount, 2)}
+              </td>
+            )}
+            {discount > 0 && (
+              <td style={{ ...valueCellStyle, color: '#cf1322' }}>
+                -{formatNumber(discount, 2)}
+              </td>
+            )}
+            {surcharge > 0 && (
+              <td style={{ ...valueCellStyle, color: '#111827' }}>
+                +{formatNumber(surcharge, 2)}
+              </td>
+            )}
+            <td style={{ ...valueCellStyle, color: '#1890ff' }}>
               {formatNumber(record?.final_amount || 0, 2)}
             </td>
             <td style={{ ...valueCellStyle, color: '#52c41a' }}>
