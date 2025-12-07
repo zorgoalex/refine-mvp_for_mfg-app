@@ -9,7 +9,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useSelect } from '@refinedev/antd';
 import { Payment } from '../../../../types/orders';
-import { formatNumber, numberParser } from '../../../../utils/numberFormat';
+import { formatNumber, numberParser, currencySmartFormatter } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import dayjs from 'dayjs';
 
@@ -305,6 +305,7 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
               style={{ width: '100%', minWidth: '120px', ...getRequiredFieldStyle(watchedAmount) }}
               min={0}
               precision={2}
+              formatter={currencySmartFormatter}
               parser={numberParser}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); } }}
             />

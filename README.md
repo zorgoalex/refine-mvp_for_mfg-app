@@ -18,7 +18,7 @@
   ## Обзор
   - Backend: Hasura GraphQL доступен локально по `http://localhost:8585/v1/graphql`.
   - Frontend: Refine (+ AntD) на Vite/React.
-  - Схема БД: **v12-5**
+  - Схема БД: **v12-6**
   - Dev server: `http://localhost:5576`
   - Статус: **MVP+ завершен** (2025-11-01) — полнофункциональная форма заказов с деталями и платежами
   - **Печать/экспорт** (2025-11-16) — готовность к production

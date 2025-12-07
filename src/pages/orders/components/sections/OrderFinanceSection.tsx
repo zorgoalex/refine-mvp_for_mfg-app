@@ -6,7 +6,7 @@ import { Form, InputNumber, DatePicker, Row, Col, Button, Select, Switch } from 
 import { CalculatorOutlined, DownOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
-import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
+import { numberParser, currencySmartFormatter } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import dayjs from 'dayjs';
 
@@ -237,7 +237,7 @@ export const OrderFinanceSection: React.FC = () => {
                 min={0}
                 precision={2}
                 placeholder="0.00"
-                formatter={(value) => numberFormatter(value, 2)}
+                formatter={currencySmartFormatter}
                 parser={numberParser}
                 style={{ width: '100%' }}
               />
@@ -283,7 +283,7 @@ export const OrderFinanceSection: React.FC = () => {
                 min={0}
                 precision={2}
                 placeholder="0.00"
-                formatter={(value) => numberFormatter(value, 2)}
+                formatter={currencySmartFormatter}
                 parser={numberParser}
                 style={{ width: '100%' }}
                 addonAfter={
@@ -318,7 +318,7 @@ export const OrderFinanceSection: React.FC = () => {
                     max={100}
                     precision={2}
                     placeholder="%"
-                    formatter={(value) => numberFormatter(value, 2)}
+                    formatter={currencySmartFormatter}
                     parser={numberParser}
                     style={{ width: '100%' }}
                     addonAfter="%"
@@ -345,7 +345,7 @@ export const OrderFinanceSection: React.FC = () => {
                 min={0}
                 precision={2}
                 placeholder="0.00"
-                formatter={(value) => numberFormatter(value, 2)}
+                formatter={currencySmartFormatter}
                 parser={numberParser}
                 style={{ width: '100%' }}
               />
@@ -364,7 +364,7 @@ export const OrderFinanceSection: React.FC = () => {
                 readOnly
                 precision={2}
                 placeholder="0.00"
-                formatter={(value) => numberFormatter(value, 2)}
+                formatter={currencySmartFormatter}
                 parser={numberParser}
                 style={{ width: '100%', background: '#f5f5f5' }}
               />
@@ -400,7 +400,7 @@ export const OrderFinanceSection: React.FC = () => {
                   value={remainingAmount}
                   readOnly
                   precision={2}
-                  formatter={(value) => numberFormatter(value, 2)}
+                  formatter={currencySmartFormatter}
                   parser={numberParser}
                   style={{
                     width: '100%',

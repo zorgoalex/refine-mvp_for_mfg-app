@@ -15,7 +15,7 @@ import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useOne } from '@refinedev/core';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
-import { formatNumber } from '../../../../utils/numberFormat';
+import { formatNumber, currencySmartFormatter, numberParser } from '../../../../utils/numberFormat';
 import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
 import {
   validateMaterialDimensions,
@@ -735,6 +735,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               style={{ width: '100%', minWidth: '90px' }}
               precision={2}
               min={0}
+              formatter={currencySmartFormatter}
+              parser={numberParser}
               onChange={handleMillingCostChange}
               onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
             />
@@ -764,6 +766,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               style={{ width: '100%', minWidth: '90px', ...getRequiredFieldStyle(watchedDetailCost) }}
               precision={2}
               min={0}
+              formatter={currencySmartFormatter}
+              parser={numberParser}
               disabled={!isSumEditable}
               onContextMenu={(e) => {
                 if (!isSumEditable) {

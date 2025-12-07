@@ -57,3 +57,31 @@ export const numberParser = (value: string | undefined): number | string => {
   const parsed = parseFormattedNumber(value);
   return parsed ?? '';
 };
+
+/**
+ * Smart formatter for Ant Design InputNumber
+ * Hides decimal part (.00) during editing if it's zero
+ * Shows full precision only when value has non-zero decimals
+ * @param precision - maximum decimal places (default: 2)
+ */
+export const createSmartFormatter = (precision: number = 2) => {
+  return (value: number | undefined): string => {
+    if (value === undefined || value === null) return '';
+
+    // Check if the value has a non-zero fractional part
+    const hasDecimalPart = value % 1 !== 0;
+
+    if (hasDecimalPart) {
+      // Show with precision if there's a decimal part
+      return formatNumber(value, precision);
+    } else {
+      // Show as integer if no decimal part
+      return formatNumber(value, 0);
+    }
+  };
+};
+
+/**
+ * Smart formatter instance for currency fields (2 decimal places)
+ */
+export const currencySmartFormatter = createSmartFormatter(2);
