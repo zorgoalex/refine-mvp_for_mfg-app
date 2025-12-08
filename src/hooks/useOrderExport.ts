@@ -77,6 +77,7 @@ export const useOrderExport = (): UseOrderExportResult => {
 
     try {
       // 1. Загрузить ПОЛНЫЙ заказ из БД (может быть передан только order_id)
+      // Используем orders для редактируемых полей + order_doweling_links
       console.log('[useOrderExport] Fetching full order from DB...');
       const { data: fullOrder } = await dataProvider().getOne({
         resource: 'orders',
@@ -88,6 +89,29 @@ export const useOrderExport = (): UseOrderExportResult => {
       }
 
       console.log('[useOrderExport] Full order loaded:', fullOrder);
+
+      // 1.1 Загрузить orders_view для получения design_engineer (computed field)
+      console.log('[useOrderExport] Fetching orders_view for design_engineer...');
+      const { data: orderView } = await dataProvider().getOne({
+        resource: 'orders_view',
+        id: order.order_id,
+      });
+
+      // Извлекаем design_engineer из view
+      const designEngineer = orderView?.design_engineer || '';
+      console.log('[useOrderExport] Design engineer:', designEngineer);
+
+      // Извлекаем первую присадку из order_doweling_links
+      const dowelingLinks = fullOrder.order_doweling_links || [];
+      const firstDoweling = dowelingLinks[0]?.doweling_order;
+      const prisadkaName = firstDoweling?.doweling_order_name || '';
+      console.log('[useOrderExport] Prisadka name:', prisadkaName);
+
+      // Добавляем данные для экспорта
+      fullOrder._exportData = {
+        prisadkaName,
+        prisadkaDesignerName: designEngineer,
+      };
 
       // 2. Загрузить детали заказа
       console.log('[useOrderExport] Fetching order_details from DB...');

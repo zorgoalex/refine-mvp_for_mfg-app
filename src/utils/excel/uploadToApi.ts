@@ -75,11 +75,17 @@ export async function uploadOrderExcelToApi(
       film: detail.film?.film_name || '',
     }));
 
+    // Извлечение данных присадки и конструктора из _exportData
+    const exportData = (order as any)._exportData || {};
+    const prisadkaName = exportData.prisadkaName || '';
+    const prisadkaDesignerName = exportData.prisadkaDesignerName || '';
+
     // Формирование JSON для отправки на Vercel API (без apiKey - добавится на сервере)
     const orderPayload = {
       orderName: order.order_name || '',
       orderId: String(order.order_id),
-      prisadkaName: '—', // Заглушка, пока не реализовано
+      prisadkaName, // Номер присадки из dowelling_order_name
+      prisadkaDesignerName, // Конструктор присадки из design_engineer (emd.full_name)
       orderDate: order.order_date,
       clientName: client?.client_name || 'Не указан',
       clientPhone: clientPhone || '',
