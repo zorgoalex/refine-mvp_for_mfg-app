@@ -1,10 +1,12 @@
 // Order Show Header (Read-only summary for show page)
 // Adapted from OrderHeaderSummary for use with props instead of store
 
-import React, { useMemo } from 'react';
-import { Tag, Space, Typography } from 'antd';
-import { StarOutlined } from '@ant-design/icons';
+import React, { useMemo, useState } from 'react';
+import { Tag, Space, Typography, Dropdown } from 'antd';
+import type { MenuProps } from 'antd';
+import { StarOutlined, EyeOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
+import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
@@ -19,11 +21,32 @@ interface OrderShowHeaderProps {
 }
 
 export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, details, dowelingLinks = [] }) => {
+  const navigate = useNavigate();
+
+  // State for client context menu
+  const [clientMenuOpen, setClientMenuOpen] = useState(false);
+
   // Get the latest (last added) doweling link for header display
   const latestDowelingLink = useMemo(() => {
     if (!dowelingLinks || dowelingLinks.length === 0) return null;
     return dowelingLinks[dowelingLinks.length - 1];
   }, [dowelingLinks]);
+
+  // Client context menu items
+  const clientMenuItems: MenuProps['items'] = useMemo(() => {
+    if (!record?.client_id) return [];
+    return [
+      {
+        key: 'view-client',
+        icon: <EyeOutlined />,
+        label: 'Просмотр клиента',
+        onClick: () => {
+          setClientMenuOpen(false);
+          navigate(`/clients/show/${record.client_id}`);
+        },
+      },
+    ];
+  }, [record?.client_id, navigate]);
 
   // Load employees for design_engineer lookup
   const { data: employeesData } = useList({
@@ -169,9 +192,29 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
 
         {/* Column 2: Client + Phone */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
-          <Text strong style={{ fontSize: 16, color: '#111827' }}>
-            {record?.client_name || '—'}
-          </Text>
+          {record?.client_id ? (
+            <Dropdown
+              menu={{ items: clientMenuItems }}
+              trigger={['contextMenu']}
+              open={clientMenuOpen}
+              onOpenChange={setClientMenuOpen}
+            >
+              <Text
+                strong
+                style={{
+                  fontSize: 16,
+                  color: '#111827',
+                  cursor: 'context-menu',
+                }}
+              >
+                {record?.client_name || '—'}
+              </Text>
+            </Dropdown>
+          ) : (
+            <Text strong style={{ fontSize: 16, color: '#111827' }}>
+              {record?.client_name || '—'}
+            </Text>
+          )}
           {primaryPhone && (
             <>
               <span style={{ margin: '0 16px', color: '#E5E7EB' }}>|</span>
