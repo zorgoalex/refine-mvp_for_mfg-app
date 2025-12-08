@@ -16,6 +16,7 @@ import { useOne } from '@refinedev/core';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { formatNumber, currencySmartFormatter, numberParser } from '../../../../utils/numberFormat';
+import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
 import {
   validateMaterialDimensions,
@@ -548,7 +549,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         }
         return (
           <Form.Item name="height" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber
+            <CurrencyInput
               autoFocus
               controls={false}
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }}
@@ -581,7 +582,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         }
         return (
           <Form.Item name="width" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber
+            <CurrencyInput
               controls={false}
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }}
               min={0}

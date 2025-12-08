@@ -2,7 +2,7 @@
 // Focus: hides ".00" for integers, shows empty for 0
 // Blur: shows ".00" and "0"
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { InputNumber, InputNumberProps } from 'antd';
 import { formatNumber, numberParser } from '../utils/numberFormat';
 
@@ -45,10 +45,23 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
   onBlur,
   value,
   onChange,
+  autoFocus,
   ...props
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [isFocused, setIsFocused] = useState(false);
+  // Initialize isFocused based on autoFocus prop
+  const [isFocused, setIsFocused] = useState(!!autoFocus);
+
+  // Handle autoFocus: format input immediately after mount
+  useLayoutEffect(() => {
+    if (autoFocus) {
+      const input = inputRef.current?.querySelector?.('input') || inputRef.current;
+      if (input && input instanceof HTMLInputElement) {
+        const numValue = typeof value === 'number' ? value : undefined;
+        input.value = formatFocused(numValue, precision);
+      }
+    }
+  }, []); // Only on mount
 
   // Update input display when focus changes
   useEffect(() => {
@@ -94,6 +107,7 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
     <InputNumber
       ref={inputRef}
       {...props}
+      autoFocus={autoFocus}
       value={value}
       onChange={onChange}
       precision={precision}
