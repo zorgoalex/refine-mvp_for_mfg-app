@@ -90,27 +90,33 @@ export const useOrderExport = (): UseOrderExportResult => {
 
       console.log('[useOrderExport] Full order loaded:', fullOrder);
 
-      // 1.1 Загрузить orders_view для получения design_engineer (computed field)
-      console.log('[useOrderExport] Fetching orders_view for design_engineer...');
-      const { data: orderView } = await dataProvider().getOne({
-        resource: 'orders_view',
-        id: order.order_id,
-      });
-
-      // Извлекаем design_engineer из view
-      const designEngineer = orderView?.design_engineer || '';
-      console.log('[useOrderExport] Design engineer:', designEngineer);
-
-      // Извлекаем первую присадку из order_doweling_links
+      // 1.1 Извлекаем первую присадку из order_doweling_links
       const dowelingLinks = fullOrder.order_doweling_links || [];
       const firstDoweling = dowelingLinks[0]?.doweling_order;
       const prisadkaName = firstDoweling?.doweling_order_name || '';
+      const designEngineerId = firstDoweling?.design_engineer_id;
       console.log('[useOrderExport] Prisadka name:', prisadkaName);
+      console.log('[useOrderExport] Design engineer ID:', designEngineerId);
+
+      // 1.2 Загрузить имя конструктора по design_engineer_id
+      let prisadkaDesignerName = '';
+      if (designEngineerId) {
+        try {
+          const { data: employee } = await dataProvider().getOne({
+            resource: 'employees',
+            id: designEngineerId,
+          });
+          prisadkaDesignerName = employee?.full_name || '';
+          console.log('[useOrderExport] Design engineer name:', prisadkaDesignerName);
+        } catch (err) {
+          console.warn('[useOrderExport] Failed to load design engineer:', err);
+        }
+      }
 
       // Добавляем данные для экспорта
       fullOrder._exportData = {
         prisadkaName,
-        prisadkaDesignerName: designEngineer,
+        prisadkaDesignerName,
       };
 
       // 2. Загрузить детали заказа

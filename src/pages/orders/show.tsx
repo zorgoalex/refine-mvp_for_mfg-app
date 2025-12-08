@@ -271,6 +271,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         clientName: record.client_name,
       });
 
+      // Получение данных присадки и конструктора для экспорта
+      const firstDoweling = dowelingLinks[0]?.doweling_order;
+      const prisadkaName = firstDoweling?.doweling_order_name || '';
+      const designEngineerId = firstDoweling?.design_engineer_id;
+      const prisadkaDesignerName = designEngineerId ? employeesMap.get(designEngineerId) || '' : '';
+
       // Генерация и скачивание Excel
       await downloadOrderExcel(
         {
@@ -282,6 +288,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             final_amount: record.final_amount,
             paid_amount: record.paid_amount,
             client: record.client_name ? { client_name: record.client_name } : null,
+            // Данные для экспорта присадки и конструктора
+            _exportData: {
+              prisadkaName,
+              prisadkaDesignerName,
+            },
           },
           details: details.map(detail => ({
             detail_id: detail.detail_id,
