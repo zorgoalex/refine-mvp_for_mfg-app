@@ -2,17 +2,17 @@
 // Contains: Total Amount, Discount, Discounted Amount, Paid Amount, Payment Date
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { Form, InputNumber, DatePicker, Row, Col, Button, Select, Switch } from 'antd';
+import { Form, InputNumber, DatePicker, Row, Col, Select, Switch } from 'antd';
 import { CalculatorOutlined, DownOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
-import { numberParser, currencySmartFormatter } from '../../../../utils/numberFormat';
+import { formatNumber, numberParser } from '../../../../utils/numberFormat';
+import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import dayjs from 'dayjs';
 
 export const OrderFinanceSection: React.FC = () => {
-  const { header, updateHeaderField, isTotalAmountManual, setTotalAmountManual, payments, details } =
-    useOrderFormStore();
+  const { header, updateHeaderField, payments, details } = useOrderFormStore();
 
   // FIX: Calculate totals directly from details/payments for proper reactivity
   // Previously used useShallow(selectTotals) which didn't react to details changes
@@ -54,17 +54,6 @@ export const OrderFinanceSection: React.FC = () => {
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
   });
-
-  const handleTotalAmountChange = (value: number | null) => {
-    if (!isTotalAmountManual) {
-      setTotalAmountManual(true);
-    }
-    updateHeaderField('total_amount', value ?? 0);
-  };
-
-  const handleRestoreAuto = () => {
-    setTotalAmountManual(false);
-  };
 
   const handlePaymentStatusChange = (value: number) => {
     updateHeaderField('payment_status_id', value);
@@ -216,36 +205,20 @@ export const OrderFinanceSection: React.FC = () => {
     >
       <Form layout="vertical" size="small">
         <Row gutter={8}>
-          {/* Общая сумма */}
+          {/* Общая сумма (read-only, авторасчёт из деталей) */}
           <Col span={3}>
             <Form.Item
-              label={
-                <span style={{ fontSize: 11 }}>
-                  Общая сумма ({CURRENCY_SYMBOL})
-                  {isTotalAmountManual && (
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={handleRestoreAuto}
-                      style={{ padding: '0 0 0 2px', height: 'auto', fontSize: 9 }}
-                      title="Вернуть авторасчет"
-                    >
-                      (авто)
-                    </Button>
-                  )}
-                </span>
-              }
+              label={<span style={{ fontSize: 11 }}>Сумма заказа ({CURRENCY_SYMBOL})</span>}
+              tooltip="Авторасчёт из деталей"
               style={{ marginBottom: 0 }}
             >
               <InputNumber
                 value={header.total_amount}
-                onChange={handleTotalAmountChange}
-                min={0}
+                readOnly
                 precision={2}
-                placeholder="0.00"
-                formatter={currencySmartFormatter}
+                formatter={(v) => formatNumber(v, 2)}
                 parser={numberParser}
-                style={{ width: '100%' }}
+                style={{ width: '100%', background: '#f5f5f5' }}
               />
             </Form.Item>
           </Col>
@@ -283,14 +256,10 @@ export const OrderFinanceSection: React.FC = () => {
               }
               style={{ marginBottom: 0 }}
             >
-              <InputNumber
+              <CurrencyInput
                 value={currentAdjustmentValue}
                 onChange={handleAdjustmentChange}
                 min={0}
-                precision={2}
-                placeholder="0.00"
-                formatter={currencySmartFormatter}
-                parser={numberParser}
                 style={{ width: '100%' }}
                 addonAfter={
                   <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -317,15 +286,11 @@ export const OrderFinanceSection: React.FC = () => {
               />
               {showPercentInput && (
                 <div style={{ marginTop: 4 }}>
-                  <InputNumber
+                  <CurrencyInput
                     value={percentValue}
                     onChange={handlePercentChange}
                     min={0}
                     max={100}
-                    precision={2}
-                    placeholder="%"
-                    formatter={currencySmartFormatter}
-                    parser={numberParser}
                     style={{ width: '100%' }}
                     addonAfter="%"
                     size="small"
@@ -345,14 +310,10 @@ export const OrderFinanceSection: React.FC = () => {
               }
               style={{ marginBottom: 0 }}
             >
-              <InputNumber
+              <CurrencyInput
                 value={header.final_amount}
                 onChange={handleFinalAmountChange}
                 min={0}
-                precision={2}
-                placeholder="0.00"
-                formatter={currencySmartFormatter}
-                parser={numberParser}
                 style={{ width: '100%' }}
               />
             </Form.Item>
@@ -369,8 +330,7 @@ export const OrderFinanceSection: React.FC = () => {
                 value={header.paid_amount}
                 readOnly
                 precision={2}
-                placeholder="0.00"
-                formatter={currencySmartFormatter}
+                formatter={(v) => formatNumber(v, 2)}
                 parser={numberParser}
                 style={{ width: '100%', background: '#f5f5f5' }}
               />
@@ -406,7 +366,7 @@ export const OrderFinanceSection: React.FC = () => {
                   value={remainingAmount}
                   readOnly
                   precision={2}
-                  formatter={currencySmartFormatter}
+                  formatter={(v) => formatNumber(v, 2)}
                   parser={numberParser}
                   style={{
                     width: '100%',
