@@ -38,6 +38,7 @@
     "react-dnd-html5-backend": "^16.0.1",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.65.0",
+    "react-number-format": "^5.4.4",
     "react-to-print": "^3.2.0",
     "zod": "^4.1.12",
     "zustand": "^5.0.8"

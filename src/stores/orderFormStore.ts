@@ -42,6 +42,8 @@ import {
     isPaymentStatusManual: boolean;
     isDetailEditing: boolean;
     isPaymentEditing: boolean;
+    isFinalAmountEditing: boolean;
+    financeValidationError: string | null;
 
     // Original header values loaded from server (for change detection after recalculations)
     originalHeader: Partial<Order>;
@@ -99,6 +101,8 @@ import {
     setPaymentStatusManual: (isManual: boolean) => void;
     setDetailEditing: (isEditing: boolean) => void;
     setPaymentEditing: (isEditing: boolean) => void;
+    setFinalAmountEditing: (isEditing: boolean) => void;
+    setFinanceValidationError: (error: string | null) => void;
 }
 
 // ============================================================================
@@ -126,6 +130,8 @@ import {
     isPaymentStatusManual: false,
     isDetailEditing: false,
     isPaymentEditing: false,
+    isFinalAmountEditing: false,
+    financeValidationError: null,
     originalHeader: {},
     originalDetails: {},
     originalPayments: {},
@@ -690,6 +696,24 @@ export const useOrderFormStore = create<OrderFormState>()(
             }),
             false,
             'setPaymentEditing'
+          ),
+
+        setFinalAmountEditing: (isEditing) =>
+          set(
+            () => ({
+              isFinalAmountEditing: isEditing,
+            }),
+            false,
+            'setFinalAmountEditing'
+          ),
+
+        setFinanceValidationError: (error) =>
+          set(
+            () => ({
+              financeValidationError: error,
+            }),
+            false,
+            'setFinanceValidationError'
           ),
       }),
       {

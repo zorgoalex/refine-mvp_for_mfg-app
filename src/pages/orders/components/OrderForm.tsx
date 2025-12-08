@@ -51,6 +51,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     isDirty,
     isDetailEditing,
     isPaymentEditing,
+    isFinalAmountEditing,
+    financeValidationError,
+    setFinanceValidationError,
+    setFinalAmountEditing,
     reset,
     loadOrder,
     getFormValues,
@@ -344,36 +348,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     updateHeaderField,
   ]);
 
-  // Auto-recalculate final_amount when total_amount, discount or surcharge changes
-  // This useEffect is in OrderForm (always mounted) to ensure recalculation
-  // happens regardless of which tab is active
-  useEffect(() => {
-    if (orderLoading || detailsLoading) {
-      return;
-    }
-
-    const totalAmount = header.total_amount || 0;
-    const discount = header.discount || 0;
-    const surcharge = header.surcharge || 0;
-    // discount/surcharge are absolute amounts, not percent
-    // Only one can be active at a time (mutually exclusive)
-    const expectedFinalAmount = surcharge > 0
-      ? Number((totalAmount + surcharge).toFixed(2))
-      : Math.max(0, Number((totalAmount - discount).toFixed(2)));
-
-    // Only update if changed (avoid infinite loops)
-    if (header.final_amount !== expectedFinalAmount) {
-      updateHeaderField('final_amount', expectedFinalAmount);
-    }
-  }, [
-    header.total_amount,
-    header.discount,
-    header.surcharge,
-    header.final_amount,
-    orderLoading,
-    detailsLoading,
-    updateHeaderField,
-  ]);
+  // NOTE: final_amount recalculation is now handled directly in:
+  // - handleAdjustmentChange (when discount/surcharge changes)
+  // - handleFinalAmountChange (when final_amount changes)
+  // This avoids conflicts and circular dependencies.
 
   // Auto-recalculate paid_amount from payments
   useEffect(() => {
@@ -434,6 +412,45 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     console.log('[OrderForm] ========== handleSave STARTED ==========');
     console.log('[OrderForm] handleSave - mode:', mode);
     console.log('[OrderForm] handleSave - orderId:', orderId);
+
+    // Validate finance fields before saving
+    const totalAmount = header.total_amount || 0;
+    const finalAmount = header.final_amount || 0;
+    const surcharge = header.surcharge || 0;
+    const discount = header.discount || 0;
+
+    // Determine mode based on which value is set
+    const isInSurchargeMode = surcharge > 0 || (surcharge === 0 && discount === 0 && finalAmount > totalAmount);
+
+    if (isInSurchargeMode) {
+      // Surcharge mode: final_amount must be >= total_amount
+      if (finalAmount < totalAmount) {
+        setFinanceValidationError('Финальная сумма не может быть меньше суммы заказа в режиме наценки');
+        setFinalAmountEditing(true); // Keep editing to prevent auto-recalc
+        notification.warning({
+          message: 'Ошибка валидации',
+          description: 'Финальная сумма не может быть меньше суммы заказа в режиме наценки',
+        });
+        return;
+      }
+    } else {
+      // Discount mode: final_amount must be <= total_amount
+      if (finalAmount > totalAmount) {
+        setFinanceValidationError('Финальная сумма не может быть больше суммы заказа в режиме скидки');
+        setFinalAmountEditing(true); // Keep editing to prevent auto-recalc
+        notification.warning({
+          message: 'Ошибка валидации',
+          description: 'Финальная сумма не может быть больше суммы заказа в режиме скидки',
+        });
+        return;
+      }
+    }
+
+    // Clear any existing finance validation error
+    if (financeValidationError) {
+      setFinanceValidationError(null);
+      setFinalAmountEditing(false);
+    }
 
     // Apply current edits from detail table before saving
     if (detailsTabRef.current) {
@@ -911,7 +928,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             icon={<SaveOutlined />}
             onClick={handleSave}
             loading={isSaving}
-            disabled={!isDirty && !isDetailEditing && !isPaymentEditing}
+            disabled={(!isDirty && !isDetailEditing && !isPaymentEditing) || !!financeValidationError}
+            title={financeValidationError ? 'Исправьте ошибки валидации перед сохранением' : undefined}
             style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
           >
             Сохранить
