@@ -139,18 +139,24 @@ export const OrderFinanceSection: React.FC = () => {
     updateHeaderField('final_amount', finalAmount);
 
     const totalAmount = header.total_amount || 0;
-    const difference = Math.abs(totalAmount - finalAmount);
 
-    if (adjustmentMode === 'discount') {
-      // final_amount < total_amount means discount
-      const discount = Math.max(0, totalAmount - finalAmount);
+    // Автоматическое переключение режима на основе соотношения сумм
+    if (finalAmount > totalAmount) {
+      // Финальная сумма увеличилась → автоматически переключаем на наценку
+      setAdjustmentMode('surcharge');
+      const surcharge = finalAmount - totalAmount;
+      updateHeaderField('surcharge', Number(surcharge.toFixed(2)));
+      updateHeaderField('discount', 0);
+    } else if (finalAmount < totalAmount) {
+      // Финальная сумма уменьшилась → автоматически переключаем на скидку
+      setAdjustmentMode('discount');
+      const discount = totalAmount - finalAmount;
       updateHeaderField('discount', Number(discount.toFixed(2)));
       updateHeaderField('surcharge', 0);
     } else {
-      // final_amount > total_amount means surcharge
-      const surcharge = Math.max(0, finalAmount - totalAmount);
-      updateHeaderField('surcharge', Number(surcharge.toFixed(2)));
+      // Финальная сумма равна общей → обнуляем коррекцию
       updateHeaderField('discount', 0);
+      updateHeaderField('surcharge', 0);
     }
   };
 
