@@ -255,7 +255,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
               const discountPercent = totalAmount > 0 ? (discount / totalAmount) * 100 : 0;
               items.push(
                 <span key="discount" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#cf1322', fontWeight: 600 }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', fontWeight: 400, letterSpacing: '0.5px', fontVariant: 'small-caps' }}>
                     Скидка {formatNumber(discountPercent, 1)}%:
                   </Text>
                   <Text style={{ fontSize: 12, fontStyle: 'italic', color: '#cf1322', fontWeight: 600 }}>
@@ -265,17 +265,24 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
               );
             }
 
-            // Наценка (если > 0)
+            // Наценка (если > 0) - показываем как двойную голубую линию-индикатор
             if (surcharge > 0) {
-              const surchargePercent = totalAmount > 0 ? (surcharge / totalAmount) * 100 : 0;
               items.push(
-                <span key="surcharge" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
-                    Наценка {formatNumber(surchargePercent, 1)}%:
-                  </Text>
-                  <Text style={{ fontSize: 12, fontStyle: 'italic', color: '#111827', fontWeight: 400 }}>
-                    +{formatNumber(surcharge, 2)} {CURRENCY_SYMBOL}
-                  </Text>
+                <span
+                  key="surcharge"
+                  title={`Наценка: +${formatNumber(surcharge, 2)} ${CURRENCY_SYMBOL}`}
+                  style={{
+                    display: 'inline-flex',
+                    flexDirection: 'column',
+                    justifyContent: 'flex-end',
+                    alignItems: 'center',
+                    width: 40,
+                    height: 28,
+                    paddingBottom: 2,
+                  }}
+                >
+                  <div style={{ width: '100%', height: 2, background: '#1890ff', marginBottom: 3 }} />
+                  <div style={{ width: '100%', height: 2, background: '#1890ff' }} />
                 </span>
               );
             }
@@ -284,7 +291,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
             if (paidAmount > 0) {
               items.push(
                 <span key="paid" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#52c41a' }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', letterSpacing: '0.5px', fontVariant: 'small-caps' }}>
                     Оплачено:
                   </Text>
                   <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#52c41a' }}>
@@ -298,7 +305,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
             if (remainingAmount > 0) {
               items.push(
                 <span key="remaining" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#D97706' }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', letterSpacing: '0.5px', fontVariant: 'small-caps' }}>
                     Остаток оплаты:
                   </Text>
                   <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#D97706' }}>

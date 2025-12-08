@@ -9,10 +9,15 @@ import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber, numberParser } from '../../../../utils/numberFormat';
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
+import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import dayjs from 'dayjs';
 
 export const OrderFinanceSection: React.FC = () => {
   const { header, updateHeaderField, payments, details } = useOrderFormStore();
+  const { getSetting } = useAppSettings();
+
+  // Get minimum order amount from settings
+  const minOrderAmount = getSetting<number>(SETTING_KEYS.ORDERS_MIN_TOTAL_AMOUNT) || 0;
 
   // FIX: Calculate totals directly from details/payments for proper reactivity
   // Previously used useShallow(selectTotals) which didn't react to details changes
@@ -305,7 +310,7 @@ export const OrderFinanceSection: React.FC = () => {
             <Form.Item
               label={
                 <span style={{ fontSize: 11 }}>
-                  {adjustmentMode === 'discount' ? 'Сумма со скидкой' : 'Сумма с наценкой'} ({CURRENCY_SYMBOL})
+                  Финальная сумма ({CURRENCY_SYMBOL})
                 </span>
               }
               style={{ marginBottom: 0 }}
@@ -315,6 +320,69 @@ export const OrderFinanceSection: React.FC = () => {
                 onChange={handleFinalAmountChange}
                 min={0}
                 style={{ width: '100%' }}
+                onContextMenu={(e) => {
+                  if (minOrderAmount > 0) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    // Remove any existing context menus
+                    const existingMenus = document.querySelectorAll('.final-amount-context-menu');
+                    existingMenus.forEach(menu => menu.remove());
+
+                    // Create context menu
+                    const menu = document.createElement('div');
+                    menu.className = 'ant-dropdown final-amount-context-menu';
+                    menu.style.position = 'fixed';
+                    menu.style.left = `${e.clientX}px`;
+                    menu.style.top = `${e.clientY}px`;
+                    menu.style.zIndex = '9999';
+
+                    const menuContent = `
+                      <ul class="ant-dropdown-menu" style="background: white; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;">
+                        <li class="ant-dropdown-menu-item" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                          <span style="color: #1890ff; font-weight: 500;">
+                            Мин. сумма заказа: ${formatNumber(minOrderAmount, 2)} ${CURRENCY_SYMBOL}
+                          </span>
+                        </li>
+                      </ul>
+                    `;
+                    menu.innerHTML = menuContent;
+                    document.body.appendChild(menu);
+
+                    const menuItem = menu.querySelector('.ant-dropdown-menu-item');
+                    menuItem?.addEventListener('click', () => {
+                      handleFinalAmountChange(minOrderAmount);
+                      menu.remove();
+                    });
+
+                    menuItem?.addEventListener('mouseenter', () => {
+                      (menuItem as HTMLElement).style.backgroundColor = '#e6f7ff';
+                    });
+
+                    menuItem?.addEventListener('mouseleave', () => {
+                      (menuItem as HTMLElement).style.backgroundColor = 'white';
+                    });
+
+                    const closeMenu = (event: MouseEvent) => {
+                      if (!menu.contains(event.target as Node)) {
+                        menu.remove();
+                        document.removeEventListener('click', closeMenu);
+                        document.removeEventListener('contextmenu', closeMenuOnContext);
+                      }
+                    };
+
+                    const closeMenuOnContext = () => {
+                      menu.remove();
+                      document.removeEventListener('click', closeMenu);
+                      document.removeEventListener('contextmenu', closeMenuOnContext);
+                    };
+
+                    setTimeout(() => {
+                      document.addEventListener('click', closeMenu);
+                      document.addEventListener('contextmenu', closeMenuOnContext);
+                    }, 0);
+                  }
+                }}
               />
             </Form.Item>
           </Col>
