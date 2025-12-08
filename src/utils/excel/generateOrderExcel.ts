@@ -30,6 +30,11 @@ interface Order {
   final_amount?: number | null;
   paid_amount?: number | null;
   client?: { client_name: string } | null;
+  // Данные для экспорта (присадка и конструктор)
+  _exportData?: {
+    prisadkaName?: string;
+    prisadkaDesignerName?: string;
+  };
 }
 
 export interface GenerateOrderExcelParams {
@@ -87,8 +92,12 @@ export const buildOrderExcelBuffer = async ({
 
     worksheet.getCell('A1').value = yearLastTwoDigits; // Последние 2 цифры года (25)
     worksheet.getCell('C1').value = order.order_name; // Название заказа (Заказ)
+    worksheet.getCell('D2').value = order._exportData?.prisadkaName || ''; // Номер присадки
     worksheet.getCell('E2').value = client?.client_name || order.client?.client_name || 'Не указан'; // Заказчик
     worksheet.getCell('C8').value = formatDate(order.order_date); // Дата заказа (07.01.2025)
+    // Конструктор присадки (с префиксом "конструктор ")
+    const designEngineer = order._exportData?.prisadkaDesignerName;
+    worksheet.getCell('F8').value = designEngineer ? `конструктор ${designEngineer}` : '';
     worksheet.getCell('H8').value = clientPhone || ''; // Телефон клиента
 
     // 4.1. Заполнить дополнительные поля (defaults для деталей)
