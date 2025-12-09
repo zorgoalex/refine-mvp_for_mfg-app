@@ -269,13 +269,11 @@ export const OrderHeaderSummary: React.FC = () => {
           )}
         </div>
 
-        {/* Column 3: Discounted amount + discount % + Payment status */}
+        {/* Column 3: Final amount + discount % + Payment status */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-          {(header.final_amount != null && Number(header.final_amount) > 0 && Math.abs(Number(header.final_amount) - Number(header.total_amount || 0)) > 0.01) && (
-            <Text strong style={{ fontSize: 15, color: '#4F46E5' }}>
-              {formatNumber(header.final_amount, 2)} {CURRENCY_SYMBOL}
-            </Text>
-          )}
+          <Text strong style={{ fontSize: 15, color: '#4F46E5' }}>
+            {formatNumber(header.final_amount || header.total_amount || 0, 2)} {CURRENCY_SYMBOL}
+          </Text>
           {(header.discount != null && Number(header.discount) > 0) && (() => {
             // Calculate discount percent from absolute discount amount
             const totalAmount = Number(header.total_amount) || 0;

@@ -303,7 +303,12 @@ export const useOrderSave = (): UseOrderSaveResult => {
           return sum + (detail.quantity || 0);
         }, 0);
 
-        console.log('[useOrderSave] Calculated totals - total_amount:', totalAmount, ', total_area:', totalArea, ', parts_count:', partsCount);
+        // Calculate final_amount: total_amount - discount + surcharge
+        const discount = values.header.discount || 0;
+        const surcharge = values.header.surcharge || 0;
+        const finalAmount = totalAmount - discount + surcharge;
+
+        console.log('[useOrderSave] Calculated totals - total_amount:', totalAmount, ', total_area:', totalArea, ', parts_count:', partsCount, ', final_amount:', finalAmount);
 
         // Update order with calculated totals
         await dataProvider().update({
@@ -313,12 +318,18 @@ export const useOrderSave = (): UseOrderSaveResult => {
             total_amount: totalAmount,
             total_area: totalArea,
             parts_count: partsCount,
+            final_amount: finalAmount,
           },
         });
 
         console.log('[useOrderSave] Order totals updated successfully');
       } else {
         console.log('[useOrderSave] No details found, setting totals to 0');
+        // Calculate final_amount even with 0 total: 0 - discount + surcharge
+        const discount = values.header.discount || 0;
+        const surcharge = values.header.surcharge || 0;
+        const finalAmount = 0 - discount + surcharge;
+
         await dataProvider().update({
           resource: 'orders',
           id: createdOrderId,
@@ -326,6 +337,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
             total_amount: 0,
             total_area: 0,
             parts_count: 0,
+            final_amount: finalAmount,
           },
         });
       }

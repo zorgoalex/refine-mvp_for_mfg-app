@@ -86,6 +86,7 @@ import {
 
   // ========== COMPUTED ==========
   calculatedTotals: () => OrderTotals;
+  recalculateFinancials: () => void; // Recalculate total_amount and final_amount from details
 
   // ========== UTILITY ==========
   reset: () => void;
@@ -168,7 +169,7 @@ export const useOrderFormStore = create<OrderFormState>()(
           ),
 
         // ========== DETAILS ACTIONS ==========
-        addDetail: (detail) =>
+        addDetail: (detail) => {
           set(
             (state) => {
               // Calculate max detail_number
@@ -193,9 +194,12 @@ export const useOrderFormStore = create<OrderFormState>()(
             },
             false,
             'addDetail'
-          ),
+          );
+          // Recalculate financials after detail add
+          get().recalculateFinancials();
+        },
 
-        insertDetailAfter: (afterTempId, detail) =>
+        insertDetailAfter: (afterTempId, detail) => {
           set(
             (state) => {
               // Find the detail to insert after
@@ -232,9 +236,12 @@ export const useOrderFormStore = create<OrderFormState>()(
             },
             false,
             'insertDetailAfter'
-          ),
+          );
+          // Recalculate financials after detail insert
+          get().recalculateFinancials();
+        },
 
-        updateDetail: (tempId, data) =>
+        updateDetail: (tempId, data) => {
           set(
             (state) => ({
               details: state.details.map((d) =>
@@ -244,9 +251,12 @@ export const useOrderFormStore = create<OrderFormState>()(
             }),
             false,
             'updateDetail'
-          ),
+          );
+          // Recalculate financials after detail update
+          get().recalculateFinancials();
+        },
 
-        deleteDetail: (tempId, detailId) =>
+        deleteDetail: (tempId, detailId) => {
           set(
             (state) => ({
               details: state.details.filter(
@@ -259,7 +269,10 @@ export const useOrderFormStore = create<OrderFormState>()(
             }),
             false,
             'deleteDetail'
-          ),
+          );
+          // Recalculate financials after detail delete
+          get().recalculateFinancials();
+        },
 
         reorderDetails: () =>
           set(
@@ -468,6 +481,32 @@ export const useOrderFormStore = create<OrderFormState>()(
             total_amount: state.details.reduce((sum, d) => sum + (d.detail_cost || 0), 0), // Сумма всех detail_cost
           };
         },
+
+        // Recalculate total_amount and final_amount from details in real-time
+        // Note: Must update final_amount synchronously here, not via useEffect,
+        // because validation happens before useEffect can run
+        recalculateFinancials: () =>
+          set(
+            (state) => {
+              const totalAmount = state.details.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
+              const discount = state.header.discount || 0;
+              const surcharge = state.header.surcharge || 0;
+              // Formula: final_amount = total_amount - discount + surcharge
+              const finalAmount = surcharge > 0
+                ? Number((totalAmount + surcharge).toFixed(2))
+                : Math.max(0, Number((totalAmount - discount).toFixed(2)));
+
+              return {
+                header: {
+                  ...state.header,
+                  total_amount: totalAmount,
+                  final_amount: finalAmount,
+                },
+              };
+            },
+            false,
+            'recalculateFinancials'
+          ),
 
         // ========== UTILITY ==========
         reset: () => set(initialState, false, 'reset'),
