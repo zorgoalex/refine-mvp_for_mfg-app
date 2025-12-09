@@ -61,12 +61,14 @@ import {
   addDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
   insertDetailAfter: (afterTempId: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   updateDetail: (tempId: number, data: Partial<OrderDetail>) => void;
+  updateDetailId: (tempId: number, detailId: number) => void; // Update detail_id after DB create
   deleteDetail: (tempId: number, detailId?: number) => void;
   reorderDetails: () => void; // Renumber detail_number
 
   // ========== ACTIONS: PAYMENTS ==========
   addPayment: (payment: Omit<Payment, 'temp_id'>) => void;
   updatePayment: (tempId: number, data: Partial<Payment>) => void;
+  updatePaymentId: (tempId: number, paymentId: number) => void; // Update payment_id after DB create
   deletePayment: (tempId: number, paymentId?: number) => void;
 
   // ========== ACTIONS: WORKSHOPS ==========
@@ -256,6 +258,18 @@ export const useOrderFormStore = create<OrderFormState>()(
           get().recalculateFinancials();
         },
 
+        // Update detail_id after successful DB create (to prevent duplicates on next save)
+        updateDetailId: (tempId, detailId) =>
+          set(
+            (state) => ({
+              details: state.details.map((d) =>
+                d.temp_id === tempId ? { ...d, detail_id: detailId } : d
+              ),
+            }),
+            false,
+            'updateDetailId'
+          ),
+
         deleteDetail: (tempId, detailId) => {
           set(
             (state) => ({
@@ -314,6 +328,18 @@ export const useOrderFormStore = create<OrderFormState>()(
             }),
             false,
             'updatePayment'
+          ),
+
+        // Update payment_id after successful DB create (to prevent duplicates on next save)
+        updatePaymentId: (tempId, paymentId) =>
+          set(
+            (state) => ({
+              payments: state.payments.map((p) =>
+                p.temp_id === tempId ? { ...p, payment_id: paymentId } : p
+              ),
+            }),
+            false,
+            'updatePaymentId'
           ),
 
         deletePayment: (tempId, paymentId) =>

@@ -224,6 +224,9 @@ export const useOrderSave = (): UseOrderSaveResult => {
           ...normalizeDetail(detail),
           order_id: createdOrderId,
         });
+        // Track new details that need detail_id update after create
+        const newDetailsToCreate: Array<{ tempId: number; promise: Promise<any> }> = [];
+
         const detailPromises = normalizedDetails.map((detail) => {
           if (detail.detail_id) {
             // Update only if changed
@@ -244,19 +247,31 @@ export const useOrderSave = (): UseOrderSaveResult => {
             });
           } else {
             // Create new detail - exclude temp_id, detail_id and all audit/system fields
-            // console.log('[useOrderSave] CREATE detail - original:', detail);
-            // console.log('[useOrderSave] CREATE detail - excluded fields:', { temp_id, detail_id, created_at, updated_at, created_by, edited_by, version });
-            // console.log('[useOrderSave] CREATE detail - cleaned data:', detailData);
             const createVariables = buildDetailPayload(detail);
-            // console.log('[useOrderSave] CREATE detail - final variables:', createVariables);
-            return dataProvider().create({
+            const createPromise = dataProvider().create({
               resource: 'order_details',
               variables: createVariables,
             });
+            // Track this detail for ID update
+            newDetailsToCreate.push({ tempId: detail.temp_id, promise: createPromise });
+            return createPromise;
           }
         });
 
         await Promise.all(detailPromises);
+
+        // Update detail_id in store for newly created details (prevents duplicates on next save)
+        for (const { tempId, promise } of newDetailsToCreate) {
+          try {
+            const result = await promise;
+            if (result?.data?.detail_id) {
+              useOrderFormStore.getState().updateDetailId(tempId, result.data.detail_id);
+              console.log(`[useOrderSave] Updated detail_id in store: temp_id=${tempId} -> detail_id=${result.data.detail_id}`);
+            }
+          } catch (e) {
+            // Ignore - detail creation might have failed
+          }
+        }
       }
 
       // ========== STEP 3: Delete removed details ==========
@@ -349,6 +364,9 @@ export const useOrderSave = (): UseOrderSaveResult => {
           const { payment_id, order_id, temp_id, created_at, updated_at, created_by, edited_by, ...rest } = p || {};
           return rest;
         };
+        // Track new payments that need payment_id update after create
+        const newPaymentsToCreate: Array<{ tempId: number; promise: Promise<any> }> = [];
+
         const paymentPromises = values.payments.map((payment) => {
           if (payment.payment_id) {
             // Update only if changed
@@ -370,17 +388,33 @@ export const useOrderSave = (): UseOrderSaveResult => {
           } else {
             // Create new payment - exclude temp_id, payment_id and all audit/system fields
             const { temp_id, payment_id, created_at, updated_at, created_by, edited_by, ...paymentData } = payment;
-            return dataProvider().create({
+            const createPromise = dataProvider().create({
               resource: 'payments',
               variables: {
                 ...paymentData,
                 order_id: createdOrderId,
               },
             });
+            // Track this payment for ID update
+            newPaymentsToCreate.push({ tempId: payment.temp_id, promise: createPromise });
+            return createPromise;
           }
         });
 
         await Promise.all(paymentPromises);
+
+        // Update payment_id in store for newly created payments (prevents duplicates on next save)
+        for (const { tempId, promise } of newPaymentsToCreate) {
+          try {
+            const result = await promise;
+            if (result?.data?.payment_id) {
+              useOrderFormStore.getState().updatePaymentId(tempId, result.data.payment_id);
+              console.log(`[useOrderSave] Updated payment_id in store: temp_id=${tempId} -> payment_id=${result.data.payment_id}`);
+            }
+          } catch (e) {
+            // Ignore - payment creation might have failed
+          }
+        }
       }
 
       // ========== STEP 5: Delete removed payments ==========

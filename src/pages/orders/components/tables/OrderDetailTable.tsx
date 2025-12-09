@@ -71,6 +71,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     [details]
   );
 
+  // Calculate totals for summary row (updates in real-time)
+  const totals = useMemo(() => {
+    return {
+      quantity: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
+      area: details.reduce((sum, d) => sum + (d.area || 0), 0),
+      detail_cost: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
+    };
+  }, [details]);
+
   const [form] = Form.useForm();
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
   const [currentFilmId, setCurrentFilmId] = useState<number | null>(null);
@@ -1053,6 +1062,52 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         size="small"
         bordered
         rowClassName={(_, index) => (index % 2 === 0 ? '' : '')}
+        summary={() => (
+          <Table.Summary fixed="bottom">
+            <Table.Summary.Row style={{ backgroundColor: '#fafafa', fontWeight: 'bold' }}>
+              {/* Checkbox column */}
+              <Table.Summary.Cell index={0} />
+              {/* № */}
+              <Table.Summary.Cell index={1} />
+              {/* Высота */}
+              <Table.Summary.Cell index={2} />
+              {/* Ширина */}
+              <Table.Summary.Cell index={3} />
+              {/* Кол-во */}
+              <Table.Summary.Cell index={4} align="right">
+                <span style={{ color: '#1890ff' }}>{formatNumber(totals.quantity, 0)}</span>
+              </Table.Summary.Cell>
+              {/* Площадь */}
+              <Table.Summary.Cell index={5} align="right">
+                <span style={{ color: '#1890ff' }}>{formatNumber(totals.area, 2)} м²</span>
+              </Table.Summary.Cell>
+              {/* Фрезеровка */}
+              <Table.Summary.Cell index={6} />
+              {/* Обкат */}
+              <Table.Summary.Cell index={7} />
+              {/* Материал */}
+              <Table.Summary.Cell index={8} />
+              {/* Примечание */}
+              <Table.Summary.Cell index={9} />
+              {/* Цена за кв.м. */}
+              <Table.Summary.Cell index={10} />
+              {/* Сумма */}
+              <Table.Summary.Cell index={11} align="right">
+                <span style={{ color: '#52c41a', fontSize: '13px' }}>{formatNumber(totals.detail_cost, 2)}</span>
+              </Table.Summary.Cell>
+              {/* Пленка */}
+              <Table.Summary.Cell index={12} />
+              {/* Пр-т */}
+              <Table.Summary.Cell index={13} />
+              {/* Статус */}
+              <Table.Summary.Cell index={14} />
+              {/* detail_name */}
+              <Table.Summary.Cell index={15} />
+              {/* Действия */}
+              <Table.Summary.Cell index={16} />
+            </Table.Summary.Row>
+          </Table.Summary>
+        )}
         onRow={(record, index) => {
           const rowKey = record.temp_id || record.detail_id || 0;
           const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
