@@ -68,7 +68,8 @@
 }
 
 /* Highlighted row animation after create/edit */
-.highlighted-row {
+.highlighted-row,
+.highlighted-row > td {
   background-color: #ffd666 !important;
   animation: fadeHighlight 2s ease-out;
 }
