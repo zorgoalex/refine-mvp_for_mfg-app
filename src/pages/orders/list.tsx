@@ -13,7 +13,7 @@ import {
   CreateButton,
   useSelect,
 } from "@refinedev/antd";
-import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography } from "antd";
+import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox } from "antd";
 import {
   EyeOutlined,
   EditOutlined,
@@ -42,8 +42,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [form] = Form.useForm();
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [showResultCount, setShowResultCount] = useState(false);
+  const [showMyOrders, setShowMyOrders] = useState(false);
 
-  const { tableProps, current, pageSize, setCurrent, sorters, setSorters, setFilters } = useTable({
+  // Получаем текущего пользователя для фильтра "Мои заказы"
+  const currentUser = authStorage.getUser();
+
+  const { tableProps, current, pageSize, setCurrent, sorters, setSorters, filters, setFilters } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [
@@ -58,6 +62,16 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   });
 
   const { show } = useNavigation();
+
+  // Синхронизация состояния чекбокса "Мои заказы" с фильтрами из URL при загрузке
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    const createdByFilter = (filters || []).find((f: any) => f.field === "created_by");
+    const isMyOrdersFilter = createdByFilter && Number(createdByFilter.value) === Number(currentUser.id);
+
+    setShowMyOrders(!!isMyOrdersFilter);
+  }, [filters, currentUser?.id]);
 
   // Автоскролл к найденной строке после загрузки данных
   useEffect(() => {
@@ -283,8 +297,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       newFilters.push({ field: "client_id", operator: "eq", value: values.client_id });
     }
 
+    // Если выбрано "created_by" в расширенных фильтрах - используем его
+    // Иначе сохраняем фильтр "Мои заказы" если он активен
     if (hasValue(values.created_by)) {
       newFilters.push({ field: "created_by", operator: "eq", value: values.created_by });
+      // Сбрасываем чекбокс если выбран другой пользователь
+      if (Number(values.created_by) !== Number(currentUser?.id)) {
+        setShowMyOrders(false);
+      }
+    } else if (showMyOrders && currentUser?.id) {
+      // Сохраняем быстрый фильтр "Мои заказы"
+      newFilters.push({ field: "created_by", operator: "eq", value: Number(currentUser.id) });
     }
 
     if (hasValue(values.order_status_name)) {
@@ -326,7 +349,26 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     setFilters([], "replace");
     setCurrent(1); // Сброс на первую страницу
     setShowResultCount(false);
+    setShowMyOrders(false); // Также сбрасываем быстрый фильтр
   };
+
+  // Обработчик переключения фильтра "Мои заказы"
+  const handleMyOrdersToggle = useCallback((checked: boolean) => {
+    setShowMyOrders(checked);
+    if (checked && currentUser?.id) {
+      // Добавляем фильтр по текущему пользователю
+      const newFilters = [
+        ...(filters || []).filter((f: any) => f.field !== "created_by"),
+        { field: "created_by", operator: "eq", value: Number(currentUser.id) },
+      ];
+      setFilters(newFilters, "replace");
+    } else {
+      // Убираем фильтр по created_by, сохраняя остальные
+      const newFilters = (filters || []).filter((f: any) => f.field !== "created_by");
+      setFilters(newFilters, "replace");
+    }
+    setCurrent(1); // Сброс на первую страницу
+  }, [currentUser?.id, filters, setFilters, setCurrent]);
 
   // Количество записей
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
@@ -591,6 +633,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 Найти
               </Button>
             </Space.Compact>
+            {/* Быстрый фильтр "Мои заказы" */}
+            <Checkbox
+              checked={showMyOrders}
+              onChange={(e) => handleMyOrdersToggle(e.target.checked)}
+              style={{ marginRight: 8 }}
+            >
+              Мои заказы
+            </Checkbox>
             <Button
               type={filtersVisible ? "primary" : "default"}
               icon={<FilterOutlined />}
