@@ -926,8 +926,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         </Space>
       }
     >
-      {/* Read-only header with order summary (only in edit mode) */}
-      {mode === 'edit' && <OrderHeaderSummary />}
+      {/* Read-only header with order summary (both create and edit modes) */}
+      <OrderHeaderSummary />
 
       {/* Editable tabs */}
       <Tabs
