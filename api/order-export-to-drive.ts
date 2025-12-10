@@ -20,6 +20,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
  *   - orderYear: number
  *   - orderMonth: number
  *   - items: Array<{height, width, quantity, itemType, edge, note, price, film}>
+ *   - payments: Array<{paymentType, paymentDate, amount}> - Платежи по заказу
  *
  * Response:
  *   - success: boolean
@@ -91,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('[order-export-to-drive] Order ID:', orderData.orderId);
     console.log('[order-export-to-drive] Order Name:', orderData.orderName);
     console.log('[order-export-to-drive] Items count:', orderData.items?.length || 0);
+    console.log('[order-export-to-drive] Payments count:', orderData.payments?.length || 0);
     console.log('[order-export-to-drive] Payload size:', payloadSize, 'bytes');
     console.log('[order-export-to-drive] GAS URL:', gasUrl.substring(0, 50) + '...');
     console.log('[order-export-to-drive] Payload summary:', {
@@ -99,6 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       clientName: orderData.clientName,
       orderDate: orderData.orderDate,
       itemsCount: orderData.items?.length,
+      paymentsCount: orderData.payments?.length,
       millingSummary: orderData.millingSummary,
       materialSummary: orderData.materialSummary,
     });

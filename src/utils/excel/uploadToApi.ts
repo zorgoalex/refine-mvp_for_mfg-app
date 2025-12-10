@@ -47,7 +47,7 @@ export async function uploadOrderExcelToApi(
   error?: string;
 }> {
   try {
-    const { order, details, client, clientPhone } = params;
+    const { order, details, payments = [], client, clientPhone } = params;
 
     // Парсинг даты заказа
     const orderDate = typeof order.order_date === 'string'
@@ -80,6 +80,13 @@ export async function uploadOrderExcelToApi(
     const prisadkaName = exportData.prisadkaName || '';
     const prisadkaDesignerName = exportData.prisadkaDesignerName || '';
 
+    // Формирование массива платежей (отсортированы по дате по возрастанию)
+    const paymentItems = payments.map((payment: any) => ({
+      paymentType: payment.payment_type?.payment_type_name || '',
+      paymentDate: payment.payment_date || '',
+      amount: payment.amount || 0,
+    }));
+
     // Формирование JSON для отправки на Vercel API (без apiKey - добавится на сервере)
     const orderPayload = {
       orderName: order.order_name || '',
@@ -96,6 +103,7 @@ export async function uploadOrderExcelToApi(
       orderYear,
       orderMonth,
       items,
+      payments: paymentItems, // Платежи: тип, дата, сумма
     };
 
     console.log('[uploadToApi] Sending to Vercel API: /api/order-export-to-drive');

@@ -108,6 +108,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     pagination: { pageSize: 10000 },
   });
 
+  const { data: paymentTypesData } = useList({
+    resource: "payment_types",
+    pagination: { pageSize: 1000 },
+  });
+
   // Загрузка телефонов клиента для экспорта
   const { data: clientPhonesData } = useList({
     resource: "client_phones",
@@ -150,6 +155,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const materialsMap = new Map(
     (materialsData?.data || []).map((item: any) => [item.material_id, item.material_name])
   );
+  const paymentTypesMap = new Map(
+    (paymentTypesData?.data || []).map((item: any) => [item.type_paid_id, item.type_paid_name])
+  );
 
   // Ref для печати
   const printRef = useRef<HTMLDivElement>(null);
@@ -160,7 +168,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Hook for updating order
   const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
 
-  // Загрузка платежей для расчёта статуса оплаты
+  // Загрузка платежей для расчёта статуса оплаты и экспорта
   const { data: paymentsData, refetch: refetchPayments } = useList({
     resource: 'payments',
     filters: [
@@ -170,6 +178,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         value: record?.order_id,
       },
     ],
+    sorters: [{ field: 'payment_date', order: 'asc' }],
     pagination: { pageSize: 1000 },
     queryOptions: {
       enabled: !!record?.order_id,
@@ -277,6 +286,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       const designEngineerId = firstDoweling?.design_engineer_id;
       const prisadkaDesignerName = designEngineerId ? employeesMap.get(designEngineerId) || '' : '';
 
+      // Подготовка платежей для экспорта (сортировка по дате по возрастанию)
+      const sortedPayments = [...payments].sort((a: any, b: any) => {
+        const dateA = a.payment_date ? new Date(a.payment_date).getTime() : 0;
+        const dateB = b.payment_date ? new Date(b.payment_date).getTime() : 0;
+        return dateA - dateB;
+      });
+
       // Генерация и скачивание Excel
       await downloadOrderExcel(
         {
@@ -307,6 +323,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
             film: { film_name: filmsMap.get(detail.film_id) || '' },
             material: { material_name: materialsMap.get(detail.material_id) || '' },
+          })),
+          payments: sortedPayments.map((payment: any) => ({
+            payment_id: payment.payment_id,
+            payment_date: payment.payment_date,
+            amount: payment.amount,
+            payment_type: { payment_type_name: paymentTypesMap.get(payment.type_paid_id) || '' },
           })),
           client: record.client_name ? { client_name: record.client_name } : null,
           clientPhone,

@@ -6,7 +6,7 @@ import ExcelJS from 'exceljs';
 import { formatDate } from '../printFormat';
 import { ExcelGenerationError } from './excelErrorHandler';
 
-// Типы для заказа и деталей
+// Типы для заказа, деталей и платежей
 interface OrderDetail {
   detail_id: number;
   length: number | null;
@@ -20,6 +20,13 @@ interface OrderDetail {
   edge_type?: { edge_type_name: string } | null;
   film?: { film_name: string } | null;
   material?: { material_name: string } | null;
+}
+
+interface OrderPayment {
+  payment_id: number;
+  payment_date: string | Date | null;
+  amount: number | null;
+  payment_type?: { payment_type_name: string } | null;
 }
 
 interface Order {
@@ -40,6 +47,7 @@ interface Order {
 export interface GenerateOrderExcelParams {
   order: Order;
   details: OrderDetail[];
+  payments?: OrderPayment[];
   client?: { client_name: string } | null;
   clientPhone?: string | null;
 }
@@ -57,6 +65,7 @@ export interface GenerateOrderExcelParams {
 export const buildOrderExcelBuffer = async ({
   order,
   details,
+  payments = [],
   client,
   clientPhone,
 }: GenerateOrderExcelParams): Promise<ArrayBuffer> => {
@@ -172,7 +181,24 @@ export const buildOrderExcelBuffer = async ({
       row.commit();
     }
 
-    // 7. Сгенерировать и вернуть ArrayBuffer
+    // 7. Заполнить платежи (столбцы O, P, Q начиная со строки 6)
+    // O = тип оплаты, P = дата оплаты, Q = сумма оплаты
+    // Платежи отсортированы по дате по возрастанию
+    payments.forEach((payment, index) => {
+      const rowNumber = 6 + index; // Первый платеж на строке 6
+      const row = worksheet.getRow(rowNumber);
+
+      // O (15) - Тип оплаты
+      row.getCell(15).value = payment.payment_type?.payment_type_name || '';
+      // P (16) - Дата оплаты
+      row.getCell(16).value = payment.payment_date ? formatDate(payment.payment_date) : '';
+      // Q (17) - Сумма оплаты
+      row.getCell(17).value = payment.amount || null;
+
+      row.commit();
+    });
+
+    // 8. Сгенерировать и вернуть ArrayBuffer
     const buffer = await workbook.xlsx.writeBuffer();
     return buffer;
   } catch (error) {
