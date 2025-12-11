@@ -34,9 +34,14 @@ export const useFormWithHighlight = <
       // Navigate manually with highlightId
       const recordId = data.data?.[idField];
       if (recordId) {
-        // Navigate to list page with highlight parameter
         const baseUrl = `${window.location.origin}/${resource}`;
-        window.location.href = `${baseUrl}?highlightId=${recordId}`;
+        if (action === "edit") {
+          // After edit: navigate to show page
+          window.location.href = `${baseUrl}/show/${recordId}`;
+        } else {
+          // After create: navigate to list page with highlight parameter
+          window.location.href = `${baseUrl}?highlightId=${recordId}`;
+        }
       }
     },
   });
