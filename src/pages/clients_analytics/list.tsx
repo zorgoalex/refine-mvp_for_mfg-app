@@ -804,17 +804,6 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
           render={(value) => value || "—"}
         />
         <Table.Column
-          dataIndex="is_active"
-          title="Активен"
-          width={90}
-          render={(value: boolean) => (
-            <Badge
-              status={value ? "success" : "default"}
-              text={value ? "Да" : "Нет"}
-            />
-          )}
-        />
-        <Table.Column
           dataIndex="orders_total_count"
           title="Заказов"
           sorter
@@ -970,6 +959,17 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
           width={150}
           ellipsis={{ showTitle: true }}
           render={(value) => value || "—"}
+        />
+        <Table.Column
+          dataIndex="is_active"
+          title="Активен"
+          width={90}
+          render={(value: boolean) => (
+            <Badge
+              status={value ? "success" : "default"}
+              text={value ? "Да" : "Нет"}
+            />
+          )}
         />
         <Table.Column
           title="Действия"
