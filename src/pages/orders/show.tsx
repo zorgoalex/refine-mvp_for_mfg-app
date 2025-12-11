@@ -4,7 +4,7 @@ import { Button, Collapse, Table, Breadcrumb, message } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
 import { handleExcelError } from "../../utils/excel/excelErrorHandler";
@@ -21,6 +21,8 @@ const { Panel } = Collapse;
 
 
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
+  const navigate = useNavigate();
+
   const { queryResult } = useShow({
     meta: {
       idColumnName: "order_id",
@@ -515,6 +517,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               tableLayout="fixed"
               style={{ fontSize: 12 }}
               rowClassName={(_, index) => index % 2 === 0 ? 'table-row-light' : 'table-row-dark'}
+              onRow={() => ({
+                onDoubleClick: () => {
+                  if (record?.order_id) {
+                    navigate(`/orders/edit/${record.order_id}`);
+                  }
+                },
+                style: { cursor: 'pointer' },
+              })}
               components={{
                 header: {
                   cell: (props: any) => <th {...props} style={{ ...props.style, padding: '2px 4px', fontSize: '70%', textAlign: 'center' }} />
@@ -622,6 +632,53 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   },
                 },
               ]}
+              summary={() => {
+                const totalCount = details.length;
+                const totalQuantity = details.reduce((sum, d) => sum + (d.quantity || 0), 0);
+                const totalArea = details.reduce((sum, d) => sum + (d.area || 0), 0);
+                const totalCost = details.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
+
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ backgroundColor: '#fafafa', fontWeight: 'bold' }}>
+                      {/* № - количество позиций */}
+                      <Table.Summary.Cell index={0} align="center">
+                        <span style={{ color: '#1890ff' }}>{totalCount}</span>
+                      </Table.Summary.Cell>
+                      {/* Высота */}
+                      <Table.Summary.Cell index={1} />
+                      {/* Ширина */}
+                      <Table.Summary.Cell index={2} />
+                      {/* Кол-во */}
+                      <Table.Summary.Cell index={3} align="center">
+                        <span style={{ color: '#1890ff' }}>{totalQuantity}</span>
+                      </Table.Summary.Cell>
+                      {/* м² */}
+                      <Table.Summary.Cell index={4} align="center">
+                        <span style={{ color: '#1890ff' }}>{totalArea.toFixed(2)}</span>
+                      </Table.Summary.Cell>
+                      {/* Фрезеровка */}
+                      <Table.Summary.Cell index={5} />
+                      {/* Обкат */}
+                      <Table.Summary.Cell index={6} />
+                      {/* Материал */}
+                      <Table.Summary.Cell index={7} />
+                      {/* Пр-е */}
+                      <Table.Summary.Cell index={8} />
+                      {/* Цена за кв.м. */}
+                      <Table.Summary.Cell index={9} />
+                      {/* Сумма */}
+                      <Table.Summary.Cell index={10} align="right">
+                        <span style={{ color: '#52c41a' }}>
+                          {totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </span>
+                      </Table.Summary.Cell>
+                      {/* Пленка */}
+                      <Table.Summary.Cell index={11} />
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }}
             />
           </div>
 
