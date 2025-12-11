@@ -31,6 +31,8 @@ import {
   TeamOutlined,
   SettingOutlined,
   AimOutlined,
+  BarChartOutlined,
+  WalletOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -54,10 +56,12 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
   calendar: <CalendarOutlined />,
   clients: <UserOutlined />,
+  clients_analytics_view: <BarChartOutlined />,
   suppliers: <ShopOutlined />,
   vendors: <ShopOutlined />,
   film_vendors: <ShopOutlined />,
   payments: <DollarOutlined />,
+  payments_view: <WalletOutlined />,
   films: <FileImageOutlined />,
   materials: <InboxOutlined />,
   order_resource_requirements: <ShoppingCartOutlined />,
@@ -97,10 +101,12 @@ const RESOURCE_LABELS: Record<string, string> = {
   orders_view: "Заказы",
   calendar: "Календарь",
   clients: "Клиенты",
+  clients_analytics_view: "+Клиенты",
   suppliers: "Поставщики",
   vendors: "Производители",
   film_vendors: "Производители плёнки",
   payments: "Платежи",
+  payments_view: "+Платежи",
   films: "Пленки",
   materials: "Материалы",
   order_resource_requirements: "Потребности заказов",
@@ -129,10 +135,12 @@ const RESOURCE_LABELS: Record<string, string> = {
 
 const CATEGORY_MAP: Record<string, string> = {
   clients: "Контрагенты",
+  clients_analytics_view: "Контрагенты",
   suppliers: "Контрагенты",
   vendors: "Контрагенты",
   film_vendors: "Контрагенты",
   payments: "Финансы",
+  payments_view: "Финансы",
   order_workshops: "Производство",
   workshops: "Производство",
   work_centers: "Производство",
@@ -194,7 +202,12 @@ export const CustomSider: React.FC = () => {
   }, [resources, isAdmin]);
 
   const selectedKey = useMemo(() => {
-    const resource = resources.find((r) => typeof r.list === "string" && location.pathname.startsWith(r.list as string));
+    // Sort resources by route length descending to match longer/more specific routes first
+    // This prevents /clients from matching /clients-analytics
+    const sortedResources = [...resources]
+      .filter((r) => typeof r.list === "string")
+      .sort((a, b) => (b.list as string).length - (a.list as string).length);
+    const resource = sortedResources.find((r) => location.pathname.startsWith(r.list as string));
     return resource?.name || "";
   }, [location.pathname, resources]);
 

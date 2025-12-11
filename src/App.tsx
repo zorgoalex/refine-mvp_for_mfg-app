@@ -121,6 +121,8 @@ import { OrderResourceRequirementList } from "./pages/order_resource_requirement
 import { OrderResourceRequirementCreate } from "./pages/order_resource_requirements/create";
 import { OrderResourceRequirementEdit } from "./pages/order_resource_requirements/edit";
 import { OrderResourceRequirementShow } from "./pages/order_resource_requirements/show";
+import { ClientsAnalyticsList, ClientsAnalyticsShow } from "./pages/clients_analytics";
+import { PaymentsAnalyticsList, PaymentsAnalyticsShow } from "./pages/payments_analytics";
 import { LoginPage } from "./pages/login";
 import { ConfigurationPage } from "./pages/configuration";
 import { dataProvider } from "./utils/dataProvider";
@@ -209,6 +211,12 @@ const App = () => {
                   meta: { idColumnName: "client_id", label: "Клиенты" },
                 },
                 {
+                  name: "clients_analytics_view",
+                  list: "/clients-analytics",
+                  show: "/clients-analytics/show/:id",
+                  meta: { idColumnName: "client_id", label: "+Клиенты" },
+                },
+                {
                   name: "edge_types",
                   list: "/edge-types",
                   create: "/edge-types/create",
@@ -285,6 +293,12 @@ const App = () => {
                   edit: "/payments/edit/:id",
                   show: "/payments/show/:id",
                   meta: { idColumnName: "payment_id", label: "Платежи" },
+                },
+                {
+                  name: "payments_view",
+                  list: "/payments-analytics",
+                  show: "/payments-analytics/show/:id",
+                  meta: { idColumnName: "payment_id", label: "+Платежи" },
                 },
                 {
                   name: "units",
@@ -489,6 +503,10 @@ const App = () => {
                     <Route path="edit/:id" element={<ClientEdit />} />
                     <Route path="show/:id" element={<ClientShow />} />
                   </Route>
+                  <Route path="/clients-analytics" >
+                    <Route index element={<ClientsAnalyticsList />} />
+                    <Route path="show/:id" element={<ClientsAnalyticsShow />} />
+                  </Route>
                   <Route path="/edge-types" >
                     <Route index element={<EdgeTypeList />} />
                     <Route path="create" element={<EdgeTypeCreate />} />
@@ -548,7 +566,12 @@ const App = () => {
                     <Route path="create" element={<PaymentCreate />} />
                     <Route path="edit/:id" element={<PaymentEdit />} />
                     <Route path="show/:id" element={<PaymentShow />} />
-                  </Route>                <Route path="/requisition-statuses" >
+                  </Route>
+                  <Route path="/payments-analytics" >
+                    <Route index element={<PaymentsAnalyticsList />} />
+                    <Route path="show/:id" element={<PaymentsAnalyticsShow />} />
+                  </Route>
+                  <Route path="/requisition-statuses" >
                     <Route index element={<RequisitionStatusList />} />
                     <Route path="create" element={<RequisitionStatusCreate />} />
                     <Route path="edit/:id" element={<RequisitionStatusEdit />} />
