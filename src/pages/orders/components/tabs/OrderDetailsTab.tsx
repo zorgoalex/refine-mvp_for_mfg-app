@@ -3,9 +3,10 @@
 
 import React, { useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Card, Button, Space, Modal, message } from 'antd';
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
+import { BulkEditModal } from '../modals/BulkEditModal';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
@@ -30,6 +31,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
+  const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
   const tableRef = useRef<OrderDetailTableRef>(null);
 
   // Expose methods via ref for parent (OrderForm) to call
@@ -296,16 +298,99 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     }
   };
 
+  // Handle bulk edit apply
+  const handleBulkEditApply = (changes: Partial<OrderDetail>, applyToAll: boolean) => {
+    // Determine which details to update
+    const detailsToUpdate = applyToAll
+      ? details
+      : details.filter((d) => selectedRowKeys.includes(d.temp_id || d.detail_id || 0));
+
+    if (detailsToUpdate.length === 0) {
+      message.warning('Нет позиций для обновления');
+      return;
+    }
+
+    // Check if dimensions or price changed - need to recalculate
+    const dimensionsChanged = changes.height !== undefined || changes.width !== undefined || changes.quantity !== undefined;
+    const priceChanged = changes.milling_cost_per_sqm !== undefined;
+
+    // Apply changes to each detail
+    let updatedCount = 0;
+    detailsToUpdate.forEach((detail) => {
+      const tempId = detail.temp_id || detail.detail_id;
+      if (tempId) {
+        // Build update object
+        const updateData: Partial<OrderDetail> = { ...changes };
+
+        // Calculate new dimensions (use new value if changed, otherwise keep existing)
+        const newHeight = changes.height ?? detail.height ?? 0;
+        const newWidth = changes.width ?? detail.width ?? 0;
+        const newQuantity = changes.quantity ?? detail.quantity ?? 0;
+        const newPricePerSqm = changes.milling_cost_per_sqm ?? detail.milling_cost_per_sqm ?? 0;
+
+        // If dimensions changed, recalculate area
+        if (dimensionsChanged && newHeight > 0 && newWidth > 0 && newQuantity > 0) {
+          const areaMm2 = newHeight * newWidth * newQuantity;
+          const newArea = Math.ceil(areaMm2 / 10000) / 100;
+          updateData.area = newArea;
+
+          // Recalculate cost based on new area
+          if (newPricePerSqm > 0) {
+            updateData.detail_cost = Number((newArea * newPricePerSqm).toFixed(2));
+          }
+        } else if (priceChanged && detail.area) {
+          // Only price changed, recalculate cost with existing area
+          updateData.detail_cost = Number((detail.area * changes.milling_cost_per_sqm!).toFixed(2));
+        }
+
+        updateDetail(tempId, updateData);
+        updatedCount++;
+      }
+    });
+
+    // Recalculate totals if cost could have changed
+    if (dimensionsChanged || priceChanged) {
+      // Update total_amount in header
+      const updatedDetails = useOrderFormStore.getState().details;
+      const totalAmount = updatedDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
+      updateHeaderField('total_amount', Number(totalAmount.toFixed(2)));
+
+      // Calculate final_amount (considering discount/surcharge)
+      const discount = header.discount || 0;
+      const surcharge = header.surcharge || 0;
+      let finalAmount = totalAmount;
+      if (discount > 0) {
+        finalAmount = Math.max(0, totalAmount - discount);
+      } else if (surcharge > 0) {
+        finalAmount = totalAmount + surcharge;
+      }
+      updateHeaderField('final_amount', Number(finalAmount.toFixed(2)));
+    }
+
+    message.success(`Обновлено позиций: ${updatedCount}`);
+    setBulkEditModalOpen(false);
+
+    // Clear selection after bulk edit
+    setSelectedRowKeys([]);
+  };
+
   return (
     <Card size="small">
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         {/* Toolbar */}
-        <Space>
+        <Space wrap>
           <Button type="primary" icon={<ThunderboltOutlined />} onClick={handleQuickAdd}>
             Быстрое добавление
           </Button>
           <Button icon={<PlusOutlined />} onClick={handleCreate}>
             Добавить (форма)
+          </Button>
+          <Button
+            icon={<EditOutlined />}
+            onClick={() => setBulkEditModalOpen(true)}
+            disabled={details.length === 0}
+          >
+            Групповые действия
           </Button>
           <Button
             danger
@@ -324,6 +409,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           </Button>
           <span style={{ marginLeft: 16, color: '#666' }}>
             Всего позиций: {details.length}
+            {selectedRowKeys.length > 0 && (
+              <span style={{ marginLeft: 8, color: '#1890ff' }}>
+                (выбрано: {selectedRowKeys.length})
+              </span>
+            )}
           </span>
         </Space>
 
@@ -350,6 +440,15 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
             setModalOpen(false);
             setEditingDetail(undefined);
           }}
+        />
+
+        {/* Bulk Edit Modal */}
+        <BulkEditModal
+          open={bulkEditModalOpen}
+          selectedCount={selectedRowKeys.length}
+          totalCount={details.length}
+          onApply={handleBulkEditApply}
+          onCancel={() => setBulkEditModalOpen(false)}
         />
       </Space>
     </Card>
