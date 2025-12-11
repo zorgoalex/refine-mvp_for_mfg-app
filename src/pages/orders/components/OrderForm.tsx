@@ -2,6 +2,7 @@
 // Master-Detail form with Tabs for child entities
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, Tabs, Button, Space, Spin, notification } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
@@ -69,7 +70,19 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
   const { exportToDrive, isUploading } = useOrderExport();
-  const [activeTab, setActiveTab] = useState('details');
+
+  // Read initial tab from URL parameter
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'details';
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  // Clear tab parameter from URL after reading it
+  useEffect(() => {
+    if (searchParams.has('tab')) {
+      searchParams.delete('tab');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, []);
 
 
   // Load existing order data in edit mode

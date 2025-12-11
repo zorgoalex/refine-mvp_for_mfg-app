@@ -411,7 +411,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               header={<span style={{ fontSize: 12, fontWeight: 600, color: '#faad14' }}>Финансы</span>}
               key="finance"
             >
-              <OrderFinanceBlock record={record} />
+              <div
+                onDoubleClick={() => {
+                  if (record?.order_id) {
+                    navigate(`/orders/edit/${record.order_id}?tab=finance`);
+                  }
+                }}
+                style={{ cursor: 'pointer' }}
+              >
+                <OrderFinanceBlock record={record} />
+              </div>
             </Panel>
           </Collapse>
 

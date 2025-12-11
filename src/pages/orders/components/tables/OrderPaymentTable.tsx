@@ -2,9 +2,9 @@
 // Displays list of order payments with inline editing capabilities
 // Pattern: same as OrderDetailTable for consistency
 
-import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Table, Button, Space, Form, InputNumber, Input, Select, DatePicker, Typography, Tooltip } from 'antd';
-import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { EditOutlined, CheckOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useSelect } from '@refinedev/antd';
@@ -120,11 +120,11 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
     const record = payments.find(p => (p.temp_id || p.payment_id) === editingKey);
     if (!record) return true;
 
-    // Check if this is an "empty" payment (no essential data)
+    // Check if this is an "empty" payment (amount is empty or zero)
+    // Must check BEFORE validation to avoid validation errors on empty rows
     const currentValues = form.getFieldsValue();
     const isEmptyPayment = (
       !record.payment_id && // Only for new payments
-      (!currentValues.type_paid_id) &&
       (!currentValues.amount || currentValues.amount === 0)
     );
 
@@ -342,14 +342,13 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
     {
       title: <div style={{ textAlign: 'center', fontSize: '85%' }}>Действия</div>,
       key: 'actions',
-      width: 80,
+      width: 50,
       align: 'center' as const,
       render: (_, record) => {
-        const tempId = record.temp_id || record.payment_id!;
         return (
           <Space size={2}>
             {isEditing(record) ? (
-              <>
+              <Tooltip title="Сохранить">
                 <Button
                   type="text"
                   size="small"
@@ -357,16 +356,9 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
                   onClick={() => saveEdit(record)}
                   style={{ padding: '0 4px' }}
                 />
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<CloseOutlined style={{ fontSize: '14px', color: '#ff4d4f' }} />}
-                  onClick={cancelEdit}
-                  style={{ padding: '0 4px' }}
-                />
-              </>
+              </Tooltip>
             ) : (
-              <>
+              <Tooltip title="Редактировать">
                 <Button
                   type="text"
                   size="small"
@@ -374,15 +366,7 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
                   onClick={() => startEdit(record)}
                   style={{ padding: '0 4px' }}
                 />
-                <Button
-                  type="text"
-                  danger
-                  size="small"
-                  icon={<DeleteOutlined style={{ fontSize: '12px' }} />}
-                  onClick={() => onDelete(tempId, record.payment_id)}
-                  style={{ padding: '0 4px' }}
-                />
-              </>
+              </Tooltip>
             )}
           </Space>
         );

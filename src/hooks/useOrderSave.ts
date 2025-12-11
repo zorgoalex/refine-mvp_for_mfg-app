@@ -358,7 +358,23 @@ export const useOrderSave = (): UseOrderSaveResult => {
       }
 
       // ========== STEP 4: Save payments ==========
-      if (values.payments && values.payments.length > 0) {
+      // Filter out unfilled payments (new payments with empty amount)
+      const isPaymentUnfilled = (payment: any): boolean => {
+        // Only check new payments (no payment_id)
+        if (payment.payment_id) return false;
+
+        // Payment is unfilled if amount is empty or zero (regardless of other fields)
+        return !payment.amount || payment.amount === 0;
+      };
+
+      // Filter payments to exclude unfilled ones
+      const filledPayments = (values.payments || []).filter(payment => !isPaymentUnfilled(payment));
+      const skippedPaymentsCount = (values.payments?.length || 0) - filledPayments.length;
+      if (skippedPaymentsCount > 0) {
+        console.log(`[useOrderSave] Skipped ${skippedPaymentsCount} unfilled payment(s)`);
+      }
+
+      if (filledPayments.length > 0) {
         const { originalPayments } = useOrderFormStore.getState();
         const normalizePayment = (p: any) => {
           const { payment_id, order_id, temp_id, created_at, updated_at, created_by, edited_by, ...rest } = p || {};
@@ -367,7 +383,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
         // Track new payments that need payment_id update after create
         const newPaymentsToCreate: Array<{ tempId: number; promise: Promise<any> }> = [];
 
-        const paymentPromises = values.payments.map((payment) => {
+        const paymentPromises = filledPayments.map((payment) => {
           if (payment.payment_id) {
             // Update only if changed
             const original = originalPayments[payment.payment_id];
