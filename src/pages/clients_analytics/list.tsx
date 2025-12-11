@@ -65,6 +65,49 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
     optionValue: "payment_status_name",
   });
 
+  // Инициализация формы фильтров из URL при монтировании
+  useEffect(() => {
+    if (filters && filters.length > 0) {
+      const formValues: any = {};
+      const dateRangeFields: Record<string, { start?: any; end?: any }> = {};
+
+      filters.forEach((filter: any) => {
+        const { field, operator, value } = filter;
+
+        // Обработка диапазонов дат
+        if (field === 'first_order_date' || field === 'last_order_date' || field === 'last_payment_date' || field === 'last_order_date_exact') {
+          const rangeKey = `${field}_range`;
+          if (!dateRangeFields[rangeKey]) dateRangeFields[rangeKey] = {};
+          if (operator === 'gte') dateRangeFields[rangeKey].start = dayjs(value);
+          if (operator === 'lte') dateRangeFields[rangeKey].end = dayjs(value);
+        }
+        // Обработка числовых диапазонов (min/max)
+        else if (operator === 'gte') {
+          formValues[`${field}_min`] = value;
+        } else if (operator === 'lte') {
+          formValues[`${field}_max`] = value;
+        }
+        // Обработка строковых и точных фильтров
+        else if (operator === 'contains') {
+          formValues[field] = value;
+        } else if (operator === 'eq') {
+          formValues[field] = value;
+        }
+      });
+
+      // Преобразование дат в RangePicker формат
+      Object.entries(dateRangeFields).forEach(([key, range]) => {
+        if (range.start && range.end) {
+          formValues[key] = [range.start, range.end];
+        }
+      });
+
+      form.setFieldsValue(formValues);
+      setShowResultCount(true);
+      setFiltersVisible(true);
+    }
+  }, []); // Только при монтировании
+
   // Автоскролл к найденной строке после загрузки данных
   useEffect(() => {
     if (highlightedClientId && tableProps?.dataSource) {

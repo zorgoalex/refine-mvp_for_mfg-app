@@ -45,7 +45,7 @@ export const PaymentsAnalyticsShow: React.FC<IResourceComponentsProps> = () => {
   };
 
   return (
-    <Show isLoading={isLoading} title="Просмотр платежа">
+    <Show isLoading={isLoading} title="Просмотр платежа" goBack="К списку">
       {/* Основная информация о платеже */}
       <Title level={5}>Платёж</Title>
       <Row gutter={[16, 16]}>
