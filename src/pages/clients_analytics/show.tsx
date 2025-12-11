@@ -270,17 +270,13 @@ export const ClientsAnalyticsShow: React.FC<IResourceComponentsProps> = () => {
       )}
 
       {/* Примечание */}
-      {record?.notes && (
-        <>
-          <Row gutter={[16, 16]}>
-            <Col span={24}>
-              <Title level={5}>Примечание</Title>
-              <TextField value={record.notes} />
-            </Col>
-          </Row>
-          <Divider />
-        </>
-      )}
+      <Title level={5}>Примечание</Title>
+      <Row gutter={[16, 16]}>
+        <Col span={24}>
+          <TextField value={record?.notes || "—"} />
+        </Col>
+      </Row>
+      <Divider />
 
       {/* Аудит */}
       <Title level={5}>Служебная информация</Title>
