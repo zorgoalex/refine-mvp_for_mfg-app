@@ -1,9 +1,9 @@
 // Order Details Tab
 // Container for managing order details with toolbar and CRUD operations
 
-import React, { useState, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Card, Button, Space, Modal, message, Tooltip } from 'antd';
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined } from '@ant-design/icons';
+import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import { Card, Button, Space, Modal, message, Tooltip, Alert } from 'antd';
+import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { BulkEditModal } from '../modals/BulkEditModal';
@@ -25,6 +25,13 @@ const QUICK_ADD_DEFAULTS = {
   priority: 100,
 };
 
+// Drag selection confirmation state
+interface DragSelectionState {
+  pendingKeys: React.Key[];
+  confirm: () => void;
+  cancel: () => void;
+}
+
 export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField } = useOrderFormStore();
   const [modalOpen, setModalOpen] = useState(false);
@@ -33,6 +40,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
   const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
+  const [dragSelectionState, setDragSelectionState] = useState<DragSelectionState | null>(null);
   const tableRef = useRef<OrderDetailTableRef>(null);
 
   // Expose methods via ref for parent (OrderForm) to call
@@ -178,7 +186,38 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   // Handle row selection change
   const handleSelectChange = (newSelectedRowKeys: React.Key[]) => {
     setSelectedRowKeys(newSelectedRowKeys);
+    // Clear drag selection state when selection changes
+    setDragSelectionState(null);
   };
+
+  // Handle drag selection pending - show confirmation bar
+  const handleDragSelectionPending = useCallback((
+    pendingKeys: React.Key[],
+    confirm: () => void,
+    cancel: () => void
+  ) => {
+    if (pendingKeys.length > 0) {
+      setDragSelectionState({ pendingKeys, confirm, cancel });
+    } else {
+      setDragSelectionState(null);
+    }
+  }, []);
+
+  // Confirm drag selection
+  const handleConfirmDragSelection = useCallback(() => {
+    if (dragSelectionState) {
+      dragSelectionState.confirm();
+      setDragSelectionState(null);
+    }
+  }, [dragSelectionState]);
+
+  // Cancel drag selection
+  const handleCancelDragSelection = useCallback(() => {
+    if (dragSelectionState) {
+      dragSelectionState.cancel();
+      setDragSelectionState(null);
+    }
+  }, [dragSelectionState]);
 
   // Handle copy row - duplicate the row and insert after original
   const handleCopyRow = (detail: OrderDetail) => {
@@ -421,6 +460,38 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           </span>
         </Space>
 
+        {/* Drag Selection Confirmation Bar */}
+        {dragSelectionState && dragSelectionState.pendingKeys.length > 0 && (
+          <Alert
+            className="drag-selection-confirm-bar"
+            type="info"
+            showIcon
+            message={
+              <Space>
+                <span>
+                  Выделено строк: <strong>{dragSelectionState.pendingKeys.length}</strong>
+                </span>
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<CheckOutlined />}
+                  onClick={handleConfirmDragSelection}
+                >
+                  Подтвердить
+                </Button>
+                <Button
+                  size="small"
+                  icon={<CloseOutlined />}
+                  onClick={handleCancelDragSelection}
+                >
+                  Отмена
+                </Button>
+              </Space>
+            }
+            style={{ marginBottom: 8 }}
+          />
+        )}
+
         {/* Table */}
         <OrderDetailTable
           ref={tableRef}
@@ -432,6 +503,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           selectedRowKeys={selectedRowKeys}
           onSelectChange={handleSelectChange}
           highlightedRowKey={highlightedRowKey}
+          onDragSelectionPending={handleDragSelectionPending}
         />
 
         {/* Modal */}

@@ -9,6 +9,7 @@ import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeH
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -32,6 +33,8 @@ interface OrderDetailTableProps {
   selectedRowKeys?: React.Key[];
   onSelectChange?: (selectedRowKeys: React.Key[]) => void;
   highlightedRowKey?: React.Key | null;
+  /** Callback when drag selection has pending items to confirm */
+  onDragSelectionPending?: (pendingKeys: React.Key[], confirm: () => void, cancel: () => void) => void;
 }
 
 // Exposed methods via ref
@@ -64,12 +67,54 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   selectedRowKeys = [],
   onSelectChange,
   highlightedRowKey = null,
+  onDragSelectionPending,
 }, ref) => {
   const { details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
+
+  // Ref for table scroll container (for auto-scroll)
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
+
+  // Find actual scroll container (.ant-table-body) after mount
+  useEffect(() => {
+    if (tableContainerRef.current) {
+      const scrollBody = tableContainerRef.current.querySelector('.ant-table-body');
+      scrollContainerRef.current = scrollBody as HTMLElement | null;
+    }
+  }, []);
+
   const sortedDetails = useMemo(
     () => [...details].sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0)),
     [details]
   );
+
+  // Drag selection hook
+  const getRowKey = useCallback((detail: OrderDetail) => detail.temp_id || detail.detail_id || 0, []);
+
+  const handleDragSelectionChange = useCallback((keys: React.Key[]) => {
+    onSelectChange?.(keys);
+  }, [onSelectChange]);
+
+  const dragSelection = useDragSelection({
+    items: sortedDetails,
+    getRowKey,
+    selectedKeys: selectedRowKeys,
+    onSelectionChange: handleDragSelectionChange,
+    scrollContainerRef: scrollContainerRef,
+    autoScrollZone: 60,
+    autoScrollSpeed: 10,
+  });
+
+  // Notify parent when pending selections change
+  useEffect(() => {
+    if (onDragSelectionPending) {
+      onDragSelectionPending(
+        dragSelection.pendingKeys,
+        dragSelection.confirmSelection,
+        dragSelection.cancelSelection
+      );
+    }
+  }, [dragSelection.pendingKeys, dragSelection.confirmSelection, dragSelection.cancelSelection, onDragSelectionPending]);
 
   // Calculate totals for summary row (updates in real-time)
   const totals = useMemo(() => {
@@ -1045,6 +1090,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   return (
     <>
     <Form form={form} component={false}>
+      <div
+        ref={tableContainerRef}
+        className={dragSelection.isDragging ? 'drag-selection-active' : ''}
+        style={{ position: 'relative' }}
+      >
       <Table<OrderDetail>
         dataSource={sortedDetails}
         columns={columns}
@@ -1061,7 +1111,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         scroll={{ x: 1500, y: 500 }}
         size="small"
         bordered
-        rowClassName={(_, index) => (index % 2 === 0 ? '' : '')}
+        rowClassName={(record) => {
+          const rowKey = record.temp_id || record.detail_id || 0;
+          return dragSelection.isInPendingSelection(rowKey) ? 'drag-selection-pending' : '';
+        }}
         summary={() => (
           <Table.Summary fixed="bottom">
             <Table.Summary.Row style={{ backgroundColor: '#fafafa', fontWeight: 'bold' }}>
@@ -1114,12 +1167,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           const rowKey = record.temp_id || record.detail_id || 0;
           const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
           const isCurrentlyEditing = isEditing(record);
+          const isPendingSelection = dragSelection.isInPendingSelection(rowKey);
 
           return {
             ref: isHighlighted ? highlightedRowRef : undefined,
             style: {
               backgroundColor: isCurrentlyEditing
                 ? '#fffbe6' // Warm yellow for editing row
+                : isPendingSelection
+                ? '#e6f4ff' // Light blue for pending drag selection
                 : isHighlighted
                 ? '#e6f7ff' // Light blue for highlighted row
                 : (index! % 2 === 0 ? '#ffffff' : '#f5f5f5'),
@@ -1129,6 +1185,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               zIndex: isCurrentlyEditing ? 10 : 1,
               transition: 'all 0.3s ease',
               border: isCurrentlyEditing ? '2px solid #faad14' : 'none',
+            },
+            // Drag selection handlers
+            onMouseDown: (e) => {
+              // Only start drag if not editing and not clicking interactive elements
+              if (!isCurrentlyEditing) {
+                dragSelection.handleMouseDown(rowKey, e);
+              }
+            },
+            onMouseEnter: () => {
+              if (dragSelection.isDragging) {
+                dragSelection.handleMouseEnter(rowKey);
+              }
             },
             onDoubleClick: () => startEdit(record),
             onContextMenu: (e) => {
@@ -1232,6 +1300,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           };
         }}
       />
+      </div>
     </Form>
     <FilmQuickCreate
       open={filmQuickCreateOpen}
