@@ -6,6 +6,7 @@ import { Card, Button, Space, Modal, message } from 'antd';
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
+import { ExcelImportButton } from '../import';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
@@ -300,13 +301,18 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     <Card size="small">
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         {/* Toolbar */}
-        <Space>
+        <Space wrap>
           <Button type="primary" icon={<ThunderboltOutlined />} onClick={handleQuickAdd}>
             Быстрое добавление
           </Button>
           <Button icon={<PlusOutlined />} onClick={handleCreate}>
             Добавить (форма)
           </Button>
+          <ExcelImportButton
+            onSuccess={(count) => {
+              message.success(`Импортировано ${count} деталей`);
+            }}
+          />
           <Button
             danger
             icon={<DeleteOutlined />}
