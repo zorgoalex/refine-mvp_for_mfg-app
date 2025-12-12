@@ -154,7 +154,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const watchedMaterialId = Form.useWatch('material_id', form);
   const watchedMillingTypeId = Form.useWatch('milling_type_id', form);
   const watchedEdgeTypeId = Form.useWatch('edge_type_id', form);
-  const watchedDetailCost = Form.useWatch('detail_cost', form);
 
   // Style for empty required fields - red bottom border
   const getRequiredFieldStyle = (value: any): React.CSSProperties => {
@@ -814,11 +813,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           <Form.Item
             name="detail_cost"
             style={{ margin: 0, padding: '0 4px' }}
-            rules={[{ required: true, message: 'Рассчитайте сумму детали' }]}
           >
             <InputNumber
               controls={false}
-              style={{ width: '100%', minWidth: '90px', ...getRequiredFieldStyle(watchedDetailCost) }}
+              style={{ width: '100%', minWidth: '90px' }}
               precision={2}
               min={0}
               formatter={currencySmartFormatter}
