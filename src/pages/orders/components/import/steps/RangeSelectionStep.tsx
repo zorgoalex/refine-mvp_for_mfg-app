@@ -10,6 +10,9 @@ const { Text, Title } = Typography;
 
 interface RangeSelectionStepProps {
   sheetData: ParsedSheet;
+  sheets: string[];
+  selectedSheet: string | null;
+  onSheetSelect: (name: string) => void;
   ranges: SelectionRange[];
   activeRangeId: string | null;
   isSelecting: boolean;
@@ -52,6 +55,9 @@ const FIELD_OPTIONS = [
 
 export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
   sheetData,
+  sheets,
+  selectedSheet,
+  onSheetSelect,
   ranges,
   activeRangeId,
   isSelecting,
@@ -316,10 +322,24 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
       `}</style>
 
       <Space direction="vertical" style={{ marginBottom: 8 }} size="small">
+        {/* Sheet selector */}
+        {sheets.length > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Text>Лист:</Text>
+            <Select
+              value={selectedSheet}
+              onChange={onSheetSelect}
+              style={{ minWidth: 200 }}
+              options={sheets.map(name => ({ label: name, value: name }))}
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              ({sheetData.rowCount} строк × {sheetData.colCount} столбцов)
+            </Text>
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Title level={5} style={{ margin: 0 }}>
-            Выделите область и укажите поля в заголовках
-          </Title>
+          <Text strong>Выделите область и укажите поля в заголовках</Text>
           <Space>
             <Checkbox
               checked={hasHeaders}

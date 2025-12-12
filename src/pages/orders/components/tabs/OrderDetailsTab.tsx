@@ -2,7 +2,7 @@
 // Container for managing order details with toolbar and CRUD operations
 
 import React, { useState, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Card, Button, Space, Modal, message } from 'antd';
+import { Card, Button, Space, Modal, message, Tooltip } from 'antd';
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
@@ -380,12 +380,14 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         {/* Toolbar */}
         <Space wrap>
-          <Button type="primary" icon={<ThunderboltOutlined />} onClick={handleQuickAdd}>
-            Быстрое добавление
-          </Button>
-          <Button icon={<PlusOutlined />} onClick={handleCreate}>
-            Добавить (форма)
-          </Button>
+          <Tooltip title="Быстрое добавление">
+            <Button type="primary" icon={<ThunderboltOutlined />} onClick={handleQuickAdd}>
+              +
+            </Button>
+          </Tooltip>
+          <Tooltip title="Добавить через форму">
+            <Button icon={<PlusOutlined />} onClick={handleCreate} />
+          </Tooltip>
           <Button
             icon={<EditOutlined />}
             onClick={() => setBulkEditModalOpen(true)}

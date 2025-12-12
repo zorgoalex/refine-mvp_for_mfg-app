@@ -18,7 +18,7 @@ interface ExcelImportModalProps {
 
 const STEPS: { key: ImportStep; title: string; icon: React.ReactNode }[] = [
   { key: 'upload', title: 'Загрузка', icon: <UploadOutlined /> },
-  { key: 'select', title: 'Выбор и маппинг', icon: <SelectOutlined /> },
+  { key: 'select', title: 'Выбор строк и столбцов', icon: <SelectOutlined /> },
   { key: 'validation', title: 'Проверка', icon: <CheckCircleOutlined /> },
 ];
 
@@ -138,6 +138,14 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   const handleMappingChange = useCallback((field: ImportableField, column: string | null) => {
     setMapping(prev => ({ ...prev, [field]: column }));
   }, []);
+
+  // Handle sheet change - clear ranges and mapping, then select new sheet
+  const handleSheetChange = useCallback((sheetName: string) => {
+    rangeSelection.clearRanges();
+    setMapping(emptyMapping());
+    lastAutoDetectRangeRef.current = null;
+    excelParser.selectSheet(sheetName);
+  }, [rangeSelection, excelParser]);
 
   const handleAutoDetect = useCallback(() => {
     if (excelParser.sheetData && rangeSelection.ranges.length > 0) {
@@ -264,6 +272,9 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
         return excelParser.sheetData ? (
           <RangeSelectionStep
             sheetData={excelParser.sheetData}
+            sheets={excelParser.sheets}
+            selectedSheet={excelParser.selectedSheet}
+            onSheetSelect={handleSheetChange}
             ranges={rangeSelection.ranges}
             activeRangeId={rangeSelection.activeRangeId}
             isSelecting={rangeSelection.isSelecting}
