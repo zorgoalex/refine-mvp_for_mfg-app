@@ -72,6 +72,14 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
   const visibleRows = Math.min(sheetData.rowCount, MAX_VISIBLE_ROWS);
   const visibleCols = Math.min(sheetData.colCount, MAX_VISIBLE_COLS);
 
+  // Calculate dynamic height based on actual rows (26px per row + 50px header)
+  // Max height is 75vh to fit in modal, min is 200px
+  const calculatedHeight = Math.min(
+    Math.max(visibleRows * 26 + 60, 200),
+    window.innerHeight * 0.75
+  );
+  const gridHeight = `${Math.round(calculatedHeight)}px`;
+
   // Get selected columns from first range
   const selectedCols = useMemo(() => {
     if (ranges.length === 0) return new Set<number>();
@@ -261,7 +269,10 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
           border: 1px solid #d9d9d9;
           border-radius: 4px;
           user-select: none;
-          height: 450px;
+          height: ${gridHeight};
+          max-height: 75vh;
+          min-height: 200px;
+          resize: vertical;
         }
         .excel-grid {
           display: grid;

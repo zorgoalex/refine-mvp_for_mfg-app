@@ -236,22 +236,123 @@ export const useImportValidation = (): UseImportValidationReturn => {
     hasHeaders: boolean
   ): FieldMapping => {
     const mapping = emptyMapping();
-    if (!hasHeaders) return mapping;
+    const { minRow, maxRow, minCol, maxCol } = normalizeRange(range);
+    const dataStartRow = hasHeaders ? minRow + 1 : minRow;
 
-    const { minRow, minCol, maxCol } = normalizeRange(range);
-    const headerRow = sheet.data[minRow];
-    if (!headerRow) return mapping;
+    // If headers exist, first try keyword-based detection
+    if (hasHeaders) {
+      const headerRow = sheet.data[minRow];
+      if (headerRow) {
+        for (let col = minCol; col <= maxCol; col++) {
+          const cellValue = headerRow[col];
+          if (!cellValue) continue;
+          const headerText = String(cellValue).toLowerCase().trim();
+
+          for (const [field, keywords] of Object.entries(FIELD_KEYWORDS)) {
+            if (mapping[field as ImportableField]) continue;
+            for (const keyword of keywords) {
+              if (headerText.includes(keyword)) {
+                mapping[field as ImportableField] = sheet.headers[col];
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Positional mapping for first 3 unmapped columns → height, width, quantity
+    const positionalFields: ImportableField[] = ['height', 'width', 'quantity'];
+    let positionalIndex = 0;
+
+    for (let col = minCol; col <= maxCol && positionalIndex < positionalFields.length; col++) {
+      const colLetter = sheet.headers[col];
+      const field = positionalFields[positionalIndex];
+
+      // Skip if this column already mapped or field already has mapping
+      if (Object.values(mapping).includes(colLetter)) continue;
+      if (mapping[field]) continue;
+
+      // Check if column has numeric data
+      let numericCount = 0;
+      const sampleSize = Math.min(10, maxRow - dataStartRow + 1);
+      for (let r = dataStartRow; r < dataStartRow + sampleSize && r <= maxRow; r++) {
+        const val = sheet.data[r]?.[col];
+        if (val != null && !isNaN(Number(val))) numericCount++;
+      }
+
+      if (numericCount >= sampleSize * 0.5) {
+        mapping[field] = colLetter;
+        positionalIndex++;
+      }
+    }
+
+    // Content-based detection for reference fields
+    const refFields: { field: ImportableField; data: ReferenceItem[] }[] = [
+      { field: 'edge_type', data: referenceData.edgeTypes },
+      { field: 'material', data: referenceData.materials },
+      { field: 'milling_type', data: referenceData.millingTypes },
+      { field: 'film', data: referenceData.films },
+    ];
 
     for (let col = minCol; col <= maxCol; col++) {
-      const cellValue = headerRow[col];
-      if (!cellValue) continue;
-      const headerText = String(cellValue).toLowerCase().trim();
+      const colLetter = sheet.headers[col];
+      if (Object.values(mapping).includes(colLetter)) continue; // Already mapped
 
-      for (const [field, keywords] of Object.entries(FIELD_KEYWORDS)) {
-        if (mapping[field as ImportableField]) continue; // Already mapped
-        for (const keyword of keywords) {
-          if (headerText.includes(keyword)) {
-            mapping[field as ImportableField] = sheet.headers[col];
+      // Sample values from this column
+      const sampleValues: string[] = [];
+      const sampleSize = Math.min(10, maxRow - dataStartRow + 1);
+      for (let r = dataStartRow; r < dataStartRow + sampleSize && r <= maxRow; r++) {
+        const val = sheet.data[r]?.[col];
+        if (val != null && String(val).trim()) {
+          sampleValues.push(String(val).toLowerCase().trim());
+        }
+      }
+
+      if (sampleValues.length === 0) continue;
+
+      // Check each reference field
+      for (const { field, data } of refFields) {
+        if (mapping[field]) continue; // Already mapped
+
+        const refNames = data.map(item => item.name.toLowerCase().trim());
+        let matchCount = 0;
+
+        for (const val of sampleValues) {
+          // Check if value matches or partially matches any reference name
+          if (refNames.some(name => name.includes(val) || val.includes(name))) {
+            matchCount++;
+          }
+        }
+
+        // If >30% match, assign this field
+        if (matchCount >= sampleValues.length * 0.3) {
+          mapping[field] = colLetter;
+          break;
+        }
+      }
+    }
+
+    // For remaining text columns, try to assign note or detail_name
+    const textFields: ImportableField[] = ['detail_name', 'note'];
+    for (let col = minCol; col <= maxCol; col++) {
+      const colLetter = sheet.headers[col];
+      if (Object.values(mapping).includes(colLetter)) continue;
+
+      // Check if column has text data (not pure numbers)
+      let textCount = 0;
+      const sampleSize = Math.min(5, maxRow - dataStartRow + 1);
+      for (let r = dataStartRow; r < dataStartRow + sampleSize && r <= maxRow; r++) {
+        const val = sheet.data[r]?.[col];
+        if (val != null && isNaN(Number(val)) && String(val).trim().length > 0) {
+          textCount++;
+        }
+      }
+
+      if (textCount >= sampleSize * 0.5) {
+        for (const field of textFields) {
+          if (!mapping[field]) {
+            mapping[field] = colLetter;
             break;
           }
         }
@@ -259,7 +360,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
     }
 
     return mapping;
-  }, []);
+  }, [referenceData]);
 
   const processImport = useCallback((
     sheet: ParsedSheet,

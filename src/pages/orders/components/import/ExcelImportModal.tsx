@@ -1,6 +1,6 @@
 // Main Excel Import Modal with wizard steps
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Modal, Steps, Button, Space, message } from 'antd';
 import { UploadOutlined, SelectOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
@@ -118,9 +118,22 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   const handleBack = useCallback(() => {
     const idx = currentStepIndex;
     if (idx > 0) {
-      setCurrentStep(STEPS[idx - 1].key);
+      const prevStep = STEPS[idx - 1].key;
+
+      // Reset current step state when going back
+      if (currentStep === 'validation') {
+        // Going back from validation to select - reset validation
+        importValidation.reset();
+      } else if (currentStep === 'select') {
+        // Going back from select to upload - reset selection and mapping
+        rangeSelection.clearRanges();
+        setMapping(emptyMapping());
+        setHasHeaders(false);
+      }
+
+      setCurrentStep(prevStep);
     }
-  }, [currentStepIndex]);
+  }, [currentStepIndex, currentStep, importValidation, rangeSelection]);
 
   const handleMappingChange = useCallback((field: ImportableField, column: string | null) => {
     setMapping(prev => ({ ...prev, [field]: column }));
@@ -136,6 +149,31 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
       setMapping(detected);
     }
   }, [excelParser.sheetData, rangeSelection.ranges, hasHeaders, importValidation]);
+
+  // Track last auto-detected range to avoid re-running
+  const lastAutoDetectRangeRef = useRef<string | null>(null);
+
+  // Auto-detect mapping when range is selected (only once per range)
+  useEffect(() => {
+    if (currentStep === 'select' && rangeSelection.ranges.length > 0 && excelParser.sheetData) {
+      // Create a unique key for current range + hasHeaders
+      const range = rangeSelection.ranges[0];
+      const rangeKey = `${range.startRow}-${range.endRow}-${range.startCol}-${range.endCol}-${hasHeaders}`;
+
+      // Only auto-detect if range changed
+      if (lastAutoDetectRangeRef.current !== rangeKey) {
+        lastAutoDetectRangeRef.current = rangeKey;
+        const detected = importValidation.autoDetectMapping(
+          excelParser.sheetData,
+          range,
+          hasHeaders
+        );
+        setMapping(detected);
+      }
+    } else if (rangeSelection.ranges.length === 0) {
+      lastAutoDetectRangeRef.current = null;
+    }
+  }, [rangeSelection.ranges, currentStep, excelParser.sheetData, hasHeaders, importValidation]);
 
   const handleClose = useCallback(() => {
     // Reset all state
@@ -273,7 +311,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
           body: {
             minHeight: 500,
             maxHeight: 'calc(90vh - 120px)',
-            overflow: 'auto',
+            overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
           },
@@ -318,7 +356,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
           size="small"
         />
 
-        <div style={{ flex: 1, overflow: 'auto' }}>
+        <div style={{ flex: 1, overflow: 'hidden' }}>
           {renderStepContent()}
         </div>
       </Modal>
