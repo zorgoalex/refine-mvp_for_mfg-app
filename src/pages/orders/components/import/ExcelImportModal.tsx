@@ -1,7 +1,7 @@
 // Main Excel Import Modal with wizard steps
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Modal, Steps, Button, Space, message, Result } from 'antd';
+import { Modal, Steps, Button, Space, message } from 'antd';
 import { UploadOutlined, SelectOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
@@ -38,8 +38,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   const [currentStep, setCurrentStep] = useState<ImportStep>('upload');
   const [hasHeaders, setHasHeaders] = useState(false);
   const [mapping, setMapping] = useState<FieldMapping>(emptyMapping());
-  const [importComplete, setImportComplete] = useState(false);
-  const [importedCount, setImportedCount] = useState(0);
 
   const excelParser = useExcelParser();
   const rangeSelection = useRangeSelection();
@@ -139,6 +137,17 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
     }
   }, [excelParser.sheetData, rangeSelection.ranges, hasHeaders, importValidation]);
 
+  const handleClose = useCallback(() => {
+    // Reset all state
+    excelParser.reset();
+    rangeSelection.clearRanges();
+    importValidation.reset();
+    setCurrentStep('upload');
+    setHasHeaders(false);
+    setMapping(emptyMapping());
+    onClose();
+  }, [excelParser, rangeSelection, importValidation, onClose]);
+
   const handleImport = useCallback(() => {
     const validRows = importValidation.getValidRows();
     if (validRows.length === 0) {
@@ -177,23 +186,11 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
     }
 
     recalculateFinancials();
-    setImportedCount(importedDetails);
-    setImportComplete(true);
     message.success(`Импортировано ${importedDetails} деталей`);
-  }, [importValidation, addDetail, recalculateFinancials]);
 
-  const handleClose = useCallback(() => {
-    // Reset all state
-    excelParser.reset();
-    rangeSelection.clearRanges();
-    importValidation.reset();
-    setCurrentStep('upload');
-    setHasHeaders(false);
-    setMapping(emptyMapping());
-    setImportComplete(false);
-    setImportedCount(0);
-    onClose();
-  }, [excelParser, rangeSelection, importValidation, onClose]);
+    // Close modal immediately after successful import
+    handleClose();
+  }, [importValidation, addDetail, recalculateFinancials, handleClose]);
 
   // Validation for next button
   const canGoNext = useMemo(() => {
@@ -211,21 +208,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   }, [currentStep, excelParser, rangeSelection.ranges, mapping, importValidation.stats]);
 
   const renderStepContent = () => {
-    if (importComplete) {
-      return (
-        <Result
-          status="success"
-          title={`Импорт завершён`}
-          subTitle={`Добавлено ${importedCount} деталей в заказ`}
-          extra={[
-            <Button key="close" type="primary" onClick={handleClose}>
-              Закрыть
-            </Button>
-          ]}
-        />
-      );
-    }
-
     switch (currentStep) {
       case 'upload':
         return (
@@ -267,8 +249,10 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
             validatedRows={importValidation.validatedRows}
             referenceData={importValidation.referenceData}
             stats={importValidation.stats}
+            unresolvedRefs={importValidation.unresolvedRefs}
             onUpdateRow={importValidation.updateRow}
             onRemoveRow={importValidation.removeRow}
+            onBatchReplace={importValidation.batchReplaceReference}
           />
         );
 
@@ -295,48 +279,44 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
           },
         }}
         footer={
-          importComplete ? null : (
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Button
-                onClick={handleBack}
-                disabled={currentStepIndex === 0}
-                icon={<ArrowLeftOutlined />}
-              >
-                Назад
-              </Button>
-              <Space>
-                <Button onClick={handleClose}>Отмена</Button>
-                {currentStep === 'validation' ? (
-                  <Button
-                    type="primary"
-                    onClick={handleImport}
-                    disabled={importValidation.stats.validRows === 0}
-                  >
-                    Импортировать ({importValidation.stats.validRows} шт)
-                  </Button>
-                ) : (
-                  <Button
-                    type="primary"
-                    onClick={handleNext}
-                    disabled={!canGoNext}
-                    icon={<ArrowRightOutlined />}
-                  >
-                    Далее
-                  </Button>
-                )}
-              </Space>
-            </div>
-          )
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Button
+              onClick={handleBack}
+              disabled={currentStepIndex === 0}
+              icon={<ArrowLeftOutlined />}
+            >
+              Назад
+            </Button>
+            <Space>
+              <Button onClick={handleClose}>Отмена</Button>
+              {currentStep === 'validation' ? (
+                <Button
+                  type="primary"
+                  onClick={handleImport}
+                  disabled={importValidation.stats.validRows === 0}
+                >
+                  Импортировать ({importValidation.stats.validRows} шт)
+                </Button>
+              ) : (
+                <Button
+                  type="primary"
+                  onClick={handleNext}
+                  disabled={!canGoNext}
+                  icon={<ArrowRightOutlined />}
+                >
+                  Далее
+                </Button>
+              )}
+            </Space>
+          </div>
         }
       >
-        {!importComplete && (
-          <Steps
-            current={currentStepIndex}
-            items={STEPS.map(s => ({ key: s.key, title: s.title, icon: s.icon }))}
-            style={{ marginBottom: 24 }}
-            size="small"
-          />
-        )}
+        <Steps
+          current={currentStepIndex}
+          items={STEPS.map(s => ({ key: s.key, title: s.title, icon: s.icon }))}
+          style={{ marginBottom: 24 }}
+          size="small"
+        />
 
         <div style={{ flex: 1, overflow: 'auto' }}>
           {renderStepContent()}

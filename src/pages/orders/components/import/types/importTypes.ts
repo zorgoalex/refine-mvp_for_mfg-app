@@ -158,10 +158,10 @@ export const FIELD_CONFIGS: FieldConfig[] = [
   { field: 'height', label: 'Высота (мм)', required: true, type: 'number' },
   { field: 'width', label: 'Ширина (мм)', required: true, type: 'number' },
   { field: 'quantity', label: 'Количество', required: true, type: 'number' },
-  { field: 'edge_type', label: 'Обкатка', required: false, type: 'reference', referenceResource: 'edge_types' },
-  { field: 'film', label: 'Плёнка', required: false, type: 'reference', referenceResource: 'films' },
+  { field: 'edge_type', label: 'Обкат', required: false, type: 'reference', referenceResource: 'edge_types' },
   { field: 'material', label: 'Материал', required: false, type: 'reference', referenceResource: 'materials' },
   { field: 'milling_type', label: 'Фрезеровка', required: false, type: 'reference', referenceResource: 'milling_types' },
+  { field: 'film', label: 'Плёнка', required: false, type: 'reference', referenceResource: 'films' },
   { field: 'note', label: 'Примечание', required: false, type: 'text' },
   { field: 'detail_name', label: 'Название детали', required: false, type: 'text' },
 ];

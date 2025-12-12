@@ -15,11 +15,27 @@ import type {
 } from '../types/importTypes';
 import { FIELD_CONFIGS, FIELD_KEYWORDS, IMPORT_DEFAULTS } from '../types/importTypes';
 
+export interface UnresolvedReference {
+  originalValue: string;
+  count: number;
+  field: 'edge_type' | 'film' | 'material' | 'milling_type';
+  nameField: 'edgeTypeName' | 'filmName' | 'materialName' | 'millingTypeName';
+  idField: 'edge_type_id' | 'film_id' | 'material_id' | 'milling_type_id';
+}
+
+export interface UnresolvedReferences {
+  edgeTypes: UnresolvedReference[];
+  films: UnresolvedReference[];
+  materials: UnresolvedReference[];
+  millingTypes: UnresolvedReference[];
+}
+
 export interface UseImportValidationReturn {
   validatedRows: ValidatedRow[];
   referenceData: ReferenceData;
   isLoading: boolean;
   stats: ImportStats;
+  unresolvedRefs: UnresolvedReferences;
   setReferenceData: (data: ReferenceData) => void;
   processImport: (sheet: ParsedSheet, ranges: SelectionRange[], mapping: FieldMapping, hasHeaders: boolean) => void;
   updateRow: (index: number, field: keyof ValidatedRow, value: unknown) => void;
@@ -27,6 +43,7 @@ export interface UseImportValidationReturn {
   getValidRows: () => ValidatedRow[];
   reset: () => void;
   autoDetectMapping: (sheet: ParsedSheet, range: SelectionRange, hasHeaders: boolean) => FieldMapping;
+  batchReplaceReference: (field: 'edge_type' | 'film' | 'material' | 'milling_type', originalValue: string, newId: number) => void;
 }
 
 export interface ImportStats {
@@ -60,14 +77,24 @@ const emptyMapping = (): FieldMapping => ({
 const findReferenceId = (name: string | null | undefined, items: ReferenceItem[]): number | null => {
   if (!name) return null;
   const normalizedName = String(name).toLowerCase().trim();
+  if (!normalizedName) return null;
+
+  // Exact match first
   const found = items.find(item => item.name.toLowerCase().trim() === normalizedName);
   if (found) return found.id;
-  // Fuzzy match: check if name includes or is included
-  const fuzzy = items.find(item =>
-    item.name.toLowerCase().includes(normalizedName) ||
-    normalizedName.includes(item.name.toLowerCase())
-  );
-  return fuzzy?.id || null;
+
+  // Fuzzy match only for longer strings (at least 3 chars) to avoid false positives
+  if (normalizedName.length >= 3) {
+    const fuzzy = items.find(item => {
+      const itemName = item.name.toLowerCase().trim();
+      // Only match if search term is substantial part of item name or vice versa
+      return (itemName.includes(normalizedName) && normalizedName.length >= itemName.length * 0.5) ||
+             (normalizedName.includes(itemName) && itemName.length >= normalizedName.length * 0.5);
+    });
+    return fuzzy?.id || null;
+  }
+
+  return null;
 };
 
 export const useImportValidation = (): UseImportValidationReturn => {
@@ -112,6 +139,96 @@ export const useImportValidation = (): UseImportValidationReturn => {
       totalArea: Math.round(totalArea * 100) / 100,
     };
   }, [validatedRows]);
+
+  // Get unresolved references grouped by type
+  const unresolvedRefs = useMemo((): UnresolvedReferences => {
+    const countMap = {
+      edgeTypes: new Map<string, number>(),
+      films: new Map<string, number>(),
+      materials: new Map<string, number>(),
+      millingTypes: new Map<string, number>(),
+    };
+
+    for (const row of validatedRows) {
+      if (row.edgeTypeName && !row.edge_type_id) {
+        const key = String(row.edgeTypeName).trim();
+        countMap.edgeTypes.set(key, (countMap.edgeTypes.get(key) || 0) + 1);
+      }
+      if (row.filmName && !row.film_id) {
+        const key = String(row.filmName).trim();
+        countMap.films.set(key, (countMap.films.get(key) || 0) + 1);
+      }
+      if (row.materialName && !row.material_id) {
+        const key = String(row.materialName).trim();
+        countMap.materials.set(key, (countMap.materials.get(key) || 0) + 1);
+      }
+      if (row.millingTypeName && !row.milling_type_id) {
+        const key = String(row.millingTypeName).trim();
+        countMap.millingTypes.set(key, (countMap.millingTypes.get(key) || 0) + 1);
+      }
+    }
+
+    return {
+      edgeTypes: Array.from(countMap.edgeTypes.entries()).map(([originalValue, count]) => ({
+        originalValue,
+        count,
+        field: 'edge_type' as const,
+        nameField: 'edgeTypeName' as const,
+        idField: 'edge_type_id' as const,
+      })),
+      films: Array.from(countMap.films.entries()).map(([originalValue, count]) => ({
+        originalValue,
+        count,
+        field: 'film' as const,
+        nameField: 'filmName' as const,
+        idField: 'film_id' as const,
+      })),
+      materials: Array.from(countMap.materials.entries()).map(([originalValue, count]) => ({
+        originalValue,
+        count,
+        field: 'material' as const,
+        nameField: 'materialName' as const,
+        idField: 'material_id' as const,
+      })),
+      millingTypes: Array.from(countMap.millingTypes.entries()).map(([originalValue, count]) => ({
+        originalValue,
+        count,
+        field: 'milling_type' as const,
+        nameField: 'millingTypeName' as const,
+        idField: 'milling_type_id' as const,
+      })),
+    };
+  }, [validatedRows]);
+
+  // Batch replace reference across all rows
+  const batchReplaceReference = useCallback((
+    field: 'edge_type' | 'film' | 'material' | 'milling_type',
+    originalValue: string,
+    newId: number
+  ): void => {
+    const fieldMap = {
+      edge_type: { nameField: 'edgeTypeName', idField: 'edge_type_id' },
+      film: { nameField: 'filmName', idField: 'film_id' },
+      material: { nameField: 'materialName', idField: 'material_id' },
+      milling_type: { nameField: 'millingTypeName', idField: 'milling_type_id' },
+    };
+
+    const { nameField, idField } = fieldMap[field];
+
+    setValidatedRows(prev => prev.map(row => {
+      const rowNameValue = row[nameField as keyof ValidatedRow];
+      if (rowNameValue && String(rowNameValue).trim() === originalValue && !row[idField as keyof ValidatedRow]) {
+        // Update the row and remove the warning for this field
+        const newWarnings = row.warnings.filter(w => w.field !== field);
+        return {
+          ...row,
+          [idField]: newId,
+          warnings: newWarnings,
+        };
+      }
+      return row;
+    }));
+  }, []);
 
   const autoDetectMapping = useCallback((
     sheet: ParsedSheet,
@@ -302,6 +419,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
     referenceData,
     isLoading,
     stats,
+    unresolvedRefs,
     setReferenceData,
     processImport,
     updateRow,
@@ -309,5 +427,6 @@ export const useImportValidation = (): UseImportValidationReturn => {
     getValidRows,
     reset,
     autoDetectMapping,
+    batchReplaceReference,
   };
 };

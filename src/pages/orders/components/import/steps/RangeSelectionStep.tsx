@@ -42,10 +42,10 @@ const FIELD_OPTIONS = [
   { value: 'height', label: 'Высота' },
   { value: 'width', label: 'Ширина' },
   { value: 'quantity', label: 'Кол-во' },
-  { value: 'edge_type', label: 'Обкатка' },
-  { value: 'film', label: 'Плёнка' },
+  { value: 'edge_type', label: 'Обкат' },
   { value: 'material', label: 'Материал' },
   { value: 'milling_type', label: 'Фрезер.' },
+  { value: 'film', label: 'Плёнка' },
   { value: 'note', label: 'Примеч.' },
   { value: 'detail_name', label: 'Назв.' },
 ];
