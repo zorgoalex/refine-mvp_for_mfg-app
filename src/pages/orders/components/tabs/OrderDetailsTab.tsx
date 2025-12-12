@@ -7,6 +7,7 @@ import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, 
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { BulkEditModal } from '../modals/BulkEditModal';
+import { ExcelImportButton } from '../import';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
@@ -392,6 +393,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           >
             Групповые действия
           </Button>
+          <ExcelImportButton />
           <Button
             danger
             icon={<DeleteOutlined />}

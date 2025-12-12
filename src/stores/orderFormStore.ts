@@ -15,6 +15,16 @@ import {
 } from '../types/orders';
 
 // ============================================================================
+// UNIQUE ID GENERATOR
+// ============================================================================
+
+let tempIdCounter = 0;
+const generateTempId = (): number => {
+  tempIdCounter += 1;
+  return Date.now() * 1000 + tempIdCounter;
+};
+
+// ============================================================================
 // STATE INTERFACE
 // ============================================================================
 
@@ -182,7 +192,7 @@ export const useOrderFormStore = create<OrderFormState>()(
 
               const newDetail = {
                 ...detail,
-                temp_id: Date.now(),
+                temp_id: generateTempId(),
                 detail_number: maxDetailNumber + 1,
                 priority: detail.priority || 100,
                 quantity: detail.quantity,
@@ -224,7 +234,7 @@ export const useOrderFormStore = create<OrderFormState>()(
               // Add new detail with the calculated number
               const newDetail = {
                 ...detail,
-                temp_id: Date.now(),
+                temp_id: generateTempId(),
                 detail_number: newDetailNumber,
                 priority: detail.priority || 100,
                 quantity: detail.quantity,
