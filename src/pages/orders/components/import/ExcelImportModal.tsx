@@ -2,11 +2,11 @@
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Modal, Steps, Button, Space, message, Result } from 'antd';
-import { UploadOutlined, SelectOutlined, LinkOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
+import { UploadOutlined, SelectOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { useExcelParser, useRangeSelection, useImportValidation } from './hooks';
-import { FileUploadStep, RangeSelectionStep, ColumnMappingStep, ValidationStep } from './steps';
+import { FileUploadStep, RangeSelectionStep, ValidationStep } from './steps';
 import type { ImportStep, FieldMapping, ImportableField, SelectionRange, ReferenceData } from './types/importTypes';
 import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -18,8 +18,7 @@ interface ExcelImportModalProps {
 
 const STEPS: { key: ImportStep; title: string; icon: React.ReactNode }[] = [
   { key: 'upload', title: 'Загрузка', icon: <UploadOutlined /> },
-  { key: 'select', title: 'Выбор данных', icon: <SelectOutlined /> },
-  { key: 'mapping', title: 'Сопоставление', icon: <LinkOutlined /> },
+  { key: 'select', title: 'Выбор и маппинг', icon: <SelectOutlined /> },
   { key: 'validation', title: 'Проверка', icon: <CheckCircleOutlined /> },
 ];
 
@@ -37,7 +36,7 @@ const emptyMapping = (): FieldMapping => ({
 
 export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClose }) => {
   const [currentStep, setCurrentStep] = useState<ImportStep>('upload');
-  const [hasHeaders, setHasHeaders] = useState(true);
+  const [hasHeaders, setHasHeaders] = useState(false);
   const [mapping, setMapping] = useState<FieldMapping>(emptyMapping());
   const [importComplete, setImportComplete] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
@@ -104,7 +103,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
     if (idx < STEPS.length - 1) {
       const nextStep = STEPS[idx + 1].key;
 
-      // When moving to validation step, process data
+      // When moving to validation step from select, process data
       if (nextStep === 'validation' && excelParser.sheetData) {
         importValidation.processImport(
           excelParser.sheetData,
@@ -150,10 +149,20 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
     let importedDetails = 0;
 
     for (const row of validRows) {
+      const height = row.height || 0;
+      const width = row.width || 0;
+      const quantity = row.quantity || 1;
+
+      // Calculate area: (height * width * quantity) in mm² -> m²
+      // Using integer math to avoid floating point errors
+      const areaMm2 = height * width * quantity;
+      const area = areaMm2 > 0 ? Math.ceil(areaMm2 / 10000) / 100 : 0;
+
       const detail = {
-        height: row.height || 0,
-        width: row.width || 0,
-        quantity: row.quantity || 1,
+        height,
+        width,
+        quantity,
+        area,
         edge_type_id: row.edge_type_id || IMPORT_DEFAULTS.edge_type_id,
         film_id: row.film_id || null,
         material_id: row.material_id || IMPORT_DEFAULTS.material_id,
@@ -179,7 +188,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
     rangeSelection.clearRanges();
     importValidation.reset();
     setCurrentStep('upload');
-    setHasHeaders(true);
+    setHasHeaders(false);
     setMapping(emptyMapping());
     setImportComplete(false);
     setImportedCount(0);
@@ -192,9 +201,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
       case 'upload':
         return !!excelParser.sheetData && !excelParser.isLoading;
       case 'select':
-        return rangeSelection.ranges.length > 0;
-      case 'mapping':
-        return !!mapping.height && !!mapping.width && !!mapping.quantity;
+        // Need range selected AND required fields mapped
+        return rangeSelection.ranges.length > 0 && !!mapping.height && !!mapping.width && !!mapping.quantity;
       case 'validation':
         return importValidation.stats.validRows > 0;
       default:
@@ -241,25 +249,15 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
             isSelecting={rangeSelection.isSelecting}
             currentSelection={rangeSelection.currentSelection}
             hasHeaders={hasHeaders}
+            mapping={mapping}
             onHasHeadersChange={setHasHeaders}
+            onMappingChange={handleMappingChange}
             onStartSelection={rangeSelection.startSelection}
             onUpdateSelection={rangeSelection.updateSelection}
             onEndSelection={rangeSelection.endSelection}
             onRemoveRange={rangeSelection.removeRange}
             onClearRanges={rangeSelection.clearRanges}
             onSetActiveRange={rangeSelection.setActiveRange}
-          />
-        ) : null;
-
-      case 'mapping':
-        return excelParser.sheetData ? (
-          <ColumnMappingStep
-            sheetData={excelParser.sheetData}
-            ranges={rangeSelection.ranges}
-            hasHeaders={hasHeaders}
-            mapping={mapping}
-            onMappingChange={handleMappingChange}
-            onAutoDetect={handleAutoDetect}
           />
         ) : null;
 

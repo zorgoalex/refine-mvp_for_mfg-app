@@ -117,7 +117,7 @@ export interface ValidatedRow extends ResolvedRow {
 // IMPORT STATE TYPES
 // ============================================================================
 
-export type ImportStep = 'upload' | 'select' | 'mapping' | 'validation' | 'complete';
+export type ImportStep = 'upload' | 'select' | 'validation' | 'complete';
 export type ImportMode = 'new_order' | 'existing_order';
 
 export interface ReferenceItem {

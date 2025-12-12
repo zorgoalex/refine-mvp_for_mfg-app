@@ -1,10 +1,10 @@
-// Step 2: Visual range selection with larger scrollable area
+// Step 2: Visual range selection with column mapping in headers
 
 import React, { useCallback, useRef, useMemo } from 'react';
-import { Typography, Checkbox, Space, Tag, Button, Tooltip } from 'antd';
-import { DeleteOutlined, ClearOutlined } from '@ant-design/icons';
-import type { ParsedSheet, SelectionRange, NormalizedRange } from '../types/importTypes';
-import { getColumnLetter } from '../types/importTypes';
+import { Typography, Checkbox, Space, Tag, Button, Select } from 'antd';
+import { ClearOutlined } from '@ant-design/icons';
+import type { ParsedSheet, SelectionRange, NormalizedRange, FieldMapping, ImportableField } from '../types/importTypes';
+import { getColumnLetter, FIELD_CONFIGS } from '../types/importTypes';
 
 const { Text, Title } = Typography;
 
@@ -15,7 +15,9 @@ interface RangeSelectionStepProps {
   isSelecting: boolean;
   currentSelection: SelectionRange | null;
   hasHeaders: boolean;
+  mapping: FieldMapping;
   onHasHeadersChange: (value: boolean) => void;
+  onMappingChange: (field: ImportableField, column: string | null) => void;
   onStartSelection: (row: number, col: number) => void;
   onUpdateSelection: (row: number, col: number) => void;
   onEndSelection: () => void;
@@ -34,6 +36,20 @@ const normalizeRange = (range: SelectionRange): NormalizedRange => ({
 const MAX_VISIBLE_ROWS = 150;
 const MAX_VISIBLE_COLS = 30;
 
+// Short labels for mapping dropdown
+const FIELD_OPTIONS = [
+  { value: '', label: '—' },
+  { value: 'height', label: 'Высота' },
+  { value: 'width', label: 'Ширина' },
+  { value: 'quantity', label: 'Кол-во' },
+  { value: 'edge_type', label: 'Обкатка' },
+  { value: 'film', label: 'Плёнка' },
+  { value: 'material', label: 'Материал' },
+  { value: 'milling_type', label: 'Фрезер.' },
+  { value: 'note', label: 'Примеч.' },
+  { value: 'detail_name', label: 'Назв.' },
+];
+
 export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
   sheetData,
   ranges,
@@ -41,7 +57,9 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
   isSelecting,
   currentSelection,
   hasHeaders,
+  mapping,
   onHasHeadersChange,
+  onMappingChange,
   onStartSelection,
   onUpdateSelection,
   onEndSelection,
@@ -53,6 +71,38 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
 
   const visibleRows = Math.min(sheetData.rowCount, MAX_VISIBLE_ROWS);
   const visibleCols = Math.min(sheetData.colCount, MAX_VISIBLE_COLS);
+
+  // Get selected columns from first range
+  const selectedCols = useMemo(() => {
+    if (ranges.length === 0) return new Set<number>();
+    const { minCol, maxCol } = normalizeRange(ranges[0]);
+    const cols = new Set<number>();
+    for (let c = minCol; c <= maxCol; c++) cols.add(c);
+    return cols;
+  }, [ranges]);
+
+  // Get which field is mapped to which column
+  const getFieldForColumn = useCallback((colLetter: string): ImportableField | null => {
+    for (const [field, col] of Object.entries(mapping)) {
+      if (col === colLetter) return field as ImportableField;
+    }
+    return null;
+  }, [mapping]);
+
+  // Handle mapping change from header dropdown
+  const handleHeaderMappingChange = useCallback((colLetter: string, field: string) => {
+    // First, clear any existing mapping to this column
+    for (const [existingField, col] of Object.entries(mapping)) {
+      if (col === colLetter) {
+        onMappingChange(existingField as ImportableField, null);
+      }
+    }
+    // Then set new mapping
+    if (field) {
+      // Clear previous column for this field
+      onMappingChange(field as ImportableField, colLetter);
+    }
+  }, [mapping, onMappingChange]);
 
   // Check if cell is in any range
   const getCellRange = useCallback((row: number, col: number): SelectionRange | null => {
@@ -94,11 +144,17 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
     return `${getColumnLetter(minCol)}${minRow + 1}:${getColumnLetter(maxCol)}${maxRow + 1}`;
   };
 
+  // Check required fields
+  const missingRequired = useMemo(() => {
+    const required = FIELD_CONFIGS.filter(f => f.required);
+    return required.filter(f => !mapping[f.field]).map(f => f.label);
+  }, [mapping]);
+
   // Memoize grid cells for performance
   const gridCells = useMemo(() => {
     const cells: React.ReactNode[] = [];
 
-    // Header row (column letters)
+    // Corner cell
     cells.push(
       <div key="corner" className="excel-cell excel-header-cell corner" style={{
         position: 'sticky',
@@ -111,7 +167,12 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
       }} />
     );
 
+    // Header row with mapping dropdowns
     for (let col = 0; col < visibleCols; col++) {
+      const colLetter = getColumnLetter(col);
+      const isInSelectedRange = selectedCols.has(col);
+      const mappedField = getFieldForColumn(colLetter);
+
       cells.push(
         <div
           key={`header-${col}`}
@@ -120,12 +181,25 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
             position: 'sticky',
             top: 0,
             zIndex: 2,
-            backgroundColor: '#fafafa',
+            backgroundColor: isInSelectedRange ? '#e6f7ff' : '#fafafa',
             borderBottom: '1px solid #d9d9d9',
-            fontWeight: 600,
+            flexDirection: 'column',
+            padding: '2px 4px',
+            minHeight: 50,
           }}
         >
-          {getColumnLetter(col)}
+          <div style={{ fontWeight: 600, fontSize: 11 }}>{colLetter}</div>
+          {isInSelectedRange && (
+            <Select
+              size="small"
+              value={mappedField || ''}
+              onChange={(val) => handleHeaderMappingChange(colLetter, val)}
+              options={FIELD_OPTIONS}
+              style={{ width: '100%', fontSize: 10 }}
+              dropdownStyle={{ minWidth: 100 }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
         </div>
       );
     }
@@ -177,25 +251,24 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
     }
 
     return cells;
-  }, [sheetData.data, visibleRows, visibleCols, getCellRange, handleMouseDown, handleMouseMove, handleMouseUp]);
+  }, [sheetData.data, visibleRows, visibleCols, selectedCols, getFieldForColumn, getCellRange, handleMouseDown, handleMouseMove, handleMouseUp, handleHeaderMappingChange]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <style>{`
         .excel-grid-container {
-          flex: 1;
           overflow: auto;
           border: 1px solid #d9d9d9;
           border-radius: 4px;
           user-select: none;
-          min-height: 400px;
-          max-height: calc(80vh - 200px);
+          height: 450px;
         }
         .excel-grid {
           display: grid;
           grid-template-columns: 40px repeat(${visibleCols}, minmax(80px, 120px));
           font-family: 'Consolas', 'Monaco', monospace;
           font-size: 12px;
+          width: max-content;
         }
         .excel-cell {
           padding: 4px 6px;
@@ -231,10 +304,10 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
         }
       `}</style>
 
-      <Space direction="vertical" style={{ marginBottom: 12 }} size="small">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Space direction="vertical" style={{ marginBottom: 8 }} size="small">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <Title level={5} style={{ margin: 0 }}>
-            Выделите область данных мышью
+            Выделите область и укажите поля в заголовках
           </Title>
           <Space>
             <Checkbox
@@ -255,33 +328,30 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
           </Space>
         </div>
 
-        {ranges.length > 0 && (
-          <div>
-            <Text type="secondary" style={{ marginRight: 8 }}>Выделенные области:</Text>
-            {ranges.map((range) => (
-              <Tag
-                key={range.id}
-                color={activeRangeId === range.id ? 'blue' : 'default'}
-                style={{
-                  marginBottom: 4,
-                  backgroundColor: range.color,
-                  cursor: 'pointer',
-                }}
-                closable
-                onClose={() => onRemoveRange(range.id)}
-                onClick={() => onSetActiveRange(range.id)}
-              >
-                {formatRange(range)}
-              </Tag>
-            ))}
-          </div>
-        )}
-
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          Зажмите левую кнопку мыши и выделите область. Можно выделить несколько областей.
-          {sheetData.rowCount > MAX_VISIBLE_ROWS && ` Показаны первые ${MAX_VISIBLE_ROWS} строк.`}
-          {sheetData.colCount > MAX_VISIBLE_COLS && ` Показаны первые ${MAX_VISIBLE_COLS} колонок.`}
-        </Text>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          {ranges.length > 0 && (
+            <div>
+              <Text type="secondary" style={{ marginRight: 8 }}>Область:</Text>
+              {ranges.map((range) => (
+                <Tag
+                  key={range.id}
+                  color={activeRangeId === range.id ? 'blue' : 'default'}
+                  style={{ marginBottom: 4, backgroundColor: range.color, cursor: 'pointer' }}
+                  closable
+                  onClose={() => onRemoveRange(range.id)}
+                  onClick={() => onSetActiveRange(range.id)}
+                >
+                  {formatRange(range)}
+                </Tag>
+              ))}
+            </div>
+          )}
+          {missingRequired.length > 0 && ranges.length > 0 && (
+            <Text type="danger" style={{ fontSize: 12 }}>
+              Не указаны: {missingRequired.join(', ')}
+            </Text>
+          )}
+        </div>
       </Space>
 
       <div

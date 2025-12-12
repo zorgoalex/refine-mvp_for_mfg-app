@@ -206,55 +206,55 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Statistics cards */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
+      {/* Statistics cards - compact */}
+      <Row gutter={8} style={{ marginBottom: 8 }}>
         <Col span={6}>
-          <Card size="small">
+          <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
             <Statistic
-              title="Всего строк"
+              title={<span style={{ fontSize: 11 }}>Всего строк</span>}
               value={stats.totalRows}
-              valueStyle={{ fontSize: 20 }}
+              valueStyle={{ fontSize: 14 }}
             />
           </Card>
         </Col>
         <Col span={6}>
-          <Card size="small">
+          <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
             <Statistic
-              title="Готово к импорту"
+              title={<span style={{ fontSize: 11 }}>Готово к импорту</span>}
               value={stats.validRows}
-              valueStyle={{ fontSize: 20, color: '#52c41a' }}
-              prefix={<CheckCircleOutlined />}
+              valueStyle={{ fontSize: 14, color: '#52c41a' }}
+              prefix={<CheckCircleOutlined style={{ fontSize: 12 }} />}
             />
           </Card>
         </Col>
         <Col span={6}>
-          <Card size="small">
+          <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
             <Statistic
-              title="Общее количество"
+              title={<span style={{ fontSize: 11 }}>Общее количество</span>}
               value={stats.totalQuantity}
-              valueStyle={{ fontSize: 20 }}
-              suffix="шт"
+              valueStyle={{ fontSize: 14 }}
+              suffix={<span style={{ fontSize: 11 }}>шт</span>}
             />
           </Card>
         </Col>
         <Col span={6}>
-          <Card size="small">
+          <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
             <Statistic
-              title="Общая площадь"
+              title={<span style={{ fontSize: 11 }}>Общая площадь</span>}
               value={stats.totalArea}
-              valueStyle={{ fontSize: 20 }}
-              suffix="м²"
+              valueStyle={{ fontSize: 14 }}
+              suffix={<span style={{ fontSize: 11 }}>м²</span>}
               precision={2}
             />
           </Card>
         </Col>
       </Row>
 
-      {/* Legend */}
-      <div style={{ marginBottom: 8 }}>
-        <Tag color="success"><CheckCircleOutlined /> Готово</Tag>
-        <Tag color="error"><ExclamationCircleOutlined /> Ошибка</Tag>
-        <Tag color="warning"><WarningOutlined /> Предупреждение</Tag>
+      {/* Legend - compact */}
+      <div style={{ marginBottom: 6 }}>
+        <Tag color="success" style={{ fontSize: 11 }}><CheckCircleOutlined style={{ fontSize: 10 }} /> Готово</Tag>
+        <Tag color="error" style={{ fontSize: 11 }}><ExclamationCircleOutlined style={{ fontSize: 10 }} /> Ошибка</Tag>
+        <Tag color="warning" style={{ fontSize: 11 }}><WarningOutlined style={{ fontSize: 10 }} /> Предупреждение</Tag>
       </div>
 
       {/* Validation table */}

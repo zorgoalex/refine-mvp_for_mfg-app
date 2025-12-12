@@ -89,7 +89,10 @@ export const useRangeSelection = (): UseRangeSelectionReturn => {
 
   const updateSelection = useCallback((row: number, col: number): void => {
     if (!isSelecting) return;
-    setSelectionEnd({ row, col });
+    setSelectionEnd(prev => {
+      if (prev && prev.row === row && prev.col === col) return prev;
+      return { row, col };
+    });
   }, [isSelecting]);
 
   const endSelection = useCallback((): void => {

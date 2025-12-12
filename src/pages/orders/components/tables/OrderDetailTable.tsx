@@ -1068,7 +1068,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               {/* Checkbox column */}
               <Table.Summary.Cell index={0} />
               {/* № */}
-              <Table.Summary.Cell index={1} />
+              <Table.Summary.Cell index={1} align="center">
+                <span style={{ color: '#666' }}>{details.length}</span>
+              </Table.Summary.Cell>
               {/* Высота */}
               <Table.Summary.Cell index={2} />
               {/* Ширина */}
