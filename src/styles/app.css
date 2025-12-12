@@ -180,3 +180,65 @@
   border-bottom: 1px solid #b8b8b8 !important;
   border-right: 1px solid #b8b8b8 !important;
 }
+
+/* ========================================
+   Drag Selection Styles
+   ======================================== */
+
+/* Pending selection - dashed border and light background */
+.drag-selection-pending > td {
+  background-color: #e6f4ff !important;
+  border-top: 1px dashed #1890ff !important;
+  border-bottom: 1px dashed #1890ff !important;
+}
+
+.drag-selection-pending:first-of-type > td {
+  border-top: 2px dashed #1890ff !important;
+}
+
+.drag-selection-pending:last-of-type > td {
+  border-bottom: 2px dashed #1890ff !important;
+}
+
+/* Pending selection - left/right indicators */
+.drag-selection-pending > td:first-child {
+  border-left: 2px dashed #1890ff !important;
+}
+
+.drag-selection-pending > td:last-child {
+  border-right: 2px dashed #1890ff !important;
+}
+
+/* Confirmation toolbar animation */
+.drag-selection-confirm-bar {
+  animation: slideInFromTop 0.2s ease-out;
+}
+
+@keyframes slideInFromTop {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Cursor during drag */
+.drag-selection-active {
+  cursor: crosshair !important;
+  user-select: none;
+}
+
+.drag-selection-active * {
+  cursor: crosshair !important;
+}
+
+/* Disable text selection during drag */
+.drag-selection-active .ant-table-tbody {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
