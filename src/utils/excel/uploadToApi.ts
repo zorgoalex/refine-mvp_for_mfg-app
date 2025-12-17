@@ -105,7 +105,7 @@ export async function uploadOrderExcelToApi(
       orderId: String(order.order_id),
       prisadkaName, // Номер присадки из dowelling_order_name
       prisadkaDesignerName, // Конструктор присадки из design_engineer (emd.full_name)
-      orderDate: order.order_date,
+      orderDate: formatDateForPayload(order.order_date),
       clientName: client?.client_name || 'Не указан',
       clientPhone: clientPhone || '',
       millingSummary,
