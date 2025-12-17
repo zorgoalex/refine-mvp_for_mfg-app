@@ -5,6 +5,7 @@
  */
 
 import type { GenerateOrderExcelParams } from './generateOrderExcel';
+import { formatDate } from '../dateFormat';
 
 /**
  * Кастомная ошибка загрузки на GAS
@@ -14,6 +15,14 @@ export class UploadToApiError extends Error {
     super(message);
     this.name = 'UploadToApiError';
   }
+}
+
+/**
+ * Форматирование даты для JSON payload (пустая строка вместо "—")
+ */
+function formatDateForPayload(date: string | null | undefined): string {
+  const formatted = formatDate(date);
+  return formatted === '—' ? '' : formatted;
 }
 
 /**
@@ -87,6 +96,9 @@ export async function uploadOrderExcelToApi(
       amount: payment.amount || 0,
     }));
 
+    // Извлекаем данные из orders_view (_viewData)
+    const viewData = (order as any)._viewData || {};
+
     // Формирование JSON для отправки на Vercel API (без apiKey - добавится на сервере)
     const orderPayload = {
       orderName: order.order_name || '',
@@ -104,6 +116,13 @@ export async function uploadOrderExcelToApi(
       orderMonth,
       items,
       payments: paymentItems, // Платежи: тип, дата, сумма
+      // Новые поля из orders_view (даты в RU формате DD.MM.YYYY)
+      totalArea: viewData.total_area || 0,
+      plannedCompletionDate: formatDateForPayload(viewData.planned_completion_date),
+      orderStatusName: viewData.order_status_name || '',
+      paymentStatusName: viewData.payment_status_name || '',
+      issueDate: formatDateForPayload(viewData.issue_date),
+      productionStatusName: viewData.production_status_name || '',
     };
 
     console.log('[uploadToApi] Sending to Vercel API: /api/order-export-to-drive');

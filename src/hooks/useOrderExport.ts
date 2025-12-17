@@ -78,17 +78,37 @@ export const useOrderExport = (): UseOrderExportResult => {
     try {
       // 1. Загрузить ПОЛНЫЙ заказ из БД (может быть передан только order_id)
       // Используем orders для редактируемых полей + order_doweling_links
+      // А также orders_view для агрегированных полей (статусы, площадь)
       console.log('[useOrderExport] Fetching full order from DB...');
-      const { data: fullOrder } = await dataProvider().getOne({
-        resource: 'orders',
-        id: order.order_id,
-      });
+      const [{ data: fullOrder }, { data: orderViewData }] = await Promise.all([
+        dataProvider().getOne({
+          resource: 'orders',
+          id: order.order_id,
+        }),
+        dataProvider().getList({
+          resource: 'orders_view',
+          filters: [{ field: 'order_id', operator: 'eq', value: order.order_id }],
+          pagination: { current: 1, pageSize: 1 },
+        }),
+      ]);
 
       if (!fullOrder) {
         throw new Error(`Order ${order.order_id} not found in database`);
       }
 
+      // Добавляем поля из orders_view
+      const orderView = orderViewData?.[0] || {};
+      fullOrder._viewData = {
+        total_area: orderView.total_area || 0,
+        planned_completion_date: orderView.planned_completion_date || null,
+        order_status_name: orderView.order_status_name || '',
+        payment_status_name: orderView.payment_status_name || '',
+        issue_date: orderView.issue_date || null,
+        production_status_name: orderView.production_status_name || '',
+      };
+
       console.log('[useOrderExport] Full order loaded:', fullOrder);
+      console.log('[useOrderExport] View data:', fullOrder._viewData);
 
       // 1.1 Извлекаем первую присадку из order_doweling_links
       const dowelingLinks = fullOrder.order_doweling_links || [];
