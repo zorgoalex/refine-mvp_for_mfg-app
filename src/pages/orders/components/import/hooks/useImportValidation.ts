@@ -38,6 +38,7 @@ export interface UseImportValidationReturn {
   unresolvedRefs: UnresolvedReferences;
   setReferenceData: (data: ReferenceData) => void;
   processImport: (sheet: ParsedSheet, ranges: SelectionRange[], mapping: FieldMapping, hasHeaders: boolean) => void;
+  processDirectRows: (rows: ImportRow[]) => void;
   updateRow: (index: number, field: keyof ValidatedRow, value: unknown) => void;
   removeRow: (index: number) => void;
   getValidRows: () => ValidatedRow[];
@@ -474,6 +475,71 @@ export const useImportValidation = (): UseImportValidationReturn => {
     }
   }, [referenceData]);
 
+  // Process pre-parsed rows directly (for PDF import)
+  const processDirectRows = useCallback((rows: ImportRow[]): void => {
+    setIsLoading(true);
+
+    try {
+      const validated: ValidatedRow[] = rows.map(row => {
+        const errors: FieldError[] = [];
+        const warnings: FieldError[] = [];
+
+        // Validate required fields
+        const height = Number(row.height);
+        const width = Number(row.width);
+        const quantity = Number(row.quantity);
+
+        if (!row.height || isNaN(height) || height <= 0) {
+          errors.push({ field: 'height', message: 'Требуется высота > 0', type: 'error' });
+        }
+        if (!row.width || isNaN(width) || width <= 0) {
+          errors.push({ field: 'width', message: 'Требуется ширина > 0', type: 'error' });
+        }
+        if (!row.quantity || isNaN(quantity) || quantity <= 0) {
+          errors.push({ field: 'quantity', message: 'Требуется количество > 0', type: 'error' });
+        }
+
+        // Resolve references
+        const edge_type_id = findReferenceId(row.edgeTypeName, referenceData.edgeTypes);
+        const film_id = findReferenceId(row.filmName, referenceData.films);
+        const material_id = findReferenceId(row.materialName, referenceData.materials);
+        const milling_type_id = findReferenceId(row.millingTypeName, referenceData.millingTypes);
+
+        // Warnings for unresolved references
+        if (row.edgeTypeName && !edge_type_id) {
+          warnings.push({ field: 'edge_type', message: `Не найдена обкатка: "${row.edgeTypeName}"`, type: 'warning' });
+        }
+        if (row.filmName && !film_id) {
+          warnings.push({ field: 'film', message: `Не найдена плёнка: "${row.filmName}"`, type: 'warning' });
+        }
+        if (row.materialName && !material_id) {
+          warnings.push({ field: 'material', message: `Не найден материал: "${row.materialName}"`, type: 'warning' });
+        }
+        if (row.millingTypeName && !milling_type_id) {
+          warnings.push({ field: 'milling_type', message: `Не найдена фрезеровка: "${row.millingTypeName}"`, type: 'warning' });
+        }
+
+        return {
+          ...row,
+          height: isNaN(height) ? null : height,
+          width: isNaN(width) ? null : width,
+          quantity: isNaN(quantity) ? null : quantity,
+          edge_type_id,
+          film_id,
+          material_id,
+          milling_type_id,
+          isValid: errors.length === 0,
+          errors,
+          warnings,
+        };
+      });
+
+      setValidatedRows(validated);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [referenceData]);
+
   const updateRow = useCallback((index: number, field: keyof ValidatedRow, value: unknown): void => {
     setValidatedRows(prev => {
       const updated = [...prev];
@@ -523,6 +589,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
     unresolvedRefs,
     setReferenceData,
     processImport,
+    processDirectRows,
     updateRow,
     removeRow,
     getValidRows,

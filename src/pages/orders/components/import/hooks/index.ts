@@ -6,3 +6,6 @@ export type { UseRangeSelectionReturn } from './useRangeSelection';
 
 export { useImportValidation } from './useImportValidation';
 export type { UseImportValidationReturn, ImportStats } from './useImportValidation';
+
+export { usePdfParser } from './usePdfParser';
+export type { UsePdfParserReturn } from './usePdfParser';
