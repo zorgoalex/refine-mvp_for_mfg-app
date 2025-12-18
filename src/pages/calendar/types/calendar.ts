@@ -57,6 +57,9 @@ export interface CalendarOrder {
   edge_type?: string;
   film?: string;
 
+  // Присадка (из order_doweling_links)
+  doweling_order_name?: string;
+
   // Дополнительные поля
   cad_files_status?: string;
   is_drawn?: boolean;

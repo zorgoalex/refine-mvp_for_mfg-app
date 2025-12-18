@@ -181,6 +181,12 @@
   cursor: move;
 }
 
+/* Карточка со статусом "Выдан" - зелёный контур */
+.order-card--issued {
+  border-color: #52c41a !important;
+  border-left-color: #52c41a !important;
+}
+
 /* Строка 1: Чекбокс | Номер | Материалы | Edit */
 .order-card__header {
   display: flex;

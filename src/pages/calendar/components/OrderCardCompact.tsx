@@ -34,7 +34,9 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
   const millingDisplay = getMillingDisplayValue(order.order_details);
   const paymentStatus = order.payment_status_name || '';
 
-  const borderColor = getCardBorderColor(order);
+  // Проверка статуса "Выдан" для зелёного контура
+  const isIssued = order.order_status_name?.toLowerCase() === 'выдан';
+  const borderColor = isIssued ? '#52c41a' : getCardBorderColor(order);
 
   // Обработчик клика на номер заказа
   const handleOrderClick = () => {
@@ -69,12 +71,15 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}
     >
       {/* Номер заказа */}
-      <div 
-        className="order-card-compact__number" 
+      <div
+        className="order-card-compact__number"
         onClick={handleOrderClick}
         style={{ cursor: 'pointer', color: '#1890ff', fontWeight: 500 }}
       >
         Заказ {order.order_name}
+        {order.doweling_order_name && (
+          <span style={{ color: '#DC2626' }}>{` - ${order.doweling_order_name}`}</span>
+        )}
       </div>
 
       {/* Горизонтальная линия */}

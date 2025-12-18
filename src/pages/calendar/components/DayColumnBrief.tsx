@@ -74,10 +74,19 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
                   cursor: 'pointer',
                   padding: '4px 0',
                   borderBottom: '1px solid #f0f0f0',
+                  ...(order.order_status_name?.toLowerCase() === 'выдан' && {
+                    border: '1px solid #52c41a',
+                    borderRadius: '4px',
+                    padding: '4px',
+                    marginBottom: '2px',
+                  }),
                 }}
               >
-                {/* Формат: номер - площадь - материал - фрезеровка */}
+                {/* Формат: номер - присадка - площадь - материал - фрезеровка */}
                 <span style={{ fontWeight: 500 }}>{order.order_name}</span>
+                {order.doweling_order_name && (
+                  <span style={{ color: '#DC2626', fontWeight: 500 }}>{` - ${order.doweling_order_name}`}</span>
+                )}
                 {' - '}
                 <span>{order.total_area > 0 ? `${order.total_area.toFixed(2)} кв.м.` : '—'}</span>
                 {hasMaterials ? ' - ' : ' '}

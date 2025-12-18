@@ -78,6 +78,9 @@ const OrderCard: React.FC<OrderCardProps> = ({
   // Цвет номера заказа: коричневый для "К", синий для остальных
   const orderNumberColor = order.order_name?.startsWith('К') ? '#8B4513' : '#1976d2';
 
+  // Проверка статуса "Выдан" для зелёного контура
+  const isIssued = order.order_status_name?.toLowerCase() === 'выдан';
+
   // Формируем строку даты + клиент
   const infoLine = [
     order.order_date ? formatDateKey(order.order_date) : null,
@@ -99,7 +102,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
   return (
     <div
       ref={dragRef}
-      className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''}`}
+      className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''} ${isIssued ? 'order-card--issued' : ''}`}
       style={{
         backgroundColor,
         cursor: 'move',
@@ -107,6 +110,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
         marginBottom: marginCompensation,
+        ...(isIssued && { borderColor: '#52c41a' }),
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
       onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}
@@ -125,6 +129,9 @@ const OrderCard: React.FC<OrderCardProps> = ({
           style={{ color: orderNumberColor }}
         >
           {order.order_name}
+          {order.doweling_order_name && (
+            <span style={{ color: '#DC2626' }}>{` - ${order.doweling_order_name}`}</span>
+          )}
         </span>
         {materials.length > 0 && (
           <div className="order-card__materials">

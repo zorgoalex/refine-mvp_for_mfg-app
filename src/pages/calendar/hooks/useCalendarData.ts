@@ -96,6 +96,23 @@ export const useCalendarData = (
     queryOptions: { staleTime: 60000 },
   });
 
+  // Загружаем связи с присадками для заказов
+  const { data: dowelingLinksData } = useList({
+    resource: 'order_doweling_links',
+    filters: [
+      {
+        field: 'order_id',
+        operator: 'in',
+        value: orderIds,
+      },
+    ],
+    pagination: { pageSize: 10000 },
+    queryOptions: {
+      enabled: orderIds.length > 0,
+      staleTime: 30000,
+    },
+  });
+
   // Создаём Map для быстрого поиска названия фрезеровки
   const millingTypesMap = useMemo(() => {
     const map = new Map<number, string>();
@@ -113,6 +130,31 @@ export const useCalendarData = (
     });
     return map;
   }, [materialsData]);
+
+  // Группируем присадки по order_id (берём последнюю по order_doweling_link_id)
+  const dowelingByOrderId = useMemo(() => {
+    const map: Record<number, string> = {};
+    const links = dowelingLinksData?.data || [];
+    // Группируем по order_id
+    const linksByOrder: Record<number, any[]> = {};
+    links.forEach((link: any) => {
+      if (!linksByOrder[link.order_id]) {
+        linksByOrder[link.order_id] = [];
+      }
+      linksByOrder[link.order_id].push(link);
+    });
+    // Берём последнюю присадку для каждого заказа
+    Object.entries(linksByOrder).forEach(([orderId, orderLinks]) => {
+      const sorted = orderLinks.sort(
+        (a: any, b: any) => b.order_doweling_link_id - a.order_doweling_link_id
+      );
+      const latestLink = sorted[0];
+      if (latestLink?.doweling_order?.doweling_order_name) {
+        map[Number(orderId)] = latestLink.doweling_order.doweling_order_name;
+      }
+    });
+    return map;
+  }, [dowelingLinksData]);
 
   // Группируем детали по order_id и добавляем milling_type_name и material_name
   const detailsByOrderId = useMemo(() => {
@@ -136,20 +178,21 @@ export const useCalendarData = (
     return map;
   }, [detailsData, millingTypesMap, materialsMap]);
 
-  // Группируем заказы по датам и добавляем order_details
+  // Группируем заказы по датам и добавляем order_details + doweling_order_name
   const ordersByDate = useMemo(() => {
     if (!data?.data) {
       return {};
     }
 
-    // Добавляем order_details к каждому заказу
+    // Добавляем order_details и doweling_order_name к каждому заказу
     const ordersWithDetails = data.data.map((order) => ({
       ...order,
       order_details: detailsByOrderId[order.order_id] || [],
+      doweling_order_name: dowelingByOrderId[order.order_id] || undefined,
     }));
 
     return groupOrdersByDate(ordersWithDetails);
-  }, [data?.data, detailsByOrderId]);
+  }, [data?.data, detailsByOrderId, dowelingByOrderId]);
 
   return {
     ordersByDate,
