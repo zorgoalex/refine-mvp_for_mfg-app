@@ -47,7 +47,7 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
     {
       key: 'pdf',
       icon: <FilePdfOutlined style={{ color: '#f5222d' }} />,
-      label: 'Импорт из PDF',
+      label: 'Импорт из PDF Базис',
       onClick: handlePdfOpen,
     },
   ];

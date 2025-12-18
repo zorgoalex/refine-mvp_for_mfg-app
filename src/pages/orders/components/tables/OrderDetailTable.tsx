@@ -8,7 +8,7 @@
 import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider } from 'antd';
 import type { MenuProps } from 'antd';
-import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined } from '@ant-design/icons';
 import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
@@ -133,6 +133,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(50);
   const [filmQuickCreateOpen, setFilmQuickCreateOpen] = useState(false);
+  const [rowContextMenu, setRowContextMenu] = useState<{
+    x: number;
+    y: number;
+    record: OrderDetail;
+  } | null>(null);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
 
   // ============================================================================
@@ -175,7 +180,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }, [highlightedRowKey]);
 
   // Reference selects (enabled only while editing)
-  const selectsEnabled = editingKey !== null;
+  // Prefetch reference data (variant A) so context-menu labels appear instantly.
+  const selectsEnabled = true;
   const { selectProps: materialSelectProps } = useSelect({
     resource: 'materials',
     optionLabel: 'material_name',
@@ -1066,16 +1072,306 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       }
     : undefined;
 
-  // Context menu items
-  const getContextMenuItems = (record: OrderDetail): MenuProps['items'] => [
-    {
-      key: 'delete',
-      label: 'Удалить',
-      icon: <DeleteOutlined />,
-      danger: true,
-      onClick: () => onDelete(record.temp_id!, record.detail_id),
-    },
-  ];
+  const closeRowContextMenu = useCallback(() => {
+    setRowContextMenu(null);
+  }, []);
+
+  const truncateText = useCallback((value: string, maxLength: number): string => {
+    const text = (value || '').trim();
+    if (text.length <= maxLength) return text;
+    return text.slice(0, maxLength - 1).trimEnd() + '…';
+  }, []);
+
+  const renderMenuValue = useCallback((value: string, maxLength = 42): React.ReactNode => {
+    const text = (value || '').trim();
+    const short = truncateText(text, maxLength);
+    if (short === text) return <span>{text}</span>;
+    return (
+      <Tooltip title={text}>
+        <span>{short}</span>
+      </Tooltip>
+    );
+  }, [truncateText]);
+
+  const getOptionsMap = useCallback((options?: any[]) => {
+    const map = new Map<number, string>();
+    for (const option of options || []) {
+      const value = option?.value;
+      const label = option?.label;
+      if (value === null || value === undefined) continue;
+      map.set(Number(value), String(label ?? value));
+    }
+    return map;
+  }, []);
+
+  const materialNameById = useMemo(
+    () => getOptionsMap(materialSelectProps.options as any[] | undefined),
+    [getOptionsMap, materialSelectProps.options]
+  );
+  const millingNameById = useMemo(
+    () => getOptionsMap(millingTypeSelectProps.options as any[] | undefined),
+    [getOptionsMap, millingTypeSelectProps.options]
+  );
+  const edgeNameById = useMemo(
+    () => getOptionsMap(edgeTypeSelectProps.options as any[] | undefined),
+    [getOptionsMap, edgeTypeSelectProps.options]
+  );
+  const filmNameById = useMemo(
+    () => getOptionsMap(filmSelectProps.options as any[] | undefined),
+    [getOptionsMap, filmSelectProps.options]
+  );
+
+  const selectRows = useCallback((predicate: (detail: OrderDetail) => boolean) => {
+    if (!onSelectChange) return;
+    const keys = sortedDetails.filter(predicate).map(getRowKey);
+    onSelectChange(keys);
+    closeRowContextMenu();
+  }, [closeRowContextMenu, getRowKey, onSelectChange, sortedDetails]);
+
+  const uniqueIds = useCallback((items: OrderDetail[], getId: (d: OrderDetail) => number | null | undefined) => {
+    const set = new Set<number>();
+    for (const item of items) {
+      const value = getId(item);
+      if (value === null || value === undefined) continue;
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      set.add(num);
+    }
+    return Array.from(set);
+  }, []);
+
+  const uniqueStrings = useCallback((items: OrderDetail[], getValue: (d: OrderDetail) => string | null | undefined) => {
+    const set = new Set<string>();
+    for (const item of items) {
+      const value = (getValue(item) || '').trim();
+      if (!value) continue;
+      set.add(value);
+    }
+    return Array.from(set);
+  }, []);
+
+  const uniquePrices = useCallback((items: OrderDetail[]) => {
+    const set = new Set<string>();
+    for (const item of items) {
+      const value = item.milling_cost_per_sqm;
+      if (value === null || value === undefined) continue;
+      const num = Number(value);
+      if (!Number.isFinite(num)) continue;
+      set.add(num.toFixed(2));
+    }
+    return Array.from(set).sort((a, b) => Number(a) - Number(b));
+  }, []);
+
+  const selectionAggregates = useMemo(() => {
+    const millingIds = uniqueIds(sortedDetails, d => d.milling_type_id);
+    const materialIds = uniqueIds(sortedDetails, d => d.material_id);
+    const filmIds = uniqueIds(sortedDetails, d => d.film_id ?? null);
+    const edgeIds = uniqueIds(sortedDetails, d => d.edge_type_id);
+    const prices = uniquePrices(sortedDetails);
+    const noteValues = uniqueStrings(sortedDetails, d => d.note ?? null).sort((a, b) => a.localeCompare(b, 'ru'));
+
+    return {
+      millingIds,
+      materialIds,
+      filmIds,
+      edgeIds,
+      prices,
+      noteValues,
+      hasPrisadka: sortedDetails.some(d => (d.note || '').includes('Присадка')),
+      hasChernovoy: sortedDetails.some(d => (d.note || '').includes('Черновой')),
+    };
+  }, [sortedDetails, uniqueIds, uniquePrices, uniqueStrings]);
+
+  const noteValueKeyToValue = useMemo(() => {
+    const map = new Map<string, string>();
+    selectionAggregates.noteValues.forEach((value, index) => {
+      map.set(`select:note:value#${index}`, value);
+    });
+    return map;
+  }, [selectionAggregates.noteValues]);
+
+  const selectionMenuItems: MenuProps['items'] = useMemo(() => {
+    const sortByLabel = (ids: number[], map: Map<number, string>) =>
+      ids
+        .map(id => ({ id, label: map.get(id) || `ID: ${id}` }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'ru'))
+        .map(x => x.id);
+
+    const buildValueItems = (
+      emptyKey: string,
+      values: Array<{ key: string; label: React.ReactNode }>
+    ): MenuProps['items'] => {
+      if (values.length === 0) {
+        return [{ key: `${emptyKey}:empty`, label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }];
+      }
+      return values;
+    };
+
+    const millingItems = buildValueItems(
+      'select:milling',
+      sortByLabel(selectionAggregates.millingIds, millingNameById).map(id => ({
+        key: `select:milling:${id}`,
+        label: renderMenuValue(millingNameById.get(id) || `ID: ${id}`),
+      }))
+    );
+
+    const materialItems = buildValueItems(
+      'select:material',
+      sortByLabel(selectionAggregates.materialIds, materialNameById).map(id => ({
+        key: `select:material:${id}`,
+        label: renderMenuValue(materialNameById.get(id) || `ID: ${id}`),
+      }))
+    );
+
+    const filmItems = buildValueItems(
+      'select:film',
+      sortByLabel(selectionAggregates.filmIds, filmNameById).map(id => ({
+        key: `select:film:${id}`,
+        label: renderMenuValue(filmNameById.get(id) || `ID: ${id}`, 36),
+      }))
+    );
+
+    const edgeItems = buildValueItems(
+      'select:edge',
+      sortByLabel(selectionAggregates.edgeIds, edgeNameById).map(id => ({
+        key: `select:edge:${id}`,
+        label: renderMenuValue(edgeNameById.get(id) || `ID: ${id}`),
+      }))
+    );
+
+    const priceItems = buildValueItems(
+      'select:price',
+      selectionAggregates.prices.map(value => ({
+        key: `select:price:${value}`,
+        label: renderMenuValue(value),
+      }))
+    );
+
+    const noteItems: MenuProps['items'] = [];
+    if (selectionAggregates.hasPrisadka) {
+      noteItems.push({ key: 'select:note:contains:prisadka', label: renderMenuValue('Присадка') });
+    }
+    if (selectionAggregates.hasChernovoy) {
+      noteItems.push({ key: 'select:note:contains:chernovoy', label: renderMenuValue('Черновой') });
+    }
+    for (const [key, value] of noteValueKeyToValue.entries()) {
+      noteItems.push({ key, label: renderMenuValue(value, 44) });
+    }
+
+    const categories: MenuProps['items'] = [
+      { key: 'select:category:milling', label: 'по фрезеровке', children: millingItems },
+      { key: 'select:category:materials', label: 'по материалам', children: materialItems },
+      { key: 'select:category:films', label: 'по пленкам', children: filmItems },
+      { key: 'select:category:edges', label: 'по обкату', children: edgeItems },
+      { key: 'select:category:prices', label: 'по ценам', children: priceItems },
+      { key: 'select:category:notes', label: 'по примечанию', children: noteItems.length ? noteItems : [{ key: 'select:note:empty', label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }] },
+    ];
+
+    return [
+      { key: 'action:insert', label: 'Вставить строку', icon: <PlusOutlined style={{ color: '#1890ff' }} /> },
+      { key: 'action:copy', label: 'Скопировать строку', icon: <CopyOutlined style={{ color: '#52c41a' }} /> },
+      { type: 'divider' as const },
+      { key: 'select', label: 'Выделить', children: categories, disabled: !onSelectChange || sortedDetails.length === 0 },
+      { type: 'divider' as const },
+      { key: 'action:delete', label: 'Удалить строку', icon: <DeleteOutlined />, danger: true },
+    ];
+  }, [
+    edgeNameById,
+    filmNameById,
+    materialNameById,
+    millingNameById,
+    noteValueKeyToValue,
+    onSelectChange,
+    renderMenuValue,
+    selectionAggregates.edgeIds,
+    selectionAggregates.filmIds,
+    selectionAggregates.hasChernovoy,
+    selectionAggregates.hasPrisadka,
+    selectionAggregates.materialIds,
+    selectionAggregates.millingIds,
+    selectionAggregates.prices,
+    sortedDetails.length,
+  ]);
+
+  const handleContextMenuClick: MenuProps['onClick'] = useCallback((info) => {
+    const key = String(info.key);
+
+    if (key === 'action:insert') {
+      if (rowContextMenu?.record) {
+        onInsertAfter?.(rowContextMenu.record);
+      }
+      closeRowContextMenu();
+      return;
+    }
+
+    if (key === 'action:copy') {
+      if (rowContextMenu?.record) {
+        onCopyRow?.(rowContextMenu.record);
+      }
+      closeRowContextMenu();
+      return;
+    }
+
+    if (key === 'action:delete') {
+      if (rowContextMenu?.record) {
+        const tempId = rowContextMenu.record.temp_id || rowContextMenu.record.detail_id;
+        if (tempId) {
+          onDelete(tempId, rowContextMenu.record.detail_id);
+        }
+      }
+      closeRowContextMenu();
+      return;
+    }
+
+    if (key.startsWith('select:milling:')) {
+      const id = Number(key.replace('select:milling:', ''));
+      selectRows(d => Number(d.milling_type_id) === id);
+      return;
+    }
+
+    if (key.startsWith('select:material:')) {
+      const id = Number(key.replace('select:material:', ''));
+      selectRows(d => Number(d.material_id) === id);
+      return;
+    }
+
+    if (key.startsWith('select:film:')) {
+      const id = Number(key.replace('select:film:', ''));
+      selectRows(d => Number(d.film_id) === id);
+      return;
+    }
+
+    if (key.startsWith('select:edge:')) {
+      const id = Number(key.replace('select:edge:', ''));
+      selectRows(d => Number(d.edge_type_id) === id);
+      return;
+    }
+
+    if (key.startsWith('select:price:')) {
+      const value = key.replace('select:price:', '');
+      selectRows(d => d.milling_cost_per_sqm !== null && d.milling_cost_per_sqm !== undefined && Number(d.milling_cost_per_sqm).toFixed(2) === value);
+      return;
+    }
+
+    if (key === 'select:note:contains:prisadka') {
+      selectRows(d => (d.note || '').includes('Присадка'));
+      return;
+    }
+
+    if (key === 'select:note:contains:chernovoy') {
+      selectRows(d => (d.note || '').includes('Черновой'));
+      return;
+    }
+
+    if (key.startsWith('select:note:value#')) {
+      const note = noteValueKeyToValue.get(key);
+      if (note) {
+        selectRows(d => (d.note || '').trim() === note);
+      } else {
+        closeRowContextMenu();
+      }
+    }
+  }, [closeRowContextMenu, noteValueKeyToValue, onCopyRow, onDelete, onInsertAfter, rowContextMenu?.record, selectRows]);
 
   // Handle film quick create success
   const handleFilmCreated = (filmId: number) => {
@@ -1190,114 +1486,46 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               if (!isCurrentlyEditing) {
                 dragSelection.handleMouseDown(rowKey, e);
               }
-            },
-            onMouseEnter: () => {
-              if (dragSelection.isDragging) {
-                dragSelection.handleMouseEnter(rowKey);
-              }
-            },
-            onDoubleClick: () => startEdit(record),
-            onContextMenu: (e) => {
-              e.preventDefault();
+             },
+             onMouseEnter: () => {
+               if (dragSelection.isDragging) {
+                 dragSelection.handleMouseEnter(rowKey);
+               }
+             },
+             onDoubleClick: () => startEdit(record),
+             onContextMenu: (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setRowContextMenu({ x: e.clientX, y: e.clientY, record });
+              },
+            };
+          }}
+        />
 
-              // Remove any existing context menus first
-              const existingMenus = document.querySelectorAll('.order-detail-context-menu');
-              existingMenus.forEach(menu => menu.remove());
-
-              // Create context menu programmatically
-              const menu = document.createElement('div');
-              menu.className = 'ant-dropdown order-detail-context-menu';
-              menu.style.position = 'fixed';
-              menu.style.left = `${e.clientX}px`;
-              menu.style.top = `${e.clientY}px`;
-              menu.style.zIndex = '9999';
-
-              const menuContent = `
-                <ul class="ant-dropdown-menu" style="background: white; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;">
-                  <li class="ant-dropdown-menu-item menu-item-insert" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                    <span role="img" aria-label="insert" style="color: #1890ff;">
-                      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
-                        <path d="M482 152h60q8 0 8 8v704q0 8-8 8h-60q-8 0-8-8V160q0-8 8-8z"></path>
-                        <path d="M176 474h672q8 0 8 8v60q0 8-8 8H176q-8 0-8-8v-60q0-8 8-8z"></path>
-                      </svg>
-                    </span>
-                    <span style="color: #1890ff;">Вставить строку</span>
-                  </li>
-                  <li class="ant-dropdown-menu-item menu-item-copy" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                    <span role="img" aria-label="copy" style="color: #52c41a;">
-                      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
-                        <path d="M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v530.7c0 8.5 3.4 16.6 9.4 22.6l173.3 173.3c2.2 2.2 4.7 4 7.4 5.5v1.9h4.2c3.5 1.3 7.2 2 11 2H704c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32zM350 856.2L263.9 770H350v86.2zM664 888H414V746c0-22.1-17.9-40-40-40H232V264h432v624z"></path>
-                      </svg>
-                    </span>
-                    <span style="color: #52c41a;">Скопировать строку</span>
-                  </li>
-                  <li style="border-top: 1px solid #f0f0f0; margin: 4px 0;"></li>
-                  <li class="ant-dropdown-menu-item ant-dropdown-menu-item-danger menu-item-delete" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                    <span role="img" aria-label="delete" style="color: #ff4d4f;">
-                      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
-                        <path d="M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72zm504 72H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM731.3 840H292.7l-24.2-512h487l-24.2 512z"></path>
-                      </svg>
-                    </span>
-                    <span style="color: #ff4d4f;">Удалить строку</span>
-                  </li>
-                </ul>
-              `;
-              menu.innerHTML = menuContent;
-              document.body.appendChild(menu);
-
-              // Insert item handler
-              const insertItem = menu.querySelector('.menu-item-insert');
-              insertItem?.addEventListener('click', () => {
-                onInsertAfter?.(record);
-                menu.remove();
-              });
-              insertItem?.addEventListener('mouseenter', () => {
-                (insertItem as HTMLElement).style.backgroundColor = '#e6f7ff';
-              });
-              insertItem?.addEventListener('mouseleave', () => {
-                (insertItem as HTMLElement).style.backgroundColor = 'white';
-              });
-
-              // Copy item handler
-              const copyItem = menu.querySelector('.menu-item-copy');
-              copyItem?.addEventListener('click', () => {
-                onCopyRow?.(record);
-                menu.remove();
-              });
-              copyItem?.addEventListener('mouseenter', () => {
-                (copyItem as HTMLElement).style.backgroundColor = '#f6ffed';
-              });
-              copyItem?.addEventListener('mouseleave', () => {
-                (copyItem as HTMLElement).style.backgroundColor = 'white';
-              });
-
-              // Delete item handler
-              const deleteItem = menu.querySelector('.menu-item-delete');
-              deleteItem?.addEventListener('click', () => {
-                onDelete(record.temp_id!, record.detail_id);
-                menu.remove();
-              });
-              deleteItem?.addEventListener('mouseenter', () => {
-                (deleteItem as HTMLElement).style.backgroundColor = '#fff1f0';
-              });
-              deleteItem?.addEventListener('mouseleave', () => {
-                (deleteItem as HTMLElement).style.backgroundColor = 'white';
-              });
-
-              const closeMenu = (event: MouseEvent) => {
-                if (!menu.contains(event.target as Node)) {
-                  menu.remove();
-                  document.removeEventListener('click', closeMenu);
-                }
-              };
-
-              setTimeout(() => {
-                document.addEventListener('click', closeMenu);
-              }, 0);
-            },
-          };
-        }}
-      />
+        <Dropdown
+          open={!!rowContextMenu}
+          placement="bottomLeft"
+          destroyPopupOnHide={false}
+          menu={{ items: selectionMenuItems, onClick: handleContextMenuClick }}
+          getPopupContainer={() => document.body}
+          overlayClassName="order-details-select-context-dropdown"
+          trigger={['click', 'contextMenu']}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) {
+              closeRowContextMenu();
+            }
+          }}
+        >
+          <span
+            style={{
+              position: 'fixed',
+              left: rowContextMenu?.x ?? -9999,
+              top: rowContextMenu?.y ?? -9999,
+              width: 1,
+              height: 1,
+            }}
+          />
+        </Dropdown>
       </div>
     </Form>
     <FilmQuickCreate
