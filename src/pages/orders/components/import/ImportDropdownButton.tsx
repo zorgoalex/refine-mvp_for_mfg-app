@@ -1,11 +1,17 @@
 // Dropdown button with Excel and PDF import options
 
-import React, { useState, useCallback } from 'react';
-import { Dropdown, Button, Tooltip } from 'antd';
+import React, { useState, useCallback, Suspense, lazy } from 'react';
+import { Dropdown, Button, Tooltip, Spin } from 'antd';
 import type { MenuProps } from 'antd';
 import { ImportOutlined, FileExcelOutlined, FilePdfOutlined, DownOutlined } from '@ant-design/icons';
-import { ExcelImportModal } from './ExcelImportModal';
-import { PdfImportModal } from './PdfImportModal';
+
+const ExcelImportModal = lazy(async () => ({
+  default: (await import('./ExcelImportModal')).ExcelImportModal,
+}));
+
+const PdfImportModal = lazy(async () => ({
+  default: (await import('./PdfImportModal')).PdfImportModal,
+}));
 
 interface ImportDropdownButtonProps {
   disabled?: boolean;
@@ -56,8 +62,17 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
         </Dropdown>
       </Tooltip>
 
-      <ExcelImportModal open={excelModalOpen} onClose={handleExcelClose} />
-      <PdfImportModal open={pdfModalOpen} onClose={handlePdfClose} />
+      {excelModalOpen && (
+        <Suspense fallback={<Spin />}>
+          <ExcelImportModal open={excelModalOpen} onClose={handleExcelClose} />
+        </Suspense>
+      )}
+
+      {pdfModalOpen && (
+        <Suspense fallback={<Spin />}>
+          <PdfImportModal open={pdfModalOpen} onClose={handlePdfClose} />
+        </Suspense>
+      )}
     </>
   );
 };

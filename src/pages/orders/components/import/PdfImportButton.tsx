@@ -1,9 +1,12 @@
 // Button to trigger PDF Import Modal
 
-import React, { useState, useCallback } from 'react';
-import { Button, Tooltip } from 'antd';
+import React, { useState, useCallback, Suspense, lazy } from 'react';
+import { Button, Tooltip, Spin } from 'antd';
 import { FilePdfOutlined } from '@ant-design/icons';
-import { PdfImportModal } from './PdfImportModal';
+
+const PdfImportModal = lazy(async () => ({
+  default: (await import('./PdfImportModal')).PdfImportModal,
+}));
 
 interface PdfImportButtonProps {
   disabled?: boolean;
@@ -32,7 +35,11 @@ export const PdfImportButton: React.FC<PdfImportButtonProps> = ({ disabled }) =>
         </Button>
       </Tooltip>
 
-      <PdfImportModal open={modalOpen} onClose={handleClose} />
+      {modalOpen && (
+        <Suspense fallback={<Spin />}>
+          <PdfImportModal open={modalOpen} onClose={handleClose} />
+        </Suspense>
+      )}
     </>
   );
 };

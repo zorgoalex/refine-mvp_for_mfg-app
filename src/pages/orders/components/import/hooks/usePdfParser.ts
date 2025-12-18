@@ -1,17 +1,30 @@
 // Hook for parsing PDF files using pdfjs-dist
 
 import { useState, useCallback } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import type { PdfTextItem, PdfParsedResult } from '../types/pdfTypes';
 import { parsePdfContent, convertToImportRows } from '../utils/pdfTextExtractor';
 import type { ImportRow } from '../types/importTypes';
 
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
-  import.meta.url
-).toString();
+type PdfjsModule = typeof import('pdfjs-dist');
+
+const PDF_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+let pdfjsPromise: Promise<PdfjsModule> | null = null;
+let isWorkerConfigured = false;
+
+async function loadPdfjs(): Promise<PdfjsModule> {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import('pdfjs-dist');
+  }
+
+  const pdfjsLib = await pdfjsPromise;
+  if (!isWorkerConfigured) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_SRC;
+    isWorkerConfigured = true;
+  }
+
+  return pdfjsLib;
+}
 
 export interface UsePdfParserReturn {
   isLoading: boolean;
@@ -49,6 +62,8 @@ export const usePdfParser = (): UsePdfParserReturn => {
 
       // Read file as ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
+
+      const pdfjsLib = await loadPdfjs();
 
       // Load PDF document
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });

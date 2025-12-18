@@ -1,9 +1,12 @@
 // Button to trigger Excel Import Modal
 
-import React, { useState, useCallback } from 'react';
-import { Button, Tooltip } from 'antd';
+import React, { useState, useCallback, Suspense, lazy } from 'react';
+import { Button, Tooltip, Spin } from 'antd';
 import { FileExcelOutlined } from '@ant-design/icons';
-import { ExcelImportModal } from './ExcelImportModal';
+
+const ExcelImportModal = lazy(async () => ({
+  default: (await import('./ExcelImportModal')).ExcelImportModal,
+}));
 
 interface ExcelImportButtonProps {
   disabled?: boolean;
@@ -32,7 +35,11 @@ export const ExcelImportButton: React.FC<ExcelImportButtonProps> = ({ disabled }
         </Button>
       </Tooltip>
 
-      <ExcelImportModal open={modalOpen} onClose={handleClose} />
+      {modalOpen && (
+        <Suspense fallback={<Spin />}>
+          <ExcelImportModal open={modalOpen} onClose={handleClose} />
+        </Suspense>
+      )}
     </>
   );
 };

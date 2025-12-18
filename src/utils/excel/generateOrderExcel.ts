@@ -2,7 +2,6 @@
  * Генерация Excel файла заказа на основе шаблона
  */
 
-import ExcelJS from 'exceljs';
 import { formatDate } from '../printFormat';
 import { ExcelGenerationError } from './excelErrorHandler';
 
@@ -70,6 +69,9 @@ export const buildOrderExcelBuffer = async ({
   clientPhone,
 }: GenerateOrderExcelParams): Promise<ArrayBuffer> => {
   try {
+    // Lazy-load ExcelJS to keep the initial bundle smaller.
+    const { default: ExcelJS } = await import('exceljs');
+
     // 1. Загрузить шаблон
     const templateUrl = '/templates/order_template.xlsx';
     const response = await fetch(templateUrl);

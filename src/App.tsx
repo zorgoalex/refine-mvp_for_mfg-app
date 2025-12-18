@@ -3,20 +3,15 @@ import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { CustomLayout } from "./components/CustomLayout";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
-import { ConfigProvider, notification } from "antd";
-import { useEffect } from "react";
+import { ConfigProvider, notification, Spin } from "antd";
+import { useEffect, Suspense, lazy } from "react";
 import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
 import "./styles/app.css";
 import { createNotificationProvider } from "./providers/notificationProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { OrderList } from "./pages/orders/list";
-import { OrderShow } from "./pages/orders/show";
-import { OrderEdit } from "./pages/orders/edit";
-import { CalendarList } from "./pages/calendar";
 import { DowelOrderList } from "./pages/doweling_orders/list";
-import { DowelOrderEdit } from "./pages/doweling_orders/edit";
-import { DowelOrderShow } from "./pages/doweling_orders/show";
 import { MaterialList } from "./pages/materials/list";
 import { MaterialCreate } from "./pages/materials/create";
 import { MaterialEdit } from "./pages/materials/edit";
@@ -124,10 +119,16 @@ import { OrderResourceRequirementShow } from "./pages/order_resource_requirement
 import { ClientsAnalyticsList, ClientsAnalyticsShow } from "./pages/clients_analytics";
 import { PaymentsAnalyticsList, PaymentsAnalyticsShow } from "./pages/payments_analytics";
 import { LoginPage } from "./pages/login";
-import { ConfigurationPage } from "./pages/configuration";
 import { dataProvider } from "./utils/dataProvider";
 import { authProvider } from "./authProvider";
 import { i18nProvider } from "./utils/i18nProvider";
+
+const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
+const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
+const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
+const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/doweling_orders/edit")).DowelOrderEdit }));
+const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
+const ConfigurationPage = lazy(async () => ({ default: (await import("./pages/configuration")).ConfigurationPage }));
 
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 
@@ -449,7 +450,14 @@ const App = () => {
                 disableTelemetry: true,
               }}
             >
-              <Routes>
+              <Suspense
+                fallback={
+                  <div style={{ padding: 24, display: "flex", justifyContent: "center" }}>
+                    <Spin />
+                  </div>
+                }
+              >
+                <Routes>
                 <Route
                   element={
                     <Authenticated
@@ -650,7 +658,8 @@ const App = () => {
                 >
                   <Route path="/login" element={<LoginPage />} />
                 </Route>
-              </Routes>
+                </Routes>
+              </Suspense>
               <RefineKbar />
             </Refine>
           </ConfigProvider>
