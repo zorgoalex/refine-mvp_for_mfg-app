@@ -15,6 +15,8 @@ import {
   ORDER_HEADER_PATTERN,
   MATERIAL_PATTERN,
   TOTAL_COUNT_PATTERN,
+  MAX_PART_LONG_SIDE_MM,
+  MAX_PART_SHORT_SIDE_MM,
 } from '../types/pdfTypes';
 
 // ============================================================================
@@ -170,6 +172,14 @@ function isDesignation(text: string): boolean {
   return DESIGNATION_PATTERN.test(text.trim());
 }
 
+function isPlausiblePartSizePair(a: number, b: number): boolean {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  if (a <= 0 || b <= 0) return false;
+  if (a > MAX_PART_LONG_SIDE_MM || b > MAX_PART_LONG_SIDE_MM) return false;
+  // At least one side must fit the typical short side of the sheet.
+  return a <= MAX_PART_SHORT_SIDE_MM || b <= MAX_PART_SHORT_SIDE_MM;
+}
+
 /**
  * Checks if a string is a position number (1, 2, 3, ...)
  */
@@ -178,30 +188,54 @@ function isPositionNumber(text: string): boolean {
   return /^\d+$/.test(text) && num > 0 && num < 1000;
 }
 
+type ParsedSizeFromLine = {
+  length: number;
+  width: number;
+  firstIndex: number;
+  secondIndex: number;
+  tokens: string[];
+};
+
+function parsePlausibleSizeFromLineText(text: string): ParsedSizeFromLine | null {
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return null;
+
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const aToken = tokens[i];
+    const bToken = tokens[i + 1];
+    if (!/^\d{2,4}$/.test(aToken) || !/^\d{2,4}$/.test(bToken)) continue;
+
+    const a = parseInt(aToken, 10);
+    const b = parseInt(bToken, 10);
+    // Require dimensions to be realistically sized (mm)
+    if (a < 50 || b < 50) continue;
+    if (!isPlausiblePartSizePair(a, b)) continue;
+
+    return { length: a, width: b, firstIndex: i, secondIndex: i + 1, tokens };
+  }
+
+  return null;
+}
+
+function extractFilmCandidateFromSizeLine(parsed: ParsedSizeFromLine): string | null {
+  const after = parsed.tokens.slice(parsed.secondIndex + 1).join(' ').trim();
+  return after ? after : null;
+}
+
 /**
  * Checks if a line starts a new detail block.
  * A detail line typically starts with: position number (1-9), then designation (XX.XX or 2+ digits).
  * Example: "1 11.02 Бок L 779 97 1 1"
  */
 function isBlockStart(line: PdfTextLine): boolean {
-  // Method 1: Check first few items for designation pattern
-  // First item is usually position (1, 2, 3...), second should be designation
-  for (let i = 0; i < Math.min(5, line.items.length); i++) {
-    const text = line.items[i]?.text?.trim() || '';
-    if (isDesignation(text)) {
-      return true;
-    }
-  }
+  // Use concatenated line text only; item-based checks are too unstable for PDFs where sizes/film are on separate lines.
+  const match = line.text.match(/^\s*(\d{1,2})\s+(\d+(?:\.\d+)?)\s+/);
+  if (!match) return false;
 
-  // Method 2: Check concatenated line text for pattern: position + designation at start
-  // Pattern: single digit position, then space, then designation (XX.XX or 2+ digits)
-  const lineText = line.text;
-  const detailLinePattern = /^\s*\d{1,2}\s+(\d+\.\d+|\d{2,})\s/;
-  if (detailLinePattern.test(lineText)) {
-    return true;
-  }
+  const position = match[1];
+  const designation = match[2];
 
-  return false;
+  return isPositionNumber(position) && isDesignation(designation);
 }
 
 /**
@@ -218,20 +252,36 @@ export function groupIntoDetailBlocks(lines: PdfTextLine[]): DetailBlock[] {
 
   const blocks: DetailBlock[] = [];
   let currentBlock: PdfTextLine[] = [];
+  let pendingPrefix: PdfTextLine[] = [];
 
   for (const line of contentLines) {
+    // Many PDFs put sizes and/or film on a separate line BEFORE the actual detail line.
+    // Treat any non-detail line that contains a plausible size pair as a prefix for the next detail.
+    const hasPlausibleSizes = !isBlockStart(line) && !!parsePlausibleSizeFromLineText(line.text);
+    if (hasPlausibleSizes) {
+      if (currentBlock.length > 0) {
+        blocks.push({ lines: currentBlock });
+        currentBlock = [];
+      }
+      pendingPrefix.push(line);
+      continue;
+    }
+
     if (isBlockStart(line)) {
       // Save previous block if not empty
       if (currentBlock.length > 0) {
         blocks.push({ lines: currentBlock });
       }
       // Start new block
-      currentBlock = [line];
+      currentBlock = [...pendingPrefix, line];
+      pendingPrefix = [];
     } else if (currentBlock.length > 0) {
       // Continue current block
       currentBlock.push(line);
+    } else {
+      // Keep lines before the first block; if they contain sizes/film they will be used as prefix.
+      pendingPrefix.push(line);
     }
-    // Ignore lines before first block start
   }
 
   // Don't forget the last block
@@ -249,113 +299,49 @@ export function parseDetailBlock(block: DetailBlock, blockIndex: number): PdfDet
   const { lines } = block;
   if (lines.length === 0) return null;
 
-  // Collect ALL text items from ALL lines in the block
-  const allItems: PdfTextItem[] = [];
-  for (const line of lines) {
-    allItems.push(...line.items);
-  }
+  const mainLine = lines.find(isBlockStart);
+  if (!mainLine) return null;
 
-  // Sort items: first by Y (descending - top to bottom), then by X (ascending - left to right)
-  allItems.sort((a, b) => {
-    const yDiff = b.y - a.y;
-    if (Math.abs(yDiff) > LINE_Y_TOLERANCE) return yDiff;
-    return a.x - b.x;
-  });
+  const mainMatch = mainLine.text.match(/^\s*(\d{1,2})\s+(\d+(?:\.\d+)?)\s+(.+)$/);
+  if (!mainMatch) return null;
 
-  const allTexts = allItems.map(item => item.text.trim()).filter(Boolean);
+  const position = parseInt(mainMatch[1], 10);
+  const designation = mainMatch[2];
+  const remainder = mainMatch[3].trim();
 
-  if (allTexts.length < 4) return null;
+  if (!isPositionNumber(String(position)) || !isDesignation(designation)) return null;
 
-  // Find designation
-  let designationIdx = -1;
-  for (let i = 0; i < Math.min(4, allTexts.length); i++) {
-    if (isDesignation(allTexts[i])) {
-      designationIdx = i;
-      break;
-    }
-  }
-
-  if (designationIdx === -1) return null;
-
-  const designation = allTexts[designationIdx];
-
-  // Check if there's a position number BEFORE designation
-  let originalPosition: number | undefined;
-  if (designationIdx > 0) {
-    const possiblePosition = parseInt(allTexts[designationIdx - 1], 10);
-    if (!isNaN(possiblePosition) && possiblePosition > 0 && possiblePosition < 1000) {
-      originalPosition = possiblePosition;
-    }
-  }
-
-  // Collect all numbers after designation
-  const numbers: { index: number; value: number }[] = [];
-  for (let i = designationIdx + 1; i < allTexts.length; i++) {
-    const text = allTexts[i];
-    const num = parseInt(text, 10);
-    if (!isNaN(num) && /^\d+$/.test(text)) {
-      numbers.push({ index: i, value: num });
-    }
-  }
-
-  // We need at least 4 numbers: length, width, position_in_pdf, quantity
-  // Or 3 numbers if position is not present
-  if (numbers.length < 3) return null;
-
-  // Name is between designation and first number
-  const nameEndIndex = numbers[0].index;
-  const nameParts = allTexts.slice(designationIdx + 1, nameEndIndex);
-  const name = nameParts.join(' ').trim();
-
-  // First two large numbers are sizes (length, width)
-  // They should be > 50 typically (sizes in mm)
+  // Extract sizes from any prefix/auxiliary line in the block.
   let length = 0;
   let width = 0;
-  let sizeCount = 0;
-
-  for (const num of numbers) {
-    if (num.value >= 50 && sizeCount < 2) {
-      if (sizeCount === 0) {
-        length = num.value;
-      } else {
-        width = num.value;
-      }
-      sizeCount++;
-    }
+  for (const line of lines) {
+    const parsed = parsePlausibleSizeFromLineText(line.text);
+    if (!parsed) continue;
+    length = parsed.length;
+    width = parsed.width;
+    break;
   }
+  if (length === 0 || width === 0) return null;
 
-  // If we couldn't find sizes >= 50, use first two numbers
-  if (length === 0 || width === 0) {
-    length = numbers[0]?.value || 0;
-    width = numbers[1]?.value || 0;
-  }
-
-  // Find quantity - it's a small number (1-100) after sizes
-  // Usually the 4th number (after length, width, position)
+  // Parse name + quantity from the main detail line.
+  const remainderTokens = remainder.split(/\s+/).filter(Boolean);
   let quantity = 1;
-  for (let i = 2; i < numbers.length; i++) {
-    const num = numbers[i].value;
-    if (num >= 1 && num <= 100) {
-      quantity = num;
+  let quantityIndex = -1;
+  for (let i = 0; i < remainderTokens.length; i++) {
+    const token = remainderTokens[i];
+    if (!/^\d{1,2}$/.test(token)) continue;
+    const value = parseInt(token, 10);
+    if (value >= 1 && value <= 100) {
+      quantity = value;
+      quantityIndex = i;
       break;
     }
   }
+  if (quantityIndex === -1) return null;
 
-  // Collect remaining text for milling, film, note
-  // Start from after the last number
-  const lastNumberIdx = numbers.length > 0 ? numbers[numbers.length - 1].index : designationIdx;
-  const remainingTexts = allTexts.slice(lastNumberIdx + 1);
-
-  // Also check all texts for keywords (they might be before numbers due to PDF structure)
-  const allRemainingTexts = [...remainingTexts];
-
-  // Add texts that are not numbers and not part of name
-  for (let i = nameEndIndex; i < allTexts.length; i++) {
-    const text = allTexts[i];
-    if (!/^\d+$/.test(text) && !allRemainingTexts.includes(text)) {
-      allRemainingTexts.push(text);
-    }
-  }
+  const name = remainderTokens.slice(0, quantityIndex).join(' ').trim();
+  const tailTokens = remainderTokens.slice(quantityIndex + 1);
+  const tailText = tailTokens.join(' ').trim();
 
   let milling: string | undefined;
   let film: string | undefined;
@@ -363,23 +349,32 @@ export function parseDetailBlock(block: DetailBlock, blockIndex: number): PdfDet
 
   const filmParts: string[] = [];
 
-  for (const text of allRemainingTexts) {
-    if (!text || text === ':' || text === '.' || /^\d+$/.test(text)) continue;
+  const tailLower = tailText.toLowerCase();
+  if (tailLower.includes('модерн')) milling = 'Модерн';
+  else if (tailLower.includes('средняя') && tailLower.includes('лапша')) milling = 'Средняя лапша';
+  else if (tailLower.includes('лапша')) milling = 'Лапша';
 
-    const lowerText = text.toLowerCase();
+  if (tailLower.includes('присадка')) note = 'Присадка:';
 
-    // Check for milling keywords
-    if (lowerText.includes('модерн') || lowerText.includes('лапша') || lowerText.includes('средняя')) {
-      milling = text;
+  // Prefer extracting film/material from lines that contain sizes (they often have trailing material text).
+  for (const line of lines) {
+    const parsed = parsePlausibleSizeFromLineText(line.text);
+    if (!parsed) continue;
+    const candidate = extractFilmCandidateFromSizeLine(parsed);
+    if (candidate) {
+      filmParts.push(candidate);
+      break;
     }
-    // Check for note keywords
-    else if (lowerText.includes('присадка')) {
-      note = text.endsWith(':') ? text : text + ':';
-    }
-    // Everything else goes to film
-    else if (text.length > 1) {
-      filmParts.push(text);
-    }
+  }
+
+  // Also include remaining tail tokens that are not milling/note markers.
+  for (const token of tailTokens) {
+    const lower = token.toLowerCase();
+    if (!token || token === ':' || token === '.') continue;
+    if (/^\d+$/.test(token)) continue;
+    if (lower.includes('присадка')) continue;
+    if (lower.includes('модерн') || lower.includes('лапша') || lower.includes('средняя')) continue;
+    filmParts.push(token);
   }
 
   // Build film string
@@ -387,15 +382,10 @@ export function parseDetailBlock(block: DetailBlock, blockIndex: number): PdfDet
     film = filmParts.join(' ').trim();
   }
 
-  // Validate we have essential data
-  if (length === 0 || width === 0) {
-    return null;
-  }
-
   return {
     designation,
     name: name || 'Деталь',
-    position: originalPosition || blockIndex + 1,
+    position: position || blockIndex + 1,
     quantity,
     length,
     width,

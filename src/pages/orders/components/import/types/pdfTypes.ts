@@ -100,6 +100,7 @@ export const HEADER_FOOTER_PATTERNS = [
   /^Конструктор:/,
   /^Дата печати:/,
   /^Спецификация/,
+  /^№\s+Обозн\./,
   /^Обозн\./,
   /^Наименование/,
   /^Кол-во/,
@@ -114,8 +115,12 @@ export const HEADER_FOOTER_PATTERNS = [
 
 // Pattern for detecting designation (start of detail block)
 // Matches: "11.02", "01.04", "36", "37" but NOT single digits like "1", "2"
-// Designation is either: XX.XX format OR two+ digit number
-export const DESIGNATION_PATTERN = /^(\d+\.\d+|\d{2,})$/;
+// Designation is either: XX.XX format OR exactly 2 digits (to avoid matching sizes like 779/2164 and 2-digit positions)
+export const DESIGNATION_PATTERN = /^(\d+\.\d+|\d{2})$/;
+
+// Typical sheet constraints for parts (mm). Used as a heuristic for parsing.
+export const MAX_PART_LONG_SIDE_MM = 2800;
+export const MAX_PART_SHORT_SIDE_MM = 2070;
 
 // Pattern for extracting order number and name from header
 export const ORDER_HEADER_PATTERN = /№\s*(\d+)\s*[\/\\]\s*(.+)/;
