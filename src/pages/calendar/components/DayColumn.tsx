@@ -18,13 +18,15 @@ const DayColumn: React.FC<DayColumnProps> = ({
   viewMode = ViewMode.STANDARD,
   cardScale = 1.0,
   onDrop,
-  onContextMenu
+  onContextMenu,
+  onCheckboxChange,
 }) => {
   const dateKey = formatDateKey(date);
   const dayName = getDayName(date);
   const totalArea = calculateTotalArea(orders);
   const allIssued = areAllOrdersIssued(orders);
   const isTodayDay = isToday(date);
+  const isSunday = date.getDay() === 0;
 
   // Настройка useDrop для приема перетаскиваемых карточек
   const [{ isOver, canDrop }, dropRef] = useDrop<DragItem, unknown, { isOver: boolean; canDrop: boolean }>({
@@ -58,7 +60,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
       ref={dropRef}
       className={`day-column ${isTodayDay ? 'day-column--today' : ''} ${
         allIssued ? 'day-column--all-issued' : ''
-      } ${isOver && canDrop ? 'day-column--drag-over' : ''}`}
+      } ${isSunday ? 'day-column--sunday' : ''} ${isOver && canDrop ? 'day-column--drag-over' : ''}`}
       style={{
         width: columnWidth,
         backgroundColor: isOver && canDrop ? 'rgba(24, 144, 255, 0.1)' : undefined,
@@ -87,6 +89,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
               order={order}
               sourceDate={dateKey}
               onContextMenu={onContextMenu}
+              onCheckboxChange={onCheckboxChange}
               cardScale={cardScale}
             />
           ))

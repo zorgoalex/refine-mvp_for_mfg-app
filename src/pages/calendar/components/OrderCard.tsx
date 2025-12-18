@@ -52,12 +52,6 @@ const OrderCard: React.FC<OrderCardProps> = ({
     navigate(`/orders/show/${order.order_id}`);
   };
 
-  // Обработчик клика на иконку редактирования
-  const handleEditClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigate(`/orders/edit/${order.order_id}`);
-  };
-
   // Обработчик чекбокса "Выдан"
   const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation();
@@ -69,17 +63,29 @@ const OrderCard: React.FC<OrderCardProps> = ({
   // Получаем материалы из order_details с сокращенными именами (исключая МДФ 16мм)
   const materials = getMaterialsForCard(order.order_details, true);
 
-  // Статусы производства - ВРЕМЕННО заглушка
+  // Статусы производства: П (Закуп пленки), Р (Распилен), З (Закатан), У (Упакован)
+  // production_status_name берётся из orders_view (уровень заказа) или агрегируется из order_details
+  const productionStatusName = order.production_status_name?.toLowerCase() || '';
+
   const productionStages = [
-    { key: 'З', label: 'Закуп пленки', status: undefined },
-    { key: 'Р', label: 'Распил', status: undefined },
-  ];
+    { key: 'П', label: 'Закуп пленки', match: 'закуп' },
+    { key: 'Р', label: 'Распилен', match: 'распил' },
+    { key: 'З', label: 'Закатан', match: 'закат' },
+    { key: 'У', label: 'Упакован', match: 'упаков' },
+  ].filter(stage => productionStatusName.includes(stage.match));
 
   // Цвет номера заказа: коричневый для "К", синий для остальных
   const orderNumberColor = order.order_name?.startsWith('К') ? '#8B4513' : '#1976d2';
 
-  // Проверка статуса "Выдан" для зелёного контура
+  // Проверка статусов для контуров
   const isIssued = order.order_status_name?.toLowerCase() === 'выдан';
+  const isReadyToIssue = order.order_status_name?.toLowerCase() === 'готов к выдаче';
+
+  // Проверка статуса "Отрисован" для иконки карандашика
+  const isDrawn =
+    order.order_status_name?.toLowerCase() === 'отрисован' ||
+    order.production_status_name?.toLowerCase() === 'отрисован' ||
+    order.is_drawn;
 
   // Формируем строку даты + клиент
   const infoLine = [
@@ -99,10 +105,17 @@ const OrderCard: React.FC<OrderCardProps> = ({
   const baseMargin = 6;
   const marginCompensation = cardScale !== 1 ? `${baseMargin * (1 - cardScale)}px` : undefined;
 
+  // Определяем CSS класс для контура
+  const borderClass = isIssued
+    ? 'order-card--issued'
+    : isReadyToIssue
+    ? 'order-card--ready-to-issue'
+    : '';
+
   return (
     <div
       ref={dragRef}
-      className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''} ${isIssued ? 'order-card--issued' : ''}`}
+      className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''} ${borderClass}`}
       style={{
         backgroundColor,
         cursor: 'move',
@@ -110,18 +123,18 @@ const OrderCard: React.FC<OrderCardProps> = ({
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
         marginBottom: marginCompensation,
-        ...(isIssued && { borderColor: '#52c41a' }),
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
       onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}
     >
-      {/* Строка 1: Чекбокс | Номер | Материалы | Edit */}
+      {/* Строка 1: Чекбокс | Номер | Материалы | Карандашик (если отрисован) */}
       <div className="order-card__header">
         <Checkbox
-          checked={order.order_status?.toLowerCase() === 'выдан' || order.is_issued}
+          checked={isIssued}
           onChange={handleCheckboxChange}
           onClick={(e) => e.stopPropagation()}
           className="order-card__checkbox"
+          title="Отметить как выдан"
         />
         <span
           className="order-card__number"
@@ -146,11 +159,15 @@ const OrderCard: React.FC<OrderCardProps> = ({
             ))}
           </div>
         )}
-        <EditOutlined
-          className="order-card__edit-icon"
-          onClick={handleEditClick}
-          title="Редактировать заказ"
-        />
+        {/* Иконка карандашика - только индикатор статуса "Отрисован", некликабельная */}
+        {isDrawn && (
+          <Tooltip title="Отрисован">
+            <EditOutlined
+              className="order-card__edit-icon order-card__edit-icon--indicator"
+              style={{ cursor: 'default', color: '#fa8c16' }}
+            />
+          </Tooltip>
+        )}
       </div>
 
       {/* Строка 2: . Фрезеровка – Площадь */}
@@ -161,10 +178,10 @@ const OrderCard: React.FC<OrderCardProps> = ({
         <span>{order.total_area > 0 ? `${order.total_area.toFixed(2)} кв.м.` : '0 кв.м.'}</span>
       </div>
 
-      {/* Строка 3: Дата • Клиент • */}
+      {/* Строка 3: Дата • Клиент */}
       {infoLine && (
         <div className="order-card__info-line">
-          {infoLine} •
+          {infoLine}
         </div>
       )}
 
@@ -178,21 +195,28 @@ const OrderCard: React.FC<OrderCardProps> = ({
         </div>
       )}
 
-      {/* Строка 5: Индикаторы производства З Р */}
+      {/* Горизонтальная линия */}
+      <div className="order-card__divider" />
+
+      {/* Индикаторы производства П Р З У — плашка всегда, буквы только при наличии статуса */}
       <div
         className="order-card__production-stages"
         style={{ background: allProductionReady ? '#ffd9bf' : 'transparent' }}
       >
-        {productionStages.map((stage) => {
-          const style = getProductionStageStyle(stage.status || '', backgroundColor);
-          return (
-            <Tooltip key={stage.key} title={`${stage.label}: ${stage.status || '-'}`}>
-              <span className="production-stage" style={style}>
-                {stage.key}
-              </span>
-            </Tooltip>
-          );
-        })}
+        {productionStages.map((stage) => (
+          <Tooltip key={stage.key} title={stage.label}>
+            <span
+              className="production-stage"
+              style={{
+                color: '#fa8c16',
+                fontWeight: 500,
+                fontSize: '11px',
+              }}
+            >
+              {stage.key}
+            </span>
+          </Tooltip>
+        ))}
       </div>
     </div>
   );

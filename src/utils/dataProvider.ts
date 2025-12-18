@@ -97,6 +97,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "planned_completion_date",
     "order_status_name",
     "payment_status_name",
+    "production_status_name",
     "issue_date",
     "total_amount",
     "final_amount",

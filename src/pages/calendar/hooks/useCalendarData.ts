@@ -96,6 +96,13 @@ export const useCalendarData = (
     queryOptions: { staleTime: 60000 },
   });
 
+  // Загружаем справочник production_statuses
+  const { data: productionStatusesData } = useList({
+    resource: 'production_statuses',
+    pagination: { pageSize: 100 },
+    queryOptions: { staleTime: 60000 },
+  });
+
   // Загружаем связи с присадками для заказов
   const { data: dowelingLinksData } = useList({
     resource: 'order_doweling_links',
@@ -131,6 +138,15 @@ export const useCalendarData = (
     return map;
   }, [materialsData]);
 
+  // Создаём Map для быстрого поиска названия статуса производства
+  const productionStatusesMap = useMemo(() => {
+    const map = new Map<number, string>();
+    (productionStatusesData?.data || []).forEach((ps: any) => {
+      map.set(ps.production_status_id, ps.production_status_name);
+    });
+    return map;
+  }, [productionStatusesData]);
+
   // Группируем присадки по order_id (берём последнюю по order_doweling_link_id)
   const dowelingByOrderId = useMemo(() => {
     const map: Record<number, string> = {};
@@ -156,11 +172,13 @@ export const useCalendarData = (
     return map;
   }, [dowelingLinksData]);
 
-  // Группируем детали по order_id и добавляем milling_type_name и material_name
+  // Группируем детали по order_id и добавляем milling_type_name, material_name, production_status_name
   const detailsByOrderId = useMemo(() => {
     const map: Record<number, Array<{
       milling_type?: { milling_type_name: string };
       material?: { material_name: string };
+      production_status_id?: number;
+      production_status_name?: string;
     }>> = {};
     (detailsData?.data || []).forEach((detail: any) => {
       if (!map[detail.order_id]) {
@@ -173,23 +191,41 @@ export const useCalendarData = (
         material: detail.material_id
           ? { material_name: materialsMap.get(detail.material_id) || '' }
           : undefined,
+        production_status_id: detail.production_status_id,
+        production_status_name: detail.production_status_id
+          ? productionStatusesMap.get(detail.production_status_id)
+          : undefined,
       });
     });
     return map;
-  }, [detailsData, millingTypesMap, materialsMap]);
+  }, [detailsData, millingTypesMap, materialsMap, productionStatusesMap]);
 
-  // Группируем заказы по датам и добавляем order_details + doweling_order_name
+  // Группируем заказы по датам и добавляем order_details + doweling_order_name + production_status_name
   const ordersByDate = useMemo(() => {
     if (!data?.data) {
       return {};
     }
 
-    // Добавляем order_details и doweling_order_name к каждому заказу
-    const ordersWithDetails = data.data.map((order) => ({
-      ...order,
-      order_details: detailsByOrderId[order.order_id] || [],
-      doweling_order_name: dowelingByOrderId[order.order_id] || undefined,
-    }));
+    // Добавляем order_details, doweling_order_name и production_status_name к каждому заказу
+    const ordersWithDetails = data.data.map((order) => {
+      const details = detailsByOrderId[order.order_id] || [];
+
+      // Агрегируем уникальные статусы производства из всех деталей
+      const productionStatusNames = details
+        .map((d) => d.production_status_name)
+        .filter((name): name is string => !!name);
+      const uniqueStatuses = Array.from(new Set(productionStatusNames));
+      // Объединяем все статусы в одну строку (для поиска ключевых слов)
+      const aggregatedProductionStatus = uniqueStatuses.join(' ').toLowerCase();
+
+      return {
+        ...order,
+        order_details: details,
+        doweling_order_name: dowelingByOrderId[order.order_id] || undefined,
+        // Приоритет: статус уровня заказа (из orders_view), затем агрегация из деталей
+        production_status_name: order.production_status_name || aggregatedProductionStatus,
+      };
+    });
 
     return groupOrdersByDate(ordersWithDetails);
   }, [data?.data, detailsByOrderId, dowelingByOrderId]);

@@ -34,9 +34,16 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
   const millingDisplay = getMillingDisplayValue(order.order_details);
   const paymentStatus = order.payment_status_name || '';
 
-  // Проверка статуса "Выдан" для зелёного контура
+  // Проверка статусов для контуров
   const isIssued = order.order_status_name?.toLowerCase() === 'выдан';
-  const borderColor = isIssued ? '#52c41a' : getCardBorderColor(order);
+  const isReadyToIssue = order.order_status_name?.toLowerCase() === 'готов к выдаче';
+
+  // Определяем цвет контура: коричневый для "Выдан", зелёный для "Готов к выдаче"
+  const borderColor = isIssued
+    ? '#8B4513'
+    : isReadyToIssue
+    ? '#52c41a'
+    : getCardBorderColor(order);
 
   // Обработчик клика на номер заказа
   const handleOrderClick = () => {

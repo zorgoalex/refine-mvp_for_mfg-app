@@ -10,10 +10,8 @@
 export function getStatusColor(status: string): string {
   const statusLower = String(status || '').toLowerCase().trim();
 
-  // Выдан - светло-зеленый
-  if (statusLower === 'выдан') {
-    return '#eafbe7';
-  }
+  // Выдан - белый фон (только коричневый контур)
+  // Убран зелёный фон — достаточно контура
 
   // Готов - светло-оранжевый
   if (statusLower === 'готов') {
@@ -142,25 +140,15 @@ export function getCardBorderColor(order: {
 /**
  * Проверяет, все ли статусы производства в "Готов"
  * @param order - объект заказа
- * @returns true если все 5 статусов в "Готов"
- * 
- * TODO: Статусы производства НЕ хранятся в orders/orders_view
- * Они в order_details.production_status_id. Временно возвращаем false.
+ * @returns true если статус производства = "Упакован" (последняя стадия)
+ *
+ * Статус производства хранится на уровне заказа (orders.production_status_id)
+ * и отображается в orders_view как production_status_name.
  */
 export function areAllProductionStagesReady(order: Record<string, any>): boolean {
-  // ВРЕМЕННО: всегда false, т.к. статусов производства нет в orders_view
-  return false;
-  
-  /* Когда будут добавлены поля в orders_view, раскомментировать:
-  const stages = [
-    order.film_purchase_status,
-    order.cutting_status,
-    order.grinding_status,
-    order.filming_status,
-    order.packaging_status,
-  ];
-  return stages.every((status) => String(status || '').toLowerCase().trim() === 'готов');
-  */
+  const status = order.production_status_name?.toLowerCase() || '';
+  // Считаем производство готовым, если статус "Упакован"
+  return status.includes('упаков');
 }
 
 /**

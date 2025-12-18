@@ -19,7 +19,7 @@ export interface CalendarViewSettings {
 }
 
 /**
- * Деталь заказа для вычисления фрезеровки и материалов
+ * Деталь заказа для вычисления фрезеровки, материалов и статусов производства
  */
 export interface CalendarOrderDetail {
   milling_type?: {
@@ -28,6 +28,8 @@ export interface CalendarOrderDetail {
   material?: {
     material_name: string;
   };
+  production_status_id?: number;
+  production_status_name?: string;
 }
 
 /**
@@ -149,6 +151,7 @@ export interface DayColumnProps {
   onOrderClick?: (order: CalendarOrder) => void;
   onPrintDay?: (date: Date, orders: CalendarOrder[]) => void;
   onContextMenu?: (e: React.MouseEvent, order: CalendarOrder) => void;
+  onCheckboxChange?: (order: CalendarOrder, isChecked: boolean) => void;
 }
 
 /**

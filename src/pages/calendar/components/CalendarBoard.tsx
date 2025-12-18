@@ -98,6 +98,35 @@ const CalendarBoard: React.FC = () => {
     });
   };
 
+  // Обработчик чекбокса "Выдан"
+  const handleCheckboxChange = async (order: CalendarOrder, isChecked: boolean) => {
+    if (isChecked) {
+      // Находим статус "Выдан"
+      const issuedStatus = orderStatuses.find(
+        (s: any) => s.name?.toLowerCase() === 'выдан'
+      );
+
+      if (!issuedStatus) {
+        console.error('Статус "Выдан" не найден в списке:', orderStatuses);
+        return;
+      }
+
+      await updateStatus(order, 'order_status', issuedStatus.id, 'Выдан');
+    } else {
+      // При снятии галочки — устанавливаем статус "Готов к выдаче"
+      const readyStatus = orderStatuses.find(
+        (s: any) => s.name?.toLowerCase() === 'готов к выдаче'
+      );
+
+      if (!readyStatus) {
+        console.error('Статус "Готов к выдаче" не найден в списке:', orderStatuses);
+        return;
+      }
+
+      await updateStatus(order, 'order_status', readyStatus.id, 'Готов к выдаче');
+    }
+  };
+
   // Обработчики масштабирования карточек
   const handleZoomIn = () => {
     setCardScale((prev) => Math.min(prev + SCALE_STEP, MAX_SCALE)); // Максимум 150% (шаг 10%)
@@ -264,6 +293,7 @@ const CalendarBoard: React.FC = () => {
                     columnWidth={columnWidth}
                     onDrop={handleDrop}
                     onContextMenu={handleContextMenu}
+                    onCheckboxChange={handleCheckboxChange}
                     viewMode={viewMode}
                     cardScale={cardScale}
                   />

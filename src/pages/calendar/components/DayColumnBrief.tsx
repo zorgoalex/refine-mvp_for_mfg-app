@@ -24,6 +24,7 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
   const navigate = useNavigate();
   const dayName = getDayName(date);
   const totalArea = calculateTotalArea(orders);
+  const isSunday = date.getDay() === 0;
 
   // Форматируем дату для отображения (12.11.2025)
   const dateKey = formatDateKey(date);
@@ -37,8 +38,8 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
 
 
   return (
-    <div 
-      className="day-column day-column--brief"
+    <div
+      className={`day-column day-column--brief ${isSunday ? 'day-column--sunday' : ''}`}
       style={{ width: columnWidth }}
     >
       {/* Заголовок: дата и общая площадь */}
@@ -74,8 +75,16 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
                   cursor: 'pointer',
                   padding: '4px 0',
                   borderBottom: '1px solid #f0f0f0',
-                  ...(order.order_status_name?.toLowerCase() === 'выдан' && {
+                  // Зелёный контур для "Готов к выдаче"
+                  ...(order.order_status_name?.toLowerCase() === 'готов к выдаче' && {
                     border: '1px solid #52c41a',
+                    borderRadius: '4px',
+                    padding: '4px',
+                    marginBottom: '2px',
+                  }),
+                  // Коричневый контур для "Выдан"
+                  ...(order.order_status_name?.toLowerCase() === 'выдан' && {
+                    border: '1px solid #8B4513',
                     borderRadius: '4px',
                     padding: '4px',
                     marginBottom: '2px',
