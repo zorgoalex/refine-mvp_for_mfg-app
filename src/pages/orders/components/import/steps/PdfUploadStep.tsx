@@ -167,9 +167,9 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
               </Descriptions.Item>
               <Descriptions.Item label="Найдено деталей">
                 <Space>
-                  <Text strong style={{ fontSize: 16 }}>{result.details.length}</Text>
+                  <Text strong style={{ fontSize: 16 }}>{result.stats.totalQuantity}</Text>
                   {result.metadata.totalCount && (
-                    result.details.length === result.metadata.totalCount ? (
+                    result.stats.totalQuantity === result.metadata.totalCount ? (
                       <Tag icon={<CheckCircleOutlined />} color="success">
                         Совпадает с ожидаемым ({result.metadata.totalCount})
                       </Tag>
@@ -180,6 +180,9 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
                     )
                   )}
                 </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="Найдено позиций">
+                <Text strong style={{ fontSize: 16 }}>{result.stats.positionsCount}</Text>
               </Descriptions.Item>
               <Descriptions.Item label="Страниц">
                 {result.pages}

@@ -426,15 +426,22 @@ export function parsePdfContent(allPageItems: PdfTextItem[][]): PdfParsedResult 
     }
   }
 
+  const totalQuantity = details.reduce((sum, detail) => sum + (detail.quantity || 0), 0);
+
   // Validate against expected count
-  if (metadata.totalCount && details.length !== metadata.totalCount) {
+  // NOTE: "Общ. кол." в PDF обычно соответствует сумме по колонке "Кол-во", а не количеству позиций (строк таблицы).
+  if (metadata.totalCount && totalQuantity !== metadata.totalCount) {
     parseErrors.push(
-      `Ожидалось ${metadata.totalCount} деталей, распознано ${details.length}`
+      `Ожидалось ${metadata.totalCount} деталей (сумма кол-ва), распознано ${totalQuantity} (позиций: ${details.length})`
     );
   }
 
   return {
     metadata,
+    stats: {
+      positionsCount: details.length,
+      totalQuantity,
+    },
     details,
     pages: allPageItems.length,
     parseErrors,

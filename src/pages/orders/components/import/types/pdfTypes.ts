@@ -34,7 +34,7 @@ export interface PdfOrderMetadata {
   material: string;          // e.g., "МДФ 16 мм"
   company?: string;          // e.g., "Zhihaz Best"
   printDate?: string;        // e.g., "18.12.2025"
-  totalCount?: number;       // e.g., 44 from "Общ. кол. 44"
+  totalCount?: number;       // e.g., 44 from "Общ. кол. 44" (обычно это сумма по колонке "Кол-во", а не количество позиций)
 }
 
 // ============================================================================
@@ -53,8 +53,14 @@ export interface PdfDetailRaw {
   note?: string;             // "Примечание" - e.g., "Присадка:"
 }
 
+export interface PdfParseStats {
+  positionsCount: number;   // кол-во строк/позиций (№ в таблице)
+  totalQuantity: number;    // сумма по колонке "Кол-во" (физических деталей)
+}
+
 export interface PdfParsedResult {
   metadata: PdfOrderMetadata;
+  stats: PdfParseStats;
   details: PdfDetailRaw[];
   pages: number;
   parseErrors: string[];
