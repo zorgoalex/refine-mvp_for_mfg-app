@@ -1390,6 +1390,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         style={{ position: 'relative' }}
       >
       <Table<OrderDetail>
+        className="order-details-table"
         dataSource={sortedDetails}
         columns={columns}
         rowKey={(record) => record.temp_id || record.detail_id || 0}

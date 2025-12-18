@@ -24,23 +24,21 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
 
-          if (id.includes("@ant-design/icons")) return "antd-icons";
-          if (id.includes("@rc-component") || id.includes("/rc-") || id.includes("\\rc-")) return "antd-rc";
-          if (id.includes("@ant-design/cssinjs") || id.includes("@ant-design/colors")) return "antd-infra";
-          if (id.includes("dayjs")) return "dayjs";
-          if (id.includes("lodash")) return "lodash";
-          if (id.includes("jszip")) return "jszip";
+          const [, nodeModulesPath] = id.split("node_modules/");
+          if (!nodeModulesPath) return;
 
-          if (id.includes("pdfjs-dist")) return "pdfjs";
-          if (id.includes("xlsx")) return "xlsx";
-          if (id.includes("exceljs")) return "exceljs";
-          if (id.includes("react-dnd")) return "dnd";
+          const parts = nodeModulesPath.split(/[\\/]/g);
+          const pkg = parts[0]?.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
+          if (!pkg) return;
 
-          if (id.includes("@refinedev")) return "refine";
-          if (id.includes("antd")) return "antd";
-          if (id.includes("react") || id.includes("scheduler")) return "react-vendor";
+          // Keep manual chunking minimal and safe; aggressive splitting can create chunk cycles
+          // and runtime errors in production deployments (e.g. React exports becoming undefined).
+          if (pkg === "pdfjs-dist") return "pdfjs";
+          if (pkg === "xlsx") return "xlsx";
+          if (pkg === "exceljs") return "exceljs";
 
-          return "vendor";
+          // Let Rollup decide the rest for correct execution order.
+          return;
         },
       },
     },

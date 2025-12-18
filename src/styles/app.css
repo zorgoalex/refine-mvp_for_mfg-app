@@ -242,3 +242,8 @@
   -moz-user-select: none;
   -ms-user-select: none;
 }
+
+/* Order details: selected row hover (teal, darker than default blue) */
+.order-details-table .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+  background: #5cdbd3 !important;
+}
