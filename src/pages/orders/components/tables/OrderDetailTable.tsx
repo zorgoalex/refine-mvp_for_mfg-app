@@ -1177,6 +1177,37 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       edgeIds,
       prices,
       noteValues,
+      hasEmptyMilling: sortedDetails.some(d => {
+        const value = d.milling_type_id;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num) || num <= 0;
+      }),
+      hasEmptyMaterial: sortedDetails.some(d => {
+        const value = d.material_id;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num) || num <= 0;
+      }),
+      hasEmptyFilm: sortedDetails.some(d => {
+        const value = d.film_id;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num) || num <= 0;
+      }),
+      hasEmptyEdge: sortedDetails.some(d => {
+        const value = d.edge_type_id;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num) || num <= 0;
+      }),
+      hasEmptyPrice: sortedDetails.some(d => {
+        const value = d.milling_cost_per_sqm;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num);
+      }),
+      hasEmptyNote: sortedDetails.some(d => !(d.note || '').trim()),
       hasPrisadka: sortedDetails.some(d => (d.note || '').includes('Присадка')),
       hasChernovoy: sortedDetails.some(d => (d.note || '').includes('Черновой')),
     };
@@ -1199,16 +1230,23 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     const buildValueItems = (
       emptyKey: string,
+      hasEmptyValue: boolean,
       values: Array<{ key: string; label: React.ReactNode }>
     ): MenuProps['items'] => {
-      if (values.length === 0) {
-        return [{ key: `${emptyKey}:empty`, label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }];
+      const items: MenuProps['items'] = [];
+      if (hasEmptyValue) {
+        items.push({ key: `${emptyKey}:empty`, label: '—' });
       }
-      return values;
+      items.push(...values);
+      if (items.length === 0) {
+        return [{ key: `${emptyKey}:none`, label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }];
+      }
+      return items;
     };
 
     const millingItems = buildValueItems(
       'select:milling',
+      selectionAggregates.hasEmptyMilling,
       sortByLabel(selectionAggregates.millingIds, millingNameById).map(id => ({
         key: `select:milling:${id}`,
         label: renderMenuValue(millingNameById.get(id) || `ID: ${id}`),
@@ -1217,6 +1255,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     const materialItems = buildValueItems(
       'select:material',
+      selectionAggregates.hasEmptyMaterial,
       sortByLabel(selectionAggregates.materialIds, materialNameById).map(id => ({
         key: `select:material:${id}`,
         label: renderMenuValue(materialNameById.get(id) || `ID: ${id}`),
@@ -1225,6 +1264,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     const filmItems = buildValueItems(
       'select:film',
+      selectionAggregates.hasEmptyFilm,
       sortByLabel(selectionAggregates.filmIds, filmNameById).map(id => ({
         key: `select:film:${id}`,
         label: renderMenuValue(filmNameById.get(id) || `ID: ${id}`, 36),
@@ -1233,6 +1273,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     const edgeItems = buildValueItems(
       'select:edge',
+      selectionAggregates.hasEmptyEdge,
       sortByLabel(selectionAggregates.edgeIds, edgeNameById).map(id => ({
         key: `select:edge:${id}`,
         label: renderMenuValue(edgeNameById.get(id) || `ID: ${id}`),
@@ -1241,6 +1282,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     const priceItems = buildValueItems(
       'select:price',
+      selectionAggregates.hasEmptyPrice,
       selectionAggregates.prices.map(value => ({
         key: `select:price:${value}`,
         label: renderMenuValue(value),
@@ -1248,6 +1290,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     );
 
     const noteItems: MenuProps['items'] = [];
+    if (selectionAggregates.hasEmptyNote) {
+      noteItems.push({ key: 'select:note:empty', label: '—' });
+    }
     if (selectionAggregates.hasPrisadka) {
       noteItems.push({ key: 'select:note:contains:prisadka', label: renderMenuValue('Присадка') });
     }
@@ -1264,7 +1309,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       { key: 'select:category:films', label: 'по пленкам', children: filmItems },
       { key: 'select:category:edges', label: 'по обкату', children: edgeItems },
       { key: 'select:category:prices', label: 'по ценам', children: priceItems },
-      { key: 'select:category:notes', label: 'по примечанию', children: noteItems.length ? noteItems : [{ key: 'select:note:empty', label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }] },
+      { key: 'select:category:notes', label: 'по примечанию', children: noteItems.length ? noteItems : [{ key: 'select:note:none', label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }] },
     ];
 
     return [
@@ -1286,6 +1331,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     selectionAggregates.edgeIds,
     selectionAggregates.filmIds,
     selectionAggregates.hasChernovoy,
+    selectionAggregates.hasEmptyEdge,
+    selectionAggregates.hasEmptyFilm,
+    selectionAggregates.hasEmptyMaterial,
+    selectionAggregates.hasEmptyMilling,
+    selectionAggregates.hasEmptyNote,
+    selectionAggregates.hasEmptyPrice,
     selectionAggregates.hasPrisadka,
     selectionAggregates.materialIds,
     selectionAggregates.millingIds,
@@ -1323,9 +1374,29 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       return;
     }
 
+    if (key === 'select:milling:empty') {
+      selectRows(d => {
+        const value = d.milling_type_id;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num) || num <= 0;
+      });
+      return;
+    }
+
     if (key.startsWith('select:milling:')) {
       const id = Number(key.replace('select:milling:', ''));
       selectRows(d => Number(d.milling_type_id) === id);
+      return;
+    }
+
+    if (key === 'select:material:empty') {
+      selectRows(d => {
+        const value = d.material_id;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num) || num <= 0;
+      });
       return;
     }
 
@@ -1335,9 +1406,29 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       return;
     }
 
+    if (key === 'select:film:empty') {
+      selectRows(d => {
+        const value = d.film_id;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num) || num <= 0;
+      });
+      return;
+    }
+
     if (key.startsWith('select:film:')) {
       const id = Number(key.replace('select:film:', ''));
       selectRows(d => Number(d.film_id) === id);
+      return;
+    }
+
+    if (key === 'select:edge:empty') {
+      selectRows(d => {
+        const value = d.edge_type_id;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num) || num <= 0;
+      });
       return;
     }
 
@@ -1347,9 +1438,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       return;
     }
 
+    if (key === 'select:price:empty') {
+      selectRows(d => {
+        const value = d.milling_cost_per_sqm;
+        if (value === null || value === undefined) return true;
+        const num = Number(value);
+        return !Number.isFinite(num);
+      });
+      return;
+    }
+
     if (key.startsWith('select:price:')) {
       const value = key.replace('select:price:', '');
       selectRows(d => d.milling_cost_per_sqm !== null && d.milling_cost_per_sqm !== undefined && Number(d.milling_cost_per_sqm).toFixed(2) === value);
+      return;
+    }
+
+    if (key === 'select:note:empty') {
+      selectRows(d => !(d.note || '').trim());
       return;
     }
 
