@@ -5,7 +5,7 @@
 // Проблема: race condition между внутренним состоянием InputNumber и Form.Item
 // Решение: используем useRef для синхронного хранения значений полей
 
-import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined } from '@ant-design/icons';
@@ -57,6 +57,95 @@ interface FieldValues {
   milling_cost_per_sqm: number | null;
   detail_cost: number | null;
 }
+
+const FitSummaryText: React.FC<{
+  children: React.ReactNode;
+  maxFontSize?: number;
+  minFontSize?: number;
+  align?: 'left' | 'center' | 'right';
+  style?: React.CSSProperties;
+}> = ({ children, maxFontSize = 13, minFontSize = 9, align = 'right', style }) => {
+  const containerRef = useRef<HTMLSpanElement>(null);
+  const [fontSize, setFontSize] = useState<number>(maxFontSize);
+  const [scaleX, setScaleX] = useState<number>(1);
+
+  const recompute = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    el.style.fontSize = `${maxFontSize}px`;
+    el.style.transform = '';
+
+    const availableWidth = el.clientWidth;
+    if (availableWidth <= 0) return;
+
+    if (el.scrollWidth <= availableWidth) {
+      setFontSize(maxFontSize);
+      setScaleX(1);
+      return;
+    }
+
+    let low = minFontSize;
+    let high = maxFontSize;
+    let best = minFontSize;
+
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      el.style.fontSize = `${mid}px`;
+      if (el.scrollWidth <= availableWidth) {
+        best = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    setFontSize(best);
+    el.style.fontSize = `${best}px`;
+    if (el.scrollWidth > availableWidth) {
+      setScaleX(availableWidth / el.scrollWidth);
+    } else {
+      setScaleX(1);
+    }
+  }, [maxFontSize, minFontSize]);
+
+  useLayoutEffect(() => {
+    recompute();
+  }, [children, recompute]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+
+    const ro = new ResizeObserver(() => recompute());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [recompute]);
+
+  return (
+    <span
+      ref={containerRef}
+      style={{
+        ...style,
+        fontSize,
+        display: 'block',
+        width: '100%',
+        whiteSpace: 'nowrap',
+        overflow: 'visible',
+        textOverflow: 'clip',
+        transform: scaleX !== 1 ? `scaleX(${scaleX})` : undefined,
+        transformOrigin:
+          align === 'right'
+            ? 'right center'
+            : align === 'center'
+              ? 'center'
+              : 'left center',
+      }}
+    >
+      {children}
+    </span>
+  );
+};
 
 export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTableProps>(({
   onEdit,
@@ -1523,7 +1612,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               <Table.Summary.Cell index={0} />
               {/* № */}
               <Table.Summary.Cell index={1} align="center">
-                <span style={{ color: '#666' }}>{details.length}</span>
+                <FitSummaryText align="center" style={{ color: '#666' }}>{details.length}</FitSummaryText>
               </Table.Summary.Cell>
               {/* Высота */}
               <Table.Summary.Cell index={2} />
@@ -1531,11 +1620,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               <Table.Summary.Cell index={3} />
               {/* Кол-во */}
               <Table.Summary.Cell index={4} align="right">
-                <span style={{ color: '#1890ff' }}>{formatNumber(totals.quantity, 0)}</span>
+                <FitSummaryText align="right" style={{ color: '#1890ff' }}>{formatNumber(totals.quantity, 0)}</FitSummaryText>
               </Table.Summary.Cell>
               {/* Площадь */}
               <Table.Summary.Cell index={5} align="right">
-                <span style={{ color: '#1890ff' }}>{formatNumber(totals.area, 2)} м²</span>
+                <FitSummaryText align="right" style={{ color: '#1890ff' }}>
+                  {`${formatNumber(totals.area, 2)} м\u00B2`}
+                </FitSummaryText>
               </Table.Summary.Cell>
               {/* Фрезеровка */}
               <Table.Summary.Cell index={6} />
@@ -1549,7 +1640,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               <Table.Summary.Cell index={10} />
               {/* Сумма */}
               <Table.Summary.Cell index={11} align="right">
-                <span style={{ color: '#52c41a', fontSize: '13px' }}>{formatNumber(totals.detail_cost, 2)}</span>
+                <FitSummaryText align="right" style={{ color: '#52c41a' }}>{formatNumber(totals.detail_cost, 2)}</FitSummaryText>
               </Table.Summary.Cell>
               {/* Пленка */}
               <Table.Summary.Cell index={12} />
