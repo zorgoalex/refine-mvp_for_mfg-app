@@ -1,7 +1,8 @@
 // Step 1: Photo Upload with VLM analysis progress and results preview
+// Supports optional image crop before analysis
 
-import React, { useCallback, useState, useEffect } from 'react';
-import { Upload, Table, Typography, Space, Alert, Progress, Descriptions, Tag, Button, Image } from 'antd';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
+import { Upload, Table, Typography, Space, Alert, Progress, Descriptions, Tag, Button, Image, Checkbox } from 'antd';
 import {
   InboxOutlined,
   CameraOutlined,
@@ -10,10 +11,15 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   ReloadOutlined,
+  ScissorOutlined,
+  ZoomInOutlined,
+  ZoomOutOutlined,
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
+import type { Crop, PixelCrop } from 'react-image-crop';
 import type { ImportStatus, VlmImportResult } from '../../../../../hooks/useVlmImport';
 import type { ImportRow } from '../types/importTypes';
+import { ImageCropArea, cropImageToBlob } from '../components/ImageCropArea';
 
 const { Dragger } = Upload;
 const { Text, Title } = Typography;
@@ -25,7 +31,7 @@ interface PhotoUploadStepProps {
   error: string | null;
   result: VlmImportResult | null;
   importRows: ImportRow[];
-  onFileUpload: (file: File) => Promise<VlmImportResult>;
+  onFileUpload: (file: File | Blob) => Promise<VlmImportResult>;
   onReset: () => void;
 }
 
@@ -60,6 +66,20 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
   onReset,
 }) => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  // Crop states
+  const [useFullImage, setUseFullImage] = useState(true);
+  const [showCropPreview, setShowCropPreview] = useState(false);
+  const [crop, setCrop] = useState<Crop>();
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
+  const [scale, setScale] = useState(1);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
+  // Zoom constants
+  const MIN_SCALE = 0.25;
+  const MAX_SCALE = 3;
+  const SCALE_STEP = 0.25;
 
   // Cleanup preview URL on unmount or reset
   useEffect(() => {
@@ -70,14 +90,91 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
     };
   }, [previewUrl]);
 
-  // Clear preview when reset
+  // Clear preview when reset (status changes TO idle, not when already idle)
+  const prevStatusRef = useRef<ImportStatus>(status);
   useEffect(() => {
-    if (status === 'idle' && previewUrl) {
+    // Only clear when transitioning TO idle (e.g., after error reset)
+    // Not when already idle (e.g., after file selection)
+    if (status === 'idle' && prevStatusRef.current !== 'idle' && previewUrl) {
       URL.revokeObjectURL(previewUrl);
       setPreviewUrl(null);
+      setSelectedFile(null);
+      setShowCropPreview(false);
+      setCrop(undefined);
+      setCompletedCrop(undefined);
+      setScale(1);
     }
+    prevStatusRef.current = status;
   }, [status, previewUrl]);
 
+  // Handle file selection - show preview first
+  const handleFileSelect: UploadProps['customRequest'] = useCallback(async (options) => {
+    const { file, onSuccess } = options;
+    const fileObj = file as File;
+
+    // Create preview URL
+    const url = URL.createObjectURL(fileObj);
+    setPreviewUrl(url);
+    setSelectedFile(fileObj);
+    setShowCropPreview(true);
+    setCrop(undefined);
+    setCompletedCrop(undefined);
+    setScale(1);
+
+    onSuccess?.({});
+  }, []);
+
+  // Handle analyze button click
+  const handleAnalyze = useCallback(async () => {
+    if (!selectedFile) return;
+
+    try {
+      if (!useFullImage && completedCrop && imgRef.current) {
+        // Crop image and upload
+        const croppedBlob = await cropImageToBlob(imgRef.current, completedCrop);
+        await onFileUpload(croppedBlob);
+      } else {
+        // Upload full image
+        await onFileUpload(selectedFile);
+      }
+      setShowCropPreview(false);
+    } catch (err) {
+      console.error('Analyze error:', err);
+    }
+  }, [selectedFile, useFullImage, completedCrop, onFileUpload]);
+
+  // Handle image load for crop
+  const handleImageLoad = useCallback((img: HTMLImageElement) => {
+    imgRef.current = img;
+  }, []);
+
+  // Cancel crop preview
+  const handleCancelCrop = useCallback(() => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    setPreviewUrl(null);
+    setSelectedFile(null);
+    setShowCropPreview(false);
+    setCrop(undefined);
+    setCompletedCrop(undefined);
+    setScale(1);
+  }, [previewUrl]);
+
+  // Zoom handlers
+  const handleZoomIn = useCallback(() => {
+    setScale((prev) => Math.min(prev + SCALE_STEP, MAX_SCALE));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setScale((prev) => Math.max(prev - SCALE_STEP, MIN_SCALE));
+  }, []);
+
+  const handleZoomReset = useCallback(() => {
+    setScale(1);
+  }, []);
+
+  // Legacy upload handler (kept for compatibility)
   const handleUpload: UploadProps['customRequest'] = useCallback(async (options) => {
     const { file, onSuccess, onError } = options;
     try {
@@ -96,10 +193,13 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
     name: 'file',
     multiple: false,
     accept: 'image/*,.jpg,.jpeg,.png,.webp',
-    customRequest: handleUpload,
+    customRequest: handleFileSelect,
     showUploadList: false,
-    disabled: status !== 'idle' && status !== 'error' && status !== 'success',
+    disabled: showCropPreview || (status !== 'idle' && status !== 'error' && status !== 'success'),
   };
+
+  // Can analyze: full image always, or crop if area selected
+  const canAnalyze = useFullImage || (completedCrop && completedCrop.width > 0 && completedCrop.height > 0);
 
   // Preview columns for parsed details
   const previewColumns = [
@@ -171,6 +271,120 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
 
   return (
     <div style={{ padding: '16px 0' }}>
+      {/* Crop preview - shown after file selection, before analysis */}
+      {showCropPreview && previewUrl && !isProcessing && (
+        <div style={{
+          background: '#fafafa',
+          borderRadius: 8,
+          padding: 16,
+          marginBottom: 24,
+        }}>
+          {/* Header with checkbox and zoom controls */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 16,
+            flexWrap: 'wrap',
+            gap: 8,
+          }}>
+            <Space>
+              <ScissorOutlined style={{ fontSize: 18, color: '#1890ff' }} />
+              <Text strong>Выберите область для анализа</Text>
+            </Space>
+            <Space size="middle">
+              {/* Zoom controls */}
+              <Space.Compact>
+                <Button
+                  icon={<ZoomOutOutlined />}
+                  onClick={handleZoomOut}
+                  disabled={scale <= MIN_SCALE}
+                  title="Уменьшить"
+                />
+                <Button
+                  onClick={handleZoomReset}
+                  style={{ minWidth: 60 }}
+                  title="Сбросить масштаб"
+                >
+                  {Math.round(scale * 100)}%
+                </Button>
+                <Button
+                  icon={<ZoomInOutlined />}
+                  onClick={handleZoomIn}
+                  disabled={scale >= MAX_SCALE}
+                  title="Увеличить"
+                />
+              </Space.Compact>
+              {/* Full image checkbox */}
+              <Checkbox
+                checked={useFullImage}
+                onChange={(e) => setUseFullImage(e.target.checked)}
+              >
+                Вся картинка
+              </Checkbox>
+            </Space>
+          </div>
+
+          {/* Image with optional crop */}
+          <div style={{ marginBottom: 16 }}>
+            {useFullImage ? (
+              <div style={{
+                background: '#f5f5f5',
+                borderRadius: 8,
+                padding: 16,
+                overflow: 'auto',
+                maxHeight: 400,
+              }}>
+                <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+                  <img
+                    src={previewUrl}
+                    alt="Preview"
+                    onLoad={(e) => { imgRef.current = e.currentTarget; }}
+                    style={{
+                      display: 'block',
+                      borderRadius: 4,
+                      border: '1px solid #d9d9d9',
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <ImageCropArea
+                  imageSrc={previewUrl}
+                  crop={crop}
+                  onCropChange={setCrop}
+                  onCropComplete={setCompletedCrop}
+                  onImageLoad={handleImageLoad}
+                  scale={scale}
+                  containerHeight={400}
+                />
+                {!completedCrop && (
+                  <Text type="secondary" style={{ display: 'block', textAlign: 'center', marginTop: 8 }}>
+                    Выделите область мышью для анализа
+                  </Text>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={handleCancelCrop}>
+              Отмена
+            </Button>
+            <Button
+              type="primary"
+              onClick={handleAnalyze}
+              disabled={!canAnalyze}
+              icon={<ScanOutlined />}
+            >
+              Анализировать
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Upload area or progress */}
       {isProcessing ? (
         <div style={{
@@ -216,7 +430,7 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
             )}
           </div>
         </div>
-      ) : (
+      ) : !showCropPreview && (
         <Dragger {...uploadProps} style={{ marginBottom: 24 }}>
           <p className="ant-upload-drag-icon">
             {STATUS_ICONS[status]}

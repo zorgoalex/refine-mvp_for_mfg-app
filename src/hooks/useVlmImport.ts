@@ -59,7 +59,7 @@ export interface UseVlmImportResult {
   result: VlmImportResult | null;
 
   // Methods
-  importFromImage: (file: File) => Promise<VlmImportResult>;
+  importFromImage: (file: File | Blob) => Promise<VlmImportResult>;
   reset: () => void;
 }
 
@@ -198,7 +198,7 @@ export const useVlmImport = (): UseVlmImportResult => {
     setResult(null);
   }, [clearProgressTimer]);
 
-  const importFromImage = useCallback(async (file: File): Promise<VlmImportResult> => {
+  const importFromImage = useCallback(async (file: File | Blob): Promise<VlmImportResult> => {
     reset();
 
     try {

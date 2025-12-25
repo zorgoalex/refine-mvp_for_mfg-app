@@ -5,6 +5,7 @@ import { Modal, Steps, Button, Space, message } from 'antd';
 import { CameraOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import { ResizableModalWrapper } from '../../../../components/ResizableModalWrapper';
 import { useVlmImport, ImportedOrderDetail } from '../../../../hooks/useVlmImport';
 import { useImportValidation } from './hooks';
 import { PhotoUploadStep } from './steps/PhotoUploadStep';
@@ -240,32 +241,31 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
 
   return (
     <DraggableModalWrapper open={open}>
-      <Modal
-        title={
-          <Space>
-            <CameraOutlined style={{ color: '#1890ff' }} />
-            <span>Импорт деталей из фото</span>
-            {vlmImport.result?.provider && (
-              <span style={{ fontWeight: 'normal', color: '#666' }}>
-                — {vlmImport.result.provider}
-              </span>
-            )}
-          </Space>
-        }
-        open={open}
-        onCancel={handleClose}
-        width={1200}
-        style={{ top: 20 }}
-        styles={{
-          body: {
-            minHeight: 500,
-            maxHeight: 'calc(90vh - 120px)',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          },
-        }}
-        footer={
+      <ResizableModalWrapper open={open} minHeight={400} defaultHeight={550}>
+        <Modal
+          title={
+            <Space>
+              <CameraOutlined style={{ color: '#1890ff' }} />
+              <span>Импорт деталей из фото</span>
+              {vlmImport.result?.provider && (
+                <span style={{ fontWeight: 'normal', color: '#666' }}>
+                  — {vlmImport.result.provider}
+                </span>
+              )}
+            </Space>
+          }
+          open={open}
+          onCancel={handleClose}
+          width={1200}
+          style={{ top: 20 }}
+          styles={{
+            body: {
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            },
+          }}
+          footer={
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Button
               onClick={handleBack}
@@ -305,10 +305,11 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
           size="small"
         />
 
-        <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div style={{ flex: 1, overflow: 'auto' }}>
           {renderStepContent()}
         </div>
-      </Modal>
+        </Modal>
+      </ResizableModalWrapper>
     </DraggableModalWrapper>
   );
 };

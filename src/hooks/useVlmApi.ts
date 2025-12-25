@@ -69,11 +69,11 @@ export interface UseVlmApiResult {
 
   // Methods
   checkHealth: () => Promise<VlmHealthStatus>;
-  uploadImage: (file: File) => Promise<VlmUploadResult>;
+  uploadImage: (file: File | Blob) => Promise<VlmUploadResult>;
   analyzeImage: (imageUrl: string, options?: AnalyzeOptions) => Promise<VlmAnalyzeResult>;
 
   // Full flow
-  uploadAndAnalyze: (file: File, options?: AnalyzeOptions) => Promise<VlmAnalyzeResult & { imageUrl?: string }>;
+  uploadAndAnalyze: (file: File | Blob, options?: AnalyzeOptions) => Promise<VlmAnalyzeResult & { imageUrl?: string }>;
 }
 
 export interface AnalyzeOptions {
@@ -129,8 +129,8 @@ export const useVlmApi = (): UseVlmApiResult => {
     }
   }, []);
 
-  // Upload image
-  const uploadImage = useCallback(async (file: File): Promise<VlmUploadResult> => {
+  // Upload image (accepts File or Blob for cropped images)
+  const uploadImage = useCallback(async (file: File | Blob): Promise<VlmUploadResult> => {
     setIsLoading(true);
     setError(null);
 
@@ -239,7 +239,7 @@ export const useVlmApi = (): UseVlmApiResult => {
 
   // Upload and analyze in one call
   const uploadAndAnalyze = useCallback(async (
-    file: File,
+    file: File | Blob,
     options: AnalyzeOptions = {}
   ): Promise<VlmAnalyzeResult & { imageUrl?: string }> => {
     setIsLoading(true);
