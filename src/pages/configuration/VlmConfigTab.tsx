@@ -17,6 +17,7 @@ import {
 import { VlmProvidersSection } from './components/VlmProvidersSection';
 import { VlmModelsSection } from './components/VlmModelsSection';
 import { VlmPromptsSection } from './components/VlmPromptsSection';
+import { VlmDefaultsSection } from './components/VlmDefaultsSection';
 
 const { Text } = Typography;
 
@@ -140,6 +141,9 @@ export const VlmConfigTab: React.FC = () => {
           </Space>
         )}
       </Card>
+
+      {/* Default Settings for VLM Requests */}
+      <VlmDefaultsSection />
 
       {/* Providers CRUD */}
       <VlmProvidersSection />

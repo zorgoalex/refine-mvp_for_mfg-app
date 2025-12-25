@@ -8,7 +8,15 @@
  */
 
 import { useState, useCallback } from 'react';
-import { useAppSettings, SETTING_KEYS, VlmSettings, DEFAULT_VLM_SETTINGS, VlmProvider } from './useAppSettings';
+import {
+  useAppSettings,
+  SETTING_KEYS,
+  VlmSettings,
+  DEFAULT_VLM_SETTINGS,
+  VlmProvider,
+  VlmDefaultSettings,
+  DEFAULT_VLM_DEFAULTS,
+} from './useAppSettings';
 
 // ============================================================================
 // Types
@@ -64,8 +72,11 @@ export interface UseVlmApiResult {
   isLoading: boolean;
   error: string | null;
 
-  // Settings
+  // Settings (legacy)
   settings: VlmSettings;
+
+  // New DB-driven defaults
+  defaults: VlmDefaultSettings;
 
   // Methods
   checkHealth: () => Promise<VlmHealthStatus>;
@@ -101,7 +112,7 @@ export const useVlmApi = (): UseVlmApiResult => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Get VLM settings
+  // Get VLM settings (legacy)
   const getSettings = useCallback((): VlmSettings => {
     const providerPriority = getSetting<VlmProvider[]>(SETTING_KEYS.VLM_PROVIDER_PRIORITY);
     const defaultProvider = getSetting<VlmProvider>(SETTING_KEYS.VLM_DEFAULT_PROVIDER);
@@ -113,6 +124,12 @@ export const useVlmApi = (): UseVlmApiResult => {
       providerConfigs: providerConfigs || DEFAULT_VLM_SETTINGS.providerConfigs,
       promptKv: DEFAULT_VLM_SETTINGS.promptKv, // Always use default (read-only)
     };
+  }, [getSetting]);
+
+  // Get new DB-driven defaults
+  const getDefaults = useCallback((): VlmDefaultSettings => {
+    const defaults = getSetting<VlmDefaultSettings>(SETTING_KEYS.VLM_DEFAULTS);
+    return defaults || DEFAULT_VLM_DEFAULTS;
   }, [getSetting]);
 
   // Check health
@@ -182,8 +199,9 @@ export const useVlmApi = (): UseVlmApiResult => {
       }
 
       const settings = getSettings();
+      const defaults = getDefaults();
 
-      // Build provider order
+      // Build provider order from legacy settings
       let providerOrder = options.providerOrder;
       if (!providerOrder) {
         const enabledProviders = settings.providerPriority.filter(
@@ -192,12 +210,18 @@ export const useVlmApi = (): UseVlmApiResult => {
         providerOrder = enabledProviders;
       }
 
-      // Get default provider and model
-      const provider = options.provider || settings.defaultProvider;
-      const providerConfig = settings.providerConfigs[provider];
-      const model = options.model || providerConfig?.defaultModel;
+      // Get provider: options > new defaults > legacy settings
+      const provider = options.provider ||
+        (defaults.providerName as VlmProvider) ||
+        settings.defaultProvider;
 
-      // Use prompt from options, or prompt_kv from settings
+      // Get model: options > new defaults > legacy settings
+      const providerConfig = settings.providerConfigs[provider];
+      const model = options.model ||
+        defaults.modelName ||
+        providerConfig?.defaultModel;
+
+      // Build request body
       const requestBody: Record<string, any> = {
         image_url: imageUrl,
         provider,
@@ -205,11 +229,42 @@ export const useVlmApi = (): UseVlmApiResult => {
         provider_order: providerOrder,
       };
 
+      // Handle prompt based on settings (options.prompt has highest priority)
       if (options.prompt) {
+        // Direct prompt from options
         requestBody.prompt = options.prompt;
       } else {
-        // Use prompt_kv from settings (default: order_details/parse_order_details_json)
-        requestBody.prompt_kv = settings.promptKv;
+        // Use new defaults based on promptMode
+        switch (defaults.promptMode) {
+          case 'prompt_id':
+            // Use direct prompt ID (Deno KV ID)
+            if (defaults.promptId) {
+              requestBody.prompt_id = defaults.promptId;
+            }
+            break;
+
+          case 'prompt_kv':
+            // Use prompt_kv criteria from DB selection
+            if (defaults.promptKv) {
+              requestBody.prompt_kv = {
+                namespace: defaults.promptKv.namespace,
+                name: defaults.promptKv.name,
+                version: defaults.promptKv.version,
+                lang: defaults.promptKv.lang,
+              };
+            }
+            break;
+
+          case 'api_default':
+          default:
+            // Don't send any prompt params - let VLM API use its default
+            // (legacy fallback: use hardcoded promptKv)
+            if (!defaults.promptMode || defaults.promptMode === 'api_default') {
+              // Use legacy promptKv as fallback for backwards compatibility
+              requestBody.prompt_kv = settings.promptKv;
+            }
+            break;
+        }
       }
 
       const response = await fetch('/api/vlm/analyze', {
@@ -235,7 +290,7 @@ export const useVlmApi = (): UseVlmApiResult => {
     } finally {
       setIsLoading(false);
     }
-  }, [getSettings]);
+  }, [getSettings, getDefaults]);
 
   // Upload and analyze in one call
   const uploadAndAnalyze = useCallback(async (
@@ -275,6 +330,7 @@ export const useVlmApi = (): UseVlmApiResult => {
     isLoading,
     error,
     settings: getSettings(),
+    defaults: getDefaults(),
     checkHealth,
     uploadImage,
     analyzeImage,
