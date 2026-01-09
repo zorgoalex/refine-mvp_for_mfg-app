@@ -100,15 +100,6 @@ export const VlmDefaultsSection: React.FC = () => {
         ]
       : [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
-    meta: {
-      fields: [
-        'provider_model_id',
-        'provider_id',
-        'name',
-        'is_default',
-        { vlm_provider: ['provider_id', 'name'] },
-      ],
-    },
   });
 
   // Load prompts for prompt_kv selection

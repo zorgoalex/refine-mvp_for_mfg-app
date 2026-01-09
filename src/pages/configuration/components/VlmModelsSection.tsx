@@ -83,24 +83,6 @@ export const VlmModelsSection: React.FC = () => {
       { field: 'provider_id', order: 'asc' },
       { field: 'sort_order', order: 'asc' },
     ],
-    meta: {
-      fields: [
-        'provider_model_id',
-        'provider_id',
-        'name',
-        'notes',
-        'sort_order',
-        'is_default',
-        'priority',
-        'is_active',
-        'thinking',
-        'input_price',
-        'output_price',
-        'max_output',
-        'total_context',
-        { vlm_provider: ['provider_id', 'name'] },
-      ],
-    },
   });
 
   // Load providers for select
