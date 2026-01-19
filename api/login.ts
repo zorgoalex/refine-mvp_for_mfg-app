@@ -16,7 +16,7 @@ import { logger } from './_lib/logger';
  *   - password: string
  *
  * Response:
- *   - accessToken: string (JWT, 8 часов)
+ *   - accessToken: string (JWT, 10 часов)
  *   - refreshToken: string (JWT, 7 дней)
  *   - user: { id, username, role }
  */

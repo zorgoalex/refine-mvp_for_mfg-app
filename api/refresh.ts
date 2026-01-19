@@ -19,7 +19,7 @@ import { generateAccessToken, generateRefreshToken as genRefreshToken } from './
  *   - refreshToken: string
  *
  * Response:
- *   - accessToken: string (новый JWT, 8 часов)
+ *   - accessToken: string (новый JWT, 10 часов)
  *   - refreshToken: string (новый JWT, 7 дней)
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
