@@ -24,6 +24,8 @@
   - **Печать/экспорт** (2025-11-16) — готовность к production
   - **Экспорт в Google Drive** (2025-11-24) — защищённый прокси через Vercel API → GAS
   - **Конфигурация и фильтры** (2025-12-04) — admin-панель настроек, расширенные фильтры заказов
+  - **Импорт деталей** (2025-12-18) — из Excel, PDF (Базис), фото (VLM API)
+  - **VLM интеграция** (2025-12-24) — распознавание деталей с изображений через AI
 
   ## Ключевые фичи
   - **CRUD** для 29 ресурсов + комплексная форма заказов (детали, платежи, статусы)
@@ -36,9 +38,12 @@
   - **Row Highlight и быстрые переходы**: подсветка новых/отредактированных записей, двойной клик открывает show-страницу
   - **Сортировка DESC по ID**, **is_active** фильтры, фиксированный sidebar, цветовая кодировка материалов
   - **Печать и экспорт**: react-to-print под A4 и ExcelJS экспорт по шаблону с формулами
-  - **Конфигурация (admin-only)**: страница настроек приложения (`app_settings`), вкладки Заказы/Финансы/Видимость, inline-редактирование по двойному клику
+  - **Конфигурация (admin-only)**: страница настроек приложения (`app_settings`), вкладки Заказы/Финансы/Видимость/Анализ фото, inline-редактирование
   - **Расширенные фильтры заказов**: поиск по вхождению (LIKE), диапазоны дат/сумм, фильтры по клиенту/статусам/присадке
   - **Присадки many-to-many**: связь orders ↔ doweling_orders через `order_doweling_links`, колонки в списке заказов
+  - **Импорт деталей**: из Excel (wizard с маппингом колонок), PDF Базис (автопарсинг), фото (VLM AI)
+  - **VLM API интеграция**: распознавание деталей с изображений через Vercel API → Auth0 M2M → VLM (Deno); fallback провайдеров (zai/bigmodel/openrouter)
+  - **Контекстное меню деталей**: ПКМ "Выделить" по группам (фрезеровка, материал, плёнка, обкат, цена)
 
   ## Стек и зависимости
   - React 18, Vite 4
@@ -48,6 +53,7 @@
   - Validation: `zod@^4` (для валидации форм)
   - Forms: `react-hook-form@^7` + `@hookform/resolvers@^5`
   - Print & Export: `react-to-print@^3`, `exceljs@^4` (печать и экспорт заказов)
+  - Import: `pdfjs-dist@^4`, `xlsx@^0.18` (парсинг PDF и Excel)
   - Calendar: `date-fns@^4`, `react-dnd@^16`, `react-dnd-html5-backend@^16` (Drag & Drop)
   - Data provider: Hasura GraphQL провайдер с JWT (`src/utils/dataProvider.ts`)
 
@@ -104,6 +110,11 @@
     - `src/hooks/useHighlightRow.ts` — подсветка и скролл к строке в таблице
     - `src/hooks/useOrderSave.ts` — delta-save для заказа, деталей, платежей
     - `src/hooks/useAppSettings.ts` — CRUD для таблицы `app_settings` (namespaced keys)
+    - `src/hooks/useVlmApi.ts`, `useVlmImport.ts` — интеграция с VLM API
+  - Импорт деталей:
+    - `src/pages/orders/components/import/` — модули импорта (Excel, PDF, VLM)
+    - `api/vlm/` — Vercel API для VLM (health, upload, analyze)
+    - `api/_lib/vlmClient.ts`, `auth0Token.ts` — клиент VLM и Auth0 M2M
   - Печать и экспорт:
     - `src/pages/orders/components/print/OrderPrintView.tsx` — компонент печатной формы заказа
     - `public/templates/order_template.xlsx` — шаблон Excel для экспорта
@@ -150,6 +161,7 @@
     - `HASURA_URL`, `HASURA_ADMIN_SECRET`
     - `JWT_SECRET`, `JWT_REFRESH_SECRET`
     - `GAS_WEBAPP_URL`, `GAS_API_KEY`
+    - `VLM_API_URL`, `AUTH0_M2M_DOMAIN`, `AUTH0_M2M_CLIENT_ID`, `AUTH0_M2M_CLIENT_SECRET`, `AUTH0_M2M_AUDIENCE`
   - **Аутентификация:** JWT через Vercel Functions; frontend `authProvider` с auto-refresh; Hasura с role-based
   permissions и audit presets.
   - **Data Provider:** `src/utils/dataProvider.ts` добавляет JWT и обновляет истёкший токен.
@@ -173,6 +185,9 @@
   - Проверить CORS и роли Hasura перед prod; типизация базовая; автотесты минимальны (unit для auth, E2E логин).
 
   ## Дальнейшие шаги (Roadmap)
-  - Done: CRUD orders, Печать/экспорт, Payments Tab (25.11.2025), Конфигурация + фильтры заказов (04.12.2025).
+  - Done: CRUD orders, Печать/экспорт, Payments Tab, Конфигурация, Импорт Excel/PDF/Фото, VLM интеграция (24.12.2025).
   - Календарь ~60% (осталось: печать плана дня, фильтры/поиск).
   - План: Workshops/Materials Tabs, Quick Create для справочников, динамическая видимость ресурсов по ролям, виртуализация таблиц, soft-delete/версионирование, E2E.
+
+  ## TODO
+  - [ ] Обновить `antd` до актуальной версии 5.x (исправит warning `findDOMNode is deprecated in StrictMode`)

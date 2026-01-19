@@ -39,6 +39,7 @@
     "react-dnd-html5-backend": "^16.0.1",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.65.0",
+    "react-image-crop": "^11.0.10",
     "react-to-print": "^3.2.0",
     "xlsx": "^0.18.5",
     "zod": "^4.1.12",
@@ -51,6 +52,7 @@
     "@types/react-dnd": "^2.0.36",
     "@vercel/node": "^5.5.9",
     "@vitejs/plugin-react": "^4.0.0",
+    "baseline-browser-mapping": "^2.9.11",
     "concurrently": "^9.2.1",
     "vite": "^4.2.0",
     "vitest": "^4.0.10"

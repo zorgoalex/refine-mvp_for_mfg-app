@@ -1,9 +1,9 @@
-// Dropdown button with Excel and PDF import options
+// Dropdown button with Excel, PDF and VLM image import options
 
 import React, { useState, useCallback, Suspense, lazy } from 'react';
 import { Dropdown, Button, Tooltip, Spin } from 'antd';
 import type { MenuProps } from 'antd';
-import { ImportOutlined, FileExcelOutlined, FilePdfOutlined, DownOutlined } from '@ant-design/icons';
+import { ImportOutlined, FileExcelOutlined, FilePdfOutlined, CameraOutlined, DownOutlined } from '@ant-design/icons';
 
 const ExcelImportModal = lazy(async () => ({
   default: (await import('./ExcelImportModal')).ExcelImportModal,
@@ -13,6 +13,10 @@ const PdfImportModal = lazy(async () => ({
   default: (await import('./PdfImportModal')).PdfImportModal,
 }));
 
+const VlmImportModal = lazy(async () => ({
+  default: (await import('./VlmImportModal')).VlmImportModal,
+}));
+
 interface ImportDropdownButtonProps {
   disabled?: boolean;
 }
@@ -20,6 +24,7 @@ interface ImportDropdownButtonProps {
 export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disabled }) => {
   const [excelModalOpen, setExcelModalOpen] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [vlmModalOpen, setVlmModalOpen] = useState(false);
 
   const handleExcelOpen = useCallback(() => {
     setExcelModalOpen(true);
@@ -37,6 +42,14 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
     setPdfModalOpen(false);
   }, []);
 
+  const handleVlmOpen = useCallback(() => {
+    setVlmModalOpen(true);
+  }, []);
+
+  const handleVlmClose = useCallback(() => {
+    setVlmModalOpen(false);
+  }, []);
+
   const menuItems: MenuProps['items'] = [
     {
       key: 'excel',
@@ -49,6 +62,12 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
       icon: <FilePdfOutlined style={{ color: '#f5222d' }} />,
       label: 'Импорт из PDF Базис',
       onClick: handlePdfOpen,
+    },
+    {
+      key: 'vlm',
+      icon: <CameraOutlined style={{ color: '#1890ff' }} />,
+      label: 'Импорт из фото',
+      onClick: handleVlmOpen,
     },
   ];
 
@@ -71,6 +90,12 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
       {pdfModalOpen && (
         <Suspense fallback={<Spin />}>
           <PdfImportModal open={pdfModalOpen} onClose={handlePdfClose} />
+        </Suspense>
+      )}
+
+      {vlmModalOpen && (
+        <Suspense fallback={<Spin />}>
+          <VlmImportModal open={vlmModalOpen} onClose={handleVlmClose} />
         </Suspense>
       )}
     </>

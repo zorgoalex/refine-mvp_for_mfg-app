@@ -7,8 +7,10 @@ import {
   DollarOutlined,
   CheckOutlined,
   CloseOutlined,
+  CameraOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
+import { VlmConfigTab } from './VlmConfigTab';
 
 const { Text } = Typography;
 
@@ -394,6 +396,16 @@ export const ConfigurationPage: React.FC = () => {
         </span>
       ),
       children: <ResourceVisibilityTab />,
+    },
+    {
+      key: 'vlm',
+      label: (
+        <span>
+          <CameraOutlined />
+          Анализ фото
+        </span>
+      ),
+      children: <VlmConfigTab />,
     },
   ];
 

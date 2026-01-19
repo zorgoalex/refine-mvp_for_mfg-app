@@ -123,6 +123,12 @@ export const useAppSettings = (): UseAppSettingsResult => {
 export const SETTING_KEYS = {
   ORDERS_MIN_TOTAL_AMOUNT: 'orders.min_total_amount',
   APP_CURRENCY: 'app.currency',
+  // VLM API settings (legacy - hardcoded)
+  VLM_PROVIDER_PRIORITY: 'vlm.provider_priority',
+  VLM_DEFAULT_PROVIDER: 'vlm.default_provider',
+  VLM_PROVIDER_MODELS: 'vlm.provider_models',
+  // VLM API settings (new - DB-driven)
+  VLM_DEFAULTS: 'vlm.defaults',
 } as const;
 
 // Types for specific settings
@@ -130,3 +136,100 @@ export interface CurrencySettings {
   code: string;
   symbol: string;
 }
+
+// VLM Provider types
+export type VlmProvider = 'zai' | 'bigmodel' | 'openrouter';
+
+export interface VlmProviderConfig {
+  provider: VlmProvider;
+  enabled: boolean;
+  defaultModel: string;
+  models: string[];
+}
+
+export interface VlmPromptKv {
+  namespace: string;
+  name: string;
+  version: number;
+  lang: string;
+  priority: number;
+  isDefault: boolean;
+  isActive: boolean;
+}
+
+export interface VlmSettings {
+  providerPriority: VlmProvider[];
+  defaultProvider: VlmProvider;
+  providerConfigs: Record<VlmProvider, VlmProviderConfig>;
+  promptKv: VlmPromptKv;
+}
+
+// VLM Defaults type (new DB-driven settings)
+export type VlmPromptMode = 'api_default' | 'prompt_kv' | 'prompt_id';
+
+export interface VlmDefaultSettings {
+  // IDs for UI selection
+  providerId: number | null;
+  modelId: number | null;
+  promptKvId: number | null;      // for prompt_kv mode (vlm_prompts.prompt_id)
+
+  // Resolved values for API calls
+  providerName: string | null;    // e.g., 'zai', 'bigmodel'
+  modelName: string | null;       // e.g., 'glm-4.6v'
+
+  // Prompt configuration
+  promptMode: VlmPromptMode;
+  promptId: string | null;        // for prompt_id mode (Deno KV ID)
+  promptKv: {                     // for prompt_kv mode (resolved from vlm_prompts)
+    namespace: string;
+    name: string;
+    version: number;
+    lang: string;
+  } | null;
+}
+
+export const DEFAULT_VLM_DEFAULTS: VlmDefaultSettings = {
+  providerId: null,
+  modelId: null,
+  promptKvId: null,
+  providerName: null,
+  modelName: null,
+  promptMode: 'api_default',
+  promptId: null,
+  promptKv: null,
+};
+
+// Default VLM settings (legacy)
+export const DEFAULT_VLM_SETTINGS: VlmSettings = {
+  providerPriority: ['zai', 'bigmodel', 'openrouter'],
+  defaultProvider: 'zai',
+  providerConfigs: {
+    zai: {
+      provider: 'zai',
+      enabled: true,
+      defaultModel: 'glm-4.6v',
+      models: ['glm-4.6v', 'glm-4.6v-flash'],
+    },
+    bigmodel: {
+      provider: 'bigmodel',
+      enabled: true,
+      defaultModel: 'glm-4.6v-flash',
+      models: ['glm-4.6v-flash', 'glm-4.6v'],
+    },
+    openrouter: {
+      provider: 'openrouter',
+      enabled: true,
+      defaultModel: 'openai/gpt-4.1-mini',
+      models: ['openai/gpt-4.1-mini', 'google/gemini-2.0-flash-exp:free', 'google/gemini-flash-1.5'],
+    },
+  },
+  promptKv: {
+    namespace: 'order_details',
+    name: 'parse_order_details_json',
+    version: 1,
+    lang: 'en',
+    priority: 1,
+    isDefault: true,
+    isActive: true,
+  },
+};
