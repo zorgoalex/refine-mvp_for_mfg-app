@@ -41,15 +41,14 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-.vercel
 
 # ai
 ai_docs/
 .claude/
 .gemini/
 .factory/
+CLAUDE.md
 
-.vercel
 
 # Playwright
 node_modules/
