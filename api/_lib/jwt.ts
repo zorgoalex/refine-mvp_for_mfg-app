@@ -16,7 +16,7 @@ interface JWTPayload {
 
 /**
  * Генерирует Access Token (JWT) для пользователя
- * TTL: 8 часов
+ * TTL: 10 часов
  */
 export function generateAccessToken(
   userId: string,
@@ -36,7 +36,7 @@ export function generateAccessToken(
   };
 
   return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: '8h', // 8 часов (рабочий день)
+    expiresIn: '10h', // 10 часов (рабочий день)
     algorithm: 'HS256',
   });
 }
