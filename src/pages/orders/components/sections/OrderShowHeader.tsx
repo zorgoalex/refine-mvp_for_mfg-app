@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
+import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../../components/ProductionStagesDisplay';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -131,6 +132,57 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
       .join(', ');
   }, [materialsData]);
 
+  // Load production status events for this order (all recorded statuses)
+  const { data: productionEventsData } = useList({
+    resource: 'production_status_events',
+    filters: record?.order_id
+      ? [{ field: 'order_id', operator: 'eq', value: record.order_id }]
+      : [],
+    pagination: { pageSize: 100 },
+    queryOptions: {
+      enabled: !!record?.order_id,
+    },
+  });
+
+  // Load all production statuses for mapping
+  const { data: allProductionStatusesData } = useList({
+    resource: 'production_statuses',
+    pagination: { pageSize: 100 },
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
+  });
+
+  // Create map for production status ID to code
+  const productionStatusIdToCode = useMemo(() => {
+    const map = new Map<number, string>();
+    (allProductionStatusesData?.data || []).forEach((status: any) => {
+      map.set(status.production_status_id, status.production_status_code);
+    });
+    return map;
+  }, [allProductionStatusesData]);
+
+  // Get passed production stage codes from events or fallback to current status
+  const passedProductionCodes = useMemo(() => {
+    // First try to get from events
+    const events = productionEventsData?.data || [];
+    if (events.length > 0) {
+      const codes: string[] = [];
+      events.forEach((event: any) => {
+        const code = productionStatusIdToCode.get(event.production_status_id);
+        if (code) codes.push(code);
+      });
+      return codes;
+    }
+
+    // Fallback: use current status name to infer passed stages (legacy)
+    const statusName = record?.production_status_name;
+    if (statusName) {
+      return getPassedCodesFromStatusName(statusName);
+    }
+
+    return [];
+  }, [productionEventsData, record?.production_status_name, productionStatusIdToCode]);
+
   // Row separator line
   const RowSeparator = () => (
     <div style={{ height: 1, background: '#E5E7EB', margin: 0 }} />
@@ -245,7 +297,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
 
       <RowSeparator />
 
-      {/* Row 2: Dates | Notes | Total amount */}
+      {/* Row 2: Dates | Production Stages | Notes | Total amount */}
       <div
         style={{
           display: 'flex',
@@ -255,13 +307,25 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
           gap: 16,
         }}
       >
-        {/* Column 1: Dates */}
-        <div style={{ flex: 1 }}>
+        {/* Column 1: Dates + Production Stages */}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12 }}>
           <Text style={{ fontSize: 13, color: '#111827' }}>
             {record?.order_date ? dayjs(record.order_date).format('DD.MM.YYYY') : '—'}
             {' → '}
             {record?.planned_completion_date ? dayjs(record.planned_completion_date).format('DD.MM.YYYY') : '—'}
           </Text>
+          {/* Production stages display */}
+          {passedProductionCodes.length > 0 && (
+            <>
+              <span style={{ color: '#E5E7EB' }}>|</span>
+              <ProductionStagesDisplay
+                passedCodes={passedProductionCodes}
+                fontSize={13}
+                passedColor="#52c41a"
+                showTooltip={true}
+              />
+            </>
+          )}
         </div>
 
         {/* Column 2: Notes (with ellipsis) */}

@@ -4,7 +4,7 @@
 // Row 3: Doweling Orders Table (Name, Engineer)
 
 import React, { useState } from 'react';
-import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm } from 'antd';
+import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm, Switch, Tooltip } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -55,6 +55,24 @@ export const OrderBasicInfo: React.FC = () => {
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
   });
+
+  // Load production statuses
+  const { selectProps: productionStatusProps } = useSelect({
+    resource: 'production_statuses',
+    optionLabel: 'production_status_name',
+    optionValue: 'production_status_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
+  });
+
+  // Handler for production status manual change - disables auto-update
+  const handleProductionStatusChange = (value: number) => {
+    updateHeaderField('production_status_id', value);
+    // При ручном изменении статуса отключаем автообновление
+    if (header.production_status_from_details_enabled) {
+      updateHeaderField('production_status_from_details_enabled', false);
+    }
+  };
 
   // Load existing doweling orders for selection
   const { selectProps: dowelingSelectProps, queryResult: dowelingQueryResult } = useSelect({
@@ -169,9 +187,25 @@ export const OrderBasicInfo: React.FC = () => {
   return (
     <>
       <Form layout="vertical">
-        {/* Row 1: Клиент, Название заказа, Дата заказа */}
+        {/* Row 1: Автообновление, Клиент, Название заказа, Дата заказа */}
         <Row gutter={16}>
-          <Col span={8}>
+          <Col span={4}>
+            <Form.Item
+              label={
+                <Tooltip title="При включении статус производства заказа рассчитывается автоматически из статусов деталей">
+                  Автообновление
+                </Tooltip>
+              }
+            >
+              <Switch
+                checked={header.production_status_from_details_enabled ?? true}
+                onChange={(checked) => updateHeaderField('production_status_from_details_enabled', checked)}
+                checkedChildren="Вкл"
+                unCheckedChildren="Выкл"
+              />
+            </Form.Item>
+          </Col>
+          <Col span={7}>
             <Form.Item
               label="Клиент"
               required
@@ -205,7 +239,7 @@ export const OrderBasicInfo: React.FC = () => {
             </Form.Item>
           </Col>
 
-          <Col span={8}>
+          <Col span={6}>
             <Form.Item
               label="Название заказа"
               required
@@ -221,7 +255,7 @@ export const OrderBasicInfo: React.FC = () => {
             </Form.Item>
           </Col>
 
-          <Col span={8}>
+          <Col span={7}>
             <Form.Item
               label="Дата заказа"
               required
@@ -240,9 +274,9 @@ export const OrderBasicInfo: React.FC = () => {
           </Col>
         </Row>
 
-        {/* Row 2: Статус заказа, Статус оплаты, Менеджер, Приоритет */}
+        {/* Row 2: Статус заказа, Статус оплаты, Статус производства, Менеджер, Приоритет */}
         <Row gutter={16}>
-          <Col span={6}>
+          <Col span={5}>
             <Form.Item
               label="Статус заказа"
               required
@@ -258,7 +292,7 @@ export const OrderBasicInfo: React.FC = () => {
             </Form.Item>
           </Col>
 
-          <Col span={6}>
+          <Col span={5}>
             <Form.Item
               label="Статус оплаты"
               required
@@ -274,7 +308,26 @@ export const OrderBasicInfo: React.FC = () => {
             </Form.Item>
           </Col>
 
-          <Col span={6}>
+          <Col span={5}>
+            <Form.Item
+              label={
+                <Tooltip title={header.production_status_from_details_enabled ? 'Рассчитывается автоматически из деталей' : 'Ручной выбор статуса'}>
+                  Статус производства
+                </Tooltip>
+              }
+            >
+              <Select
+                {...productionStatusProps}
+                value={header.production_status_id}
+                onChange={handleProductionStatusChange}
+                placeholder="Выберите статус"
+                disabled={header.production_status_from_details_enabled ?? true}
+                allowClear
+              />
+            </Form.Item>
+          </Col>
+
+          <Col span={5}>
             <Form.Item label="Менеджер">
               <Select
                 {...employeeSelectProps}
@@ -290,7 +343,7 @@ export const OrderBasicInfo: React.FC = () => {
             </Form.Item>
           </Col>
 
-          <Col span={6}>
+          <Col span={4}>
             <Form.Item
               label="Приоритет"
               tooltip="1 — наивысший приоритет, большее число — ниже"

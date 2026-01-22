@@ -33,6 +33,7 @@ import { formatNumber } from "../../utils/numberFormat";
 import { OrderCreateModal } from "./components/OrderCreateModal";
 import { authStorage } from "../../utils/auth";
 import { getMaterialTextColor } from "../calendar/utils/statusColors";
+import { ProductionStagesDisplay, getPassedCodesFromStatusName } from "../../components/ProductionStagesDisplay";
 import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -481,6 +482,29 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     },
   });
 
+  // Загружаем события производственных статусов для заказов на текущей странице
+  const { data: productionEventsData } = useList({
+    resource: "production_status_events",
+    filters: [
+      {
+        field: "order_id",
+        operator: "in",
+        value: orderIds,
+      },
+    ],
+    pagination: { pageSize: 10000 },
+    queryOptions: {
+      enabled: orderIds.length > 0,
+    },
+  });
+
+  // Загружаем справочник production_statuses для маппинга ID -> code
+  const { data: productionStatusesData } = useList({
+    resource: "production_statuses",
+    pagination: { pageSize: 100 },
+    filters: [{ field: "is_active", operator: "eq", value: true }],
+  });
+
   // Загружаем сотрудников для lookup конструктора
   const { data: employeesData } = useList({
     resource: "employees",
@@ -507,6 +531,32 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     });
     return map;
   }, [dowelingLinksData]);
+
+  // Map production_status_id -> production_status_code
+  const productionStatusIdToCode = useMemo(() => {
+    const map = new Map<number, string>();
+    (productionStatusesData?.data || []).forEach((status: any) => {
+      map.set(status.production_status_id, status.production_status_code);
+    });
+    return map;
+  }, [productionStatusesData]);
+
+  // Группируем события производственных статусов по order_id и получаем коды
+  const passedCodesByOrderId = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    (productionEventsData?.data || []).forEach((event: any) => {
+      if (event.order_id) {
+        if (!map[event.order_id]) {
+          map[event.order_id] = [];
+        }
+        const code = productionStatusIdToCode.get(event.production_status_id);
+        if (code && !map[event.order_id].includes(code)) {
+          map[event.order_id].push(code);
+        }
+      }
+    });
+    return map;
+  }, [productionEventsData, productionStatusIdToCode]);
 
   // Функция для получения последней (свежей) присадки для заказа
   const getLatestDoweling = (orderId: number) => {
@@ -941,10 +991,21 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           />
           <Table.Column
             dataIndex="production_status_name"
-            title="Статус произ-ва"
+            title="Этапы"
             width={90}
-            className="orders-col status production-status orders-col--wrap"
-            render={(value) => renderStatus(value)}
+            className="orders-col status production-status"
+            render={(value, record: any) => {
+              // Сначала пробуем получить из events, если нет - fallback на статус
+              const codes = passedCodesByOrderId[record.order_id] || getPassedCodesFromStatusName(value || '');
+              return (
+                <ProductionStagesDisplay
+                  passedCodes={codes}
+                  fontSize={9}
+                  showTooltip={true}
+                  maxWidth={85}
+                />
+              );
+            }}
           />
           <Table.Column
             dataIndex="priority"

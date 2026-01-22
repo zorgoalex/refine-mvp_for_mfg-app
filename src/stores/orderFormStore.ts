@@ -121,6 +121,7 @@ const generateTempId = (): number => {
   const initialState = {
     header: {
       priority: 100,
+      production_status_from_details_enabled: true, // По умолчанию автообновление включено
     },
     details: [],
     payments: [],
