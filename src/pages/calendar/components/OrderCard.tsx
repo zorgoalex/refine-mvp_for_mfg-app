@@ -13,6 +13,7 @@ import {
   getMaterialsForCard,
 } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
+import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../components/ProductionStagesDisplay';
 
 /**
  * Компонент карточки заказа (стандартный вид)
@@ -63,16 +64,8 @@ const OrderCard: React.FC<OrderCardProps> = ({
   // Получаем материалы из order_details с сокращенными именами (исключая МДФ 16мм)
   const materials = getMaterialsForCard(order.order_details, true);
 
-  // Статусы производства: П (Закуп пленки), Р (Распилен), З (Закатан), У (Упакован)
-  // production_status_name берётся из orders_view (уровень заказа) или агрегируется из order_details
-  const productionStatusName = order.production_status_name?.toLowerCase() || '';
-
-  const productionStages = [
-    { key: 'П', label: 'Закуп пленки', match: 'закуп' },
-    { key: 'Р', label: 'Распилен', match: 'распил' },
-    { key: 'З', label: 'Закатан', match: 'закат' },
-    { key: 'У', label: 'Упакован', match: 'упаков' },
-  ].filter(stage => productionStatusName.includes(stage.match));
+  // Пройденные этапы производства на основе текущего статуса
+  const passedProductionCodes = getPassedCodesFromStatusName(order.production_status_name || '');
 
   // Цвет номера заказа: коричневый для "К", синий для остальных
   const orderNumberColor = order.order_name?.startsWith('К') ? '#8B4513' : '#1976d2';
@@ -198,25 +191,17 @@ const OrderCard: React.FC<OrderCardProps> = ({
       {/* Горизонтальная линия */}
       <div className="order-card__divider" />
 
-      {/* Индикаторы производства П Р З У — плашка всегда, буквы только при наличии статуса */}
+      {/* Индикаторы производства — плашка с пройденными этапами */}
       <div
         className="order-card__production-stages"
         style={{ background: allProductionReady ? '#ffd9bf' : 'transparent' }}
       >
-        {productionStages.map((stage) => (
-          <Tooltip key={stage.key} title={stage.label}>
-            <span
-              className="production-stage"
-              style={{
-                color: '#fa8c16',
-                fontWeight: 500,
-                fontSize: '11px',
-              }}
-            >
-              {stage.key}
-            </span>
-          </Tooltip>
-        ))}
+        <ProductionStagesDisplay
+          passedCodes={passedProductionCodes}
+          fontSize={11}
+          showTooltip={true}
+          passedColor="#fa8c16"
+        />
       </div>
     </div>
   );

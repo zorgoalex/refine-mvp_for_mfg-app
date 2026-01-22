@@ -1,7 +1,8 @@
 // Order Header Summary (Read-only)
 // Compact minimalist design - 3 rows with minimal padding
+// Right-click to open context menu for status changes
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Tag, Space, Typography } from 'antd';
 import { StarOutlined } from '@ant-design/icons';
 import { useOne, useList } from '@refinedev/core';
@@ -9,12 +10,35 @@ import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
+import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../../components/ProductionStagesDisplay';
+import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
 
 export const OrderHeaderSummary: React.FC = () => {
   const { header, details, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+  }>({ visible: false, x: 0, y: 0 });
+
+  // Handle right-click on header
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+    });
+  };
+
+  const closeContextMenu = () => {
+    setContextMenu({ visible: false, x: 0, y: 0 });
+  };
 
   // FIX: Calculate totals directly from details/payments for proper reactivity
   const totals = useMemo(() => ({
@@ -107,6 +131,74 @@ export const OrderHeaderSummary: React.FC = () => {
       enabled: !!header.payment_status_id,
     },
   });
+
+  // Load production status
+  const { data: productionStatusData } = useOne({
+    resource: 'production_statuses',
+    id: header.production_status_id as number,
+    queryOptions: {
+      enabled: !!header.production_status_id,
+    },
+  });
+
+  // Load production status events for this order
+  const { data: productionEventsData } = useList({
+    resource: 'production_status_events',
+    filters: header.order_id
+      ? [{ field: 'order_id', operator: 'eq', value: header.order_id }]
+      : [],
+    pagination: { pageSize: 100 },
+    queryOptions: {
+      enabled: !!header.order_id,
+    },
+  });
+
+  // Load all production statuses for mapping
+  const { data: allProductionStatusesData } = useList({
+    resource: 'production_statuses',
+    pagination: { pageSize: 100 },
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
+  });
+
+  // Create maps for production status lookup
+  const productionStatusIdToCode = useMemo(() => {
+    const map = new Map<number, string>();
+    (allProductionStatusesData?.data || []).forEach((status: any) => {
+      map.set(status.production_status_id, status.production_status_code);
+    });
+    return map;
+  }, [allProductionStatusesData]);
+
+  const productionStatusIdToSortOrder = useMemo(() => {
+    const map = new Map<number, number>();
+    (allProductionStatusesData?.data || []).forEach((status: any) => {
+      map.set(status.production_status_id, status.sort_order);
+    });
+    return map;
+  }, [allProductionStatusesData]);
+
+  // Get passed production stage codes from events or fallback to current status
+  const passedProductionCodes = useMemo(() => {
+    // First try to get from events
+    const events = productionEventsData?.data || [];
+    if (events.length > 0) {
+      const codes: string[] = [];
+      events.forEach((event: any) => {
+        const code = productionStatusIdToCode.get(event.production_status_id);
+        if (code) codes.push(code);
+      });
+      return codes;
+    }
+
+    // Fallback: use current status name to infer passed stages (legacy)
+    const statusName = productionStatusData?.data?.production_status_name;
+    if (statusName) {
+      return getPassedCodesFromStatusName(statusName);
+    }
+
+    return [];
+  }, [productionEventsData, productionStatusData, productionStatusIdToCode]);
 
   // Load materials list
   const { data: materialsData } = useList({
@@ -201,6 +293,7 @@ export const OrderHeaderSummary: React.FC = () => {
   );
 
   return (
+    <>
     <div
       style={{
         marginTop: -12,
@@ -209,7 +302,10 @@ export const OrderHeaderSummary: React.FC = () => {
         borderRadius: 6,
         background: '#FFFFFF',
         overflow: 'hidden',
+        cursor: 'context-menu',
       }}
+      onContextMenu={handleContextMenu}
+      title="ПКМ — изменить статусы"
     >
       {/* Row 1: Order name, priority, status | Client | Discounted amount, discount %, payment status */}
       <div
@@ -308,7 +404,7 @@ export const OrderHeaderSummary: React.FC = () => {
 
       <RowSeparator />
 
-      {/* Row 2: Dates | Notes | Total amount */}
+      {/* Row 2: Dates | Production Stages | Notes | Total amount */}
       <div
         style={{
           display: 'flex',
@@ -318,13 +414,25 @@ export const OrderHeaderSummary: React.FC = () => {
           gap: 16,
         }}
       >
-        {/* Column 1: Dates */}
-        <div style={{ flex: 1 }}>
+        {/* Column 1: Dates + Production Stages */}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12 }}>
           <Text style={{ fontSize: 13, color: '#111827' }}>
             {header.order_date ? dayjs(header.order_date).format('DD.MM.YYYY') : '—'}
             {' → '}
             {header.planned_completion_date ? dayjs(header.planned_completion_date).format('DD.MM.YYYY') : '—'}
           </Text>
+          {/* Production stages display */}
+          {passedProductionCodes.length > 0 && (
+            <>
+              <span style={{ color: '#E5E7EB' }}>|</span>
+              <ProductionStagesDisplay
+                passedCodes={passedProductionCodes}
+                fontSize={13}
+                passedColor="#52c41a"
+                showTooltip={true}
+              />
+            </>
+          )}
         </div>
 
         {/* Column 2: Notes (with ellipsis) */}
@@ -560,5 +668,14 @@ export const OrderHeaderSummary: React.FC = () => {
         </div>
       </div>
     </div>
+
+    {/* Context menu for status changes */}
+    <OrderHeaderContextMenu
+      visible={contextMenu.visible}
+      x={contextMenu.x}
+      y={contextMenu.y}
+      onClose={closeContextMenu}
+    />
+    </>
   );
 };

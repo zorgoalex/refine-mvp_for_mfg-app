@@ -1,4 +1,4 @@
-import { useUpdate, useInvalidate } from '@refinedev/core';
+import { useUpdate, useInvalidate, useDataProvider } from '@refinedev/core';
 import { message } from 'antd';
 import { CalendarOrder } from '../types/calendar';
 
@@ -16,6 +16,7 @@ export interface UseOrderStatusUpdateResult {
 export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
   const invalidate = useInvalidate();
   const { mutate: updateOrder, isLoading } = useUpdate();
+  const dataProvider = useDataProvider();
 
   /**
    * Обновляет статус заказа
@@ -44,15 +45,23 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
       return;
     }
 
+    // Подготовка значений для обновления
+    const updateValues: Record<string, any> = {
+      [dbField]: statusId,
+    };
+
+    // Для статуса производства - отключаем автообновление
+    if (fieldName === 'production_status') {
+      updateValues.production_status_from_details_enabled = false;
+    }
+
     try {
       await new Promise<void>((resolve, reject) => {
         updateOrder(
           {
             resource: 'orders',
             id: order.order_id,
-            values: {
-              [dbField]: statusId,
-            },
+            values: updateValues,
             meta: {
               idColumnName: 'order_id',
             },
@@ -71,6 +80,30 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
               message.success(
                 `${displayName} изменен на "${statusName}" для заказа ${order.order_name}`
               );
+
+              // Записываем событие статуса производства
+              if (fieldName === 'production_status') {
+                try {
+                  await dataProvider().create({
+                    resource: 'production_status_events',
+                    variables: {
+                      order_id: order.order_id,
+                      detail_id: null,
+                      production_status_id: statusId,
+                      note: null,
+                      payload: {},
+                    },
+                  });
+                  console.log(
+                    `[useOrderStatusUpdate] Recorded production event for order ${order.order_id}, status ${statusId}`
+                  );
+                } catch (eventError: any) {
+                  // Игнорируем ошибки дубликатов (unique constraint)
+                  if (!eventError?.message?.includes('unique') && !eventError?.message?.includes('duplicate')) {
+                    console.warn('[useOrderStatusUpdate] Failed to record event:', eventError);
+                  }
+                }
+              }
 
               // Инвалидируем кэш для перезагрузки данных
               await invalidate({

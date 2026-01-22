@@ -33,6 +33,7 @@ import { formatNumber } from "../../utils/numberFormat";
 import { OrderCreateModal } from "./components/OrderCreateModal";
 import { authStorage } from "../../utils/auth";
 import { getMaterialTextColor } from "../calendar/utils/statusColors";
+import { ProductionStagesDisplay, getPassedCodesFromStatusName } from "../../components/ProductionStagesDisplay";
 import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -941,10 +942,16 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           />
           <Table.Column
             dataIndex="production_status_name"
-            title="Статус произ-ва"
+            title="Этапы"
             width={90}
-            className="orders-col status production-status orders-col--wrap"
-            render={(value) => renderStatus(value)}
+            className="orders-col status production-status"
+            render={(value) => (
+              <ProductionStagesDisplay
+                passedCodes={getPassedCodesFromStatusName(value || '')}
+                fontSize={11}
+                showTooltip={true}
+              />
+            )}
           />
           <Table.Column
             dataIndex="priority"

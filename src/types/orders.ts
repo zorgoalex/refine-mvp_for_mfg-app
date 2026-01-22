@@ -20,6 +20,8 @@ export interface Order {
   // Statuses
   order_status_id: number;
   payment_status_id: number;
+  production_status_id?: number | null;
+  production_status_from_details_enabled?: boolean;
 
   // Financial fields
   total_amount?: number | null;
@@ -299,3 +301,63 @@ export interface OrderValidationError {
   section?: 'header' | 'details' | 'payments' | 'workshops' | 'requirements';
   index?: number; // For array items
 }
+
+// ============================================================================
+// PRODUCTION STATUS
+// ============================================================================
+
+export interface ProductionStatus {
+  production_status_id: number;
+  production_status_name: string;
+  production_status_code: string;
+  sort_order: number;
+  color?: string | null;
+  description?: string | null;
+  is_active: boolean;
+}
+
+// ============================================================================
+// PRODUCTION STATUS EVENTS (Журнал прохождения этапов производства)
+// ============================================================================
+
+export interface ProductionStatusEvent {
+  event_id: number;
+  order_id?: number | null;
+  detail_id?: number | null;
+  production_status_id: number;
+  event_at: Date | string;
+  event_by?: number | null;
+  note?: string | null;
+  payload?: Record<string, unknown>;
+}
+
+// ============================================================================
+// PRODUCTION STATUS CODE TO LETTER MAPPING
+// ============================================================================
+
+export const PRODUCTION_STATUS_CODE_LETTERS: Record<string, string> = {
+  new: 'Н',
+  drawn: 'О',
+  film_purchase: 'П',
+  cut: 'Р',
+  drilled: 'С',
+  sanded: 'Ш',
+  stocked: 'К',
+  laminated: 'З',
+  packed: 'У',
+  issued: 'В',
+};
+
+// Порядок отображения букв (по sort_order)
+export const PRODUCTION_STATUS_DISPLAY_ORDER = [
+  'new',
+  'drawn',
+  'film_purchase',
+  'cut',
+  'drilled',
+  'sanded',
+  'stocked',
+  'laminated',
+  'packed',
+  'issued',
+];
