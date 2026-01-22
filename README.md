@@ -26,6 +26,7 @@
   - **Конфигурация и фильтры** (2025-12-04) — admin-панель настроек, расширенные фильтры заказов
   - **Импорт деталей** (2025-12-18) — из Excel, PDF (Базис), фото (VLM API)
   - **VLM интеграция** (2025-12-24) — распознавание деталей с изображений через AI
+  - **Этапы производства** (2026-01-23) — toggle-модель с накоплением событий в `production_status_events`
 
   ## Ключевые фичи
   - **CRUD** для 29 ресурсов + комплексная форма заказов (детали, платежи, статусы)
@@ -33,6 +34,7 @@
   - **Присадки (doweling_orders)**: связь 1→many, выбор и быстрое создание из формы заказа, поля видны в списке/просмотре
   - **JWT аутентификация и управление пользователями**: `/api/login` и `/api/refresh` с ротацией refresh-токенов; страницы users (create/edit/show/list) со сменой пароля; токены в localStorage, роли Hasura
   - **Производственный календарь** (16 дней: 5 назад + 10 вперед): адаптивный layout, Drag & Drop, контекстное меню статусов заказа/оплаты/производства, три вида карточек (стандарт/компакт/краткий), цветовая кодировка материалов
+  - **Этапы производства**: независимые этапы с toggle-логикой (Н/О/П/Р/С/Ш/К/З/У/В), хранение в `production_status_events`, отображение на карточках календаря, в списке заказов и на странице просмотра
   - **Автоэкспорт заказов в Google Drive**: Vercel API proxy → Google Apps Script, JSON payload без фронтовых секретов, автоэкспорт после сохранения
   - **Аудит через Hasura presets**: created_by/edited_by проставляются сервером, без dev-override
   - **Row Highlight и быстрые переходы**: подсветка новых/отредактированных записей, двойной клик открывает show-страницу
@@ -81,6 +83,8 @@
       - `hooks/useOrderMove.ts` — перемещение заказов между днями
       - `utils/dateUtils.ts`, `calendarLayout.ts`, `statusColors.ts`
       - `types/calendar.ts`, `styles/calendar.css`
+  - Компоненты:
+    - `src/components/ProductionStagesDisplay.tsx` — отображение этапов производства буквами (Н/О/П/Р/С/Ш/К/З/У/В)
     - Orders — ключевые секции формы: `OrderForm.tsx`, табы деталей и платежей (`OrderDetailsTab.tsx`,
   `OrderPaymentsTab.tsx`), модалки (`OrderDetailModal.tsx`, `PaymentModal.tsx`), быстрые действия для присадки
   (`DowellingOrderQuickCreate.tsx`)
@@ -111,6 +115,7 @@
     - `src/hooks/useOrderSave.ts` — delta-save для заказа, деталей, платежей
     - `src/hooks/useAppSettings.ts` — CRUD для таблицы `app_settings` (namespaced keys)
     - `src/hooks/useVlmApi.ts`, `useVlmImport.ts` — интеграция с VLM API
+    - `src/hooks/useProductionStatusEvent.ts` — toggle-управление этапами производства (record/remove/toggle)
   - Импорт деталей:
     - `src/pages/orders/components/import/` — модули импорта (Excel, PDF, VLM)
     - `api/vlm/` — Vercel API для VLM (health, upload, analyze)
@@ -185,8 +190,8 @@
   - Проверить CORS и роли Hasura перед prod; типизация базовая; автотесты минимальны (unit для auth, E2E логин).
 
   ## Дальнейшие шаги (Roadmap)
-  - Done: CRUD orders, Печать/экспорт, Payments Tab, Конфигурация, Импорт Excel/PDF/Фото, VLM интеграция (24.12.2025).
-  - Календарь ~60% (осталось: печать плана дня, фильтры/поиск).
+  - Done: CRUD orders, Печать/экспорт, Payments Tab, Конфигурация, Импорт Excel/PDF/Фото, VLM интеграция (24.12.2025), Этапы производства (23.01.2026).
+  - Календарь ~70% (осталось: печать плана дня, фильтры/поиск).
   - План: Workshops/Materials Tabs, Quick Create для справочников, динамическая видимость ресурсов по ролям, виртуализация таблиц, soft-delete/версионирование, E2E.
 
   ## TODO
