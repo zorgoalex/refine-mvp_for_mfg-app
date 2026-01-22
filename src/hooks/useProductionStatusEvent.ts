@@ -8,14 +8,22 @@ import { ProductionStatusEvent } from '../types/orders';
 interface UseProductionStatusEventResult {
   /** Record a new production status event for an order */
   recordOrderEvent: (orderId: number, productionStatusId: number, note?: string) => Promise<void>;
+  /** Remove a production status event for an order */
+  removeOrderEvent: (orderId: number, productionStatusId: number) => Promise<void>;
+  /** Toggle a production status event for an order (add if not exists, remove if exists) */
+  toggleOrderEvent: (orderId: number, productionStatusId: number) => Promise<boolean>;
   /** Record a new production status event for a detail */
   recordDetailEvent: (detailId: number, productionStatusId: number, note?: string) => Promise<void>;
   /** Get all events for an order */
   getOrderEvents: (orderId: number) => ProductionStatusEvent[];
   /** Check if a status has already been recorded for an order */
   hasOrderStatus: (orderId: number, productionStatusId: number) => boolean;
+  /** All loaded events */
+  events: ProductionStatusEvent[];
   /** Loading state */
   isLoading: boolean;
+  /** Refetch events */
+  refetch: () => void;
 }
 
 interface UseProductionStatusEventProps {
@@ -35,7 +43,7 @@ export const useProductionStatusEvent = (
   const { orderId, enabled = true } = props || {};
 
   // Load existing events for the order (if orderId provided)
-  const { data: eventsData, isLoading } = useList<ProductionStatusEvent>({
+  const { data: eventsData, isLoading, refetch } = useList<ProductionStatusEvent>({
     resource: 'production_status_events',
     filters: orderId
       ? [{ field: 'order_id', operator: 'eq', value: orderId }]
@@ -72,11 +80,21 @@ export const useProductionStatusEvent = (
           `[useProductionStatusEvent] Recorded event for order ${targetOrderId}, status ${productionStatusId}`
         );
       } catch (error: any) {
+        const errorMsg = error?.message || '';
         // If unique constraint violation, it's expected - status already recorded
-        if (error?.message?.includes('unique') || error?.message?.includes('duplicate')) {
+        const isUniqueViolation =
+          errorMsg.includes('unique') ||
+          errorMsg.includes('duplicate') ||
+          errorMsg.includes('уникальн'); // Russian: "уникальным"
+        if (isUniqueViolation) {
           console.log(
             `[useProductionStatusEvent] Status ${productionStatusId} already recorded for order ${targetOrderId}`
           );
+          return;
+        }
+        // If table not found in Hasura - skip silently (table not tracked yet)
+        if (errorMsg.includes('not found in type')) {
+          console.warn('[useProductionStatusEvent] Table not tracked in Hasura, skipping event recording');
           return;
         }
         console.error('[useProductionStatusEvent] Error recording event:', error);
@@ -106,10 +124,20 @@ export const useProductionStatusEvent = (
           `[useProductionStatusEvent] Recorded event for detail ${detailId}, status ${productionStatusId}`
         );
       } catch (error: any) {
-        if (error?.message?.includes('unique') || error?.message?.includes('duplicate')) {
+        const errorMsg = error?.message || '';
+        const isUniqueViolation =
+          errorMsg.includes('unique') ||
+          errorMsg.includes('duplicate') ||
+          errorMsg.includes('уникальн');
+        if (isUniqueViolation) {
           console.log(
             `[useProductionStatusEvent] Status ${productionStatusId} already recorded for detail ${detailId}`
           );
+          return;
+        }
+        // If table not found in Hasura - skip silently
+        if (errorMsg.includes('not found in type')) {
+          console.warn('[useProductionStatusEvent] Table not tracked in Hasura, skipping event recording');
           return;
         }
         console.error('[useProductionStatusEvent] Error recording event:', error);
@@ -117,6 +145,65 @@ export const useProductionStatusEvent = (
       }
     },
     [dataProvider]
+  );
+
+  /**
+   * Remove a production status event for an order
+   */
+  const removeOrderEvent = useCallback(
+    async (targetOrderId: number, productionStatusId: number) => {
+      // Find the event to delete
+      const eventToDelete = events.find(
+        (e) => e.order_id === targetOrderId && e.production_status_id === productionStatusId
+      );
+
+      if (!eventToDelete) {
+        console.log(
+          `[useProductionStatusEvent] No event found for order ${targetOrderId}, status ${productionStatusId}`
+        );
+        return;
+      }
+
+      try {
+        await dataProvider().deleteOne({
+          resource: 'production_status_events',
+          id: eventToDelete.event_id,
+        });
+        console.log(
+          `[useProductionStatusEvent] Removed event for order ${targetOrderId}, status ${productionStatusId}`
+        );
+      } catch (error: any) {
+        const errorMsg = error?.message || '';
+        if (errorMsg.includes('not found in type')) {
+          console.warn('[useProductionStatusEvent] Table not tracked in Hasura');
+          return;
+        }
+        console.error('[useProductionStatusEvent] Error removing event:', error);
+        throw error;
+      }
+    },
+    [dataProvider, events]
+  );
+
+  /**
+   * Toggle a production status event for an order
+   * @returns true if event was added, false if event was removed
+   */
+  const toggleOrderEvent = useCallback(
+    async (targetOrderId: number, productionStatusId: number): Promise<boolean> => {
+      const hasStatus = events.some(
+        (e) => e.order_id === targetOrderId && e.production_status_id === productionStatusId
+      );
+
+      if (hasStatus) {
+        await removeOrderEvent(targetOrderId, productionStatusId);
+        return false; // Event was removed
+      } else {
+        await recordOrderEvent(targetOrderId, productionStatusId);
+        return true; // Event was added
+      }
+    },
+    [events, removeOrderEvent, recordOrderEvent]
   );
 
   /**
@@ -148,10 +235,14 @@ export const useProductionStatusEvent = (
 
   return {
     recordOrderEvent,
+    removeOrderEvent,
+    toggleOrderEvent,
     recordDetailEvent,
     getOrderEvents,
     hasOrderStatus,
+    events,
     isLoading,
+    refetch,
   };
 };
 

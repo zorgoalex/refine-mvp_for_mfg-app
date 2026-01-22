@@ -141,7 +141,7 @@ export const OrderHeaderSummary: React.FC = () => {
     },
   });
 
-  // Load production status events for this order
+  // Load production status events for this order (all recorded statuses)
   const { data: productionEventsData } = useList({
     resource: 'production_status_events',
     filters: header.order_id

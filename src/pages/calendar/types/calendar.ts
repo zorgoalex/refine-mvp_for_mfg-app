@@ -62,6 +62,9 @@ export interface CalendarOrder {
   // Присадка (из order_doweling_links)
   doweling_order_name?: string;
 
+  // Пройденные этапы производства (коды из production_status_events)
+  passedProductionCodes?: string[];
+
   // Дополнительные поля
   cad_files_status?: string;
   is_drawn?: boolean;

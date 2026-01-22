@@ -13,7 +13,7 @@ import {
   getMaterialsForCard,
 } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
-import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../components/ProductionStagesDisplay';
+import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
 
 /**
  * Компонент карточки заказа (стандартный вид)
@@ -64,8 +64,8 @@ const OrderCard: React.FC<OrderCardProps> = ({
   // Получаем материалы из order_details с сокращенными именами (исключая МДФ 16мм)
   const materials = getMaterialsForCard(order.order_details, true);
 
-  // Пройденные этапы производства на основе текущего статуса
-  const passedProductionCodes = getPassedCodesFromStatusName(order.production_status_name || '');
+  // Пройденные этапы производства из production_status_events
+  const passedProductionCodes = order.passedProductionCodes || [];
 
   // Цвет номера заказа: коричневый для "К", синий для остальных
   const orderNumberColor = order.order_name?.startsWith('К') ? '#8B4513' : '#1976d2';

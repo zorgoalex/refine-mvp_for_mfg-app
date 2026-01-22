@@ -43,6 +43,8 @@ interface ProductionStagesDisplayProps {
   notPassedColor?: string;
   /** Show all stages (passed and not passed) */
   showAll?: boolean;
+  /** Max width for wrapping (enables flex-wrap) */
+  maxWidth?: number;
 }
 
 /**
@@ -64,6 +66,7 @@ export const ProductionStagesDisplay: React.FC<ProductionStagesDisplayProps> = (
   passedColor = '#52c41a',
   notPassedColor = '#d9d9d9',
   showAll = false,
+  maxWidth,
 }) => {
   // Determine which codes are passed
   let passedSet: Set<string>;
@@ -108,14 +111,27 @@ export const ProductionStagesDisplay: React.FC<ProductionStagesDisplayProps> = (
     return <span style={{ color: notPassedColor, fontSize, ...style }}>—</span>;
   }
 
+  // Container style with optional maxWidth for wrapping
+  const containerStyle: React.CSSProperties = {
+    fontSize,
+    ...(maxWidth && {
+      display: 'inline-flex',
+      flexWrap: 'wrap',
+      maxWidth,
+      lineHeight: 1.3,
+    }),
+    ...style,
+  };
+
   const content = (
-    <span style={{ fontSize, ...style }}>
+    <span style={containerStyle}>
       {stagesToShow.map((stage, index) => (
         <React.Fragment key={stage.code}>
           <span
             style={{
               color: stage.isPassed ? passedColor : notPassedColor,
               fontWeight: stage.isPassed ? 600 : 400,
+              whiteSpace: 'nowrap',
             }}
           >
             {stage.letter}
@@ -174,38 +190,38 @@ export const getStatusLetterFromName = (statusName: string): string | null => {
 };
 
 /**
- * Convert status name to array of passed codes (legacy cumulative logic)
- * Assumes stages are sequential and current stage means all previous are passed
+ * Convert status name to array of passed codes
+ * Returns only the CURRENT stage code (independent stages logic)
+ *
+ * Independent stages (can be set in any order): О, П, Р, С, Ш, К, З
+ * When production_status_events is enabled, all recorded events will be shown.
+ * Without events, only the current status is displayed.
  */
 export const getPassedCodesFromStatusName = (statusName: string): string[] => {
   const lowerName = statusName.toLowerCase();
 
-  // Find the current stage index based on name
-  const nameToIndex: Record<string, number> = {
-    'новый': 0,
-    'отрисован': 1,
-    'закуп': 2,
-    'распил': 3,
-    'присаж': 4,
-    'шлиф': 5,
-    'закромл': 6,
-    'закат': 7,
-    'упаков': 8,
-    'выдан': 9,
+  // Map status name parts to codes
+  const nameToCode: Record<string, string> = {
+    'новый': 'new',
+    'отрисован': 'drawn',
+    'закуп': 'film_purchase',
+    'распил': 'cut',
+    'присаж': 'drilled',
+    'шлиф': 'sanded',
+    'закромл': 'stocked',
+    'закат': 'laminated',
+    'упаков': 'packed',
+    'выдан': 'issued',
   };
 
-  let currentIndex = -1;
-  for (const [namePart, index] of Object.entries(nameToIndex)) {
+  // Find matching code for current status name
+  for (const [namePart, code] of Object.entries(nameToCode)) {
     if (lowerName.includes(namePart)) {
-      currentIndex = index;
-      break;
+      return [code]; // Return only the current stage
     }
   }
 
-  if (currentIndex < 0) return [];
-
-  // Return all codes up to and including current
-  return PRODUCTION_STATUS_DISPLAY_ORDER.slice(0, currentIndex + 1);
+  return [];
 };
 
 export default ProductionStagesDisplay;

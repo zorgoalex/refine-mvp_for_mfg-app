@@ -98,8 +98,14 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
                     `[useOrderStatusUpdate] Recorded production event for order ${order.order_id}, status ${statusId}`
                   );
                 } catch (eventError: any) {
-                  // Игнорируем ошибки дубликатов (unique constraint)
-                  if (!eventError?.message?.includes('unique') && !eventError?.message?.includes('duplicate')) {
+                  // Игнорируем ошибки дубликатов (unique constraint) и отсутствия таблицы в Hasura
+                  const errorMsg = eventError?.message || '';
+                  const isExpectedError =
+                    errorMsg.includes('unique') ||
+                    errorMsg.includes('duplicate') ||
+                    errorMsg.includes('уникальн') || // Russian
+                    errorMsg.includes('not found in type');
+                  if (!isExpectedError) {
                     console.warn('[useOrderStatusUpdate] Failed to record event:', eventError);
                   }
                 }

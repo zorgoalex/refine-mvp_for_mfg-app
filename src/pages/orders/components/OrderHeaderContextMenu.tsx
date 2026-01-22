@@ -2,10 +2,11 @@
 // Context menu for changing order statuses from the order form header
 // Appears on right-click on the order header summary
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useMemo } from 'react';
 import { Menu, notification } from 'antd';
+import { CheckOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { useList, useUpdate } from '@refinedev/core';
+import { useList, useUpdate, useInvalidate } from '@refinedev/core';
 import { useOrderFormStore } from '../../../stores/orderFormStore';
 import { useProductionStatusEvent } from '../../../hooks/useProductionStatusEvent';
 
@@ -27,8 +28,14 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
   onClose,
 }) => {
   const { header, updateHeaderField } = useOrderFormStore();
-  const { recordOrderEvent } = useProductionStatusEvent({ orderId: header.order_id });
+  const { toggleOrderEvent, events, refetch } = useProductionStatusEvent({ orderId: header.order_id });
   const { mutate: updateOrder } = useUpdate();
+  const invalidate = useInvalidate();
+
+  // Set of production status IDs that are currently set (have events)
+  const activeProductionStatusIds = useMemo(() => {
+    return new Set(events.map((e) => e.production_status_id));
+  }, [events]);
 
   // Load order statuses
   const { data: orderStatusesData } = useList({
@@ -93,7 +100,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
     };
   }, [visible, onClose]);
 
-  // Handle status change
+  // Handle status change for order_status and payment_status (non-toggle)
   const handleStatusChange = useCallback(
     async (fieldName: string, statusId: number, statusName: string) => {
       if (!header.order_id) {
@@ -107,49 +114,24 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
       const fieldMapping: Record<string, string> = {
         order_status: 'order_status_id',
         payment_status: 'payment_status_id',
-        production_status: 'production_status_id',
       };
 
       const dbField = fieldMapping[fieldName];
       if (!dbField) return;
 
       try {
-        // Update in database
         await updateOrder({
           resource: 'orders',
           id: header.order_id,
-          values: {
-            [dbField]: statusId,
-            // For production status - disable auto-update
-            ...(fieldName === 'production_status' && {
-              production_status_from_details_enabled: false,
-            }),
-          },
+          values: { [dbField]: statusId },
         });
 
-        // Update local state
         updateHeaderField(dbField as any, statusId);
-
-        // For production status - also update the enabled flag and record event
-        if (fieldName === 'production_status') {
-          updateHeaderField('production_status_from_details_enabled', false);
-
-          // Record the production status event
-          try {
-            await recordOrderEvent(header.order_id, statusId);
-          } catch (eventError) {
-            console.warn('[OrderHeaderContextMenu] Failed to record event:', eventError);
-          }
-        }
 
         notification.success({
           message: 'Статус обновлён',
           description: `${
-            fieldName === 'order_status'
-              ? 'Статус заказа'
-              : fieldName === 'payment_status'
-              ? 'Статус оплаты'
-              : 'Статус производства'
+            fieldName === 'order_status' ? 'Статус заказа' : 'Статус оплаты'
           }: ${statusName}`,
           duration: 2,
         });
@@ -161,7 +143,62 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         });
       }
     },
-    [header.order_id, updateOrder, updateHeaderField, recordOrderEvent]
+    [header.order_id, updateOrder, updateHeaderField]
+  );
+
+  // Handle production status toggle (add if not exists, remove if exists)
+  const handleProductionStatusToggle = useCallback(
+    async (statusId: number, statusName: string) => {
+      if (!header.order_id) {
+        notification.warning({
+          message: 'Сначала сохраните заказ',
+          description: 'Статусы можно изменять только для сохранённых заказов',
+        });
+        return;
+      }
+
+      try {
+        const wasAdded = await toggleOrderEvent(header.order_id, statusId);
+
+        // Disable auto-update when manually toggling
+        if (header.production_status_from_details_enabled) {
+          await updateOrder({
+            resource: 'orders',
+            id: header.order_id,
+            values: { production_status_from_details_enabled: false },
+          });
+          updateHeaderField('production_status_from_details_enabled', false);
+        }
+
+        // Refetch events to update the context menu
+        refetch();
+
+        // Invalidate to refresh all displays
+        await Promise.all([
+          invalidate({
+            resource: 'production_status_events',
+            invalidates: ['list'],
+          }),
+          invalidate({
+            resource: 'orders_view',
+            invalidates: ['list'],
+          }),
+        ]);
+
+        notification.success({
+          message: wasAdded ? 'Этап установлен' : 'Этап снят',
+          description: statusName,
+          duration: 2,
+        });
+      } catch (error) {
+        console.error('[OrderHeaderContextMenu] Error toggling production status:', error);
+        notification.error({
+          message: 'Ошибка изменения этапа',
+          description: 'Не удалось изменить этап производства',
+        });
+      }
+    },
+    [header.order_id, header.production_status_from_details_enabled, toggleOrderEvent, updateOrder, updateHeaderField, refetch, invalidate]
   );
 
   if (!visible) return null;
@@ -186,15 +223,20 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
     },
   }));
 
-  // Create menu items for production status
-  const productionStatusItems: MenuProps['items'] = productionStatuses.map((status) => ({
-    key: `production_status_${status.id}`,
-    label: status.name,
-    onClick: () => {
-      handleStatusChange('production_status', status.id, status.name);
-      onClose();
-    },
-  }));
+  // Create menu items for production status (with toggle and checkmark)
+  const productionStatusItems: MenuProps['items'] = productionStatuses.map((status) => {
+    const isActive = activeProductionStatusIds.has(status.id);
+    return {
+      key: `production_status_${status.id}`,
+      label: status.name,
+      icon: isActive ? <CheckOutlined style={{ color: '#52c41a' }} /> : null,
+      style: isActive ? { fontWeight: 600, backgroundColor: '#f6ffed' } : undefined,
+      onClick: () => {
+        handleProductionStatusToggle(status.id, status.name);
+        onClose();
+      },
+    };
+  });
 
   // Main menu with submenus
   const menuItems: MenuProps['items'] = [

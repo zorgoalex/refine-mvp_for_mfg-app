@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Spin, Alert, Button, Space, Segmented, Tooltip } from 'antd';
+import { Spin, Alert, Button, Space, Segmented, Tooltip, message } from 'antd';
 import { LeftOutlined, RightOutlined, CalendarOutlined, ZoomInOutlined, ZoomOutOutlined, UndoOutlined } from '@ant-design/icons';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
+import { useInvalidate } from '@refinedev/core';
 import DayColumn from './DayColumn';
 import OrderContextMenu from './OrderContextMenu';
 import { useCalendarDays } from '../hooks/useCalendarDays';
@@ -10,6 +11,7 @@ import { useCalendarData } from '../hooks/useCalendarData';
 import { useOrderMove } from '../hooks/useOrderMove';
 import { useOrderStatuses } from '../hooks/useOrderStatuses';
 import { useOrderStatusUpdate } from '../hooks/useOrderStatusUpdate';
+import { useProductionStatusEvent } from '../../../hooks/useProductionStatusEvent';
 import { DragItem, CalendarOrder, ViewMode } from '../types/calendar';
 import {
   calculateColumnsPerRow,
@@ -48,7 +50,8 @@ const CalendarBoard: React.FC = () => {
   // Hooks для статусов и их обновления
   const { orderStatuses, paymentStatuses, productionStatuses, isLoading: isLoadingStatuses } = useOrderStatuses();
   const { updateStatus, isUpdating } = useOrderStatusUpdate();
-  
+  const invalidate = useInvalidate();
+
   // State для контекстного меню
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
@@ -61,6 +64,17 @@ const CalendarBoard: React.FC = () => {
     y: 0,
     order: null,
   });
+
+  // Hook для событий производственных статусов выбранного заказа
+  const { events: productionEvents, toggleOrderEvent, refetch: refetchEvents } = useProductionStatusEvent({
+    orderId: contextMenu.order?.order_id,
+    enabled: contextMenu.visible && !!contextMenu.order?.order_id,
+  });
+
+  // Set активных production status IDs для контекстного меню
+  const activeProductionStatusIds = useMemo(() => {
+    return new Set(productionEvents.map((e) => e.production_status_id));
+  }, [productionEvents]);
 
   // Обработчик drop события
   const handleDrop = async (item: DragItem, targetDate: Date, targetDateKey: string) => {
@@ -81,13 +95,45 @@ const CalendarBoard: React.FC = () => {
     });
   };
   
-  // Обработчик изменения статуса через контекстное меню
+  // Обработчик изменения статуса через контекстное меню (для order_status и payment_status)
   const handleStatusChange = async (fieldName: string, statusId: number, statusName: string) => {
     if (!contextMenu.order) return;
-    
+
     await updateStatus(contextMenu.order, fieldName, statusId, statusName);
   };
-  
+
+  // Обработчик toggle статуса производства (установить/снять)
+  const handleProductionStatusToggle = async (statusId: number, statusName: string) => {
+    if (!contextMenu.order) return;
+
+    try {
+      const wasAdded = await toggleOrderEvent(contextMenu.order.order_id, statusId);
+
+      // Refetch events for context menu
+      refetchEvents();
+
+      // Invalidate and refetch to refresh calendar cards
+      await Promise.all([
+        invalidate({
+          resource: 'production_status_events',
+          invalidates: ['list'],
+        }),
+        invalidate({
+          resource: 'orders_view',
+          invalidates: ['list'],
+        }),
+      ]);
+
+      // Refetch calendar data to update cards
+      refetch();
+
+      message.success(wasAdded ? `Этап установлен: ${statusName}` : `Этап снят: ${statusName}`);
+    } catch (error) {
+      console.error('[CalendarBoard] Error toggling production status:', error);
+      message.error('Ошибка изменения этапа');
+    }
+  };
+
   // Обработчик закрытия контекстного меню
   const handleCloseContextMenu = () => {
     setContextMenu({
@@ -313,6 +359,8 @@ const CalendarBoard: React.FC = () => {
           y={contextMenu.y}
           onClose={handleCloseContextMenu}
           onStatusChange={handleStatusChange}
+          onProductionStatusToggle={handleProductionStatusToggle}
+          activeProductionStatusIds={activeProductionStatusIds}
           statuses={{
             orderStatuses,
             paymentStatuses,

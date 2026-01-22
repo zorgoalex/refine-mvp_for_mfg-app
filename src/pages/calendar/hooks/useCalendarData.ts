@@ -103,6 +103,23 @@ export const useCalendarData = (
     queryOptions: { staleTime: 60000 },
   });
 
+  // Загружаем production_status_events для всех заказов
+  const { data: productionEventsData } = useList({
+    resource: 'production_status_events',
+    filters: [
+      {
+        field: 'order_id',
+        operator: 'in',
+        value: orderIds,
+      },
+    ],
+    pagination: { pageSize: 10000 },
+    queryOptions: {
+      enabled: orderIds.length > 0,
+      staleTime: 30000,
+    },
+  });
+
   // Загружаем связи с присадками для заказов
   const { data: dowelingLinksData } = useList({
     resource: 'order_doweling_links',
@@ -146,6 +163,34 @@ export const useCalendarData = (
     });
     return map;
   }, [productionStatusesData]);
+
+  // Создаём Map для быстрого поиска кода статуса производства по ID
+  const productionStatusIdToCode = useMemo(() => {
+    const map = new Map<number, string>();
+    (productionStatusesData?.data || []).forEach((ps: any) => {
+      if (ps.production_status_code) {
+        map.set(ps.production_status_id, ps.production_status_code);
+      }
+    });
+    return map;
+  }, [productionStatusesData]);
+
+  // Группируем события по order_id и получаем коды пройденных этапов
+  const passedCodesByOrderId = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    (productionEventsData?.data || []).forEach((event: any) => {
+      if (event.order_id) {
+        if (!map[event.order_id]) {
+          map[event.order_id] = [];
+        }
+        const code = productionStatusIdToCode.get(event.production_status_id);
+        if (code && !map[event.order_id].includes(code)) {
+          map[event.order_id].push(code);
+        }
+      }
+    });
+    return map;
+  }, [productionEventsData, productionStatusIdToCode]);
 
   // Группируем присадки по order_id (берём последнюю по order_doweling_link_id)
   const dowelingByOrderId = useMemo(() => {
@@ -224,11 +269,13 @@ export const useCalendarData = (
         doweling_order_name: dowelingByOrderId[order.order_id] || undefined,
         // Приоритет: статус уровня заказа (из orders_view), затем агрегация из деталей
         production_status_name: order.production_status_name || aggregatedProductionStatus,
+        // Пройденные этапы производства из production_status_events
+        passedProductionCodes: passedCodesByOrderId[order.order_id] || [],
       };
     });
 
     return groupOrdersByDate(ordersWithDetails);
-  }, [data?.data, detailsByOrderId, dowelingByOrderId]);
+  }, [data?.data, detailsByOrderId, dowelingByOrderId, passedCodesByOrderId]);
 
   return {
     ordersByDate,

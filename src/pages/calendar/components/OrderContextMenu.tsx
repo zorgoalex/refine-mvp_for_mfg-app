@@ -1,5 +1,6 @@
 import React from 'react';
 import { Menu } from 'antd';
+import { CheckOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { CalendarOrder } from '../types/calendar';
 
@@ -10,6 +11,8 @@ export interface OrderContextMenuProps {
   y: number;
   onClose: () => void;
   onStatusChange: (fieldName: string, statusId: number, statusName: string) => void;
+  onProductionStatusToggle: (statusId: number, statusName: string) => void;
+  activeProductionStatusIds: Set<number>;
   statuses: {
     orderStatuses: Array<{ id: number; name: string }>;
     paymentStatuses: Array<{ id: number; name: string }>;
@@ -28,6 +31,8 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
   y,
   onClose,
   onStatusChange,
+  onProductionStatusToggle,
+  activeProductionStatusIds,
   statuses,
 }) => {
   if (!visible) return null;
@@ -75,15 +80,20 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
     },
   }));
 
-  // Создаем пункты меню для статуса производства
-  const productionStatusItems: MenuProps['items'] = statuses.productionStatuses.map((status) => ({
-    key: `production_status_${status.id}`,
-    label: status.name,
-    onClick: () => {
-      onStatusChange('production_status', status.id, status.name);
-      onClose();
-    },
-  }));
+  // Создаем пункты меню для статуса производства (с toggle и галочкой)
+  const productionStatusItems: MenuProps['items'] = statuses.productionStatuses.map((status) => {
+    const isActive = activeProductionStatusIds.has(status.id);
+    return {
+      key: `production_status_${status.id}`,
+      label: status.name,
+      icon: isActive ? <CheckOutlined style={{ color: '#52c41a' }} /> : null,
+      style: isActive ? { fontWeight: 600, backgroundColor: '#f6ffed' } : undefined,
+      onClick: () => {
+        onProductionStatusToggle(status.id, status.name);
+        onClose();
+      },
+    };
+  });
 
   // Главное меню с подменю
   const menuItems: MenuProps['items'] = [
