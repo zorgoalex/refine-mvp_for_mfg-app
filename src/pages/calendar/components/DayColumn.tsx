@@ -17,6 +17,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
   columnWidth,
   viewMode = ViewMode.STANDARD,
   cardScale = 1.0,
+  productionWorkflowDisplay,
   onDrop,
   onContextMenu,
   onCheckboxChange,
@@ -91,6 +92,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
               onContextMenu={onContextMenu}
               onCheckboxChange={onCheckboxChange}
               cardScale={cardScale}
+              productionWorkflowDisplay={productionWorkflowDisplay}
             />
           ))
         ) : (

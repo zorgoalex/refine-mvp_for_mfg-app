@@ -25,6 +25,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
   order,
   sourceDate,
   cardScale = 1.0,
+  productionWorkflowDisplay,
   onCheckboxChange,
   onContextMenu,
   onDoubleTap,
@@ -198,6 +199,9 @@ const OrderCard: React.FC<OrderCardProps> = ({
       >
         <ProductionStagesDisplay
           passedCodes={passedProductionCodes}
+          displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+          codeToLetter={productionWorkflowDisplay?.codeToLetter}
+          codeToName={productionWorkflowDisplay?.codeToName}
           fontSize={11}
           showTooltip={true}
           passedColor="#fa8c16"

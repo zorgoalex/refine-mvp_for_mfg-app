@@ -29,6 +29,17 @@ interface ProductionStagesDisplayProps {
   statusIdToCode?: Map<number, string>;
   /** Map of status_id to sort_order (required if using currentStatusId for cumulative display) */
   statusIdToSortOrder?: Map<number, number>;
+  /**
+   * Optional workflow-driven order (overrides PRODUCTION_STATUS_DISPLAY_ORDER).
+   * Pass codes in desired display order.
+   */
+  displayOrderCodes?: string[];
+  /** Optional mapping code -> display letter (overrides PRODUCTION_STATUS_CODE_LETTERS) */
+  codeToLetter?: Record<string, string>;
+  /** Optional mapping code -> human name (overrides PRODUCTION_STATUS_NAMES) */
+  codeToName?: Record<string, string>;
+  /** If true, append passed codes not present in displayOrderCodes */
+  showUnknownPassedCodes?: boolean;
   /** Separator between letters (default: '/') */
   separator?: string;
   /** Style for the container */
@@ -59,6 +70,10 @@ export const ProductionStagesDisplay: React.FC<ProductionStagesDisplayProps> = (
   currentStatusId,
   statusIdToCode,
   statusIdToSortOrder,
+  displayOrderCodes,
+  codeToLetter,
+  codeToName,
+  showUnknownPassedCodes = true,
   separator = '/',
   style,
   showTooltip = true,
@@ -95,14 +110,28 @@ export const ProductionStagesDisplay: React.FC<ProductionStagesDisplayProps> = (
     passedSet = new Set<string>();
   }
 
-  // Build display based on PRODUCTION_STATUS_DISPLAY_ORDER
-  const stages = PRODUCTION_STATUS_DISPLAY_ORDER.map((code) => {
-    const letter = PRODUCTION_STATUS_CODE_LETTERS[code];
-    const name = PRODUCTION_STATUS_NAMES[code];
-    const isPassed = passedSet.has(code);
+  const order = displayOrderCodes && displayOrderCodes.length > 0 ? displayOrderCodes : PRODUCTION_STATUS_DISPLAY_ORDER;
 
+  // Build display based on provided order (or fallback order)
+  const stages = order.map((code) => {
+    const rawLetter = (codeToLetter?.[code] || PRODUCTION_STATUS_CODE_LETTERS[code] || '').trim().slice(0, 1);
+    const letter = rawLetter ? rawLetter.toUpperCase() : '?';
+    const name = codeToName?.[code] || PRODUCTION_STATUS_NAMES[code] || code;
+    const isPassed = passedSet.has(code);
     return { code, letter, name, isPassed };
   });
+
+  // Append unknown passed codes (e.g., newly added statuses in DB) so they don't disappear
+  if (showUnknownPassedCodes) {
+    const known = new Set(order);
+    const unknownPassed = [...passedSet].filter((code) => !known.has(code));
+    unknownPassed.forEach((code) => {
+      const rawLetter = (codeToLetter?.[code] || PRODUCTION_STATUS_CODE_LETTERS[code] || '').trim().slice(0, 1);
+      const letter = rawLetter ? rawLetter.toUpperCase() : '?';
+      const name = codeToName?.[code] || PRODUCTION_STATUS_NAMES[code] || code;
+      stages.push({ code, letter, name, isPassed: true });
+    });
+  }
 
   // Filter to only passed stages unless showAll is true
   const stagesToShow = showAll ? stages : stages.filter((s) => s.isPassed);

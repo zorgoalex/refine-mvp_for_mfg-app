@@ -32,6 +32,9 @@ interface UseAppSettingsResult {
   // Save a setting (create or update)
   saveSetting: (key: string, value: any, description?: string) => Promise<void>;
 
+  // Toggle setting active flag
+  setSettingActive: (key: string, isActive: boolean) => Promise<void>;
+
   // Refetch settings
   refetch: () => void;
 }
@@ -40,7 +43,10 @@ export const useAppSettings = (): UseAppSettingsResult => {
   const { data, isLoading, refetch } = useList<AppSetting>({
     resource: 'app_settings',
     pagination: { mode: 'off' },
-    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    // IMPORTANT: explicit is_active filter disables the dataProvider auto-filter.
+    // We load both active and inactive rows to avoid UNIQUE(setting_key) conflicts
+    // when a key exists but was deactivated in DB.
+    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
   });
 
   const { mutateAsync: createSetting } = useCreate<AppSetting>();
@@ -52,6 +58,7 @@ export const useAppSettings = (): UseAppSettingsResult => {
     <T = any>(key: string): T | null => {
       const setting = settings.find((s) => s.setting_key === key);
       if (!setting) return null;
+      if (!setting.is_active) return null;
 
       // value_json is stored as { value: ... } or as object directly
       const json = setting.value_json;
@@ -88,6 +95,7 @@ export const useAppSettings = (): UseAppSettingsResult => {
           values: {
             value_json: valueJson,
             ...(description !== undefined && { description }),
+            ...(existing.is_active === false && { is_active: true }),
           },
         });
       } else {
@@ -109,12 +117,42 @@ export const useAppSettings = (): UseAppSettingsResult => {
     [settings, createSetting, updateSetting, refetch]
   );
 
+  const setSettingActive = useCallback(
+    async (key: string, isActive: boolean): Promise<void> => {
+      const existing = settings.find((s) => s.setting_key === key);
+      if (!existing) {
+        // No record yet — create an empty placeholder only if enabling
+        if (!isActive) return;
+        await createSetting({
+          resource: 'app_settings',
+          values: {
+            setting_key: key,
+            value_json: { value: null },
+            description: null,
+            is_active: true,
+          },
+        });
+        refetch();
+        return;
+      }
+
+      await updateSetting({
+        resource: 'app_settings',
+        id: existing.setting_id,
+        values: { is_active: isActive },
+      });
+      refetch();
+    },
+    [settings, createSetting, updateSetting, refetch]
+  );
+
   return {
     settings,
     isLoading,
     getSetting,
     getSettingRecord,
     saveSetting,
+    setSettingActive,
     refetch,
   };
 };
@@ -129,6 +167,8 @@ export const SETTING_KEYS = {
   VLM_PROVIDER_MODELS: 'vlm.provider_models',
   // VLM API settings (new - DB-driven)
   VLM_DEFAULTS: 'vlm.defaults',
+  // Production workflow (production_status_events)
+  PRODUCTION_WORKFLOW_DEFAULT: 'production.workflow.default',
 } as const;
 
 // Types for specific settings

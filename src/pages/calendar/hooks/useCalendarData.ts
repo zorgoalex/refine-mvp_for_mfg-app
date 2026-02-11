@@ -3,6 +3,9 @@ import { useList } from '@refinedev/core';
 import { CalendarOrder, CalendarDataResult } from '../types/calendar';
 import { groupOrdersByDate } from '../utils/groupOrdersByDate';
 import { formatDateForApi } from '../utils/dateUtils';
+import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
+import { buildProductionStagesDisplayConfig } from '../../../utils/productionWorkflow';
+import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../types/productionWorkflow';
 
 /**
  * Hook для загрузки данных заказов календаря из Hasura GraphQL
@@ -14,6 +17,8 @@ export const useCalendarData = (
   startDate: Date,
   endDate: Date
 ): CalendarDataResult => {
+  const { getSetting } = useAppSettings();
+
   // Форматируем даты для API запроса
   const startDateStr = formatDateForApi(startDate);
   const endDateStr = formatDateForApi(endDate);
@@ -100,6 +105,8 @@ export const useCalendarData = (
   const { data: productionStatusesData } = useList({
     resource: 'production_statuses',
     pagination: { pageSize: 100 },
+    // IMPORTANT: explicit is_active filter disables the dataProvider auto-filter, so we can map inactive statuses too
+    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
     queryOptions: { staleTime: 60000 },
   });
 
@@ -174,6 +181,28 @@ export const useCalendarData = (
     });
     return map;
   }, [productionStatusesData]);
+
+  const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
+    return (productionStatusesData?.data || []).map((ps: any) => ({
+      production_status_id: ps.production_status_id,
+      production_status_code: ps.production_status_code,
+      production_status_name: ps.production_status_name,
+      sort_order: ps.sort_order,
+      color: ps.color,
+      is_active: !!ps.is_active,
+    }));
+  }, [productionStatusesData]);
+
+  const workflow = getSetting<ProductionWorkflowConfig>(SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT);
+
+  const productionWorkflowDisplay = useMemo(() => {
+    if (!statusesForWorkflow || statusesForWorkflow.length === 0) return undefined;
+    return buildProductionStagesDisplayConfig({
+      workflow,
+      statuses: statusesForWorkflow,
+      workflowKey: SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT,
+    }).display;
+  }, [workflow, statusesForWorkflow]);
 
   // Группируем события по order_id и получаем коды пройденных этапов
   const passedCodesByOrderId = useMemo(() => {
@@ -281,6 +310,7 @@ export const useCalendarData = (
     ordersByDate,
     isLoading,
     refetch,
+    productionWorkflowDisplay,
     error: isError ? (error as Error) : undefined,
   };
 };
