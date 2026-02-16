@@ -189,22 +189,6 @@ export const OrderBasicInfo: React.FC = () => {
       <Form layout="vertical">
         {/* Row 1: Автообновление, Клиент, Название заказа, Дата заказа */}
         <Row gutter={16}>
-          <Col span={4}>
-            <Form.Item
-              label={
-                <Tooltip title="При включении статус производства заказа рассчитывается автоматически из статусов деталей">
-                  Автообновление
-                </Tooltip>
-              }
-            >
-              <Switch
-                checked={header.production_status_from_details_enabled ?? true}
-                onChange={(checked) => updateHeaderField('production_status_from_details_enabled', checked)}
-                checkedChildren="Вкл"
-                unCheckedChildren="Выкл"
-              />
-            </Form.Item>
-          </Col>
           <Col span={7}>
             <Form.Item
               label="Клиент"
@@ -272,6 +256,33 @@ export const OrderBasicInfo: React.FC = () => {
               />
             </Form.Item>
           </Col>
+
+          <Col span={4}>
+          <Form.Item>
+            <div
+              style={{
+                border: '1px solid #d9d9d9',
+                borderRadius: 8,
+                padding: '8px 12px',
+                backgroundColor: '#fff',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <Tooltip title="При включении статус производства заказа рассчитывается автоматически из статусов деталей">
+                <span>Автообновление статусов производства</span>
+              </Tooltip>
+              <Switch
+                checked={header.production_status_from_details_enabled ?? true}
+                onChange={(checked) => updateHeaderField('production_status_from_details_enabled', checked)}
+                checkedChildren="Вкл"
+                unCheckedChildren="Выкл"
+              />
+            </div>
+          </Form.Item>
+        </Col>
         </Row>
 
         {/* Row 2: Статус заказа, Статус оплаты, Статус производства, Менеджер, Приоритет */}
