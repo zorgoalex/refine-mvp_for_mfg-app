@@ -34,6 +34,9 @@ import { OrderCreateModal } from "./components/OrderCreateModal";
 import { authStorage } from "../../utils/auth";
 import { getMaterialTextColor } from "../calendar/utils/statusColors";
 import { ProductionStagesDisplay, getPassedCodesFromStatusName } from "../../components/ProductionStagesDisplay";
+import { useAppSettings, SETTING_KEYS } from "../../hooks/useAppSettings";
+import { buildProductionStagesDisplayConfig } from "../../utils/productionWorkflow";
+import type { ProductionStatusRef, ProductionWorkflowConfig } from "../../types/productionWorkflow";
 import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -47,6 +50,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   // Получаем текущего пользователя для фильтра "Мои заказы"
   const currentUser = authStorage.getUser();
+  const { getSetting } = useAppSettings();
 
   const { tableProps, current, pageSize, setCurrent, sorters, setSorters, filters, setFilters } = useTable({
     syncWithLocation: true,
@@ -502,7 +506,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { data: productionStatusesData } = useList({
     resource: "production_statuses",
     pagination: { pageSize: 100 },
-    filters: [{ field: "is_active", operator: "eq", value: true }],
+    // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
+    filters: [{ field: "is_active", operator: "in", value: [true, false] }],
   });
 
   // Загружаем сотрудников для lookup конструктора
@@ -540,6 +545,28 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     });
     return map;
   }, [productionStatusesData]);
+
+  const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
+    return (productionStatusesData?.data || []).map((s: any) => ({
+      production_status_id: s.production_status_id,
+      production_status_code: s.production_status_code,
+      production_status_name: s.production_status_name,
+      sort_order: s.sort_order,
+      color: s.color,
+      is_active: !!s.is_active,
+    }));
+  }, [productionStatusesData]);
+
+  const workflow = getSetting<ProductionWorkflowConfig>(SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT);
+
+  const productionWorkflowDisplay = useMemo(() => {
+    if (!statusesForWorkflow || statusesForWorkflow.length === 0) return undefined;
+    return buildProductionStagesDisplayConfig({
+      workflow,
+      statuses: statusesForWorkflow,
+      workflowKey: SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT,
+    }).display;
+  }, [workflow, statusesForWorkflow]);
 
   // Группируем события производственных статусов по order_id и получаем коды
   const passedCodesByOrderId = useMemo(() => {
@@ -1000,6 +1027,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               return (
                 <ProductionStagesDisplay
                   passedCodes={codes}
+                  displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+                  codeToLetter={productionWorkflowDisplay?.codeToLetter}
+                  codeToName={productionWorkflowDisplay?.codeToName}
                   fontSize={9}
                   showTooltip={true}
                   maxWidth={85}
@@ -1161,4 +1191,3 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     </>
   );
 };
-

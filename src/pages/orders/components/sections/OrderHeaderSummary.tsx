@@ -11,6 +11,9 @@ import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
 import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../../components/ProductionStagesDisplay';
+import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
+import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
 import dayjs from 'dayjs';
 
@@ -18,6 +21,7 @@ const { Text } = Typography;
 
 export const OrderHeaderSummary: React.FC = () => {
   const { header, details, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
+  const { getSetting } = useAppSettings();
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -157,7 +161,8 @@ export const OrderHeaderSummary: React.FC = () => {
   const { data: allProductionStatusesData } = useList({
     resource: 'production_statuses',
     pagination: { pageSize: 100 },
-    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
+    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
   });
 
@@ -177,6 +182,28 @@ export const OrderHeaderSummary: React.FC = () => {
     });
     return map;
   }, [allProductionStatusesData]);
+
+  const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
+    return (allProductionStatusesData?.data || []).map((s: any) => ({
+      production_status_id: s.production_status_id,
+      production_status_code: s.production_status_code,
+      production_status_name: s.production_status_name,
+      sort_order: s.sort_order,
+      color: s.color,
+      is_active: !!s.is_active,
+    }));
+  }, [allProductionStatusesData]);
+
+  const workflow = getSetting<ProductionWorkflowConfig>(SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT);
+
+  const productionWorkflowDisplay = useMemo(() => {
+    if (!statusesForWorkflow || statusesForWorkflow.length === 0) return undefined;
+    return buildProductionStagesDisplayConfig({
+      workflow,
+      statuses: statusesForWorkflow,
+      workflowKey: SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT,
+    }).display;
+  }, [workflow, statusesForWorkflow]);
 
   // Get passed production stage codes from events or fallback to current status
   const passedProductionCodes = useMemo(() => {
@@ -427,6 +454,9 @@ export const OrderHeaderSummary: React.FC = () => {
               <span style={{ color: '#E5E7EB' }}>|</span>
               <ProductionStagesDisplay
                 passedCodes={passedProductionCodes}
+                displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+                codeToLetter={productionWorkflowDisplay?.codeToLetter}
+                codeToName={productionWorkflowDisplay?.codeToName}
                 fontSize={13}
                 passedColor="#52c41a"
                 showTooltip={true}

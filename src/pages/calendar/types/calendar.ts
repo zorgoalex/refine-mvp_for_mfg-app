@@ -77,6 +77,15 @@ export interface CalendarOrder {
 }
 
 /**
+ * Настройки отображения этапов производства (workflow-driven)
+ */
+export interface ProductionWorkflowDisplay {
+  displayOrderCodes: string[];
+  codeToLetter: Record<string, string>;
+  codeToName: Record<string, string>;
+}
+
+/**
  * Данные дня календаря
  */
 export interface DayData {
@@ -149,6 +158,7 @@ export interface DayColumnProps {
   columnWidth: number;
   viewMode?: ViewMode;
   cardScale?: number; // Масштаб карточек (от 0.7 до 1.0)
+  productionWorkflowDisplay?: ProductionWorkflowDisplay;
   onDrop?: (item: DragItem, targetDate: Date, targetDateKey: string) => void;
   onOrderDrop?: (order: CalendarOrder, sourceDate: string, targetDate: string) => void;
   onOrderClick?: (order: CalendarOrder) => void;
@@ -164,6 +174,7 @@ export interface OrderCardProps {
   order: CalendarOrder;
   sourceDate: string;
   cardScale?: number; // Масштаб карточки (от 0.7 до 1.0)
+  productionWorkflowDisplay?: ProductionWorkflowDisplay;
   onContextMenu?: (e: React.MouseEvent, order: CalendarOrder) => void;
   onDoubleTap?: (e: React.TouchEvent, order: CalendarOrder) => void;
   onCheckboxChange?: (order: CalendarOrder, isChecked: boolean) => void;
@@ -182,6 +193,7 @@ export interface CalendarDataResult {
   ordersByDate: OrdersByDate;
   isLoading: boolean;
   refetch: () => void;
+  productionWorkflowDisplay?: ProductionWorkflowDisplay;
   error?: Error;
 }
 

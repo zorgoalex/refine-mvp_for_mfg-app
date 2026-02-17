@@ -39,7 +39,7 @@ const CalendarBoard: React.FC = () => {
     useCalendarDays();
 
   // Загрузка данных заказов
-  const { ordersByDate, isLoading, error, refetch } = useCalendarData(
+  const { ordersByDate, isLoading, error, refetch, productionWorkflowDisplay } = useCalendarData(
     startDate,
     endDate
   );
@@ -342,6 +342,7 @@ const CalendarBoard: React.FC = () => {
                     onCheckboxChange={handleCheckboxChange}
                     viewMode={viewMode}
                     cardScale={cardScale}
+                    productionWorkflowDisplay={productionWorkflowDisplay}
                   />
                 );
               })}

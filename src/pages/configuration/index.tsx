@@ -8,9 +8,11 @@ import {
   CheckOutlined,
   CloseOutlined,
   CameraOutlined,
+  BuildOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { VlmConfigTab } from './VlmConfigTab';
+import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
 
 const { Text } = Typography;
 
@@ -376,6 +378,16 @@ export const ConfigurationPage: React.FC = () => {
         </span>
       ),
       children: <OrdersConfigTab />,
+    },
+    {
+      key: 'production',
+      label: (
+        <span>
+          <BuildOutlined />
+          Этапы производства
+        </span>
+      ),
+      children: <ProductionWorkflowTab />,
     },
     {
       key: 'finance',

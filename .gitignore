@@ -48,6 +48,7 @@ ai_docs/
 .gemini/
 .factory/
 CLAUDE.md
+AGENTS.md
 
 
 # Playwright
