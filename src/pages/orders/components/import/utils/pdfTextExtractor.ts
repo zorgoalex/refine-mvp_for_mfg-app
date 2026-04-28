@@ -112,6 +112,7 @@ export function extractMetadata(allLines: PdfTextLine[]): PdfOrderMetadata {
     orderName: '',
     material: '',
   };
+  const totalCounts: number[] = [];
 
   for (const line of allLines) {
     const text = line.text;
@@ -134,7 +135,7 @@ export function extractMetadata(allLines: PdfTextLine[]): PdfOrderMetadata {
     // Extract total count: "Общ. кол. 44"
     const totalMatch = text.match(TOTAL_COUNT_PATTERN);
     if (totalMatch) {
-      metadata.totalCount = parseInt(totalMatch[1], 10);
+      totalCounts.push(parseInt(totalMatch[1], 10));
     }
 
     // Extract company
@@ -154,6 +155,10 @@ export function extractMetadata(allLines: PdfTextLine[]): PdfOrderMetadata {
     }
   }
 
+  if (totalCounts.length > 0) {
+    metadata.totalCount = totalCounts.reduce((sum, count) => sum + count, 0);
+  }
+
   return metadata;
 }
 
@@ -163,6 +168,253 @@ export function extractMetadata(allLines: PdfTextLine[]): PdfOrderMetadata {
 
 interface DetailBlock {
   lines: PdfTextLine[];
+}
+
+type PdfTableColumnKey =
+  | 'position'
+  | 'designation'
+  | 'name'
+  | 'quantity'
+  | 'length'
+  | 'width'
+  | 'milling'
+  | 'film'
+  | 'note';
+
+type PdfTableRowCells = Record<PdfTableColumnKey, string>;
+
+type PdfTableColumn = {
+  key: PdfTableColumnKey;
+  minX: number;
+  maxX: number;
+};
+
+type RowAnchor = {
+  item: PdfTextItem;
+  value: number;
+};
+
+// Basis specification PDFs use a stable landscape table layout. The values are
+// deliberately ranges, not exact coordinates, so minor font/renderer shifts are tolerated.
+const BASIS_TABLE_COLUMNS: PdfTableColumn[] = [
+  { key: 'position', minX: 42, maxX: 72 },
+  { key: 'designation', minX: 72, maxX: 150 },
+  { key: 'name', minX: 150, maxX: 240 },
+  { key: 'quantity', minX: 240, maxX: 285 },
+  { key: 'length', minX: 285, maxX: 322 },
+  { key: 'width', minX: 322, maxX: 385 },
+  { key: 'milling', minX: 385, maxX: 515 },
+  { key: 'film', minX: 515, maxX: 710 },
+  { key: 'note', minX: 710, maxX: Number.POSITIVE_INFINITY },
+];
+
+const TABLE_CELL_LINE_Y_TOLERANCE = 3;
+const TABLE_FOOTER_MIN_Y = 65;
+
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function isTableHeaderLine(line: PdfTextLine): boolean {
+  return (
+    line.text.includes('№') &&
+    line.text.includes('Обозн.') &&
+    line.text.includes('Наименование') &&
+    line.text.includes('Кол-во') &&
+    line.text.includes('Размер')
+  );
+}
+
+function midpoint(a: number, b: number): number {
+  return (a + b) / 2;
+}
+
+function findHeaderX(line: PdfTextLine, pattern: RegExp): number | null {
+  const item = line.items.find(headerItem => pattern.test(headerItem.text));
+  return item ? item.x : null;
+}
+
+function getTableColumns(headerLine: PdfTextLine): PdfTableColumn[] {
+  const positionX = findHeaderX(headerLine, /^№$/);
+  const designationX = findHeaderX(headerLine, /^Обозн\./);
+  const nameX = findHeaderX(headerLine, /^Наименование/);
+  const quantityX = findHeaderX(headerLine, /^Кол-во/);
+  const sizeX = findHeaderX(headerLine, /^Размер/);
+  const millingX = findHeaderX(headerLine, /^Фрезировка/);
+  const filmX = findHeaderX(headerLine, /^Пленка/);
+  const noteX = findHeaderX(headerLine, /^Примечание/);
+
+  if (
+    positionX === null ||
+    designationX === null ||
+    nameX === null ||
+    quantityX === null ||
+    sizeX === null ||
+    millingX === null ||
+    filmX === null ||
+    noteX === null
+  ) {
+    return BASIS_TABLE_COLUMNS;
+  }
+
+  const sizeWidthSplit = sizeX + Math.max(25, (millingX - sizeX) * 0.28);
+  const sizeEnd = midpoint(sizeX, millingX);
+
+  return [
+    { key: 'position', minX: Math.max(0, positionX - 12), maxX: midpoint(positionX, designationX) },
+    { key: 'designation', minX: midpoint(positionX, designationX), maxX: midpoint(designationX, nameX) },
+    { key: 'name', minX: midpoint(designationX, nameX), maxX: midpoint(nameX, quantityX) },
+    { key: 'quantity', minX: midpoint(nameX, quantityX), maxX: midpoint(quantityX, sizeX) },
+    { key: 'length', minX: midpoint(quantityX, sizeX), maxX: sizeWidthSplit },
+    { key: 'width', minX: sizeWidthSplit, maxX: sizeEnd },
+    { key: 'milling', minX: sizeEnd, maxX: midpoint(millingX, filmX) },
+    { key: 'film', minX: midpoint(millingX, filmX), maxX: midpoint(filmX, noteX) },
+    { key: 'note', minX: midpoint(filmX, noteX), maxX: Number.POSITIVE_INFINITY },
+  ];
+}
+
+function getColumnForItem(item: PdfTextItem, columns: PdfTableColumn[]): PdfTableColumn | null {
+  return columns.find(column => item.x >= column.minX && item.x < column.maxX) || null;
+}
+
+function getEmptyTableCells(): PdfTableRowCells {
+  return {
+    position: '',
+    designation: '',
+    name: '',
+    quantity: '',
+    length: '',
+    width: '',
+    milling: '',
+    film: '',
+    note: '',
+  };
+}
+
+function normalizeTableCell(items: PdfTextItem[]): string {
+  if (items.length === 0) return '';
+
+  const sorted = [...items].sort((a, b) => b.y - a.y || a.x - b.x);
+  const lines: PdfTextItem[][] = [];
+
+  for (const item of sorted) {
+    const line = lines.find(existing => Math.abs(existing[0].y - item.y) <= TABLE_CELL_LINE_Y_TOLERANCE);
+    if (line) {
+      line.push(item);
+    } else {
+      lines.push([item]);
+    }
+  }
+
+  return normalizeWhitespace(
+    lines
+      .map(line =>
+        [...line]
+          .sort((a, b) => a.x - b.x)
+          .map(item => item.text)
+          .join(' ')
+      )
+      .join(' ')
+  );
+}
+
+function parsePositiveIntCell(text: string): number | null {
+  const normalized = normalizeWhitespace(text);
+  if (!/^\d+$/.test(normalized)) return null;
+  const value = parseInt(normalized, 10);
+  return value > 0 ? value : null;
+}
+
+function findTableRowAnchors(pageItems: PdfTextItem[], headerY: number, columns: PdfTableColumn[]): RowAnchor[] {
+  const positionColumn = columns.find(column => column.key === 'position') || BASIS_TABLE_COLUMNS[0];
+
+  return pageItems
+    .filter(item => {
+      const text = item.text.trim();
+      return (
+        /^\d{1,3}$/.test(text) &&
+        item.x >= positionColumn.minX &&
+        item.x < positionColumn.maxX &&
+        item.y < headerY - 4 &&
+        item.y > TABLE_FOOTER_MIN_Y
+      );
+    })
+    .map(item => ({ item, value: parseInt(item.text.trim(), 10) }))
+    .filter(anchor => anchor.value > 0 && anchor.value < 1000)
+    .sort((a, b) => b.item.y - a.item.y || a.value - b.value);
+}
+
+function estimateRowStep(anchors: RowAnchor[]): number {
+  const gaps: number[] = [];
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const gap = anchors[i].item.y - anchors[i + 1].item.y;
+    if (gap > 0) gaps.push(gap);
+  }
+  if (gaps.length === 0) return 24;
+  const sorted = [...gaps].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] || 24;
+}
+
+function extractTableRowsFromPage(lines: PdfTextLine[]): PdfDetailRaw[] {
+  const headerLine = lines.find(isTableHeaderLine);
+  if (!headerLine) return [];
+
+  const pageItems = lines.flatMap(line => line.items);
+  const columns = getTableColumns(headerLine);
+  const anchors = findTableRowAnchors(pageItems, headerLine.y, columns);
+  if (anchors.length === 0) return [];
+
+  const rowStep = estimateRowStep(anchors);
+  const totalLine = lines.find(line => TOTAL_COUNT_PATTERN.test(line.text));
+  const details: PdfDetailRaw[] = [];
+
+  for (let i = 0; i < anchors.length; i++) {
+    const current = anchors[i];
+    const previousY = i === 0 ? headerLine.y : anchors[i - 1].item.y;
+    const nextY =
+      i === anchors.length - 1
+        ? totalLine && totalLine.y < current.item.y
+          ? totalLine.y
+          : current.item.y - rowStep
+        : anchors[i + 1].item.y;
+
+    const upperY = (previousY + current.item.y) / 2;
+    const lowerY = (current.item.y + nextY) / 2;
+    const rowItems = pageItems.filter(item => item.y <= upperY && item.y > lowerY);
+    const cells = getEmptyTableCells();
+
+    for (const column of columns) {
+      cells[column.key] = normalizeTableCell(rowItems.filter(item => getColumnForItem(item, columns)?.key === column.key));
+    }
+
+    const position = parsePositiveIntCell(cells.position);
+    const quantity = parsePositiveIntCell(cells.quantity);
+    const length = parsePositiveIntCell(cells.length);
+    const width = parsePositiveIntCell(cells.width);
+    const designation = normalizeWhitespace(cells.designation);
+
+    if (!position || !quantity || !length || !width || !isDesignation(designation)) {
+      continue;
+    }
+
+    details.push({
+      position,
+      designation,
+      name: normalizeWhitespace(cells.name) || 'Деталь',
+      quantity,
+      length,
+      width,
+      milling: cells.milling || undefined,
+      film: cells.film || undefined,
+      note: cells.note || undefined,
+    });
+  }
+
+  return details;
+}
+
+function parseDetailsFromTableGeometry(pageLines: PdfTextLine[][]): PdfDetailRaw[] {
+  return pageLines.flatMap(lines => extractTableRowsFromPage(lines));
 }
 
 /**
@@ -229,7 +481,7 @@ function extractFilmCandidateFromSizeLine(parsed: ParsedSizeFromLine): string | 
  */
 function isBlockStart(line: PdfTextLine): boolean {
   // Use concatenated line text only; item-based checks are too unstable for PDFs where sizes/film are on separate lines.
-  const match = line.text.match(/^\s*(\d{1,2})\s+(\d+(?:\.\d+)?)\s+/);
+  const match = line.text.match(/^\s*(\d{1,3})\s+(\d+(?:\.\d+)*)\s+/);
   if (!match) return false;
 
   const position = match[1];
@@ -302,7 +554,7 @@ export function parseDetailBlock(block: DetailBlock, blockIndex: number): PdfDet
   const mainLine = lines.find(isBlockStart);
   if (!mainLine) return null;
 
-  const mainMatch = mainLine.text.match(/^\s*(\d{1,2})\s+(\d+(?:\.\d+)?)\s+(.+)$/);
+  const mainMatch = mainLine.text.match(/^\s*(\d{1,3})\s+(\d+(?:\.\d+)*)\s+(.+)$/);
   if (!mainMatch) return null;
 
   const position = parseInt(mainMatch[1], 10);
@@ -406,23 +658,28 @@ export function parsePdfContent(allPageItems: PdfTextItem[][]): PdfParsedResult 
   const parseErrors: string[] = [];
 
   // Group items into lines for all pages
+  const pageLines = allPageItems.map(pageItems => groupTextItemsIntoLines(pageItems));
   const allLines: PdfTextLine[] = [];
-  for (const pageItems of allPageItems) {
-    const lines = groupTextItemsIntoLines(pageItems);
+  for (const lines of pageLines) {
     allLines.push(...lines);
   }
 
   // Extract metadata
   const metadata = extractMetadata(allLines);
 
-  // Parse details using block-based approach
-  const blocks = groupIntoDetailBlocks(allLines);
-  const details: PdfDetailRaw[] = [];
+  // Prefer table geometry: Basis PDFs contain stable column/row coordinates and multi-line cells.
+  // Keep the older block parser as a fallback for PDFs without a recognizable table header.
+  let details = parseDetailsFromTableGeometry(pageLines);
 
-  for (let i = 0; i < blocks.length; i++) {
-    const detail = parseDetailBlock(blocks[i], i);
-    if (detail) {
-      details.push(detail);
+  if (details.length === 0) {
+    const blocks = groupIntoDetailBlocks(allLines);
+    details = [];
+
+    for (let i = 0; i < blocks.length; i++) {
+      const detail = parseDetailBlock(blocks[i], i);
+      if (detail) {
+        details.push(detail);
+      }
     }
   }
 

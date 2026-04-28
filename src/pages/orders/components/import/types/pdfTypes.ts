@@ -121,8 +121,9 @@ export const HEADER_FOOTER_PATTERNS = [
 
 // Pattern for detecting designation (start of detail block)
 // Matches: "11.02", "01.04", "36", "37" but NOT single digits like "1", "2"
-// Designation is either: XX.XX format OR exactly 2 digits (to avoid matching sizes like 779/2164 and 2-digit positions)
-export const DESIGNATION_PATTERN = /^(\d+\.\d+|\d{2})$/;
+// Designation is either: dot-separated digits (01.04, 17.01.02) OR exactly 2 digits (35, 36).
+// Single digits are intentionally excluded to avoid matching position numbers.
+export const DESIGNATION_PATTERN = /^(\d+(?:\.\d+)+|\d{2})$/;
 
 // Typical sheet constraints for parts (mm). Used as a heuristic for parsing.
 export const MAX_PART_LONG_SIDE_MM = 2800;
