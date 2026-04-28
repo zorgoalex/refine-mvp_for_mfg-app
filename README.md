@@ -1,198 +1,177 @@
-﻿ # Front Refine v1 - Refine + Hasura GraphQL Admin (MVP)
+# ERP Frontend — Refine + Hasura GraphQL
 
-  Простой административный интерфейс на базе Refine + Ant Design, работающий с Hasura GraphQL. Проект ориентирован на MVP для сущностей БД и демонстрирует список, просмотр и CRUD-операции для ключевых ресурсов.
+Веб-интерфейс ERP для управления заказами, производством, оплатами, материалами и справочниками. Приложение построено на React, Refine и Ant Design, работает с Hasura GraphQL и использует Vercel Functions для серверных API.
 
-  ## Содержание
-  - Обзор
-  - Ключевые фичи
-  - Стек и зависимости
-  - Структура проекта
-  - Ресурсы и маршруты
-  - Конфигурация и авторизация
-  - Установка и запуск
-  - Примечания по реализации
-  - Известные ограничения
-  - Дальнейшие шаги (Roadmap)
-  - Ссылки и материалы
+## Содержание
 
-  ## Обзор
-  - Backend: Hasura GraphQL доступен локально по `http://localhost:8585/v1/graphql`.
-  - Frontend: Refine (+ AntD) на Vite/React.
-  - Схема БД: **v12-6**
-  - Dev server: `http://localhost:5576`
-  - Статус: **MVP+ завершен** (2025-11-01) — полнофункциональная форма заказов с деталями и платежами
-  - **Печать/экспорт** (2025-11-16) — готовность к production
-  - **Экспорт в Google Drive** (2025-11-24) — защищённый прокси через Vercel API → GAS
-  - **Конфигурация и фильтры** (2025-12-04) — admin-панель настроек, расширенные фильтры заказов
-  - **Импорт деталей** (2025-12-18) — из Excel, PDF (Базис), фото (VLM API)
-  - **VLM интеграция** (2025-12-24) — распознавание деталей с изображений через AI
-  - **Этапы производства** (2026-01-23) — toggle-модель с накоплением событий в `production_status_events`
+- Обзор
+- Возможности
+- Стек
+- Структура проекта
+- Ресурсы и маршруты
+- Конфигурация и авторизация
+- Установка и запуск
+- Тесты
+- Примечания по реализации
 
-  ## Ключевые фичи
-  - **CRUD** для 29 ресурсов + комплексная форма заказов (детали, платежи, статусы)
-  - **Финансы**: вкладка платежей с inline CRUD, итогами и автозаполнением даты оплаты по последнему платежу
-  - **Присадки (doweling_orders)**: связь 1→many, выбор и быстрое создание из формы заказа, поля видны в списке/просмотре
-  - **JWT аутентификация и управление пользователями**: `/api/login` и `/api/refresh` с ротацией refresh-токенов; страницы users (create/edit/show/list) со сменой пароля; токены в localStorage, роли Hasura
-  - **Производственный календарь** (16 дней: 5 назад + 10 вперед): адаптивный layout, Drag & Drop, контекстное меню статусов заказа/оплаты/производства, три вида карточек (стандарт/компакт/краткий), цветовая кодировка материалов
-  - **Этапы производства**: независимые этапы с toggle-логикой (Н/О/П/Р/С/Ш/К/З/У/В), хранение в `production_status_events`, отображение на карточках календаря, в списке заказов и на странице просмотра
-  - **Автоэкспорт заказов в Google Drive**: Vercel API proxy → Google Apps Script, JSON payload без фронтовых секретов, автоэкспорт после сохранения
-  - **Аудит через Hasura presets**: created_by/edited_by проставляются сервером, без dev-override
-  - **Row Highlight и быстрые переходы**: подсветка новых/отредактированных записей, двойной клик открывает show-страницу
-  - **Сортировка DESC по ID**, **is_active** фильтры, фиксированный sidebar, цветовая кодировка материалов
-  - **Печать и экспорт**: react-to-print под A4 и ExcelJS экспорт по шаблону с формулами
-  - **Конфигурация (admin-only)**: страница настроек приложения (`app_settings`), вкладки Заказы/Финансы/Видимость/Анализ фото, inline-редактирование
-  - **Расширенные фильтры заказов**: поиск по вхождению (LIKE), диапазоны дат/сумм, фильтры по клиенту/статусам/присадке
-  - **Присадки many-to-many**: связь orders ↔ doweling_orders через `order_doweling_links`, колонки в списке заказов
-  - **Импорт деталей**: из Excel (wizard с маппингом колонок), PDF Базис (автопарсинг), фото (VLM AI)
-  - **VLM API интеграция**: распознавание деталей с изображений через Vercel API → Auth0 M2M → VLM (Deno); fallback провайдеров (zai/bigmodel/openrouter)
-  - **Контекстное меню деталей**: ПКМ "Выделить" по группам (фрезеровка, материал, плёнка, обкат, цена)
+## Обзор
 
-  ## Стек и зависимости
-  - React 18, Vite 4
-  - Refine: `@refinedev/core`, `@refinedev/antd`, `@refinedev/react-router-v6`, `@refinedev/kbar`
-  - UI: `antd@^5`
-  - State Management: `zustand@^5` (для формы заказов)
-  - Validation: `zod@^4` (для валидации форм)
-  - Forms: `react-hook-form@^7` + `@hookform/resolvers@^5`
-  - Print & Export: `react-to-print@^3`, `exceljs@^4` (печать и экспорт заказов)
-  - Import: `pdfjs-dist@^4`, `xlsx@^0.18` (парсинг PDF и Excel)
-  - Calendar: `date-fns@^4`, `react-dnd@^16`, `react-dnd-html5-backend@^16` (Drag & Drop)
-  - Data provider: Hasura GraphQL провайдер с JWT (`src/utils/dataProvider.ts`)
+- Frontend: React + Vite + Refine + Ant Design.
+- Backend data API: Hasura GraphQL.
+- Serverless API: Vercel Functions в каталоге `api/`.
+- Локальный dev server: `http://localhost:5173`.
+- Локальный Hasura GraphQL по умолчанию: `http://localhost:8585/v1/graphql`.
+- Актуальная схема БД: v14.
 
-  ### Audit
-  - Поля аудита заполняются Hasura column presets по `x-hasura-user-id` из JWT. Дополнительных dev-переменных не требуется.
+## Возможности
 
-  Список версий см. в `package.json`.
+- Комплексная форма заказов: шапка, детали, платежи, присадки, статусы, даты, файлы и примечания.
+- Список заказов с серверной сортировкой, поиском, расширенными фильтрами, быстрым фильтром "Мои заказы" и подсветкой строк.
+- Финансы: платежи, статусы оплат, итоговые суммы, пересчёт оплачено/остаток.
+- Производственный календарь: диапазон дат, Drag & Drop, контекстное меню статусов, компактные виды карточек, цветовая кодировка материалов.
+- Этапы производства: независимые toggle-этапы, хранение фактов в `production_status_events`, отображение в списке, карточках календаря и карточке заказа.
+- Настройки приложения: `app_settings`, вкладки заказов, финансов, этапов производства, видимости ресурсов и анализа фото.
+- Импорт деталей: Excel, PDF и фото через VLM API.
+- VLM-конфигурация из БД: провайдеры, модели, промпты и дефолтные настройки запросов.
+- Печать заказа и экспорт в Excel.
+- Экспорт заказов в Google Drive через защищённый Vercel API proxy к Google Apps Script.
+- JWT-аутентификация с refresh token rotation и Hasura role-based permissions.
+- Управление пользователями, ролями и ключевыми справочниками.
 
-  ## Структура проекта
-  - `src/index.tsx` — точка входа React.
-  - `src/App.tsx` — конфигурация Refine: ресурсы, роутинг, аутентификация, layout.
-  - `src/utils/dataProvider.ts` — Hasura GraphQL `dataProvider`, использующий Bearer токен пользователя.
-  - `src/components/CustomSider.tsx` — левое меню на основе `useMenu` (AntD 5 `Menu.items`).
-  - Страницы ресурсов:
-    - Orders (read-only view): `src/pages/orders/{list,show}.tsx` (Edit направлен на базовую таблицу `orders`).
-    - Calendar: `src/pages/calendar/index.tsx` — производственный календарь
-      - `components/CalendarBoard.tsx` — основная доска календаря
-      - `components/DayColumn.tsx` — колонка дня
-      - `components/OrderCard.tsx` — карточка заказа (три вида)
-      - `components/OrderCardCompact.tsx`, `components/DayColumnBrief.tsx` — компактные виды
-      - `components/OrderContextMenu.tsx` — ПКМ для статусов
-      - `hooks/useCalendarData.ts` — загрузка данных
-      - `hooks/useCalendarDays.ts` — генерация дней
-      - `hooks/useOrderStatusUpdate.ts`, `hooks/useOrderStatuses.ts` — обновление/загрузка статусов
-      - `hooks/useOrderMove.ts` — перемещение заказов между днями
-      - `utils/dateUtils.ts`, `calendarLayout.ts`, `statusColors.ts`
-      - `types/calendar.ts`, `styles/calendar.css`
-  - Компоненты:
-    - `src/components/ProductionStagesDisplay.tsx` — отображение этапов производства буквами (Н/О/П/Р/С/Ш/К/З/У/В)
-    - Orders — ключевые секции формы: `OrderForm.tsx`, табы деталей и платежей (`OrderDetailsTab.tsx`,
-  `OrderPaymentsTab.tsx`), модалки (`OrderDetailModal.tsx`, `PaymentModal.tsx`), быстрые действия для присадки
-  (`DowellingOrderQuickCreate.tsx`)
-    - Materials: `src/pages/materials/{list,create,edit,show}.tsx`
-    - Milling Types: `src/pages/milling_types/{list,create,edit,show}.tsx`
-    - Films: `src/pages/films/{list,create,edit,show}.tsx`
-    - Clients: `src/pages/clients/{list,create,edit,show}.tsx`
-    - Edge Types: `src/pages/edge_types/{list,create,edit,show}.tsx`
-    - Vendors: `src/pages/vendors/{list,create,edit,show}.tsx`
-    - Suppliers: `src/pages/suppliers/{list,create,edit,show}.tsx`
-    - Film Vendors: `src/pages/film_vendors/{list,create,edit,show}.tsx`
-    - Film Types: `src/pages/film_types/{list,create,edit,show}.tsx`
-    - Material Types: `src/pages/material_types/{list,create,edit,show}.tsx`
-    - Order Statuses: `src/pages/order_statuses/{list,create,edit,show}.tsx`
-    - Payment Statuses: `src/pages/payment_statuses/{list,create,edit,show}.tsx`
-    - Payment Types: `src/pages/payment_types/{list,create,edit,show}.tsx`
-    - Units: `src/pages/units/{list,create,edit,show}.tsx`
-    - Employees: `src/pages/employees/{list,create,edit,show}.tsx`
-    - Users: `src/pages/users/{list,create,edit,show}.tsx`
-    - Workshops: `src/pages/workshops/{list,create,edit,show}.tsx`
-    - Work Centers: `src/pages/work_centers/{list,create,edit,show}.tsx`
-    - Production Statuses: `src/pages/production_statuses/{list,create,edit,show}.tsx`
-    - Resource Requirements Statuses: `src/pages/resource_requirements_statuses/{list,create,edit,show}.tsx`
-  - Configuration (admin-only): `src/pages/configuration/index.tsx` — настройки приложения (вкладки: Заказы, Финансы, Видимость)
-  - Хуки:
-    - `src/hooks/useFormWithHighlight.ts` — навигация с подсветкой после create/edit
-    - `src/hooks/useHighlightRow.ts` — подсветка и скролл к строке в таблице
-    - `src/hooks/useOrderSave.ts` — delta-save для заказа, деталей, платежей
-    - `src/hooks/useAppSettings.ts` — CRUD для таблицы `app_settings` (namespaced keys)
-    - `src/hooks/useVlmApi.ts`, `useVlmImport.ts` — интеграция с VLM API
-    - `src/hooks/useProductionStatusEvent.ts` — toggle-управление этапами производства (record/remove/toggle)
-  - Импорт деталей:
-    - `src/pages/orders/components/import/` — модули импорта (Excel, PDF, VLM)
-    - `api/vlm/` — Vercel API для VLM (health, upload, analyze)
-    - `api/_lib/vlmClient.ts`, `auth0Token.ts` — клиент VLM и Auth0 M2M
-  - Печать и экспорт:
-    - `src/pages/orders/components/print/OrderPrintView.tsx` — компонент печатной формы заказа
-    - `public/templates/order_template.xlsx` — шаблон Excel для экспорта
-    - `src/hooks/useOrderExport.ts`, `src/utils/excel/uploadToApi.ts` — автоэкспорт в Google Drive через Vercel API
-  → GAS
-  - Стили:
-    - `src/styles/app.css` — глобальные стили (sidebar, row highlight анимация)
-    - `src/pages/orders/components/print/OrderPrintView.css` — стили печатной формы
-  - Инфраструктура:
-    - `vite.config.ts` — порт 5576 и proxy для /api
-    - `vercel.json` — security headers, rewrites для API
-    - `package.json` — скрипты `dev`, `dev:api`, `dev:full`
+## Стек
 
-  ## Ресурсы и маршруты
-  Определены в `src/App.tsx` внутри `resources` и роутов React Router:
-  - `orders_view`
-    - `list`: `/orders`
-    - `show`: `/orders/show/:id`
-    - `meta.idColumnName`: `order_id`
-    - Назначение: только чтение (read-only), агрегированный вид заказа.
-  - `calendar`
-    - `list`: `/calendar`
-    - `meta.label`: `Календарь`
-    - Назначение: визуализация заказов по плановым датам завершения (производственный календарь).
-    - Использует `orders_view` как источник данных
-  - `materials`
-    - `list/create/edit/show` с `meta.idColumnName`: `material_id`
-  - `milling_types`
-    - `list/create/edit/show` с `meta.idColumnName`: `milling_type_id`
-  - `films`
-    - `list/create/edit/show` с `meta.idColumnName`: `film_id`
-  - `clients`
-    - `list/create/edit/show` с `meta.idColumnName`: `client_id`
-  - `edge_types`, `vendors`, `suppliers`
-    - `list/create/edit/show` с соответствующими `*_id`
-  - `film_vendors`, `film_types`, `material_types`
-    - `list/create/edit/show` с соответствующими `*_id`
-  - `order_statuses`, `payment_statuses`, `payment_types`
-    - `list/create/edit/show` с соответствующими `*_id`
-  ## Конфигурация и авторизация
-  - Переменные окружения (frontend / Vite):
-    - `VITE_HASURA_GRAPHQL_URL` — URL Hasura GraphQL.
-  - Переменные окружения (backend / Vercel Functions):
-    - `HASURA_URL`, `HASURA_ADMIN_SECRET`
-    - `JWT_SECRET`, `JWT_REFRESH_SECRET`
-    - `GAS_WEBAPP_URL`, `GAS_API_KEY`
-    - `VLM_API_URL`, `AUTH0_M2M_DOMAIN`, `AUTH0_M2M_CLIENT_ID`, `AUTH0_M2M_CLIENT_SECRET`, `AUTH0_M2M_AUDIENCE`
-  - **Аутентификация:** JWT через Vercel Functions; frontend `authProvider` с auto-refresh; Hasura с role-based
-  permissions и audit presets.
-  - **Data Provider:** `src/utils/dataProvider.ts` добавляет JWT и обновляет истёкший токен.
+- React 18, Vite 4.
+- Refine: `@refinedev/core`, `@refinedev/antd`, `@refinedev/react-router-v6`, `@refinedev/kbar`.
+- UI: `antd@^5`.
+- State: `zustand@^5`.
+- Forms/validation: `react-hook-form@^7`, `@hookform/resolvers@^5`, `zod@^4`.
+- Import/export/print: `xlsx`, `pdfjs-dist`, `exceljs`, `react-to-print`.
+- Calendar: `date-fns`, `react-dnd`, `react-dnd-html5-backend`.
+- Serverless/API: `@vercel/node`, `jsonwebtoken`, `bcryptjs`.
+- Tests: Vitest, Playwright.
 
-  Пример `.env.local`:
+Точные версии указаны в `package.json`.
 
-  VITE_HASURA_GRAPHQL_URL=http://localhost:8585/v1/graphql
+## Структура проекта
 
+- `src/index.tsx` — точка входа React.
+- `src/App.tsx` — Refine resources, routes, providers, layout и auth.
+- `src/authProvider.ts` — Refine auth provider для `/api/login` и `/api/refresh`.
+- `src/utils/dataProvider.ts` — кастомный Hasura GraphQL data provider с JWT.
+- `src/components/CustomLayout.tsx`, `src/components/CustomSider.tsx` — основной layout и меню.
+- `src/pages/orders/` — список, просмотр, создание и редактирование заказов.
+- `src/pages/orders/components/` — форма заказа, таблицы, вкладки, модальные окна, печать и импорт.
+- `src/pages/calendar/` — производственный календарь, карточки, DnD, контекстные меню и хуки данных.
+- `src/pages/configuration/` — настройки приложения, производства и VLM.
+- `src/hooks/` — shared hooks: сохранение заказов, настройки, VLM, экспорт, подсветка, production events.
+- `src/stores/` — Zustand stores для формы заказа и уведомлений.
+- `src/schemas/` — Zod-схемы валидации.
+- `src/types/` — типы доменных сущностей.
+- `src/utils/excel/` — подготовка и отправка данных для Excel/Google Drive.
+- `api/` — Vercel Functions: auth, users, refresh, VLM, export.
+- `public/templates/order_template.xlsx` — шаблон Excel.
+- `vercel.json` — rewrites, headers и настройки функций.
+- `vite.config.ts` — порт dev server и proxy `/api`.
 
-  ## Установка и запуск
-  - Скрипты: `npm run dev` (только UI), `npm run dev:api` (только API), `npm run dev:full` (UI+API, proxy).
-  - Env: заполняем HASURA_URL, HASURA_ADMIN_SECRET, JWT_SECRET/REFRESH_SECRET, VITE_HASURA_GRAPHQL_URL, при экспорте также GAS_WEBAPP_URL/GAS_API_KEY.
+## Ресурсы и маршруты
 
-  ## Примечания по реализации
-  - Orders: детали (inline), платежи (вкладка Финансы, итоги, автодата), присадки many-to-many, Zod-валидация, delta save, очистка audit-полей, optimistic locking, печать/Excel, автоэкспорт в GDrive, расширенные фильтры (LIKE-поиск, диапазоны, статусы).
-  - Календарь: 16 дней, три вида карточек, Drag&Drop, ПКМ статусов, сокращённые материалы, фиксированная шапка.
-  - Конфигурация: admin-only страница с `app_settings` (JSONB), namespaced keys (`orders.*`, `app.*`), inline-редактирование.
-  - Общие: `meta.idColumnName` во всех ресурсах, `CustomSider` с календарём и заказами на верхнем уровне, локаль ruRU.
+Ключевые routes:
 
-  ## Известные ограничения
-  - Проверить CORS и роли Hasura перед prod; типизация базовая; автотесты минимальны (unit для auth, E2E логин).
+- `/orders` — список заказов (`orders_view`).
+- `/orders/edit/:id` — форма редактирования заказа, запись в `orders` и связанные таблицы.
+- `/orders/show/:id` — просмотр заказа.
+- `/calendar` — производственный календарь.
+- `/doweling-orders` — присадки.
+- `/payments` — платежи.
+- `/payments-analytics` — агрегированный список платежей (`payments_view`).
+- `/clients` и `/clients-analytics` — клиенты и клиентская аналитика.
+- `/configuration` — настройки приложения.
 
-  ## Дальнейшие шаги (Roadmap)
-  - Done: CRUD orders, Печать/экспорт, Payments Tab, Конфигурация, Импорт Excel/PDF/Фото, VLM интеграция (24.12.2025), Этапы производства (23.01.2026).
-  - Календарь ~70% (осталось: печать плана дня, фильтры/поиск).
-  - План: Workshops/Materials Tabs, Quick Create для справочников, динамическая видимость ресурсов по ролям, виртуализация таблиц, soft-delete/версионирование, E2E.
+Справочники и производственные сущности также зарегистрированы в `src/App.tsx`: материалы, плёнки, типы фрезеровок, типы кромок, поставщики, производители, статусы заказов/оплат/производства, цеха, участки, сотрудники, пользователи и другие ресурсы.
 
-  ## TODO
-  - [ ] Обновить `antd` до актуальной версии 5.x (исправит warning `findDOMNode is deprecated in StrictMode`)
+## Конфигурация и авторизация
+
+Frontend env:
+
+```env
+VITE_HASURA_GRAPHQL_URL=http://localhost:8585/v1/graphql
+```
+
+Backend env для Vercel Functions:
+
+```env
+HASURA_URL=http://localhost:8585/v1/graphql
+HASURA_ADMIN_SECRET=...
+JWT_SECRET=...
+JWT_REFRESH_SECRET=...
+GAS_WEBAPP_URL=...
+GAS_API_KEY=...
+VLM_API_URL=...
+AUTH0_M2M_DOMAIN=...
+AUTH0_M2M_CLIENT_ID=...
+AUTH0_M2M_CLIENT_SECRET=...
+AUTH0_M2M_AUDIENCE=...
+```
+
+Аутентификация:
+
+- `/api/login` проверяет пользователя через Hasura admin query, выдаёт access token и refresh token.
+- `/api/refresh` выполняет refresh token rotation.
+- Access token содержит Hasura claims: allowed roles, default role и user id.
+- Frontend хранит токены в `localStorage` и автоматически обновляет access token при истечении.
+
+Audit:
+
+- `created_by`, `edited_by`, `created_at`, `updated_at` управляются серверной стороной.
+- Клиентские create/update payload очищаются от audit-полей в `dataProvider`.
+
+## Установка и запуск
+
+```bash
+npm install
+npm run dev
+```
+
+Полный локальный запуск UI + API:
+
+```bash
+npm run dev:full
+```
+
+Доступные скрипты:
+
+- `npm run dev` — только Vite UI на `5173`.
+- `npm run dev:api` — только Vercel Functions на `3001`.
+- `npm run dev:full` — UI и API вместе.
+- `npm run build` — production build.
+- `npm run preview` — preview build.
+- `npm run test` — unit/API tests через Vitest.
+- `npm run test:e2e` — Playwright tests.
+
+## Тесты
+
+Unit/API:
+
+```bash
+npm run test
+```
+
+E2E:
+
+```bash
+npm run test:e2e
+```
+
+Playwright запускает `npm run dev:full` через `webServer` и использует `http://localhost:5173` как `baseURL`.
+
+## Примечания по реализации
+
+- `orders_view` и аналитические views используются для чтения; запись идёт в базовые таблицы.
+- Для новых ресурсов нужно добавить primary key в `ID_COLUMNS` и selection fields в `RESOURCE_FIELDS`.
+- `dataProvider` автоматически добавляет `is_active = true` для активируемых справочников, если фильтр `is_active` не задан явно.
+- Форма заказа хранит черновик в Zustand store и использует `temp_id` для новых строк до сохранения.
+- Сохранение заказа последовательное: header, детали, удаления, пересчёт итогов, платежи, production/workshop/resource блоки, присадки, invalidation.
+- Этапы производства отображаются по workflow-настройке из `app_settings`; факты этапов хранятся отдельно от текущего статуса заказа.
+- VLM upload/analyze проходит через Vercel API, проверку ERP JWT и Auth0 M2M token.
+- Google Drive export не раскрывает GAS API key на frontend: ключ добавляется только в serverless function.
+- Глобальная локаль интерфейса — `ru_RU`.
