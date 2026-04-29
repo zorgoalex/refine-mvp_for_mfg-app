@@ -16,14 +16,14 @@ describe('JWT Utilities', () => {
             });
         });
 
-        it('should have 8 hour expiration', () => {
+        it('should have 10 hour expiration', () => {
             const token = generateAccessToken('123', 'testuser', 'admin', ['admin']);
             const decoded = jwt.decode(token) as any;
 
             const now = Math.floor(Date.now() / 1000);
             // Allow small time difference (using -1 precision for approx check if needed, or just check difference)
-            // 8 hours = 28800 seconds
-            expect(decoded.exp - now).toBeCloseTo(8 * 60 * 60, -1);
+            // 10 hours = 36000 seconds
+            expect(decoded.exp - now).toBeCloseTo(10 * 60 * 60, -1);
         });
     });
 
