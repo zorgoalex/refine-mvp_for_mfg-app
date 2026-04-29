@@ -113,6 +113,7 @@ export function extractMetadata(allLines: PdfTextLine[]): PdfOrderMetadata {
     material: '',
   };
   const totalCounts: number[] = [];
+  const materialNames: string[] = [];
 
   for (const line of allLines) {
     const text = line.text;
@@ -129,7 +130,11 @@ export function extractMetadata(allLines: PdfTextLine[]): PdfOrderMetadata {
     // Extract material: "Материал: МДФ 16 мм"
     const materialMatch = text.match(MATERIAL_PATTERN);
     if (materialMatch) {
-      metadata.material = materialMatch[1].trim();
+      const material = normalizeWhitespace(materialMatch[1]);
+      if (material && !materialNames.includes(material)) {
+        materialNames.push(material);
+      }
+      metadata.material = materialNames.join(', ');
     }
 
     // Extract total count: "Общ. кол. 44"
@@ -223,6 +228,20 @@ function isTableHeaderLine(line: PdfTextLine): boolean {
     line.text.includes('Кол-во') &&
     line.text.includes('Размер')
   );
+}
+
+function getMaterialFromLine(line: PdfTextLine): string | null {
+  const materialMatch = line.text.match(MATERIAL_PATTERN);
+  if (!materialMatch) return null;
+  return normalizeWhitespace(materialMatch[1]) || null;
+}
+
+function findMaterialForTable(lines: PdfTextLine[], headerLine: PdfTextLine): string | undefined {
+  const materialLine = lines
+    .filter(line => line.y > headerLine.y && getMaterialFromLine(line))
+    .sort((a, b) => a.y - b.y)[0];
+
+  return materialLine ? getMaterialFromLine(materialLine) || undefined : undefined;
 }
 
 function midpoint(a: number, b: number): number {
@@ -325,7 +344,12 @@ function parsePositiveIntCell(text: string): number | null {
   return value > 0 ? value : null;
 }
 
-function findTableRowAnchors(pageItems: PdfTextItem[], headerY: number, columns: PdfTableColumn[]): RowAnchor[] {
+function findTableRowAnchors(
+  pageItems: PdfTextItem[],
+  headerY: number,
+  columns: PdfTableColumn[],
+  minY = TABLE_FOOTER_MIN_Y
+): RowAnchor[] {
   const positionColumn = columns.find(column => column.key === 'position') || BASIS_TABLE_COLUMNS[0];
 
   return pageItems
@@ -336,7 +360,7 @@ function findTableRowAnchors(pageItems: PdfTextItem[], headerY: number, columns:
         item.x >= positionColumn.minX &&
         item.x < positionColumn.maxX &&
         item.y < headerY - 4 &&
-        item.y > TABLE_FOOTER_MIN_Y
+        item.y > minY
       );
     })
     .map(item => ({ item, value: parseInt(item.text.trim(), 10) }))
@@ -355,17 +379,24 @@ function estimateRowStep(anchors: RowAnchor[]): number {
   return sorted[Math.floor(sorted.length / 2)] || 24;
 }
 
-function extractTableRowsFromPage(lines: PdfTextLine[]): PdfDetailRaw[] {
-  const headerLine = lines.find(isTableHeaderLine);
-  if (!headerLine) return [];
-
-  const pageItems = lines.flatMap(line => line.items);
+function extractTableRowsForHeader(
+  lines: PdfTextLine[],
+  pageItems: PdfTextItem[],
+  headerLine: PdfTextLine,
+  tableBottomY: number
+): PdfDetailRaw[] {
   const columns = getTableColumns(headerLine);
-  const anchors = findTableRowAnchors(pageItems, headerLine.y, columns);
+  const sectionItems = pageItems.filter(item => item.y < headerLine.y - 4 && item.y > tableBottomY);
+  const anchors = findTableRowAnchors(sectionItems, headerLine.y, columns, tableBottomY);
   if (anchors.length === 0) return [];
 
   const rowStep = estimateRowStep(anchors);
-  const totalLine = lines.find(line => TOTAL_COUNT_PATTERN.test(line.text));
+  const totalLine = lines.find(line =>
+    TOTAL_COUNT_PATTERN.test(line.text) &&
+    line.y < headerLine.y &&
+    line.y > tableBottomY
+  );
+  const material = findMaterialForTable(lines, headerLine);
   const details: PdfDetailRaw[] = [];
 
   for (let i = 0; i < anchors.length; i++) {
@@ -380,7 +411,7 @@ function extractTableRowsFromPage(lines: PdfTextLine[]): PdfDetailRaw[] {
 
     const upperY = (previousY + current.item.y) / 2;
     const lowerY = (current.item.y + nextY) / 2;
-    const rowItems = pageItems.filter(item => item.y <= upperY && item.y > lowerY);
+    const rowItems = sectionItems.filter(item => item.y <= upperY && item.y > lowerY);
     const cells = getEmptyTableCells();
 
     for (const column of columns) {
@@ -404,10 +435,28 @@ function extractTableRowsFromPage(lines: PdfTextLine[]): PdfDetailRaw[] {
       quantity,
       length,
       width,
+      material,
       milling: cells.milling || undefined,
       film: cells.film || undefined,
       note: cells.note || undefined,
     });
+  }
+
+  return details;
+}
+
+function extractTableRowsFromPage(lines: PdfTextLine[]): PdfDetailRaw[] {
+  const headerLines = lines.filter(isTableHeaderLine).sort((a, b) => b.y - a.y);
+  if (headerLines.length === 0) return [];
+
+  const pageItems = lines.flatMap(line => line.items);
+  const details: PdfDetailRaw[] = [];
+
+  for (let i = 0; i < headerLines.length; i++) {
+    const headerLine = headerLines[i];
+    const nextHeaderLine = headerLines[i + 1];
+    const tableBottomY = Math.max(TABLE_FOOTER_MIN_Y, nextHeaderLine?.y ?? TABLE_FOOTER_MIN_Y);
+    details.push(...extractTableRowsForHeader(lines, pageItems, headerLine, tableBottomY));
   }
 
   return details;
@@ -713,11 +762,17 @@ export function parsePdfContent(allPageItems: PdfTextItem[][]): PdfParsedResult 
  * Converts parsed PDF details to import row format (compatible with validation step)
  */
 export function convertToImportRows(result: PdfParsedResult): import('../types/importTypes').ImportRow[] {
+  const metadataMaterials = result.metadata.material
+    ? result.metadata.material.split(',').map(material => material.trim()).filter(Boolean)
+    : [];
+  const fallbackMaterial = metadataMaterials.length === 1 ? metadataMaterials[0] : null;
+
   return result.details.map((detail, index) => ({
     sourceRowIndex: index,
     height: detail.length,
     width: detail.width,
     quantity: detail.quantity,
+    materialName: detail.material || fallbackMaterial,
     millingTypeName: detail.milling || null,
     filmName: detail.film || null,
     note: detail.note || null,

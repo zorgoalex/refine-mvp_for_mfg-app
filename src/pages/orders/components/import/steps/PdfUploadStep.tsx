@@ -13,6 +13,7 @@ const { Text, Title } = Typography;
 interface PdfUploadStepProps {
   isLoading: boolean;
   error: string | null;
+  fileName: string | null;
   result: PdfParsedResult | null;
   importRows: ImportRow[];
   onFileUpload: (file: File) => Promise<void>;
@@ -21,6 +22,7 @@ interface PdfUploadStepProps {
 export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
   isLoading,
   error,
+  fileName,
   result,
   importRows,
   onFileUpload,
@@ -81,6 +83,14 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
       render: (_: unknown, record: ImportRow) => (
         <Text>{record.height} × {record.width}</Text>
       ),
+    },
+    {
+      title: 'Материал',
+      dataIndex: 'materialName',
+      key: 'material',
+      width: 120,
+      ellipsis: true,
+      render: (value: string | null) => value || <Text type="secondary">—</Text>,
     },
     {
       title: 'Кол-во',
@@ -208,8 +218,14 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
             {/* Preview table */}
             {importRows.length > 0 && (
               <div>
-                <Title level={5} style={{ marginBottom: 8 }}>
-                  Предпросмотр (первые 10 деталей):
+                <Title level={5} style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span>Предпросмотр (первые 10 деталей):</span>
+                  {fileName && (
+                    <Text type="secondary" style={{ fontSize: 14, fontWeight: 400 }}>
+                      <FilePdfOutlined style={{ color: '#f5222d', marginRight: 4 }} />
+                      {fileName}
+                    </Text>
+                  )}
                 </Title>
                 <Table
                   columns={previewColumns}

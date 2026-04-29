@@ -6,7 +6,7 @@ import path from 'node:path';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
 
-import { parsePdfContent } from './pdfTextExtractor';
+import { convertToImportRows, parsePdfContent } from './pdfTextExtractor';
 import type { PdfParsedResult, PdfTextItem } from '../types/pdfTypes';
 
 const PDF_FIXTURE_DIR = process.env.PDF_FIXTURE_DIR || path.resolve(process.cwd(), '../spec_erp');
@@ -106,6 +106,7 @@ describe('parsePdfContent table geometry parser', () => {
       quantity: 1,
       length: 400,
       width: 34,
+      material: 'МДФ 16 мм',
       milling: 'Модерн',
       film: 'Плёнка мат. OR-01 Магнолия (0,25мм) ADILET',
     });
@@ -116,6 +117,7 @@ describe('parsePdfContent table geometry parser', () => {
       quantity: 1,
       length: 757,
       width: 447,
+      material: 'МДФ 16 мм',
       note: 'Присадка:',
     });
   });
@@ -168,8 +170,11 @@ describe('parsePdfContent table geometry parser', () => {
     const result = parsePdfContent([pageOne, pageTwo]);
 
     expect(result.parseErrors).toEqual([]);
+    expect(result.metadata.material).toBe('МДФ 18 мм, МДФ 16 мм');
     expect(result.metadata.totalCount).toBe(3);
     expect(result.stats).toEqual({ positionsCount: 2, totalQuantity: 3 });
+    expect(result.details.map(detail => detail.material)).toEqual(['МДФ 18 мм', 'МДФ 16 мм']);
+    expect(convertToImportRows(result).map(row => row.materialName)).toEqual(['МДФ 18 мм', 'МДФ 16 мм']);
   });
 });
 
@@ -236,7 +241,17 @@ describe('parsePdfContent PDF fixtures', () => {
       quantity: 1,
       length: 1343,
       width: 95,
+      material: 'МДФ 18 мм',
     });
+    expect(wrong2.metadata.material).toBe('МДФ 18 мм, МДФ 16 мм');
     expect(wrong2.metadata.totalCount).toBe(48);
+    const firstMdf16Index = wrong2.details.findIndex(detail => detail.material === 'МДФ 16 мм');
+    expect(firstMdf16Index).toBeGreaterThan(0);
+    expect(wrong2.details.slice(0, firstMdf16Index).every(detail => detail.material === 'МДФ 18 мм')).toBe(true);
+    expect(wrong2.details.slice(firstMdf16Index).every(detail => detail.material === 'МДФ 16 мм')).toBe(true);
+
+    const wrong2Rows = convertToImportRows(wrong2);
+    expect(wrong2Rows[0].materialName).toBe('МДФ 18 мм');
+    expect(wrong2Rows[firstMdf16Index].materialName).toBe('МДФ 16 мм');
   }, 30_000);
 });

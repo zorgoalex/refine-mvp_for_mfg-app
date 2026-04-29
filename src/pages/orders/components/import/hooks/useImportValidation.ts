@@ -75,22 +75,39 @@ const emptyMapping = (): FieldMapping => ({
   detail_name: null,
 });
 
-const findReferenceId = (name: string | null | undefined, items: ReferenceItem[]): number | null => {
+export const normalizeReferenceName = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const compactReferenceName = (value: string): string =>
+  normalizeReferenceName(value).replace(/\s+/g, '');
+
+export const findReferenceId = (name: string | null | undefined, items: ReferenceItem[]): number | null => {
   if (!name) return null;
-  const normalizedName = String(name).toLowerCase().trim();
+  const normalizedName = normalizeReferenceName(String(name));
   if (!normalizedName) return null;
+  const compactName = compactReferenceName(normalizedName);
 
   // Exact match first
-  const found = items.find(item => item.name.toLowerCase().trim() === normalizedName);
+  const found = items.find(item =>
+    normalizeReferenceName(item.name) === normalizedName ||
+    compactReferenceName(item.name) === compactName
+  );
   if (found) return found.id;
 
   // Fuzzy match only for longer strings (at least 3 chars) to avoid false positives
   if (normalizedName.length >= 3) {
     const fuzzy = items.find(item => {
-      const itemName = item.name.toLowerCase().trim();
+      const itemName = normalizeReferenceName(item.name);
+      const compactItemName = compactReferenceName(item.name);
       // Only match if search term is substantial part of item name or vice versa
       return (itemName.includes(normalizedName) && normalizedName.length >= itemName.length * 0.5) ||
-             (normalizedName.includes(itemName) && itemName.length >= normalizedName.length * 0.5);
+             (normalizedName.includes(itemName) && itemName.length >= normalizedName.length * 0.5) ||
+             (compactItemName.includes(compactName) && compactName.length >= compactItemName.length * 0.5) ||
+             (compactName.includes(compactItemName) && compactItemName.length >= compactName.length * 0.5);
     });
     return fuzzy?.id || null;
   }

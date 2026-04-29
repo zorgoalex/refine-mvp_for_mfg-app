@@ -29,6 +29,7 @@ async function loadPdfjs(): Promise<PdfjsModule> {
 export interface UsePdfParserReturn {
   isLoading: boolean;
   error: string | null;
+  fileName: string | null;
   result: PdfParsedResult | null;
   importRows: ImportRow[];
   parseFile: (file: File) => Promise<void>;
@@ -40,6 +41,7 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 export const usePdfParser = (): UsePdfParserReturn => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
   const [result, setResult] = useState<PdfParsedResult | null>(null);
   const [importRows, setImportRows] = useState<ImportRow[]>([]);
 
@@ -59,6 +61,8 @@ export const usePdfParser = (): UsePdfParserReturn => {
       if (file.size > MAX_FILE_SIZE) {
         throw new Error(`Файл слишком большой. Максимальный размер: ${MAX_FILE_SIZE / 1024 / 1024} МБ`);
       }
+
+      setFileName(file.name);
 
       // Read file as ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
@@ -113,6 +117,7 @@ export const usePdfParser = (): UsePdfParserReturn => {
     } catch (err) {
       console.error('[usePdfParser] Error parsing PDF:', err);
       setError(err instanceof Error ? err.message : 'Ошибка при чтении PDF файла');
+      setFileName(null);
       setResult(null);
       setImportRows([]);
     } finally {
@@ -123,6 +128,7 @@ export const usePdfParser = (): UsePdfParserReturn => {
   const reset = useCallback((): void => {
     setIsLoading(false);
     setError(null);
+    setFileName(null);
     setResult(null);
     setImportRows([]);
   }, []);
@@ -130,6 +136,7 @@ export const usePdfParser = (): UsePdfParserReturn => {
   return {
     isLoading,
     error,
+    fileName,
     result,
     importRows,
     parseFile,

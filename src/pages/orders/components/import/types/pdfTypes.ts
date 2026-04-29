@@ -48,6 +48,7 @@ export interface PdfDetailRaw {
   quantity: number;          // "Кол-во"
   length: number;            // first size value (height/length in mm)
   width: number;             // second size value (width in mm)
+  material?: string;         // "Материал" for the table section, e.g. "МДФ 16 мм"
   milling?: string;          // "Фрезировка" - e.g., "Модерн", "Средняя лапша"
   film?: string;             // "Пленка" - full value, e.g., "AL 17 Айвори софт Алер"
   note?: string;             // "Примечание" - e.g., "Присадка:"
@@ -75,6 +76,7 @@ export interface PdfImportRow {
   height: number;
   width: number;
   quantity: number;
+  materialName?: string | null;
   millingTypeName?: string | null;
   filmName?: string | null;
   note?: string | null;

@@ -187,6 +187,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
           <PdfUploadStep
             isLoading={pdfParser.isLoading}
             error={pdfParser.error}
+            fileName={pdfParser.fileName}
             result={pdfParser.result}
             importRows={pdfParser.importRows}
             onFileUpload={pdfParser.parseFile}
