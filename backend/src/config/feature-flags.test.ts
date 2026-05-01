@@ -10,9 +10,14 @@ describe('backend feature flags', () => {
       orderExport: false,
       users: false,
       vlm: false,
+      deadlines: false,
       ordersReadOnly: true,
       exportDisabled: true,
       vlmDisabled: true,
+      deadlinesReadOnly: true,
+      deadlineWorker: false,
+      deadlineActions: false,
+      deadlineNotifications: false,
     });
   });
 
@@ -23,12 +28,22 @@ describe('backend feature flags', () => {
           BACKEND_ENABLE_AUTH: 'true',
           BACKEND_ENABLE_ORDERS: 'true',
           BACKEND_ORDERS_READ_ONLY: 'false',
+          BACKEND_ENABLE_DEADLINES: 'true',
+          BACKEND_DEADLINES_READ_ONLY: 'false',
+          BACKEND_ENABLE_DEADLINE_WORKER: 'true',
+          BACKEND_DEADLINE_ACTIONS_ENABLED: 'true',
+          BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: 'true',
         }),
       ),
     ).toMatchObject({
       auth: true,
       orders: true,
       ordersReadOnly: false,
+      deadlines: true,
+      deadlinesReadOnly: false,
+      deadlineWorker: true,
+      deadlineActions: true,
+      deadlineNotifications: true,
     });
   });
 });

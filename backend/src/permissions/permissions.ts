@@ -99,6 +99,15 @@ export const PERMISSIONS = [
   'vlm.configure',
   'vlm.health.view',
 
+  'deadlines.view',
+  'deadlines.manage',
+  'deadlines.override',
+  'deadlines.pause',
+  'deadlines.cancel',
+  'deadlines.actions.manage',
+  'deadlines.audit.view',
+  'deadlines.worker.manage',
+
   'settings.view',
   'settings.manage',
   'audit.view',
@@ -114,6 +123,7 @@ const ADMIN_SERVICE_EXCLUDED_PERMISSIONS = [
   'roles.manage',
   'permissions.manage',
   'system.superadmin',
+  'deadlines.worker.manage',
 ] as const satisfies PermissionName[];
 
 const adminServiceExcludedPermissions = new Set<PermissionName>(ADMIN_SERVICE_EXCLUDED_PERMISSIONS);
@@ -189,6 +199,11 @@ export const ROLE_PERMISSIONS = {
     'employees.view',
     'employees.manage',
 
+    'deadlines.view',
+    'deadlines.override',
+    'deadlines.pause',
+    'deadlines.audit.view',
+
     'vlm.use',
   ],
 
@@ -239,6 +254,10 @@ export const ROLE_PERMISSIONS = {
 
     'employees.view',
 
+    'deadlines.view',
+    'deadlines.override',
+    'deadlines.pause',
+
     'vlm.use',
   ],
 
@@ -281,6 +300,9 @@ export const ROLE_PERMISSIONS = {
 
     'employees.view',
 
+    'deadlines.view',
+    'deadlines.pause',
+
     'vlm.use',
   ],
 
@@ -306,6 +328,8 @@ export const ROLE_PERMISSIONS = {
     'doweling.view',
 
     'employees.view',
+
+    'deadlines.view',
   ],
 
   viewer: [
@@ -332,6 +356,8 @@ export const ROLE_PERMISSIONS = {
     'doweling.view',
 
     'employees.view',
+
+    'deadlines.view',
   ],
 } as const satisfies Record<UserRole, readonly PermissionName[]>;
 

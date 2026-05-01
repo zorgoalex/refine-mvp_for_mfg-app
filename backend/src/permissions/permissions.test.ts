@@ -44,6 +44,21 @@ describe('permissions foundation', () => {
     }
   });
 
+  it('assigns deadline permissions by role without giving worker controls to service admin', () => {
+    expect(can('superadmin', 'deadlines.worker.manage')).toBe(true);
+    expect(can('admin', 'deadlines.manage')).toBe(true);
+    expect(can('admin', 'deadlines.actions.manage')).toBe(true);
+    expect(can('admin', 'deadlines.worker.manage')).toBe(false);
+
+    expect(can('top_manager', 'deadlines.audit.view')).toBe(true);
+    expect(can('manager', 'deadlines.override')).toBe(true);
+    expect(can('operator', 'deadlines.pause')).toBe(true);
+    expect(can('operator', 'deadlines.override')).toBe(false);
+    expect(can('worker', 'deadlines.view')).toBe(true);
+    expect(can('worker', 'deadlines.pause')).toBe(false);
+    expect(can('viewer', 'deadlines.view')).toBe(true);
+  });
+
   it('sets legacy Hasura allowed roles with superadmin at the top', () => {
     expect(HASURA_ALLOWED_ROLES.superadmin).toEqual([
       'superadmin',

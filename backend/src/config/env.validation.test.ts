@@ -11,6 +11,14 @@ describe('backend env validation', () => {
       LOG_LEVEL: 'info',
       TRUST_PROXY: false,
       REQUEST_ID_HEADER: 'x-request-id',
+      BACKEND_ENABLE_DEADLINES: false,
+      BACKEND_DEADLINES_READ_ONLY: true,
+      BACKEND_ENABLE_DEADLINE_WORKER: false,
+      BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS: 60000,
+      BACKEND_DEADLINE_WORKER_BATCH_SIZE: 100,
+      BACKEND_DEADLINE_WORKER_ID: 'backend-local',
+      BACKEND_DEADLINE_ACTIONS_ENABLED: false,
+      BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: false,
     });
   });
 
@@ -22,6 +30,14 @@ describe('backend env validation', () => {
         FRONTEND_ORIGIN: 'http://localhost:5173',
         API_PREFIX: 'api/v2',
         TRUST_PROXY: 'true',
+        BACKEND_ENABLE_DEADLINES: 'true',
+        BACKEND_DEADLINES_READ_ONLY: 'false',
+        BACKEND_ENABLE_DEADLINE_WORKER: 'true',
+        BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS: '15000',
+        BACKEND_DEADLINE_WORKER_BATCH_SIZE: '25',
+        BACKEND_DEADLINE_WORKER_ID: 'worker-a',
+        BACKEND_DEADLINE_ACTIONS_ENABLED: 'true',
+        BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: 'true',
         VLM_MAX_UPLOAD_MB: '25',
         VLM_ALLOWED_MIME_TYPES: 'image/png,image/jpeg',
       }),
@@ -30,6 +46,14 @@ describe('backend env validation', () => {
       API_PREFIX: '/api/v2',
       PORT: 3100,
       TRUST_PROXY: true,
+      BACKEND_ENABLE_DEADLINES: true,
+      BACKEND_DEADLINES_READ_ONLY: false,
+      BACKEND_ENABLE_DEADLINE_WORKER: true,
+      BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS: 15000,
+      BACKEND_DEADLINE_WORKER_BATCH_SIZE: 25,
+      BACKEND_DEADLINE_WORKER_ID: 'worker-a',
+      BACKEND_DEADLINE_ACTIONS_ENABLED: true,
+      BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: true,
       VLM_MAX_UPLOAD_MB: 25,
       VLM_ALLOWED_MIME_TYPES: 'image/png,image/jpeg',
     });
@@ -69,5 +93,23 @@ describe('backend env validation', () => {
         VLM_ALLOWED_MIME_TYPES: '',
       }),
     ).toThrow(/VLM_ALLOWED_MIME_TYPES/);
+  });
+
+  it('rejects invalid deadline worker settings', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS: '0',
+      }),
+    ).toThrow(/BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS/);
+    expect(() =>
+      validateEnv({
+        BACKEND_DEADLINE_WORKER_BATCH_SIZE: '0',
+      }),
+    ).toThrow(/BACKEND_DEADLINE_WORKER_BATCH_SIZE/);
+    expect(() =>
+      validateEnv({
+        BACKEND_DEADLINE_WORKER_ID: '',
+      }),
+    ).toThrow(/BACKEND_DEADLINE_WORKER_ID/);
   });
 });
