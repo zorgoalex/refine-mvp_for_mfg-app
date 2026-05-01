@@ -1,0 +1,87 @@
+# ERP Backend Stage 1
+
+This directory is the starting point for the stage-1 backend migration described in
+`../spec_back-erp/prd_v1/prd_backend-erp.md`.
+
+Current implemented foundation:
+
+- schema pre-flight checks for `spec_erp/postgresql_schema_v_14.sql`;
+- read-only DB precheck SQL for DBeaver before any migration;
+- additive stage-1 migration draft, not applied to any shared DB;
+- NestJS runtime skeleton without DB connection;
+- env validation for runtime-only settings, CORS, readiness, Swagger, and feature flags;
+- `/health/live` live health contract;
+- `/health/ready` readiness contract with DB/Redis checks disabled unless explicitly required;
+- Swagger/OpenAPI at `/docs` and `/docs-json`;
+- Dockerfile and docker-compose skeleton;
+- requestId helper/middleware;
+- ApiError response contract and Nest exception filter;
+- log redaction utility for sensitive fields;
+- permissions runtime layer: `PermissionsService`, `RequirePermissions`, `PermissionsGuard`,
+  `CurrentUser` decorator, and `PermissionsModule`;
+- auth/session application layer without DB adapter or enabled HTTP cutover;
+- refresh token helper contract: opaque token generation, HMAC hash, HttpOnly cookie options;
+- auth HTTP shell without DB adapter or enabled cutover:
+  `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`,
+  and `GET /api/me` exist but fail closed while `BACKEND_ENABLE_AUTH=false`;
+  if the flag is forced on before DB adapters exist, unavailable auth ports return 503;
+- domain policies for orders, payments, and users;
+- OrdersModule domain core without DB adapter or enabled HTTP cutover:
+  `SaveOrderDto` types, normalization, validation, totals/payment-status calculations,
+  and `prepareOrderSave()`;
+- orders transaction application layer without DB adapter or enabled HTTP cutover:
+  transaction manager/unit-of-work ports, permission check, version conflict handling,
+  child ownership check hook, ordered child upsert/delete orchestration, audit hook,
+  and rollback-covered fake tests;
+- orders HTTP write shell without DB adapter or enabled cutover:
+  `POST /api/orders` and `PUT /api/orders/:orderId` controllers exist but fail closed
+  while `BACKEND_ENABLE_ORDERS=false` or `BACKEND_ORDERS_READ_ONLY=true`; if write flags
+  are forced on before DB adapter exists, the unavailable transaction manager returns 503;
+- Vitest coverage for schema blockers, env validation, health, ApiError, redaction,
+  prechecks, migrations, permissions, auth contracts, policies, and orders domain core.
+
+Local commands:
+
+```bash
+npm install
+npm run build
+npm run test
+npm run dev
+```
+
+Live health:
+
+```txt
+GET http://localhost:3000/health/live
+GET http://localhost:3000/health/ready
+GET http://localhost:3000/docs-json
+```
+
+Runtime env defaults are local-only:
+
+```env
+NODE_ENV=development
+PORT=3000
+FRONTEND_ORIGIN=http://localhost:5173
+LOG_LEVEL=info
+REQUEST_ID_HEADER=x-request-id
+SWAGGER_ENABLED=true
+READINESS_REQUIRE_DATABASE=false
+READINESS_REQUIRE_REDIS=false
+BACKEND_ENABLE_AUTH=false
+BACKEND_ENABLE_ORDERS=false
+BACKEND_ORDERS_READ_ONLY=true
+```
+
+Docker:
+
+```bash
+docker build -t erp-backend-stage1:test .
+docker compose up backend
+```
+
+Next implementation steps:
+
+1. Add read-only orders list/detail HTTP shell behind disabled feature flags if needed.
+2. Prepare frontend auth/httpClient tests and API wrappers without cutover.
+3. Add DB adapters only after a separate test DB is available.

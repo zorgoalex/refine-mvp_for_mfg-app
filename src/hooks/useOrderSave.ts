@@ -6,6 +6,9 @@ import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { notification, Modal } from 'antd';
 import { OrderFormValues } from '../types/orders';
 import { useOrderFormStore } from '../stores/orderFormStore';
+import { isApiError } from '../api/apiError';
+import { featureFlags } from '../config/featureFlags';
+import { saveOrderViaBackend } from './useOrderSaveBackend';
 
 interface UseOrderSaveResult {
   saveOrder: (values: OrderFormValues, isEdit: boolean) => Promise<number | null>;
@@ -45,6 +48,18 @@ export const useOrderSave = (): UseOrderSaveResult => {
     setError(null);
 
     try {
+      if (featureFlags.useBackendOrdersWrite) {
+        const savedOrderId = await saveOrderViaBackend(values, isEdit, { invalidate });
+
+        notification.success({
+          message: `Заказ успешно ${isEdit ? 'обновлен' : 'создан'}`,
+          description: `ID заказа: ${savedOrderId}`,
+        });
+
+        setIsSaving(false);
+        return savedOrderId;
+      }
+
       // ========== STEP 1: Save/Update orders (header) ==========
       if (isEdit && values.header.order_id) {
         // Update existing order
@@ -624,7 +639,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
       }
 
       // ========== HANDLE VERSION CONFLICT ==========
-      if (err.message === 'VERSION_CONFLICT') {
+      if (isApiError(err, 'ORDER_VERSION_CONFLICT') || err.message === 'VERSION_CONFLICT') {
         Modal.error({
           title: 'Конфликт версий',
           content:

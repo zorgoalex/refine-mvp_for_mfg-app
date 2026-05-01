@@ -1,0 +1,22 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      FRONTEND_ORIGIN: http://localhost:5173
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      CORS_ALLOW_CREDENTIALS: "true"
+      SWAGGER_ENABLED: "true"
+      READINESS_REQUIRE_DATABASE: "false"
+      READINESS_REQUIRE_REDIS: "false"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -25,7 +25,7 @@ export interface UserIdentity {
   id: string;
   username: string;
   role: string;
-  role_id?: number; // Опциональный ID роли (1=admin, 2=manager, 3=viewer)
+  role_id?: number; // Legacy DB role id: 2=superadmin, 1=admin, 10=manager, 11=operator, 15=top_manager, 20=worker, 100=viewer
 }
 
 /**

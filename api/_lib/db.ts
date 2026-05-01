@@ -1,3 +1,5 @@
+import { getAllowedRoles, mapRoleIdToSystemRole } from './roles';
+
 interface User {
   user_id: string;
   username: string;
@@ -68,31 +70,11 @@ export async function getUserByUsername(username: string): Promise<User | null> 
   const user = data.users[0];
   if (!user) return null;
 
-  // Маппинг role_id на системные роли Hasura (английские названия)
-  const roleIdMap: Record<number, string> = {
-    1: 'admin',
-    10: 'manager',
-    11: 'operator',
-    15: 'top_manager',
-    20: 'worker',
-    100: 'viewer',
-  };
-
-  // Маппинг системных ролей на allowed_roles (иерархия прав)
-  const roleHierarchy: Record<string, string[]> = {
-    admin: ['admin', 'manager', 'operator', 'top_manager', 'worker', 'viewer'],
-    manager: ['manager', 'operator', 'viewer'],
-    top_manager: ['top_manager', 'manager', 'operator', 'viewer'],
-    operator: ['operator', 'viewer'],
-    worker: ['worker', 'viewer'],
-    viewer: ['viewer'],
-  };
-
   // Определяем системную роль по ID
-  const systemRole = roleIdMap[user.role_id] || 'viewer';
+  const systemRole = mapRoleIdToSystemRole(user.role_id);
 
   // Определяем разрешенные роли
-  const allowedRoles = roleHierarchy[systemRole] || ['viewer'];
+  const allowedRoles = getAllowedRoles(systemRole);
 
   return {
     ...user,
@@ -128,21 +110,11 @@ export async function getUserById(userId: string): Promise<User | null> {
   const user = data.users[0];
   if (!user) return null;
 
-  // Маппинг ролей на allowed_roles
-  const roleMap: Record<string, string[]> = {
-    admin: ['admin', 'manager', 'operator', 'top_manager', 'worker', 'viewer'],
-    manager: ['manager', 'operator', 'viewer'],
-    top_manager: ['top_manager', 'manager', 'operator', 'viewer'],
-    operator: ['operator', 'viewer'],
-    worker: ['worker', 'viewer'],
-    viewer: ['viewer'],
-  };
-
   const roleName = user.role.role_name;
 
   return {
     ...user,
-    allowed_roles: roleMap[roleName] || ['viewer'],
+    allowed_roles: getAllowedRoles(roleName),
   };
 }
 

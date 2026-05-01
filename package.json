@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:backend": "vitest run backend",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },

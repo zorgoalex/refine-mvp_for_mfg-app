@@ -1,0 +1,70 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { exportApi, normalizeExportOrderRequest } from './exportApi';
+
+describe('exportApi', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_API_URL', '');
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('exports order to Google Drive endpoint with minimal backend payload', async () => {
+    const fetchMock = mockFetch({
+      success: true,
+      fileName: 'order_42.xlsx',
+      folder: null,
+      xlsxUrl: 'https://example.test/order_42.xlsx',
+    });
+
+    await expect(exportApi.exportOrderToGoogleDrive(42)).resolves.toMatchObject({
+      success: true,
+      fileName: 'order_42.xlsx',
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/orders/42/export/google-drive',
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+    expect(init?.body).toBe(JSON.stringify({ format: 'xlsx' }));
+    expect(init?.body).not.toContain('items');
+    expect(init?.body).not.toContain('payments');
+    expect(init?.body).not.toContain('clientPhone');
+  });
+
+  it('normalizes optional fileName and validates order id before fetch', async () => {
+    const fetchMock = mockFetch({ success: true, fileName: 'custom.xlsx' });
+
+    await exportApi.exportOrderToGoogleDrive(42, {
+      format: 'xlsx',
+      fileName: ' custom.xlsx ',
+    });
+
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ format: 'xlsx', fileName: 'custom.xlsx' }),
+    );
+    expect(() => exportApi.exportOrderToGoogleDrive(0)).toThrow('Invalid orderId');
+  });
+
+  it('normalizes default export request', () => {
+    expect(normalizeExportOrderRequest(undefined)).toEqual({ format: 'xlsx' });
+    expect(normalizeExportOrderRequest({ format: 'xlsx', fileName: ' ' })).toEqual({
+      format: 'xlsx',
+    });
+  });
+});
+
+function mockFetch(body: unknown) {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}

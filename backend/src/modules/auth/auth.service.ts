@@ -1,0 +1,86 @@
+import { getPermissionsForRole, mapRoleIdToRole } from '../../permissions/permissions';
+import type { CurrentUser } from '../../permissions/current-user';
+import { InvalidCredentialsError, UnknownRoleError, UserInactiveError } from './auth.errors';
+import type {
+  AccessTokenIssuerPort,
+  AuthResponse,
+  AuthUserRecord,
+  AuthUserRepositoryPort,
+  LoginCommand,
+  LoginResult,
+  PasswordVerifierPort,
+  SessionManagerPort,
+} from './auth.types';
+
+export interface AuthServicePorts {
+  users: AuthUserRepositoryPort;
+  passwords: PasswordVerifierPort;
+  sessions: SessionManagerPort;
+  tokens: AccessTokenIssuerPort;
+}
+
+export class AuthService {
+  constructor(private readonly ports: AuthServicePorts) {}
+
+  async login(command: LoginCommand): Promise<LoginResult> {
+    const username = command.username.trim();
+    const user = await this.ports.users.findByUsername(username);
+
+    if (!user) {
+      throw new InvalidCredentialsError();
+    }
+
+    const passwordValid = await this.ports.passwords.verify(command.password, user.passwordHash);
+
+    if (!passwordValid) {
+      throw new InvalidCredentialsError();
+    }
+
+    if (!user.isActive) {
+      throw new UserInactiveError();
+    }
+
+    const session = await this.ports.sessions.createLoginSession(user, {
+      userAgent: command.userAgent,
+      ipAddress: command.ipAddress,
+    });
+    const currentUser = this.toCurrentUser(user, session.sessionId);
+    const accessToken = await this.ports.tokens.issueAccessToken(currentUser);
+
+    return {
+      response: this.toAuthResponse(currentUser, accessToken),
+      refreshToken: session.refreshToken,
+      refreshTokenExpiresAt: session.refreshTokenExpiresAt,
+    };
+  }
+
+  private toCurrentUser(user: AuthUserRecord, sessionId: string): CurrentUser {
+    const role = mapRoleIdToRole(user.roleId);
+
+    if (!role) {
+      throw new UnknownRoleError(user.roleId);
+    }
+
+    return {
+      id: user.id,
+      username: user.username,
+      role,
+      roleId: user.roleId,
+      permissions: getPermissionsForRole(role),
+      sessionId,
+    };
+  }
+
+  private toAuthResponse(user: CurrentUser, accessToken: string): AuthResponse {
+    return {
+      accessToken,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        roleId: user.roleId,
+        permissions: user.permissions,
+      },
+    };
+  }
+}

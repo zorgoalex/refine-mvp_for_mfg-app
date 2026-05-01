@@ -1,0 +1,831 @@
+import { describe, expect, it } from 'vitest';
+import { ApiError } from '../../../common/errors/api-error';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { getPermissionsForRole, type UserRole } from '../../../permissions/permissions';
+import type { OrderDto } from '../dto/order.dto';
+import type {
+  CalculatedOrderDetailDto,
+  NormalizedSaveOrderDowelingLinkDto,
+  NormalizedSaveOrderHeaderDto,
+  NormalizedSaveOrderPaymentDto,
+  NormalizedSaveOrderRequirementDto,
+  NormalizedSaveOrderWorkshopDto,
+  OrderTotalsDto,
+  SaveOrderDto,
+} from '../dto/save-order.dto';
+import {
+  ChildEntityNotFoundError,
+  ChildEntityNotOwnedError,
+  OrderVersionConflictError,
+} from '../errors/order.errors';
+import type {
+  LockedOrderRow,
+  OrderChildReference,
+  OrderSaveAuditEvent,
+  OrderTransactionManagerPort,
+  OrderWriteUnitOfWork,
+} from './order-transaction.types';
+import { collectChildReferences, OrderTransactionService } from './order-transaction.service';
+
+interface FakeOrderRecord {
+  orderId: number;
+  header: NormalizedSaveOrderHeaderDto;
+  details: CalculatedOrderDetailDto[];
+  payments: NormalizedSaveOrderPaymentDto[];
+  workshops: NormalizedSaveOrderWorkshopDto[];
+  requirements: NormalizedSaveOrderRequirementDto[];
+  dowelingLinks: NormalizedSaveOrderDowelingLinkDto[];
+  totals: OrderTotalsDto;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface FakeState {
+  nextOrderId: number;
+  nextDetailId: number;
+  nextPaymentId: number;
+  nextWorkshopId: number;
+  nextRequirementId: number;
+  nextDowelingLinkId: number;
+  orders: Map<number, FakeOrderRecord>;
+  auditEvents: OrderSaveAuditEvent[];
+}
+
+class FakeOrderTransactions implements OrderTransactionManagerPort {
+  calls: string[] = [];
+  committed = 0;
+  rolledBack = 0;
+  failAt?: string;
+  state: FakeState = {
+    nextOrderId: 100,
+    nextDetailId: 1000,
+    nextPaymentId: 2000,
+    nextWorkshopId: 3000,
+    nextRequirementId: 4000,
+    nextDowelingLinkId: 5000,
+    orders: new Map(),
+    auditEvents: [],
+  };
+
+  async runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
+    this.calls.push('begin');
+    const working = cloneState(this.state);
+    const unitOfWork = new FakeUnitOfWork(this, working);
+
+    try {
+      const result = await handler(unitOfWork);
+      this.state = working;
+      this.committed += 1;
+      this.calls.push('commit');
+      return result;
+    } catch (error) {
+      this.rolledBack += 1;
+      this.calls.push('rollback');
+      throw error;
+    }
+  }
+
+  seedOrder(record: Partial<FakeOrderRecord> & { orderId: number; version: number }): void {
+    const header = createHeader({
+      orderId: record.orderId,
+      paymentStatusId: record.totals?.paymentStatusId ?? 1,
+    });
+    const totals = record.totals ?? createTotals();
+
+    this.state.orders.set(record.orderId, {
+      orderId: record.orderId,
+      header: record.header ?? header,
+      details: record.details ?? [],
+      payments: record.payments ?? [],
+      workshops: record.workshops ?? [],
+      requirements: record.requirements ?? [],
+      dowelingLinks: record.dowelingLinks ?? [],
+      totals,
+      version: record.version,
+      createdAt: record.createdAt ?? '2026-04-30T00:00:00.000Z',
+      updatedAt: record.updatedAt ?? '2026-04-30T00:00:00.000Z',
+    });
+  }
+}
+
+class FakeUnitOfWork implements OrderWriteUnitOfWork {
+  constructor(
+    private readonly owner: FakeOrderTransactions,
+    private readonly state: FakeState,
+  ) {}
+
+  async setSessionUser(): Promise<void> {
+    this.call('setSessionUser');
+  }
+
+  async loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null> {
+    this.call('loadOrderForUpdate');
+    const order = this.state.orders.get(orderId);
+    return order ? { orderId, version: order.version } : null;
+  }
+
+  async assertChildOwnership(orderId: number, refs: readonly OrderChildReference[]): Promise<void> {
+    this.call('assertChildOwnership');
+    const order = this.getOrder(orderId);
+
+    refs.forEach((ref) => {
+      const owned = getCollection(order, ref.entityType).some((row) => row.id === ref.id);
+
+      if (!owned) {
+        const existsInAnotherOrder = [...this.state.orders.values()].some(
+          (candidate) =>
+            candidate.orderId !== orderId &&
+            getCollection(candidate, ref.entityType).some((row) => row.id === ref.id),
+        );
+
+        if (existsInAnotherOrder) {
+          throw new ChildEntityNotOwnedError(ref.entityType, ref.id, orderId);
+        }
+
+        throw new ChildEntityNotFoundError(ref.entityType, ref.id);
+      }
+    });
+  }
+
+  async createOrderHeader(input: {
+    header: NormalizedSaveOrderHeaderDto;
+    totals: OrderTotalsDto;
+  }): Promise<number> {
+    this.call('createOrderHeader');
+    const orderId = this.state.nextOrderId++;
+    const now = '2026-04-30T00:00:00.000Z';
+
+    this.state.orders.set(orderId, {
+      orderId,
+      header: input.header,
+      details: [],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+      totals: input.totals,
+      version: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return orderId;
+  }
+
+  async updateOrderHeader(input: {
+    orderId: number;
+    header: NormalizedSaveOrderHeaderDto;
+    totals: OrderTotalsDto;
+  }): Promise<void> {
+    this.call('updateOrderHeader');
+    const order = this.getOrder(input.orderId);
+    order.header = input.header;
+    order.totals = input.totals;
+  }
+
+  async upsertDetails(orderId: number, details: readonly CalculatedOrderDetailDto[]): Promise<void> {
+    this.call('upsertDetails');
+    const order = this.getOrder(orderId);
+    order.details = upsertRows(order.details, details, () => this.state.nextDetailId++);
+  }
+
+  async deleteDetails(orderId: number, ids: readonly number[]): Promise<void> {
+    this.call('deleteDetails');
+    const order = this.getOrder(orderId);
+    order.details = order.details.filter((detail) => !ids.includes(detail.id as number));
+  }
+
+  async upsertPayments(orderId: number, payments: readonly NormalizedSaveOrderPaymentDto[]): Promise<void> {
+    this.call('upsertPayments');
+    const order = this.getOrder(orderId);
+    order.payments = upsertRows(order.payments, payments, () => this.state.nextPaymentId++);
+  }
+
+  async deletePayments(orderId: number, ids: readonly number[]): Promise<void> {
+    this.call('deletePayments');
+    const order = this.getOrder(orderId);
+    order.payments = order.payments.filter((payment) => !ids.includes(payment.id as number));
+  }
+
+  async upsertWorkshops(
+    orderId: number,
+    workshops: readonly NormalizedSaveOrderWorkshopDto[],
+  ): Promise<void> {
+    this.call('upsertWorkshops');
+    const order = this.getOrder(orderId);
+    order.workshops = upsertRows(order.workshops, workshops, () => this.state.nextWorkshopId++);
+  }
+
+  async deleteWorkshops(orderId: number, ids: readonly number[]): Promise<void> {
+    this.call('deleteWorkshops');
+    const order = this.getOrder(orderId);
+    order.workshops = order.workshops.filter((workshop) => !ids.includes(workshop.id as number));
+  }
+
+  async upsertRequirements(
+    orderId: number,
+    requirements: readonly NormalizedSaveOrderRequirementDto[],
+  ): Promise<void> {
+    this.call('upsertRequirements');
+    const order = this.getOrder(orderId);
+    order.requirements = upsertRows(order.requirements, requirements, () => this.state.nextRequirementId++);
+  }
+
+  async deleteRequirements(orderId: number, ids: readonly number[]): Promise<void> {
+    this.call('deleteRequirements');
+    const order = this.getOrder(orderId);
+    order.requirements = order.requirements.filter(
+      (requirement) => !ids.includes(requirement.id as number),
+    );
+  }
+
+  async upsertDowelingLinks(
+    orderId: number,
+    links: readonly NormalizedSaveOrderDowelingLinkDto[],
+  ): Promise<void> {
+    this.call('upsertDowelingLinks');
+    const order = this.getOrder(orderId);
+    order.dowelingLinks = upsertRows(order.dowelingLinks, links, () => this.state.nextDowelingLinkId++);
+  }
+
+  async deleteDowelingLinks(orderId: number, ids: readonly number[]): Promise<void> {
+    this.call('deleteDowelingLinks');
+    const order = this.getOrder(orderId);
+    order.dowelingLinks = order.dowelingLinks.filter((link) => !ids.includes(link.id as number));
+  }
+
+  async updateOrderTotalsAndVersion(input: {
+    orderId: number;
+    totals: OrderTotalsDto;
+    previousVersion: number | null;
+  }): Promise<number> {
+    this.call('updateOrderTotalsAndVersion');
+    const order = this.getOrder(input.orderId);
+    order.totals = input.totals;
+    order.version = input.previousVersion === null ? 1 : input.previousVersion + 1;
+    order.updatedAt = '2026-04-30T01:00:00.000Z';
+    return order.version;
+  }
+
+  async writeAuditEvent(event: OrderSaveAuditEvent): Promise<void> {
+    this.call('writeAuditEvent');
+    this.state.auditEvents.push(event);
+  }
+
+  async readOrder(orderId: number): Promise<OrderDto> {
+    this.call('readOrder');
+    return toOrderDto(this.getOrder(orderId));
+  }
+
+  private getOrder(orderId: number): FakeOrderRecord {
+    const order = this.state.orders.get(orderId);
+
+    if (!order) {
+      throw new Error(`Missing fake order ${orderId}`);
+    }
+
+    return order;
+  }
+
+  private call(name: string): void {
+    this.owner.calls.push(name);
+
+    if (this.owner.failAt === name) {
+      throw new Error(`Injected failure at ${name}`);
+    }
+  }
+}
+
+describe('OrderTransactionService', () => {
+  it('creates an order aggregate in the PRD transaction order and writes audit after totals', async () => {
+    const transactions = new FakeOrderTransactions();
+    const result = await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto(),
+    });
+
+    expect(result.header.orderId).toBe(100);
+    expect(result.details[0]).toMatchObject({
+      id: 1000,
+      clientKey: 'detail-temp-1',
+      area: 0.22,
+      detailCost: 10000,
+    });
+    expect(result.payments[0]).toMatchObject({
+      id: 2000,
+      clientKey: 'payment-temp-1',
+    });
+    expect(result.totals).toMatchObject({
+      totalAmount: 10000,
+      finalAmount: 9500,
+      paidAmount: 3000,
+      debtAmount: 6500,
+    });
+    expect(result.version).toBe(1);
+    expect(transactions.state.auditEvents).toEqual([
+      { action: 'orders.create', orderId: 100, actorUserId: 'user_manager' },
+    ]);
+    expect(transactions.calls).toEqual([
+      'begin',
+      'setSessionUser',
+      'createOrderHeader',
+      'upsertDetails',
+      'deleteDetails',
+      'upsertPayments',
+      'deletePayments',
+      'upsertWorkshops',
+      'deleteWorkshops',
+      'upsertRequirements',
+      'deleteRequirements',
+      'upsertDowelingLinks',
+      'deleteDowelingLinks',
+      'updateOrderTotalsAndVersion',
+      'writeAuditEvent',
+      'readOrder',
+      'commit',
+    ]);
+  });
+
+  it('updates an order after lock, version check and child ownership validation', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+      payments: [payment({ id: 21, amount: 1000 })],
+    });
+
+    const result = await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 7000,
+          },
+          {
+            clientKey: 'new-detail',
+            height: 1000,
+            width: 500,
+            quantity: 1,
+            materialId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 3000,
+          },
+        ],
+        payments: [],
+        deleted: {
+          paymentIds: [21],
+        },
+        version: 3,
+      }),
+    });
+
+    expect(result.version).toBe(4);
+    expect(result.details).toHaveLength(2);
+    expect(result.payments).toHaveLength(0);
+    expect(result.totals.totalAmount).toBe(10000);
+    expect(transactions.state.auditEvents).toEqual([
+      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager' },
+    ]);
+    expect(transactions.calls.slice(0, 6)).toEqual([
+      'begin',
+      'setSessionUser',
+      'loadOrderForUpdate',
+      'assertChildOwnership',
+      'updateOrderHeader',
+      'upsertDetails',
+    ]);
+  });
+
+  it('returns version conflict before child mutations and does not write audit', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({ orderId: 42, version: 2 });
+
+    await expect(
+      new OrderTransactionService({ transactions }).update({
+        currentUser: currentUser('manager'),
+        orderId: 42,
+        dto: createSaveDto({ version: 1 }),
+      }),
+    ).rejects.toBeInstanceOf(OrderVersionConflictError);
+
+    expect(transactions.rolledBack).toBe(1);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).toEqual([
+      'begin',
+      'setSessionUser',
+      'loadOrderForUpdate',
+      'rollback',
+    ]);
+  });
+
+  it('rejects users without orders.create permission before any write mutation', async () => {
+    const transactions = new FakeOrderTransactions();
+
+    await expect(
+      new OrderTransactionService({ transactions }).create({
+        currentUser: currentUser('viewer'),
+        dto: createSaveDto(),
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+    } satisfies Partial<ApiError>);
+
+    expect(transactions.state.orders.size).toBe(0);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'rollback']);
+  });
+
+  it('rolls back created header and skips success audit when a child write fails', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.failAt = 'upsertPayments';
+
+    await expect(
+      new OrderTransactionService({ transactions }).create({
+        currentUser: currentUser('manager'),
+        dto: createSaveDto(),
+      }),
+    ).rejects.toThrow('Injected failure at upsertPayments');
+
+    expect(transactions.state.orders.size).toBe(0);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).toEqual([
+      'begin',
+      'setSessionUser',
+      'createOrderHeader',
+      'upsertDetails',
+      'deleteDetails',
+      'upsertPayments',
+      'rollback',
+    ]);
+  });
+
+  it('collects active and deleted child ids for DB ownership checks', () => {
+    const refs = collectChildReferences({
+      ...createPreparedNormalizedOrder(),
+      details: [calculatedDetail({ id: 11 })],
+      payments: [payment({ id: 21 })],
+      workshops: [workshop({ id: 31 })],
+      requirements: [requirement({ id: 41 })],
+      dowelingLinks: [dowelingLink({ id: 51 })],
+      deleted: {
+        detailIds: [12],
+        paymentIds: [22],
+        workshopIds: [32],
+        requirementIds: [42],
+        dowelingLinkIds: [52],
+      },
+    });
+
+    expect(refs).toEqual([
+      { entityType: 'detail', id: 11 },
+      { entityType: 'detail', id: 12 },
+      { entityType: 'payment', id: 21 },
+      { entityType: 'payment', id: 22 },
+      { entityType: 'workshop', id: 31 },
+      { entityType: 'workshop', id: 32 },
+      { entityType: 'requirement', id: 41 },
+      { entityType: 'requirement', id: 42 },
+      { entityType: 'dowelingLink', id: 51 },
+      { entityType: 'dowelingLink', id: 52 },
+    ]);
+  });
+});
+
+function createSaveDto(overrides: Partial<SaveOrderDto> = {}): SaveOrderDto {
+  return {
+    header: {
+      orderName: 'Test order',
+      clientId: 1001,
+      orderDate: '2026-04-30',
+      orderStatusId: 1001,
+      discount: 500,
+      surcharge: 0,
+    },
+    details: [
+      {
+        clientKey: 'detail-temp-1',
+        height: 550,
+        width: 200,
+        quantity: 2,
+        materialId: 1001,
+        millingTypeId: 1001,
+        edgeTypeId: 1001,
+        detailCost: 10000,
+      },
+    ],
+    payments: [
+      {
+        clientKey: 'payment-temp-1',
+        typePaidId: 1001,
+        amount: 3000,
+        paymentDate: '2026-04-30',
+      },
+    ],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+    deleted: {},
+    ...overrides,
+  };
+}
+
+function currentUser(role: UserRole): CurrentUser {
+  return {
+    id: `user_${role}`,
+    username: role,
+    role,
+    roleId: 10,
+    permissions: getPermissionsForRole(role),
+  };
+}
+
+function createHeader(
+  overrides: Partial<NormalizedSaveOrderHeaderDto> = {},
+): NormalizedSaveOrderHeaderDto {
+  return {
+    orderName: 'Seed order',
+    clientId: 1001,
+    orderDate: '2026-04-30',
+    priority: 100,
+    orderStatusId: 1001,
+    paymentStatusId: 1,
+    productionStatusId: null,
+    productionStatusFromDetailsEnabled: true,
+    plannedCompletionDate: null,
+    completionDate: null,
+    issueDate: null,
+    paymentDate: null,
+    discount: 0,
+    surcharge: 0,
+    linkCuttingFile: null,
+    linkCuttingImageFile: null,
+    linkCadFile: null,
+    linkPdfFile: null,
+    notes: null,
+    refKey1c: null,
+    materialId: null,
+    millingTypeId: null,
+    edgeTypeId: null,
+    filmId: null,
+    ...overrides,
+  };
+}
+
+function createTotals(overrides: Partial<OrderTotalsDto> = {}): OrderTotalsDto {
+  return {
+    positionsCount: 0,
+    partsCount: 0,
+    totalArea: 0,
+    totalAmount: 0,
+    discount: 0,
+    surcharge: 0,
+    finalAmount: 0,
+    paidAmount: 0,
+    debtAmount: 0,
+    paymentDate: null,
+    paymentStatusId: 1,
+    ...overrides,
+  };
+}
+
+function calculatedDetail(
+  overrides: Partial<CalculatedOrderDetailDto & { id: number }> = {},
+): CalculatedOrderDetailDto & { id?: number } {
+  return {
+    detailNumber: 1,
+    detailName: null,
+    height: 550,
+    width: 200,
+    quantity: 2,
+    materialId: 1001,
+    millingTypeId: 1001,
+    edgeTypeId: 1001,
+    filmId: null,
+    area: 0.22,
+    millingCostPerSqm: null,
+    detailCost: 10000,
+    priority: 100,
+    productionStatusId: null,
+    jointOrderId: null,
+    note: null,
+    linkCuttingFile: null,
+    linkCuttingImageFile: null,
+    linkCadFile: null,
+    linkPdfFile: null,
+    refKey1c: null,
+    ...overrides,
+  };
+}
+
+function payment(
+  overrides: Partial<NormalizedSaveOrderPaymentDto & { id: number }> = {},
+): NormalizedSaveOrderPaymentDto & { id?: number } {
+  return {
+    typePaidId: 1001,
+    amount: 3000,
+    paymentDate: '2026-04-30',
+    notes: null,
+    refKey1c: null,
+    ...overrides,
+  };
+}
+
+function workshop(
+  overrides: Partial<NormalizedSaveOrderWorkshopDto & { id: number }> = {},
+): NormalizedSaveOrderWorkshopDto & { id?: number } {
+  return {
+    workshopId: 1001,
+    productionStatusId: 1001,
+    receivedDate: null,
+    startedDate: null,
+    completedDate: null,
+    plannedCompletionDate: null,
+    sequenceOrder: null,
+    responsibleEmployeeId: null,
+    notes: null,
+    refKey1c: null,
+    ...overrides,
+  };
+}
+
+function requirement(
+  overrides: Partial<NormalizedSaveOrderRequirementDto & { id: number }> = {},
+): NormalizedSaveOrderRequirementDto & { id?: number } {
+  return {
+    resourceType: 'material',
+    materialId: 1001,
+    filmId: null,
+    edgeTypeId: null,
+    requiredQuantity: 2,
+    unitId: 1001,
+    wastePercentage: null,
+    finalQuantity: null,
+    requirementStatusId: 1001,
+    supplierId: null,
+    purchasePrice: null,
+    requisitionId: null,
+    warehouseId: null,
+    reservedAt: null,
+    consumedAt: null,
+    notes: null,
+    calculationDetails: null,
+    refKey1c: null,
+    ...overrides,
+  };
+}
+
+function dowelingLink(
+  overrides: Partial<NormalizedSaveOrderDowelingLinkDto & { id: number }> = {},
+): NormalizedSaveOrderDowelingLinkDto & { id?: number } {
+  return {
+    dowelingOrderId: 1001,
+    designEngineerId: null,
+    refKey1c: null,
+    ...overrides,
+  };
+}
+
+function createPreparedNormalizedOrder() {
+  return {
+    header: createHeader(),
+    details: [],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+    deleted: {
+      detailIds: [],
+      paymentIds: [],
+      workshopIds: [],
+      requirementIds: [],
+      dowelingLinkIds: [],
+    },
+  };
+}
+
+function cloneState(state: FakeState): FakeState {
+  return {
+    ...state,
+    orders: new Map(
+      [...state.orders.entries()].map(([orderId, order]) => [
+        orderId,
+        {
+          ...order,
+          header: { ...order.header },
+          details: order.details.map((detail) => ({ ...detail })),
+          payments: order.payments.map((item) => ({ ...item })),
+          workshops: order.workshops.map((item) => ({ ...item })),
+          requirements: order.requirements.map((item) => ({ ...item })),
+          dowelingLinks: order.dowelingLinks.map((item) => ({ ...item })),
+          totals: { ...order.totals },
+        },
+      ]),
+    ),
+    auditEvents: state.auditEvents.map((event) => ({ ...event })),
+  };
+}
+
+function getCollection(
+  order: FakeOrderRecord,
+  entityType: OrderChildReference['entityType'],
+): Array<{ id?: number }> {
+  if (entityType === 'detail') return order.details;
+  if (entityType === 'payment') return order.payments;
+  if (entityType === 'workshop') return order.workshops;
+  if (entityType === 'requirement') return order.requirements;
+  return order.dowelingLinks;
+}
+
+function upsertRows<T extends { id?: number }>(
+  existing: T[],
+  incoming: readonly T[],
+  nextId: () => number,
+): T[] {
+  const rows = [...existing];
+
+  incoming.forEach((item) => {
+    const nextItem = { ...item, id: item.id ?? nextId() };
+    const index = rows.findIndex((row) => row.id === nextItem.id);
+
+    if (index >= 0) {
+      rows[index] = nextItem;
+      return;
+    }
+
+    rows.push(nextItem);
+  });
+
+  return rows;
+}
+
+function toOrderDto(order: FakeOrderRecord): OrderDto {
+  return {
+    header: {
+      ...order.header,
+      orderId: order.orderId,
+      paymentDate: order.totals.paymentDate,
+      paymentStatusId: order.totals.paymentStatusId,
+      totalAmount: order.totals.totalAmount,
+      finalAmount: order.totals.finalAmount,
+      paidAmount: order.totals.paidAmount,
+      partsCount: order.totals.partsCount,
+      totalArea: order.totals.totalArea,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      version: order.version,
+    },
+    details: order.details.map((detail) => ({ ...detail, id: detail.id as number, orderId: order.orderId })),
+    payments: order.payments.map((payment) => ({
+      ...payment,
+      id: payment.id as number,
+      orderId: order.orderId,
+    })),
+    workshops: order.workshops.map((workshopItem) => ({
+      ...workshopItem,
+      id: workshopItem.id as number,
+      orderId: order.orderId,
+    })),
+    requirements: order.requirements.map((requirementItem) => ({
+      ...requirementItem,
+      id: requirementItem.id as number,
+      orderId: order.orderId,
+    })),
+    dowelingLinks: order.dowelingLinks.map((link) => ({
+      ...link,
+      id: link.id as number,
+      orderId: order.orderId,
+    })),
+    totals: {
+      totalAmount: order.totals.totalAmount,
+      finalAmount: order.totals.finalAmount,
+      paidAmount: order.totals.paidAmount,
+      debtAmount: order.totals.debtAmount,
+      partsCount: order.totals.partsCount,
+      totalArea: order.totals.totalArea,
+    },
+    version: order.version,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+  };
+}

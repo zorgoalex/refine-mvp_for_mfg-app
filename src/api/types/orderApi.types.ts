@@ -1,0 +1,413 @@
+export type DateOnlyString = string;
+export type IsoDateTimeString = string;
+
+export interface SaveOrderDto {
+  header: SaveOrderHeaderDto;
+  details: SaveOrderDetailDto[];
+  payments: SaveOrderPaymentDto[];
+  workshops: SaveOrderWorkshopDto[];
+  requirements: SaveOrderRequirementDto[];
+  dowelingLinks: SaveOrderDowelingLinkDto[];
+  deleted: DeletedOrderChildrenDto;
+  version?: number;
+}
+
+export interface SaveOrderResponse {
+  order: OrderDto;
+}
+
+export interface OrderResponse {
+  order: OrderDto;
+}
+
+export interface OrderListResponse {
+  data: OrderListItemDto[];
+  pagination: Pagination;
+}
+
+export interface Pagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export type OrderSortBy =
+  | 'orderId'
+  | 'orderName'
+  | 'orderDate'
+  | 'plannedCompletionDate'
+  | 'completionDate'
+  | 'issueDate'
+  | 'clientName'
+  | 'orderStatusName'
+  | 'paymentStatusName'
+  | 'productionStatusName'
+  | 'finalAmount'
+  | 'paidAmount'
+  | 'debtAmount'
+  | 'updatedAt';
+
+export type SortOrder = 'asc' | 'desc';
+
+export interface OrderListQuery {
+  page?: number;
+  pageSize?: number;
+  sortBy?: OrderSortBy;
+  sortOrder?: SortOrder;
+  search?: string;
+  clientId?: number;
+  orderStatusId?: number;
+  paymentStatusId?: number;
+  productionStatusId?: number;
+  dateFrom?: DateOnlyString;
+  dateTo?: DateOnlyString;
+  onlyMyOrders?: boolean;
+}
+
+export interface ChangeOrderStatusRequest {
+  orderStatusId: number;
+  productionStatusId?: number | null;
+  version: number;
+}
+
+export interface DeleteOrderResponse {
+  orderId: number;
+  deleted: boolean;
+}
+
+export interface ExportOrderRequest {
+  format?: 'xlsx';
+  fileName?: string | null;
+}
+
+export interface ExportOrderResponse {
+  success: boolean;
+  fileName: string;
+  folder?: string | null;
+  xlsxUrl?: string | null;
+  externalId?: string | null;
+}
+
+export interface SaveOrderHeaderDto {
+  orderName: string;
+  clientId: number;
+  orderDate: DateOnlyString;
+  priority: number;
+
+  orderStatusId: number;
+  paymentStatusId?: number | null;
+  productionStatusId?: number | null;
+  productionStatusFromDetailsEnabled?: boolean;
+
+  plannedCompletionDate?: DateOnlyString | null;
+  completionDate?: DateOnlyString | null;
+  issueDate?: DateOnlyString | null;
+  paymentDate?: DateOnlyString | null;
+
+  discount: number;
+  surcharge: number;
+
+  managerId?: number | null;
+
+  materialId?: number | null;
+  millingTypeId?: number | null;
+  edgeTypeId?: number | null;
+  filmId?: number | null;
+
+  linkCuttingFile?: string | null;
+  linkCuttingImageFile?: string | null;
+  linkCadFile?: string | null;
+  linkPdfFile?: string | null;
+
+  notes?: string | null;
+  refKey1c?: string | null;
+}
+
+export interface SaveOrderDetailDto {
+  id?: number;
+  clientKey?: string;
+
+  detailNumber: number;
+  detailName?: string | null;
+
+  height: number;
+  width: number;
+  quantity: number;
+
+  materialId: number;
+  millingTypeId: number;
+  edgeTypeId: number;
+  filmId?: number | null;
+
+  millingCostPerSqm?: number | null;
+  detailCost: number;
+
+  note?: string | null;
+  priority: number;
+  productionStatusId?: number | null;
+  jointOrderId?: number | null;
+
+  linkCuttingFile?: string | null;
+  linkCuttingImageFile?: string | null;
+  linkCadFile?: string | null;
+  linkPdfFile?: string | null;
+
+  refKey1c?: string | null;
+}
+
+export interface SaveOrderPaymentDto {
+  id?: number;
+  clientKey?: string;
+
+  typePaidId: number;
+  amount: number;
+  paymentDate: DateOnlyString;
+  notes?: string | null;
+  refKey1c?: string | null;
+}
+
+export interface SaveOrderWorkshopDto {
+  id?: number;
+  clientKey?: string;
+
+  workshopId: number;
+  productionStatusId: number;
+
+  receivedDate?: DateOnlyString | null;
+  startedDate?: DateOnlyString | null;
+  completedDate?: DateOnlyString | null;
+  plannedCompletionDate?: DateOnlyString | null;
+
+  sequenceOrder?: number | null;
+  responsibleEmployeeId?: number | null;
+  notes?: string | null;
+  refKey1c?: string | null;
+}
+
+export interface SaveOrderRequirementDto {
+  id?: number;
+  clientKey?: string;
+
+  resourceType: 'material' | 'film' | 'edge' | string;
+
+  materialId?: number | null;
+  filmId?: number | null;
+  edgeTypeId?: number | null;
+
+  requiredQuantity: number;
+  unitId: number;
+  wastePercentage?: number | null;
+  finalQuantity?: number | null;
+
+  requirementStatusId: number;
+  supplierId?: number | null;
+  purchasePrice?: number | null;
+
+  requisitionId?: number | null;
+  warehouseId?: number | null;
+
+  reservedAt?: IsoDateTimeString | null;
+  consumedAt?: IsoDateTimeString | null;
+
+  notes?: string | null;
+  calculationDetails?: string | null;
+  refKey1c?: string | null;
+}
+
+export interface SaveOrderDowelingLinkDto {
+  id?: number;
+  clientKey?: string;
+
+  dowelingOrderId: number;
+  designEngineerId?: number | null;
+  refKey1c?: string | null;
+}
+
+export interface DeletedOrderChildrenDto {
+  detailIds: number[];
+  paymentIds: number[];
+  workshopIds: number[];
+  requirementIds: number[];
+  dowelingLinkIds: number[];
+}
+
+export interface OrderDto {
+  header: OrderHeaderDto;
+  details: OrderDetailDto[];
+  payments: PaymentDto[];
+  workshops: OrderWorkshopDto[];
+  requirements: OrderResourceRequirementDto[];
+  dowelingLinks: OrderDowelingLinkDto[];
+  totals: OrderTotalsDto;
+  version: number;
+}
+
+export interface OrderHeaderDto {
+  orderId: number;
+  orderName: string;
+  clientId: number;
+  clientName?: string | null;
+  orderDate: DateOnlyString;
+  managerId?: number | null;
+  priority?: number | null;
+  orderStatusId: number;
+  paymentStatusId?: number | null;
+  productionStatusId?: number | null;
+  productionStatusFromDetailsEnabled?: boolean | null;
+  plannedCompletionDate?: DateOnlyString | null;
+  completionDate?: DateOnlyString | null;
+  issueDate?: DateOnlyString | null;
+  paymentDate?: DateOnlyString | null;
+  discount?: number | null;
+  surcharge?: number | null;
+  materialId?: number | null;
+  millingTypeId?: number | null;
+  edgeTypeId?: number | null;
+  filmId?: number | null;
+  linkCuttingFile?: string | null;
+  linkCuttingImageFile?: string | null;
+  linkCadFile?: string | null;
+  linkPdfFile?: string | null;
+  notes?: string | null;
+  refKey1c?: string | null;
+  createdAt?: IsoDateTimeString | null;
+  updatedAt?: IsoDateTimeString | null;
+  version?: number;
+}
+
+export interface OrderDetailDto {
+  id: number;
+  clientKey?: string | null;
+  orderId?: number | null;
+  detailNumber: number;
+  detailName?: string | null;
+  height: number;
+  width: number;
+  quantity: number;
+  area?: number | null;
+  materialId: number;
+  millingTypeId: number;
+  edgeTypeId: number;
+  filmId?: number | null;
+  millingCostPerSqm?: number | null;
+  detailCost: number;
+  priority?: number | null;
+  productionStatusId?: number | null;
+  jointOrderId?: number | null;
+  note?: string | null;
+  linkCuttingFile?: string | null;
+  linkCuttingImageFile?: string | null;
+  linkCadFile?: string | null;
+  linkPdfFile?: string | null;
+  refKey1c?: string | null;
+}
+
+export interface PaymentDto {
+  id: number;
+  clientKey?: string | null;
+  orderId?: number | null;
+  typePaidId: number;
+  typePaidName?: string | null;
+  amount: number;
+  paymentDate: DateOnlyString;
+  notes?: string | null;
+  refKey1c?: string | null;
+}
+
+export interface OrderWorkshopDto {
+  id: number;
+  clientKey?: string | null;
+  orderId?: number | null;
+  workshopId: number;
+  workshopName?: string | null;
+  productionStatusId: number;
+  receivedDate?: DateOnlyString | null;
+  startedDate?: DateOnlyString | null;
+  completedDate?: DateOnlyString | null;
+  plannedCompletionDate?: DateOnlyString | null;
+  sequenceOrder?: number | null;
+  responsibleEmployeeId?: number | null;
+  notes?: string | null;
+  refKey1c?: string | null;
+}
+
+export interface OrderResourceRequirementDto {
+  id: number;
+  clientKey?: string | null;
+  orderId?: number | null;
+  resourceType: 'material' | 'film' | 'edge' | string;
+  materialId?: number | null;
+  filmId?: number | null;
+  edgeTypeId?: number | null;
+  requiredQuantity: number;
+  unitId: number;
+  wastePercentage?: number | null;
+  finalQuantity?: number | null;
+  requirementStatusId: number;
+  supplierId?: number | null;
+  purchasePrice?: number | null;
+  requisitionId?: number | null;
+  warehouseId?: number | null;
+  reservedAt?: IsoDateTimeString | null;
+  consumedAt?: IsoDateTimeString | null;
+  notes?: string | null;
+  calculationDetails?: string | null;
+  refKey1c?: string | null;
+}
+
+export interface OrderDowelingLinkDto {
+  id: number;
+  clientKey?: string | null;
+  orderId?: number | null;
+  dowelingOrderId: number;
+  designEngineerId?: number | null;
+  designEngineerName?: string | null;
+  refKey1c?: string | null;
+  dowelingOrder?: {
+    id?: number | null;
+    name?: string | null;
+    designEngineerId?: number | null;
+    designEngineerName?: string | null;
+  } | null;
+}
+
+export interface OrderTotalsDto {
+  totalAmount: number;
+  discount?: number;
+  surcharge?: number;
+  finalAmount: number;
+  paidAmount: number;
+  debtAmount: number;
+  partsCount: number;
+  totalArea: number;
+}
+
+export interface OrderListItemDto {
+  orderId: number;
+  orderName: string;
+  clientId: number;
+  clientName?: string | null;
+  orderDate: DateOnlyString;
+  plannedCompletionDate?: DateOnlyString | null;
+  completionDate?: DateOnlyString | null;
+  issueDate?: DateOnlyString | null;
+  orderStatusId: number;
+  orderStatusName?: string | null;
+  paymentStatusId?: number | null;
+  paymentStatusName?: string | null;
+  productionStatusId?: number | null;
+  productionStatusName?: string | null;
+  totalAmount?: number | null;
+  discount?: number | null;
+  surcharge?: number | null;
+  finalAmount?: number | null;
+  paidAmount?: number | null;
+  debtAmount?: number | null;
+  partsCount?: number | null;
+  totalArea?: number | null;
+  managerId?: number | null;
+  priority?: number | null;
+  updatedAt?: IsoDateTimeString;
+  version?: number;
+}
