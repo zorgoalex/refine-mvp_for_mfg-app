@@ -70,7 +70,7 @@ describe('AuthController HTTP shell', () => {
           httpOnly: true,
           secure: false,
           sameSite: 'lax',
-          path: '/api/auth',
+          path: '/api/v1/auth',
           maxAge: 604800000,
         },
       },
@@ -109,7 +109,7 @@ describe('AuthController HTTP shell', () => {
       value: 'refresh_token_secret',
       options: {
         httpOnly: true,
-        path: '/api/auth',
+        path: '/api/v1/auth',
       },
     });
   });
@@ -136,14 +136,14 @@ describe('AuthController HTTP shell', () => {
           httpOnly: true,
           secure: false,
           sameSite: 'lax',
-          path: '/api/auth',
+          path: '/api/v1/auth',
           maxAge: 0,
         },
       },
     ]);
   });
 
-  it('requires current user for /api/me and returns permissions without tokens', () => {
+  it('requires current user for /api/v1/me and returns permissions without tokens', () => {
     const context = createController({ authEnabled: true });
 
     expect(() => context.controller.me(createRequest())).toThrow(ApiError);
@@ -193,6 +193,7 @@ function createController(options: { authEnabled: boolean; nodeEnv?: string }) {
     getFeatureFlags() {
       return {
         authEnabled: options.authEnabled,
+        apiPrefix: '/api/v1',
         nodeEnv: options.nodeEnv ?? 'development',
         refreshTokenTtlDays: 7,
       };

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_API_PREFIX, isVersionedApiPrefix, normalizeApiPrefix } from './api-prefix';
 
 const booleanFromEnv = z
   .union([z.boolean(), z.string()])
@@ -16,7 +17,12 @@ const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
     APP_NAME: z.string().trim().min(1).default('erp-backend'),
-    API_PREFIX: z.string().trim().default('/api'),
+    API_PREFIX: z
+      .string()
+      .trim()
+      .default(DEFAULT_API_PREFIX)
+      .transform(normalizeApiPrefix)
+      .refine(isVersionedApiPrefix, 'API_PREFIX must use /api/vN format'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     FRONTEND_ORIGIN: z.string().url().optional(),
     CORS_ALLOWED_ORIGINS: z.string().trim().optional(),

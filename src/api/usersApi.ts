@@ -1,3 +1,4 @@
+import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
@@ -13,20 +14,25 @@ import type {
 
 export const usersApi = {
   list(params: UserListQuery = {}): Promise<UserListResponse> {
-    return httpClient.get<UserListResponse>(withQuery('/api/users', params));
+    return httpClient.get<UserListResponse>(withQuery(apiRoutes.users.list, params));
   },
 
   async getById(userId: number): Promise<UserDto> {
-    const response = await httpClient.get<UserResponse>(`/api/users/${validateUserId(userId)}`);
+    const response = await httpClient.get<UserResponse>(
+      apiRoutes.users.byId(validateUserId(userId)),
+    );
     return response.user;
   },
 
   create(request: CreateUserRequest): Promise<UserResponse> {
-    return httpClient.post<UserResponse>('/api/users', request);
+    return httpClient.post<UserResponse>(apiRoutes.users.list, request);
   },
 
   update(userId: number, request: UpdateUserRequest): Promise<UserResponse> {
-    return httpClient.patch<UserResponse>(`/api/users/${validateUserId(userId)}`, request);
+    return httpClient.patch<UserResponse>(
+      apiRoutes.users.byId(validateUserId(userId)),
+      request,
+    );
   },
 
   changePassword(
@@ -34,17 +40,17 @@ export const usersApi = {
     request: ChangePasswordRequest,
   ): Promise<ChangePasswordResponse> {
     return httpClient.post<ChangePasswordResponse>(
-      `/api/users/${validateUserId(userId)}/change-password`,
+      apiRoutes.users.changePassword(validateUserId(userId)),
       request,
     );
   },
 
   deactivate(userId: number): Promise<UserResponse> {
-    return httpClient.patch<UserResponse>(`/api/users/${validateUserId(userId)}/deactivate`);
+    return httpClient.patch<UserResponse>(apiRoutes.users.deactivate(validateUserId(userId)));
   },
 
   activate(userId: number): Promise<UserResponse> {
-    return httpClient.patch<UserResponse>(`/api/users/${validateUserId(userId)}/activate`);
+    return httpClient.patch<UserResponse>(apiRoutes.users.activate(validateUserId(userId)));
   },
 };
 

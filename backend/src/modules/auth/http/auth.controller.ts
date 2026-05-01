@@ -18,7 +18,7 @@ export interface MeResponse {
   user: AuthResponse['user'];
 }
 
-@Controller('api')
+@Controller()
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
@@ -116,6 +116,7 @@ export class AuthController {
   private setRefreshCookie(response: Response, refreshToken: string): void {
     const flags = this.runtimeConfig.getFeatureFlags();
     const cookie = createRefreshCookie(refreshToken, {
+      apiPrefix: flags.apiPrefix,
       nodeEnv: flags.nodeEnv,
       ttlDays: flags.refreshTokenTtlDays,
     });
@@ -124,7 +125,8 @@ export class AuthController {
   }
 
   private clearRefreshCookie(response: Response): void {
-    const cookie = createClearRefreshCookie(this.runtimeConfig.getFeatureFlags().nodeEnv);
+    const flags = this.runtimeConfig.getFeatureFlags();
+    const cookie = createClearRefreshCookie(flags.nodeEnv, flags.apiPrefix);
 
     response.cookie(cookie.name, cookie.value, cookie.options);
   }

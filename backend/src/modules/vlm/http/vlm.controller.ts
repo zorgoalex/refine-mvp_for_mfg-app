@@ -32,7 +32,7 @@ const analyzeRequestSchema = z
     message: 'Exactly one of uploadId or imageUrl must be provided',
   });
 
-@Controller('api/vlm')
+@Controller('vlm')
 export class VlmController {
   constructor(
     private readonly vlm: VlmService,

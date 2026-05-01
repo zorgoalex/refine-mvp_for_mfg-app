@@ -23,11 +23,11 @@ describe('httpClient', () => {
     );
     authSession.setAccessToken('access-token');
 
-    await httpClient.get('/api/orders');
+    await httpClient.get('/api/v1/orders');
 
     const [, init] = fetchMock.mock.calls[0];
     const headers = init?.headers as Headers;
-    expect(fetchMock).toHaveBeenCalledWith('/api/orders', expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/orders', expect.any(Object));
     expect(init?.credentials).toBe('include');
     expect(headers.get('Authorization')).toBe('Bearer access-token');
   });
@@ -35,7 +35,7 @@ describe('httpClient', () => {
   it('serializes JSON POST body', async () => {
     const fetchMock = mockFetch(jsonResponse(201, { ok: true }));
 
-    await httpClient.post('/api/orders', { orderName: 'A' });
+    await httpClient.post('/api/v1/orders', { orderName: 'A' });
 
     const [, init] = fetchMock.mock.calls[0];
     const headers = init?.headers as Headers;
@@ -50,7 +50,7 @@ describe('httpClient', () => {
     const formData = new FormData();
     formData.append('file', new Blob(['x']), 'file.txt');
 
-    await httpClient.post('/api/vlm/upload', formData);
+    await httpClient.post('/api/v1/vlm/upload', formData);
 
     const [, init] = fetchMock.mock.calls[0];
     const headers = init?.headers as Headers;
@@ -60,7 +60,7 @@ describe('httpClient', () => {
 
   it('refreshes access token once and retries original request', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/auth/refresh') {
+      if (url === '/api/v1/auth/refresh') {
         return jsonResponse(200, {
           accessToken: 'new-token',
           user: { id: '1', username: 'admin', role: 'superadmin' },
@@ -81,21 +81,21 @@ describe('httpClient', () => {
     vi.stubGlobal('fetch', fetchMock);
     authSession.setAccessToken('old-token');
 
-    const result = await httpClient.get<{ ok: boolean }>('/api/orders');
+    const result = await httpClient.get<{ ok: boolean }>('/api/v1/orders');
 
     expect(result).toEqual({ ok: true });
     expect(authSession.getAccessToken()).toBe('new-token');
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      '/api/orders',
-      '/api/auth/refresh',
-      '/api/orders',
+      '/api/v1/orders',
+      '/api/v1/auth/refresh',
+      '/api/v1/orders',
     ]);
   });
 
   it('clears session and throws ApiError when refresh fails', async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === '/api/auth/refresh') {
+      if (url === '/api/v1/auth/refresh') {
         return jsonResponse(
           401,
           { error: { code: 'AUTH_REQUIRED', message: 'Refresh expired' } },
@@ -113,7 +113,7 @@ describe('httpClient', () => {
     authSession.setAccessToken('old-token');
     authSession.setUser({ id: '1', username: 'admin', role: 'superadmin' });
 
-    await expect(httpClient.get('/api/orders')).rejects.toMatchObject({
+    await expect(httpClient.get('/api/v1/orders')).rejects.toMatchObject({
       code: 'AUTH_REQUIRED',
       status: 401,
       requestId: 'req-1',
@@ -140,7 +140,7 @@ describe('httpClient', () => {
 
     let error: unknown;
     try {
-      await httpClient.put('/api/orders/1', { version: 3 });
+      await httpClient.put('/api/v1/orders/1', { version: 3 });
     } catch (caught) {
       error = caught;
     }
@@ -158,7 +158,7 @@ describe('httpClient', () => {
   it('shares one refresh request for parallel 401 responses', async () => {
     let refreshCalls = 0;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/auth/refresh') {
+      if (url === '/api/v1/auth/refresh') {
         refreshCalls += 1;
         await Promise.resolve();
         return jsonResponse(200, { accessToken: 'new-token' });
@@ -179,12 +179,12 @@ describe('httpClient', () => {
     authSession.setAccessToken('old-token');
 
     const [first, second] = await Promise.all([
-      httpClient.get('/api/orders/1'),
-      httpClient.get('/api/orders/2'),
+      httpClient.get('/api/v1/orders/1'),
+      httpClient.get('/api/v1/orders/2'),
     ]);
 
-    expect(first).toEqual({ url: '/api/orders/1' });
-    expect(second).toEqual({ url: '/api/orders/2' });
+    expect(first).toEqual({ url: '/api/v1/orders/1' });
+    expect(second).toEqual({ url: '/api/v1/orders/2' });
     expect(refreshCalls).toBe(1);
   });
 });

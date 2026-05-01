@@ -1,10 +1,12 @@
+import { DEFAULT_API_PREFIX, getAuthCookiePath } from '../../config/api-prefix';
+
 export const REFRESH_COOKIE_NAME = 'erp_refresh_token';
 
 export interface RefreshCookieOptions {
   httpOnly: true;
   secure: boolean;
   sameSite: 'lax' | 'strict';
-  path: '/api/auth';
+  path: string;
   maxAge?: number;
 }
 
@@ -19,6 +21,7 @@ export function createRefreshCookie(
   options: {
     nodeEnv: string;
     ttlDays: number;
+    apiPrefix?: string;
     sameSite?: 'lax' | 'strict';
   },
 ): RefreshCookie {
@@ -29,13 +32,13 @@ export function createRefreshCookie(
       httpOnly: true,
       secure: options.nodeEnv === 'production',
       sameSite: options.sameSite ?? 'lax',
-      path: '/api/auth',
+      path: getAuthCookiePath(options.apiPrefix ?? DEFAULT_API_PREFIX),
       maxAge: options.ttlDays * 24 * 60 * 60 * 1000,
     },
   };
 }
 
-export function createClearRefreshCookie(nodeEnv: string): RefreshCookie {
+export function createClearRefreshCookie(nodeEnv: string, apiPrefix = DEFAULT_API_PREFIX): RefreshCookie {
   return {
     name: REFRESH_COOKIE_NAME,
     value: '',
@@ -43,7 +46,7 @@ export function createClearRefreshCookie(nodeEnv: string): RefreshCookie {
       httpOnly: true,
       secure: nodeEnv === 'production',
       sameSite: 'lax',
-      path: '/api/auth',
+      path: getAuthCookiePath(apiPrefix),
       maxAge: 0,
     },
   };

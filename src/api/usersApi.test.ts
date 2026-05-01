@@ -28,7 +28,7 @@ describe('usersApi', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/users?page=2&pageSize=20&search=admin&role=admin&isActive=true',
+      '/api/v1/users?page=2&pageSize=20&search=admin&role=admin&isActive=true',
       expect.objectContaining({ method: 'GET' }),
     );
   });
@@ -38,11 +38,11 @@ describe('usersApi', () => {
     const fetchMock = mockFetch({ user });
 
     await expect(usersApi.getById(10)).resolves.toEqual(user);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/users/10');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/users/10');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
   });
 
-  it('creates user via POST /api/users with canonical role name only', async () => {
+  it('creates user via POST /api/v1/users with canonical role name only', async () => {
     const user = createUserDto({ role: 'manager' });
     const fetchMock = mockFetch({ user });
 
@@ -54,7 +54,7 @@ describe('usersApi', () => {
     });
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/users');
+    expect(url).toBe('/api/v1/users');
     expect(url).not.toBe('/api/users/create');
     expect(init?.method).toBe('POST');
     expect(init?.body).toBe(
@@ -78,9 +78,9 @@ describe('usersApi', () => {
       revokeExistingSessions: true,
     });
 
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/users/11');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/users/11');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/users/11/change-password');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/users/11/change-password');
     expect(fetchMock.mock.calls[1][0]).not.toBe('/api/users/change-password');
     expect(fetchMock.mock.calls[1][1]?.method).toBe('POST');
     expect(fetchMock.mock.calls[1][1]?.body).toBe(
@@ -100,9 +100,9 @@ describe('usersApi', () => {
     await usersApi.deactivate(11);
     await usersApi.activate(11);
 
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/users/11/deactivate');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/users/11/deactivate');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/users/11/activate');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/users/11/activate');
     expect(fetchMock.mock.calls[1][1]?.method).toBe('PATCH');
   });
 

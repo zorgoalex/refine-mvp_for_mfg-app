@@ -47,7 +47,7 @@ const changePasswordRequestSchema = z.object({
   revokeExistingSessions: z.boolean().default(true),
 });
 
-@Controller('api/users')
+@Controller('users')
 export class UsersController {
   constructor(
     private readonly users: UserService,

@@ -10,7 +10,7 @@ import type {
 import { parseOrderId } from './orders.controller';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
-@Controller('api/orders')
+@Controller('orders')
 export class OrderExportController {
   constructor(
     private readonly exports: OrderExportService,
