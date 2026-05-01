@@ -1,3 +1,4 @@
+import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import type {
   VlmAnalyzeRequest,
@@ -8,7 +9,7 @@ import type {
 
 export const vlmApi = {
   health(): Promise<VlmHealthResponse> {
-    return httpClient.get<VlmHealthResponse>('/api/vlm/health');
+    return httpClient.get<VlmHealthResponse>(apiRoutes.vlm.health);
   },
 
   upload(file: File | Blob, purpose: 'vlm' | 'order_file' = 'vlm'): Promise<VlmUploadResponse> {
@@ -16,11 +17,14 @@ export const vlmApi = {
     formData.append('file', file);
     formData.append('purpose', purpose);
 
-    return httpClient.post<VlmUploadResponse>('/api/vlm/upload', formData);
+    return httpClient.post<VlmUploadResponse>(apiRoutes.vlm.upload, formData);
   },
 
   analyze(request: VlmAnalyzeRequest): Promise<VlmAnalyzeResponse> {
-    return httpClient.post<VlmAnalyzeResponse>('/api/vlm/analyze', normalizeVlmAnalyzeRequest(request));
+    return httpClient.post<VlmAnalyzeResponse>(
+      apiRoutes.vlm.analyze,
+      normalizeVlmAnalyzeRequest(request),
+    );
   },
 };
 

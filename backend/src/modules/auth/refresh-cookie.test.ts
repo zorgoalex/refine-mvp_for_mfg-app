@@ -15,7 +15,7 @@ describe('refresh cookie contract', () => {
         httpOnly: true,
         secure: false,
         sameSite: 'lax',
-        path: '/api/auth',
+        path: '/api/v1/auth',
         maxAge: 604800000,
       },
     });
@@ -38,7 +38,7 @@ describe('refresh cookie contract', () => {
         httpOnly: true,
         secure: true,
         sameSite: 'lax',
-        path: '/api/auth',
+        path: '/api/v1/auth',
         maxAge: 0,
       },
     });

@@ -1,3 +1,4 @@
+import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import type {
   ChangeOrderStatusRequest,
@@ -12,20 +13,25 @@ import type {
 
 export const ordersApi = {
   list(params: OrderListQuery = {}): Promise<OrderListResponse> {
-    return httpClient.get<OrderListResponse>(withQuery('/api/orders', params));
+    return httpClient.get<OrderListResponse>(withQuery(apiRoutes.orders.list, params));
   },
 
   async getById(orderId: number): Promise<OrderDto> {
-    const response = await httpClient.get<OrderResponse>(`/api/orders/${validateOrderId(orderId)}`);
+    const response = await httpClient.get<OrderResponse>(
+      apiRoutes.orders.byId(validateOrderId(orderId)),
+    );
     return response.order;
   },
 
   create(dto: SaveOrderDto): Promise<SaveOrderResponse> {
-    return httpClient.post<SaveOrderResponse>('/api/orders', dto);
+    return httpClient.post<SaveOrderResponse>(apiRoutes.orders.list, dto);
   },
 
   update(orderId: number, dto: SaveOrderDto): Promise<SaveOrderResponse> {
-    return httpClient.put<SaveOrderResponse>(`/api/orders/${validateOrderId(orderId)}`, dto);
+    return httpClient.put<SaveOrderResponse>(
+      apiRoutes.orders.byId(validateOrderId(orderId)),
+      dto,
+    );
   },
 
   changeStatus(
@@ -33,13 +39,15 @@ export const ordersApi = {
     request: ChangeOrderStatusRequest,
   ): Promise<OrderResponse> {
     return httpClient.patch<OrderResponse>(
-      `/api/orders/${validateOrderId(orderId)}/status`,
+      apiRoutes.orders.status(validateOrderId(orderId)),
       request,
     );
   },
 
   delete(orderId: number): Promise<DeleteOrderResponse> {
-    return httpClient.delete<DeleteOrderResponse>(`/api/orders/${validateOrderId(orderId)}`);
+    return httpClient.delete<DeleteOrderResponse>(
+      apiRoutes.orders.byId(validateOrderId(orderId)),
+    );
   },
 };
 

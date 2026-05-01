@@ -20,7 +20,7 @@ describe('vlmApi', () => {
 
     await expect(vlmApi.health()).resolves.toEqual({ status: 'ok', detailsVisible: true });
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/vlm/health',
+      '/api/v1/vlm/health',
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
     );
   });
@@ -41,7 +41,7 @@ describe('vlmApi', () => {
 
     const [, init] = fetchMock.mock.calls[0];
     const headers = init?.headers as Headers;
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/vlm/upload');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/vlm/upload');
     expect(init?.method).toBe('POST');
     expect(init?.body).toBeInstanceOf(FormData);
     expect(headers.get('Content-Type')).toBeNull();
@@ -64,7 +64,7 @@ describe('vlmApi', () => {
     });
 
     const [, init] = fetchMock.mock.calls[0];
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/vlm/analyze');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/vlm/analyze');
     expect(init?.method).toBe('POST');
     expect(init?.body).toBe(
       JSON.stringify({

@@ -27,7 +27,7 @@ describe('exportApi', () => {
 
     const [, init] = fetchMock.mock.calls[0];
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/orders/42/export/google-drive',
+      '/api/v1/orders/42/export/google-drive',
       expect.objectContaining({ method: 'POST', credentials: 'include' }),
     );
     expect(init?.body).toBe(JSON.stringify({ format: 'xlsx' }));

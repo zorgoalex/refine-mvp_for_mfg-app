@@ -17,7 +17,7 @@ export interface SaveOrderResponseDto {
   order: OrderDto;
 }
 
-@Controller('api/orders')
+@Controller('orders')
 export class OrdersController {
   constructor(
     private readonly orders: OrderTransactionService,

@@ -1,4 +1,5 @@
 import { ApiError, createApiErrorFromBody, type BackendErrorBody } from './apiError';
+import { apiRoutes } from './apiRoutes';
 import { authSession } from './authSession';
 
 export interface RequestOptions extends RequestInit {
@@ -24,7 +25,7 @@ export function buildApiUrl(path: string): string {
 
 async function refreshAccessToken(): Promise<string | null> {
   if (!refreshPromise) {
-    refreshPromise = fetch(buildApiUrl('/api/auth/refresh'), {
+    refreshPromise = fetch(buildApiUrl(apiRoutes.auth.refresh), {
       method: 'POST',
       credentials: 'include',
       headers: {

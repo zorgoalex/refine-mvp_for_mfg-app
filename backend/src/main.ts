@@ -1,9 +1,11 @@
 import 'reflect-metadata';
+import { RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ApiErrorFilter } from './common/errors/api-error.filter';
 import { createRequestIdMiddleware } from './common/request-id/request-id.middleware';
+import { toNestGlobalPrefix } from './config/api-prefix';
 import { createCorsRuntimeOptions, isOriginAllowed } from './config/cors';
 import type { BackendEnv } from './config/env.validation';
 import { setupSwagger } from './config/swagger';
@@ -18,6 +20,12 @@ async function bootstrap(): Promise<void> {
 
   app.use(createRequestIdMiddleware(config.get('REQUEST_ID_HEADER', { infer: true })));
   app.useGlobalFilters(new ApiErrorFilter());
+  app.setGlobalPrefix(toNestGlobalPrefix(config.get('API_PREFIX', { infer: true })), {
+    exclude: [
+      { path: 'health/live', method: RequestMethod.GET },
+      { path: 'health/ready', method: RequestMethod.GET },
+    ],
+  });
   app.enableCors({
     origin: (
       origin: string | undefined,
@@ -33,6 +41,7 @@ async function bootstrap(): Promise<void> {
     credentials: cors.credentials,
   });
   setupSwagger(app, {
+    API_PREFIX: config.get('API_PREFIX', { infer: true }),
     SWAGGER_ENABLED: config.get('SWAGGER_ENABLED', { infer: true }),
     SWAGGER_PATH: config.get('SWAGGER_PATH', { infer: true }),
   });

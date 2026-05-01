@@ -10,6 +10,7 @@ Current implemented foundation:
 - additive stage-1 migration draft, not applied to any shared DB;
 - NestJS runtime skeleton without DB connection;
 - env validation for runtime-only settings, CORS, readiness, Swagger, and feature flags;
+- versioned backend API prefix `/api/v1` for new NestJS endpoints;
 - `/health/live` live health contract;
 - `/health/ready` readiness contract with DB/Redis checks disabled unless explicitly required;
 - Swagger/OpenAPI at `/docs` and `/docs-json`;
@@ -22,8 +23,8 @@ Current implemented foundation:
 - auth/session application layer without DB adapter or enabled HTTP cutover;
 - refresh token helper contract: opaque token generation, HMAC hash, HttpOnly cookie options;
 - auth HTTP shell without DB adapter or enabled cutover:
-  `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`,
-  and `GET /api/me` exist but fail closed while `BACKEND_ENABLE_AUTH=false`;
+  `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`,
+  and `GET /api/v1/me` exist but fail closed while `BACKEND_ENABLE_AUTH=false`;
   if the flag is forced on before DB adapters exist, unavailable auth ports return 503;
 - domain policies for orders, payments, and users;
 - OrdersModule domain core without DB adapter or enabled HTTP cutover:
@@ -34,7 +35,7 @@ Current implemented foundation:
   child ownership check hook, ordered child upsert/delete orchestration, audit hook,
   and rollback-covered fake tests;
 - orders HTTP write shell without DB adapter or enabled cutover:
-  `POST /api/orders` and `PUT /api/orders/:orderId` controllers exist but fail closed
+  `POST /api/v1/orders` and `PUT /api/v1/orders/:orderId` controllers exist but fail closed
   while `BACKEND_ENABLE_ORDERS=false` or `BACKEND_ORDERS_READ_ONLY=true`; if write flags
   are forced on before DB adapter exists, the unavailable transaction manager returns 503;
 - Vitest coverage for schema blockers, env validation, health, ApiError, redaction,
@@ -55,6 +56,7 @@ Live health:
 GET http://localhost:3000/health/live
 GET http://localhost:3000/health/ready
 GET http://localhost:3000/docs-json
+POST http://localhost:3000/api/v1/auth/login
 ```
 
 Runtime env defaults are local-only:
@@ -62,6 +64,7 @@ Runtime env defaults are local-only:
 ```env
 NODE_ENV=development
 PORT=3000
+API_PREFIX=/api/v1
 FRONTEND_ORIGIN=http://localhost:5173
 LOG_LEVEL=info
 REQUEST_ID_HEADER=x-request-id

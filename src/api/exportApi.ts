@@ -1,3 +1,4 @@
+import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { validateOrderId } from './ordersApi';
 import type { ExportOrderRequest, ExportOrderResponse } from './types/orderApi.types';
@@ -7,8 +8,9 @@ export const exportApi = {
     orderId: number,
     request: ExportOrderRequest = { format: 'xlsx' },
   ): Promise<ExportOrderResponse> {
+    const orderIdValue = validateOrderId(orderId);
     return httpClient.post<ExportOrderResponse>(
-      `/api/orders/${validateOrderId(orderId)}/export/google-drive`,
+      apiRoutes.orders.exportGoogleDrive(orderIdValue),
       normalizeExportOrderRequest(request),
     );
   },

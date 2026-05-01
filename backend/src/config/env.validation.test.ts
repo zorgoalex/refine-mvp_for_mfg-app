@@ -5,6 +5,7 @@ describe('backend env validation', () => {
   it('uses safe local defaults without DB settings', () => {
     expect(validateEnv({})).toMatchObject({
       NODE_ENV: 'development',
+      API_PREFIX: '/api/v1',
       PORT: 3000,
       FRONTEND_ORIGIN: 'http://localhost:5173',
       LOG_LEVEL: 'info',
@@ -19,12 +20,14 @@ describe('backend env validation', () => {
         NODE_ENV: 'test',
         PORT: '3100',
         FRONTEND_ORIGIN: 'http://localhost:5173',
+        API_PREFIX: 'api/v2',
         TRUST_PROXY: 'true',
         VLM_MAX_UPLOAD_MB: '25',
         VLM_ALLOWED_MIME_TYPES: 'image/png,image/jpeg',
       }),
     ).toMatchObject({
       NODE_ENV: 'test',
+      API_PREFIX: '/api/v2',
       PORT: 3100,
       TRUST_PROXY: true,
       VLM_MAX_UPLOAD_MB: 25,
@@ -45,6 +48,14 @@ describe('backend env validation', () => {
         FRONTEND_ORIGIN: 'not-a-url',
       }),
     ).toThrow(/Invalid backend environment/);
+  });
+
+  it('requires a versioned API prefix', () => {
+    expect(() =>
+      validateEnv({
+        API_PREFIX: '/api',
+      }),
+    ).toThrow(/API_PREFIX/);
   });
 
   it('rejects invalid VLM upload limits', () => {

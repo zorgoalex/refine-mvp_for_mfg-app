@@ -32,7 +32,7 @@ describe('authApi', () => {
     const response = await authApi.login({ username: 'admin', password: 'secret' });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/auth/login',
+      '/api/v1/auth/login',
       expect.objectContaining({
         method: 'POST',
         credentials: 'include',
@@ -64,7 +64,7 @@ describe('authApi', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/auth/refresh',
+      '/api/v1/auth/refresh',
       expect.objectContaining({
         method: 'POST',
         credentials: 'include',
@@ -96,7 +96,7 @@ describe('authApi', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/auth/logout',
+      '/api/v1/auth/logout',
       expect.objectContaining({
         method: 'POST',
         credentials: 'include',
@@ -106,7 +106,7 @@ describe('authApi', () => {
     expect(authSession.getUser()).toBeNull();
   });
 
-  it('loads /api/me and stores current user without changing access token', async () => {
+  it('loads /api/v1/me and stores current user without changing access token', async () => {
     mockFetch({
       user: {
         id: '1',

@@ -31,7 +31,7 @@ describe('ordersApi', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/orders?page=2&pageSize=20&sortBy=updatedAt&sortOrder=desc&search=Order+A&clientId=12&onlyMyOrders=true',
+      '/api/v1/orders?page=2&pageSize=20&sortBy=updatedAt&sortOrder=desc&search=Order+A&clientId=12&onlyMyOrders=true',
       expect.objectContaining({ method: 'GET' }),
     );
   });
@@ -43,12 +43,12 @@ describe('ordersApi', () => {
     await expect(ordersApi.getById(15)).resolves.toEqual(order);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/orders/15',
+      '/api/v1/orders/15',
       expect.objectContaining({ method: 'GET' }),
     );
   });
 
-  it('creates an order with one POST /api/orders request', async () => {
+  it('creates an order with one POST /api/v1/orders request', async () => {
     const dto = createSaveOrderDto();
     const order = createOrderDto();
     const fetchMock = mockFetch({ order });
@@ -57,12 +57,12 @@ describe('ordersApi', () => {
 
     const [, init] = fetchMock.mock.calls[0];
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/orders');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders');
     expect(init?.method).toBe('POST');
     expect(init?.body).toBe(JSON.stringify(dto));
   });
 
-  it('updates an order with PUT /api/orders/:id', async () => {
+  it('updates an order with PUT /api/v1/orders/:id', async () => {
     const dto = createSaveOrderDto();
     const order = createOrderDto();
     const fetchMock = mockFetch({ order });
@@ -70,7 +70,7 @@ describe('ordersApi', () => {
     await expect(ordersApi.update(15, dto)).resolves.toEqual({ order });
 
     const [, init] = fetchMock.mock.calls[0];
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/orders/15');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15');
     expect(init?.method).toBe('PUT');
     expect(init?.body).toBe(JSON.stringify(dto));
   });
@@ -81,12 +81,12 @@ describe('ordersApi', () => {
     await ordersApi.changeStatus(15, { orderStatusId: 3, version: 4 });
     await ordersApi.delete(15);
 
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/orders/15/status');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15/status');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
     expect(fetchMock.mock.calls[0][1]?.body).toBe(
       JSON.stringify({ orderStatusId: 3, version: 4 }),
     );
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/orders/15');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/15');
     expect(fetchMock.mock.calls[1][1]?.method).toBe('DELETE');
   });
 
@@ -99,8 +99,8 @@ describe('ordersApi', () => {
   });
 
   it('withQuery skips empty params', () => {
-    expect(withQuery('/api/orders', { page: 1, search: '', clientId: null })).toBe(
-      '/api/orders?page=1',
+    expect(withQuery('/api/v1/orders', { page: 1, search: '', clientId: null })).toBe(
+      '/api/v1/orders?page=1',
     );
   });
 });
