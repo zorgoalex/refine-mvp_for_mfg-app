@@ -38,8 +38,14 @@ Current implemented foundation:
   `POST /api/v1/orders` and `PUT /api/v1/orders/:orderId` controllers exist but fail closed
   while `BACKEND_ENABLE_ORDERS=false` or `BACKEND_ORDERS_READ_ONLY=true`; if write flags
   are forced on before DB adapter exists, the unavailable transaction manager returns 503;
+- Deadline Engine shell without DB adapter or enabled cutover:
+  `/api/v1/deadlines`, `/api/v1/deadline-policies`, `/api/v1/deadline-settings`,
+  and order deadline read-model endpoints exist behind fail-closed feature flags;
+  domain helpers, action dispatcher, worker core, unavailable adapters,
+  `002_deadline_engine.sql`, and read-only precheck SQL are included;
 - Vitest coverage for schema blockers, env validation, health, ApiError, redaction,
-  prechecks, migrations, permissions, auth contracts, policies, and orders domain core.
+  prechecks, migrations, permissions, auth contracts, policies, orders domain core,
+  and Deadline Engine shell/domain behavior.
 
 Local commands:
 
@@ -74,6 +80,11 @@ READINESS_REQUIRE_REDIS=false
 BACKEND_ENABLE_AUTH=false
 BACKEND_ENABLE_ORDERS=false
 BACKEND_ORDERS_READ_ONLY=true
+BACKEND_ENABLE_DEADLINES=false
+BACKEND_DEADLINES_READ_ONLY=true
+BACKEND_ENABLE_DEADLINE_WORKER=false
+BACKEND_DEADLINE_ACTIONS_ENABLED=false
+BACKEND_DEADLINE_NOTIFICATIONS_ENABLED=false
 ```
 
 Docker:
@@ -85,6 +96,6 @@ docker compose up backend
 
 Next implementation steps:
 
-1. Add read-only orders list/detail HTTP shell behind disabled feature flags if needed.
-2. Prepare frontend auth/httpClient tests and API wrappers without cutover.
-3. Add DB adapters only after a separate test DB is available.
+1. Add DB adapters only after a separate test DB is available.
+2. Wire Deadline Engine to orders through an outbox/sync port after DB adapters exist.
+3. Move frontend UI flows to backend APIs through feature flags after cutover testing.

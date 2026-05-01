@@ -46,9 +46,17 @@ const envSchema = z
     BACKEND_ENABLE_ORDER_EXPORT: booleanFromEnv.default(false),
     BACKEND_ENABLE_USERS: booleanFromEnv.default(false),
     BACKEND_ENABLE_VLM: booleanFromEnv.default(false),
+    BACKEND_ENABLE_DEADLINES: booleanFromEnv.default(false),
     BACKEND_ORDERS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_EXPORT_DISABLED: booleanFromEnv.default(true),
     BACKEND_VLM_DISABLED: booleanFromEnv.default(true),
+    BACKEND_DEADLINES_READ_ONLY: booleanFromEnv.default(true),
+    BACKEND_ENABLE_DEADLINE_WORKER: booleanFromEnv.default(false),
+    BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
+    BACKEND_DEADLINE_WORKER_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(100),
+    BACKEND_DEADLINE_WORKER_ID: z.string().trim().min(1).default('backend-local'),
+    BACKEND_DEADLINE_ACTIONS_ENABLED: booleanFromEnv.default(false),
+    BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     VLM_MAX_UPLOAD_MB: z.coerce.number().positive().default(20),
     VLM_ALLOWED_MIME_TYPES: z
       .string()
