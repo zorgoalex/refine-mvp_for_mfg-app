@@ -11,6 +11,12 @@ describe('backend env validation', () => {
       LOG_LEVEL: 'info',
       TRUST_PROXY: false,
       REQUEST_ID_HEADER: 'x-request-id',
+      DATABASE_SSL: false,
+      DATABASE_POOL_MIN: 1,
+      DATABASE_POOL_MAX: 10,
+      DATABASE_QUERY_TIMEOUT_MS: 10000,
+      ACCESS_TOKEN_TTL_SECONDS: 900,
+      REFRESH_TOKEN_TTL_DAYS: 7,
       BACKEND_ENABLE_DEADLINES: false,
       BACKEND_DEADLINES_READ_ONLY: true,
       BACKEND_ENABLE_DEADLINE_WORKER: false,
@@ -29,6 +35,15 @@ describe('backend env validation', () => {
         PORT: '3100',
         FRONTEND_ORIGIN: 'http://localhost:5173',
         API_PREFIX: 'api/v2',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        DATABASE_SSL: 'true',
+        DATABASE_POOL_MIN: '2',
+        DATABASE_POOL_MAX: '20',
+        DATABASE_QUERY_TIMEOUT_MS: '15000',
+        JWT_ACCESS_SECRET: 'x'.repeat(32),
+        REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
+        ACCESS_TOKEN_TTL_SECONDS: '1200',
+        REFRESH_TOKEN_TTL_DAYS: '14',
         TRUST_PROXY: 'true',
         BACKEND_ENABLE_DEADLINES: 'true',
         BACKEND_DEADLINES_READ_ONLY: 'false',
@@ -45,6 +60,12 @@ describe('backend env validation', () => {
       NODE_ENV: 'test',
       API_PREFIX: '/api/v2',
       PORT: 3100,
+      DATABASE_SSL: true,
+      DATABASE_POOL_MIN: 2,
+      DATABASE_POOL_MAX: 20,
+      DATABASE_QUERY_TIMEOUT_MS: 15000,
+      ACCESS_TOKEN_TTL_SECONDS: 1200,
+      REFRESH_TOKEN_TTL_DAYS: 14,
       TRUST_PROXY: true,
       BACKEND_ENABLE_DEADLINES: true,
       BACKEND_DEADLINES_READ_ONLY: false,
@@ -72,6 +93,54 @@ describe('backend env validation', () => {
         FRONTEND_ORIGIN: 'not-a-url',
       }),
     ).toThrow(/Invalid backend environment/);
+  });
+
+  it('validates database runtime settings when provided or required', () => {
+    expect(() =>
+      validateEnv({
+        DATABASE_URL: 'http://localhost:5432/erp',
+      }),
+    ).toThrow(/DATABASE_URL/);
+
+    expect(() =>
+      validateEnv({
+        READINESS_REQUIRE_DATABASE: 'true',
+      }),
+    ).toThrow(/DATABASE_URL is required/);
+
+    expect(() =>
+      validateEnv({
+        DATABASE_POOL_MIN: '5',
+        DATABASE_POOL_MAX: '3',
+      }),
+    ).toThrow(/DATABASE_POOL_MIN/);
+
+    expect(() =>
+      validateEnv({
+        DATABASE_QUERY_TIMEOUT_MS: '0',
+      }),
+    ).toThrow(/DATABASE_QUERY_TIMEOUT_MS/);
+  });
+
+  it('requires DB and auth secrets when backend auth is enabled', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_AUTH: 'true',
+      }),
+    ).toThrow(/DATABASE_URL.*JWT_ACCESS_SECRET.*REFRESH_TOKEN_PEPPER/);
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_AUTH: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        JWT_ACCESS_SECRET: 'x'.repeat(32),
+        REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_AUTH: true,
+      JWT_ACCESS_SECRET: 'x'.repeat(32),
+      REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
+    });
   });
 
   it('requires a versioned API prefix', () => {

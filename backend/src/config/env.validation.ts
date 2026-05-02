@@ -13,6 +13,15 @@ const booleanFromEnv = z
     return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
   });
 
+function isPostgresUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'postgres:' || url.protocol === 'postgresql:';
+  } catch {
+    return false;
+  }
+}
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
@@ -37,10 +46,23 @@ const envSchema = z
       .transform((value) => value.toLowerCase()),
     SWAGGER_ENABLED: booleanFromEnv.default(true),
     SWAGGER_PATH: z.string().trim().min(1).default('/docs'),
-    DATABASE_URL: z.string().trim().min(1).optional(),
+    DATABASE_URL: z
+      .string()
+      .trim()
+      .min(1)
+      .refine(isPostgresUrl, 'DATABASE_URL must be a postgres connection string')
+      .optional(),
+    DATABASE_SSL: booleanFromEnv.default(false),
+    DATABASE_POOL_MIN: z.coerce.number().int().min(0).default(1),
+    DATABASE_POOL_MAX: z.coerce.number().int().positive().max(100).default(10),
+    DATABASE_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     REDIS_URL: z.string().trim().min(1).optional(),
     READINESS_REQUIRE_DATABASE: booleanFromEnv.default(false),
     READINESS_REQUIRE_REDIS: booleanFromEnv.default(false),
+    JWT_ACCESS_SECRET: z.string().trim().min(32).optional(),
+    REFRESH_TOKEN_PEPPER: z.string().trim().min(32).optional(),
+    ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+    REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
     BACKEND_ENABLE_AUTH: booleanFromEnv.default(false),
     BACKEND_ENABLE_ORDERS: booleanFromEnv.default(false),
     BACKEND_ENABLE_ORDER_EXPORT: booleanFromEnv.default(false),
@@ -79,6 +101,48 @@ const envSchema = z
         message: 'CORS_ALLOWED_ORIGINS cannot contain * when CORS_ALLOW_CREDENTIALS is true',
         path: ['CORS_ALLOWED_ORIGINS'],
       });
+    }
+
+    if (env.READINESS_REQUIRE_DATABASE && !env.DATABASE_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'DATABASE_URL is required when READINESS_REQUIRE_DATABASE is true',
+        path: ['DATABASE_URL'],
+      });
+    }
+
+    if (env.DATABASE_POOL_MIN > env.DATABASE_POOL_MAX) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'DATABASE_POOL_MIN cannot be greater than DATABASE_POOL_MAX',
+        path: ['DATABASE_POOL_MIN'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_AUTH) {
+      if (!env.DATABASE_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'DATABASE_URL is required when BACKEND_ENABLE_AUTH is true',
+          path: ['DATABASE_URL'],
+        });
+      }
+
+      if (!env.JWT_ACCESS_SECRET) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'JWT_ACCESS_SECRET is required when BACKEND_ENABLE_AUTH is true',
+          path: ['JWT_ACCESS_SECRET'],
+        });
+      }
+
+      if (!env.REFRESH_TOKEN_PEPPER) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'REFRESH_TOKEN_PEPPER is required when BACKEND_ENABLE_AUTH is true',
+          path: ['REFRESH_TOKEN_PEPPER'],
+        });
+      }
     }
   })
   .transform((env) => ({

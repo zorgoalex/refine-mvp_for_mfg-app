@@ -1,0 +1,641 @@
+import { ApiError } from '../../../common/errors/api-error';
+import { DatabaseService } from '../../../database/database.service';
+import type { TransactionClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { PgOrderReadRepository } from './pg-order-read-repository';
+import type {
+  LockedOrderRow,
+  OrderChildReference,
+  OrderSaveAuditEvent,
+  OrderTransactionManagerPort,
+  OrderWriteUnitOfWork,
+} from '../application/order-transaction.types';
+import type { OrderDto } from '../dto/order.dto';
+import type {
+  CalculatedOrderDetailDto,
+  NormalizedSaveOrderDowelingLinkDto,
+  NormalizedSaveOrderHeaderDto,
+  NormalizedSaveOrderPaymentDto,
+  NormalizedSaveOrderRequirementDto,
+  NormalizedSaveOrderWorkshopDto,
+  OrderTotalsDto,
+} from '../dto/save-order.dto';
+
+const CHILD_TABLES = {
+  detail: { table: 'order_details', pk: 'detail_id' },
+  payment: { table: 'payments', pk: 'payment_id' },
+  workshop: { table: 'order_workshops', pk: 'order_workshop_id' },
+  requirement: { table: 'order_resource_requirements', pk: 'requirement_id' },
+  dowelingLink: { table: 'order_doweling_links', pk: 'order_doweling_link_id' },
+} as const;
+
+export class PgOrderTransactionManager implements OrderTransactionManagerPort {
+  constructor(private readonly database: DatabaseService) {}
+
+  runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
+    return this.database.transaction((tx) => handler(new PgOrderWriteUnitOfWork(tx)));
+  }
+}
+
+class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
+  constructor(private readonly tx: TransactionClient) {}
+
+  async setSessionUser(userId: string): Promise<void> {
+    await this.tx.query('SELECT set_session_user($1)', [userId]);
+  }
+
+  async loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null> {
+    const result = await this.tx.query<{ order_id: string | number; version: string | number }>(
+      `
+      SELECT order_id, version
+      FROM orders
+      WHERE order_id = $1 AND delete_flag = false
+      FOR UPDATE
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+
+    return row ? { orderId: Number(row.order_id), version: Number(row.version) } : null;
+  }
+
+  async assertChildOwnership(
+    orderId: number,
+    refs: readonly OrderChildReference[],
+  ): Promise<void> {
+    for (const [entityType, ids] of groupChildReferences(refs)) {
+      if (ids.length === 0) {
+        continue;
+      }
+
+      const table = CHILD_TABLES[entityType];
+      const result = await this.tx.query<{ count: string | number }>(
+        `
+        SELECT COUNT(*)::int AS count
+        FROM ${table.table}
+        WHERE ${table.pk} = ANY($1::bigint[]) AND order_id = $2
+        `,
+        [ids, orderId],
+      );
+
+      if (Number(result.rows[0]?.count ?? 0) !== ids.length) {
+        throw new ApiError(422, 'CHILD_ENTITY_NOT_OWNED', 'Child entity does not belong to order', {
+          entityType,
+          orderId,
+        });
+      }
+    }
+  }
+
+  async createOrderHeader(input: {
+    header: NormalizedSaveOrderHeaderDto;
+    totals: OrderTotalsDto;
+    currentUser: CurrentUser;
+  }): Promise<number> {
+    const result = await this.tx.query<{ order_id: string | number }>(
+      `
+      INSERT INTO orders (
+        order_name, client_id, order_date, priority, manager_id,
+        order_status_id, payment_status_id, production_status_id,
+        production_status_from_details_enabled,
+        planned_completion_date, completion_date, issue_date, payment_date,
+        discount, surcharge, total_amount, final_amount, paid_amount, parts_count, total_area,
+        link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file,
+        notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c, version
+      )
+      VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8,
+        $9,
+        $10, $11, $12, $13,
+        $14, $15, $16, $17, $18, $19, $20,
+        $21, $22, $23, $24,
+        $25, $26, $27, $28, $29, $30, 1
+      )
+      RETURNING order_id
+      `,
+      [
+        input.header.orderName,
+        input.header.clientId,
+        input.header.orderDate,
+        input.header.priority,
+        input.header.managerId ?? Number(input.currentUser.id),
+        input.header.orderStatusId,
+        input.totals.paymentStatusId,
+        input.header.productionStatusId ?? null,
+        input.header.productionStatusFromDetailsEnabled,
+        input.header.plannedCompletionDate ?? null,
+        input.header.completionDate ?? null,
+        input.header.issueDate ?? null,
+        input.totals.paymentDate,
+        input.totals.discount,
+        input.totals.surcharge,
+        input.totals.totalAmount,
+        input.totals.finalAmount,
+        input.totals.paidAmount,
+        input.totals.partsCount,
+        input.totals.totalArea,
+        input.header.linkCuttingFile ?? null,
+        input.header.linkCuttingImageFile ?? null,
+        input.header.linkCadFile ?? null,
+        input.header.linkPdfFile ?? null,
+        input.header.notes ?? null,
+        input.header.materialId ?? null,
+        input.header.millingTypeId ?? null,
+        input.header.edgeTypeId ?? null,
+        input.header.filmId ?? null,
+        input.header.refKey1c ?? null,
+      ],
+    );
+
+    return Number(result.rows[0].order_id);
+  }
+
+  async updateOrderHeader(input: {
+    orderId: number;
+    header: NormalizedSaveOrderHeaderDto;
+    totals: OrderTotalsDto;
+    currentUser: CurrentUser;
+  }): Promise<void> {
+    await this.tx.query(
+      `
+      UPDATE orders
+      SET order_name = $2,
+          client_id = $3,
+          order_date = $4,
+          priority = $5,
+          manager_id = $6,
+          order_status_id = $7,
+          production_status_id = $8,
+          production_status_from_details_enabled = $9,
+          planned_completion_date = $10,
+          completion_date = $11,
+          issue_date = $12,
+          discount = $13,
+          surcharge = $14,
+          link_cutting_file = $15,
+          link_cutting_image_file = $16,
+          link_cad_file = $17,
+          link_pdf_file = $18,
+          notes = $19,
+          material_id = $20,
+          milling_type_id = $21,
+          edge_type_id = $22,
+          film_id = $23,
+          ref_key_1c = $24
+      WHERE order_id = $1 AND delete_flag = false
+      `,
+      [
+        input.orderId,
+        input.header.orderName,
+        input.header.clientId,
+        input.header.orderDate,
+        input.header.priority,
+        input.header.managerId ?? Number(input.currentUser.id),
+        input.header.orderStatusId,
+        input.header.productionStatusId ?? null,
+        input.header.productionStatusFromDetailsEnabled,
+        input.header.plannedCompletionDate ?? null,
+        input.header.completionDate ?? null,
+        input.header.issueDate ?? null,
+        input.totals.discount,
+        input.totals.surcharge,
+        input.header.linkCuttingFile ?? null,
+        input.header.linkCuttingImageFile ?? null,
+        input.header.linkCadFile ?? null,
+        input.header.linkPdfFile ?? null,
+        input.header.notes ?? null,
+        input.header.materialId ?? null,
+        input.header.millingTypeId ?? null,
+        input.header.edgeTypeId ?? null,
+        input.header.filmId ?? null,
+        input.header.refKey1c ?? null,
+      ],
+    );
+  }
+
+  async upsertDetails(orderId: number, details: readonly CalculatedOrderDetailDto[]): Promise<void> {
+    for (const detail of details) {
+      if (detail.id) {
+        await this.tx.query(
+          `
+          UPDATE order_details
+          SET detail_number = $3, detail_name = $4, height = $5, width = $6, quantity = $7,
+              area = $8, material_id = $9, milling_type_id = $10, edge_type_id = $11,
+              film_id = $12, milling_cost_per_sqm = $13, detail_cost = $14, priority = $15,
+              production_status_id = $16, joint_order_id = $17, note = $18,
+              link_cutting_file = $19, link_cutting_image_file = $20, link_cad_file = $21,
+              link_pdf_file = $22, ref_key_1c = $23
+          WHERE detail_id = $1 AND order_id = $2
+          `,
+          detailParams(detail.id, orderId, detail),
+        );
+      } else {
+        await this.tx.query(
+          `
+          INSERT INTO order_details (
+            order_id, detail_number, detail_name, height, width, quantity, area,
+            material_id, milling_type_id, edge_type_id, film_id, milling_cost_per_sqm,
+            detail_cost, priority, production_status_id, joint_order_id, note,
+            link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file, ref_key_1c
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+          `,
+          detailParamsForInsert(orderId, detail),
+        );
+      }
+    }
+  }
+
+  async deleteDetails(orderId: number, ids: readonly number[]): Promise<void> {
+    await deleteByIds(this.tx, 'order_details', 'detail_id', orderId, ids);
+  }
+
+  async upsertPayments(
+    orderId: number,
+    payments: readonly NormalizedSaveOrderPaymentDto[],
+  ): Promise<void> {
+    for (const payment of payments) {
+      if (payment.id) {
+        await this.tx.query(
+          `
+          UPDATE payments
+          SET amount = $3, payment_date = $4, type_paid_id = $5, notes = $6, ref_key_1c = $7
+          WHERE payment_id = $1 AND order_id = $2
+          `,
+          [
+            payment.id,
+            orderId,
+            payment.amount,
+            payment.paymentDate,
+            payment.typePaidId,
+            payment.notes,
+            payment.refKey1c,
+          ],
+        );
+      } else {
+        await this.tx.query(
+          `
+          INSERT INTO payments (order_id, amount, payment_date, type_paid_id, notes, ref_key_1c)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          `,
+          [orderId, payment.amount, payment.paymentDate, payment.typePaidId, payment.notes, payment.refKey1c],
+        );
+      }
+    }
+  }
+
+  async deletePayments(orderId: number, ids: readonly number[]): Promise<void> {
+    await deleteByIds(this.tx, 'payments', 'payment_id', orderId, ids);
+  }
+
+  async upsertWorkshops(
+    orderId: number,
+    workshops: readonly NormalizedSaveOrderWorkshopDto[],
+  ): Promise<void> {
+    for (const workshop of workshops) {
+      if (workshop.id) {
+        await this.tx.query(
+          `
+          UPDATE order_workshops
+          SET workshop_id = $3, production_status_id = $4, received_date = $5,
+              started_date = $6, completed_date = $7, planned_completion_date = $8,
+              sequence_order = $9, responsible_employee_id = $10, notes = $11, ref_key_1c = $12
+          WHERE order_workshop_id = $1 AND order_id = $2
+          `,
+          workshopParams(workshop.id, orderId, workshop),
+        );
+      } else {
+        const restored = await this.tx.query(
+          `
+          UPDATE order_workshops
+          SET delete_flag = false,
+              received_date = $4,
+              started_date = $5,
+              completed_date = $6,
+              planned_completion_date = $7,
+              sequence_order = $8,
+              responsible_employee_id = $9,
+              notes = $10,
+              ref_key_1c = $11
+          WHERE order_id = $1 AND workshop_id = $2 AND production_status_id = $3 AND delete_flag = true
+          RETURNING order_workshop_id
+          `,
+          [
+            orderId,
+            workshop.workshopId,
+            workshop.productionStatusId,
+            workshop.receivedDate,
+            workshop.startedDate,
+            workshop.completedDate,
+            workshop.plannedCompletionDate,
+            workshop.sequenceOrder,
+            workshop.responsibleEmployeeId,
+            workshop.notes,
+            workshop.refKey1c,
+          ],
+        );
+
+        if (restored.rowCount === 0) {
+          await this.tx.query(
+            `
+            INSERT INTO order_workshops (
+              order_id, workshop_id, production_status_id, received_date, started_date,
+              completed_date, planned_completion_date, sequence_order,
+              responsible_employee_id, notes, ref_key_1c
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            `,
+            workshopParamsForInsert(orderId, workshop),
+          );
+        }
+      }
+    }
+  }
+
+  async deleteWorkshops(orderId: number, ids: readonly number[]): Promise<void> {
+    await deleteByIds(this.tx, 'order_workshops', 'order_workshop_id', orderId, ids);
+  }
+
+  async upsertRequirements(
+    orderId: number,
+    requirements: readonly NormalizedSaveOrderRequirementDto[],
+  ): Promise<void> {
+    for (const requirement of requirements) {
+      if (requirement.id) {
+        await this.tx.query(
+          `
+          UPDATE order_resource_requirements
+          SET resource_type = $3, material_id = $4, film_id = $5, edge_type_id = $6,
+              required_quantity = $7, unit_id = $8, waste_percentage = $9,
+              requirement_status_id = $10, supplier_id = $11, purchase_price = $12,
+              requisition_id = $13, warehouse_id = $14, reserved_at = $15, consumed_at = $16,
+              notes = $17, calculation_details = $18, ref_key_1c = $19, is_active = true
+          WHERE requirement_id = $1 AND order_id = $2
+          `,
+          requirementParams(requirement.id, orderId, requirement),
+        );
+      } else {
+        await this.tx.query(
+          `
+          INSERT INTO order_resource_requirements (
+            order_id, resource_type, material_id, film_id, edge_type_id, required_quantity,
+            unit_id, waste_percentage, requirement_status_id, supplier_id, purchase_price,
+            requisition_id, warehouse_id, reserved_at, consumed_at, notes, calculation_details, ref_key_1c
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          `,
+          requirementParamsForInsert(orderId, requirement),
+        );
+      }
+    }
+  }
+
+  async deleteRequirements(orderId: number, ids: readonly number[]): Promise<void> {
+    await deleteByIds(this.tx, 'order_resource_requirements', 'requirement_id', orderId, ids);
+  }
+
+  async upsertDowelingLinks(
+    orderId: number,
+    links: readonly NormalizedSaveOrderDowelingLinkDto[],
+  ): Promise<void> {
+    for (const link of links) {
+      if (link.id) {
+        await this.tx.query(
+          `
+          UPDATE order_doweling_links
+          SET doweling_order_id = $3, ref_key_1c = $4
+          WHERE order_doweling_link_id = $1 AND order_id = $2
+          `,
+          [link.id, orderId, link.dowelingOrderId, link.refKey1c],
+        );
+      } else {
+        const restored = await this.tx.query(
+          `
+          UPDATE order_doweling_links
+          SET delete_flag = false, ref_key_1c = $3
+          WHERE order_id = $1 AND doweling_order_id = $2 AND delete_flag = true
+          RETURNING order_doweling_link_id
+          `,
+          [orderId, link.dowelingOrderId, link.refKey1c],
+        );
+
+        if (restored.rowCount === 0) {
+          await this.tx.query(
+            `
+            INSERT INTO order_doweling_links (order_id, doweling_order_id, ref_key_1c)
+            VALUES ($1, $2, $3)
+            `,
+            [orderId, link.dowelingOrderId, link.refKey1c],
+          );
+        }
+      }
+
+      if (link.designEngineerId) {
+        await this.tx.query(
+          'UPDATE doweling_orders SET design_engineer_id = $2 WHERE doweling_order_id = $1',
+          [link.dowelingOrderId, link.designEngineerId],
+        );
+      }
+    }
+  }
+
+  async deleteDowelingLinks(orderId: number, ids: readonly number[]): Promise<void> {
+    await deleteByIds(this.tx, 'order_doweling_links', 'order_doweling_link_id', orderId, ids);
+  }
+
+  async updateOrderTotalsAndVersion(input: {
+    orderId: number;
+    totals: OrderTotalsDto;
+    previousVersion: number | null;
+    currentUser: CurrentUser;
+  }): Promise<number> {
+    const nextVersion = input.previousVersion === null ? 1 : input.previousVersion + 1;
+
+    await this.tx.query(
+      `
+      UPDATE orders
+      SET total_amount = $2,
+          final_amount = $3,
+          paid_amount = $4,
+          payment_date = $5,
+          payment_status_id = $6,
+          parts_count = $7,
+          total_area = $8,
+          version = $9
+      WHERE order_id = $1
+      `,
+      [
+        input.orderId,
+        input.totals.totalAmount,
+        input.totals.finalAmount,
+        input.totals.paidAmount,
+        input.totals.paymentDate,
+        input.totals.paymentStatusId,
+        input.totals.partsCount,
+        input.totals.totalArea,
+        nextVersion,
+      ],
+    );
+
+    return nextVersion;
+  }
+
+  async writeAuditEvent(event: OrderSaveAuditEvent): Promise<void> {
+    await this.tx.query(
+      `
+      INSERT INTO audit_log (event, entity_type, entity_id, user_id, request_id, metadata_json)
+      VALUES ($1, 'order', $2, $3, 'order-transaction', $4::jsonb)
+      `,
+      [
+        event.action,
+        String(event.orderId),
+        event.actorUserId,
+        JSON.stringify({ source: 'backend-orders-transaction' }),
+      ],
+    );
+  }
+
+  readOrder(orderId: number): Promise<OrderDto> {
+    const reader = new PgOrderReadRepository(this.tx);
+    return reader
+      .getOrderById({
+        orderId,
+        currentUser: {
+          id: '0',
+          username: 'system',
+          role: 'admin',
+          roleId: 1,
+          permissions: [],
+        },
+      })
+      .then((order) => {
+        if (!order) {
+          throw new ApiError(500, 'ORDER_SAVE_FAILED', 'Saved order cannot be loaded');
+        }
+
+        return order;
+      });
+  }
+}
+
+function groupChildReferences(refs: readonly OrderChildReference[]) {
+  const grouped = new Map<OrderChildReference['entityType'], number[]>();
+
+  for (const ref of refs) {
+    grouped.set(ref.entityType, [...(grouped.get(ref.entityType) ?? []), ref.id]);
+  }
+
+  return [...grouped.entries()].map(([entityType, ids]) => [entityType, [...new Set(ids)]] as const);
+}
+
+function detailParams(id: number, orderId: number, detail: CalculatedOrderDetailDto) {
+  return [id, orderId, ...detailParamsForInsertValues(detail)];
+}
+
+function detailParamsForInsert(orderId: number, detail: CalculatedOrderDetailDto) {
+  return [orderId, ...detailParamsForInsertValues(detail)];
+}
+
+function detailParamsForInsertValues(detail: CalculatedOrderDetailDto) {
+  return [
+    detail.detailNumber,
+    detail.detailName,
+    detail.height,
+    detail.width,
+    detail.quantity,
+    detail.area,
+    detail.materialId,
+    detail.millingTypeId,
+    detail.edgeTypeId,
+    detail.filmId,
+    detail.millingCostPerSqm,
+    detail.detailCost,
+    detail.priority,
+    detail.productionStatusId,
+    detail.jointOrderId,
+    detail.note,
+    detail.linkCuttingFile,
+    detail.linkCuttingImageFile,
+    detail.linkCadFile,
+    detail.linkPdfFile,
+    detail.refKey1c,
+  ];
+}
+
+function workshopParams(id: number, orderId: number, workshop: NormalizedSaveOrderWorkshopDto) {
+  return [id, orderId, ...workshopParamsForInsertValues(workshop)];
+}
+
+function workshopParamsForInsert(orderId: number, workshop: NormalizedSaveOrderWorkshopDto) {
+  return [orderId, ...workshopParamsForInsertValues(workshop)];
+}
+
+function workshopParamsForInsertValues(workshop: NormalizedSaveOrderWorkshopDto) {
+  return [
+    workshop.workshopId,
+    workshop.productionStatusId,
+    workshop.receivedDate,
+    workshop.startedDate,
+    workshop.completedDate,
+    workshop.plannedCompletionDate,
+    workshop.sequenceOrder,
+    workshop.responsibleEmployeeId,
+    workshop.notes,
+    workshop.refKey1c,
+  ];
+}
+
+function requirementParams(
+  id: number,
+  orderId: number,
+  requirement: NormalizedSaveOrderRequirementDto,
+) {
+  return [id, orderId, ...requirementParamsForInsertValues(requirement)];
+}
+
+function requirementParamsForInsert(orderId: number, requirement: NormalizedSaveOrderRequirementDto) {
+  return [orderId, ...requirementParamsForInsertValues(requirement)];
+}
+
+function requirementParamsForInsertValues(requirement: NormalizedSaveOrderRequirementDto) {
+  return [
+    requirement.resourceType,
+    requirement.materialId,
+    requirement.filmId,
+    requirement.edgeTypeId,
+    requirement.requiredQuantity,
+    requirement.unitId,
+    requirement.wastePercentage,
+    requirement.requirementStatusId,
+    requirement.supplierId,
+    requirement.purchasePrice,
+    requirement.requisitionId,
+    requirement.warehouseId,
+    requirement.reservedAt,
+    requirement.consumedAt,
+    requirement.notes,
+    requirement.calculationDetails,
+    requirement.refKey1c,
+  ];
+}
+
+async function deleteByIds(
+  tx: TransactionClient,
+  table: string,
+  pk: string,
+  orderId: number,
+  ids: readonly number[],
+): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+
+  await tx.query(
+    `
+    DELETE FROM ${table}
+    WHERE ${pk} = ANY($1::bigint[]) AND order_id = $2
+    `,
+    [ids, orderId],
+  );
+}

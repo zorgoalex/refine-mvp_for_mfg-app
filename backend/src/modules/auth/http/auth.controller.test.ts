@@ -231,6 +231,8 @@ function createLoginResult(overrides: Partial<AuthResponse> = {}): LoginResult {
 function createAuthResponse(overrides: Partial<AuthResponse> = {}): AuthResponse {
   return {
     accessToken: overrides.accessToken ?? 'access_token',
+    accessTokenExpiresAt:
+      overrides.accessTokenExpiresAt ?? '2026-05-01T12:15:00.000Z',
     user: overrides.user ?? {
       id: 'user_manager',
       username: 'manager',
