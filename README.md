@@ -174,6 +174,7 @@ npm run dev:full
 - `npm run test` — unit/API tests через Vitest.
 - `npm run test:e2e` — Playwright tests.
 - `npm run test:e2e:users-cutover` — Playwright smoke для backend users cutover flags.
+- `npm run test:e2e:order-export-cutover` — Playwright smoke для backend order export cutover flag.
 
 ## Тесты
 
@@ -188,10 +189,12 @@ E2E:
 ```bash
 npm run test:e2e
 npm run test:e2e:users-cutover
+npm run test:e2e:order-export-cutover
 ```
 
 Playwright запускает `npm run dev:full` через `webServer` и использует `http://localhost:5173` как `baseURL`.
 Users backend cutover checklist: [docs/users-cutover-readiness.md](docs/users-cutover-readiness.md).
+Order export backend cutover checklist: [docs/order-export-cutover-readiness.md](docs/order-export-cutover-readiness.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 
 Acceptance check 2026-05-02: `npm test`, `npm run build` и
