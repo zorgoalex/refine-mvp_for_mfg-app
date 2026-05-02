@@ -108,6 +108,18 @@ Add `--check-legacy` when the staging frontend domain should still expose legacy
 rollback paths. The legacy check uses `HEAD`/`OPTIONS` only and treats `404` as
 missing; it does not send business payloads.
 
+Protected Vercel previews require a Protection Bypass for Automation secret:
+
+```bash
+VERCEL_AUTOMATION_BYPASS_SECRET=... \
+npm run smoke:staging-gates -- \
+  --frontend-url=https://staging.example.com \
+  --backend-url=https://api-staging.example.com \
+  --expect=docs/runtime-config/canary/00-all-off.json
+```
+
+The value is sent as `x-vercel-protection-bypass` and is not printed.
+
 For local file smoke:
 
 ```bash

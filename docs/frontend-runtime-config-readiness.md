@@ -152,6 +152,11 @@ npm run smoke:staging-gates -- \
   --expect=docs/runtime-config/canary/00-all-off.json
 ```
 
+For protected Vercel previews, create a Protection Bypass for Automation secret
+in Vercel, store it locally as `VERCEL_AUTOMATION_BYPASS_SECRET`, and rerun the
+same smoke command. The smoke scripts send it only as the
+`x-vercel-protection-bypass` request header and never print the value.
+
 ## Smoke
 
 Automated mocked frontend runtime-config smoke:

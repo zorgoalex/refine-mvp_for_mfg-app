@@ -12,6 +12,7 @@ const SECRET_PATTERN =
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const vercelBypassSecret = getVercelBypassSecret(args);
 
   if (!args.frontendUrl) {
     usageAndExit();
@@ -19,7 +20,11 @@ async function main() {
 
   const frontendUrl = normalizeBaseUrl(args.frontendUrl);
   const runtimeConfigUrl = `${frontendUrl}/runtime-config.json`;
-  const runtimeConfig = await fetchJson(runtimeConfigUrl, 'runtime config');
+  const runtimeConfig = await fetchJson(
+    runtimeConfigUrl,
+    'runtime config',
+    vercelBypassSecret,
+  );
   const runtimeErrors = validateRuntimeConfig(runtimeConfig, {
     label: runtimeConfigUrl,
     requireCompleteFeatures: true,
@@ -42,21 +47,21 @@ async function main() {
   if (!backendUrl) {
     console.log('Backend health skipped: pass --backend-url or set runtime config apiUrl.');
   } else {
-    await smokeHealth(`${backendUrl}/health/live`, 'live health');
-    await smokeHealth(`${backendUrl}/health/ready`, 'ready health');
+    await smokeHealth(`${backendUrl}/health/live`, 'live health', vercelBypassSecret);
+    await smokeHealth(`${backendUrl}/health/ready`, 'ready health', vercelBypassSecret);
   }
 
   if (args.checkLegacy) {
-    await smokeLegacyRollbackPaths(frontendUrl);
+    await smokeLegacyRollbackPaths(frontendUrl, vercelBypassSecret);
   }
 
   console.log('Staging gates smoke ok.');
 }
 
-async function smokeHealth(url, label) {
+async function smokeHealth(url, label, vercelBypassSecret) {
   const response = await fetch(url, {
     cache: 'no-store',
-    headers: { Accept: 'application/json' },
+    headers: buildHeaders(vercelBypassSecret, { Accept: 'application/json' }),
   });
 
   if (!response.ok) {
@@ -70,7 +75,7 @@ async function smokeHealth(url, label) {
   console.log(`${label} ok: ${url} (${status})`);
 }
 
-async function smokeLegacyRollbackPaths(frontendUrl) {
+async function smokeLegacyRollbackPaths(frontendUrl, vercelBypassSecret) {
   const paths = [
     '/api/login',
     '/api/refresh',
@@ -87,7 +92,12 @@ async function smokeLegacyRollbackPaths(frontendUrl) {
     const response = await fetch(url, {
       method: 'HEAD',
       cache: 'no-store',
-    }).catch(async () => fetch(url, { method: 'OPTIONS', cache: 'no-store' }));
+      headers: buildHeaders(vercelBypassSecret),
+    }).catch(async () => fetch(url, {
+      method: 'OPTIONS',
+      cache: 'no-store',
+      headers: buildHeaders(vercelBypassSecret),
+    }));
 
     if (response.status === 404) {
       throw new Error(`legacy rollback path missing: ${url}`);
@@ -97,10 +107,10 @@ async function smokeLegacyRollbackPaths(frontendUrl) {
   }
 }
 
-async function fetchJson(url, label) {
+async function fetchJson(url, label, vercelBypassSecret) {
   const response = await fetch(url, {
     cache: 'no-store',
-    headers: { Accept: 'application/json' },
+    headers: buildHeaders(vercelBypassSecret, { Accept: 'application/json' }),
   });
 
   if (!response.ok) {
@@ -108,6 +118,16 @@ async function fetchJson(url, label) {
   }
 
   return response.json();
+}
+
+function buildHeaders(vercelBypassSecret, baseHeaders = {}) {
+  const headers = { ...baseHeaders };
+
+  if (vercelBypassSecret) {
+    headers['x-vercel-protection-bypass'] = vercelBypassSecret;
+  }
+
+  return headers;
 }
 
 function assertNoSecretLikeBody(body, source) {
@@ -152,6 +172,11 @@ function parseArgs(rawArgs) {
       index += 1;
     } else if (arg === '--check-legacy') {
       result.checkLegacy = true;
+    } else if (arg.startsWith('--vercel-bypass-env=')) {
+      result.vercelBypassEnv = arg.slice('--vercel-bypass-env='.length);
+    } else if (arg === '--vercel-bypass-env') {
+      result.vercelBypassEnv = rawArgs[index + 1];
+      index += 1;
     } else if (arg === '--help' || arg === '-h') {
       usageAndExit(0);
     } else {
@@ -161,6 +186,12 @@ function parseArgs(rawArgs) {
   }
 
   return result;
+}
+
+function getVercelBypassSecret(args) {
+  const envName = args.vercelBypassEnv || 'VERCEL_AUTOMATION_BYPASS_SECRET';
+  const value = process.env[envName];
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
 function normalizeBaseUrl(value) {
@@ -177,6 +208,7 @@ function usageAndExit(code = 1) {
       '',
       'Optional:',
       '  --check-legacy   HEAD/OPTIONS check legacy rollback paths are not 404',
+      '  --vercel-bypass-env VERCEL_AUTOMATION_BYPASS_SECRET',
     ].join('\n'),
   );
   process.exit(code);

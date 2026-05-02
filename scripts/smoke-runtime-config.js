@@ -19,7 +19,7 @@ async function main() {
 
   const source = args.url || args.file;
   const config = args.url
-    ? await fetchRuntimeConfig(args.url)
+    ? await fetchRuntimeConfig(args.url, getVercelBypassSecret(args))
     : readJsonFile(path.resolve(repoRoot, args.file));
 
   const errors = validateRuntimeConfig(config, {
@@ -64,6 +64,11 @@ function parseArgs(rawArgs) {
     } else if (arg === '--expect') {
       result.expect = rawArgs[index + 1];
       index += 1;
+    } else if (arg.startsWith('--vercel-bypass-env=')) {
+      result.vercelBypassEnv = arg.slice('--vercel-bypass-env='.length);
+    } else if (arg === '--vercel-bypass-env') {
+      result.vercelBypassEnv = rawArgs[index + 1];
+      index += 1;
     } else if (arg === '--help' || arg === '-h') {
       usageAndExit(0);
     } else {
@@ -80,14 +85,14 @@ function parseArgs(rawArgs) {
   return result;
 }
 
-async function fetchRuntimeConfig(url) {
+async function fetchRuntimeConfig(url, vercelBypassSecret) {
   if (typeof fetch !== 'function') {
     throw new Error('Global fetch is not available in this Node runtime.');
   }
 
   const response = await fetch(url, {
     cache: 'no-store',
-    headers: { Accept: 'application/json' },
+    headers: buildHeaders(vercelBypassSecret),
   });
 
   if (!response.ok) {
@@ -97,12 +102,31 @@ async function fetchRuntimeConfig(url) {
   return response.json();
 }
 
+function buildHeaders(vercelBypassSecret) {
+  const headers = { Accept: 'application/json' };
+
+  if (vercelBypassSecret) {
+    headers['x-vercel-protection-bypass'] = vercelBypassSecret;
+  }
+
+  return headers;
+}
+
+function getVercelBypassSecret(args) {
+  const envName = args.vercelBypassEnv || 'VERCEL_AUTOMATION_BYPASS_SECRET';
+  const value = process.env[envName];
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
 function usageAndExit(code = 1) {
   const command = path.basename(process.argv[1]);
   console.error(
     [
       `Usage: node scripts/${command} --url <runtime-config-url> [--expect <example-json>]`,
       `   or: node scripts/${command} --file <runtime-config-json> [--expect <example-json>]`,
+      '',
+      'Optional for protected Vercel previews:',
+      `  --vercel-bypass-env VERCEL_AUTOMATION_BYPASS_SECRET`,
     ].join('\n'),
   );
   process.exit(code);
