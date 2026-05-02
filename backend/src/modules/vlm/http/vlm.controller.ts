@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpCode, Inject, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Inject,
+  Post,
+  Req,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -46,20 +57,24 @@ export class VlmController {
     this.assertVlmEnabled();
 
     const currentUser = this.requireCurrentUser(request);
-    return this.vlm.getHealth({ currentUser });
+    return this.vlm.getHealth({ currentUser, requestId: request.requestId });
   }
 
   @Post('upload')
+  @UseInterceptors(FileInterceptor('file'))
   async upload(
     @Req() request: RequestWithCurrentUser,
+    @UploadedFile() uploadedFile: unknown,
     @Body() body: unknown,
   ): Promise<VlmUploadResponseDto> {
     this.assertVlmActionsEnabled();
 
     const currentUser = this.requireCurrentUser(request);
+    const uploadBody = normalizeUploadBody(uploadedFile, body);
     return this.vlm.uploadImage({
       currentUser,
-      dto: parseVlmUploadRequest(body, this.runtimeConfig.getUploadLimits()),
+      dto: parseVlmUploadRequest(uploadBody, this.runtimeConfig.getUploadLimits()),
+      requestId: request.requestId,
     });
   }
 
@@ -72,6 +87,7 @@ export class VlmController {
     return this.vlm.analyzeImage({
       currentUser,
       dto: parseVlmAnalyzeRequest(body),
+      requestId: request.requestId,
     });
   }
 
@@ -101,6 +117,23 @@ export class VlmController {
 
     return request.user;
   }
+}
+
+function normalizeUploadBody(uploadedFile: unknown, body: unknown): unknown {
+  if (body === undefined) {
+    return uploadedFile;
+  }
+
+  if (body && typeof body === 'object') {
+    return {
+      ...(body as Record<string, unknown>),
+      file: uploadedFile ?? (body as Record<string, unknown>).file,
+    };
+  }
+
+  return {
+    file: uploadedFile,
+  };
 }
 
 export function parseVlmAnalyzeRequest(body: unknown): VlmAnalyzeRequestDto {

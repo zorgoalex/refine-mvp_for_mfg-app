@@ -35,6 +35,7 @@ export class OrderExportController {
       currentUser: request.user,
       orderId: parseOrderId(orderIdParam),
       request: normalizeExportOrderRequest(body),
+      requestId: request.requestId,
     });
   }
 

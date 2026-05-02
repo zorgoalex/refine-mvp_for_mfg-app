@@ -51,6 +51,23 @@ Current implemented foundation:
 - orders HTTP write endpoints:
   `POST /api/v1/orders` and `PUT /api/v1/orders/:orderId` controllers exist but fail closed
   while `BACKEND_ENABLE_ORDERS=false` or `BACKEND_ORDERS_READ_ONLY=true`;
+- users DB adapter:
+  `GET/POST/PATCH /api/v1/users/*` read and mutate `users` through Postgres when
+  `DATABASE_URL` is configured and `BACKEND_ENABLE_USERS=true`; password hashes are
+  bcrypt-generated, role ids are mapped from canonical backend roles, sessions/tokens are
+  revoked on password change/deactivation, and user DTOs never expose password fields;
+- order export DB/GAS adapter:
+  `POST /api/v1/orders/:orderId/export/google-drive` builds the export payload server-side
+  from Postgres, enforces order export scope, rate-limits per user/order, writes audit rows,
+  and calls Google Apps Script only when `BACKEND_ENABLE_ORDER_EXPORT=true`,
+  `BACKEND_EXPORT_DISABLED=false`, `DATABASE_URL`, `GAS_WEBAPP_URL`, and `GAS_API_KEY`
+  are configured;
+- VLM DB/provider adapter:
+  `GET /api/v1/vlm/health`, `POST /api/v1/vlm/upload`, and `POST /api/v1/vlm/analyze`
+  are wired to Postgres upload records plus an external VLM provider when
+  `BACKEND_ENABLE_VLM=true`, `BACKEND_VLM_DISABLED=false`, `DATABASE_URL`, `VLM_API_URL`,
+  and Auth0 M2M env are configured; analyze accepts only trusted stored uploads or matching
+  stored URLs, applies rate/daily limits, and writes audit rows;
 - Deadline Engine DB adapter without frontend cutover:
   `/api/v1/deadlines`, `/api/v1/deadline-policies`, `/api/v1/deadline-settings`,
   and order deadline read-model endpoints exist behind fail-closed feature flags;
@@ -68,7 +85,9 @@ Current implemented foundation:
   `VITE_USE_BACKEND_AUTH`; navigation can use backend `permissions[]` behind
   `VITE_USE_BACKEND_PERMISSIONS`; orders list/show/edit load and order save can use
   `/api/v1/orders` behind `VITE_USE_BACKEND_ORDERS_READ` and
-  `VITE_USE_BACKEND_ORDERS_WRITE`;
+  `VITE_USE_BACKEND_ORDERS_WRITE`; users pages, order export, and VLM hooks can use
+  `/api/v1/users`, `/api/v1/orders/:id/export/google-drive`, and `/api/v1/vlm/*` behind
+  `VITE_USE_BACKEND_USERS`, `VITE_USE_BACKEND_ORDER_EXPORT`, and `VITE_USE_BACKEND_VLM`;
 - Vite dev proxy now routes versioned `/api/v1/*` and `/health/*` to NestJS while
   keeping legacy `/api/*` Vercel Functions available for non-cutover users/export/VLM flows;
 - Vitest coverage for schema blockers, env validation, health, ApiError, redaction,
@@ -115,7 +134,12 @@ ACCESS_TOKEN_TTL_SECONDS=900
 REFRESH_TOKEN_TTL_DAYS=7
 BACKEND_ENABLE_AUTH=false
 BACKEND_ENABLE_ORDERS=false
+BACKEND_ENABLE_ORDER_EXPORT=false
+BACKEND_ENABLE_USERS=false
+BACKEND_ENABLE_VLM=false
 BACKEND_ORDERS_READ_ONLY=true
+BACKEND_EXPORT_DISABLED=true
+BACKEND_VLM_DISABLED=true
 BACKEND_ENABLE_DEADLINES=false
 BACKEND_DEADLINES_READ_ONLY=true
 BACKEND_ENABLE_DEADLINE_WORKER=false
@@ -124,6 +148,20 @@ BACKEND_DEADLINE_WORKER_BATCH_SIZE=100
 BACKEND_DEADLINE_WORKER_ID=backend-local
 BACKEND_DEADLINE_ACTIONS_ENABLED=false
 BACKEND_DEADLINE_NOTIFICATIONS_ENABLED=false
+GAS_WEBAPP_URL=
+GAS_API_KEY=
+GAS_EXPORT_TIMEOUT_MS=55000
+VLM_API_URL=
+VLM_HEALTH_TIMEOUT_MS=10000
+VLM_UPLOAD_TIMEOUT_MS=30000
+VLM_ANALYZE_TIMEOUT_MS=90000
+VLM_ANALYZE_DAILY_LIMIT=100
+AUTH0_M2M_DOMAIN=
+AUTH0_M2M_CLIENT_ID=
+AUTH0_M2M_CLIENT_SECRET=
+AUTH0_M2M_AUDIENCE=
+VLM_MAX_UPLOAD_MB=20
+VLM_ALLOWED_MIME_TYPES=image/jpeg,image/png,image/webp
 ```
 
 Docker:
@@ -159,9 +197,15 @@ Enabled-flow smoke status:
   `.env.test-bd.local`.
 - `npm run dev` was verified after adding explicit Nest `@Inject(...)` annotations for
   controller/service dependencies that should not rely on compiled decorator metadata.
+- 2026-05-02 real adapter smoke was run from compiled `dist` with auth/orders/users enabled,
+  export/VLM external actions disabled: `/health/ready` returned ready with DB ok, users
+  list/create/update/change-password/deactivate/activate passed through HTTP and the temporary
+  user was cleaned up, export returned fail-closed HTTP 503 while disabled, and VLM returned
+  fail-closed HTTP 503 without provider config.
 
 Next implementation steps:
 
-1. Add backend export/users/VLM real adapters before enabling those production flows.
+1. Stage/prod cutover can start only after runtime env/secrets are delivered for auth, DB, GAS,
+   VLM, and Auth0 M2M; toggle users/export/VLM one flow at a time with smoke and rollback checks.
 2. Add a scheduled Deadline Worker poller only after operations agrees on runtime ownership.
 3. Add production runtime-config delivery if fast frontend rollback must work without rebuild.

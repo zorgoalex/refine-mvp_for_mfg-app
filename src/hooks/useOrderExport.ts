@@ -8,6 +8,9 @@
 import { useState } from 'react';
 import { useDataProvider } from '@refinedev/core';
 import { message } from 'antd';
+import { exportApi } from '../api/exportApi';
+import { isApiError } from '../api/apiError';
+import { featureFlags } from '../config/featureFlags';
 import { uploadOrderExcelToApi, handleUploadError } from '../utils/excel/uploadToApi';
 import { generateOrderFileName } from '../utils/excel/fileNameGenerator';
 
@@ -76,6 +79,21 @@ export const useOrderExport = (): UseOrderExportResult => {
     setIsUploading(true);
 
     try {
+      if (featureFlags.useBackendOrderExport) {
+        const result = await exportApi.exportOrderToGoogleDrive(order.order_id, {
+          format: 'xlsx',
+        });
+
+        if (result.success) {
+          message.success(
+            `Заказ успешно выгружен в Google Drive: ${result.fileName || order.order_name}`,
+          );
+          return;
+        }
+
+        throw new Error('Неизвестная ошибка');
+      }
+
       // 1. Загрузить ПОЛНЫЙ заказ из БД (может быть передан только order_id)
       // Используем orders для редактируемых полей + order_doweling_links
       // А также orders_view для агрегированных полей (статусы, площадь)
@@ -358,7 +376,9 @@ export const useOrderExport = (): UseOrderExportResult => {
       console.error('Ошибка экспорта в Google Drive:', error);
 
       // Обработка ошибок через handleUploadError
-      const errorMessage = handleUploadError(error);
+      const errorMessage = featureFlags.useBackendOrderExport
+        ? formatBackendExportError(error)
+        : handleUploadError(error);
       message.error(`Не удалось выгрузить в Google Drive: ${errorMessage}`);
 
       // Не прокидываем ошибку дальше - заказ сохранен, экспорт опционален
@@ -372,3 +392,24 @@ export const useOrderExport = (): UseOrderExportResult => {
     isUploading,
   };
 };
+
+function formatBackendExportError(error: unknown): string {
+  if (isApiError(error)) {
+    if (error.code === 'PERMISSION_DENIED') {
+      return 'Недостаточно прав для экспорта заказа.';
+    }
+    if (error.code === 'ORDER_NOT_FOUND') {
+      return 'Заказ не найден.';
+    }
+    if (error.code === 'RATE_LIMIT_EXCEEDED') {
+      return 'Слишком много попыток экспорта. Повторите позже.';
+    }
+    if (error.code === 'EXPORT_PROVIDER_TIMEOUT') {
+      return 'Превышено время ожидания Google Drive. Попробуйте позже.';
+    }
+
+    return error.message;
+  }
+
+  return handleUploadError(error);
+}

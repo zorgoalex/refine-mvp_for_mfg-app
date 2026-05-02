@@ -3,6 +3,8 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { Form, Input, Select, Checkbox, message } from "antd";
 import { authStorage } from "../../utils/auth";
 import { useState } from "react";
+import { usersApi } from "../../api/usersApi";
+import { featureFlags } from "../../config/featureFlags";
 
 export const UserCreate: React.FC<IResourceComponentsProps> = () => {
   const { list } = useNavigation();
@@ -11,6 +13,21 @@ export const UserCreate: React.FC<IResourceComponentsProps> = () => {
   const handleSubmit = async (values: any) => {
     setLoading(true);
     try {
+      if (featureFlags.useBackendUsers) {
+        await usersApi.create({
+          username: values.username,
+          email: values.email,
+          password: values.password,
+          role: values.role,
+          fullName: values.full_name || null,
+          isActive: values.is_active ?? true,
+        });
+
+        message.success('Пользователь успешно создан');
+        list('users');
+        return;
+      }
+
       const token = authStorage.getAccessToken();
 
       if (!token) {
@@ -96,10 +113,10 @@ export const UserCreate: React.FC<IResourceComponentsProps> = () => {
           name="password"
           rules={[
             { required: true, message: 'Пожалуйста, введите пароль' },
-            { min: 6, message: 'Пароль должен содержать минимум 6 символов' },
+            { min: 8, message: 'Пароль должен содержать минимум 8 символов' },
           ]}
         >
-          <Input.Password placeholder="Минимум 6 символов" />
+          <Input.Password placeholder="Минимум 8 символов" />
         </Form.Item>
 
         <Form.Item

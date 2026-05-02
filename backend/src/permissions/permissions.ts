@@ -22,6 +22,16 @@ export const ROLE_ID_TO_ROLE = {
 
 export type KnownRoleId = keyof typeof ROLE_ID_TO_ROLE;
 
+export const ROLE_TO_ROLE_ID = {
+  superadmin: 2,
+  admin: 1,
+  top_manager: 15,
+  manager: 10,
+  operator: 11,
+  worker: 20,
+  viewer: 100,
+} as const satisfies Record<UserRole, KnownRoleId>;
+
 export const PERMISSIONS = [
   'profile.view',
   'profile.update_own',
@@ -377,6 +387,10 @@ export function isUserRole(value: unknown): value is UserRole {
 
 export function mapRoleIdToRole(roleId: number): UserRole | null {
   return ROLE_ID_TO_ROLE[roleId as KnownRoleId] ?? null;
+}
+
+export function mapRoleToRoleId(role: UserRole): KnownRoleId {
+  return ROLE_TO_ROLE_ID[role];
 }
 
 export function getPermissionsForRole(role: UserRole): readonly PermissionName[] {

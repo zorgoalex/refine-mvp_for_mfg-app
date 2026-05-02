@@ -79,6 +79,18 @@ const envSchema = z
     BACKEND_DEADLINE_WORKER_ID: z.string().trim().min(1).default('backend-local'),
     BACKEND_DEADLINE_ACTIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
+    GAS_WEBAPP_URL: z.string().trim().url().optional(),
+    GAS_API_KEY: z.string().trim().min(1).optional(),
+    GAS_EXPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(55000),
+    VLM_API_URL: z.string().trim().url().optional(),
+    VLM_HEALTH_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+    VLM_UPLOAD_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    VLM_ANALYZE_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
+    VLM_ANALYZE_DAILY_LIMIT: z.coerce.number().int().positive().default(100),
+    AUTH0_M2M_DOMAIN: z.string().trim().min(1).optional(),
+    AUTH0_M2M_CLIENT_ID: z.string().trim().min(1).optional(),
+    AUTH0_M2M_CLIENT_SECRET: z.string().trim().min(1).optional(),
+    AUTH0_M2M_AUDIENCE: z.string().trim().min(1).optional(),
     VLM_MAX_UPLOAD_MB: z.coerce.number().positive().default(20),
     VLM_ALLOWED_MIME_TYPES: z
       .string()
@@ -142,6 +154,65 @@ const envSchema = z
           message: 'REFRESH_TOKEN_PEPPER is required when BACKEND_ENABLE_AUTH is true',
           path: ['REFRESH_TOKEN_PEPPER'],
         });
+      }
+    }
+
+    if (env.BACKEND_ENABLE_ORDER_EXPORT && env.BACKEND_EXPORT_DISABLED === false) {
+      if (!env.DATABASE_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'DATABASE_URL is required when order export is enabled',
+          path: ['DATABASE_URL'],
+        });
+      }
+
+      if (!env.GAS_WEBAPP_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'GAS_WEBAPP_URL is required when order export is enabled',
+          path: ['GAS_WEBAPP_URL'],
+        });
+      }
+
+      if (!env.GAS_API_KEY) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'GAS_API_KEY is required when order export is enabled',
+          path: ['GAS_API_KEY'],
+        });
+      }
+    }
+
+    if (env.BACKEND_ENABLE_VLM && env.BACKEND_VLM_DISABLED === false) {
+      if (!env.DATABASE_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'DATABASE_URL is required when VLM actions are enabled',
+          path: ['DATABASE_URL'],
+        });
+      }
+
+      if (!env.VLM_API_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'VLM_API_URL is required when VLM actions are enabled',
+          path: ['VLM_API_URL'],
+        });
+      }
+
+      for (const key of [
+        'AUTH0_M2M_DOMAIN',
+        'AUTH0_M2M_CLIENT_ID',
+        'AUTH0_M2M_CLIENT_SECRET',
+        'AUTH0_M2M_AUDIENCE',
+      ] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `${key} is required when VLM actions are enabled`,
+            path: [key],
+          });
+        }
       }
     }
   })

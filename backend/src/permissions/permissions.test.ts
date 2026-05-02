@@ -3,6 +3,7 @@ import {
   can,
   getPermissionsForRole,
   HASURA_ALLOWED_ROLES,
+  mapRoleToRoleId,
   mapRoleIdToRole,
   PERMISSIONS,
   ROLE_PERMISSIONS,
@@ -12,6 +13,8 @@ import {
 describe('permissions foundation', () => {
   it('maps live DB role_id=2 to canonical superadmin', () => {
     expect(mapRoleIdToRole(2)).toBe('superadmin');
+    expect(mapRoleToRoleId('superadmin')).toBe(2);
+    expect(mapRoleToRoleId('admin')).toBe(1);
     expect(USER_ROLES).toContain('superadmin');
   });
 

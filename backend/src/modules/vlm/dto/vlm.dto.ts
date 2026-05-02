@@ -17,6 +17,8 @@ export interface VlmUploadFileLike {
   contentType?: string;
   type?: string;
   size?: number;
+  buffer?: Buffer | Uint8Array;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
 }
 
 export interface VlmUploadRequestDto {

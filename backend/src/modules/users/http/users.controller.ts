@@ -64,7 +64,11 @@ export class UsersController {
     this.assertUsersEnabled();
 
     const currentUser = this.requireCurrentUser(request);
-    return this.users.list({ currentUser, query: parseUserListQuery(query) });
+    return this.users.list({
+      currentUser,
+      query: parseUserListQuery(query),
+      requestId: request.requestId,
+    });
   }
 
   @Get(':userId')
@@ -78,6 +82,7 @@ export class UsersController {
     const user = await this.users.getById({
       currentUser,
       userId: parseUserId(userIdParam),
+      requestId: request.requestId,
     });
 
     return { user };
@@ -94,6 +99,7 @@ export class UsersController {
     const user = await this.users.create({
       currentUser,
       dto: parseCreateUserRequest(body),
+      requestId: request.requestId,
     });
 
     return { user };
@@ -112,6 +118,7 @@ export class UsersController {
       currentUser,
       userId: parseUserId(userIdParam),
       dto: parseUpdateUserRequest(body),
+      requestId: request.requestId,
     });
 
     return { user };
@@ -131,6 +138,7 @@ export class UsersController {
       currentUser,
       userId: parseUserId(userIdParam),
       dto: parseChangePasswordRequest(body),
+      requestId: request.requestId,
     });
   }
 
@@ -145,6 +153,7 @@ export class UsersController {
     const user = await this.users.deactivate({
       currentUser,
       userId: parseUserId(userIdParam),
+      requestId: request.requestId,
     });
 
     return { user };
@@ -161,6 +170,7 @@ export class UsersController {
     const user = await this.users.activate({
       currentUser,
       userId: parseUserId(userIdParam),
+      requestId: request.requestId,
     });
 
     return { user };

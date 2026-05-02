@@ -8,6 +8,9 @@
  */
 
 import { useState, useCallback } from 'react';
+import { vlmApi } from '../api/vlmApi';
+import type { VlmAnalyzeRequest, VlmAnalyzeResponse } from '../api/types/vlmApi.types';
+import { featureFlags } from '../config/featureFlags';
 import {
   useAppSettings,
   SETTING_KEYS,
@@ -40,6 +43,7 @@ export interface VlmHealthStatus {
 
 export interface VlmUploadResult {
   success: boolean;
+  uploadId?: string;
   url?: string;
   key?: string;
   width?: number;
@@ -135,6 +139,25 @@ export const useVlmApi = (): UseVlmApiResult => {
   // Check health
   const checkHealth = useCallback(async (): Promise<VlmHealthStatus> => {
     try {
+      if (featureFlags.useBackendVlm) {
+        const backendHealth = await vlmApi.health();
+        return {
+          status: backendHealth.status === 'ok'
+            ? 'ok'
+            : backendHealth.status === 'degraded'
+              ? 'partial'
+              : 'error',
+          vlm: {
+            healthz: { status: backendHealth.status },
+            readyz: { status: backendHealth.status },
+          },
+          auth0: {
+            configured: backendHealth.status !== 'unavailable',
+          },
+          timestamp: new Date().toISOString(),
+        };
+      }
+
       const response = await fetch('/api/vlm/health');
       const data = await response.json();
       return data;
@@ -152,6 +175,10 @@ export const useVlmApi = (): UseVlmApiResult => {
     setError(null);
 
     try {
+      if (featureFlags.useBackendVlm) {
+        return await vlmApi.upload(file, 'vlm');
+      }
+
       const token = getAuthToken();
       if (!token) {
         throw new Error('Not authenticated');
@@ -193,6 +220,17 @@ export const useVlmApi = (): UseVlmApiResult => {
     setError(null);
 
     try {
+      if (featureFlags.useBackendVlm) {
+        const backendRequest = buildBackendAnalyzeRequest({
+          imageUrl,
+          options,
+          settings: getSettings(),
+          defaults: getDefaults(),
+        });
+        const backendResult = await vlmApi.analyze(backendRequest);
+        return mapBackendAnalyzeResult(backendResult);
+      }
+
       const token = getAuthToken();
       if (!token) {
         throw new Error('Not authenticated');
@@ -311,7 +349,18 @@ export const useVlmApi = (): UseVlmApiResult => {
       }
 
       // 2. Analyze
-      const analyzeResult = await analyzeImage(uploadResult.url, options);
+      const analyzeResult = featureFlags.useBackendVlm && uploadResult.uploadId
+        ? mapBackendAnalyzeResult(
+            await vlmApi.analyze(
+              buildBackendAnalyzeRequest({
+                uploadId: uploadResult.uploadId,
+                options,
+                settings: getSettings(),
+                defaults: getDefaults(),
+              }),
+            ),
+          )
+        : await analyzeImage(uploadResult.url, options);
 
       return {
         ...analyzeResult,
@@ -337,5 +386,96 @@ export const useVlmApi = (): UseVlmApiResult => {
     uploadAndAnalyze,
   };
 };
+
+function buildBackendAnalyzeRequest(input: {
+  uploadId?: string;
+  imageUrl?: string;
+  options: AnalyzeOptions;
+  settings: VlmSettings;
+  defaults: VlmDefaultSettings;
+}): VlmAnalyzeRequest {
+  let providerOrder = input.options.providerOrder;
+  if (!providerOrder) {
+    providerOrder = input.settings.providerPriority.filter(
+      (provider) => input.settings.providerConfigs[provider]?.enabled,
+    );
+  }
+
+  const provider = input.options.provider ||
+    (input.defaults.providerName as VlmProvider) ||
+    input.settings.defaultProvider;
+  const providerConfig = input.settings.providerConfigs[provider];
+  const model = input.options.model ||
+    input.defaults.modelName ||
+    providerConfig?.defaultModel;
+  const request: VlmAnalyzeRequest = {
+    uploadId: input.uploadId,
+    imageUrl: input.imageUrl,
+    provider,
+    model,
+    providerOrder,
+  };
+
+  switch (input.defaults.promptMode) {
+    case 'prompt_id':
+      request.promptId = input.defaults.promptId;
+      break;
+    case 'prompt_kv':
+      request.promptKv = normalizePromptKv(input.defaults.promptKv);
+      break;
+    case 'api_default':
+    default:
+      request.promptKv = normalizePromptKv(input.settings.promptKv);
+      break;
+  }
+
+  return request;
+}
+
+function normalizePromptKv(
+  promptKv: VlmSettings['promptKv'] | VlmDefaultSettings['promptKv'] | null,
+): VlmAnalyzeRequest['promptKv'] {
+  if (!promptKv) {
+    return null;
+  }
+
+  return {
+    namespace: promptKv.namespace,
+    name: promptKv.name,
+    version: String(promptKv.version),
+    lang: promptKv.lang,
+  };
+}
+
+function mapBackendAnalyzeResult(response: VlmAnalyzeResponse): VlmAnalyzeResult {
+  const content = typeof response.result.content === 'string'
+    ? response.result.content
+    : undefined;
+  const items = Array.isArray(response.result.items)
+    ? response.result.items
+    : undefined;
+  const parseError = typeof response.result.parseError === 'string'
+    ? response.result.parseError
+    : undefined;
+  const inputTokens = response.usage?.inputTokens ?? 0;
+  const outputTokens = response.usage?.outputTokens ?? 0;
+
+  return {
+    success: true,
+    content,
+    items,
+    parseError,
+    raw: response.rawResult ?? response.result,
+    provider: response.provider ?? undefined,
+    model: response.model ?? undefined,
+    usage: response.usage
+      ? {
+          prompt_tokens: inputTokens,
+          completion_tokens: outputTokens,
+          total_tokens: inputTokens + outputTokens,
+        }
+      : undefined,
+  };
+}
 
 export default useVlmApi;

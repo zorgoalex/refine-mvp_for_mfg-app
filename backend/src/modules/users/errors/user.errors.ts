@@ -5,3 +5,9 @@ export class UserNotFoundError extends ApiError {
     super(404, 'USER_NOT_FOUND', 'User not found', { userId });
   }
 }
+
+export class UserAlreadyExistsError extends ApiError {
+  constructor(field: 'username' | 'email') {
+    super(409, 'USER_ALREADY_EXISTS', `User with this ${field} already exists`, { field });
+  }
+}

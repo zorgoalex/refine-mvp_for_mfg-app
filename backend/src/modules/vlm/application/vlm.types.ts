@@ -10,16 +10,19 @@ import type {
 export interface GetVlmHealthCommand {
   currentUser: CurrentUser;
   detailsVisible: boolean;
+  requestId?: string;
 }
 
 export interface UploadVlmImageCommand {
   currentUser: CurrentUser;
   dto: VlmUploadRequestDto;
+  requestId?: string;
 }
 
 export interface AnalyzeVlmImageCommand {
   currentUser: CurrentUser;
   dto: VlmAnalyzeRequestDto;
+  requestId?: string;
 }
 
 export interface VlmProviderPort {

@@ -11,4 +11,5 @@ export interface CurrentUser {
 
 export interface RequestWithCurrentUser {
   user?: CurrentUser;
+  requestId?: string;
 }

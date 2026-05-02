@@ -103,6 +103,9 @@ VITE_USE_BACKEND_AUTH=false
 VITE_USE_BACKEND_PERMISSIONS=false
 VITE_USE_BACKEND_ORDERS_READ=false
 VITE_USE_BACKEND_ORDERS_WRITE=false
+VITE_USE_BACKEND_USERS=false
+VITE_USE_BACKEND_ORDER_EXPORT=false
+VITE_USE_BACKEND_VLM=false
 ```
 
 Backend env для Vercel Functions:
@@ -136,6 +139,12 @@ Backend orders cutover mode за `VITE_USE_BACKEND_ORDERS_READ=true` и
 `VITE_USE_BACKEND_ORDERS_WRITE=true` использует versioned `/api/v1/orders` для list/show/edit
 load и create/update. Dual-write для заказов не используется: при выключенном write flag
 остаётся legacy save path.
+
+Backend users/export/VLM cutover mode за `VITE_USE_BACKEND_USERS=true`,
+`VITE_USE_BACKEND_ORDER_EXPORT=true` и `VITE_USE_BACKEND_VLM=true` использует versioned
+`/api/v1/users`, `/api/v1/orders/:id/export/google-drive` и `/api/v1/vlm/*`.
+Legacy Vercel Functions остаются rollback path, пока соответствующие backend flags и
+external provider env не включены на runtime.
 
 Audit:
 

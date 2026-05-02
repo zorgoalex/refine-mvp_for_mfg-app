@@ -3,6 +3,8 @@ import { IResourceComponentsProps, useOne } from "@refinedev/core";
 import { Form, Input, Select, Checkbox, Button, Divider, message, Card } from "antd";
 import { authStorage } from "../../utils/auth";
 import { useState } from "react";
+import { usersApi } from "../../api/usersApi";
+import { featureFlags } from "../../config/featureFlags";
 
 export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps, queryResult } = useForm({
@@ -36,7 +38,7 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordForm] = Form.useForm();
 
-  const userId = queryResult?.data?.data?.user_id;
+  const userId = queryResult?.data?.data?.user_id ?? queryResult?.data?.data?.id;
 
   // Обратная карта для сохранения
   const roleNameToId: Record<string, number> = {
@@ -51,6 +53,17 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   const handlePasswordChange = async (values: { new_password: string }) => {
     setPasswordLoading(true);
     try {
+      if (featureFlags.useBackendUsers) {
+        await usersApi.changePassword(Number(userId), {
+          newPassword: values.new_password,
+          revokeExistingSessions: true,
+        });
+
+        message.success('Пароль успешно изменён');
+        passwordForm.resetFields();
+        return;
+      }
+
       const token = authStorage.getAccessToken();
 
       if (!token) {
@@ -89,6 +102,22 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
 
   // Кастомный onFinish для преобразования role → role_id
   const handleFinish = (values: any) => {
+    if (featureFlags.useBackendUsers) {
+      usersApi.update(Number(userId), {
+        username: values.username,
+        email: values.email,
+        role: values.role,
+        fullName: values.full_name || null,
+        isActive: values.is_active,
+      }).then(() => {
+        message.success('Данные пользователя обновлены');
+      }).catch((error) => {
+        console.error('Update user error:', error);
+        message.error(error instanceof Error ? error.message : 'Ошибка обновления пользователя');
+      });
+      return;
+    }
+
     const { role, ...rest } = values;
 
     // Преобразуем role в role_id
@@ -165,11 +194,11 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
             label="Новый пароль"
             name="new_password"
             rules={[
-              { required: true, message: 'Пожалуйста, введите новый пароль' },
-              { min: 6, message: 'Пароль должен содержать минимум 6 символов' },
+            { required: true, message: 'Пожалуйста, введите новый пароль' },
+              { min: 8, message: 'Пароль должен содержать минимум 8 символов' },
             ]}
           >
-            <Input.Password placeholder="Минимум 6 символов" />
+            <Input.Password placeholder="Минимум 8 символов" />
           </Form.Item>
 
           <Form.Item>

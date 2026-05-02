@@ -20,33 +20,39 @@ export interface UserListQuery {
 export interface ListUsersCommand {
   currentUser: CurrentUser;
   query: UserListQuery;
+  requestId?: string;
 }
 
 export interface GetUserByIdCommand {
   currentUser: CurrentUser;
   userId: number;
+  requestId?: string;
 }
 
 export interface CreateUserCommand {
   currentUser: CurrentUser;
   dto: CreateUserRequestDto;
+  requestId?: string;
 }
 
 export interface UpdateUserCommand {
   currentUser: CurrentUser;
   userId: number;
   dto: UpdateUserRequestDto;
+  requestId?: string;
 }
 
 export interface ChangeUserPasswordCommand {
   currentUser: CurrentUser;
   userId: number;
   dto: ChangePasswordRequestDto;
+  requestId?: string;
 }
 
 export interface UserActivationCommand {
   currentUser: CurrentUser;
   userId: number;
+  requestId?: string;
 }
 
 export interface UserRepositoryPort {

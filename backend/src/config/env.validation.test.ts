@@ -25,6 +25,11 @@ describe('backend env validation', () => {
       BACKEND_DEADLINE_WORKER_ID: 'backend-local',
       BACKEND_DEADLINE_ACTIONS_ENABLED: false,
       BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: false,
+      GAS_EXPORT_TIMEOUT_MS: 55000,
+      VLM_HEALTH_TIMEOUT_MS: 10000,
+      VLM_UPLOAD_TIMEOUT_MS: 30000,
+      VLM_ANALYZE_TIMEOUT_MS: 90000,
+      VLM_ANALYZE_DAILY_LIMIT: 100,
     });
   });
 
@@ -53,6 +58,18 @@ describe('backend env validation', () => {
         BACKEND_DEADLINE_WORKER_ID: 'worker-a',
         BACKEND_DEADLINE_ACTIONS_ENABLED: 'true',
         BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: 'true',
+        GAS_WEBAPP_URL: 'https://script.google.com/macros/s/test/exec',
+        GAS_API_KEY: 'gas-key',
+        GAS_EXPORT_TIMEOUT_MS: '30000',
+        VLM_API_URL: 'https://vlm.example.test',
+        VLM_HEALTH_TIMEOUT_MS: '5000',
+        VLM_UPLOAD_TIMEOUT_MS: '15000',
+        VLM_ANALYZE_TIMEOUT_MS: '45000',
+        VLM_ANALYZE_DAILY_LIMIT: '25',
+        AUTH0_M2M_DOMAIN: 'auth.example.test',
+        AUTH0_M2M_CLIENT_ID: 'client-id',
+        AUTH0_M2M_CLIENT_SECRET: 'client-secret',
+        AUTH0_M2M_AUDIENCE: 'https://vlm.example.test',
         VLM_MAX_UPLOAD_MB: '25',
         VLM_ALLOWED_MIME_TYPES: 'image/png,image/jpeg',
       }),
@@ -75,6 +92,18 @@ describe('backend env validation', () => {
       BACKEND_DEADLINE_WORKER_ID: 'worker-a',
       BACKEND_DEADLINE_ACTIONS_ENABLED: true,
       BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: true,
+      GAS_WEBAPP_URL: 'https://script.google.com/macros/s/test/exec',
+      GAS_API_KEY: 'gas-key',
+      GAS_EXPORT_TIMEOUT_MS: 30000,
+      VLM_API_URL: 'https://vlm.example.test',
+      VLM_HEALTH_TIMEOUT_MS: 5000,
+      VLM_UPLOAD_TIMEOUT_MS: 15000,
+      VLM_ANALYZE_TIMEOUT_MS: 45000,
+      VLM_ANALYZE_DAILY_LIMIT: 25,
+      AUTH0_M2M_DOMAIN: 'auth.example.test',
+      AUTH0_M2M_CLIENT_ID: 'client-id',
+      AUTH0_M2M_CLIENT_SECRET: 'client-secret',
+      AUTH0_M2M_AUDIENCE: 'https://vlm.example.test',
       VLM_MAX_UPLOAD_MB: 25,
       VLM_ALLOWED_MIME_TYPES: 'image/png,image/jpeg',
     });
@@ -143,6 +172,30 @@ describe('backend env validation', () => {
     });
   });
 
+  it('requires DB and GAS settings when order export is enabled for writes', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_ORDER_EXPORT: 'true',
+        BACKEND_EXPORT_DISABLED: 'false',
+      }),
+    ).toThrow(/DATABASE_URL.*GAS_WEBAPP_URL.*GAS_API_KEY/);
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_ORDER_EXPORT: 'true',
+        BACKEND_EXPORT_DISABLED: 'false',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        GAS_WEBAPP_URL: 'https://script.google.com/macros/s/test/exec',
+        GAS_API_KEY: 'gas-key',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_ORDER_EXPORT: true,
+      BACKEND_EXPORT_DISABLED: false,
+      GAS_WEBAPP_URL: 'https://script.google.com/macros/s/test/exec',
+      GAS_API_KEY: 'gas-key',
+    });
+  });
+
   it('requires a versioned API prefix', () => {
     expect(() =>
       validateEnv({
@@ -162,6 +215,32 @@ describe('backend env validation', () => {
         VLM_ALLOWED_MIME_TYPES: '',
       }),
     ).toThrow(/VLM_ALLOWED_MIME_TYPES/);
+  });
+
+  it('requires DB, VLM API, and Auth0 M2M settings when VLM actions are enabled', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_VLM: 'true',
+        BACKEND_VLM_DISABLED: 'false',
+      }),
+    ).toThrow(/DATABASE_URL.*VLM_API_URL.*AUTH0_M2M_DOMAIN.*AUTH0_M2M_CLIENT_ID.*AUTH0_M2M_CLIENT_SECRET.*AUTH0_M2M_AUDIENCE/);
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_VLM: 'true',
+        BACKEND_VLM_DISABLED: 'false',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        VLM_API_URL: 'https://vlm.example.test',
+        AUTH0_M2M_DOMAIN: 'auth.example.test',
+        AUTH0_M2M_CLIENT_ID: 'client-id',
+        AUTH0_M2M_CLIENT_SECRET: 'client-secret',
+        AUTH0_M2M_AUDIENCE: 'https://vlm.example.test',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_VLM: true,
+      BACKEND_VLM_DISABLED: false,
+      VLM_API_URL: 'https://vlm.example.test',
+    });
   });
 
   it('rejects invalid deadline worker settings', () => {

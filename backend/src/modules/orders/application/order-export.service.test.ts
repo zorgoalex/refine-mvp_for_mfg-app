@@ -49,6 +49,31 @@ describe('OrderExportService', () => {
     ).resolves.toEqual({ success: true, fileName: 'order_42.xlsx', folder: null });
     expect(calls).toEqual(['manager-id:42:custom.xlsx']);
   });
+
+  it('checks rate limit before exporter call', async () => {
+    const calls: string[] = [];
+    const service = new OrderExportService({
+      rateLimiter: {
+        assertAllowed(command) {
+          calls.push(`limit:${command.currentUser.id}:${command.orderId}`);
+        },
+      },
+      exporter: {
+        async exportToGoogleDrive(command) {
+          calls.push(`export:${command.orderId}`);
+          return { success: true, fileName: 'order_42.xlsx', folder: null };
+        },
+      },
+    });
+
+    await service.exportToGoogleDrive({
+      currentUser: manager(),
+      orderId: 42,
+      request: { format: 'xlsx', fileName: null },
+    });
+
+    expect(calls).toEqual(['limit:manager-id:42', 'export:42']);
+  });
 });
 
 function manager(): CurrentUser {

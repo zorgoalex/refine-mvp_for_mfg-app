@@ -4,6 +4,7 @@ import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import type { BackendEnv } from '../../config/env.validation';
 import { PgOrderDeadlineSync } from '../deadlines/adapters/pg-order-deadline-sync';
+import { PgOrderExporter } from './adapters/pg-order-exporter';
 import { PgOrderReadRepository } from './adapters/pg-order-read-repository';
 import { PgOrderTransactionManager } from './adapters/pg-order-transaction-manager';
 import { UnavailableOrderExporter } from './adapters/unavailable-order-exporter';
@@ -47,10 +48,20 @@ import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service
     },
     {
       provide: OrderExportService,
-      useFactory: () =>
+      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
         new OrderExportService({
-          exporter: new UnavailableOrderExporter(),
+          exporter:
+            database.isConfigured &&
+            config.get('GAS_WEBAPP_URL', { infer: true }) &&
+            config.get('GAS_API_KEY', { infer: true })
+              ? new PgOrderExporter(database, {
+                  gasWebappUrl: config.get('GAS_WEBAPP_URL', { infer: true }) ?? '',
+                  gasApiKey: config.get('GAS_API_KEY', { infer: true }) ?? '',
+                  timeoutMs: config.get('GAS_EXPORT_TIMEOUT_MS', { infer: true }),
+                })
+              : new UnavailableOrderExporter(),
         }),
+      inject: [DatabaseService, ConfigService],
     },
   ],
 })
