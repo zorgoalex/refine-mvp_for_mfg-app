@@ -12,9 +12,10 @@ const { Text } = Typography;
 
 interface OrderFinanceBlockProps {
   record: any;
+  payments?: any[];
 }
 
-export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) => {
+export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, payments: providedPayments }) => {
   // Загружаем платежи для текущего заказа
   const { data: paymentsData } = useList({
     resource: 'payments',
@@ -29,7 +30,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
       pageSize: 1000,
     },
     queryOptions: {
-      enabled: !!record?.order_id,
+      enabled: !!record?.order_id && !providedPayments,
     },
   });
 
@@ -48,7 +49,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record }) 
     return map;
   }, [paymentTypesData]);
 
-  const payments = paymentsData?.data || [];
+  const payments = providedPayments ?? paymentsData?.data ?? [];
 
   // Считаем сумму всех платежей
   const totalPaymentsAmount = useMemo(() => {

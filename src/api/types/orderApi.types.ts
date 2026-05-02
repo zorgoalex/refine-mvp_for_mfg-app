@@ -252,8 +252,11 @@ export interface OrderHeaderDto {
   managerId?: number | null;
   priority?: number | null;
   orderStatusId: number;
+  orderStatusName?: string | null;
   paymentStatusId?: number | null;
+  paymentStatusName?: string | null;
   productionStatusId?: number | null;
+  productionStatusName?: string | null;
   productionStatusFromDetailsEnabled?: boolean | null;
   plannedCompletionDate?: DateOnlyString | null;
   completionDate?: DateOnlyString | null;

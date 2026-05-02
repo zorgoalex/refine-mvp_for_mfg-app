@@ -37,6 +37,8 @@ import { ProductionStagesDisplay, getPassedCodesFromStatusName } from "../../com
 import { useAppSettings, SETTING_KEYS } from "../../hooks/useAppSettings";
 import { buildProductionStagesDisplayConfig } from "../../utils/productionWorkflow";
 import type { ProductionStatusRef, ProductionWorkflowConfig } from "../../types/productionWorkflow";
+import { featureFlags } from "../../config/featureFlags";
+import { ordersApi } from "../../api/ordersApi";
 import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -50,6 +52,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   // Получаем текущего пользователя для фильтра "Мои заказы"
   const currentUser = authStorage.getUser();
+  const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
   const { getSetting } = useAppSettings();
 
   const { tableProps, current, pageSize, setCurrent, sorters, setSorters, filters, setFilters } = useTable({
@@ -120,6 +123,32 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     }
 
     try {
+      if (useBackendOrdersRead) {
+        const response = await ordersApi.list({
+          page: 1,
+          pageSize: 1,
+          search: orderName,
+          sortBy: "orderDate",
+          sortOrder: "desc",
+        });
+        const foundOrder = response.data[0];
+
+        if (!foundOrder) {
+          message.error(`Заказ с "${orderName}" не найден`);
+          return;
+        }
+
+        setFilters([{ field: "order_name", operator: "contains", value: orderName }], "replace");
+        setCurrent(1);
+        setHighlightedOrderId(foundOrder.orderId);
+        message.success(`Заказ №${foundOrder.orderName} найден`);
+
+        setTimeout(() => {
+          setHighlightedOrderId(null);
+        }, 3000);
+        return;
+      }
+
       // Получаем JWT токен пользователя
       const token = authStorage.getAccessToken();
       if (!token) {
@@ -251,7 +280,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       console.error("Ошибка поиска заказа:", error);
       message.error("Ошибка при поиске заказа");
     }
-  }, [searchOrderId, pageSize, current, setCurrent, sorters, setSorters]);
+  }, [searchOrderId, pageSize, current, setCurrent, sorters, setSorters, setFilters, useBackendOrdersRead]);
 
   // useSelect для справочников в фильтрах
   const { selectProps: clientSelectProps } = useSelect({
@@ -269,13 +298,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { selectProps: orderStatusSelectProps } = useSelect({
     resource: "order_statuses",
     optionLabel: "order_status_name",
-    optionValue: "order_status_name",
+    optionValue: useBackendOrdersRead ? "order_status_id" : "order_status_name",
   });
 
   const { selectProps: paymentStatusSelectProps } = useSelect({
     resource: "payment_statuses",
     optionLabel: "payment_status_name",
-    optionValue: "payment_status_name",
+    optionValue: useBackendOrdersRead ? "payment_status_id" : "payment_status_name",
   });
 
   const { selectProps: dowelingSelectProps } = useSelect({
@@ -316,11 +345,19 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     }
 
     if (hasValue(values.order_status_name)) {
-      newFilters.push({ field: "order_status_name", operator: "eq", value: values.order_status_name });
+      newFilters.push({
+        field: useBackendOrdersRead ? "order_status_id" : "order_status_name",
+        operator: "eq",
+        value: values.order_status_name,
+      });
     }
 
     if (hasValue(values.payment_status_name)) {
-      newFilters.push({ field: "payment_status_name", operator: "eq", value: values.payment_status_name });
+      newFilters.push({
+        field: useBackendOrdersRead ? "payment_status_id" : "payment_status_name",
+        operator: "eq",
+        value: values.payment_status_name,
+      });
     }
 
     if (hasValue(values.final_amount_min)) {
@@ -445,7 +482,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       pageSize: 10000,
     },
     queryOptions: {
-      enabled: orderIds.length > 0,
+      enabled: orderIds.length > 0 && !useBackendOrdersRead,
     },
   });
 
@@ -482,7 +519,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 10000 },
     queryOptions: {
-      enabled: orderIds.length > 0,
+      enabled: orderIds.length > 0 && !useBackendOrdersRead,
     },
   });
 
@@ -498,7 +535,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 10000 },
     queryOptions: {
-      enabled: orderIds.length > 0,
+      enabled: orderIds.length > 0 && !useBackendOrdersRead,
     },
   });
 

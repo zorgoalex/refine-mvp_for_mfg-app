@@ -88,7 +88,7 @@ test.describe('Authentication', () => {
         await expect(page).toHaveURL(/\//, { timeout: 15000 });
 
         // Находим и кликаем на dropdown пользователя
-        const userDropdown = page.locator('.ant-dropdown-trigger').first();
+        const userDropdown = page.getByRole('button', { name: /admin/i });
         await userDropdown.waitFor({ state: 'visible', timeout: 5000 });
         await userDropdown.click();
 

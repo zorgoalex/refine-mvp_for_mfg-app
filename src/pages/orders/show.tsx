@@ -15,6 +15,7 @@ import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
 import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
+import { featureFlags } from "../../config/featureFlags";
 
 const { Panel } = Collapse;
 
@@ -69,6 +70,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const { data, isLoading } = queryResult;
 
   const record = data?.data;
+  const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
+  const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
 
   // Загрузка деталей заказа
   const { data: detailsData, isLoading: detailsLoading } = useList({
@@ -82,11 +85,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 1000 },
     queryOptions: {
-      enabled: !!record?.order_id,
+      enabled: !!record?.order_id && !useBackendOrdersRead,
     },
   });
 
-  const details = (detailsData?.data || []).sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0));
+  const details = (
+    backendOrder?.details ??
+    (detailsData?.data || []).sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0))
+  );
 
   // Загрузка справочников для отображения названий
   const { data: millingTypesData } = useList({
@@ -183,12 +189,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     sorters: [{ field: 'payment_date', order: 'asc' }],
     pagination: { pageSize: 1000 },
     queryOptions: {
-      enabled: !!record?.order_id,
+      enabled: !!record?.order_id && !useBackendOrdersRead,
     },
   });
 
-  const payments = paymentsData?.data || [];
-  const totalPaymentsAmount = payments.reduce((sum, p: any) => sum + (p.amount || 0), 0);
+  const payments = backendOrder?.payments ?? paymentsData?.data ?? [];
 
   // Загрузка связей с присадками (many-to-many)
   const { data: dowelingLinksData } = useList({
@@ -198,11 +203,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 100 },
     queryOptions: {
-      enabled: !!record?.order_id,
+      enabled: !!record?.order_id && !useBackendOrdersRead,
     },
   });
 
-  const dowelingLinks = dowelingLinksData?.data || [];
+  const dowelingLinks = backendOrder?.dowelingLinks ?? dowelingLinksData?.data ?? [];
 
   // Загрузка сотрудников для отображения имени конструктора
   const { data: employeesData } = useList({
@@ -217,6 +222,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Функция обновления статуса оплаты
   const handleRefreshPaymentStatus = async () => {
     if (!record?.order_id) return;
+    if (useBackendOrdersRead) {
+      message.info('В backend-режиме статус оплаты обновляется через сохранение заказа');
+      return;
+    }
 
     // Refetch payments to get latest data
     const { data: freshPaymentsData } = await refetchPayments();
@@ -398,7 +407,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         <>
           {/* Компактная шапка заказа (Read-only summary) */}
           <div style={{ marginBottom: 4 }}>
-            <OrderShowHeader record={record} details={details} dowelingLinks={dowelingLinks} />
+            <OrderShowHeader
+              record={record}
+              details={details}
+              dowelingLinks={dowelingLinks}
+              disableLegacyOrderReads={useBackendOrdersRead}
+            />
           </div>
           
           {/* Финансы */}
@@ -419,7 +433,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 }}
                 style={{ cursor: 'pointer' }}
               >
-                <OrderFinanceBlock record={record} />
+                <OrderFinanceBlock record={record} payments={payments} />
               </div>
             </Panel>
           </Collapse>

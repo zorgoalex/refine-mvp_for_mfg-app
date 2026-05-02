@@ -9,6 +9,7 @@ export interface Order {
   order_id?: number;
   order_name: string;
   client_id: number;
+  client_name?: string | null;
   order_date: Date | string;
   priority: number;
 
@@ -19,8 +20,11 @@ export interface Order {
 
   // Statuses
   order_status_id: number;
+  order_status_name?: string | null;
   payment_status_id: number;
+  payment_status_name?: string | null;
   production_status_id?: number | null;
+  production_status_name?: string | null;
   production_status_from_details_enabled?: boolean;
 
   // Financial fields

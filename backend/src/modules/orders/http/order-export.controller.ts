@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Inject, Param, Post, Req } from '@nestjs/common';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OrderExportService } from '../application/order-export.service';
@@ -13,7 +13,9 @@ import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 @Controller('orders')
 export class OrderExportController {
   constructor(
+    @Inject(OrderExportService)
     private readonly exports: OrderExportService,
+    @Inject(OrdersRuntimeConfigService)
     private readonly runtimeConfig: OrdersRuntimeConfigService,
   ) {}
 

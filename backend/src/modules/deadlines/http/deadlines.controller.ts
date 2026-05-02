@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -65,8 +65,11 @@ const cancelDeadlineRequestSchema = z.object({
 @Controller()
 export class DeadlinesController {
   constructor(
+    @Inject(DeadlineCommandService)
     private readonly commands: DeadlineCommandService,
+    @Inject(DeadlineQueryService)
     private readonly queries: DeadlineQueryService,
+    @Inject(DeadlinesRuntimeConfigService)
     private readonly runtimeConfig: DeadlinesRuntimeConfigService,
   ) {}
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -39,8 +39,11 @@ const updatePolicyRequestSchema = createPolicyRequestSchema
 @Controller('deadline-policies')
 export class DeadlinePoliciesController {
   constructor(
+    @Inject(DeadlineCommandService)
     private readonly commands: DeadlineCommandService,
+    @Inject(DeadlineQueryService)
     private readonly queries: DeadlineQueryService,
+    @Inject(DeadlinesRuntimeConfigService)
     private readonly runtimeConfig: DeadlinesRuntimeConfigService,
   ) {}
 

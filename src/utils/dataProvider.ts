@@ -3,6 +3,10 @@
 
 import { authStorage, isTokenExpired, refreshAccessToken } from './auth';
 import { logGraphQLError } from './notificationLogger';
+import { ordersApi } from '../api/ordersApi';
+import { mapOrderDtoToFormValues, mapOrderListItemToLegacyRow } from '../api/mappers/orderMapper';
+import type { OrderListQuery, OrderSortBy, SortOrder } from '../api/types/orderApi.types';
+import { featureFlags } from '../config/featureFlags';
 
 type AnyObject = Record<string, any>;
 
@@ -1031,6 +1035,123 @@ const buildWhere = (filters?: any[]) => {
   return `, where: { _and: [${andParts.join(", ")}] }`;
 };
 
+const ORDER_SORT_FIELD_MAP: Record<string, OrderSortBy> = {
+  order_id: 'orderId',
+  order_name: 'orderName',
+  order_date: 'orderDate',
+  planned_completion_date: 'plannedCompletionDate',
+  completion_date: 'completionDate',
+  issue_date: 'issueDate',
+  client_name: 'clientName',
+  order_status_name: 'orderStatusName',
+  payment_status_name: 'paymentStatusName',
+  production_status_name: 'productionStatusName',
+  final_amount: 'finalAmount',
+  paid_amount: 'paidAmount',
+  debt_amount: 'debtAmount',
+  updated_at: 'updatedAt',
+};
+
+function mapOrdersViewQueryToBackend(
+  pagination?: AnyObject,
+  sorters?: AnyObject[],
+  filters?: AnyObject[],
+): OrderListQuery | null {
+  const query: OrderListQuery = {
+    page: pagination?.current ?? 1,
+    pageSize: pagination?.pageSize ?? 10,
+  };
+
+  const sorter = sorters?.find((item) => ORDER_SORT_FIELD_MAP[item.field]);
+  if (sorter) {
+    query.sortBy = ORDER_SORT_FIELD_MAP[sorter.field];
+    query.sortOrder = (sorter.order === 'asc' ? 'asc' : 'desc') as SortOrder;
+  }
+
+  const currentUser = authStorage.getUser();
+
+  for (const filter of filters ?? []) {
+    const field = filter.field;
+    const value = filter.value;
+    if (value === null || value === undefined || value === '') continue;
+
+    switch (field) {
+      case 'order_name':
+        query.search = String(value);
+        break;
+      case 'client_id':
+        query.clientId = Number(value);
+        break;
+      case 'order_status_id':
+        query.orderStatusId = Number(value);
+        break;
+      case 'payment_status_id':
+        query.paymentStatusId = Number(value);
+        break;
+      case 'production_status_id':
+        query.productionStatusId = Number(value);
+        break;
+      case 'order_date':
+        if (filter.operator === 'gte') {
+          query.dateFrom = String(value);
+          break;
+        }
+        if (filter.operator === 'lte') {
+          query.dateTo = String(value);
+          break;
+        }
+        return null;
+      case 'created_by':
+        if (currentUser?.id && Number(value) === Number(currentUser.id)) {
+          query.onlyMyOrders = true;
+          break;
+        }
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  return query;
+}
+
+async function getBackendOrdersListIfEnabled(
+  resource: string,
+  pagination?: AnyObject,
+  sorters?: AnyObject[],
+  filters?: AnyObject[],
+) {
+  if (!featureFlags.useBackendOrdersRead || resource !== 'orders_view') {
+    return null;
+  }
+
+  const query = mapOrdersViewQueryToBackend(pagination, sorters, filters);
+  if (!query) {
+    return null;
+  }
+
+  const response = await ordersApi.list(query);
+  return {
+    data: response.data.map(mapOrderListItemToLegacyRow),
+    total: response.pagination.total,
+  };
+}
+
+async function getBackendOrderOneIfEnabled(resource: string, id: number | string) {
+  if (!featureFlags.useBackendOrdersRead || (resource !== 'orders_view' && resource !== 'orders')) {
+    return null;
+  }
+
+  const order = await ordersApi.getById(Number(id));
+  const formValues = mapOrderDtoToFormValues(order);
+  return {
+    data: {
+      ...formValues.header,
+      __backendOrder: formValues,
+    },
+  };
+}
+
 const fieldsFor = (resource: string) => {
   const fields = RESOURCE_FIELDS[resource];
   if (!fields) return "";
@@ -1042,6 +1163,16 @@ export const dataProvider = (_apiUrl: string) => {
     getApiUrl: () => HASURA_URL,
 
     getList: async ({ resource, pagination, sorters, filters }: AnyObject) => {
+      const backendOrdersList = await getBackendOrdersListIfEnabled(
+        resource,
+        pagination,
+        sorters,
+        filters,
+      );
+      if (backendOrdersList) {
+        return backendOrdersList;
+      }
+
       // Handle pagination: mode 'off' means no limit/offset
       const paginationMode = pagination?.mode;
       const limit = paginationMode === 'off' ? null : (pagination?.pageSize ?? 10);
@@ -1091,6 +1222,11 @@ export const dataProvider = (_apiUrl: string) => {
     },
 
     getOne: async ({ resource, id }: AnyObject) => {
+      const backendOrder = await getBackendOrderOneIfEnabled(resource, id);
+      if (backendOrder) {
+        return backendOrder;
+      }
+
       const idCol = ID_COLUMNS[resource] ?? "id";
       const selection = fieldsFor(resource);
       const query = `

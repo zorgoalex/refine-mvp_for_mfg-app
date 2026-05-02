@@ -126,12 +126,16 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     order_id: order.header.orderId,
     order_name: order.header.orderName,
     client_id: order.header.clientId,
+    client_name: order.header.clientName ?? null,
     order_date: order.header.orderDate,
     priority: normalizeNumber(order.header.priority, 100),
 
     order_status_id: order.header.orderStatusId,
+    order_status_name: order.header.orderStatusName ?? undefined,
     payment_status_id: optionalNumber(order.header.paymentStatusId) ?? 0,
+    payment_status_name: order.header.paymentStatusName ?? undefined,
     production_status_id: optionalNumber(order.header.productionStatusId),
+    production_status_name: order.header.productionStatusName ?? undefined,
     production_status_from_details_enabled: normalizeBoolean(
       order.header.productionStatusFromDetailsEnabled,
       true,
@@ -165,6 +169,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
 
     notes: order.header.notes ?? null,
     ref_key_1c: order.header.refKey1c ?? null,
+    created_at: order.header.createdAt ?? undefined,
+    updated_at: order.header.updatedAt ?? undefined,
     version: order.version,
   };
 
@@ -201,16 +207,25 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     client_id: item.clientId,
     client_name: item.clientName ?? null,
     order_date: item.orderDate,
+    planned_completion_date: item.plannedCompletionDate ?? null,
+    completion_date: item.completionDate ?? null,
+    issue_date: item.issueDate ?? null,
     priority: normalizeNumber(item.priority, 100),
     order_status_id: item.orderStatusId,
+    order_status_name: item.orderStatusName ?? null,
     payment_status_id: item.paymentStatusId ?? undefined,
+    payment_status_name: item.paymentStatusName ?? null,
     production_status_id: item.productionStatusId ?? null,
+    production_status_name: item.productionStatusName ?? null,
     total_amount: item.totalAmount ?? null,
     final_amount: item.finalAmount ?? null,
     paid_amount: item.paidAmount ?? undefined,
+    discount: item.discount ?? 0,
+    surcharge: item.surcharge ?? 0,
     parts_count: item.partsCount ?? undefined,
     total_area: item.totalArea ?? undefined,
-    discount: 0,
+    manager_id: item.managerId ?? null,
+    updated_at: item.updatedAt,
     version: item.version,
   };
 }

@@ -9,10 +9,12 @@ import { useOne, useList, useNavigation } from '@refinedev/core';
 import { useOrderFormStore } from '../../../stores/orderFormStore';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
 import { useUnsavedChangesWarning } from '../../../hooks/useUnsavedChangesWarning';
+import { loadOrderViaBackend } from '../../../hooks/useOrderBackendRead';
 import { useOrderSave } from '../../../hooks/useOrderSave';
 import { useOrderExport } from '../../../hooks/useOrderExport';
 import { OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
+import { featureFlags } from '../../../config/featureFlags';
 import dayjs from 'dayjs';
 
 // Sections
@@ -75,6 +77,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get('tab') || 'details';
   const [activeTab, setActiveTab] = useState(initialTab);
+  const [backendOrderLoading, setBackendOrderLoading] = useState(false);
+  const useBackendOrderRead = featureFlags.useBackendOrdersRead;
 
   // Clear tab parameter from URL after reading it
   useEffect(() => {
@@ -87,7 +91,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   // Load existing order data in edit mode
   // Use relationship to load doweling links via order_doweling_links (many-to-many)
-  const shouldLoadOrder = mode === 'edit' && !!orderId;
+  const shouldLoadOrder = mode === 'edit' && !!orderId && !useBackendOrderRead;
   const { data: orderData, isLoading: orderLoading } = useOne({
     resource: 'orders',
     id: orderId,
@@ -152,7 +156,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   });
 
   // Load order details in edit mode (only if orderId is valid number)
-  const shouldLoadDetails = mode === 'edit' && orderId && typeof orderId === 'number' && orderId > 0;
+  const canLoadOrderChildren = mode === 'edit' && typeof orderId === 'number' && orderId > 0;
+  const shouldLoadDetails = canLoadOrderChildren && !useBackendOrderRead;
 
   const { data: detailsData, isLoading: detailsLoading } = useList({
     resource: 'order_details',
@@ -164,7 +169,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   });
 
   // Load payments in edit mode (only if orderId is valid number)
-  const shouldLoadPayments = mode === 'edit' && orderId && typeof orderId === 'number' && orderId > 0;
+  const shouldLoadPayments = canLoadOrderChildren && !useBackendOrderRead;
 
   const { data: paymentsData, isLoading: paymentsLoading } = useList({
     resource: 'payments',
@@ -213,6 +218,43 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       prevOrderIdRef.current = orderId;
     }
   }, [orderId, reset]);
+
+  useEffect(() => {
+    if (!useBackendOrderRead || didInit.current || mode !== 'edit' || !orderId) {
+      return;
+    }
+
+    let cancelled = false;
+    setBackendOrderLoading(true);
+
+    loadOrderViaBackend(orderId)
+      .then((formValues) => {
+        if (cancelled || !formValues) return;
+        didInit.current = true;
+        setTimeout(() => {
+          if (!cancelled) {
+            finalizeInitialization();
+          }
+        }, 200);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('[OrderForm] Backend order load failed:', error);
+        notification.error({
+          message: 'Ошибка загрузки заказа',
+          description: error instanceof Error ? error.message : 'Не удалось загрузить заказ',
+        });
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBackendOrderLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [useBackendOrderRead, mode, orderId, finalizeInitialization]);
 
   // Load order data in edit mode (one-time per orderId)
   useEffect(() => {
@@ -279,6 +321,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     shouldLoadPayments,
   ]);
 
+  const isOrderDataLoading =
+    backendOrderLoading ||
+    (!useBackendOrderRead && (orderLoading || detailsLoading));
+
   // Ensure legacy details always have a calculated sum
   useEffect(() => {
     if (!details || details.length === 0) {
@@ -310,7 +356,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   // Auto-recalculate total_amount from details (unless overridden manually)
   useEffect(() => {
-    if (orderLoading || detailsLoading) {
+    if (isOrderDataLoading) {
       return;
     }
 
@@ -355,8 +401,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     details,
     header.total_amount,
     isTotalAmountManual,
-    orderLoading,
-    detailsLoading,
+    isOrderDataLoading,
     updateHeaderField,
   ]);
 
@@ -364,7 +409,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   // This useEffect is in OrderForm (always mounted) to ensure recalculation
   // happens regardless of which tab is active
   useEffect(() => {
-    if (orderLoading || detailsLoading) {
+    if (isOrderDataLoading) {
       return;
     }
 
@@ -386,14 +431,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     header.discount,
     header.surcharge,
     header.final_amount,
-    orderLoading,
-    detailsLoading,
+    isOrderDataLoading,
     updateHeaderField,
   ]);
 
   // Auto-recalculate paid_amount from payments
   useEffect(() => {
-    if (orderLoading || detailsLoading) return;
+    if (isOrderDataLoading) return;
 
     const totalPaid = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
     const roundedPaid = Number(totalPaid.toFixed(2));
@@ -401,13 +445,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     if (header.paid_amount !== roundedPaid) {
       updateHeaderField('paid_amount', roundedPaid);
     }
-  }, [payments, header.paid_amount, orderLoading, detailsLoading, updateHeaderField]);
+  }, [payments, header.paid_amount, isOrderDataLoading, updateHeaderField]);
 
   // Auto-update payment_status_id based on paid_amount and final_amount
   // Only auto-update if current status is 1 (не оплачено), 2 (частично), or 3 (оплачено)
   // If user set a custom status (other than 1,2,3), don't auto-update
   useEffect(() => {
-    if (orderLoading || detailsLoading) return;
+    if (isOrderDataLoading) return;
 
     // Skip auto-update if current status is not one of the standard payment statuses (1, 2, 3)
     const currentStatus = header.payment_status_id;
@@ -437,8 +481,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     header.final_amount,
     header.total_amount,
     header.payment_status_id,
-    orderLoading,
-    detailsLoading,
+    isOrderDataLoading,
     updateHeaderField,
   ]);
 
@@ -884,6 +927,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   // Show loading only for essential data
   const isLoadingEssential =
     statusesLoading ||
+    backendOrderLoading ||
     (shouldLoadOrder && orderLoading) ||
     (shouldLoadDetails && detailsLoading) ||
     (shouldLoadPayments && paymentsLoading);
@@ -895,7 +939,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         <div style={{ textAlign: 'center', padding: '50px' }}>
           <Spin size="large" />
           <div style={{ marginTop: '16px' }}>
-            {orderLoading ? 'Загрузка заказа...' : 'Загрузка формы...'}
+            {backendOrderLoading || orderLoading ? 'Загрузка заказа...' : 'Загрузка формы...'}
           </div>
         </div>
       </Card>

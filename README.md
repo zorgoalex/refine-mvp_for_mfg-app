@@ -19,6 +19,7 @@
 - Frontend: React + Vite + Refine + Ant Design.
 - Backend data API: Hasura GraphQL.
 - Serverless API: Vercel Functions в каталоге `api/`.
+- Stage-1 NestJS backend: versioned `/api/v1/*` endpoints for auth/orders/deadlines behind feature flags.
 - Локальный dev server: `http://localhost:5173`.
 - Локальный Hasura GraphQL по умолчанию: `http://localhost:8585/v1/graphql`.
 - Актуальная схема БД: v14.
@@ -56,8 +57,8 @@
 
 - `src/index.tsx` — точка входа React.
 - `src/App.tsx` — Refine resources, routes, providers, layout и auth.
-- `src/authProvider.ts` — Refine auth provider для `/api/login` и `/api/refresh`.
-- `src/utils/dataProvider.ts` — кастомный Hasura GraphQL data provider с JWT.
+- `src/authProvider.ts` — Refine auth provider для legacy `/api/login`/`/api/refresh` и backend `/api/v1/auth/*` cutover mode.
+- `src/utils/dataProvider.ts` — кастомный Hasura GraphQL data provider с JWT; `orders_view`/`orders` могут читать через `/api/v1/orders` за feature flag.
 - `src/components/CustomLayout.tsx`, `src/components/CustomSider.tsx` — основной layout и меню.
 - `src/pages/orders/` — список, просмотр, создание и редактирование заказов.
 - `src/pages/orders/components/` — форма заказа, таблицы, вкладки, модальные окна, печать и импорт.
@@ -69,9 +70,10 @@
 - `src/types/` — типы доменных сущностей.
 - `src/utils/excel/` — подготовка и отправка данных для Excel/Google Drive.
 - `api/` — Vercel Functions: auth, users, refresh, VLM, export.
+- `backend/` — NestJS backend stage-1: `/api/v1/*`, health, auth/session, orders, deadlines.
 - `public/templates/order_template.xlsx` — шаблон Excel.
 - `vercel.json` — rewrites, headers и настройки функций.
-- `vite.config.ts` — порт dev server и proxy `/api`.
+- `vite.config.ts` — порт dev server, proxy `/api/v1`/`/health` на NestJS и legacy `/api` на Vercel Functions.
 
 ## Ресурсы и маршруты
 
@@ -95,6 +97,12 @@ Frontend env:
 
 ```env
 VITE_HASURA_GRAPHQL_URL=http://localhost:8585/v1/graphql
+VITE_API_URL=http://localhost:3000
+VITE_LEGACY_API_URL=http://localhost:3001
+VITE_USE_BACKEND_AUTH=false
+VITE_USE_BACKEND_PERMISSIONS=false
+VITE_USE_BACKEND_ORDERS_READ=false
+VITE_USE_BACKEND_ORDERS_WRITE=false
 ```
 
 Backend env для Vercel Functions:
@@ -113,12 +121,21 @@ AUTH0_M2M_CLIENT_SECRET=...
 AUTH0_M2M_AUDIENCE=...
 ```
 
-Аутентификация:
+Аутентификация legacy mode:
 
 - `/api/login` проверяет пользователя через Hasura admin query, выдаёт access token и refresh token.
 - `/api/refresh` выполняет refresh token rotation.
 - Access token содержит Hasura claims: allowed roles, default role и user id.
 - Frontend хранит токены в `localStorage` и автоматически обновляет access token при истечении.
+
+Backend cutover mode за `VITE_USE_BACKEND_AUTH=true` использует `/api/v1/auth/login`,
+`/api/v1/auth/refresh`, `/api/v1/auth/logout` и `/api/v1/me`; refresh token остаётся в
+HttpOnly cookie и не хранится в JS/localStorage.
+
+Backend orders cutover mode за `VITE_USE_BACKEND_ORDERS_READ=true` и
+`VITE_USE_BACKEND_ORDERS_WRITE=true` использует versioned `/api/v1/orders` для list/show/edit
+load и create/update. Dual-write для заказов не используется: при выключенном write flag
+остаётся legacy save path.
 
 Audit:
 
@@ -163,10 +180,16 @@ npm run test:e2e
 ```
 
 Playwright запускает `npm run dev:full` через `webServer` и использует `http://localhost:5173` как `baseURL`.
+Браузерный runtime проверяется через `npx playwright install chromium`.
+
+Acceptance check 2026-05-02: `npm test`, `npm run build` и
+`npm run test:e2e -- --project=chromium` прошли; backend enabled-flow smoke на локальной test DB
+проверил auth/permissions/orders read-write через `/api/v1`.
 
 ## Примечания по реализации
 
-- `orders_view` и аналитические views используются для чтения; запись идёт в базовые таблицы.
+- В legacy mode `orders_view` и аналитические views используются для чтения; запись идёт в базовые таблицы через Hasura.
+- В backend orders mode `OrderList`, `OrderShow`, `OrderForm` и `useOrderSave` используют `/api/v1/orders` за feature flags.
 - Для новых ресурсов нужно добавить primary key в `ID_COLUMNS` и selection fields в `RESOURCE_FIELDS`.
 - `dataProvider` автоматически добавляет `is_active = true` для активируемых справочников, если фильтр `is_active` не задан явно.
 - Форма заказа хранит черновик в Zustand store и использует `temp_id` для новых строк до сохранения.

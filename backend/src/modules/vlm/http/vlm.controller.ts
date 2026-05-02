@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -35,7 +35,9 @@ const analyzeRequestSchema = z
 @Controller('vlm')
 export class VlmController {
   constructor(
+    @Inject(VlmService)
     private readonly vlm: VlmService,
+    @Inject(VlmRuntimeConfigService)
     private readonly runtimeConfig: VlmRuntimeConfigService,
   ) {}
 

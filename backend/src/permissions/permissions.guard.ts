@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ApiError } from '../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from './current-user';
@@ -9,7 +9,9 @@ import { REQUIRED_PERMISSIONS_METADATA_KEY } from './require-permissions.decorat
 @Injectable()
 export class PermissionsGuard implements CanActivate {
   constructor(
+    @Inject(Reflector)
     private readonly reflector: Reflector,
+    @Inject(PermissionsService)
     private readonly permissionsService: PermissionsService,
   ) {}
 

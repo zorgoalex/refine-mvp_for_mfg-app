@@ -1,4 +1,6 @@
 import type { AuthTokens, UserIdentity } from '../types/auth';
+import { authSession } from '../api/authSession';
+import { featureFlags } from '../config/featureFlags';
 
 /**
  * Ключи для хранения в localStorage
@@ -15,6 +17,10 @@ export const authStorage = {
    * Получить Access Token из localStorage
    */
   getAccessToken(): string | null {
+    if (featureFlags.useBackendAuth) {
+      return authSession.getAccessToken();
+    }
+
     return localStorage.getItem(ACCESS_TOKEN_KEY);
   },
 
@@ -22,6 +28,11 @@ export const authStorage = {
    * Сохранить Access Token в localStorage
    */
   setAccessToken(token: string): void {
+    if (featureFlags.useBackendAuth) {
+      authSession.setAccessToken(token);
+      return;
+    }
+
     localStorage.setItem(ACCESS_TOKEN_KEY, token);
   },
 
@@ -29,6 +40,10 @@ export const authStorage = {
    * Получить Refresh Token из localStorage
    */
   getRefreshToken(): string | null {
+    if (featureFlags.useBackendAuth) {
+      return null;
+    }
+
     return localStorage.getItem(REFRESH_TOKEN_KEY);
   },
 
@@ -36,6 +51,10 @@ export const authStorage = {
    * Сохранить Refresh Token в localStorage
    */
   setRefreshToken(token: string): void {
+    if (featureFlags.useBackendAuth) {
+      return;
+    }
+
     localStorage.setItem(REFRESH_TOKEN_KEY, token);
   },
 
@@ -43,6 +62,10 @@ export const authStorage = {
    * Получить данные пользователя из localStorage
    */
   getUser(): UserIdentity | null {
+    if (featureFlags.useBackendAuth) {
+      return authSession.getUser();
+    }
+
     const user = localStorage.getItem(USER_KEY);
     return user ? JSON.parse(user) : null;
   },
@@ -51,6 +74,11 @@ export const authStorage = {
    * Сохранить данные пользователя в localStorage
    */
   setUser(user: UserIdentity): void {
+    if (featureFlags.useBackendAuth) {
+      authSession.setUser(user);
+      return;
+    }
+
     localStorage.setItem(USER_KEY, JSON.stringify(user));
   },
 
@@ -58,6 +86,12 @@ export const authStorage = {
    * Сохранить все данные аутентификации (токены + пользователь)
    */
   setTokens(data: AuthTokens & { user: UserIdentity }): void {
+    if (featureFlags.useBackendAuth) {
+      authSession.setAccessToken(data.accessToken);
+      authSession.setUser(data.user);
+      return;
+    }
+
     this.setAccessToken(data.accessToken);
     this.setRefreshToken(data.refreshToken);
     this.setUser(data.user);
@@ -67,6 +101,7 @@ export const authStorage = {
    * Очистить все данные аутентификации
    */
   clear(): void {
+    authSession.clear();
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     localStorage.removeItem(USER_KEY);

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -50,7 +50,9 @@ const changePasswordRequestSchema = z.object({
 @Controller('users')
 export class UsersController {
   constructor(
+    @Inject(UserService)
     private readonly users: UserService,
+    @Inject(UsersRuntimeConfigService)
     private readonly runtimeConfig: UsersRuntimeConfigService,
   ) {}
 
