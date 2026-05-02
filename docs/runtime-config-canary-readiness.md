@@ -95,6 +95,19 @@ npm run smoke:runtime-config -- \
   --expect=docs/runtime-config/canary/03-orders-read.json
 ```
 
+Smoke staging gates after deploy:
+
+```bash
+npm run smoke:staging-gates -- \
+  --frontend-url=https://staging.example.com \
+  --backend-url=https://api-staging.example.com \
+  --expect=docs/runtime-config/canary/00-all-off.json
+```
+
+Add `--check-legacy` when the staging frontend domain should still expose legacy
+rollback paths. The legacy check uses `HEAD`/`OPTIONS` only and treats `404` as
+missing; it does not send business payloads.
+
 For local file smoke:
 
 ```bash

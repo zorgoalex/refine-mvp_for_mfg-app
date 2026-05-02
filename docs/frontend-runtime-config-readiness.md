@@ -143,6 +143,15 @@ npm run smoke:runtime-config -- \
   --expect=docs/runtime-config/canary/00-all-off.json
 ```
 
+Staging gate smoke after deploy:
+
+```bash
+npm run smoke:staging-gates -- \
+  --frontend-url=https://staging.example.com \
+  --backend-url=https://api-staging.example.com \
+  --expect=docs/runtime-config/canary/00-all-off.json
+```
+
 ## Smoke
 
 Automated mocked frontend runtime-config smoke:

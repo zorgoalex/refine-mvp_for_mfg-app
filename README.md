@@ -187,6 +187,7 @@ npm run dev:full
 - `npm run test:e2e:runtime-config` — Playwright smoke для runtime frontend flags.
 - `npm run test:runtime-config-canary` — проверка staged runtime-config examples для canary.
 - `npm run smoke:runtime-config` — проверка локального или deployed `/runtime-config.json`.
+- `npm run smoke:staging-gates` — проверка staging runtime config и backend health gates.
 
 ## Тесты
 

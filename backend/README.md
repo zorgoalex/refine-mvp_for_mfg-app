@@ -97,6 +97,9 @@ Current implemented foundation:
   `GET /runtime-config.json` rewrites to `api/runtime-config.ts`, reads only
   whitelisted `RUNTIME_CONFIG_*` env keys, sets `Cache-Control: no-store`, and
   defaults all backend frontend flags to `false`;
+- staging gate smoke:
+  `npm run smoke:staging-gates -- --frontend-url=<url> --backend-url=<url> --expect=<canary-json>`
+  checks deployed runtime config, backend live/ready health, and optionally legacy rollback paths;
 - Vite dev proxy now routes versioned `/api/v1/*` and `/health/*` to NestJS while
   keeping legacy `/api/*` Vercel Functions available for non-cutover users/export/VLM flows;
 - Vitest coverage for schema blockers, env validation, health, ApiError, redaction,
