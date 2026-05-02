@@ -217,7 +217,10 @@ export const useVlmImport = (): UseVlmImportResult => {
       setProgress(ANALYZING_START_PROGRESS);
       startProgressTimer();
 
-      const analyzeResult = await vlmApi.analyzeImage(uploadResult.url);
+      const analyzeResult = await vlmApi.analyzeImage(
+        uploadResult.url,
+        uploadResult.uploadId ? { uploadId: uploadResult.uploadId } : undefined,
+      );
 
       clearProgressTimer();
 

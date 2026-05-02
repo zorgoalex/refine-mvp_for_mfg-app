@@ -202,6 +202,11 @@ Enabled-flow smoke status:
   list/create/update/change-password/deactivate/activate passed through HTTP and the temporary
   user was cleaned up, export returned fail-closed HTTP 503 while disabled, and VLM returned
   fail-closed HTTP 503 without provider config.
+- 2026-05-02 VLM provider smoke was run from compiled `dist` with real test DB, VLM provider,
+  and Auth0 M2M env: readiness/auth/VLM health passed, arbitrary external `imageUrl` was
+  rejected, image upload returned `uploadId`, analyze by `uploadId` succeeded, audit rows
+  `vlm.upload`/`vlm.analyze` were verified, smoke rows were cleaned up, and
+  `BACKEND_VLM_DISABLED=true` returned HTTP 503 for upload/analyze rollback.
 
 Next implementation steps:
 

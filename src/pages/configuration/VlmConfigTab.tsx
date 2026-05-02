@@ -14,6 +14,9 @@ import {
   ReloadOutlined,
   ApiOutlined,
 } from '@ant-design/icons';
+import { vlmApi } from '../../api/vlmApi';
+import type { VlmHealthResponse } from '../../api/types/vlmApi.types';
+import { featureFlags } from '../../config/featureFlags';
 import { VlmProvidersSection } from './components/VlmProvidersSection';
 import { VlmModelsSection } from './components/VlmModelsSection';
 import { VlmPromptsSection } from './components/VlmPromptsSection';
@@ -51,9 +54,13 @@ export const VlmConfigTab: React.FC = () => {
     setHealthStatus({ status: 'loading' });
 
     try {
-      const response = await fetch('/api/vlm/health');
-      const data = await response.json();
-      setHealthStatus(data);
+      if (featureFlags.useBackendVlm) {
+        setHealthStatus(mapBackendHealthStatus(await vlmApi.health()));
+      } else {
+        const response = await fetch('/api/vlm/health');
+        const data = await response.json();
+        setHealthStatus(data);
+      }
     } catch (error) {
       setHealthStatus({
         status: 'error',
@@ -156,5 +163,25 @@ export const VlmConfigTab: React.FC = () => {
     </div>
   );
 };
+
+function mapBackendHealthStatus(response: VlmHealthResponse): HealthStatus {
+  const status = response.status === 'ok'
+    ? 'ok'
+    : response.status === 'degraded'
+      ? 'partial'
+      : 'error';
+
+  return {
+    status,
+    vlm: {
+      healthz: { status: response.status },
+      readyz: { status: response.status },
+    },
+    auth0: {
+      configured: response.status !== 'unavailable',
+    },
+    timestamp: new Date().toISOString(),
+  };
+}
 
 export default VlmConfigTab;

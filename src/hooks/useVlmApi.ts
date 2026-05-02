@@ -92,6 +92,7 @@ export interface UseVlmApiResult {
 }
 
 export interface AnalyzeOptions {
+  uploadId?: string;
   provider?: VlmProvider;
   model?: string;
   prompt?: string;
@@ -222,7 +223,8 @@ export const useVlmApi = (): UseVlmApiResult => {
     try {
       if (featureFlags.useBackendVlm) {
         const backendRequest = buildBackendAnalyzeRequest({
-          imageUrl,
+          uploadId: options.uploadId,
+          imageUrl: options.uploadId ? undefined : imageUrl,
           options,
           settings: getSettings(),
           defaults: getDefaults(),
