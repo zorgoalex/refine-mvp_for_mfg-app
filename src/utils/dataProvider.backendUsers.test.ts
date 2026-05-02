@@ -129,3 +129,75 @@ describe('dataProvider backend users cutover routing', () => {
     expect(result.data).not.toHaveProperty('password_hash');
   });
 });
+
+describe('dataProvider users rollback routing', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    listUsers.mockReset();
+    getUserById.mockReset();
+    vi.doMock('../config/featureFlags', () => ({
+      featureFlags: {
+        useBackendAuth: true,
+        useBackendPermissions: true,
+        useBackendOrdersRead: false,
+        useBackendOrdersWrite: false,
+        useBackendOrderExport: false,
+        useBackendUsers: false,
+        useBackendVlm: false,
+        useBackendReferences: false,
+        enableLegacyHasura: true,
+      },
+    }));
+    vi.doMock('../api/usersApi', () => ({
+      usersApi: {
+        list: listUsers,
+        getById: getUserById,
+      },
+    }));
+    vi.stubEnv('VITE_HASURA_GRAPHQL_URL', '/v1/graphql');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              users: [{ user_id: 1, username: 'legacy_admin', is_active: true }],
+              users_aggregate: { aggregate: { count: 1 } },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.doUnmock('../config/featureFlags');
+    vi.doUnmock('../api/usersApi');
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('falls back to legacy GraphQL users read when backend users flag is disabled', async () => {
+    const { dataProvider } = await import('./dataProvider');
+
+    const result = await dataProvider('').getList({
+      resource: 'users',
+      pagination: { current: 1, pageSize: 10 },
+    });
+
+    expect(listUsers).not.toHaveBeenCalled();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('users'),
+      }),
+    );
+    expect(result).toMatchObject({
+      total: 1,
+      data: [{ user_id: 1, username: 'legacy_admin' }],
+    });
+  });
+});
