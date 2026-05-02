@@ -24,6 +24,11 @@ Each file is complete and explicit about every supported runtime feature key.
 `apiUrl` is intentionally empty in the examples so the deployment can keep
 using `VITE_API_URL`; set it only in the hosting runtime config source.
 
+Vercel delivery is wired through `api/runtime-config.ts` and the
+`/runtime-config.json -> /api/runtime-config` rewrite in `vercel.json`.
+Production/staging should set `RUNTIME_CONFIG_*` env vars in hosting settings,
+not commit an environment-specific `public/runtime-config.json`.
+
 ## Required Gates
 
 - Backend `/health/ready` must return `status=ready` with database ok before
@@ -35,6 +40,23 @@ using `VITE_API_URL`; set it only in the hosting runtime config source.
 - Do not put secrets, tokens, provider URLs with credentials, GAS keys, Auth0
   secrets, or database URLs into `/runtime-config.json`.
 - Do not enable all backend frontend flags at once in production.
+
+## Hosting Env Contract
+
+```env
+RUNTIME_CONFIG_API_URL=
+RUNTIME_CONFIG_BACKEND_AUTH=false
+RUNTIME_CONFIG_BACKEND_PERMISSIONS=false
+RUNTIME_CONFIG_BACKEND_ORDERS_READ=false
+RUNTIME_CONFIG_BACKEND_ORDERS_WRITE=false
+RUNTIME_CONFIG_BACKEND_ORDER_EXPORT=false
+RUNTIME_CONFIG_BACKEND_USERS=false
+RUNTIME_CONFIG_BACKEND_VLM=false
+RUNTIME_CONFIG_BACKEND_REFERENCES=false
+```
+
+`RUNTIME_CONFIG_BACKEND_ORDERS=true` is accepted as a compatibility shortcut for
+both orders read/write, but canary should use the split read/write flags.
 
 ## Validation
 

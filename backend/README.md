@@ -93,6 +93,10 @@ Current implemented foundation:
   `docs/runtime-config-canary-readiness.md`, validator
   `npm run test:runtime-config-canary`, and deployed-config smoke script
   `npm run smoke:runtime-config`;
+- frontend runtime-config delivery on Vercel:
+  `GET /runtime-config.json` rewrites to `api/runtime-config.ts`, reads only
+  whitelisted `RUNTIME_CONFIG_*` env keys, sets `Cache-Control: no-store`, and
+  defaults all backend frontend flags to `false`;
 - Vite dev proxy now routes versioned `/api/v1/*` and `/health/*` to NestJS while
   keeping legacy `/api/*` Vercel Functions available for non-cutover users/export/VLM flows;
 - Vitest coverage for schema blockers, env validation, health, ApiError, redaction,
@@ -219,4 +223,5 @@ Next implementation steps:
    VLM, and Auth0 M2M; toggle each frontend runtime flag one flow at a time with smoke and
    rollback checks.
 2. Add a scheduled Deadline Worker poller only after operations agrees on runtime ownership.
-3. Wire production hosting to deliver `/runtime-config.json`; committed files are examples only.
+3. Configure staging/production `RUNTIME_CONFIG_*` env and run deployed runtime-config smoke
+   before each canary step.

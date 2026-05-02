@@ -21,6 +21,11 @@ export default defineConfig(({ mode }) => {
           target: backendApiTarget,
           changeOrigin: true,
         },
+        // Runtime frontend flags are served by Vercel dev/prod, not baked into the Vite bundle.
+        "/runtime-config.json": {
+          target: legacyApiTarget,
+          changeOrigin: true,
+        },
         // Legacy Vercel endpoints stay available while non-cutover flows use feature flags.
         "/api": {
           target: legacyApiTarget,

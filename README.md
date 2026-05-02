@@ -151,7 +151,8 @@ Frontend runtime config для canary/rollback загружается до React
 `/runtime-config.json` или из `VITE_RUNTIME_CONFIG_URL`. Если файл отсутствует
 или невалиден, используются build-time `VITE_*` значения. Пример лежит в
 `public/runtime-config.example.json`; staged canary examples лежат в
-`docs/runtime-config/canary/`.
+`docs/runtime-config/canary/`. На Vercel `/runtime-config.json` отдаётся через
+`api/runtime-config.ts` и env `RUNTIME_CONFIG_*`.
 
 Audit:
 

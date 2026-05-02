@@ -1,0 +1,54 @@
+export interface FrontendRuntimeConfigResponse {
+  apiUrl: string;
+  features: {
+    backendAuth: boolean;
+    backendPermissions: boolean;
+    backendOrdersRead: boolean;
+    backendOrdersWrite: boolean;
+    backendOrderExport: boolean;
+    backendUsers: boolean;
+    backendVlm: boolean;
+    backendReferences: boolean;
+  };
+}
+
+type EnvSource = Record<string, string | undefined>;
+
+const TRUE_VALUES = new Set(['true', '1', 'yes', 'on']);
+const FALSE_VALUES = new Set(['false', '0', 'no', 'off']);
+
+export function buildFrontendRuntimeConfig(
+  env: EnvSource = process.env,
+): FrontendRuntimeConfigResponse {
+  const backendOrders = readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDERS, false);
+
+  return {
+    apiUrl: normalizeApiUrl(env.RUNTIME_CONFIG_API_URL),
+    features: {
+      backendAuth: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_AUTH, false),
+      backendPermissions: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_PERMISSIONS, false),
+      backendOrdersRead: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDERS_READ, backendOrders),
+      backendOrdersWrite: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDERS_WRITE, backendOrders),
+      backendOrderExport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDER_EXPORT, false),
+      backendUsers: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_USERS, false),
+      backendVlm: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_VLM, false),
+      backendReferences: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_REFERENCES, false),
+    },
+  };
+}
+
+export function readBooleanEnv(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value.trim() === '') return fallback;
+
+  const normalized = value.trim().toLowerCase();
+  if (TRUE_VALUES.has(normalized)) return true;
+  if (FALSE_VALUES.has(normalized)) return false;
+
+  return fallback;
+}
+
+function normalizeApiUrl(value: string | undefined): string {
+  if (value === undefined) return '';
+
+  return value.trim().replace(/\/+$/, '');
+}

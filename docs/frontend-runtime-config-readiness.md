@@ -36,6 +36,10 @@ Example:
 `/runtime-config.json` should be provided by the hosting environment, not
 committed with production secrets or environment-specific values.
 
+On Vercel, `/runtime-config.json` is delivered by the `api/runtime-config.ts`
+function through `vercel.json` rewrite. The function is fail-closed by default:
+all backend frontend flags are `false` unless explicit runtime env keys are set.
+
 ## Build-Time Fallback
 
 These env values remain supported:
@@ -58,6 +62,34 @@ Optional:
 ```env
 VITE_RUNTIME_CONFIG_URL=/runtime-config.json
 ```
+
+## Delivery Env
+
+Runtime config delivery uses server-side hosting env, not bundled frontend env:
+
+```env
+RUNTIME_CONFIG_API_URL=https://api.example.com
+RUNTIME_CONFIG_BACKEND_AUTH=false
+RUNTIME_CONFIG_BACKEND_PERMISSIONS=false
+RUNTIME_CONFIG_BACKEND_ORDERS_READ=false
+RUNTIME_CONFIG_BACKEND_ORDERS_WRITE=false
+RUNTIME_CONFIG_BACKEND_ORDER_EXPORT=false
+RUNTIME_CONFIG_BACKEND_USERS=false
+RUNTIME_CONFIG_BACKEND_VLM=false
+RUNTIME_CONFIG_BACKEND_REFERENCES=false
+```
+
+Compatibility shortcut:
+
+```env
+RUNTIME_CONFIG_BACKEND_ORDERS=false
+```
+
+`RUNTIME_CONFIG_BACKEND_ORDERS` sets both read and write only when the split
+orders flags are not set. Split flags should be preferred for canary.
+
+Do not put backend secrets, database URLs, GAS keys, Auth0 credentials, provider
+tokens, or bearer tokens into runtime config env.
 
 ## Rollback Rules
 
@@ -100,6 +132,15 @@ Smoke a deployed runtime config without printing the config body:
 npm run smoke:runtime-config -- \
   --url=https://example.com/runtime-config.json \
   --expect=docs/runtime-config/canary/03-orders-read.json
+```
+
+Local Vercel dev delivery smoke:
+
+```bash
+npm run dev:full
+npm run smoke:runtime-config -- \
+  --url=http://localhost:5173/runtime-config.json \
+  --expect=docs/runtime-config/canary/00-all-off.json
 ```
 
 ## Smoke
