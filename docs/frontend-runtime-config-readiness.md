@@ -69,6 +69,39 @@ VITE_RUNTIME_CONFIG_URL=/runtime-config.json
 - Backend module flags remain the final safety gate; frontend flags only choose
   the browser route.
 
+## Staged Canary
+
+Staged canary examples and the full checklist live in
+`docs/runtime-config-canary-readiness.md`.
+
+Example runtime config files:
+
+```txt
+docs/runtime-config/canary/00-all-off.json
+docs/runtime-config/canary/01-backend-auth.json
+docs/runtime-config/canary/02-backend-permissions.json
+docs/runtime-config/canary/03-orders-read.json
+docs/runtime-config/canary/04-orders-write.json
+docs/runtime-config/canary/05-order-export.json
+docs/runtime-config/canary/06-users.json
+docs/runtime-config/canary/07-vlm.json
+docs/runtime-config/canary/99-rollback-all-off.json
+```
+
+Validate staged examples:
+
+```bash
+npm run test:runtime-config-canary
+```
+
+Smoke a deployed runtime config without printing the config body:
+
+```bash
+npm run smoke:runtime-config -- \
+  --url=https://example.com/runtime-config.json \
+  --expect=docs/runtime-config/canary/03-orders-read.json
+```
+
 ## Smoke
 
 Automated mocked frontend runtime-config smoke:
@@ -80,5 +113,5 @@ npm run test:e2e:runtime-config
 Unit coverage:
 
 ```bash
-npm test -- featureFlags runtimeConfig httpClient
+npm test -- featureFlags runtimeConfig runtimeConfigCanaryExamples httpClient
 ```

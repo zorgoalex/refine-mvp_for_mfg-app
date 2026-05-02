@@ -88,6 +88,11 @@ Current implemented foundation:
   `VITE_USE_BACKEND_ORDERS_WRITE`; users pages, order export, and VLM hooks can use
   `/api/v1/users`, `/api/v1/orders/:id/export/google-drive`, and `/api/v1/vlm/*` behind
   `VITE_USE_BACKEND_USERS`, `VITE_USE_BACKEND_ORDER_EXPORT`, and `VITE_USE_BACKEND_VLM`;
+- staged frontend runtime-config canary readiness:
+  examples under `docs/runtime-config/canary/`, checklist in
+  `docs/runtime-config-canary-readiness.md`, validator
+  `npm run test:runtime-config-canary`, and deployed-config smoke script
+  `npm run smoke:runtime-config`;
 - Vite dev proxy now routes versioned `/api/v1/*` and `/health/*` to NestJS while
   keeping legacy `/api/*` Vercel Functions available for non-cutover users/export/VLM flows;
 - Vitest coverage for schema blockers, env validation, health, ApiError, redaction,
@@ -211,6 +216,7 @@ Enabled-flow smoke status:
 Next implementation steps:
 
 1. Stage/prod cutover can start only after runtime env/secrets are delivered for auth, DB, GAS,
-   VLM, and Auth0 M2M; toggle users/export/VLM one flow at a time with smoke and rollback checks.
+   VLM, and Auth0 M2M; toggle each frontend runtime flag one flow at a time with smoke and
+   rollback checks.
 2. Add a scheduled Deadline Worker poller only after operations agrees on runtime ownership.
-3. Add production runtime-config delivery if fast frontend rollback must work without rebuild.
+3. Wire production hosting to deliver `/runtime-config.json`; committed files are examples only.

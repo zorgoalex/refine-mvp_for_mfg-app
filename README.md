@@ -150,7 +150,8 @@ external provider env не включены на runtime.
 Frontend runtime config для canary/rollback загружается до React bootstrap из
 `/runtime-config.json` или из `VITE_RUNTIME_CONFIG_URL`. Если файл отсутствует
 или невалиден, используются build-time `VITE_*` значения. Пример лежит в
-`public/runtime-config.example.json`.
+`public/runtime-config.example.json`; staged canary examples лежат в
+`docs/runtime-config/canary/`.
 
 Audit:
 
@@ -183,6 +184,8 @@ npm run dev:full
 - `npm run test:e2e:order-export-cutover` — Playwright smoke для backend order export cutover flag.
 - `npm run test:e2e:vlm-cutover` — Playwright smoke для backend VLM cutover flag.
 - `npm run test:e2e:runtime-config` — Playwright smoke для runtime frontend flags.
+- `npm run test:runtime-config-canary` — проверка staged runtime-config examples для canary.
+- `npm run smoke:runtime-config` — проверка локального или deployed `/runtime-config.json`.
 
 ## Тесты
 
@@ -200,6 +203,7 @@ npm run test:e2e:users-cutover
 npm run test:e2e:order-export-cutover
 npm run test:e2e:vlm-cutover
 npm run test:e2e:runtime-config
+npm run test:runtime-config-canary
 ```
 
 Playwright запускает `npm run dev:full` через `webServer` и использует `http://localhost:5173` как `baseURL`.
@@ -207,6 +211,7 @@ Users backend cutover checklist: [docs/users-cutover-readiness.md](docs/users-cu
 Order export backend cutover checklist: [docs/order-export-cutover-readiness.md](docs/order-export-cutover-readiness.md).
 VLM backend cutover checklist: [docs/vlm-cutover-readiness.md](docs/vlm-cutover-readiness.md).
 Frontend runtime config checklist: [docs/frontend-runtime-config-readiness.md](docs/frontend-runtime-config-readiness.md).
+Runtime config canary checklist: [docs/runtime-config-canary-readiness.md](docs/runtime-config-canary-readiness.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 
 Acceptance check 2026-05-02: `npm test`, `npm run build` и

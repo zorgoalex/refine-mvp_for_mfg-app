@@ -1,0 +1,13 @@
+{
+  "apiUrl": "",
+  "features": {
+    "backendAuth": true,
+    "backendPermissions": true,
+    "backendOrdersRead": false,
+    "backendOrdersWrite": false,
+    "backendOrderExport": false,
+    "backendUsers": false,
+    "backendVlm": false,
+    "backendReferences": false
+  }
+}
