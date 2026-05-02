@@ -13,6 +13,28 @@ const booleanFromEnv = z
     return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
   });
 
+const optionalBooleanFromEnv = z
+  .union([z.boolean(), z.string()])
+  .optional()
+  .transform((value) => {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+  });
+
+const sameSiteFromEnv = z
+  .preprocess(
+    (value) => (typeof value === 'string' ? value.toLowerCase() : value),
+    z.enum(['lax', 'strict', 'none']),
+  )
+  .default('lax');
+
 function isPostgresUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -63,6 +85,8 @@ const envSchema = z
     REFRESH_TOKEN_PEPPER: z.string().trim().min(32).optional(),
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
+    REFRESH_COOKIE_SECURE: optionalBooleanFromEnv,
+    REFRESH_COOKIE_SAME_SITE: sameSiteFromEnv,
     BACKEND_ENABLE_AUTH: booleanFromEnv.default(false),
     BACKEND_ENABLE_ORDERS: booleanFromEnv.default(false),
     BACKEND_ENABLE_ORDER_EXPORT: booleanFromEnv.default(false),
@@ -153,6 +177,16 @@ const envSchema = z
           code: 'custom',
           message: 'REFRESH_TOKEN_PEPPER is required when BACKEND_ENABLE_AUTH is true',
           path: ['REFRESH_TOKEN_PEPPER'],
+        });
+      }
+
+      const refreshCookieSecure = env.REFRESH_COOKIE_SECURE ?? env.NODE_ENV === 'production';
+
+      if (env.REFRESH_COOKIE_SAME_SITE === 'none' && !refreshCookieSecure) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'REFRESH_COOKIE_SECURE=true is required when REFRESH_COOKIE_SAME_SITE=none',
+          path: ['REFRESH_COOKIE_SECURE'],
         });
       }
     }

@@ -123,6 +123,8 @@ export class AuthController {
     const cookie = createRefreshCookie(refreshToken, {
       apiPrefix: flags.apiPrefix,
       nodeEnv: flags.nodeEnv,
+      sameSite: flags.refreshCookieSameSite,
+      secure: flags.refreshCookieSecure,
       ttlDays: flags.refreshTokenTtlDays,
     });
 
@@ -131,7 +133,10 @@ export class AuthController {
 
   private clearRefreshCookie(response: Response): void {
     const flags = this.runtimeConfig.getFeatureFlags();
-    const cookie = createClearRefreshCookie(flags.nodeEnv, flags.apiPrefix);
+    const cookie = createClearRefreshCookie(flags.nodeEnv, flags.apiPrefix, {
+      sameSite: flags.refreshCookieSameSite,
+      secure: flags.refreshCookieSecure,
+    });
 
     response.cookie(cookie.name, cookie.value, cookie.options);
   }

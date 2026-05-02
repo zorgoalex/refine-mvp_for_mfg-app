@@ -114,6 +114,34 @@ describe('AuthController HTTP shell', () => {
     });
   });
 
+  it('passes explicit preview cookie attributes to login, refresh, and logout cookies', async () => {
+    const context = createController({
+      authEnabled: true,
+      refreshCookieSameSite: 'none',
+      refreshCookieSecure: true,
+    });
+
+    await context.controller.login(createRequest(), context.response, {
+      username: 'manager',
+      password: 'secret',
+    });
+    await context.controller.refresh(
+      createRequest(`${REFRESH_COOKIE_NAME}=old_refresh_token`),
+      context.response,
+    );
+    await context.controller.logout(
+      createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`),
+      context.response,
+    );
+
+    expect(context.cookies).toHaveLength(3);
+    expect(context.cookies.map((cookie) => cookie.options)).toEqual([
+      expect.objectContaining({ secure: true, sameSite: 'none' }),
+      expect.objectContaining({ secure: true, sameSite: 'none' }),
+      expect.objectContaining({ secure: true, sameSite: 'none', maxAge: 0 }),
+    ]);
+  });
+
   it('delegates logout and clears refresh cookie', async () => {
     const context = createController({ authEnabled: true });
 
@@ -166,7 +194,12 @@ describe('AuthController HTTP shell', () => {
   });
 });
 
-function createController(options: { authEnabled: boolean; nodeEnv?: string }) {
+function createController(options: {
+  authEnabled: boolean;
+  nodeEnv?: string;
+  refreshCookieSecure?: boolean;
+  refreshCookieSameSite?: 'lax' | 'strict' | 'none';
+}) {
   const calls: string[] = [];
   const cookies: CookieWrite[] = [];
   const response = {
@@ -196,6 +229,8 @@ function createController(options: { authEnabled: boolean; nodeEnv?: string }) {
         apiPrefix: '/api/v1',
         nodeEnv: options.nodeEnv ?? 'development',
         refreshTokenTtlDays: 7,
+        refreshCookieSecure: options.refreshCookieSecure,
+        refreshCookieSameSite: options.refreshCookieSameSite ?? 'lax',
       };
     },
   } as AuthRuntimeConfigService;

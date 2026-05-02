@@ -17,6 +17,7 @@ describe('backend env validation', () => {
       DATABASE_QUERY_TIMEOUT_MS: 10000,
       ACCESS_TOKEN_TTL_SECONDS: 900,
       REFRESH_TOKEN_TTL_DAYS: 7,
+      REFRESH_COOKIE_SAME_SITE: 'lax',
       BACKEND_ENABLE_DEADLINES: false,
       BACKEND_DEADLINES_READ_ONLY: true,
       BACKEND_ENABLE_DEADLINE_WORKER: false,
@@ -49,6 +50,8 @@ describe('backend env validation', () => {
         REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
         ACCESS_TOKEN_TTL_SECONDS: '1200',
         REFRESH_TOKEN_TTL_DAYS: '14',
+        REFRESH_COOKIE_SECURE: 'true',
+        REFRESH_COOKIE_SAME_SITE: 'None',
         TRUST_PROXY: 'true',
         BACKEND_ENABLE_DEADLINES: 'true',
         BACKEND_DEADLINES_READ_ONLY: 'false',
@@ -83,6 +86,8 @@ describe('backend env validation', () => {
       DATABASE_QUERY_TIMEOUT_MS: 15000,
       ACCESS_TOKEN_TTL_SECONDS: 1200,
       REFRESH_TOKEN_TTL_DAYS: 14,
+      REFRESH_COOKIE_SECURE: true,
+      REFRESH_COOKIE_SAME_SITE: 'none',
       TRUST_PROXY: true,
       BACKEND_ENABLE_DEADLINES: true,
       BACKEND_DEADLINES_READ_ONLY: false,
@@ -169,6 +174,33 @@ describe('backend env validation', () => {
       BACKEND_ENABLE_AUTH: true,
       JWT_ACCESS_SECRET: 'x'.repeat(32),
       REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
+    });
+  });
+
+  it('requires secure refresh cookies for SameSite=None auth canaries', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_AUTH: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        JWT_ACCESS_SECRET: 'x'.repeat(32),
+        REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
+        REFRESH_COOKIE_SAME_SITE: 'none',
+      }),
+    ).toThrow(/REFRESH_COOKIE_SECURE=true/);
+
+    expect(
+      validateEnv({
+        NODE_ENV: 'staging',
+        BACKEND_ENABLE_AUTH: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        JWT_ACCESS_SECRET: 'x'.repeat(32),
+        REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
+        REFRESH_COOKIE_SAME_SITE: 'none',
+        REFRESH_COOKIE_SECURE: 'true',
+      }),
+    ).toMatchObject({
+      REFRESH_COOKIE_SAME_SITE: 'none',
+      REFRESH_COOKIE_SECURE: true,
     });
   });
 

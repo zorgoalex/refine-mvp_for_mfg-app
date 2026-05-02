@@ -30,6 +30,28 @@ describe('refresh cookie contract', () => {
     ).toBe(true);
   });
 
+  it('allows explicit cross-site cookie attributes for preview canaries', () => {
+    expect(
+      createRefreshCookie('refresh_secret', {
+        nodeEnv: 'staging',
+        secure: true,
+        sameSite: 'none',
+        ttlDays: 7,
+      }).options,
+    ).toMatchObject({
+      secure: true,
+      sameSite: 'none',
+    });
+
+    expect(createClearRefreshCookie('staging', '/api/v1', { secure: true, sameSite: 'none' }))
+      .toMatchObject({
+        options: {
+          secure: true,
+          sameSite: 'none',
+        },
+      });
+  });
+
   it('creates clear cookie command', () => {
     expect(createClearRefreshCookie('production')).toMatchObject({
       name: REFRESH_COOKIE_NAME,

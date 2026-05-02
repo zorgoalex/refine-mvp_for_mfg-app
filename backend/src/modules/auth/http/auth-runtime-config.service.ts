@@ -7,6 +7,8 @@ export interface AuthHttpFeatureFlags {
   apiPrefix: string;
   nodeEnv: string;
   refreshTokenTtlDays: number;
+  refreshCookieSecure?: boolean;
+  refreshCookieSameSite: 'lax' | 'strict' | 'none';
 }
 
 @Injectable()
@@ -19,6 +21,8 @@ export class AuthRuntimeConfigService {
       apiPrefix: this.config.get('API_PREFIX', { infer: true }),
       nodeEnv: this.config.get('NODE_ENV', { infer: true }),
       refreshTokenTtlDays: 7,
+      refreshCookieSecure: this.config.get('REFRESH_COOKIE_SECURE', { infer: true }),
+      refreshCookieSameSite: this.config.get('REFRESH_COOKIE_SAME_SITE', { infer: true }),
     };
   }
 }
