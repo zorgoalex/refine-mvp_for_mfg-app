@@ -106,6 +106,7 @@ VITE_USE_BACKEND_ORDERS_WRITE=false
 VITE_USE_BACKEND_USERS=false
 VITE_USE_BACKEND_ORDER_EXPORT=false
 VITE_USE_BACKEND_VLM=false
+VITE_RUNTIME_CONFIG_URL=/runtime-config.json
 ```
 
 Backend env для Vercel Functions:
@@ -146,6 +147,11 @@ Backend users/export/VLM cutover mode за `VITE_USE_BACKEND_USERS=true`,
 Legacy Vercel Functions остаются rollback path, пока соответствующие backend flags и
 external provider env не включены на runtime.
 
+Frontend runtime config для canary/rollback загружается до React bootstrap из
+`/runtime-config.json` или из `VITE_RUNTIME_CONFIG_URL`. Если файл отсутствует
+или невалиден, используются build-time `VITE_*` значения. Пример лежит в
+`public/runtime-config.example.json`.
+
 Audit:
 
 - `created_by`, `edited_by`, `created_at`, `updated_at` управляются серверной стороной.
@@ -176,6 +182,7 @@ npm run dev:full
 - `npm run test:e2e:users-cutover` — Playwright smoke для backend users cutover flags.
 - `npm run test:e2e:order-export-cutover` — Playwright smoke для backend order export cutover flag.
 - `npm run test:e2e:vlm-cutover` — Playwright smoke для backend VLM cutover flag.
+- `npm run test:e2e:runtime-config` — Playwright smoke для runtime frontend flags.
 
 ## Тесты
 
@@ -192,12 +199,14 @@ npm run test:e2e
 npm run test:e2e:users-cutover
 npm run test:e2e:order-export-cutover
 npm run test:e2e:vlm-cutover
+npm run test:e2e:runtime-config
 ```
 
 Playwright запускает `npm run dev:full` через `webServer` и использует `http://localhost:5173` как `baseURL`.
 Users backend cutover checklist: [docs/users-cutover-readiness.md](docs/users-cutover-readiness.md).
 Order export backend cutover checklist: [docs/order-export-cutover-readiness.md](docs/order-export-cutover-readiness.md).
 VLM backend cutover checklist: [docs/vlm-cutover-readiness.md](docs/vlm-cutover-readiness.md).
+Frontend runtime config checklist: [docs/frontend-runtime-config-readiness.md](docs/frontend-runtime-config-readiness.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 
 Acceptance check 2026-05-02: `npm test`, `npm run build` и

@@ -1,6 +1,7 @@
 import { ApiError, createApiErrorFromBody, type BackendErrorBody } from './apiError';
 import { apiRoutes } from './apiRoutes';
 import { authSession } from './authSession';
+import { getRuntimeApiUrl } from '../config/runtimeConfig';
 
 export interface RequestOptions extends RequestInit {
   skipAuthRefresh?: boolean;
@@ -14,6 +15,11 @@ interface RefreshResponseBody {
 let refreshPromise: Promise<string | null> | null = null;
 
 export function getApiBaseUrl(): string {
+  const runtimeApiUrl = getRuntimeApiUrl();
+  if (runtimeApiUrl !== null) {
+    return runtimeApiUrl;
+  }
+
   const value = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_API_URL;
   return trimTrailingSlash(value ?? '');
 }

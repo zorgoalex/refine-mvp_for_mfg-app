@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, httpClient } from './httpClient';
 import { authSession } from './authSession';
+import { applyRuntimeConfig, resetRuntimeConfigForTests } from '../config/runtimeConfig';
 
 const jsonHeaders = { 'Content-Type': 'application/json' };
 
@@ -15,6 +16,7 @@ describe('httpClient', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     authSession.clear();
+    resetRuntimeConfigForTests();
   });
 
   it('adds Authorization header and credentials include', async () => {
@@ -186,6 +188,21 @@ describe('httpClient', () => {
     expect(first).toEqual({ url: '/api/v1/orders/1' });
     expect(second).toEqual({ url: '/api/v1/orders/2' });
     expect(refreshCalls).toBe(1);
+  });
+
+  it('uses runtime apiUrl before VITE_API_URL', async () => {
+    vi.stubEnv('VITE_API_URL', 'https://build-api.example.test');
+    applyRuntimeConfig({
+      apiUrl: 'https://runtime-api.example.test/',
+    });
+    const fetchMock = mockFetch(jsonResponse(200, { ok: true }));
+
+    await httpClient.get('/api/v1/me');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://runtime-api.example.test/api/v1/me',
+      expect.any(Object),
+    );
   });
 });
 

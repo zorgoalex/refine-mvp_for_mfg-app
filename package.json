@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "test:e2e:users-cutover": "VITE_USE_BACKEND_AUTH=true VITE_USE_BACKEND_PERMISSIONS=true VITE_USE_BACKEND_USERS=true playwright test tests/users-backend-cutover.spec.ts",
     "test:e2e:order-export-cutover": "VITE_USE_BACKEND_ORDER_EXPORT=true playwright test tests/order-export-backend-cutover.spec.ts",
-    "test:e2e:vlm-cutover": "VITE_USE_BACKEND_VLM=true playwright test tests/vlm-backend-cutover.spec.ts"
+    "test:e2e:vlm-cutover": "VITE_USE_BACKEND_VLM=true playwright test tests/vlm-backend-cutover.spec.ts",
+    "test:e2e:runtime-config": "playwright test tests/frontend-runtime-config.spec.ts"
   },
   "keywords": [],
   "author": "",
