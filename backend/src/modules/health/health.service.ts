@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BackendEnv } from '../../config/env.validation';
+import { DatabaseService } from '../../database/database.service';
 import {
   createLiveHealthResponse,
   createReadyHealthResponse,
@@ -11,7 +12,10 @@ import {
 
 @Injectable()
 export class HealthService {
-  constructor(private readonly config: ConfigService<BackendEnv, true>) {}
+  constructor(
+    @Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>,
+    private readonly database: DatabaseService,
+  ) {}
 
   live(): LiveHealthResponse {
     return createLiveHealthResponse(
@@ -21,13 +25,9 @@ export class HealthService {
     );
   }
 
-  ready(): ReadyHealthResponse {
+  async ready(): Promise<ReadyHealthResponse> {
     return createReadyHealthResponse({
-      database: this.configuredDependencyCheck(
-        'database',
-        this.config.get('READINESS_REQUIRE_DATABASE', { infer: true }),
-        this.config.get('DATABASE_URL', { infer: true }),
-      ),
+      database: await this.databaseCheck(),
       redis: this.configuredDependencyCheck(
         'redis',
         this.config.get('READINESS_REQUIRE_REDIS', { infer: true }),
@@ -35,6 +35,34 @@ export class HealthService {
       ),
       config: { status: 'ok' },
     });
+  }
+
+  private async databaseCheck(): Promise<HealthCheckStatus> {
+    const required = this.config.get('READINESS_REQUIRE_DATABASE', { infer: true });
+
+    if (!required) {
+      return {
+        status: 'ok',
+        message: 'database readiness check disabled',
+      };
+    }
+
+    if (!this.database.isConfigured) {
+      return {
+        status: 'unavailable',
+        message: 'database configuration is missing',
+      };
+    }
+
+    try {
+      await this.database.ping();
+      return { status: 'ok' };
+    } catch {
+      return {
+        status: 'unavailable',
+        message: 'database connection failed',
+      };
+    }
   }
 
   private configuredDependencyCheck(

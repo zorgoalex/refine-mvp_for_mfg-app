@@ -26,6 +26,9 @@ describe('backend feature flags', () => {
       getBackendFeatureFlags(
         validateEnv({
           BACKEND_ENABLE_AUTH: 'true',
+          DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+          JWT_ACCESS_SECRET: 'x'.repeat(32),
+          REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
           BACKEND_ENABLE_ORDERS: 'true',
           BACKEND_ORDERS_READ_ONLY: 'false',
           BACKEND_ENABLE_DEADLINES: 'true',

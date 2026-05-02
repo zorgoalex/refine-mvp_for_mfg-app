@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -28,6 +28,7 @@ export class AuthController {
   ) {}
 
   @Post('auth/login')
+  @HttpCode(200)
   async login(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
@@ -48,6 +49,7 @@ export class AuthController {
   }
 
   @Post('auth/refresh')
+  @HttpCode(200)
   async refresh(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
@@ -71,6 +73,7 @@ export class AuthController {
   }
 
   @Post('auth/logout')
+  @HttpCode(200)
   async logout(
     @Req() request: AuthRequest,
     @Res({ passthrough: true }) response: Response,

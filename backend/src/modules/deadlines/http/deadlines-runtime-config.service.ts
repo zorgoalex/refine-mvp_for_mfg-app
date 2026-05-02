@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BackendEnv } from '../../../config/env.validation';
 
@@ -15,7 +15,7 @@ export interface DeadlinesFeatureFlags {
 
 @Injectable()
 export class DeadlinesRuntimeConfigService {
-  constructor(private readonly config: ConfigService<BackendEnv, true>) {}
+  constructor(@Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>) {}
 
   getFeatureFlags(): DeadlinesFeatureFlags {
     return {

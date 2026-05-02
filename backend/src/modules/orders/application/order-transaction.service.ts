@@ -2,6 +2,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
   CreateOrderCommand,
+  OrderDeadlineSyncPort,
   OrderChildReference,
   OrderPermissionCheckerPort,
   OrderTransactionManagerPort,
@@ -16,6 +17,7 @@ import { prepareOrderSave } from '../domain/order-save-preparer';
 export interface OrderTransactionServicePorts {
   transactions: OrderTransactionManagerPort;
   permissions?: OrderPermissionCheckerPort;
+  deadlineSync?: OrderDeadlineSyncPort;
 }
 
 export class OrderTransactionService {
@@ -28,7 +30,7 @@ export class OrderTransactionService {
   async create(command: CreateOrderCommand): Promise<OrderDto> {
     const prepared = prepareOrderSave(command.dto, { mode: 'create' });
 
-    return this.ports.transactions.runInTransaction(async (unitOfWork) => {
+    const order = await this.ports.transactions.runInTransaction(async (unitOfWork) => {
       await unitOfWork.setSessionUser(command.currentUser.id);
       this.requirePermission(command, 'orders.create');
 
@@ -53,10 +55,18 @@ export class OrderTransactionService {
 
       return this.readAndAssertVersion(unitOfWork, orderId, version);
     });
+
+    await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
+      orderId: order.header.orderId,
+      currentUser: command.currentUser,
+      eventType: 'ORDER_CREATED',
+    });
+
+    return order;
   }
 
   async update(command: UpdateOrderCommand): Promise<OrderDto> {
-    return this.ports.transactions.runInTransaction(async (unitOfWork) => {
+    const order = await this.ports.transactions.runInTransaction(async (unitOfWork) => {
       await unitOfWork.setSessionUser(command.currentUser.id);
       this.requirePermission(command, 'orders.update');
 
@@ -101,6 +111,14 @@ export class OrderTransactionService {
 
       return this.readAndAssertVersion(unitOfWork, command.orderId, version);
     });
+
+    await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
+      orderId: command.orderId,
+      currentUser: command.currentUser,
+      eventType: 'ORDER_UPDATED',
+    });
+
+    return order;
   }
 
   private async persistChildren(

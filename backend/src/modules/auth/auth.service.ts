@@ -71,9 +71,13 @@ export class AuthService {
     };
   }
 
-  private toAuthResponse(user: CurrentUser, accessToken: string): AuthResponse {
+  private toAuthResponse(
+    user: CurrentUser,
+    issuedAccessToken: { accessToken: string; expiresAt: Date },
+  ): AuthResponse {
     return {
-      accessToken,
+      accessToken: issuedAccessToken.accessToken,
+      accessTokenExpiresAt: issuedAccessToken.expiresAt.toISOString(),
       user: {
         id: user.id,
         username: user.username,

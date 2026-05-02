@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { validateEnvForNest } from './config/env.validation';
+import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DeadlinesModule } from './modules/deadlines/deadlines.module';
 import { HealthModule } from './modules/health/health.module';
@@ -15,6 +16,7 @@ import { PermissionsModule } from './permissions/permissions.module';
       isGlobal: true,
       validate: validateEnvForNest,
     }),
+    DatabaseModule,
     AuthModule,
     DeadlinesModule,
     HealthModule,

@@ -97,3 +97,11 @@ export interface OrderTransactionManagerPort {
 export interface OrderPermissionCheckerPort {
   canUser(user: CurrentUser | null | undefined, permission: PermissionName): boolean;
 }
+
+export interface OrderDeadlineSyncPort {
+  syncOrderDeadlinesAfterSave(input: {
+    orderId: number;
+    currentUser: CurrentUser;
+    eventType: 'ORDER_CREATED' | 'ORDER_UPDATED';
+  }): Promise<void>;
+}

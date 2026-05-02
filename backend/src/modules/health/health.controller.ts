@@ -12,7 +12,7 @@ export class HealthController {
   }
 
   @Get('ready')
-  ready(): ReadyHealthResponse {
+  ready(): Promise<ReadyHealthResponse> {
     return this.healthService.ready();
   }
 }

@@ -1,4 +1,10 @@
 import { Module } from '@nestjs/common';
+import { DatabaseModule } from '../../database/database.module';
+import { DatabaseService } from '../../database/database.service';
+import { PgDeadlineNotificationPort } from './adapters/pg-deadline-notification-port';
+import { PgDeadlineRepository } from './adapters/pg-deadline-repository';
+import { PgDeadlineTargetResolver } from './adapters/pg-deadline-target-resolver';
+import { PgDeadlineTransactionManager } from './adapters/pg-deadline-transaction-manager';
 import { UnavailableDeadlineNotificationPort } from './adapters/unavailable-deadline-notification-port';
 import { UnavailableDeadlineRepository } from './adapters/unavailable-deadline-repository';
 import { UnavailableDeadlineTargetResolver } from './adapters/unavailable-deadline-target-resolver';
@@ -13,32 +19,46 @@ import { DeadlinesController } from './http/deadlines.controller';
 import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.service';
 
 @Module({
+  imports: [DatabaseModule],
   controllers: [DeadlinesController, DeadlinePoliciesController, DeadlineSettingsController],
   providers: [
     DeadlinesRuntimeConfigService,
     DeadlineActionDispatcherService,
     {
       provide: DeadlineQueryService,
-      useFactory: () =>
+      useFactory: (database: DatabaseService) =>
         new DeadlineQueryService({
-          repository: new UnavailableDeadlineRepository(),
+          repository: database.isConfigured
+            ? new PgDeadlineRepository(database)
+            : new UnavailableDeadlineRepository(),
         }),
+      inject: [DatabaseService],
     },
     {
       provide: DeadlineCommandService,
-      useFactory: () =>
+      useFactory: (database: DatabaseService) =>
         new DeadlineCommandService({
-          transactions: new UnavailableDeadlineTransactionManager(),
+          transactions: database.isConfigured
+            ? new PgDeadlineTransactionManager(database)
+            : new UnavailableDeadlineTransactionManager(),
         }),
+      inject: [DatabaseService],
     },
     {
       provide: DeadlineWorkerService,
-      useFactory: () =>
+      useFactory: (database: DatabaseService) =>
         new DeadlineWorkerService({
-          transactions: new UnavailableDeadlineTransactionManager(),
-          targetResolver: new UnavailableDeadlineTargetResolver(),
-          notificationPort: new UnavailableDeadlineNotificationPort(),
+          transactions: database.isConfigured
+            ? new PgDeadlineTransactionManager(database)
+            : new UnavailableDeadlineTransactionManager(),
+          targetResolver: database.isConfigured
+            ? new PgDeadlineTargetResolver(database)
+            : new UnavailableDeadlineTargetResolver(),
+          notificationPort: database.isConfigured
+            ? new PgDeadlineNotificationPort(database)
+            : new UnavailableDeadlineNotificationPort(),
         }),
+      inject: [DatabaseService],
     },
   ],
 })

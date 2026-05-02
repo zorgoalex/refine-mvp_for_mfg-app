@@ -39,7 +39,12 @@ export interface SessionManagerPort {
 }
 
 export interface AccessTokenIssuerPort {
-  issueAccessToken(user: CurrentUser): Promise<string>;
+  issueAccessToken(user: CurrentUser): Promise<IssuedAccessToken>;
+}
+
+export interface IssuedAccessToken {
+  accessToken: string;
+  expiresAt: Date;
 }
 
 export interface AuthResponseUser {
@@ -52,6 +57,7 @@ export interface AuthResponseUser {
 
 export interface AuthResponse {
   accessToken: string;
+  accessTokenExpiresAt: string;
   user: AuthResponseUser;
 }
 

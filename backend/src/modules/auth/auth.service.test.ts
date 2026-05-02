@@ -28,7 +28,10 @@ function createPorts(user: AuthUserRecord | null, passwordValid = true): AuthSer
     },
     tokens: {
       async issueAccessToken(currentUser) {
-        return `access_for_${currentUser.id}`;
+        return {
+          accessToken: `access_for_${currentUser.id}`,
+          expiresAt: new Date('2026-05-01T12:15:00.000Z'),
+        };
       },
     },
   };
@@ -51,6 +54,7 @@ describe('AuthService login contract', () => {
 
     expect(result.response).toMatchObject({
       accessToken: 'access_for_1',
+      accessTokenExpiresAt: '2026-05-01T12:15:00.000Z',
       user: {
         id: '1',
         username: 'superadmin',
