@@ -36,7 +36,7 @@ export const UserShow: React.FC<IResourceComponentsProps> = () => {
         </Col>
         <Col span={8}>
           <Title level={5}>Роль</Title>
-          <TextField value={record?.role?.role_name || "-"} />
+          <TextField value={formatUserRole(record)} />
         </Col>
       </Row>
 
@@ -76,3 +76,10 @@ export const UserShow: React.FC<IResourceComponentsProps> = () => {
   );
 };
 
+function formatUserRole(record: any): string {
+  if (typeof record?.role === "string") {
+    return record.role_name || record.role;
+  }
+
+  return record?.role?.role_name || record?.role_name || "-";
+}

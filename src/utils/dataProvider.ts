@@ -4,8 +4,11 @@
 import { authStorage, isTokenExpired, refreshAccessToken } from './auth';
 import { logGraphQLError } from './notificationLogger';
 import { ordersApi } from '../api/ordersApi';
+import { usersApi } from '../api/usersApi';
 import { mapOrderDtoToFormValues, mapOrderListItemToLegacyRow } from '../api/mappers/orderMapper';
 import type { OrderListQuery, OrderSortBy, SortOrder } from '../api/types/orderApi.types';
+import type { UserDto, UserListQuery } from '../api/types/userApi.types';
+import type { UserRole } from '../api/types/authApi.types';
 import { featureFlags } from '../config/featureFlags';
 
 type AnyObject = Record<string, any>;
@@ -1052,6 +1055,26 @@ const ORDER_SORT_FIELD_MAP: Record<string, OrderSortBy> = {
   updated_at: 'updatedAt',
 };
 
+const USER_ROLE_ID_MAP: Record<number, UserRole> = {
+  1: 'admin',
+  2: 'superadmin',
+  10: 'manager',
+  11: 'operator',
+  15: 'top_manager',
+  20: 'worker',
+  100: 'viewer',
+};
+
+const USER_ROLE_LABELS: Record<UserRole, string> = {
+  superadmin: 'Суперадминистратор',
+  admin: 'Администратор',
+  top_manager: 'Топ-менеджер',
+  manager: 'Менеджер',
+  operator: 'Оператор',
+  worker: 'Работник',
+  viewer: 'Наблюдатель',
+};
+
 function mapOrdersViewQueryToBackend(
   pagination?: AnyObject,
   sorters?: AnyObject[],
@@ -1152,6 +1175,114 @@ async function getBackendOrderOneIfEnabled(resource: string, id: number | string
   };
 }
 
+function mapUsersQueryToBackend(
+  pagination?: AnyObject,
+  filters?: AnyObject[],
+): UserListQuery {
+  const query: UserListQuery = {
+    page: pagination?.current ?? 1,
+    pageSize: pagination?.pageSize ?? 10,
+  };
+
+  for (const filter of filters ?? []) {
+    const field = filter.field;
+    const value = filter.value;
+    if (value === null || value === undefined || value === '') continue;
+
+    switch (field) {
+      case 'username':
+      case 'email':
+      case 'full_name':
+        query.search = String(value);
+        break;
+      case 'role':
+        if (isUserRole(value)) {
+          query.role = value;
+        }
+        break;
+      case 'role_id': {
+        const role = USER_ROLE_ID_MAP[Number(value)];
+        if (role) {
+          query.role = role;
+        }
+        break;
+      }
+      case 'is_active':
+        query.isActive = parseBooleanFilter(value);
+        break;
+      default:
+        break;
+    }
+  }
+
+  return query;
+}
+
+async function getBackendUsersListIfEnabled(
+  resource: string,
+  pagination?: AnyObject,
+  filters?: AnyObject[],
+) {
+  if (!featureFlags.useBackendUsers || resource !== 'users') {
+    return null;
+  }
+
+  const response = await usersApi.list(mapUsersQueryToBackend(pagination, filters));
+  return {
+    data: response.data.map(mapBackendUserToLegacyRow),
+    total: response.pagination.total,
+  };
+}
+
+async function getBackendUserOneIfEnabled(resource: string, id: number | string) {
+  if (!featureFlags.useBackendUsers || resource !== 'users') {
+    return null;
+  }
+
+  const user = await usersApi.getById(Number(id));
+  return {
+    data: mapBackendUserToLegacyRow(user),
+  };
+}
+
+function mapBackendUserToLegacyRow(user: UserDto): AnyObject {
+  return {
+    id: user.id,
+    user_id: user.id,
+    username: user.username,
+    email: user.email ?? null,
+    full_name: user.fullName ?? null,
+    role: user.role,
+    role_name: USER_ROLE_LABELS[user.role] ?? user.role,
+    role_code: user.role,
+    employee_id: user.employeeId ?? null,
+    is_active: user.isActive,
+    permissions: user.permissions,
+    last_login_at: null,
+    created_at: user.createdAt,
+    updated_at: user.updatedAt ?? null,
+  };
+}
+
+function parseBooleanFilter(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
+
+function isUserRole(value: unknown): value is UserRole {
+  return (
+    value === 'superadmin' ||
+    value === 'admin' ||
+    value === 'top_manager' ||
+    value === 'manager' ||
+    value === 'operator' ||
+    value === 'worker' ||
+    value === 'viewer'
+  );
+}
+
 const fieldsFor = (resource: string) => {
   const fields = RESOURCE_FIELDS[resource];
   if (!fields) return "";
@@ -1171,6 +1302,11 @@ export const dataProvider = (_apiUrl: string) => {
       );
       if (backendOrdersList) {
         return backendOrdersList;
+      }
+
+      const backendUsersList = await getBackendUsersListIfEnabled(resource, pagination, filters);
+      if (backendUsersList) {
+        return backendUsersList;
       }
 
       // Handle pagination: mode 'off' means no limit/offset
@@ -1225,6 +1361,11 @@ export const dataProvider = (_apiUrl: string) => {
       const backendOrder = await getBackendOrderOneIfEnabled(resource, id);
       if (backendOrder) {
         return backendOrder;
+      }
+
+      const backendUser = await getBackendUserOneIfEnabled(resource, id);
+      if (backendUser) {
+        return backendUser;
       }
 
       const idCol = ID_COLUMNS[resource] ?? "id";

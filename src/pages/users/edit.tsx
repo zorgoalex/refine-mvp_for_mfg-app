@@ -24,7 +24,12 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
           ...data,
           data: {
             ...data.data,
-            role: data.data.role_id ? roleIdMap[data.data.role_id] : undefined,
+            role:
+              typeof data.data.role === 'string'
+                ? data.data.role
+                : data.data.role_id
+                  ? roleIdMap[data.data.role_id]
+                  : undefined,
           },
         };
       },

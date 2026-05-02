@@ -31,7 +31,7 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
           dataIndex={["role", "role_name"]}
           title="Роль"
           sorter
-          render={(value, record: any) => record?.role?.role_name || "-"}
+          render={(_, record: any) => formatUserRole(record)}
         />
         <Table.Column
           dataIndex="is_active"
@@ -66,3 +66,11 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
     </LocalizedList>
   );
 };
+
+function formatUserRole(record: any): string {
+  if (typeof record?.role === "string") {
+    return record.role_name || record.role;
+  }
+
+  return record?.role?.role_name || record?.role_name || "-";
+}
