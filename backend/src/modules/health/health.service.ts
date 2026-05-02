@@ -14,6 +14,7 @@ import {
 export class HealthService {
   constructor(
     @Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>,
+    @Inject(DatabaseService)
     private readonly database: DatabaseService,
   ) {}
 

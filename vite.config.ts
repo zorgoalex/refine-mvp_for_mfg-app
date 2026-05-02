@@ -1,46 +1,61 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
 // https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 5173,
-    proxy: {
-      // Проксировать API запросы на Vercel Functions
-      '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const backendApiTarget = env.VITE_API_URL || env.VITE_BACKEND_URL || "http://localhost:3000";
+  const legacyApiTarget = env.VITE_LEGACY_API_URL || "http://localhost:3001";
+
+  return {
+    plugins: [react()],
+    server: {
+      port: 5173,
+      proxy: {
+        // New backend endpoints are versioned and served by NestJS.
+        "/api/v1": {
+          target: backendApiTarget,
+          changeOrigin: true,
+        },
+        "/health": {
+          target: backendApiTarget,
+          changeOrigin: true,
+        },
+        // Legacy Vercel endpoints stay available while non-cutover flows use feature flags.
+        "/api": {
+          target: legacyApiTarget,
+          changeOrigin: true,
+        },
+      },
+      watch: {
+        ignored: ["**/ai_docs/**"],
       },
     },
-    watch: {
-      ignored: ["**/ai_docs/**"],
-    },
-  },
-  build: {
-    chunkSizeWarningLimit: 1100,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return;
+    build: {
+      chunkSizeWarningLimit: 1100,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return;
 
-          const [, nodeModulesPath] = id.split("node_modules/");
-          if (!nodeModulesPath) return;
+            const [, nodeModulesPath] = id.split("node_modules/");
+            if (!nodeModulesPath) return;
 
-          const parts = nodeModulesPath.split(/[\\/]/g);
-          const pkg = parts[0]?.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
-          if (!pkg) return;
+            const parts = nodeModulesPath.split(/[\\/]/g);
+            const pkg = parts[0]?.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
+            if (!pkg) return;
 
-          // Keep manual chunking minimal and safe; aggressive splitting can create chunk cycles
-          // and runtime errors in production deployments (e.g. React exports becoming undefined).
-          if (pkg === "pdfjs-dist") return "pdfjs";
-          if (pkg === "xlsx") return "xlsx";
-          if (pkg === "exceljs") return "exceljs";
+            // Keep manual chunking minimal and safe; aggressive splitting can create chunk cycles
+            // and runtime errors in production deployments (e.g. React exports becoming undefined).
+            if (pkg === "pdfjs-dist") return "pdfjs";
+            if (pkg === "xlsx") return "xlsx";
+            if (pkg === "exceljs") return "exceljs";
 
-          // Let Rollup decide the rest for correct execution order.
-          return;
+            // Let Rollup decide the rest for correct execution order.
+            return;
+          },
         },
       },
     },
-  },
+  };
 });

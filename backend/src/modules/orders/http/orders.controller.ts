@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Put, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OrderQueryService } from '../application/order-query.service';
@@ -20,8 +20,11 @@ export interface SaveOrderResponseDto {
 @Controller('orders')
 export class OrdersController {
   constructor(
+    @Inject(OrderTransactionService)
     private readonly orders: OrderTransactionService,
+    @Inject(OrderQueryService)
     private readonly orderQueries: OrderQueryService,
+    @Inject(OrdersRuntimeConfigService)
     private readonly runtimeConfig: OrdersRuntimeConfigService,
   ) {}
 

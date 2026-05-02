@@ -3,6 +3,9 @@ import type { LoginCredentials, LoginResponse } from './types/auth';
 import { authStorage, isTokenExpired, refreshAccessToken } from './utils/auth';
 import { logAuthError } from './utils/notificationLogger';
 import { useNotificationStore } from './stores/notificationStore';
+import { authApi } from './api/authApi';
+import { authSession } from './api/authSession';
+import { featureFlags } from './config/featureFlags';
 
 /**
  * AuthProvider для Refine
@@ -14,6 +17,10 @@ export const authProvider: AuthBindings = {
    * Вызывает /api/login и сохраняет токены в localStorage
    */
   login: async (credentials: any) => {
+    if (featureFlags.useBackendAuth) {
+      return loginWithBackend(credentials);
+    }
+
     try {
       const { username, password } = credentials;
 
@@ -69,6 +76,10 @@ export const authProvider: AuthBindings = {
    * Очищает токены из localStorage и личные уведомления
    */
   logout: async () => {
+    if (featureFlags.useBackendAuth) {
+      return logoutFromBackend();
+    }
+
     // Получаем userId перед очисткой authStorage
     const user = authStorage.getUser();
 
@@ -92,6 +103,10 @@ export const authProvider: AuthBindings = {
    * Используется для защиты роутов
    */
   check: async () => {
+    if (featureFlags.useBackendAuth) {
+      return checkBackendAuth();
+    }
+
     const token = authStorage.getAccessToken();
 
     if (!token) {
@@ -126,6 +141,10 @@ export const authProvider: AuthBindings = {
    * Пытается обновить токен при 401 ошибке
    */
   onError: async (error) => {
+    if (featureFlags.useBackendAuth) {
+      return handleBackendAuthError(error);
+    }
+
     // Проверка на ошибку отсутствия авторизации от Hasura
     const isAuthMissingError =
       error?.message?.includes('Missing') && error?.message?.includes('Authorization') ||
@@ -180,6 +199,10 @@ export const authProvider: AuthBindings = {
    * Используется для отображения имени пользователя в UI
    */
   getIdentity: async () => {
+    if (featureFlags.useBackendAuth) {
+      return ensureBackendUser();
+    }
+
     const user = authStorage.getUser();
     return user || null;
   },
@@ -189,7 +212,131 @@ export const authProvider: AuthBindings = {
    * Используется для проверки прав доступа
    */
   getPermissions: async () => {
+    if (featureFlags.useBackendAuth) {
+      const user = await ensureBackendUser();
+      return user?.permissions || [];
+    }
+
     const user = authStorage.getUser();
     return user?.role || null;
   },
 };
+
+async function loginWithBackend(credentials: LoginCredentials) {
+  try {
+    const { username, password } = credentials;
+    await authApi.login({ username, password });
+
+    return {
+      success: true,
+      redirectTo: '/',
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Неверный логин или пароль';
+    logAuthError({ message: errorMessage }, 'Вход в систему');
+
+    return {
+      success: false,
+      error: {
+        message: errorMessage,
+        name: 'LoginError',
+      },
+    };
+  }
+}
+
+async function logoutFromBackend() {
+  const user = authSession.getUser();
+
+  try {
+    await authApi.logout();
+  } catch (error) {
+    logAuthError(error, 'Выход из системы');
+  } finally {
+    authSession.clear();
+    authStorage.clear();
+
+    if (user?.id) {
+      const { deleteAll } = useNotificationStore.getState();
+      deleteAll(user.id);
+    }
+  }
+
+  return {
+    success: true,
+    redirectTo: '/login',
+  };
+}
+
+async function checkBackendAuth() {
+  if (authSession.getAccessToken()) {
+    return {
+      authenticated: true,
+    };
+  }
+
+  try {
+    await authApi.refresh();
+    return {
+      authenticated: true,
+    };
+  } catch {
+    authSession.clear();
+    authStorage.clear();
+    return {
+      authenticated: false,
+      redirectTo: '/login',
+      logout: true,
+    };
+  }
+}
+
+async function handleBackendAuthError(error: any) {
+  const isAuthError =
+    error?.status === 401 ||
+    error?.statusCode === 401 ||
+    error?.message?.includes('Unauthorized') ||
+    error?.message?.includes('JWT') ||
+    error?.message?.includes('Missing');
+
+  if (!isAuthError) {
+    return { error };
+  }
+
+  try {
+    await authApi.refresh();
+    return {};
+  } catch {
+    const userFriendlyError = {
+      message: 'Сессия истекла',
+      name: 'SessionExpired',
+      statusCode: error?.statusCode ?? error?.status,
+    };
+    logAuthError(userFriendlyError, 'Сессия истекла. Пожалуйста, войдите в систему заново.');
+
+    return {
+      logout: true,
+      redirectTo: '/login',
+      error: userFriendlyError,
+    };
+  }
+}
+
+async function ensureBackendUser() {
+  const cachedUser = authSession.getUser();
+  if (cachedUser) return cachedUser;
+
+  try {
+    const { user } = await authApi.me();
+    return user;
+  } catch {
+    try {
+      const { user } = await authApi.refresh();
+      return user;
+    } catch {
+      authSession.clear();
+      authStorage.clear();
+      return null;
+    }
+  }
+}

@@ -7,7 +7,8 @@ Current implemented foundation:
 
 - schema pre-flight checks for `spec_erp/postgresql_schema_v_14.sql`;
 - read-only DB precheck SQL for DBeaver before any migration;
-- additive stage-1 migration draft, not applied to any shared DB;
+- additive stage-1 migration draft; applied only to the local test DB for enabled-flow smoke,
+  not to any shared prod/stage DB;
 - NestJS runtime skeleton with a shared Postgres pool module;
 - env validation for runtime settings, CORS, DB pool/query timeout, readiness, Swagger,
   and feature flags;
@@ -62,6 +63,14 @@ Current implemented foundation:
   `completedDate`;
   domain helpers, action dispatcher, worker core, unavailable adapters,
   `002_deadline_engine.sql`, and read-only precheck SQL are included;
+- frontend cutover foundation on branch `feat/frontend-backend-cutover`:
+  authProvider/authStorage can use `/api/v1/auth/*` and `/api/v1/me` behind
+  `VITE_USE_BACKEND_AUTH`; navigation can use backend `permissions[]` behind
+  `VITE_USE_BACKEND_PERMISSIONS`; orders list/show/edit load and order save can use
+  `/api/v1/orders` behind `VITE_USE_BACKEND_ORDERS_READ` and
+  `VITE_USE_BACKEND_ORDERS_WRITE`;
+- Vite dev proxy now routes versioned `/api/v1/*` and `/health/*` to NestJS while
+  keeping legacy `/api/*` Vercel Functions available for non-cutover users/export/VLM flows;
 - Vitest coverage for schema blockers, env validation, health, ApiError, redaction,
   prechecks, migrations, permissions, auth contracts, policies, orders domain core,
   Deadline Engine shell/domain behavior, and Postgres DB adapters.
@@ -130,15 +139,29 @@ DB readiness with test database:
 set -a
 . ./.env.test-bd.local
 set +a
-DATABASE_URL="postgres://${PG_USER}:${PG_PASSWORD}@100.70.138.94:5432/${PG_DB}" \
 READINESS_REQUIRE_DATABASE=true \
 npm start
 ```
 
 Do not print real values from `.env.test-bd.local`.
 
+Enabled-flow smoke status:
+
+- 2026-05-02 local test DB prechecks passed for stage-1 blockers; `001_backend_stage1_additive.sql`
+  and `002_deadline_engine.sql` were applied to the recreated local `postgresdb`.
+- Production-like backend runtime was started from compiled `dist` with
+  `API_PREFIX=/api/v1`, `BACKEND_ENABLE_AUTH=true`, `BACKEND_ENABLE_ORDERS=true`.
+- Smoke passed for auth login/refresh/me/logout, manager permissions, orders list/get/create/update,
+  and audit rows `orders.create`/`orders.update`.
+- Rollback smoke passed with `BACKEND_ORDERS_READ_ONLY=true`: orders read stayed available and
+  write returned HTTP 503 `SERVICE_UNAVAILABLE` with `mode=read_only`.
+- Smoke-created users/orders/audit rows were cleaned up. Do not print real values from
+  `.env.test-bd.local`.
+- `npm run dev` was verified after adding explicit Nest `@Inject(...)` annotations for
+  controller/service dependencies that should not rely on compiled decorator metadata.
+
 Next implementation steps:
 
-1. Move frontend critical order flows to backend APIs through feature flags.
-2. Add backend export/users/VLM real adapters where the frontend is ready to cut over.
-3. Add a scheduled Deadline Worker poller only after operations agrees on runtime ownership.
+1. Add backend export/users/VLM real adapters before enabling those production flows.
+2. Add a scheduled Deadline Worker poller only after operations agrees on runtime ownership.
+3. Add production runtime-config delivery if fast frontend rollback must work without rebuild.

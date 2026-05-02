@@ -22,9 +22,15 @@ interface OrderShowHeaderProps {
   record: any; // order record from orders_view
   details: any[]; // order details array
   dowelingLinks?: any[]; // doweling links with nested doweling_order
+  disableLegacyOrderReads?: boolean;
 }
 
-export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, details, dowelingLinks = [] }) => {
+export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
+  record,
+  details,
+  dowelingLinks = [],
+  disableLegacyOrderReads = false,
+}) => {
   const navigate = useNavigate();
   const { getSetting } = useAppSettings();
 
@@ -144,7 +150,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({ record, detail
       : [],
     pagination: { pageSize: 100 },
     queryOptions: {
-      enabled: !!record?.order_id,
+      enabled: !!record?.order_id && !disableLegacyOrderReads,
     },
   });
 

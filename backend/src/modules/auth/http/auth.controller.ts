@@ -21,9 +21,11 @@ export interface MeResponse {
 @Controller()
 export class AuthController {
   constructor(
+    @Inject(AuthService)
     private readonly auth: AuthService,
     @Inject(AUTH_SESSION_HTTP_PORT)
     private readonly sessions: AuthSessionHttpPort,
+    @Inject(AuthRuntimeConfigService)
     private readonly runtimeConfig: AuthRuntimeConfigService,
   ) {}
 

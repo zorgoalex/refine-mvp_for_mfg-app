@@ -39,6 +39,13 @@ import { useResource, useNavigation } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
 import { OrderCreateModal } from "../pages/orders/components/OrderCreateModal";
 import { authStorage } from "../utils/auth";
+import { authSession } from "../api/authSession";
+import { featureFlags } from "../config/featureFlags";
+import {
+  canViewNavigationResource,
+  canViewSettingsCategory,
+} from "../utils/navigationPermissions";
+import { can } from "../utils/permissions";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -159,13 +166,29 @@ export const CustomSider: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
 
-  const currentUser = useMemo(() => authStorage.getUser(), []);
-  const isAdmin = useMemo(
+  const currentUser = useMemo(
+    () => (featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser()),
+    [],
+  );
+  const legacyIsAdmin = useMemo(
     () =>
       currentUser?.role_id === 1 ||
       currentUser?.role_id === 2 ||
       currentUser?.role === "admin" ||
       currentUser?.role === "superadmin",
+    [currentUser],
+  );
+  const canViewSettings = useMemo(
+    () =>
+      canViewSettingsCategory(
+        currentUser,
+        featureFlags.useBackendPermissions,
+        legacyIsAdmin,
+      ),
+    [currentUser, legacyIsAdmin],
+  );
+  const canCreateOrders = useMemo(
+    () => !featureFlags.useBackendPermissions || can("orders.create", currentUser),
     [currentUser],
   );
 
@@ -186,8 +209,10 @@ export const CustomSider: React.FC = () => {
         route = resource.meta.route;
       }
       if (route) {
-        // Категория "Настройки" видима только для админов
-        if (category === "Настройки" && !isAdmin) {
+        if (category === "Настройки" && !canViewSettings) {
+          return;
+        }
+        if (!canViewNavigationResource(resource.name, currentUser, featureFlags.useBackendPermissions)) {
           return;
         }
         categories[category].push({ name: resource.name, label, route });
@@ -199,7 +224,7 @@ export const CustomSider: React.FC = () => {
     });
 
     return categories;
-  }, [resources, isAdmin]);
+  }, [resources, currentUser, canViewSettings]);
 
   const selectedKey = useMemo(() => {
     // Sort resources by route length descending to match longer/more specific routes first
@@ -220,9 +245,13 @@ export const CustomSider: React.FC = () => {
   const calendarLabel = RESOURCE_LABELS["calendar"] || "Календарь";
 
   const topMenuItems: MenuProps["items"] = [
-    { key: "orders_view", icon: RESOURCE_ICONS["orders_view"], label: ordersLabel, onClick: () => push(ordersRoute) },
-    { key: "calendar", icon: RESOURCE_ICONS["calendar"], label: calendarLabel, onClick: () => push(calendarRoute) },
-  ];
+    canViewNavigationResource("orders_view", currentUser, featureFlags.useBackendPermissions)
+      ? { key: "orders_view", icon: RESOURCE_ICONS["orders_view"], label: ordersLabel, onClick: () => push(ordersRoute) }
+      : null,
+    canViewNavigationResource("calendar", currentUser, featureFlags.useBackendPermissions)
+      ? { key: "calendar", icon: RESOURCE_ICONS["calendar"], label: calendarLabel, onClick: () => push(calendarRoute) }
+      : null,
+  ].filter(Boolean) as MenuProps["items"];
 
   const handleNewOrder = () => {
     push(ordersRoute);
@@ -230,7 +259,7 @@ export const CustomSider: React.FC = () => {
   };
 
   const flatMenuItems: MenuProps["items"] = CATEGORY_ORDER.flatMap((category) => {
-    if (category === "Настройки" && !isAdmin) return [];
+    if (category === "Настройки" && !canViewSettings) return [];
     const items = categorizedResources[category];
     if (!items || items.length === 0) return [];
     return items.map((item) => ({
@@ -280,18 +309,20 @@ export const CustomSider: React.FC = () => {
           className="orders-menu"
         />
 
-        <div style={{ padding: collapsed ? "8px 4px" : "8px 16px", marginTop: "72px", textAlign: "center" }}>
-          <Button
-            type="primary"
-            icon={collapsed ? <PlusOutlined /> : undefined}
-            onClick={handleNewOrder}
-            block={!collapsed}
-            style={{ marginBottom: 8 }}
-            title={collapsed ? "Создать заказ" : undefined}
-          >
-            {!collapsed && "Создать заказ"}
-          </Button>
-        </div>
+        {canCreateOrders && (
+          <div style={{ padding: collapsed ? "8px 4px" : "8px 16px", marginTop: "72px", textAlign: "center" }}>
+            <Button
+              type="primary"
+              icon={collapsed ? <PlusOutlined /> : undefined}
+              onClick={handleNewOrder}
+              block={!collapsed}
+              style={{ marginBottom: 8 }}
+              title={collapsed ? "Создать заказ" : undefined}
+            >
+              {!collapsed && "Создать заказ"}
+            </Button>
+          </div>
+        )}
 
         {collapsed ? (
           <Menu
@@ -305,7 +336,7 @@ export const CustomSider: React.FC = () => {
             {CATEGORY_ORDER.map((category) => {
               const items = categorizedResources[category];
               if (!items || items.length === 0) return null;
-              if (category === "Настройки" && !isAdmin) return null;
+              if (category === "Настройки" && !canViewSettings) return null;
 
               const categoryItems: MenuProps["items"] = items.map((item) => ({
                 key: item.name,
