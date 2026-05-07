@@ -17,6 +17,7 @@ import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
 import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
 import { featureFlags } from "../../config/featureFlags";
 import { shouldShowOrderLoading } from "./utils/orderShowLoading";
+import { getDowelingOrderShowPath } from "./utils/dowelingOrderPaths";
 
 const { Panel } = Collapse;
 
@@ -493,11 +494,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       {
                         title: 'Номер присадки',
                         key: 'name',
-                        render: (_, link: any) => (
-                          <Link to={`/doweling_orders/show/${link.doweling_order?.doweling_order_id}`}>
-                            {link.doweling_order?.doweling_order_name || '—'}
-                          </Link>
-                        ),
+                        render: (_, link: any) => {
+                          const dowelingOrderId =
+                            link.doweling_order?.doweling_order_id ?? link.doweling_order_id;
+                          const dowelingOrderName =
+                            link.doweling_order?.doweling_order_name ||
+                            link.doweling_order_name ||
+                            (dowelingOrderId ? String(dowelingOrderId) : '—');
+                          const showPath = getDowelingOrderShowPath(dowelingOrderId);
+
+                          return showPath ? (
+                            <Link to={showPath}>{dowelingOrderName}</Link>
+                          ) : (
+                            dowelingOrderName
+                          );
+                        },
                       },
                       {
                         title: 'Конструктор',
