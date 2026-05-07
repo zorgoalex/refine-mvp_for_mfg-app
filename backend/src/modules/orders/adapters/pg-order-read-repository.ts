@@ -25,6 +25,23 @@ const SORT_COLUMNS: Record<OrderListSortBy, string> = {
   updatedAt: 'o.updated_at',
 };
 
+const PAGE_SORT_COLUMNS: Record<OrderListSortBy, string> = {
+  orderId: 'o.order_id',
+  orderName: 'o.order_name',
+  orderDate: 'o.order_date',
+  plannedCompletionDate: 'o.planned_completion_date',
+  completionDate: 'o.completion_date',
+  issueDate: 'o.issue_date',
+  clientName: 'o.client_name',
+  orderStatusName: 'o.order_status_name',
+  paymentStatusName: 'o.payment_status_name',
+  productionStatusName: 'o.production_status_name',
+  finalAmount: 'o.final_amount',
+  paidAmount: 'o.paid_amount',
+  debtAmount: '(o.final_amount - o.paid_amount)',
+  updatedAt: 'o.updated_at',
+};
+
 interface OrderHeaderRow extends QueryResultRow {
   order_id: string | number;
   order_name: string;
@@ -60,6 +77,14 @@ interface OrderHeaderRow extends QueryResultRow {
   updated_at: string | Date;
   version: string | number;
   ref_key_1c: string | null;
+  material_ids: unknown[] | null;
+  material_names: unknown[] | null;
+  milling_type_id: string | number | null;
+  milling_type_name: string | null;
+  latest_doweling_order_id: string | number | null;
+  latest_doweling_order_name: string | null;
+  latest_design_engineer_id: string | number | null;
+  passed_production_status_codes: unknown[] | null;
 }
 
 interface OrderDetailRow extends QueryResultRow {
@@ -171,26 +196,87 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     );
     const rows = await this.database.query<OrderHeaderRow>(
       `
+      WITH page_orders AS (
+        SELECT
+          o.order_id, o.order_name, o.client_id, c.client_name,
+          o.order_date, o.priority,
+          o.order_status_id, os.order_status_name,
+          o.payment_status_id, pay_s.payment_status_name,
+          o.production_status_id, prod_s.production_status_name,
+          o.production_status_from_details_enabled,
+          o.planned_completion_date, o.completion_date, o.issue_date, o.payment_date,
+          o.discount, o.surcharge, o.notes, o.manager_id,
+          o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
+          o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
+          o.created_at, o.updated_at, o.version, o.ref_key_1c
+        FROM orders o
+        LEFT JOIN clients c ON c.client_id = o.client_id
+        LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
+        LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
+        LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
+        ${where}
+        ORDER BY ${orderBy} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
+        LIMIT $${limitIndex} OFFSET $${offsetIndex}
+      )
       SELECT
-        o.order_id, o.order_name, o.client_id, c.client_name,
-        o.order_date, o.priority,
-        o.order_status_id, os.order_status_name,
-        o.payment_status_id, pay_s.payment_status_name,
-        o.production_status_id, prod_s.production_status_name,
-        o.production_status_from_details_enabled,
-        o.planned_completion_date, o.completion_date, o.issue_date, o.payment_date,
-        o.discount, o.surcharge, o.notes, o.manager_id,
-        o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
-        o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
-        o.created_at, o.updated_at, o.version, o.ref_key_1c
-      FROM orders o
-      LEFT JOIN clients c ON c.client_id = o.client_id
-      LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
-      LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
-      LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
-      ${where}
-      ORDER BY ${orderBy} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
-      LIMIT $${limitIndex} OFFSET $${offsetIndex}
+        o.*,
+        material_projection.material_ids,
+        material_projection.material_names,
+        milling_projection.milling_type_id,
+        milling_projection.milling_type_name,
+        latest_doweling.doweling_order_id AS latest_doweling_order_id,
+        latest_doweling.doweling_order_name AS latest_doweling_order_name,
+        latest_doweling.design_engineer_id AS latest_design_engineer_id,
+        production_projection.passed_production_status_codes
+      FROM page_orders o
+      LEFT JOIN LATERAL (
+        SELECT
+          ARRAY_AGG(materials.material_id ORDER BY materials.first_detail_number, materials.first_detail_id) AS material_ids,
+          ARRAY_AGG(materials.material_name ORDER BY materials.first_detail_number, materials.first_detail_id) AS material_names
+        FROM (
+          SELECT
+            od.material_id,
+            m.material_name,
+            MIN(od.detail_number) AS first_detail_number,
+            MIN(od.detail_id) AS first_detail_id
+          FROM order_details od
+          LEFT JOIN materials m ON m.material_id = od.material_id
+          WHERE od.order_id = o.order_id AND od.delete_flag = false AND od.material_id IS NOT NULL
+          GROUP BY od.material_id, m.material_name
+        ) materials
+      ) material_projection ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          CASE WHEN COUNT(DISTINCT od.milling_type_id) = 1 THEN MIN(od.milling_type_id) END AS milling_type_id,
+          CASE WHEN COUNT(DISTINCT od.milling_type_id) = 1 THEN MAX(mt.milling_type_name) END AS milling_type_name
+        FROM order_details od
+        LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
+        WHERE od.order_id = o.order_id AND od.delete_flag = false
+      ) milling_projection ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          odl.doweling_order_id,
+          d.doweling_order_name,
+          d.design_engineer_id
+        FROM order_doweling_links odl
+        LEFT JOIN doweling_orders d ON d.doweling_order_id = odl.doweling_order_id
+        WHERE odl.order_id = o.order_id AND odl.delete_flag = false
+        ORDER BY odl.order_doweling_link_id DESC
+        LIMIT 1
+      ) latest_doweling ON true
+      LEFT JOIN LATERAL (
+        SELECT ARRAY_AGG(events.production_status_code ORDER BY events.sort_order, events.production_status_code) AS passed_production_status_codes
+        FROM (
+          SELECT
+            ps.production_status_code,
+            MIN(COALESCE(ps.sort_order, 0)) AS sort_order
+          FROM production_status_events pse
+          INNER JOIN production_statuses ps ON ps.production_status_id = pse.production_status_id
+          WHERE pse.order_id = o.order_id
+          GROUP BY ps.production_status_code
+        ) events
+      ) production_projection ON true
+      ORDER BY ${PAGE_SORT_COLUMNS[command.query.sortBy]} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
       `,
       params,
     );
@@ -404,9 +490,14 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
     plannedCompletionDate: toDateOnly(row.planned_completion_date),
     completionDate: toDateOnly(row.completion_date),
     issueDate: toDateOnly(row.issue_date),
+    paymentDate: toDateOnly(row.payment_date),
+    orderStatusId: toNumber(row.order_status_id),
     orderStatusName: row.order_status_name ?? '',
+    paymentStatusId: toNumber(row.payment_status_id),
     paymentStatusName: row.payment_status_name ?? '',
+    productionStatusId: toNullableNumber(row.production_status_id),
     productionStatusName: row.production_status_name,
+    priority: toNumber(row.priority),
     totalAmount: toNumber(row.total_amount),
     discount: toNumber(row.discount),
     surcharge: toNumber(row.surcharge),
@@ -416,6 +507,15 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
     partsCount: toNumber(row.parts_count),
     totalArea: toNumber(row.total_area),
     managerId: toNullableNumber(row.manager_id),
+    notes: row.notes,
+    materialIds: toNumberArray(row.material_ids),
+    materialNames: toStringArray(row.material_names),
+    millingTypeId: toNullableNumber(row.milling_type_id),
+    millingTypeName: row.milling_type_name,
+    dowelingOrderId: toNullableNumber(row.latest_doweling_order_id),
+    dowelingOrderName: row.latest_doweling_order_name,
+    designEngineerId: toNullableNumber(row.latest_design_engineer_id),
+    passedProductionStatusCodes: toStringArray(row.passed_production_status_codes),
     updatedAt: toIsoString(row.updated_at),
     version: toNumber(row.version),
   };
@@ -530,6 +630,26 @@ function toNullableNumber(value: string | number | null | undefined): number | n
   }
 
   return Number(value);
+}
+
+function toNumberArray(value: unknown[] | null | undefined): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => toNullableNumber(item as string | number | null | undefined))
+    .filter((item): item is number => item !== null && Number.isFinite(item));
+}
+
+function toStringArray(value: unknown[] | null | undefined): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => (item === null || item === undefined ? '' : String(item).trim()))
+    .filter((item) => item.length > 0);
 }
 
 function toDateOnly(value: string | Date | null | undefined): string | null {

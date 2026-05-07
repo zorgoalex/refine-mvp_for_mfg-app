@@ -28,6 +28,15 @@ describe('PgOrderReadRepository', () => {
           orderId: 100,
           orderName: 'A-100',
           debtAmount: 70,
+          notes: 'List note',
+          materialIds: [10, 11],
+          materialNames: ['MDF 16', 'MDF 18'],
+          millingTypeId: 1,
+          millingTypeName: 'Modern',
+          dowelingOrderId: 700,
+          dowelingOrderName: '1368',
+          designEngineerId: 8,
+          passedProductionStatusCodes: ['cut', 'paint'],
           version: 3,
         },
       ],
@@ -41,6 +50,10 @@ describe('PgOrderReadRepository', () => {
 
     const listQuery = database.queries.find((query) => query.text.includes('LIMIT'))?.text ?? '';
     expect(listQuery).toContain('o.delete_flag = false');
+    expect(listQuery).toContain('LEFT JOIN LATERAL');
+    expect(listQuery).toContain('FROM order_details od');
+    expect(listQuery).toContain('FROM order_doweling_links odl');
+    expect(listQuery).toContain('FROM production_status_events pse');
     expect(listQuery).toContain('ORDER BY (o.final_amount - o.paid_amount) ASC');
     expect(database.queries.at(-1)?.params).toEqual(['%client%', '2026-05-01', 42, 10, 10]);
   });
@@ -229,7 +242,7 @@ function orderRow() {
     payment_date: '2026-05-01',
     discount: '0',
     surcharge: '0',
-    notes: null,
+    notes: 'List note',
     manager_id: 42,
     link_cutting_file: null,
     link_cutting_image_file: null,
@@ -244,6 +257,14 @@ function orderRow() {
     updated_at: new Date('2026-05-01T11:00:00.000Z'),
     version: 3,
     ref_key_1c: null,
+    material_ids: [10, 11],
+    material_names: ['MDF 16', 'MDF 18'],
+    milling_type_id: 1,
+    milling_type_name: 'Modern',
+    latest_doweling_order_id: 700,
+    latest_doweling_order_name: '1368',
+    latest_design_engineer_id: 8,
+    passed_production_status_codes: ['cut', 'paint'],
   };
 }
 

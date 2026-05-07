@@ -395,6 +395,7 @@ export interface OrderListItemDto {
   plannedCompletionDate?: DateOnlyString | null;
   completionDate?: DateOnlyString | null;
   issueDate?: DateOnlyString | null;
+  paymentDate?: DateOnlyString | null;
   orderStatusId: number;
   orderStatusName?: string | null;
   paymentStatusId?: number | null;
@@ -411,6 +412,15 @@ export interface OrderListItemDto {
   totalArea?: number | null;
   managerId?: number | null;
   priority?: number | null;
+  notes?: string | null;
+  materialIds?: number[];
+  materialNames?: string[];
+  millingTypeId?: number | null;
+  millingTypeName?: string | null;
+  dowelingOrderId?: number | null;
+  dowelingOrderName?: string | null;
+  designEngineerId?: number | null;
+  passedProductionStatusCodes?: string[];
   updatedAt?: IsoDateTimeString;
   version?: number;
 }

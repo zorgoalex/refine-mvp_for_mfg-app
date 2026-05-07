@@ -623,9 +623,23 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   }, [productionEventsData, productionStatusIdToCode]);
 
   // Функция для получения последней (свежей) присадки для заказа
-  const getLatestDoweling = (orderId: number) => {
+  const getLatestDoweling = (orderId: number, record?: any) => {
     const links = dowelingLinksByOrderId[orderId] || [];
-    if (links.length === 0) return null;
+    if (links.length === 0) {
+      const dowelingOrderName = record?.doweling_order_name;
+      const dowelingOrderId = record?.doweling_order_id;
+      const designEngineerId = record?.design_engineer_id;
+      if (!dowelingOrderName && !dowelingOrderId && !designEngineerId) return null;
+      return {
+        order_doweling_link_id: 0,
+        doweling_order_id: dowelingOrderId ?? null,
+        doweling_order: {
+          doweling_order_id: dowelingOrderId ?? null,
+          doweling_order_name: dowelingOrderName ?? null,
+          design_engineer_id: designEngineerId ?? null,
+        },
+      };
+    }
     // Сортируем по order_doweling_link_id по убыванию (последняя = самая свежая)
     const sorted = [...links].sort((a, b) => b.order_doweling_link_id - a.order_doweling_link_id);
     return sorted[0];
@@ -677,9 +691,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   }, [detailsData]);
 
   // Функция: возвращает значение если оно одинаковое для всех деталей, иначе null
-  const getCommonValue = (orderId: number, fieldName: string) => {
+  const getCommonValue = (orderId: number, fieldName: string, record?: any) => {
     const details = detailsByOrderId[orderId] || [];
-    if (details.length === 0) return null;
+    if (details.length === 0) {
+      if (fieldName === "milling_type_id") return record?.milling_type_id ?? null;
+      return null;
+    }
 
     const values = details
       .map((d) => d[fieldName])
@@ -692,18 +709,26 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   };
 
   // Функция: возвращает уникальные материалы с цветовой кодировкой
-  const getMaterialsList = (orderId: number) => {
+  const getMaterialsList = (orderId: number, record?: any) => {
     const details = detailsByOrderId[orderId] || [];
-    if (details.length === 0) return null;
+    let materialNames: string[] = [];
 
-    const materialIds = details
-      .map((d) => d.material_id)
-      .filter((v) => v !== null && v !== undefined);
+    if (details.length > 0) {
+      const materialIds = details
+        .map((d) => d.material_id)
+        .filter((v) => v !== null && v !== undefined);
 
-    const uniqueMaterialIds = Array.from(new Set(materialIds));
-    const materialNames = uniqueMaterialIds
-      .map((id) => materialsMap[id])
-      .filter((name) => name && name.toLowerCase() !== "нд" && !["—", "-", "–"].includes(name.trim()));
+      const uniqueMaterialIds = Array.from(new Set(materialIds));
+      materialNames = uniqueMaterialIds.map((id) => materialsMap[id]).filter(Boolean);
+    } else if (Array.isArray(record?.material_names)) {
+      materialNames = record.material_names;
+    } else if (record?.material_name) {
+      materialNames = String(record.material_name).split(",");
+    }
+
+    materialNames = materialNames
+      .map((name) => String(name).trim())
+      .filter((name) => name && name.toLowerCase() !== "нд" && !["—", "-", "–"].includes(name));
 
     if (materialNames.length === 0) return null;
 
@@ -948,7 +973,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             width={80}
             className="orders-col orders-col--doweling-name"
             render={(_, record: any) => {
-              const latestLink = getLatestDoweling(record.order_id);
+              const latestLink = getLatestDoweling(record.order_id, record);
               const dowelingName = latestLink?.doweling_order?.doweling_order_name;
               return dowelingName ? (
                 <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{dowelingName}</span>
@@ -975,8 +1000,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             width={72}
             className="orders-col"
             render={(_, record: any) => {
-              const millingTypeId = getCommonValue(record.order_id, "milling_type_id");
-              const value = millingTypeId ? millingTypesMap[millingTypeId] : null;
+              const millingTypeId = getCommonValue(record.order_id, "milling_type_id", record);
+              const value = (millingTypeId ? millingTypesMap[millingTypeId] : null) || record.milling_type_name;
               if (!value) return null;
               return (
                 <Tooltip title={value} placement="topLeft">
@@ -990,7 +1015,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             title="Материал"
             width={95}
             className="orders-col orders-col--wrap"
-            render={(_, record: any) => getMaterialsList(record.order_id)}
+            render={(_, record: any) => getMaterialsList(record.order_id, record)}
           />
           <Table.Column
             dataIndex="notes"
@@ -1060,7 +1085,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             className="orders-col status production-status"
             render={(value, record: any) => {
               // Сначала пробуем получить из events, если нет - fallback на статус
-              const codes = passedCodesByOrderId[record.order_id] || getPassedCodesFromStatusName(value || '');
+              const backendCodes = Array.isArray(record.passed_production_status_codes)
+                ? record.passed_production_status_codes
+                : [];
+              const codes = passedCodesByOrderId[record.order_id]
+                || (backendCodes.length > 0 ? backendCodes : getPassedCodesFromStatusName(value || ''));
               return (
                 <ProductionStagesDisplay
                   passedCodes={codes}
@@ -1120,7 +1149,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             width={100}
             className="orders-col orders-col--wrap"
             render={(_, record: any) => {
-              const latestLink = getLatestDoweling(record.order_id);
+              const latestLink = getLatestDoweling(record.order_id, record);
               const engineerId = latestLink?.doweling_order?.design_engineer_id;
               return engineerId ? employeesMap[engineerId] : null;
             }}
