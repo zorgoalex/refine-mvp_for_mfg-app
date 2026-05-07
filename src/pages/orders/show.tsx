@@ -16,6 +16,7 @@ import { OrderProductionBlock } from "./components/sections/OrderProductionBlock
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
 import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
 import { featureFlags } from "../../config/featureFlags";
+import { shouldShowOrderLoading } from "./utils/orderShowLoading";
 
 const { Panel } = Collapse;
 
@@ -93,6 +94,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     backendOrder?.details ??
     (detailsData?.data || []).sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0))
   );
+  const showLoading = shouldShowOrderLoading({
+    orderLoading: isLoading,
+    detailsLoading,
+    useBackendOrdersRead,
+  });
 
   // Загрузка справочников для отображения названий
   const { data: millingTypesData } = useList({
@@ -359,7 +365,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <Show
-      isLoading={isLoading || detailsLoading}
+      isLoading={showLoading}
       title="Просмотр заказа"
       breadcrumb={
         <Breadcrumb>
