@@ -45,6 +45,7 @@ next-env.d.ts
 
 # ai
 ai_docs/
+docs/
 .claude/
 .gemini/
 .factory/

@@ -214,6 +214,7 @@ Order export backend cutover checklist: [docs/order-export-cutover-readiness.md]
 VLM backend cutover checklist: [docs/vlm-cutover-readiness.md](docs/vlm-cutover-readiness.md).
 Frontend runtime config checklist: [docs/frontend-runtime-config-readiness.md](docs/frontend-runtime-config-readiness.md).
 Runtime config canary checklist: [docs/runtime-config-canary-readiness.md](docs/runtime-config-canary-readiness.md).
+Production cutover plan: [../spec_erp/docs/production-cutover-plan.md](../spec_erp/docs/production-cutover-plan.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 
 Acceptance check 2026-05-02: `npm test`, `npm run build` и

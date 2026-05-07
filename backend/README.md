@@ -224,7 +224,9 @@ Next implementation steps:
 
 1. Stage/prod cutover can start only after runtime env/secrets are delivered for auth, DB, GAS,
    VLM, and Auth0 M2M; toggle each frontend runtime flag one flow at a time with smoke and
-   rollback checks.
+   rollback checks. After restoring a prod backup into a new environment, run
+   `npm run smoke:db-cutover -- --env-file <path> --database-url-env DATABASE_URL`
+   from `backend/` before browser smoke.
 2. Add a scheduled Deadline Worker poller only after operations agrees on runtime ownership.
 3. Configure staging/production `RUNTIME_CONFIG_*` env and run deployed runtime-config smoke
    before each canary step.

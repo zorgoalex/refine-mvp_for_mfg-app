@@ -5,6 +5,7 @@
  * Автоматически добавляет M2M токен Auth0 к запросам.
  */
 
+import { Buffer } from 'node:buffer';
 import { getM2MToken } from './auth0Token';
 
 // Env-переменные
@@ -125,6 +126,16 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   };
 }
 
+function getUploadFileSize(file: Buffer | Blob): number {
+  return Buffer.isBuffer(file) ? file.byteLength : file.size;
+}
+
+function bufferToBlob(file: Buffer, contentType: string): Blob {
+  const bytes = new Uint8Array(new ArrayBuffer(file.byteLength));
+  bytes.set(file);
+  return new Blob([bytes.buffer], { type: contentType });
+}
+
 // ============================================================================
 // API Methods
 // ============================================================================
@@ -165,12 +176,12 @@ export async function uploadImage(
   filename: string,
   contentType: string
 ): Promise<UploadResponse> {
-  console.log('[vlmClient] Uploading image...', { filename, contentType, size: file instanceof Buffer ? file.length : file.size });
+  console.log('[vlmClient] Uploading image...', { filename, contentType, size: getUploadFileSize(file) });
 
   const authHeaders = await getAuthHeaders();
 
   const formData = new FormData();
-  const blob = file instanceof Buffer ? new Blob([file], { type: contentType }) : file;
+  const blob = Buffer.isBuffer(file) ? bufferToBlob(file, contentType) : file;
   formData.append('file', blob, filename);
 
   const response = await fetchWithTimeout(
