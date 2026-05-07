@@ -64,6 +64,33 @@ describe('PgOrderTransactionManager', () => {
       code: 'CHILD_ENTITY_NOT_OWNED',
     });
   });
+
+  it('updates discount and final amount in the same header statement', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+    const discountedHeader = { ...header(), discount: 20 };
+    const discountedTotals = { ...totals(), discount: 20, finalAmount: 100, debtAmount: 50 };
+
+    await manager.runInTransaction((uow) =>
+      uow.updateOrderHeader({
+        orderId: 100,
+        header: discountedHeader,
+        totals: discountedTotals,
+        currentUser: currentUser(),
+      }),
+    );
+
+    const updateQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('UPDATE orders SET order_name'),
+    );
+
+    expect(normalizeSql(updateQuery?.text ?? '')).toContain(
+      'discount = $13, surcharge = $14, total_amount = $15, final_amount = $16',
+    );
+    expect(updateQuery?.params[12]).toBe(20);
+    expect(updateQuery?.params[14]).toBe(120);
+    expect(updateQuery?.params[15]).toBe(100);
+  });
 });
 
 function createDatabase(options: { childCount?: number } = {}) {
