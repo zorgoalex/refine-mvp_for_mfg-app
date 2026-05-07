@@ -165,6 +165,7 @@ interface OrderDowelingLinkRow extends QueryResultRow {
   order_doweling_link_id: string | number;
   order_id: string | number;
   doweling_order_id: string | number;
+  doweling_order_name: string | null;
   design_engineer_id: string | number | null;
   ref_key_1c: string | null;
 }
@@ -361,7 +362,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     );
     const dowelingLinks = await this.database.query<OrderDowelingLinkRow>(
       `
-      SELECT odl.*, d.design_engineer_id
+      SELECT odl.*, d.doweling_order_name, d.design_engineer_id
       FROM order_doweling_links odl
       LEFT JOIN doweling_orders d ON d.doweling_order_id = odl.doweling_order_id
       WHERE odl.order_id = $1 AND odl.delete_flag = false
@@ -607,12 +608,20 @@ function mapRequirement(row: OrderRequirementRow) {
 }
 
 function mapDowelingLink(row: OrderDowelingLinkRow) {
+  const dowelingOrderId = toNumber(row.doweling_order_id);
+  const designEngineerId = toNullableNumber(row.design_engineer_id);
+
   return {
     id: toNumber(row.order_doweling_link_id),
     orderId: toNumber(row.order_id),
-    dowelingOrderId: toNumber(row.doweling_order_id),
-    designEngineerId: toNullableNumber(row.design_engineer_id),
+    dowelingOrderId,
+    designEngineerId,
     refKey1c: row.ref_key_1c,
+    dowelingOrder: {
+      id: dowelingOrderId,
+      name: row.doweling_order_name,
+      designEngineerId,
+    },
   };
 }
 

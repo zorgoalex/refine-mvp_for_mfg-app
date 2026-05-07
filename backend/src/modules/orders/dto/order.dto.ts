@@ -115,4 +115,9 @@ export type OrderRequirementDto = NormalizedSaveOrderRequirementDto & {
 export type OrderDowelingLinkDto = NormalizedSaveOrderDowelingLinkDto & {
   id: number;
   orderId: number;
+  dowelingOrder: {
+    id: number;
+    name: string | null;
+    designEngineerId: number | null;
+  } | null;
 };

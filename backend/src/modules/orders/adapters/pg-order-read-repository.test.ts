@@ -77,7 +77,18 @@ describe('PgOrderReadRepository', () => {
       payments: [{ id: 300, amount: 50 }],
       workshops: [{ id: 400, workshopId: 1 }],
       requirements: [{ id: 500, resourceType: 'material' }],
-      dowelingLinks: [{ id: 600, dowelingOrderId: 700 }],
+      dowelingLinks: [
+        {
+          id: 600,
+          dowelingOrderId: 700,
+          designEngineerId: 8,
+          dowelingOrder: {
+            id: 700,
+            name: '1368',
+            designEngineerId: 8,
+          },
+        },
+      ],
       totals: {
         totalAmount: 120,
         paidAmount: 50,
@@ -207,7 +218,8 @@ function createDatabase() {
               order_doweling_link_id: 600,
               order_id: 100,
               doweling_order_id: 700,
-              design_engineer_id: null,
+              doweling_order_name: '1368',
+              design_engineer_id: 8,
               ref_key_1c: null,
             },
           ],
