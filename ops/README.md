@@ -6,8 +6,32 @@ Traefik, PostgreSQL, Hasura, and the backend service.
 No real secrets are stored here. Copy `ops/templates/env.vps.example` to `.env`
 on the VPS and fill real values there. `.env` is ignored by git.
 
+## One Script Flow
+
+Use one command on the VPS:
+
+```bash
+sudo ops/setup-vps.sh
+```
+
+On the first run it installs Docker, prepares folders, creates `.env`, and then
+stops because placeholders are still present. Fill `.env`, make sure DNS points
+to the VPS, then run the same command again:
+
+```bash
+sudo ops/setup-vps.sh
+```
+
+The second run validates `.env`, checks DNS, deploys the stack, and runs smoke
+checks. If you want non-interactive deploy after `.env` is filled:
+
+```bash
+sudo ops/setup-vps.sh --yes
+```
+
 ## Files
 
+- `setup-vps.sh` - the single entrypoint for normal VPS setup.
 - `templates/docker-compose.vps.yml` - self-host compose file for this repo.
 - `templates/env.vps.example` - safe placeholder env template.
 - `templates/pg_hba.vps.conf` - PostgreSQL access rules for Docker and Tailscale.
@@ -55,7 +79,7 @@ On the new VPS:
 ```bash
 git clone <repo-url> /opt/erp
 cd /opt/erp
-sudo ops/bootstrap-vps.sh --project-dir /opt/erp
+sudo ops/setup-vps.sh
 ```
 
 Fill `.env`:
@@ -79,28 +103,16 @@ Use unique values for:
 - `HASURA_JWT_SECRET`
 - `BACKEND_REFRESH_TOKEN_PEPPER`
 
-Before deploy, validate:
+After DNS is configured and `.env` is filled, run the same setup script:
 
 ```bash
-ops/check-env.sh --dns
+sudo ops/setup-vps.sh
 ```
 
 If DNS has not propagated but you know the target IP:
 
 ```bash
-ops/check-env.sh --dns --expected-ip <VPS_PUBLIC_IP>
-```
-
-Deploy:
-
-```bash
-ops/deploy-stack.sh
-```
-
-Smoke check:
-
-```bash
-ops/smoke-vps.sh
+sudo ops/setup-vps.sh --expected-ip <VPS_PUBLIC_IP>
 ```
 
 ## Frontend/Vercel Values
@@ -137,7 +149,7 @@ ops/smoke-vps.sh
 If only CORS/domain variables changed:
 
 ```bash
-ops/check-env.sh
+ops/setup-vps.sh --skip-bootstrap --skip-deploy
 docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hasura backend
 ops/smoke-vps.sh
 ```
