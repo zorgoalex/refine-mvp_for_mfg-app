@@ -1,4 +1,4 @@
-import { useShow, useList, useUpdate, IResourceComponentsProps } from "@refinedev/core";
+import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Collapse, Table, Breadcrumb, message } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined } from "@ant-design/icons";
@@ -18,6 +18,7 @@ import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
 import { featureFlags } from "../../config/featureFlags";
 import { shouldShowOrderLoading } from "./utils/orderShowLoading";
 import { getDowelingOrderShowPath } from "./utils/dowelingOrderPaths";
+import { resolveOrderExportClientName, toOrderExportClient } from "./utils/orderExportClient";
 
 const { Panel } = Collapse;
 
@@ -74,6 +75,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const record = data?.data;
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
+
+  const { data: clientData, isLoading: clientLoading } = useOne({
+    resource: "clients",
+    id: record?.client_id,
+    queryOptions: {
+      enabled: !!record?.client_id,
+    },
+  });
+
+  const resolvedClientName = resolveOrderExportClientName(record, backendOrder, clientData?.data);
+  const exportClient = toOrderExportClient(resolvedClientName);
+  const isClientResolving = !!record?.client_id && !resolvedClientName && clientLoading;
 
   // Загрузка деталей заказа
   const { data: detailsData, isLoading: detailsLoading } = useList({
@@ -295,7 +308,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         orderId: record.order_id,
         orderName: record.order_name,
         orderDate: record.order_date,
-        clientName: record.client_name,
+        clientName: resolvedClientName ?? undefined,
       });
 
       // Получение данных присадки и конструктора для экспорта
@@ -321,7 +334,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             total_amount: record.total_amount,
             final_amount: record.final_amount,
             paid_amount: record.paid_amount,
-            client: record.client_name ? { client_name: record.client_name } : null,
+            client: exportClient,
             // Данные для экспорта присадки и конструктора
             _exportData: {
               prisadkaName,
@@ -348,7 +361,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             amount: payment.amount,
             payment_type: { payment_type_name: paymentTypesMap.get(payment.type_paid_id) || '' },
           })),
-          client: record.client_name ? { client_name: record.client_name } : null,
+          client: exportClient,
           clientPhone,
         },
         fileName
@@ -403,7 +416,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             icon={<FileExcelOutlined />}
             onClick={handleExportExcel}
             loading={isExporting}
-            disabled={!record || details.length === 0}
+            disabled={!record || details.length === 0 || isClientResolving}
           >
             Экспорт в Excel
           </Button>
@@ -742,7 +755,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
               film: { film_name: filmsMap.get(detail.film_id) || '' },
             }))}
-            client={record.client_name ? { client_name: record.client_name } : undefined}
+            client={exportClient ?? undefined}
           />
         </>
       )}
