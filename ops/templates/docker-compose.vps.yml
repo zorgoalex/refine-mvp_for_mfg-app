@@ -1,0 +1,190 @@
+services:
+  traefik:
+    image: traefik:v3.6
+    restart: unless-stopped
+    command:
+      - --api.dashboard=false
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/traefik:/letsencrypt
+    networks:
+      - edge
+
+  postgresdb:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DB}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      TZ: Asia/Almaty
+      PGTZ: Asia/Almaty
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql_custom_config/pg_hba.conf
+      - -c
+      - timezone=Asia/Almaty
+    ports:
+      - "${PG_BIND_IP:-127.0.0.1}:5432:5432"
+    volumes:
+      - ./data/postgres/main:/var/lib/postgresql/data
+      - ./config/postgres/pg_hba.conf:/etc/postgresql_custom_config/pg_hba.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+    networks:
+      - back
+      - host_access
+
+  hasura_metadata_db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${HASURA_MD_DB}
+      POSTGRES_USER: ${HASURA_MD_USER}
+      POSTGRES_PASSWORD: ${HASURA_MD_PASSWORD}
+      TZ: Asia/Almaty
+      PGTZ: Asia/Almaty
+    volumes:
+      - ./data/postgres/hasura_md:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HASURA_MD_USER} -d ${HASURA_MD_DB}"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 10s
+    networks:
+      - back
+
+  hasura:
+    image: hasura/graphql-engine:v2.40.0
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: ${HASURA_GRAPHQL_DATABASE_URL}
+      HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://${HASURA_MD_USER}:${HASURA_MD_PASSWORD}@hasura_metadata_db:5432/${HASURA_MD_DB}
+      HASURA_GRAPHQL_ENABLE_CONSOLE: ${HASURA_ENABLE_CONSOLE:-false}
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_ADMIN_SECRET}
+      HASURA_GRAPHQL_JWT_SECRET: |
+        {
+          "type": "HS256",
+          "key": "${HASURA_JWT_SECRET}"
+        }
+      HASURA_GRAPHQL_LOG_LEVEL: ${HASURA_LOG_LEVEL:-info}
+      HASURA_GRAPHQL_CORS_DOMAIN: ${HASURA_GRAPHQL_CORS_DOMAIN}
+      HASURA_GRAPHQL_ENABLED_LOG_TYPES: ${HASURA_ENABLED_LOG_TYPES:-startup,http-log,webhook-log,websocket-log,query-log}
+    depends_on:
+      hasura_metadata_db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 25s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${EDGE_NETWORK_NAME:-erp_edge}
+      - traefik.http.routers.hasura.rule=Host(`${HASURA_FQDN}`)
+      - traefik.http.routers.hasura.entrypoints=websecure
+      - traefik.http.routers.hasura.tls.certresolver=letsencrypt
+      - traefik.http.services.hasura.loadbalancer.server.port=8080
+    networks:
+      - back
+      - edge
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: ${BACKEND_NODE_ENV:-production}
+      APP_NAME: ${BACKEND_APP_NAME:-erp-backend}
+      API_PREFIX: /api/v1
+      PORT: 3000
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
+      CORS_ALLOWED_ORIGINS: ${BACKEND_CORS_ALLOWED_ORIGINS}
+      CORS_ALLOW_CREDENTIALS: "true"
+      TRUST_PROXY: "true"
+      SWAGGER_ENABLED: ${BACKEND_SWAGGER_ENABLED:-false}
+      READINESS_REQUIRE_DATABASE: "true"
+      READINESS_REQUIRE_REDIS: "false"
+      DATABASE_URL: postgres://${PG_USER}:${PG_PASSWORD}@postgresdb:5432/${PG_DB}
+      DATABASE_SSL: "false"
+      JWT_ACCESS_SECRET: ${HASURA_JWT_SECRET}
+      REFRESH_TOKEN_PEPPER: ${BACKEND_REFRESH_TOKEN_PEPPER}
+      REFRESH_COOKIE_SECURE: "true"
+      REFRESH_COOKIE_SAME_SITE: none
+      BACKEND_ENABLE_AUTH: ${BACKEND_ENABLE_AUTH:-true}
+      BACKEND_ENABLE_ORDERS: ${BACKEND_ENABLE_ORDERS:-true}
+      BACKEND_ORDERS_READ_ONLY: ${BACKEND_ORDERS_READ_ONLY:-false}
+      BACKEND_ENABLE_USERS: ${BACKEND_ENABLE_USERS:-true}
+      BACKEND_ENABLE_ORDER_EXPORT: ${BACKEND_ENABLE_ORDER_EXPORT:-true}
+      BACKEND_EXPORT_DISABLED: ${BACKEND_EXPORT_DISABLED:-true}
+      GAS_WEBAPP_URL: ${GAS_WEBAPP_URL:-}
+      GAS_API_KEY: ${GAS_API_KEY:-}
+      GAS_EXPORT_TIMEOUT_MS: ${GAS_EXPORT_TIMEOUT_MS:-55000}
+      BACKEND_ENABLE_VLM: ${BACKEND_ENABLE_VLM:-true}
+      BACKEND_VLM_DISABLED: ${BACKEND_VLM_DISABLED:-true}
+      VLM_API_URL: ${VLM_API_URL:-}
+      VLM_HEALTH_TIMEOUT_MS: ${VLM_HEALTH_TIMEOUT_MS:-10000}
+      VLM_UPLOAD_TIMEOUT_MS: ${VLM_UPLOAD_TIMEOUT_MS:-30000}
+      VLM_ANALYZE_TIMEOUT_MS: ${VLM_ANALYZE_TIMEOUT_MS:-90000}
+      VLM_ANALYZE_DAILY_LIMIT: ${VLM_ANALYZE_DAILY_LIMIT:-100}
+      VLM_MAX_UPLOAD_MB: ${VLM_MAX_UPLOAD_MB:-20}
+      VLM_ALLOWED_MIME_TYPES: ${VLM_ALLOWED_MIME_TYPES:-image/jpeg,image/png,image/webp}
+      AUTH0_M2M_DOMAIN: ${AUTH0_M2M_DOMAIN:-}
+      AUTH0_M2M_CLIENT_ID: ${AUTH0_M2M_CLIENT_ID:-}
+      AUTH0_M2M_CLIENT_SECRET: ${AUTH0_M2M_CLIENT_SECRET:-}
+      AUTH0_M2M_AUDIENCE: ${AUTH0_M2M_AUDIENCE:-}
+      BACKEND_ENABLE_DEADLINES: ${BACKEND_ENABLE_DEADLINES:-false}
+      BACKEND_DEADLINES_READ_ONLY: ${BACKEND_DEADLINES_READ_ONLY:-true}
+      BACKEND_ENABLE_DEADLINE_WORKER: ${BACKEND_ENABLE_DEADLINE_WORKER:-false}
+    depends_on:
+      postgresdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${EDGE_NETWORK_NAME:-erp_edge}
+      - traefik.http.routers.backend.rule=Host(`${BACKEND_FQDN}`)
+      - traefik.http.routers.backend.entrypoints=websecure
+      - traefik.http.routers.backend.tls.certresolver=letsencrypt
+      - traefik.http.services.backend.loadbalancer.server.port=3000
+    networks:
+      - back
+      - edge
+
+networks:
+  edge:
+    name: ${EDGE_NETWORK_NAME:-erp_edge}
+    driver: bridge
+  back:
+    driver: bridge
+    internal: true
+  host_access:
+    driver: bridge
