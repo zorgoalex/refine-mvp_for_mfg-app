@@ -71,6 +71,7 @@ describe('PgOrderReadRepository', () => {
         orderId: 100,
         orderName: 'A-100',
         clientId: 5,
+        clientName: 'Client',
         paymentStatusId: 2,
       },
       details: [{ id: 200, detailNumber: 1, detailCost: 120 }],

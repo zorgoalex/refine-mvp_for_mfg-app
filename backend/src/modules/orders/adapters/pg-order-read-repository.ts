@@ -434,6 +434,7 @@ function mapOrderDto(
       orderId: toNumber(row.order_id),
       orderName: row.order_name,
       clientId: toNumber(row.client_id),
+      clientName: row.client_name,
       orderDate: toDateOnly(row.order_date) ?? '',
       priority: toNumber(row.priority),
       managerId: toNullableNumber(row.manager_id),
