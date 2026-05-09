@@ -40,6 +40,7 @@ sudo ops/setup-vps.sh --yes
 - `deploy-stack.sh` - creates missing templates and starts/rebuilds the stack.
 - `smoke-vps.sh` - checks HTTPS health endpoints and Hasura CORS preflight.
 - `restore-prod-backup.sh` - destructive DB restore helper for a fresh backup.
+- `track-hasura-public-schema.sh` - tracks restored public tables/views in Hasura.
 
 ## When Domains Are Needed
 
@@ -127,8 +128,10 @@ sudo ops/setup-vps.sh --yes --restore-backup restore
 When the path is a directory, the script picks the newest `*.dump`,
 `*.backup`, or `*.pgdump` file, excluding `pre_restore` and `logs`. If a
 matching `*global*.sql` or `*global*.sql.gz` file is present in the same
-directory tree, globals are restored too. Missing path or empty directory is a
-non-fatal skip by default; use strict mode when the restore must happen:
+directory tree, globals are restored too. After a successful DB restore, the
+script tracks public tables/views in Hasura metadata so GraphQL exposes the
+restored schema. Missing path or empty directory is a non-fatal skip by
+default; use strict mode when the restore must happen:
 
 ```bash
 sudo ops/setup-vps.sh --yes --restore-backup restore --require-restore-backup
@@ -203,6 +206,9 @@ ops/restore-prod-backup.sh \
 
 The restore script stops Hasura, creates a pre-restore dump when the target DB
 already exists, drops/recreates `PG_DB`, restores the dump, then starts Hasura.
+`setup-vps.sh --restore-backup ...` also tracks restored public tables/views in
+Hasura metadata after this restore step. It does not replace a full production
+Hasura metadata backup for custom relationships or permission rules.
 
 ## Common Failures
 

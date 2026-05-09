@@ -15,6 +15,7 @@ AUTO_YES=0
 PROJECT_DIR_ARG_SET=0
 RESTORE_BACKUP_PATH=""
 REQUIRE_RESTORE_BACKUP=0
+TRACK_HASURA_AFTER_RESTORE=1
 
 preferred_project_dir() {
   local owner="${SUDO_USER:-${USER:-}}"
@@ -64,6 +65,7 @@ Options:
                           If a matching *global*.sql or *global*.sql.gz exists, it is restored too.
   --require-restore-backup
                           Fail when --restore-backup path is missing or contains no main dump.
+  --skip-hasura-track     Do not auto-track public tables/views in Hasura after DB restore.
   -y, --yes               Do not ask for confirmation before deploy.
 
 Default path rule:
@@ -95,6 +97,7 @@ while [[ $# -gt 0 ]]; do
     --force-recreate) FORCE_RECREATE=1; shift ;;
     --restore-backup) RESTORE_BACKUP_PATH="$2"; shift 2 ;;
     --require-restore-backup) REQUIRE_RESTORE_BACKUP=1; shift ;;
+    --skip-hasura-track) TRACK_HASURA_AFTER_RESTORE=0; shift ;;
     -y|--yes) AUTO_YES=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
@@ -231,6 +234,14 @@ run_smoke() {
   "$PROJECT_DIR/ops/smoke-vps.sh" --env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE"
 }
 
+track_hasura_after_restore() {
+  [[ "$TRACK_HASURA_AFTER_RESTORE" == "1" ]] || return 0
+
+  "$PROJECT_DIR/ops/track-hasura-public-schema.sh" \
+    --env-file "$ENV_FILE" \
+    --compose-file "$COMPOSE_FILE"
+}
+
 resolve_project_path() {
   local value="$1"
   if [[ "$value" = /* ]]; then
@@ -334,6 +345,7 @@ run_restore_backup_if_requested() {
 
   log "Selected main DB dump: $main_dump"
   "$PROJECT_DIR/ops/restore-prod-backup.sh" "${restore_args[@]}"
+  track_hasura_after_restore
 }
 
 [[ -d "$PROJECT_DIR/ops" ]] || fail "ops directory not found under $PROJECT_DIR"
