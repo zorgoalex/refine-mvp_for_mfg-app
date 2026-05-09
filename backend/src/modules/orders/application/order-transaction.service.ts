@@ -153,9 +153,9 @@ export class OrderTransactionService {
   }
 
   private extractClientVersion(version: unknown): number {
-    if (!Number.isInteger(version) || Number(version) <= 0) {
+    if (!Number.isInteger(version) || Number(version) < 0) {
       throw new ApiError(422, 'VALIDATION_ERROR', 'Order payload validation failed', {
-        errors: [{ field: 'version', message: 'version must be a positive integer' }],
+        errors: [{ field: 'version', message: 'version must be a non-negative integer' }],
       });
     }
 

@@ -61,7 +61,7 @@ const FRONTEND_ONLY_FIELDS = new Set([
 
 export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDto {
   const header = values.header;
-  const version = optionalPositiveInteger(values.version ?? header.version);
+  const version = optionalNonNegativeInteger(values.version ?? header.version);
   const dto: SaveOrderDto = {
     header: {
       orderName: requiredString(header.order_name, 'header.order_name'),
@@ -593,9 +593,9 @@ function requiredDateOnly(value: unknown, field: string): DateOnlyString {
   return dateValue;
 }
 
-function optionalPositiveInteger(value: unknown): number | undefined {
+function optionalNonNegativeInteger(value: unknown): number | undefined {
   const numberValue = optionalNumber(value);
-  if (numberValue === null || !Number.isInteger(numberValue) || numberValue < 1) {
+  if (numberValue === null || !Number.isInteger(numberValue) || numberValue < 0) {
     return undefined;
   }
   return numberValue;

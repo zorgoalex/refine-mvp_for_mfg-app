@@ -127,6 +127,16 @@ describe('orderMapper', () => {
     );
   });
 
+  it('preserves legacy zero version on update payloads', () => {
+    const values = createFormValues();
+    values.version = 0;
+    values.header.version = 0;
+
+    const dto = mapOrderFormToSaveOrderDto(values);
+
+    expect(dto.version).toBe(0);
+  });
+
   it('maps OrderDto back to OrderFormValues and restores stable temp ids', () => {
     const dto: OrderDto = {
       header: {

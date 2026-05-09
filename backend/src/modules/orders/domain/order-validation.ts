@@ -47,7 +47,7 @@ function validateHeader(
   }
 
   if (options.mode === 'update') {
-    requirePositiveInteger(order.version, 'version', errors);
+    requireNonNegativeInteger(order.version, 'version', errors);
 
     if (options.pathOrderId !== undefined && header.orderId !== undefined && header.orderId !== options.pathOrderId) {
       errors.push({ field: 'header.orderId', message: 'orderId must match path order id' });
@@ -404,6 +404,16 @@ function requirePositiveInteger(
 ): void {
   if (value === null || value === undefined || !Number.isInteger(value) || value <= 0) {
     errors.push({ field, message: `${field} must be a positive integer` });
+  }
+}
+
+function requireNonNegativeInteger(
+  value: number | null | undefined,
+  field: string,
+  errors: OrderFieldError[],
+): void {
+  if (value === null || value === undefined || !Number.isInteger(value) || value < 0) {
+    errors.push({ field, message: `${field} must be a non-negative integer` });
   }
 }
 

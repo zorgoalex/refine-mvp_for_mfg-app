@@ -166,6 +166,23 @@ describe('validateSaveOrderDto', () => {
     );
   });
 
+  it('accepts zero update version for legacy restored orders', () => {
+    const order = normalizeSaveOrderDto(
+      createOrder({
+        header: {
+          orderId: 10,
+          orderName: 'Legacy order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+        },
+        version: 0,
+      }),
+    );
+
+    expect(() => validateSaveOrderDto(order, { mode: 'update', pathOrderId: 10 })).not.toThrow();
+  });
+
   it('rejects deleted ids on create and active/deleted id collisions', () => {
     const order = normalizeSaveOrderDto(
       createOrder({
