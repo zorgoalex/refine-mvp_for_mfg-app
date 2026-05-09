@@ -383,12 +383,13 @@ test.describe('Reference workflows', () => {
 async function createAndUpdateCatalog(page: Page, db: WorkflowMockDb, catalog: CatalogCase) {
     await page.goto(`${catalog.path}/create`);
     await catalog.fillCreate(page);
+    const createUrl = page.url();
     await page.getByRole('button', { name: 'Сохранить' }).click();
 
     await expect
         .poll(() => db[catalog.resource].find((row) => row[catalog.nameField] === catalog.createName)?.[catalog.idField])
         .toBeTruthy();
-    await settleNavigation(page);
+    await settleNavigation(page, createUrl);
 
     const created = db[catalog.resource].find((row) => row[catalog.nameField] === catalog.createName)!;
     expect(created).toMatchObject({
@@ -404,6 +405,7 @@ async function createAndUpdateCatalog(page: Page, db: WorkflowMockDb, catalog: C
     if (!catalog.fillUpdate) {
         await page.locator(`#${catalog.nameField}`).fill(catalog.updateName);
     }
+    const editUrl = page.url();
     await page.getByRole('button', { name: 'Сохранить' }).click();
 
     await expect
@@ -412,7 +414,7 @@ async function createAndUpdateCatalog(page: Page, db: WorkflowMockDb, catalog: C
             [catalog.nameField]: catalog.updateName,
             ...(catalog.expectedUpdate || {}),
         });
-    await settleNavigation(page);
+    await settleNavigation(page, editUrl);
 }
 
 function formItem(page: Page, label: string) {
@@ -425,7 +427,8 @@ async function selectAntdOption(page: Page, formItemLocator: Locator, optionText
     await dropdown.locator('.ant-select-item-option').filter({ hasText: optionText }).first().click();
 }
 
-async function settleNavigation(page: Page) {
-    await page.waitForLoadState('domcontentloaded', { timeout: 2000 }).catch(() => {});
-    await page.waitForTimeout(150);
+async function settleNavigation(page: Page, previousUrl: string) {
+    await expect(page).not.toHaveURL(previousUrl, { timeout: 5000 });
+    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(100);
 }
