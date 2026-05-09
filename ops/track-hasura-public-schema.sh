@@ -56,7 +56,8 @@ set +a
 cd "$PROJECT_DIR"
 compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 relations_file="$(mktemp)"
-trap 'rm -f "$relations_file"' EXIT
+invalid_relations_file="$(mktemp)"
+trap 'rm -f "$relations_file" "$invalid_relations_file"' EXIT
 
 wait_for_hasura() {
   local attempt
@@ -76,15 +77,41 @@ wait_for_hasura
 log "Reading PostgreSQL relations from schema $SCHEMA"
 "${compose[@]}" exec -T -e PGPASSWORD="$PG_PASSWORD" postgresdb \
   psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 -Atc "
-    SELECT table_schema || '.' || table_name
-    FROM information_schema.tables
-    WHERE table_schema = '${SCHEMA}'
-      AND table_type IN ('BASE TABLE', 'VIEW')
-    ORDER BY table_name;
+    SELECT t.table_schema || '.' || t.table_name
+    FROM information_schema.tables AS t
+    WHERE t.table_schema = '${SCHEMA}'
+      AND t.table_type IN ('BASE TABLE', 'VIEW')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns AS c
+        WHERE c.table_schema = t.table_schema
+          AND c.table_name = t.table_name
+          AND c.column_name !~ '^[_A-Za-z][_0-9A-Za-z]*$'
+      )
+    ORDER BY t.table_name;
   " > "$relations_file"
+
+"${compose[@]}" exec -T -e PGPASSWORD="$PG_PASSWORD" postgresdb \
+  psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 -Atc "
+    SELECT DISTINCT t.table_schema || '.' || t.table_name
+    FROM information_schema.tables AS t
+    JOIN information_schema.columns AS c
+      ON c.table_schema = t.table_schema
+     AND c.table_name = t.table_name
+    WHERE t.table_schema = '${SCHEMA}'
+      AND t.table_type IN ('BASE TABLE', 'VIEW')
+      AND c.column_name !~ '^[_A-Za-z][_0-9A-Za-z]*$'
+    ORDER BY t.table_schema || '.' || t.table_name;
+  " > "$invalid_relations_file"
 
 relation_count="$(grep -cve '^[[:space:]]*$' "$relations_file" || true)"
 [[ "$relation_count" != "0" ]] || fail "No PostgreSQL relations found in schema $SCHEMA"
+
+invalid_relation_count="$(grep -cve '^[[:space:]]*$' "$invalid_relations_file" || true)"
+if [[ "$invalid_relation_count" != "0" ]]; then
+  log "Skipping $invalid_relation_count relations with non-GraphQL column names"
+  sed 's/^/  skipped: /' "$invalid_relations_file"
+fi
 
 log "Tracking $relation_count PostgreSQL relations in Hasura"
 HASURA_METADATA_URL="https://${HASURA_FQDN}/v1/metadata" \
@@ -143,6 +170,7 @@ with open(relations_file, "r", encoding="utf-8") as handle:
         schema, name = value.split(".", 1)
         relations.append((schema, name))
 
+request_json(metadata_url, {"type": "drop_inconsistent_metadata", "args": {}})
 metadata = request_json(metadata_url, {"type": "export_metadata", "args": {}})
 sources = metadata.get("metadata", metadata).get("sources", [])
 source = next((item for item in sources if item.get("name") == "default"), None)
