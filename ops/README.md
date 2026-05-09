@@ -40,6 +40,7 @@ sudo ops/setup-vps.sh --yes
 - `deploy-stack.sh` - creates missing templates and starts/rebuilds the stack.
 - `smoke-vps.sh` - checks HTTPS health endpoints and Hasura CORS preflight.
 - `restore-prod-backup.sh` - destructive DB restore helper for a fresh backup.
+- `apply-hasura-metadata.sh` - applies Hasura `metadata.json`.
 - `track-hasura-public-schema.sh` - tracks restored public tables/views in Hasura.
 
 ## When Domains Are Needed
@@ -128,10 +129,24 @@ sudo ops/setup-vps.sh --yes --restore-backup restore
 When the path is a directory, the script picks the newest `*.dump`,
 `*.backup`, or `*.pgdump` file, excluding `pre_restore` and `logs`. If a
 matching `*global*.sql` or `*global*.sql.gz` file is present in the same
-directory tree, globals are restored too. After a successful DB restore, the
-script tracks public tables/views in Hasura metadata so GraphQL exposes the
-restored schema. Missing path or empty directory is a non-fatal skip by
-default; use strict mode when the restore must happen:
+directory tree, globals are restored too. If a `metadata.json` or archive
+containing `metadata.json` is present near the backup, Hasura metadata is
+applied after the DB restore. You can also pass it explicitly:
+
+```bash
+sudo ops/setup-vps.sh --yes \
+  --restore-backup restore \
+  --hasura-metadata restore/hasura_metadata.tar.gz
+```
+
+Supported metadata inputs are `metadata.json`, `.tar`, `.tar.gz`, `.tgz`, and
+`.zip` archives containing `metadata.json`. The script uses
+`HASURA_ADMIN_SECRET` from `.env`.
+
+If no metadata is found, the script falls back to tracking public tables/views
+in Hasura metadata so GraphQL exposes the restored schema. Missing backup path
+or empty backup directory is a non-fatal skip by default; use strict mode when
+the restore must happen:
 
 ```bash
 sudo ops/setup-vps.sh --yes --restore-backup restore --require-restore-backup
@@ -206,8 +221,9 @@ ops/restore-prod-backup.sh \
 
 The restore script stops Hasura, creates a pre-restore dump when the target DB
 already exists, drops/recreates `PG_DB`, restores the dump, then starts Hasura.
-`setup-vps.sh --restore-backup ...` also tracks restored public tables/views in
-Hasura metadata after this restore step. It does not replace a full production
+`setup-vps.sh --restore-backup ...` also applies Hasura metadata when supplied
+or found near the backup. Without a metadata file it tracks restored public
+tables/views as a fallback; this fallback does not replace a full production
 Hasura metadata backup for custom relationships or permission rules.
 
 ## Common Failures

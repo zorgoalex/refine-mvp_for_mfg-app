@@ -16,6 +16,8 @@ PROJECT_DIR_ARG_SET=0
 RESTORE_BACKUP_PATH=""
 REQUIRE_RESTORE_BACKUP=0
 TRACK_HASURA_AFTER_RESTORE=1
+HASURA_METADATA_PATH=""
+HASURA_METADATA_APPLIED=0
 
 preferred_project_dir() {
   local owner="${SUDO_USER:-${USER:-}}"
@@ -47,7 +49,7 @@ What it does:
   3. Stops until real domains/secrets are filled in .env.
   4. On the next run, validates env and DNS.
   5. Deploys Traefik, Postgres, Hasura, and backend.
-  6. Optionally restores a DB backup when --restore-backup is provided.
+  6. Optionally restores a DB backup and Hasura metadata when provided.
   7. Runs HTTPS health checks and Hasura CORS preflight.
 
 Options:
@@ -65,6 +67,8 @@ Options:
                           If a matching *global*.sql or *global*.sql.gz exists, it is restored too.
   --require-restore-backup
                           Fail when --restore-backup path is missing or contains no main dump.
+  --hasura-metadata PATH  Optional metadata.json or archive containing metadata.json.
+                          If omitted, restore directory is scanned for Hasura metadata.
   --skip-hasura-track     Do not auto-track public tables/views in Hasura after DB restore.
   -y, --yes               Do not ask for confirmation before deploy.
 
@@ -97,6 +101,7 @@ while [[ $# -gt 0 ]]; do
     --force-recreate) FORCE_RECREATE=1; shift ;;
     --restore-backup) RESTORE_BACKUP_PATH="$2"; shift 2 ;;
     --require-restore-backup) REQUIRE_RESTORE_BACKUP=1; shift ;;
+    --hasura-metadata) HASURA_METADATA_PATH="$2"; shift 2 ;;
     --skip-hasura-track) TRACK_HASURA_AFTER_RESTORE=0; shift ;;
     -y|--yes) AUTO_YES=1; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -180,6 +185,10 @@ confirm_deploy() {
     printf 'A destructive DB restore will run if a backup is found at:\n'
     printf '  restore backup: %s\n\n' "$RESTORE_BACKUP_PATH"
   fi
+  if [[ -n "$HASURA_METADATA_PATH" ]]; then
+    printf 'Hasura metadata will be applied from:\n'
+    printf '  metadata: %s\n\n' "$HASURA_METADATA_PATH"
+  fi
   printf 'Continue? Type yes: '
 
   local answer
@@ -234,6 +243,16 @@ run_smoke() {
   "$PROJECT_DIR/ops/smoke-vps.sh" --env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE"
 }
 
+apply_hasura_metadata() {
+  local metadata_path="$1"
+  [[ -n "$metadata_path" ]] || return 1
+
+  "$PROJECT_DIR/ops/apply-hasura-metadata.sh" \
+    --env-file "$ENV_FILE" \
+    --metadata "$metadata_path"
+  HASURA_METADATA_APPLIED=1
+}
+
 track_hasura_after_restore() {
   [[ "$TRACK_HASURA_AFTER_RESTORE" == "1" ]] || return 0
 
@@ -279,6 +298,24 @@ find_globals_dump_in_dir() {
     ! -path '*/logs/*'
 }
 
+find_hasura_metadata_in_dir() {
+  local directory="$1"
+
+  find_newest_file "$directory" \
+    \( -iname '*hasura*metadata*.json' \
+      -o -iname '*hasura*metadata*.tar' \
+      -o -iname '*hasura*metadata*.tar.gz' \
+      -o -iname '*hasura*metadata*.tgz' \
+      -o -iname '*hasura*metadata*.zip' \
+      -o -iname 'metadata.json' \
+      -o -iname 'metadata.tar' \
+      -o -iname 'metadata.tar.gz' \
+      -o -iname 'metadata.tgz' \
+      -o -iname 'metadata.zip' \) \
+    ! -path '*/pre_restore/*' \
+    ! -path '*/logs/*'
+}
+
 fail_or_skip_restore() {
   local message="$1"
 
@@ -296,6 +333,7 @@ run_restore_backup_if_requested() {
   local restore_path
   local main_dump=""
   local globals_dump=""
+  local hasura_metadata=""
   restore_path="$(resolve_project_path "$RESTORE_BACKUP_PATH")"
 
   if [[ ! -e "$restore_path" ]]; then
@@ -309,9 +347,11 @@ run_restore_backup_if_requested() {
       *) fail "Unsupported restore backup file extension: $restore_path. Use *.dump, *.backup, or *.pgdump." ;;
     esac
     globals_dump="$(find_globals_dump_in_dir "$(dirname "$restore_path")")"
+    hasura_metadata="$(find_hasura_metadata_in_dir "$(dirname "$restore_path")")"
   elif [[ -d "$restore_path" ]]; then
     main_dump="$(find_main_dump_in_dir "$restore_path")"
     globals_dump="$(find_globals_dump_in_dir "$restore_path")"
+    hasura_metadata="$(find_hasura_metadata_in_dir "$restore_path")"
   else
     fail_or_skip_restore "Restore backup path is neither a file nor a directory: $restore_path"
     return 0
@@ -345,7 +385,28 @@ run_restore_backup_if_requested() {
 
   log "Selected main DB dump: $main_dump"
   "$PROJECT_DIR/ops/restore-prod-backup.sh" "${restore_args[@]}"
-  track_hasura_after_restore
+
+  if [[ -n "$HASURA_METADATA_PATH" ]]; then
+    hasura_metadata="$(resolve_project_path "$HASURA_METADATA_PATH")"
+  fi
+
+  if [[ -n "$hasura_metadata" ]]; then
+    log "Selected Hasura metadata: $hasura_metadata"
+    apply_hasura_metadata "$hasura_metadata"
+  else
+    log "No Hasura metadata found near restore backup; using public schema auto-track fallback"
+    track_hasura_after_restore
+  fi
+}
+
+apply_standalone_hasura_metadata_if_requested() {
+  [[ "$HASURA_METADATA_APPLIED" == "0" ]] || return 0
+  [[ -n "$HASURA_METADATA_PATH" ]] || return 0
+
+  local metadata_path
+  metadata_path="$(resolve_project_path "$HASURA_METADATA_PATH")"
+  log "Selected Hasura metadata: $metadata_path"
+  apply_hasura_metadata "$metadata_path"
 }
 
 [[ -d "$PROJECT_DIR/ops" ]] || fail "ops directory not found under $PROJECT_DIR"
@@ -378,6 +439,7 @@ log "Deploying stack"
 run_deploy
 
 run_restore_backup_if_requested
+apply_standalone_hasura_metadata_if_requested
 
 if [[ "$RUN_SMOKE" == "1" ]]; then
   log "Running smoke checks"
