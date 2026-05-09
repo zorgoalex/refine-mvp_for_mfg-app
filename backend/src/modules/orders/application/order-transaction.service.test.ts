@@ -461,6 +461,48 @@ describe('OrderTransactionService', () => {
     ]);
   });
 
+  it('accepts an omitted client version for the first update of legacy zero-version orders', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 0,
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+    });
+
+    const result = await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated legacy order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 4,
+            materialId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 20000,
+          },
+        ],
+        payments: [],
+        version: undefined,
+      }),
+    });
+
+    expect(result.version).toBe(1);
+    expect(result.details[0].quantity).toBe(4);
+  });
+
   it('returns version conflict before child mutations and does not write audit', async () => {
     const transactions = new FakeOrderTransactions();
     transactions.seedOrder({ orderId: 42, version: 2 });

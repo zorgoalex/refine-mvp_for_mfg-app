@@ -76,13 +76,13 @@ export class OrderTransactionService {
         throw new OrderNotFoundError(command.orderId);
       }
 
-      const clientVersion = this.extractClientVersion(command.dto.version);
+      const clientVersion = this.extractClientVersion(command.dto.version, lockedOrder.version);
 
       if (clientVersion !== lockedOrder.version) {
         throw new OrderVersionConflictError(lockedOrder.version, clientVersion);
       }
 
-      const prepared = prepareOrderSave(command.dto, {
+      const prepared = prepareOrderSave({ ...command.dto, version: clientVersion }, {
         mode: 'update',
         pathOrderId: command.orderId,
       });
@@ -152,7 +152,11 @@ export class OrderTransactionService {
     return order;
   }
 
-  private extractClientVersion(version: unknown): number {
+  private extractClientVersion(version: unknown, lockedVersion: number): number {
+    if ((version === null || version === undefined) && lockedVersion === 0) {
+      return 0;
+    }
+
     if (!Number.isInteger(version) || Number(version) < 0) {
       throw new ApiError(422, 'VALIDATION_ERROR', 'Order payload validation failed', {
         errors: [{ field: 'version', message: 'version must be a non-negative integer' }],
