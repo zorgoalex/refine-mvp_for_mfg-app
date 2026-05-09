@@ -35,6 +35,13 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# generated VPS runtime files
+/docker-compose.yml
+/config/postgres/pg_hba.conf
+/data/
+/backups/
+/restore/
+
 # vercel
 .vercel
 
