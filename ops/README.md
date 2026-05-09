@@ -116,6 +116,24 @@ If DNS has not propagated but you know the target IP:
 sudo ops/setup-vps.sh --expected-ip <VPS_PUBLIC_IP>
 ```
 
+If a DB backup is already uploaded to the VPS and should be restored during
+setup, pass either a dump file or a directory:
+
+```bash
+sudo ops/setup-vps.sh --yes --restore-backup restore
+```
+
+`--restore-backup` runs after the stack is deployed and before smoke checks.
+When the path is a directory, the script picks the newest `*.dump`,
+`*.backup`, or `*.pgdump` file, excluding `pre_restore` and `logs`. If a
+matching `*global*.sql` or `*global*.sql.gz` file is present in the same
+directory tree, globals are restored too. Missing path or empty directory is a
+non-fatal skip by default; use strict mode when the restore must happen:
+
+```bash
+sudo ops/setup-vps.sh --yes --restore-backup restore --require-restore-backup
+```
+
 ## Frontend/Vercel Values
 
 For a frontend that talks directly to this VPS stack, set:
@@ -158,6 +176,12 @@ ops/smoke-vps.sh
 ## Restoring A Production Backup
 
 Upload the backup to the VPS, for example into `/opt/erp/restore`.
+
+For the normal one-script flow, prefer:
+
+```bash
+sudo ops/setup-vps.sh --yes --restore-backup /opt/erp/restore --require-restore-backup
+```
 
 Then run:
 

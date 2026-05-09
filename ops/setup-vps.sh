@@ -13,6 +13,8 @@ SKIP_BOOTSTRAP=0
 SKIP_DEPLOY=0
 AUTO_YES=0
 PROJECT_DIR_ARG_SET=0
+RESTORE_BACKUP_PATH=""
+REQUIRE_RESTORE_BACKUP=0
 
 preferred_project_dir() {
   local owner="${SUDO_USER:-${USER:-}}"
@@ -44,7 +46,8 @@ What it does:
   3. Stops until real domains/secrets are filled in .env.
   4. On the next run, validates env and DNS.
   5. Deploys Traefik, Postgres, Hasura, and backend.
-  6. Runs HTTPS health checks and Hasura CORS preflight.
+  6. Optionally restores a DB backup when --restore-backup is provided.
+  7. Runs HTTPS health checks and Hasura CORS preflight.
 
 Options:
   --project-dir PATH       Repo/project directory. Default: repo root.
@@ -56,6 +59,11 @@ Options:
   --skip-bootstrap        Do not run bootstrap-vps.sh.
   --skip-deploy           Stop after bootstrap/env validation.
   --force-recreate        Recreate containers during deploy.
+  --restore-backup PATH   Optional DB backup file or directory to restore after deploy.
+                          Directory mode picks the newest *.dump/*.backup/*.pgdump file.
+                          If a matching *global*.sql or *global*.sql.gz exists, it is restored too.
+  --require-restore-backup
+                          Fail when --restore-backup path is missing or contains no main dump.
   -y, --yes               Do not ask for confirmation before deploy.
 
 Default path rule:
@@ -85,6 +93,8 @@ while [[ $# -gt 0 ]]; do
     --skip-bootstrap) SKIP_BOOTSTRAP=1; shift ;;
     --skip-deploy) SKIP_DEPLOY=1; shift ;;
     --force-recreate) FORCE_RECREATE=1; shift ;;
+    --restore-backup) RESTORE_BACKUP_PATH="$2"; shift 2 ;;
+    --require-restore-backup) REQUIRE_RESTORE_BACKUP=1; shift ;;
     -y|--yes) AUTO_YES=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
@@ -163,6 +173,10 @@ confirm_deploy() {
   printf '  project: %s\n' "$PROJECT_DIR"
   printf '  env:     %s\n' "$ENV_FILE"
   printf '  compose: %s\n\n' "$COMPOSE_FILE"
+  if [[ -n "$RESTORE_BACKUP_PATH" ]]; then
+    printf 'A destructive DB restore will run if a backup is found at:\n'
+    printf '  restore backup: %s\n\n' "$RESTORE_BACKUP_PATH"
+  fi
   printf 'Continue? Type yes: '
 
   local answer
@@ -217,6 +231,111 @@ run_smoke() {
   "$PROJECT_DIR/ops/smoke-vps.sh" --env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE"
 }
 
+resolve_project_path() {
+  local value="$1"
+  if [[ "$value" = /* ]]; then
+    printf '%s\n' "$value"
+  else
+    printf '%s/%s\n' "$PROJECT_DIR" "$value"
+  fi
+}
+
+find_newest_file() {
+  local directory="$1"
+  shift
+
+  find "$directory" -type f "$@" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -rn \
+    | sed -n '1s/^[^ ]* //p'
+}
+
+find_main_dump_in_dir() {
+  local directory="$1"
+
+  find_newest_file "$directory" \
+    \( -iname '*.dump' -o -iname '*.backup' -o -iname '*.pgdump' \) \
+    ! -iname '*global*' \
+    ! -path '*/pre_restore/*' \
+    ! -path '*/logs/*'
+}
+
+find_globals_dump_in_dir() {
+  local directory="$1"
+
+  find_newest_file "$directory" \
+    \( -iname '*global*.sql' -o -iname '*global*.sql.gz' -o -iname '*globals*.sql' -o -iname '*globals*.sql.gz' \) \
+    ! -path '*/pre_restore/*' \
+    ! -path '*/logs/*'
+}
+
+fail_or_skip_restore() {
+  local message="$1"
+
+  if [[ "$REQUIRE_RESTORE_BACKUP" == "1" ]]; then
+    fail "$message"
+  fi
+
+  log "$message; skipping DB restore"
+  return 0
+}
+
+run_restore_backup_if_requested() {
+  [[ -n "$RESTORE_BACKUP_PATH" ]] || return 0
+
+  local restore_path
+  local main_dump=""
+  local globals_dump=""
+  restore_path="$(resolve_project_path "$RESTORE_BACKUP_PATH")"
+
+  if [[ ! -e "$restore_path" ]]; then
+    fail_or_skip_restore "Restore backup path not found: $restore_path"
+    return 0
+  fi
+
+  if [[ -f "$restore_path" ]]; then
+    case "$restore_path" in
+      *.dump|*.backup|*.pgdump) main_dump="$restore_path" ;;
+      *) fail "Unsupported restore backup file extension: $restore_path. Use *.dump, *.backup, or *.pgdump." ;;
+    esac
+    globals_dump="$(find_globals_dump_in_dir "$(dirname "$restore_path")")"
+  elif [[ -d "$restore_path" ]]; then
+    main_dump="$(find_main_dump_in_dir "$restore_path")"
+    globals_dump="$(find_globals_dump_in_dir "$restore_path")"
+  else
+    fail_or_skip_restore "Restore backup path is neither a file nor a directory: $restore_path"
+    return 0
+  fi
+
+  if [[ -z "$main_dump" ]]; then
+    fail_or_skip_restore "No main DB dump found under: $restore_path"
+    return 0
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+
+  [[ -n "${PG_DB:-}" ]] || fail "PG_DB is required in .env for DB restore"
+
+  local restore_args=(
+    --env-file "$ENV_FILE"
+    --compose-file "$COMPOSE_FILE"
+    --main-dump "$main_dump"
+    --confirm-db "$PG_DB"
+  )
+
+  if [[ -n "$globals_dump" ]]; then
+    restore_args+=(--globals-dump "$globals_dump" --restore-globals)
+    log "Selected globals dump: $globals_dump"
+  else
+    log "No globals dump found near restore backup; restoring main dump only"
+  fi
+
+  log "Selected main DB dump: $main_dump"
+  "$PROJECT_DIR/ops/restore-prod-backup.sh" "${restore_args[@]}"
+}
+
 [[ -d "$PROJECT_DIR/ops" ]] || fail "ops directory not found under $PROJECT_DIR"
 
 if [[ "$SKIP_BOOTSTRAP" == "0" ]]; then
@@ -245,6 +364,8 @@ confirm_deploy
 
 log "Deploying stack"
 run_deploy
+
+run_restore_backup_if_requested
 
 if [[ "$RUN_SMOKE" == "1" ]]; then
   log "Running smoke checks"
