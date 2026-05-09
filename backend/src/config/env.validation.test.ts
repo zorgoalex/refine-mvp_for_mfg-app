@@ -228,6 +228,36 @@ describe('backend env validation', () => {
     });
   });
 
+  it('treats empty optional integration env values as unset when integrations are disabled', () => {
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_ORDER_EXPORT: 'true',
+        BACKEND_EXPORT_DISABLED: 'true',
+        GAS_WEBAPP_URL: '',
+        GAS_API_KEY: '',
+        BACKEND_ENABLE_VLM: 'true',
+        BACKEND_VLM_DISABLED: 'true',
+        VLM_API_URL: '',
+        AUTH0_M2M_DOMAIN: '',
+        AUTH0_M2M_CLIENT_ID: '',
+        AUTH0_M2M_CLIENT_SECRET: '',
+        AUTH0_M2M_AUDIENCE: '',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_ORDER_EXPORT: true,
+      BACKEND_EXPORT_DISABLED: true,
+      GAS_WEBAPP_URL: undefined,
+      GAS_API_KEY: undefined,
+      BACKEND_ENABLE_VLM: true,
+      BACKEND_VLM_DISABLED: true,
+      VLM_API_URL: undefined,
+      AUTH0_M2M_DOMAIN: undefined,
+      AUTH0_M2M_CLIENT_ID: undefined,
+      AUTH0_M2M_CLIENT_SECRET: undefined,
+      AUTH0_M2M_AUDIENCE: undefined,
+    });
+  });
+
   it('requires a versioned API prefix', () => {
     expect(() =>
       validateEnv({

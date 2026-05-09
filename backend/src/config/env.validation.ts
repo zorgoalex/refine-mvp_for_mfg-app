@@ -35,6 +35,16 @@ const sameSiteFromEnv = z
   )
   .default('lax');
 
+const emptyTrimmedStringFromEnv = z.string().trim().length(0).transform(() => undefined);
+
+const optionalTrimmedStringFromEnv = z
+  .union([z.string().trim().min(1), emptyTrimmedStringFromEnv])
+  .optional();
+
+const optionalUrlFromEnv = z
+  .union([z.string().trim().url(), emptyTrimmedStringFromEnv])
+  .optional();
+
 function isPostgresUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -103,18 +113,18 @@ const envSchema = z
     BACKEND_DEADLINE_WORKER_ID: z.string().trim().min(1).default('backend-local'),
     BACKEND_DEADLINE_ACTIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
-    GAS_WEBAPP_URL: z.string().trim().url().optional(),
-    GAS_API_KEY: z.string().trim().min(1).optional(),
+    GAS_WEBAPP_URL: optionalUrlFromEnv,
+    GAS_API_KEY: optionalTrimmedStringFromEnv,
     GAS_EXPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(55000),
-    VLM_API_URL: z.string().trim().url().optional(),
+    VLM_API_URL: optionalUrlFromEnv,
     VLM_HEALTH_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     VLM_UPLOAD_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
     VLM_ANALYZE_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
     VLM_ANALYZE_DAILY_LIMIT: z.coerce.number().int().positive().default(100),
-    AUTH0_M2M_DOMAIN: z.string().trim().min(1).optional(),
-    AUTH0_M2M_CLIENT_ID: z.string().trim().min(1).optional(),
-    AUTH0_M2M_CLIENT_SECRET: z.string().trim().min(1).optional(),
-    AUTH0_M2M_AUDIENCE: z.string().trim().min(1).optional(),
+    AUTH0_M2M_DOMAIN: optionalTrimmedStringFromEnv,
+    AUTH0_M2M_CLIENT_ID: optionalTrimmedStringFromEnv,
+    AUTH0_M2M_CLIENT_SECRET: optionalTrimmedStringFromEnv,
+    AUTH0_M2M_AUDIENCE: optionalTrimmedStringFromEnv,
     VLM_MAX_UPLOAD_MB: z.coerce.number().positive().default(20),
     VLM_ALLOWED_MIME_TYPES: z
       .string()
