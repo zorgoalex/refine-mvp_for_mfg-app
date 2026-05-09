@@ -6,6 +6,7 @@ export function createOrderDtoForQueryTest(orderId: number): OrderDto {
       orderId,
       orderName: 'Test order',
       clientId: 1001,
+      clientName: 'Test client',
       orderDate: '2026-04-30',
       priority: 100,
       orderStatusId: 1001,
