@@ -5,6 +5,8 @@ import React from 'react';
 import { Typography, Tag } from 'antd';
 import { useOne } from '@refinedev/core';
 import dayjs from 'dayjs';
+import { authStorage } from '../../../../utils/auth';
+import { canQueryUsersResource } from '../../../../utils/resourcePermissions';
 
 const { Text } = Typography;
 
@@ -13,6 +15,8 @@ interface OrderMetaBlockProps {
 }
 
 export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
+  const canViewUsers = canQueryUsersResource(authStorage.getUser());
+
   const formatDate = (date?: string | Date | null) => {
     if (!date) return '—';
     return dayjs(date).format('DD.MM.YYYY HH:mm');
@@ -23,7 +27,7 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
     resource: 'users',
     id: record?.created_by,
     queryOptions: {
-      enabled: !!record?.created_by,
+      enabled: canViewUsers && !!record?.created_by,
     },
   });
 
@@ -32,7 +36,7 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
     resource: 'users',
     id: record?.edited_by,
     queryOptions: {
-      enabled: !!record?.edited_by,
+      enabled: canViewUsers && !!record?.edited_by,
     },
   });
 

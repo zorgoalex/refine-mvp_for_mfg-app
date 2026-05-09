@@ -39,6 +39,7 @@ import { buildProductionStagesDisplayConfig } from "../../utils/productionWorkfl
 import type { ProductionStatusRef, ProductionWorkflowConfig } from "../../types/productionWorkflow";
 import { featureFlags } from "../../config/featureFlags";
 import { ordersApi } from "../../api/ordersApi";
+import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -53,6 +54,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   // Получаем текущего пользователя для фильтра "Мои заказы"
   const currentUser = authStorage.getUser();
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
+  const canViewUsers = canQueryUsersResource(currentUser);
   const { getSetting } = useAppSettings();
 
   const { tableProps, current, pageSize, setCurrent, sorters, setSorters, filters, setFilters } = useTable({
@@ -293,6 +295,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     resource: "users",
     optionLabel: "username",
     optionValue: "user_id",
+    queryOptions: {
+      enabled: canViewUsers,
+    },
   });
 
   const { selectProps: orderStatusSelectProps } = useSelect({
@@ -333,7 +338,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
     // Если выбрано "created_by" в расширенных фильтрах - используем его
     // Иначе сохраняем фильтр "Мои заказы" если он активен
-    if (hasValue(values.created_by)) {
+    if (canViewUsers && hasValue(values.created_by)) {
       newFilters.push({ field: "created_by", operator: "eq", value: values.created_by });
       // Сбрасываем чекбокс если выбран другой пользователь
       if (Number(values.created_by) !== Number(currentUser?.id)) {
@@ -444,7 +449,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { data: usersData } = useMany({
     resource: "users",
     ids: createdByIds,
-    queryOptions: { enabled: createdByIds.length > 0 },
+    queryOptions: { enabled: canViewUsers && createdByIds.length > 0 },
   });
 
   const createdByMap = useMemo(() => {
@@ -824,19 +829,21 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                     />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={6} lg={3}>
-                  <Form.Item name="created_by" label="Создано">
-                    <Select
-                      {...userSelectProps}
-                      allowClear
-                      placeholder="Пользователь"
-                      showSearch
-                      filterOption={(input, option) =>
-                        (option?.label ?? "").toString().toLowerCase().includes(input.toLowerCase())
-                      }
-                    />
-                  </Form.Item>
-                </Col>
+                {canViewUsers && (
+                  <Col xs={24} sm={12} md={6} lg={3}>
+                    <Form.Item name="created_by" label="Создано">
+                      <Select
+                        {...userSelectProps}
+                        allowClear
+                        placeholder="Пользователь"
+                        showSearch
+                        filterOption={(input, option) =>
+                          (option?.label ?? "").toString().toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                    </Form.Item>
+                  </Col>
+                )}
                 <Col xs={24} sm={12} md={6} lg={4}>
                   <Form.Item name="order_status_name" label="Статус заказа">
                     <Select {...orderStatusSelectProps} allowClear placeholder="Статус" />

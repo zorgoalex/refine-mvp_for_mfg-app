@@ -6,6 +6,8 @@ import { FilterOutlined, ClearOutlined, CheckCircleOutlined } from "@ant-design/
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { formatDate } from "../../utils/dateFormat";
 import { formatNumber } from "../../utils/numberFormat";
+import { authStorage } from "../../utils/auth";
+import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import dayjs from "dayjs";
 import "./list.css";
 
@@ -16,6 +18,8 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const [form] = Form.useForm();
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [showResultCount, setShowResultCount] = useState(false);
+  const currentUser = authStorage.getUser();
+  const canViewUsers = canQueryUsersResource(currentUser);
 
   const { tableProps, filters, setFilters } = useTable({
     syncWithLocation: true,
@@ -66,6 +70,9 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
     resource: "users",
     optionLabel: "username",
     optionValue: "user_id",
+    queryOptions: {
+      enabled: canViewUsers,
+    },
   });
 
   // Применение фильтров
@@ -104,7 +111,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
       newFilters.push({ field: "type_paid_id", operator: "eq", value: values.type_paid_id });
     }
 
-    if (hasValue(values.created_by)) {
+    if (canViewUsers && hasValue(values.created_by)) {
       newFilters.push({ field: "created_by", operator: "eq", value: values.created_by });
     }
 
@@ -193,19 +200,21 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
                   />
                 </Form.Item>
               </Col>
-              <Col xs={24} sm={12} md={8} lg={3}>
-                <Form.Item name="created_by" label="Создал">
-                  <Select
-                    {...userSelectProps}
-                    allowClear
-                    placeholder="Пользователь"
-                    showSearch
-                    filterOption={(input, option) =>
-                      (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-                    }
-                  />
-                </Form.Item>
-              </Col>
+              {canViewUsers && (
+                <Col xs={24} sm={12} md={8} lg={3}>
+                  <Form.Item name="created_by" label="Создал">
+                    <Select
+                      {...userSelectProps}
+                      allowClear
+                      placeholder="Пользователь"
+                      showSearch
+                      filterOption={(input, option) =>
+                        (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+              )}
             </Row>
             <Row gutter={16} justify="space-between" align="bottom">
               <Col xs={24} sm={12} md={8} lg={6}>
