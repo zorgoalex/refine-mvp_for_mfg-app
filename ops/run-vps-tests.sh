@@ -111,7 +111,8 @@ restore_tracked_test_artifacts() {
   command -v git >/dev/null 2>&1 || return 0
   git -c safe.directory="$PROJECT_DIR" -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
 
-  git -c safe.directory="$PROJECT_DIR" -C "$PROJECT_DIR" restore -- test-results playwright-report 2>/dev/null || true
+  git -c safe.directory="$PROJECT_DIR" -C "$PROJECT_DIR" restore -- test-results 2>/dev/null || true
+  git -c safe.directory="$PROJECT_DIR" -C "$PROJECT_DIR" restore -- playwright-report 2>/dev/null || true
 }
 
 if [[ "$RUN_BACKEND" == "1" ]]; then
