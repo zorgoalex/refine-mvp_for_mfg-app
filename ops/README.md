@@ -22,8 +22,9 @@ to the VPS, then run the same command again:
 sudo ops/setup-vps.sh
 ```
 
-The second run validates `.env`, checks DNS, deploys the stack, and runs smoke
-checks. If you want non-interactive deploy after `.env` is filled:
+The second run validates `.env`, checks DNS, deploys the stack, runs smoke
+checks, and runs the backend/frontend/e2e test suite. If you want
+non-interactive deploy after `.env` is filled:
 
 ```bash
 sudo ops/setup-vps.sh --yes
@@ -42,6 +43,8 @@ sudo ops/setup-vps.sh --yes
 - `restore-prod-backup.sh` - destructive DB restore helper for a fresh backup.
 - `apply-hasura-metadata.sh` - applies Hasura `metadata.json`.
 - `track-hasura-public-schema.sh` - tracks restored public tables/views in Hasura.
+- `run-vps-tests.sh` - installs npm dependencies in Docker volumes and runs
+  backend Vitest, frontend/serverless Vitest, and Playwright e2e.
 
 ## When Domains Are Needed
 
@@ -116,6 +119,19 @@ If DNS has not propagated but you know the target IP:
 
 ```bash
 sudo ops/setup-vps.sh --expected-ip <VPS_PUBLIC_IP>
+```
+
+The setup script runs all test suites after a successful deploy/restore/smoke.
+For an emergency deploy where tests must be skipped explicitly:
+
+```bash
+sudo ops/setup-vps.sh --yes --skip-tests
+```
+
+To run the same VPS test suite manually:
+
+```bash
+ops/run-vps-tests.sh
 ```
 
 If a DB backup is already uploaded to the VPS and should be restored during

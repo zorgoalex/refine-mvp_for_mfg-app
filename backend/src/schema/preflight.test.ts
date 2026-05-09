@@ -30,7 +30,7 @@ describe('schema preflight', () => {
 
   it('detects the known blockers in postgresql_schema_v_14.sql', () => {
     const schema = readFileSync(
-      new URL('../../../../spec_erp/postgresql_schema_v_14.sql', import.meta.url),
+      new URL('./fixtures/postgresql_schema_v_14.preflight.sql', import.meta.url),
       'utf8',
     );
 

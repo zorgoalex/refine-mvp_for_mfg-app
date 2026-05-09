@@ -7,6 +7,7 @@ ENV_FILE="$PROJECT_DIR/.env"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 RUN_DNS_CHECK=1
 RUN_SMOKE=1
+RUN_TESTS=1
 FORCE_RECREATE=0
 EXPECTED_IP=""
 SKIP_BOOTSTRAP=0
@@ -59,6 +60,7 @@ Options:
   --expected-ip IP         Expected public IP for DNS checks.
   --skip-dns              Do not check DNS A records before deploy.
   --skip-smoke            Do not run smoke checks after deploy.
+  --skip-tests            Do not run backend/frontend/e2e tests after deploy.
   --skip-bootstrap        Do not run bootstrap-vps.sh.
   --skip-deploy           Stop after bootstrap/env validation.
   --force-recreate        Recreate containers during deploy.
@@ -96,6 +98,7 @@ while [[ $# -gt 0 ]]; do
     --expected-ip) EXPECTED_IP="$2"; shift 2 ;;
     --skip-dns) RUN_DNS_CHECK=0; shift ;;
     --skip-smoke) RUN_SMOKE=0; shift ;;
+    --skip-tests) RUN_TESTS=0; shift ;;
     --skip-bootstrap) SKIP_BOOTSTRAP=1; shift ;;
     --skip-deploy) SKIP_DEPLOY=1; shift ;;
     --force-recreate) FORCE_RECREATE=1; shift ;;
@@ -241,6 +244,10 @@ run_deploy() {
 
 run_smoke() {
   "$PROJECT_DIR/ops/smoke-vps.sh" --env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE"
+}
+
+run_tests() {
+  "$PROJECT_DIR/ops/run-vps-tests.sh" --project-dir "$PROJECT_DIR" --env-file "$ENV_FILE"
 }
 
 apply_hasura_metadata() {
@@ -446,6 +453,13 @@ if [[ "$RUN_SMOKE" == "1" ]]; then
   run_smoke
 else
   log "Skipping smoke checks"
+fi
+
+if [[ "$RUN_TESTS" == "1" ]]; then
+  log "Running test suite"
+  run_tests
+else
+  log "Skipping test suite"
 fi
 
 log "VPS setup complete"
