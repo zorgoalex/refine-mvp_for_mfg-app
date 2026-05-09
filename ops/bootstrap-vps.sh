@@ -3,6 +3,8 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKIP_FIREWALL=0
+POSTGRES_DATA_UID="${POSTGRES_DATA_UID:-70}"
+POSTGRES_DATA_GID="${POSTGRES_DATA_GID:-70}"
 
 usage() {
   cat <<'EOF'
@@ -86,7 +88,32 @@ create_project_dirs() {
     "$PROJECT_DIR/restore"
 
   if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    "${SUDO[@]}" chown -R "$SUDO_USER:$SUDO_USER" "$PROJECT_DIR/config" "$PROJECT_DIR/data" "$PROJECT_DIR/backups" "$PROJECT_DIR/restore"
+    "${SUDO[@]}" chown -R "$SUDO_USER:$SUDO_USER" \
+      "$PROJECT_DIR/config" \
+      "$PROJECT_DIR/data/traefik" \
+      "$PROJECT_DIR/backups" \
+      "$PROJECT_DIR/restore"
+    "${SUDO[@]}" chown "$SUDO_USER:$SUDO_USER" "$PROJECT_DIR/data" "$PROJECT_DIR/data/postgres"
+  fi
+
+  ensure_postgres_data_owner "$PROJECT_DIR/data/postgres/main"
+  ensure_postgres_data_owner "$PROJECT_DIR/data/postgres/hasura_md"
+}
+
+ensure_postgres_data_owner() {
+  local data_dir="$1"
+  local expected_owner="${POSTGRES_DATA_UID}:${POSTGRES_DATA_GID}"
+  local current_owner=""
+
+  if [[ -f "$data_dir/PG_VERSION" ]]; then
+    current_owner="$(stat -c '%u:%g' "$data_dir/PG_VERSION")"
+  else
+    current_owner="$(stat -c '%u:%g' "$data_dir")"
+  fi
+
+  if [[ "$current_owner" != "$expected_owner" ]]; then
+    log "Setting Postgres data ownership on $data_dir to $expected_owner"
+    "${SUDO[@]}" chown -R "$expected_owner" "$data_dir"
   fi
 }
 
