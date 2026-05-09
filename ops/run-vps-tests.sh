@@ -107,6 +107,13 @@ cleanup_test_artifact_ownership() {
   done
 }
 
+restore_tracked_test_artifacts() {
+  command -v git >/dev/null 2>&1 || return 0
+  git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  git -C "$PROJECT_DIR" restore -- test-results playwright-report 2>/dev/null || true
+}
+
 if [[ "$RUN_BACKEND" == "1" ]]; then
   log "Installing backend dependencies"
   docker_run_backend 'npm ci'
@@ -128,6 +135,7 @@ fi
 if [[ "$RUN_E2E" == "1" ]]; then
   log "Running Playwright e2e suite"
   docker_run_playwright 'npx playwright test'
+  restore_tracked_test_artifacts
   cleanup_test_artifact_ownership
 fi
 
