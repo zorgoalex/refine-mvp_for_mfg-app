@@ -3,6 +3,9 @@
 This folder contains scripts for quickly preparing a new VPS for the ERP stack:
 Traefik, PostgreSQL, Hasura, and the backend service.
 
+Russian step-by-step guide for the one-command script:
+`ops/VPS_ONE_COMMAND_GUIDE.ru.md`.
+
 No real secrets are stored here. Copy `ops/templates/env.vps.example` to `.env`
 on the VPS and fill real values there. `.env` is ignored by git.
 
