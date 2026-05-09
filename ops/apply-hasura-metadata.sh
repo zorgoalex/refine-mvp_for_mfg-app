@@ -55,6 +55,18 @@ set +a
 [[ -n "${HASURA_FQDN:-}" ]] || fail "HASURA_FQDN is required in .env"
 [[ -n "${HASURA_ADMIN_SECRET:-}" ]] || fail "HASURA_ADMIN_SECRET is required in .env"
 
+wait_for_hasura() {
+  local attempt
+  for attempt in $(seq 1 60); do
+    if curl -fsS --max-time 10 "https://${HASURA_FQDN}/healthz" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  fail "Hasura did not become healthy at https://${HASURA_FQDN}/healthz"
+}
+
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 
@@ -96,6 +108,9 @@ PY
 esac
 
 [[ -n "$metadata_json" ]] || fail "metadata.json not found in $METADATA_PATH"
+
+log "Waiting for Hasura health"
+wait_for_hasura
 
 log "Applying Hasura metadata from $metadata_json"
 HASURA_METADATA_URL="https://${HASURA_FQDN}/v1/metadata" \
