@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_DIR="$SCRIPT_PROJECT_DIR"
 ENV_FILE="$PROJECT_DIR/.env"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 RUN_DNS_CHECK=1
@@ -11,6 +12,21 @@ EXPECTED_IP=""
 SKIP_BOOTSTRAP=0
 SKIP_DEPLOY=0
 AUTO_YES=0
+PROJECT_DIR_ARG_SET=0
+
+preferred_project_dir() {
+  local owner="${SUDO_USER:-${USER:-}}"
+  if [[ -z "$owner" || "$owner" == "root" ]]; then
+    owner="$(logname 2>/dev/null || true)"
+  fi
+  if [[ -z "$owner" || "$owner" == "root" ]]; then
+    owner="user"
+  fi
+
+  printf '/home/%s/projects/erp' "$owner"
+}
+
+PREFERRED_PROJECT_DIR="${ERP_PROJECT_DIR:-$(preferred_project_dir)}"
 
 usage() {
   cat <<'EOF'
@@ -19,6 +35,7 @@ setup-vps.sh
 One-command VPS setup for the ERP stack.
 
 First run on a fresh VPS:
+  cd /home/<user>/projects/erp
   sudo ops/setup-vps.sh
 
 What it does:
@@ -40,6 +57,11 @@ Options:
   --skip-deploy           Stop after bootstrap/env validation.
   --force-recreate        Recreate containers during deploy.
   -y, --yes               Do not ask for confirmation before deploy.
+
+Default path rule:
+  Without --project-dir, the repo is expected at:
+    /home/<current-user>/projects/erp
+  Override with ERP_PROJECT_DIR=/custom/path or --project-dir PATH.
 EOF
 }
 
@@ -54,7 +76,7 @@ fail() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project-dir) PROJECT_DIR="$2"; shift 2 ;;
+    --project-dir) PROJECT_DIR="$2"; PROJECT_DIR_ARG_SET=1; shift 2 ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --compose-file) COMPOSE_FILE="$2"; shift 2 ;;
     --expected-ip) EXPECTED_IP="$2"; shift 2 ;;
@@ -72,6 +94,29 @@ done
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 [[ "$ENV_FILE" = /* ]] || ENV_FILE="$PROJECT_DIR/$ENV_FILE"
 [[ "$COMPOSE_FILE" = /* ]] || COMPOSE_FILE="$PROJECT_DIR/$COMPOSE_FILE"
+
+if [[ "$PROJECT_DIR_ARG_SET" == "0" && "$PROJECT_DIR" != "$PREFERRED_PROJECT_DIR" ]]; then
+  repo_url="$(git -C "$SCRIPT_PROJECT_DIR" remote get-url origin 2>/dev/null || printf '<repo-url>')"
+  parent_dir="$(dirname "$PREFERRED_PROJECT_DIR")"
+
+  cat <<EOF
+The VPS project directory must be:
+  $PREFERRED_PROJECT_DIR
+
+Current script directory is:
+  $SCRIPT_PROJECT_DIR
+
+Clone or move the repository into the required structure, then rerun:
+  mkdir -p "$parent_dir"
+  git clone "$repo_url" "$PREFERRED_PROJECT_DIR"
+  cd "$PREFERRED_PROJECT_DIR"
+  sudo ops/setup-vps.sh
+
+If this different path is intentional, rerun with:
+  sudo ops/setup-vps.sh --project-dir "$PROJECT_DIR"
+EOF
+  exit 2
+fi
 
 needs_env_edit() {
   [[ -f "$ENV_FILE" ]] || return 0

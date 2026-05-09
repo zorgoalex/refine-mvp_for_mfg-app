@@ -77,8 +77,9 @@ docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hasu
 On the new VPS:
 
 ```bash
-git clone <repo-url> /opt/erp
-cd /opt/erp
+mkdir -p /home/<user>/projects
+git clone <repo-url> /home/<user>/projects/erp
+cd /home/<user>/projects/erp
 sudo ops/setup-vps.sh
 ```
 
