@@ -5,6 +5,8 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$PROJECT_DIR/.env"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 SKIP_DOCKER=0
+SMOKE_ATTEMPTS="${SMOKE_ATTEMPTS:-12}"
+SMOKE_DELAY_SECONDS="${SMOKE_DELAY_SECONDS:-5}"
 
 usage() {
   cat <<'EOF'
@@ -55,44 +57,77 @@ check_url() {
   local url="$1"
   local expected="$2"
   local code
-  code="$(curl -fsS -o /tmp/erp-smoke-body.$$ -w '%{http_code}' --max-time 20 "$url" || true)"
-  if [[ "$code" != "$expected" ]]; then
-    printf 'Response body:\n' >&2
-    cat /tmp/erp-smoke-body.$$ >&2 || true
-    rm -f /tmp/erp-smoke-body.$$
-    fail "$url returned HTTP $code, expected $expected"
-  fi
+  local attempt
+
+  for ((attempt = 1; attempt <= SMOKE_ATTEMPTS; attempt++)); do
+    code="$(curl -fsS -o /tmp/erp-smoke-body.$$ -w '%{http_code}' --max-time 20 "$url" || true)"
+    if [[ "$code" == "$expected" ]]; then
+      rm -f /tmp/erp-smoke-body.$$
+      log "OK $url -> $code"
+      return 0
+    fi
+
+    if [[ "$attempt" -lt "$SMOKE_ATTEMPTS" ]]; then
+      log "Waiting for $url -> got HTTP $code, expected $expected (attempt $attempt/$SMOKE_ATTEMPTS)"
+      sleep "$SMOKE_DELAY_SECONDS"
+    fi
+  done
+
+  printf 'Response body:\n' >&2
+  cat /tmp/erp-smoke-body.$$ >&2 || true
   rm -f /tmp/erp-smoke-body.$$
-  log "OK $url -> $code"
+  fail "$url returned HTTP $code, expected $expected"
 }
 
 check_hasura_cors() {
   local headers
   local body
   local code
-  headers="$(mktemp)"
-  body="$(mktemp)"
-  code="$(curl -sS -o "$body" -D "$headers" -w '%{http_code}' --max-time 20 \
-    -X OPTIONS "https://${HASURA_FQDN}/v1/graphql" \
-    -H "Origin: ${FRONTEND_ORIGIN}" \
-    -H 'Access-Control-Request-Method: POST' \
-    -H 'Access-Control-Request-Headers: content-type,authorization' || true)"
+  local attempt
 
+  for ((attempt = 1; attempt <= SMOKE_ATTEMPTS; attempt++)); do
+    headers="$(mktemp)"
+    body="$(mktemp)"
+    code="$(curl -sS -o "$body" -D "$headers" -w '%{http_code}' --max-time 20 \
+      -X OPTIONS "https://${HASURA_FQDN}/v1/graphql" \
+      -H "Origin: ${FRONTEND_ORIGIN}" \
+      -H 'Access-Control-Request-Method: POST' \
+      -H 'Access-Control-Request-Headers: content-type,authorization' || true)"
+
+    if [[ "$code" == "204" ]] && awk -v origin="$FRONTEND_ORIGIN" '
+      BEGIN { found = 0 }
+      {
+        line = $0
+        sub(/\r$/, "", line)
+        split(line, parts, ":")
+        name = tolower(parts[1])
+        value = substr(line, length(parts[1]) + 2)
+        sub(/^[[:space:]]+/, "", value)
+        if (name == "access-control-allow-origin" && value == origin) {
+          found = 1
+        }
+      }
+      END { exit found ? 0 : 1 }
+    ' "$headers"; then
+      rm -f "$headers" "$body"
+      log "OK Hasura CORS allows ${FRONTEND_ORIGIN}"
+      return 0
+    fi
+
+    if [[ "$attempt" -lt "$SMOKE_ATTEMPTS" ]]; then
+      log "Waiting for Hasura CORS preflight -> got HTTP $code (attempt $attempt/$SMOKE_ATTEMPTS)"
+      rm -f "$headers" "$body"
+      sleep "$SMOKE_DELAY_SECONDS"
+    fi
+  done
+
+  cat "$headers" >&2 || true
+  cat "$body" >&2 || true
+  rm -f "$headers" "$body"
   if [[ "$code" != "204" ]]; then
-    cat "$headers" >&2 || true
-    cat "$body" >&2 || true
-    rm -f "$headers" "$body"
     fail "Hasura CORS preflight returned HTTP $code, expected 204"
   fi
-
-  if ! grep -iq "^access-control-allow-origin: ${FRONTEND_ORIGIN}$" "$headers"; then
-    cat "$headers" >&2 || true
-    rm -f "$headers" "$body"
-    fail "Hasura CORS does not allow ${FRONTEND_ORIGIN}"
-  fi
-
-  rm -f "$headers" "$body"
-  log "OK Hasura CORS allows ${FRONTEND_ORIGIN}"
+  fail "Hasura CORS does not allow ${FRONTEND_ORIGIN}"
 }
 
 check_url "https://${HASURA_FQDN}/healthz" "200"
