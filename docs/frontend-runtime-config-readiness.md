@@ -24,6 +24,7 @@ Example:
     "backendPermissions": false,
     "backendOrdersRead": false,
     "backendOrdersWrite": false,
+    "backendPayments": false,
     "backendOrderExport": false,
     "backendUsers": false,
     "backendVlm": false,
@@ -50,6 +51,7 @@ VITE_USE_BACKEND_AUTH=false
 VITE_USE_BACKEND_PERMISSIONS=false
 VITE_USE_BACKEND_ORDERS_READ=false
 VITE_USE_BACKEND_ORDERS_WRITE=false
+VITE_USE_BACKEND_PAYMENTS=false
 VITE_USE_BACKEND_ORDER_EXPORT=false
 VITE_USE_BACKEND_USERS=false
 VITE_USE_BACKEND_VLM=false
@@ -73,6 +75,7 @@ RUNTIME_CONFIG_BACKEND_AUTH=false
 RUNTIME_CONFIG_BACKEND_PERMISSIONS=false
 RUNTIME_CONFIG_BACKEND_ORDERS_READ=false
 RUNTIME_CONFIG_BACKEND_ORDERS_WRITE=false
+RUNTIME_CONFIG_BACKEND_PAYMENTS=false
 RUNTIME_CONFIG_BACKEND_ORDER_EXPORT=false
 RUNTIME_CONFIG_BACKEND_USERS=false
 RUNTIME_CONFIG_BACKEND_VLM=false
@@ -117,6 +120,7 @@ docs/runtime-config/canary/04-orders-write.json
 docs/runtime-config/canary/05-order-export.json
 docs/runtime-config/canary/06-users.json
 docs/runtime-config/canary/07-vlm.json
+docs/runtime-config/canary/08-payments.json
 docs/runtime-config/canary/99-rollback-all-off.json
 ```
 

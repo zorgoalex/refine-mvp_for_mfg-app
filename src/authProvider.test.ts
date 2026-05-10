@@ -13,6 +13,7 @@ describe('authProvider backend cutover mode', () => {
         useBackendPermissions: true,
         useBackendOrdersRead: false,
         useBackendOrdersWrite: false,
+        useBackendPayments: false,
         useBackendOrderExport: false,
         useBackendUsers: false,
         useBackendVlm: false,

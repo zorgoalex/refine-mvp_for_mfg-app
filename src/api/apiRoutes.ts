@@ -23,6 +23,10 @@ export const apiRoutes = {
     deadlineEvents: (orderId: number) => backendApiPath(`/orders/${orderId}/deadline-events`),
     deadlineSummary: (orderId: number) => backendApiPath(`/orders/${orderId}/deadline-summary`),
   },
+  payments: {
+    list: backendApiPath('/payments'),
+    byId: (paymentId: number) => backendApiPath(`/payments/${paymentId}`),
+  },
   deadlines: {
     list: backendApiPath('/deadlines'),
     byId: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}`),

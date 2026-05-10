@@ -19,6 +19,7 @@ describe('backend env validation', () => {
       REFRESH_TOKEN_TTL_DAYS: 7,
       REFRESH_COOKIE_SAME_SITE: 'lax',
       BACKEND_ENABLE_DEADLINES: false,
+      BACKEND_ENABLE_PAYMENTS: false,
       BACKEND_DEADLINES_READ_ONLY: true,
       BACKEND_ENABLE_DEADLINE_WORKER: false,
       BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS: 60000,
@@ -53,6 +54,7 @@ describe('backend env validation', () => {
         REFRESH_COOKIE_SECURE: 'true',
         REFRESH_COOKIE_SAME_SITE: 'None',
         TRUST_PROXY: 'true',
+        BACKEND_ENABLE_PAYMENTS: 'true',
         BACKEND_ENABLE_DEADLINES: 'true',
         BACKEND_DEADLINES_READ_ONLY: 'false',
         BACKEND_ENABLE_DEADLINE_WORKER: 'true',
@@ -89,6 +91,7 @@ describe('backend env validation', () => {
       REFRESH_COOKIE_SECURE: true,
       REFRESH_COOKIE_SAME_SITE: 'none',
       TRUST_PROXY: true,
+      BACKEND_ENABLE_PAYMENTS: true,
       BACKEND_ENABLE_DEADLINES: true,
       BACKEND_DEADLINES_READ_ONLY: false,
       BACKEND_ENABLE_DEADLINE_WORKER: true,
@@ -225,6 +228,23 @@ describe('backend env validation', () => {
       BACKEND_EXPORT_DISABLED: false,
       GAS_WEBAPP_URL: 'https://script.google.com/macros/s/test/exec',
       GAS_API_KEY: 'gas-key',
+    });
+  });
+
+  it('requires DB when backend payments are enabled', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_PAYMENTS: 'true',
+      }),
+    ).toThrow(/DATABASE_URL is required when BACKEND_ENABLE_PAYMENTS is true/);
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_PAYMENTS: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_PAYMENTS: true,
     });
   });
 

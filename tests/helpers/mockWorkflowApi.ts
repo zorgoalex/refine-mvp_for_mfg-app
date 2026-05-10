@@ -4,6 +4,10 @@ type Row = Record<string, any>;
 
 export type WorkflowMockDb = Record<string, Row[]>;
 
+export interface WorkflowMockApiOptions {
+    onGraphqlQuery?: (query: string) => void;
+}
+
 const AUTH_TOKEN =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidXNlcm5hbWUiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsImh0dHBzOi8vaGFzdXJhLmlvL2p3dC9jbGFpbXMiOnsiWC1IYXN1cmEtQWxsb3dlZC1Sb2xlcyI6WyJhZG1pbiJdLCJYLUhhc3VyYS1EZWZhdWx0LVJvbGUiOiJhZG1pbiIsIlgtSGFzdXJhLVVzZXItSWQiOiIxIn0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoyMDAwMDAwMDAwfQ.test';
 
@@ -356,7 +360,11 @@ export function createWorkflowMockDb(): WorkflowMockDb {
     };
 }
 
-export async function setupWorkflowMockApi(page: Page, db = createWorkflowMockDb()): Promise<WorkflowMockDb> {
+export async function setupWorkflowMockApi(
+    page: Page,
+    db = createWorkflowMockDb(),
+    options: WorkflowMockApiOptions = {},
+): Promise<WorkflowMockDb> {
     await page.addInitScript((token) => {
         localStorage.clear();
         localStorage.setItem('access_token', token);
@@ -398,15 +406,16 @@ export async function setupWorkflowMockApi(page: Page, db = createWorkflowMockDb
     });
 
     await page.route(/\/(v1\/graphql|undefined)$/, async (route) => {
-        await fulfillGraphql(route, db);
+        await fulfillGraphql(route, db, options);
     });
 
     return db;
 }
 
-async function fulfillGraphql(route: Route, db: WorkflowMockDb) {
+async function fulfillGraphql(route: Route, db: WorkflowMockDb, options: WorkflowMockApiOptions) {
     const body = JSON.parse(route.request().postData() || '{}');
     const query = String(body.query || '');
+    options.onGraphqlQuery?.(query);
 
     try {
         const data = handleGraphql(query, db);

@@ -18,6 +18,18 @@ describe('PaymentAccessPolicy', () => {
 
   it('allows manager payments on own order only', () => {
     expect(
+      policy.canCreate(user('manager'), {
+        paymentId: 1,
+        order: { createdByUserId: 'user_1' },
+      }),
+    ).toBe(true);
+    expect(
+      policy.canCreate(user('manager'), {
+        paymentId: 1,
+        order: { createdByUserId: 'user_2' },
+      }),
+    ).toBe(false);
+    expect(
       policy.canUpdate(user('manager'), {
         paymentId: 1,
         order: { createdByUserId: 'user_1' },

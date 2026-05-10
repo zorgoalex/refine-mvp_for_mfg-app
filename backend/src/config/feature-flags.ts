@@ -3,6 +3,7 @@ import type { BackendEnv } from './env.validation';
 export interface BackendFeatureFlags {
   auth: boolean;
   orders: boolean;
+  payments: boolean;
   orderExport: boolean;
   users: boolean;
   vlm: boolean;
@@ -20,6 +21,7 @@ export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
   return {
     auth: env.BACKEND_ENABLE_AUTH,
     orders: env.BACKEND_ENABLE_ORDERS,
+    payments: env.BACKEND_ENABLE_PAYMENTS,
     orderExport: env.BACKEND_ENABLE_ORDER_EXPORT,
     users: env.BACKEND_ENABLE_USERS,
     vlm: env.BACKEND_ENABLE_VLM,

@@ -14,6 +14,7 @@ describe('dataProvider backend orders read routing', () => {
         useBackendPermissions: true,
         useBackendOrdersRead: true,
         useBackendOrdersWrite: false,
+        useBackendPayments: false,
         useBackendOrderExport: false,
         useBackendUsers: false,
         useBackendVlm: false,

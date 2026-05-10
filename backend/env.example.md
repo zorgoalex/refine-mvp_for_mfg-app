@@ -57,6 +57,7 @@ All risky stage-1 APIs are disabled or read-only by default.
 ```env
 BACKEND_ENABLE_AUTH=false
 BACKEND_ENABLE_ORDERS=false
+BACKEND_ENABLE_PAYMENTS=false
 BACKEND_ENABLE_ORDER_EXPORT=false
 BACKEND_ENABLE_USERS=false
 BACKEND_ENABLE_VLM=false

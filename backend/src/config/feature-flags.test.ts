@@ -7,6 +7,7 @@ describe('backend feature flags', () => {
     expect(getBackendFeatureFlags(validateEnv({}))).toEqual({
       auth: false,
       orders: false,
+      payments: false,
       orderExport: false,
       users: false,
       vlm: false,
@@ -30,6 +31,7 @@ describe('backend feature flags', () => {
           JWT_ACCESS_SECRET: 'x'.repeat(32),
           REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
           BACKEND_ENABLE_ORDERS: 'true',
+          BACKEND_ENABLE_PAYMENTS: 'true',
           BACKEND_ORDERS_READ_ONLY: 'false',
           BACKEND_ENABLE_DEADLINES: 'true',
           BACKEND_DEADLINES_READ_ONLY: 'false',
@@ -41,6 +43,7 @@ describe('backend feature flags', () => {
     ).toMatchObject({
       auth: true,
       orders: true,
+      payments: true,
       ordersReadOnly: false,
       deadlines: true,
       deadlinesReadOnly: false,

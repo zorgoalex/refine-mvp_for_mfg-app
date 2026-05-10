@@ -5,6 +5,7 @@
     "backendPermissions": true,
     "backendOrdersRead": true,
     "backendOrdersWrite": true,
+    "backendPayments": false,
     "backendOrderExport": false,
     "backendUsers": false,
     "backendVlm": false,

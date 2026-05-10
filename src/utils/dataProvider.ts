@@ -4,9 +4,11 @@
 import { authStorage, isTokenExpired, refreshAccessToken } from './auth';
 import { logGraphQLError } from './notificationLogger';
 import { ordersApi } from '../api/ordersApi';
+import { paymentsApi } from '../api/paymentsApi';
 import { usersApi } from '../api/usersApi';
 import { mapOrderDtoToFormValues, mapOrderListItemToLegacyRow } from '../api/mappers/orderMapper';
 import type { OrderListQuery, OrderSortBy, SortOrder } from '../api/types/orderApi.types';
+import type { PaymentDto } from '../api/types/paymentApi.types';
 import type { UserDto, UserListQuery } from '../api/types/userApi.types';
 import type { UserRole } from '../api/types/authApi.types';
 import { featureFlags } from '../config/featureFlags';
@@ -1245,6 +1247,48 @@ async function getBackendUserOneIfEnabled(resource: string, id: number | string)
   };
 }
 
+const FORCE_HASURA_MUTATION_META_KEY = 'forceHasuraMutation';
+
+async function createBackendPaymentIfEnabled(resource: string, variables?: AnyObject, meta?: AnyObject) {
+  if (!shouldUseBackendPaymentMutation(resource, meta)) {
+    return null;
+  }
+
+  const payment = await paymentsApi.create(mapLegacyPaymentCreateVariablesToBackend(variables));
+  return { data: mapBackendPaymentToLegacyRow(payment) };
+}
+
+async function updateBackendPaymentIfEnabled(
+  resource: string,
+  id: number | string,
+  variables?: AnyObject,
+  meta?: AnyObject,
+) {
+  if (!shouldUseBackendPaymentMutation(resource, meta)) {
+    return null;
+  }
+
+  const payment = await paymentsApi.update(Number(id), mapLegacyPaymentUpdateVariablesToBackend(variables));
+  return { data: mapBackendPaymentToLegacyRow(payment) };
+}
+
+async function deleteBackendPaymentIfEnabled(resource: string, id: number | string, meta?: AnyObject) {
+  if (!shouldUseBackendPaymentMutation(resource, meta)) {
+    return null;
+  }
+
+  const response = await paymentsApi.delete(Number(id));
+  return { data: { payment_id: response.paymentId } };
+}
+
+function shouldUseBackendPaymentMutation(resource: string, meta?: AnyObject): boolean {
+  return (
+    featureFlags.useBackendPayments &&
+    resource === 'payments' &&
+    meta?.[FORCE_HASURA_MUTATION_META_KEY] !== true
+  );
+}
+
 function mapBackendUserToLegacyRow(user: UserDto): AnyObject {
   return {
     id: user.id,
@@ -1262,6 +1306,80 @@ function mapBackendUserToLegacyRow(user: UserDto): AnyObject {
     created_at: user.createdAt,
     updated_at: user.updatedAt ?? null,
   };
+}
+
+function mapLegacyPaymentCreateVariablesToBackend(variables: AnyObject = {}) {
+  return {
+    orderId: Number(variables.order_id),
+    typePaidId: Number(variables.type_paid_id),
+    amount: Number(variables.amount),
+    paymentDate: normalizePaymentDate(variables.payment_date),
+    notes: normalizeNullableString(variables.notes),
+    refKey1c: normalizeNullableString(variables.ref_key_1c),
+  };
+}
+
+function mapLegacyPaymentUpdateVariablesToBackend(variables: AnyObject = {}) {
+  const dto: AnyObject = {};
+
+  if (Object.prototype.hasOwnProperty.call(variables, 'order_id')) {
+    dto.orderId = Number(variables.order_id);
+  }
+  if (Object.prototype.hasOwnProperty.call(variables, 'type_paid_id')) {
+    dto.typePaidId = Number(variables.type_paid_id);
+  }
+  if (Object.prototype.hasOwnProperty.call(variables, 'amount')) {
+    dto.amount = Number(variables.amount);
+  }
+  if (Object.prototype.hasOwnProperty.call(variables, 'payment_date')) {
+    dto.paymentDate = normalizePaymentDate(variables.payment_date);
+  }
+  if (Object.prototype.hasOwnProperty.call(variables, 'notes')) {
+    dto.notes = normalizeNullableString(variables.notes);
+  }
+  if (Object.prototype.hasOwnProperty.call(variables, 'ref_key_1c')) {
+    dto.refKey1c = normalizeNullableString(variables.ref_key_1c);
+  }
+
+  return dto;
+}
+
+function mapBackendPaymentToLegacyRow(payment: PaymentDto): AnyObject {
+  return {
+    payment_id: payment.paymentId,
+    order_id: payment.orderId,
+    type_paid_id: payment.typePaidId,
+    amount: payment.amount,
+    payment_date: payment.paymentDate,
+    notes: payment.notes,
+    ref_key_1c: payment.refKey1c,
+    created_by: payment.createdBy,
+    edited_by: payment.editedBy,
+    created_at: payment.createdAt,
+    updated_at: payment.updatedAt,
+  };
+}
+
+function normalizePaymentDate(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (value && typeof value === 'object' && 'format' in value) {
+    const formatter = (value as { format?: (format: string) => string }).format;
+    if (typeof formatter === 'function') {
+      return formatter.call(value, 'YYYY-MM-DD');
+    }
+  }
+
+  const raw = String(value ?? '').trim();
+  return raw.includes('T') ? raw.slice(0, 10) : raw;
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function parseBooleanFilter(value: unknown): boolean | undefined {
@@ -1383,7 +1501,12 @@ export const dataProvider = (_apiUrl: string) => {
       return { data: record };
     },
 
-    create: async ({ resource, variables }: AnyObject) => {
+    create: async ({ resource, variables, meta }: AnyObject) => {
+      const backendPayment = await createBackendPaymentIfEnabled(resource, variables, meta);
+      if (backendPayment) {
+        return backendPayment;
+      }
+
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
@@ -1449,7 +1572,12 @@ export const dataProvider = (_apiUrl: string) => {
       return { data: data[`insert_${resource}_one`] };
     },
 
-    update: async ({ resource, id, variables }: AnyObject) => {
+    update: async ({ resource, id, variables, meta }: AnyObject) => {
+      const backendPayment = await updateBackendPaymentIfEnabled(resource, id, variables, meta);
+      if (backendPayment) {
+        return backendPayment;
+      }
+
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
@@ -1477,7 +1605,12 @@ export const dataProvider = (_apiUrl: string) => {
       return { data: data[`update_${resource}_by_pk`] };
     },
 
-    deleteOne: async ({ resource, id }: AnyObject) => {
+    deleteOne: async ({ resource, id, meta }: AnyObject) => {
+      const backendPayment = await deleteBackendPaymentIfEnabled(resource, id, meta);
+      if (backendPayment) {
+        return backendPayment;
+      }
+
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }

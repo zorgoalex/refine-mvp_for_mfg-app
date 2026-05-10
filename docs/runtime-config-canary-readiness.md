@@ -18,6 +18,7 @@ Example files live in `docs/runtime-config/canary/`.
 | 5 | `05-order-export.json` | previous + `backendOrderExport` |
 | 6 | `06-users.json` | previous + `backendUsers` |
 | 7 | `07-vlm.json` | previous + `backendVlm` |
+| 8 | `08-payments.json` | previous + `backendPayments` |
 | rollback | `99-rollback-all-off.json` | none |
 
 Each file is complete and explicit about every supported runtime feature key.
@@ -49,6 +50,7 @@ RUNTIME_CONFIG_BACKEND_AUTH=false
 RUNTIME_CONFIG_BACKEND_PERMISSIONS=false
 RUNTIME_CONFIG_BACKEND_ORDERS_READ=false
 RUNTIME_CONFIG_BACKEND_ORDERS_WRITE=false
+RUNTIME_CONFIG_BACKEND_PAYMENTS=false
 RUNTIME_CONFIG_BACKEND_ORDER_EXPORT=false
 RUNTIME_CONFIG_BACKEND_USERS=false
 RUNTIME_CONFIG_BACKEND_VLM=false
@@ -147,7 +149,11 @@ The smoke script prints only the enabled flag names, not the config body.
    password change, deactivate/activate, and rollback.
 9. Enable `07-vlm.json`; smoke health, upload, analyze by `uploadId`, arbitrary
    external `imageUrl` rejection, audit, quota/rate-limit behavior, and rollback.
-10. Expand canary only after scoped smoke, rollback smoke, logs, and audit checks
+10. Enable `08-payments.json`; smoke standalone payment create/update/delete,
+    parent order paid/date/status/version recalculation, audit/session user, and
+    rollback to legacy Hasura mutations by disabling `backendPayments` and
+    `BACKEND_ENABLE_PAYMENTS`.
+11. Expand canary only after scoped smoke, rollback smoke, logs, and audit checks
     are clean for the previous step.
 
 ## Rollback
@@ -161,6 +167,7 @@ BACKEND_EXPORT_DISABLED=true
 BACKEND_VLM_DISABLED=true
 BACKEND_ENABLE_USERS=false
 BACKEND_ENABLE_ORDER_EXPORT=false
+BACKEND_ENABLE_PAYMENTS=false
 BACKEND_ENABLE_VLM=false
 ```
 

@@ -6,6 +6,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { DeadlinesModule } from './modules/deadlines/deadlines.module';
 import { HealthModule } from './modules/health/health.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { UsersModule } from './modules/users/users.module';
 import { VlmModule } from './modules/vlm/vlm.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -21,6 +22,7 @@ import { PermissionsModule } from './permissions/permissions.module';
     DeadlinesModule,
     HealthModule,
     OrdersModule,
+    PaymentsModule,
     UsersModule,
     VlmModule,
     PermissionsModule,

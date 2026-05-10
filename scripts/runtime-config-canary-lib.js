@@ -6,6 +6,7 @@ const FEATURE_KEYS = [
   'backendPermissions',
   'backendOrdersRead',
   'backendOrdersWrite',
+  'backendPayments',
   'backendOrderExport',
   'backendUsers',
   'backendVlm',
@@ -57,6 +58,19 @@ const STAGED_CANARY_FILES = [
       'backendPermissions',
       'backendOrdersRead',
       'backendOrdersWrite',
+      'backendOrderExport',
+      'backendUsers',
+      'backendVlm',
+    ],
+  },
+  {
+    file: '08-payments.json',
+    enabled: [
+      'backendAuth',
+      'backendPermissions',
+      'backendOrdersRead',
+      'backendOrdersWrite',
+      'backendPayments',
       'backendOrderExport',
       'backendUsers',
       'backendVlm',
@@ -147,6 +161,10 @@ function validateFeatureDependencies(features, label) {
 
   if (features.backendOrdersWrite === true && features.backendOrdersRead !== true) {
     errors.push(`${label}: backendOrdersWrite requires backendOrdersRead`);
+  }
+
+  if (features.backendPayments === true && features.backendPermissions !== true) {
+    errors.push(`${label}: backendPayments requires backendPermissions`);
   }
 
   if (features.backendOrderExport === true && features.backendOrdersRead !== true) {

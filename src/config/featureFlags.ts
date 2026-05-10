@@ -3,6 +3,7 @@ export interface FrontendFeatureFlags {
   useBackendPermissions: boolean;
   useBackendOrdersRead: boolean;
   useBackendOrdersWrite: boolean;
+  useBackendPayments: boolean;
   useBackendOrderExport: boolean;
   useBackendUsers: boolean;
   useBackendVlm: boolean;
@@ -17,6 +18,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendOrders: string | boolean;
   backendOrdersRead: string | boolean;
   backendOrdersWrite: string | boolean;
+  backendPayments: string | boolean;
   backendOrderExport: string | boolean;
   backendUsers: string | boolean;
   backendVlm: string | boolean;
@@ -41,6 +43,7 @@ export function getFeatureFlags(
       env.VITE_USE_BACKEND_ORDERS_WRITE,
       legacyOrdersFlag,
     ),
+    useBackendPayments: readBooleanFlag(env.VITE_USE_BACKEND_PAYMENTS, false),
     useBackendOrderExport: readBooleanFlag(env.VITE_USE_BACKEND_ORDER_EXPORT, false),
     useBackendUsers: readBooleanFlag(env.VITE_USE_BACKEND_USERS, false),
     useBackendVlm: readBooleanFlag(env.VITE_USE_BACKEND_VLM, false),
@@ -69,6 +72,8 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.backendOrdersWrite) ??
       runtimeOrdersFlag ??
       fallback.useBackendOrdersWrite,
+    useBackendPayments:
+      readOptionalBooleanFlag(runtimeFeatures.backendPayments) ?? fallback.useBackendPayments,
     useBackendOrderExport:
       readOptionalBooleanFlag(runtimeFeatures.backendOrderExport) ?? fallback.useBackendOrderExport,
     useBackendUsers: readOptionalBooleanFlag(runtimeFeatures.backendUsers) ?? fallback.useBackendUsers,

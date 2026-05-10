@@ -8,6 +8,13 @@ export interface PaymentPolicySubject extends ScopedEntity {
 }
 
 export class PaymentAccessPolicy {
+  canCreate(user: CurrentUser, payment: PaymentPolicySubject): boolean {
+    return (
+      user.permissions.includes('payments.create') &&
+      allowsScope(user, ROLE_POLICIES[user.role].payments.create, payment.order)
+    );
+  }
+
   canView(user: CurrentUser, payment: PaymentPolicySubject): boolean {
     return (
       user.permissions.includes('payments.view') &&
