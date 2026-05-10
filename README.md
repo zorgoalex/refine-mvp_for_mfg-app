@@ -201,6 +201,7 @@ E2E:
 
 ```bash
 npm run test:e2e
+npx playwright test tests/reference-workflows.spec.ts --project=chromium
 npm run test:e2e:users-cutover
 npm run test:e2e:order-export-cutover
 npm run test:e2e:vlm-cutover
@@ -209,6 +210,9 @@ npm run test:runtime-config-canary
 ```
 
 Playwright запускает `npm run dev:full` через `webServer` и использует `http://localhost:5173` как `baseURL`.
+`tests/reference-workflows.spec.ts` покрывает CRUD справочников: создание записи,
+редактирование всех полей формы, удаление записи и отдельный workflow телефонов
+клиента.
 Users backend cutover checklist: [docs/users-cutover-readiness.md](docs/users-cutover-readiness.md).
 Order export backend cutover checklist: [docs/order-export-cutover-readiness.md](docs/order-export-cutover-readiness.md).
 VLM backend cutover checklist: [docs/vlm-cutover-readiness.md](docs/vlm-cutover-readiness.md).
