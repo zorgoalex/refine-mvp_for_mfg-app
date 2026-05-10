@@ -184,6 +184,7 @@ npm run dev:full
 - `npm run test:e2e` — Playwright tests.
 - `npm run test:e2e:users-cutover` — Playwright smoke для backend users cutover flags.
 - `npm run test:e2e:order-export-cutover` — Playwright smoke для backend order export cutover flag.
+- `npm run test:e2e:payments-stage-canary` — opt-in Playwright smoke для stage payments UI/backend path с реальными DB writes на тестовом заказе.
 - `npm run test:e2e:vlm-cutover` — Playwright smoke для backend VLM cutover flag.
 - `npm run test:e2e:runtime-config` — Playwright smoke для runtime frontend flags.
 - `npm run test:runtime-config-canary` — проверка staged runtime-config examples для canary.
@@ -205,6 +206,7 @@ npm run test:e2e
 npx playwright test tests/reference-workflows.spec.ts --project=chromium
 npm run test:e2e:users-cutover
 npm run test:e2e:order-export-cutover
+npm run test:e2e:payments-stage-canary
 npm run test:e2e:vlm-cutover
 npm run test:e2e:runtime-config
 npm run test:runtime-config-canary
@@ -219,6 +221,9 @@ Order export backend cutover checklist: [docs/order-export-cutover-readiness.md]
 VLM backend cutover checklist: [docs/vlm-cutover-readiness.md](docs/vlm-cutover-readiness.md).
 Frontend runtime config checklist: [docs/frontend-runtime-config-readiness.md](docs/frontend-runtime-config-readiness.md).
 Runtime config canary checklist: [docs/runtime-config-canary-readiness.md](docs/runtime-config-canary-readiness.md).
+Payments stage canary creates/updates/deletes a standalone payment through the
+stage UI/backend path and verifies DB audit/order recalculation. It uses a
+temporary test user and requires access to the stage `erpdb` Docker Postgres.
 Production cutover plan: [../spec_erp/docs/production-cutover-plan.md](../spec_erp/docs/production-cutover-plan.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 

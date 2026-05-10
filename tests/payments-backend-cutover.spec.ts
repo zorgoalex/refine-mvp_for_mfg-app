@@ -235,8 +235,9 @@ async function selectAntdOption(page: Page, formItemLocator: Locator, optionText
 async function fillDatePicker(page: Page, selector: string, value: string) {
     const input = page.locator(selector);
     await input.click();
-    await input.fill(value);
-    await input.press('Enter');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.type(value);
+    await page.keyboard.press('Enter');
 }
 
 function formItem(page: Page, label: string) {

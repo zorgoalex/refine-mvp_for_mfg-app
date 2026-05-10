@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEB_SERVER === 'true';
+
 /**
  * Playwright Configuration
  *
@@ -27,10 +29,14 @@ export default defineConfig({
             use: { ...devices['Desktop Chrome'] },
         },
     ],
-    webServer: {
-        command: 'npm run dev:full',
-        port: 5173,
-        reuseExistingServer: !process.env.CI,
-        timeout: 120000, // 2 минуты на запуск (оба сервера)
-    },
+    ...(skipWebServer
+        ? {}
+        : {
+            webServer: {
+                command: 'npm run dev:full',
+                port: 5173,
+                reuseExistingServer: !process.env.CI,
+                timeout: 120000, // 2 минуты на запуск (оба сервера)
+            },
+        }),
 });
