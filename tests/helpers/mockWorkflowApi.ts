@@ -32,7 +32,9 @@ const ID_COLUMNS: Record<string, string> = {
     payments: 'payment_id',
     production_status_events: 'event_id',
     production_statuses: 'production_status_id',
+    requisition_statuses: 'requisition_status_id',
     resource_requirements_statuses: 'requirement_status_id',
+    movements_statuses: 'movement_status_id',
     material_transaction_types: 'transaction_type_id',
     suppliers: 'supplier_id',
     transaction_direction: 'direction_type_id',
@@ -83,6 +85,14 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 full_name: 'Администратор Тестов',
                 position: 'Менеджер',
                 is_active: true,
+                ref_key_1c: 'employee-admin',
+            },
+            {
+                employee_id: 2,
+                full_name: 'Мастер Тестов',
+                position: 'Мастер',
+                is_active: true,
+                ref_key_1c: 'employee-master',
             },
         ],
         film_types: [
@@ -90,6 +100,13 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 film_type_id: 1,
                 film_type_name: 'ПВХ',
                 is_active: true,
+                ref_key_1c: 'film-type-pvc',
+            },
+            {
+                film_type_id: 2,
+                film_type_name: 'PET',
+                is_active: true,
+                ref_key_1c: 'film-type-pet',
             },
         ],
         films: [
@@ -108,6 +125,14 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 material_type_name: 'МДФ',
                 sort_order: 10,
                 is_active: true,
+                ref_key_1c: 'material-type-mdf',
+            },
+            {
+                material_type_id: 2,
+                material_type_name: 'ЛДСП',
+                sort_order: 20,
+                is_active: true,
+                ref_key_1c: 'material-type-ldsp',
             },
         ],
         materials: [
@@ -225,12 +250,38 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 is_active: true,
             },
         ],
+        requisition_statuses: [
+            {
+                requisition_status_id: 1,
+                requisition_status_name: 'Новая заявка',
+                sort_order: 10,
+                description: 'Базовый статус заявки',
+                is_active: true,
+            },
+        ],
+        movements_statuses: [
+            {
+                movement_status_id: 1,
+                movement_status_code: 'draft',
+                movement_status_name: 'Черновик',
+                sort_order: 10,
+                description: 'Базовый статус движения',
+                is_active: true,
+            },
+        ],
         resource_requirements_statuses: [],
         suppliers: [
             {
                 supplier_id: 1,
                 supplier_name: 'Тестовый поставщик',
                 is_active: true,
+                ref_key_1c: 'supplier-main',
+            },
+            {
+                supplier_id: 2,
+                supplier_name: 'Резервный поставщик',
+                is_active: true,
+                ref_key_1c: 'supplier-reserve',
             },
         ],
         transaction_direction: [
@@ -238,6 +289,13 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 direction_type_id: 1,
                 direction_code: 'IN',
                 direction_name: 'Приход',
+                description: '',
+                is_active: true,
+            },
+            {
+                direction_type_id: 2,
+                direction_code: 'OUT',
+                direction_name: 'Расход',
                 description: '',
                 is_active: true,
             },
@@ -249,6 +307,15 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 unit_name: 'Квадратный метр',
                 unit_symbol: 'м²',
                 decimals: 2,
+                ref_key_1c: 'unit-sqm',
+            },
+            {
+                unit_id: 2,
+                unit_code: 'pcs',
+                unit_name: 'Штука',
+                unit_symbol: 'шт',
+                decimals: 0,
+                ref_key_1c: 'unit-pcs',
             },
         ],
         vendors: [
@@ -257,6 +324,14 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 vendor_name: 'Тестовый производитель',
                 material_type_id: 1,
                 is_active: true,
+                ref_key_1c: 'vendor-main',
+            },
+            {
+                vendor_id: 2,
+                vendor_name: 'Второй производитель',
+                material_type_id: 2,
+                is_active: true,
+                ref_key_1c: 'vendor-second',
             },
         ],
         workshops: [
@@ -266,6 +341,15 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 address: 'Тестовый адрес',
                 responsible_employee_id: 1,
                 is_active: true,
+                ref_key_1c: 'workshop-main',
+            },
+            {
+                workshop_id: 2,
+                workshop_name: 'Финишный цех',
+                address: 'Финишный адрес',
+                responsible_employee_id: 2,
+                is_active: true,
+                ref_key_1c: 'workshop-finish',
             },
         ],
         work_centers: [],
@@ -405,7 +489,7 @@ function handleUpdate(query: string, db: WorkflowMockDb) {
     if (!resource) throw new Error(`Cannot parse update resource: ${query}`);
 
     const idCol = idColumn(resource);
-    const idMatch = query.match(new RegExp(`${idCol}\\s*:\\s*([^,}\\s]+)`));
+    const idMatch = query.match(new RegExp(`${idCol}\\s*:\\s*([^,}\\)\\s]+)`));
     const id = parseScalar(idMatch?.[1] || '');
     const patch = parseLiteral(extractBalancedLiteral(query, '_set:'));
 
@@ -427,7 +511,7 @@ function handleDelete(query: string, db: WorkflowMockDb) {
     if (!resource) throw new Error(`Cannot parse delete resource: ${query}`);
 
     const idCol = idColumn(resource);
-    const idMatch = query.match(new RegExp(`${idCol}\\s*:\\s*([^,}\\s]+)`));
+    const idMatch = query.match(new RegExp(`${idCol}\\s*:\\s*([^,}\\)\\s]+)`));
     const id = parseScalar(idMatch?.[1] || '');
     const rows = ensureRows(db, resource);
     const index = rows.findIndex((row) => sameId(row[idCol], id));
