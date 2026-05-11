@@ -6,6 +6,8 @@ export type WorkflowMockDb = Record<string, Row[]>;
 
 export interface WorkflowMockApiOptions {
     onGraphqlQuery?: (query: string) => void;
+    onGraphqlError?: (message: string, query: string) => void;
+    graphqlErrorForQuery?: (query: string) => string | null | undefined;
 }
 
 const AUTH_TOKEN =
@@ -15,6 +17,7 @@ const ID_COLUMNS: Record<string, string> = {
     app_settings: 'setting_id',
     client_phones: 'phone_id',
     clients: 'client_id',
+    clients_analytics_view: 'client_id',
     doweling_orders: 'doweling_order_id',
     doweling_orders_view: 'doweling_order_id',
     edge_types: 'edge_type_id',
@@ -34,8 +37,10 @@ const ID_COLUMNS: Record<string, string> = {
     payment_statuses: 'payment_status_id',
     payment_types: 'type_paid_id',
     payments: 'payment_id',
+    payments_view: 'payment_id',
     production_status_events: 'event_id',
     production_statuses: 'production_status_id',
+    roles: 'role_id',
     requisition_statuses: 'requisition_status_id',
     resource_requirements_statuses: 'requirement_status_id',
     movements_statuses: 'movement_status_id',
@@ -43,7 +48,11 @@ const ID_COLUMNS: Record<string, string> = {
     suppliers: 'supplier_id',
     transaction_direction: 'direction_type_id',
     units: 'unit_id',
+    users: 'user_id',
     vendors: 'vendor_id',
+    vlm_prompts: 'prompt_id',
+    vlm_provider_models: 'provider_model_id',
+    vlm_providers: 'provider_id',
     work_centers: 'workcenter_id',
     workshops: 'workshop_id',
 };
@@ -71,6 +80,7 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 is_primary: true,
             },
         ],
+        clients_analytics_view: [],
         doweling_orders: [],
         doweling_orders_view: [],
         edge_types: [
@@ -227,6 +237,7 @@ export function createWorkflowMockDb(): WorkflowMockDb {
             },
         ],
         payments: [],
+        payments_view: [],
         production_status_events: [],
         production_statuses: [
             {
@@ -274,6 +285,15 @@ export function createWorkflowMockDb(): WorkflowMockDb {
             },
         ],
         resource_requirements_statuses: [],
+        roles: [
+            {
+                role_id: 1,
+                role_name: 'admin',
+                role_description: 'Administrator',
+                is_active: true,
+                ref_key_1c: 'role-admin',
+            },
+        ],
         suppliers: [
             {
                 supplier_id: 1,
@@ -322,6 +342,29 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 ref_key_1c: 'unit-pcs',
             },
         ],
+        users: [
+            {
+                user_id: 1,
+                username: 'admin',
+                email: 'admin@example.invalid',
+                full_name: 'Администратор Тестов',
+                role_id: 1,
+                role: {
+                    role_id: 1,
+                    role_name: 'admin',
+                },
+                employee_id: 1,
+                employee: {
+                    employee_id: 1,
+                    full_name: 'Администратор Тестов',
+                },
+                is_active: true,
+                last_login_at: null,
+                ref_key_1c: 'user-admin',
+                created_at: '2026-05-10T00:00:00+05:00',
+                updated_at: '2026-05-10T00:00:00+05:00',
+            },
+        ],
         vendors: [
             {
                 vendor_id: 1,
@@ -338,6 +381,9 @@ export function createWorkflowMockDb(): WorkflowMockDb {
                 ref_key_1c: 'vendor-second',
             },
         ],
+        vlm_prompts: [],
+        vlm_provider_models: [],
+        vlm_providers: [],
         workshops: [
             {
                 workshop_id: 1,
@@ -415,9 +461,14 @@ export async function setupWorkflowMockApi(
 async function fulfillGraphql(route: Route, db: WorkflowMockDb, options: WorkflowMockApiOptions) {
     const body = JSON.parse(route.request().postData() || '{}');
     const query = String(body.query || '');
-    options.onGraphqlQuery?.(query);
 
     try {
+        options.onGraphqlQuery?.(query);
+        const forcedError = options.graphqlErrorForQuery?.(query);
+        if (forcedError) {
+            throw new Error(forcedError);
+        }
+
         const data = handleGraphql(query, db);
         await route.fulfill({
             status: 200,
@@ -425,13 +476,15 @@ async function fulfillGraphql(route: Route, db: WorkflowMockDb, options: Workflo
             body: JSON.stringify({ data }),
         });
     } catch (error) {
+        const message = error instanceof Error ? error.message : 'Mock GraphQL error';
+        options.onGraphqlError?.(message, query);
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({
                 errors: [
                     {
-                        message: error instanceof Error ? error.message : 'Mock GraphQL error',
+                        message,
                     },
                 ],
             }),

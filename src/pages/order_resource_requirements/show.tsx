@@ -24,19 +24,19 @@ export const OrderResourceRequirementShow: React.FC<IResourceComponentsProps> = 
       <Title level={5}>Edge Type ID</Title>
       <TextField value={record?.edge_type_id} />
       <Title level={5}>Required Quantity</Title>
-      <NumberField value={record?.required_quantity} />
+      <NumberField value={record?.required_quantity ?? 0} />
       <Title level={5}>Unit ID</Title>
       <TextField value={record?.unit_id} />
       <Title level={5}>Waste Percentage</Title>
-      <NumberField value={record?.waste_percentage} />
+      <NumberField value={record?.waste_percentage ?? 0} />
       <Title level={5}>Final Quantity</Title>
-      <NumberField value={record?.final_quantity} />
+      <NumberField value={record?.final_quantity ?? 0} />
       <Title level={5}>Requirement Status ID</Title>
       <TextField value={record?.requirement_status_id} />
       <Title level={5}>Supplier ID</Title>
       <TextField value={record?.supplier_id} />
       <Title level={5}>Purchase Price</Title>
-      <NumberField value={record?.purchase_price} />
+      <NumberField value={record?.purchase_price ?? 0} />
       <Title level={5}>Requisition ID</Title>
       <TextField value={record?.requisition_id} />
       <Title level={5}>Warehouse ID</Title>
@@ -63,4 +63,3 @@ export const OrderResourceRequirementShow: React.FC<IResourceComponentsProps> = 
     </Show>
   );
 };
-
