@@ -37,6 +37,9 @@ not commit an environment-specific `public/runtime-config.json`.
   any backend frontend flag is enabled for canary.
 - Backend module flags remain the final safety gate. Frontend runtime flags
   only choose the browser route.
+- `backendProductionActions` is intentionally after `backendPayments`: the
+  production-action UI shares order/payment recalculation state, and the
+  runtime validator requires `backendPayments=true` before this flag canary.
 - Keep legacy `/api/*` endpoints deployed while the matching backend canary and
   rollback checks are still in progress.
 - Do not put secrets, tokens, provider URLs with credentials, GAS keys, Auth0

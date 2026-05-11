@@ -58,6 +58,7 @@ All risky stage-1 APIs are disabled or read-only by default.
 BACKEND_ENABLE_AUTH=false
 BACKEND_ENABLE_ORDERS=false
 BACKEND_ENABLE_PAYMENTS=false
+BACKEND_ENABLE_PRODUCTION_ACTIONS=false
 BACKEND_ENABLE_ORDER_EXPORT=false
 BACKEND_ENABLE_USERS=false
 BACKEND_ENABLE_VLM=false
@@ -75,6 +76,12 @@ BACKEND_DEADLINE_WORKER_ID=backend-local
 BACKEND_DEADLINE_ACTIONS_ENABLED=false
 BACKEND_DEADLINE_NOTIFICATIONS_ENABLED=false
 ```
+
+`BACKEND_ENABLE_PRODUCTION_ACTIONS=true` enables the narrow calendar/order
+header production actions API: calendar date move, order status change, and
+order-level production stage activate/deactivate. It requires `DATABASE_URL` and
+should be paired with the frontend/runtime-config flag only after the DB
+migration for production action audit/outbox/idempotency contracts is applied.
 
 ## Auth Session Adapter
 

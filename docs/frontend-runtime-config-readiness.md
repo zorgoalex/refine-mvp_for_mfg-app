@@ -25,6 +25,7 @@ Example:
     "backendOrdersRead": false,
     "backendOrdersWrite": false,
     "backendPayments": false,
+    "backendProductionActions": false,
     "backendOrderExport": false,
     "backendUsers": false,
     "backendVlm": false,
@@ -52,6 +53,7 @@ VITE_USE_BACKEND_PERMISSIONS=false
 VITE_USE_BACKEND_ORDERS_READ=false
 VITE_USE_BACKEND_ORDERS_WRITE=false
 VITE_USE_BACKEND_PAYMENTS=false
+VITE_USE_BACKEND_PRODUCTION_ACTIONS=false
 VITE_USE_BACKEND_ORDER_EXPORT=false
 VITE_USE_BACKEND_USERS=false
 VITE_USE_BACKEND_VLM=false
@@ -76,6 +78,7 @@ RUNTIME_CONFIG_BACKEND_PERMISSIONS=false
 RUNTIME_CONFIG_BACKEND_ORDERS_READ=false
 RUNTIME_CONFIG_BACKEND_ORDERS_WRITE=false
 RUNTIME_CONFIG_BACKEND_PAYMENTS=false
+RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS=false
 RUNTIME_CONFIG_BACKEND_ORDER_EXPORT=false
 RUNTIME_CONFIG_BACKEND_USERS=false
 RUNTIME_CONFIG_BACKEND_VLM=false
@@ -90,6 +93,11 @@ RUNTIME_CONFIG_BACKEND_ORDERS=false
 
 `RUNTIME_CONFIG_BACKEND_ORDERS` sets both read and write only when the split
 orders flags are not set. Split flags should be preferred for canary.
+
+`RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS=true` routes supported calendar/order
+header production actions through `/api/v1/orders/:id/*`. It requires
+`RUNTIME_CONFIG_BACKEND_PAYMENTS=true` in canary examples and the matching VPS
+backend runtime flag `BACKEND_ENABLE_PRODUCTION_ACTIONS=true`.
 
 Do not put backend secrets, database URLs, GAS keys, Auth0 credentials, provider
 tokens, or bearer tokens into runtime config env.
@@ -121,6 +129,7 @@ docs/runtime-config/canary/05-order-export.json
 docs/runtime-config/canary/06-users.json
 docs/runtime-config/canary/07-vlm.json
 docs/runtime-config/canary/08-payments.json
+docs/runtime-config/canary/09-production-actions.json
 docs/runtime-config/canary/99-rollback-all-off.json
 ```
 
