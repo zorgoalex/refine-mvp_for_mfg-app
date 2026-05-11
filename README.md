@@ -71,6 +71,7 @@
 - `src/utils/excel/` — подготовка и отправка данных для Excel/Google Drive.
 - `api/` — Vercel Functions: auth, users, refresh, VLM, export.
 - `backend/` — NestJS backend stage-1: `/api/v1/*`, health, auth/session, orders, deadlines.
+- `ops/` — VPS bootstrap/deploy scripts and tracked Docker Compose templates.
 - `public/templates/order_template.xlsx` — шаблон Excel.
 - `vercel.json` — rewrites, headers и настройки функций.
 - `vite.config.ts` — порт dev server, proxy `/api/v1`/`/health` на NestJS и legacy `/api` на Vercel Functions.
@@ -156,6 +157,67 @@ Frontend runtime config для canary/rollback загружается до React
 `docs/runtime-config/canary/`. На Vercel `/runtime-config.json` отдаётся через
 `api/runtime-config.ts` и env `RUNTIME_CONFIG_*`.
 
+## VPS и Docker Compose
+
+Vercel хостит только frontend и serverless runtime-config endpoint. Stage-1
+NestJS backend, Hasura, PostgreSQL и Traefik хостятся на VPS через Docker
+Compose.
+
+Tracked source-of-truth для VPS Compose находится в
+`ops/templates/docker-compose.vps.yml`; пример env — в
+`ops/templates/env.vps.example`. В этих файлах не должно быть реальных секретов:
+используются только ссылки вида `${PG_PASSWORD}`, `${HASURA_ADMIN_SECRET}`,
+`${GAS_API_KEY}`. Реальные значения живут в VPS `.env`, который не коммитится.
+
+`ops/setup-vps.sh` и `ops/deploy-stack.sh` создают live `docker-compose.yml` из
+template, если его ещё нет. После ручного изменения live Compose на VPS нужно
+перенести соответствующее не секретное изменение обратно в
+`ops/templates/docker-compose.vps.yml`, иначе следующий bootstrap/deploy не будет
+самодокументирован.
+
+Можно запускать tracked template напрямую, без копирования в live
+`docker-compose.yml`. В этом режиме `.env` должен лежать в runtime-корне,
+который передан через `--project-directory`, потому что там же Compose будет
+искать `data/`, `config/`, `backups/` и `restore/`.
+
+Для текущей VPS-раскладки:
+
+```bash
+cd /home/ovhubu/projects/erp_dev
+
+# один раз добавить в /home/ovhubu/projects/erp_dev/.env:
+# BACKEND_BUILD_CONTEXT=./repo_erp/backend
+
+docker compose \
+  --env-file .env \
+  --project-directory . \
+  -f repo_erp/ops/templates/docker-compose.vps.yml \
+  up -d --build --no-deps backend
+```
+
+Для обычного checkout, где `backend/`, `ops/`, `.env` и `data/` находятся в
+одном корне, `BACKEND_BUILD_CONTEXT` можно не задавать: default `./backend`.
+
+Frontend flags на Vercel и backend flags на VPS независимы. Например:
+
+```env
+# Vercel frontend runtime config
+RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS=true
+
+# VPS backend runtime
+BACKEND_ENABLE_PRODUCTION_ACTIONS=true
+```
+
+После изменения backend Compose/env пересобирается и перезапускается только
+backend service:
+
+```bash
+docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
+```
+
+Если используется tracked template напрямую, добавь `--project-directory` и путь
+к template, как в примере выше.
+
 Audit:
 
 - `created_by`, `edited_by`, `created_at`, `updated_at` управляются серверной стороной.
@@ -226,6 +288,7 @@ Order export backend cutover checklist: [docs/order-export-cutover-readiness.md]
 VLM backend cutover checklist: [docs/vlm-cutover-readiness.md](docs/vlm-cutover-readiness.md).
 Frontend runtime config checklist: [docs/frontend-runtime-config-readiness.md](docs/frontend-runtime-config-readiness.md).
 Runtime config canary checklist: [docs/runtime-config-canary-readiness.md](docs/runtime-config-canary-readiness.md).
+VPS Docker Compose/deploy checklist: [ops/README.md](ops/README.md).
 Payments stage canary creates/updates/deletes a standalone payment through the
 stage UI/backend path and verifies DB audit/order recalculation. It uses a
 temporary test user and requires access to the stage `erpdb` Docker Postgres.

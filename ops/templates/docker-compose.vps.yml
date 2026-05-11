@@ -111,7 +111,7 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: ${BACKEND_BUILD_CONTEXT:-./backend}
       dockerfile: Dockerfile
     restart: unless-stopped
     expose:

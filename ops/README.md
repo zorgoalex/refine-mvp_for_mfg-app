@@ -10,6 +10,61 @@ workspace spec folder:
 No real secrets are stored here. Copy `ops/templates/env.vps.example` to `.env`
 on the VPS and fill real values there. `.env` is ignored by git.
 
+## Docker Compose Source Of Truth
+
+The tracked Compose source-of-truth is
+`ops/templates/docker-compose.vps.yml`. The tracked env shape is
+`ops/templates/env.vps.example`.
+
+On a fresh VPS, `ops/setup-vps.sh`/`ops/deploy-stack.sh` create the live
+`docker-compose.yml` from that template when the live file is missing. The live
+file sits next to `.env`, `data/`, `config/`, `backups/`, and `restore/`.
+
+You can also run the tracked template directly. In that mode, keep `.env` in
+the runtime root passed as `--project-directory`; Compose also resolves
+`data/`, `config/`, `backups/`, and `restore/` from that same root. The
+`--env-file` path should point to that `.env` explicitly.
+
+Rules:
+
+- Commit non-secret stack changes to `ops/templates/docker-compose.vps.yml`.
+- Commit new env keys with safe defaults/placeholders to
+  `ops/templates/env.vps.example`.
+- Keep real values only in the VPS `.env`.
+- If the live VPS Compose file needs a machine-local path or bind override, keep
+  that override out of secrets and mirror any general service/env change back
+  into the tracked template.
+- Backend runtime flags such as `BACKEND_ENABLE_PRODUCTION_ACTIONS` belong to
+  the VPS backend service; frontend runtime flags such as
+  `RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS` belong to the Vercel frontend
+  project.
+- `BACKEND_BUILD_CONTEXT` controls where the backend Dockerfile is read from.
+  Keep `./backend` for a normal one-repo checkout. Use `./repo_erp/backend` for
+  the current split VPS layout where the runtime root contains `repo_erp/`,
+  `.env`, `data/`, and `config/`.
+
+After backend-only Compose/env changes, rebuild and recreate only the backend
+service:
+
+```bash
+docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
+```
+
+Direct-template equivalent for the current split VPS layout:
+
+```bash
+cd /home/ovhubu/projects/erp_dev
+
+# in /home/ovhubu/projects/erp_dev/.env:
+# BACKEND_BUILD_CONTEXT=./repo_erp/backend
+
+docker compose \
+  --env-file .env \
+  --project-directory . \
+  -f repo_erp/ops/templates/docker-compose.vps.yml \
+  up -d --build --no-deps backend
+```
+
 ## One Script Flow
 
 Use one command on the VPS:
@@ -189,10 +244,17 @@ VITE_USE_BACKEND_AUTH=true
 VITE_USE_BACKEND_PERMISSIONS=true
 VITE_USE_BACKEND_ORDERS_READ=true
 VITE_USE_BACKEND_ORDERS_WRITE=true
+VITE_USE_BACKEND_PAYMENTS=true
+VITE_USE_BACKEND_PRODUCTION_ACTIONS=true
 VITE_USE_BACKEND_USERS=true
 VITE_USE_BACKEND_ORDER_EXPORT=true
 VITE_USE_BACKEND_VLM=true
 ```
+
+On Vercel runtime-config deployments, use matching `RUNTIME_CONFIG_*` keys, for
+example `RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS=true`. Do not set backend
+server flags such as `BACKEND_ENABLE_PRODUCTION_ACTIONS` in the frontend Vercel
+project unless that project is actually running the NestJS backend.
 
 ## Updating An Existing VPS
 
@@ -201,6 +263,27 @@ cd /opt/erp
 git pull
 ops/deploy-stack.sh
 ops/smoke-vps.sh
+```
+
+If only backend code or backend Compose/env flags changed:
+
+```bash
+git pull
+docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
+ops/smoke-vps.sh
+```
+
+If you are running the tracked template directly from the parent runtime root:
+
+```bash
+cd /home/ovhubu/projects/erp_dev
+git -C repo_erp pull
+docker compose \
+  --env-file .env \
+  --project-directory . \
+  -f repo_erp/ops/templates/docker-compose.vps.yml \
+  up -d --build --no-deps backend
+repo_erp/ops/smoke-vps.sh
 ```
 
 If only CORS/domain variables changed:

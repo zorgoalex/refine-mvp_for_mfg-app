@@ -17,7 +17,8 @@ Current implemented foundation:
 - `/health/ready` readiness contract with real DB ping when
   `READINESS_REQUIRE_DATABASE=true`; Redis checks remain disabled unless explicitly required;
 - Swagger/OpenAPI at `/docs` and `/docs-json`;
-- Dockerfile and docker-compose skeleton;
+- Dockerfile and tracked VPS Docker Compose template under
+  `../ops/templates/docker-compose.vps.yml`;
 - requestId helper/middleware;
 - ApiError response contract and Nest exception filter;
 - log redaction utility for sensitive fields;
@@ -62,6 +63,14 @@ Current implemented foundation:
   and calls Google Apps Script only when `BACKEND_ENABLE_ORDER_EXPORT=true`,
   `BACKEND_EXPORT_DISABLED=false`, `DATABASE_URL`, `GAS_WEBAPP_URL`, and `GAS_API_KEY`
   are configured;
+- production actions DB adapter:
+  `PATCH /api/v1/orders/:orderId/calendar-date`,
+  `PATCH /api/v1/orders/:orderId/order-status`,
+  `PUT /api/v1/orders/:orderId/production-stage-events/:productionStatusId`,
+  and `DELETE /api/v1/orders/:orderId/production-stage-events/:productionStatusId`
+  update calendar/status/stage facts through Postgres when `DATABASE_URL` is configured
+  and `BACKEND_ENABLE_PRODUCTION_ACTIONS=true`; writes use optimistic `version`,
+  idempotency keys, audit rows, and outbox events;
 - VLM DB/provider adapter:
   `GET /api/v1/vlm/health`, `POST /api/v1/vlm/upload`, and `POST /api/v1/vlm/analyze`
   are wired to Postgres upload records plus an external VLM provider when
@@ -85,7 +94,9 @@ Current implemented foundation:
   `VITE_USE_BACKEND_AUTH`; navigation can use backend `permissions[]` behind
   `VITE_USE_BACKEND_PERMISSIONS`; orders list/show/edit load and order save can use
   `/api/v1/orders` behind `VITE_USE_BACKEND_ORDERS_READ` and
-  `VITE_USE_BACKEND_ORDERS_WRITE`; users pages, order export, and VLM hooks can use
+  `VITE_USE_BACKEND_ORDERS_WRITE`; calendar/order header production actions can use
+  `/api/v1/orders/:id/*` behind `VITE_USE_BACKEND_PRODUCTION_ACTIONS`; users pages,
+  order export, and VLM hooks can use
   `/api/v1/users`, `/api/v1/orders/:id/export/google-drive`, and `/api/v1/vlm/*` behind
   `VITE_USE_BACKEND_USERS`, `VITE_USE_BACKEND_ORDER_EXPORT`, and `VITE_USE_BACKEND_VLM`;
 - staged frontend runtime-config canary readiness:
@@ -147,6 +158,7 @@ REFRESH_TOKEN_TTL_DAYS=7
 BACKEND_ENABLE_AUTH=false
 BACKEND_ENABLE_ORDERS=false
 BACKEND_ENABLE_PAYMENTS=false
+BACKEND_ENABLE_PRODUCTION_ACTIONS=false
 BACKEND_ENABLE_ORDER_EXPORT=false
 BACKEND_ENABLE_USERS=false
 BACKEND_ENABLE_VLM=false
@@ -183,6 +195,20 @@ Docker:
 docker build -t erp-backend-stage1:test .
 docker compose up backend
 ```
+
+For VPS deploys, keep Docker Compose changes in the repo template
+`../ops/templates/docker-compose.vps.yml` and runtime secret values in the VPS
+`.env`. The live VPS `docker-compose.yml` is generated from the template on a
+fresh setup and may contain only machine-local path differences. Backend feature
+gates, including `BACKEND_ENABLE_PRODUCTION_ACTIONS`, belong to the VPS backend
+runtime, not to the frontend Vercel project.
+
+If the template is run directly with `-f ../ops/templates/docker-compose.vps.yml`,
+the `.env` file should live in the Compose runtime root passed through
+`--project-directory`. For the current split VPS layout, that is
+`/home/ovhubu/projects/erp_dev/.env`, and it should include
+`BACKEND_BUILD_CONTEXT=./repo_erp/backend` so Compose can build this backend
+from the nested repo checkout.
 
 DB readiness with test database:
 
