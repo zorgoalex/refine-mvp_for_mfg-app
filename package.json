@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:frontend-pages": "playwright test tests/frontend-pages-smoke.spec.ts",
+    "test:e2e:frontend-pages-stage-canary": "FRONTEND_PAGES_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/frontend-pages-stage-canary.spec.ts --project=chromium",
     "test:e2e:calendar": "playwright test tests/calendar-frontend.spec.ts",
     "test:e2e:calendar-stage-canary": "CALENDAR_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/calendar-frontend.spec.ts --project=chromium",
     "test:e2e:users-cutover": "VITE_USE_BACKEND_AUTH=true VITE_USE_BACKEND_PERMISSIONS=true VITE_USE_BACKEND_USERS=true playwright test tests/users-backend-cutover.spec.ts",

@@ -246,6 +246,7 @@ npm run dev:full
 - `npm run test` — unit/API tests через Vitest.
 - `npm run test:e2e` — Playwright tests.
 - `npm run test:e2e:frontend-pages` — Playwright smoke для всех зарегистрированных frontend routes.
+- `npm run test:e2e:frontend-pages-stage-canary` — opt-in read-only smoke для deployed stage frontend routes.
 - `npm run test:e2e:calendar` — Playwright smoke календаря, включая проверку `orders_view.version`.
 - `npm run test:e2e:calendar-stage-canary` — opt-in Playwright smoke для deployed stage календаря против реальной Hasura schema.
 - `npm run test:e2e:users-cutover` — Playwright smoke для backend users cutover flags.
@@ -288,8 +289,15 @@ Opt-in stage canaries require the deployed stage environment and VPS DB/Docker
 access where noted by the specific checklist:
 
 ```bash
+npm run test:e2e:frontend-pages-stage-canary
 npm run test:e2e:calendar-stage-canary
 ```
+
+`test:e2e:frontend-pages-stage-canary` is read-only by default and expects
+`FRONTEND_PAGES_STAGE_USERNAME` / `FRONTEND_PAGES_STAGE_PASSWORD` for an
+existing stage smoke user. For local VPS validation only, set
+`FRONTEND_PAGES_STAGE_CREATE_USER=true` to create and deactivate a temporary
+smoke user during the run.
 
 Playwright запускает `npm run dev:full` через `webServer` и использует `http://localhost:5173` как `baseURL`.
 GitHub Actions пока не используется; проверки перед коммитом и пушем выполняются
