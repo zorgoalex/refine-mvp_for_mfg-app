@@ -292,8 +292,10 @@ npm run test:e2e:calendar-stage-canary
 ```
 
 Playwright запускает `npm run dev:full` через `webServer` и использует `http://localhost:5173` как `baseURL`.
-CI запускает только Vite и выставляет `PLAYWRIGHT_SKIP_WEB_SERVER=true` для
-mocked frontend e2e, потому что эти тесты сами мокают runtime-config и GraphQL.
+GitHub Actions пока не используется; проверки перед коммитом и пушем выполняются
+локально. Для mocked frontend e2e можно запустить только Vite и выставить
+`PLAYWRIGHT_SKIP_WEB_SERVER=true`, потому что эти тесты сами мокают runtime-config
+и GraphQL.
 `tests/reference-workflows.spec.ts` покрывает CRUD справочников: создание записи,
 редактирование всех полей формы, удаление записи и отдельный workflow телефонов
 клиента.
