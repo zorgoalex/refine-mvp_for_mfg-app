@@ -1,9 +1,11 @@
 import { ApiError } from '../../../common/errors/api-error';
 import { PermissionsService } from '../../../permissions/permissions.service';
+import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { OrderDto, OrderListResponseDto } from '../dto/order.dto';
 import { OrderNotFoundError } from '../errors/order.errors';
 import type { OrderPermissionCheckerPort } from './order-transaction.types';
 import type {
+  GetOrderFormDataCommand,
   GetOrderByIdCommand,
   ListOrdersCommand,
   OrderReadRepositoryPort,
@@ -36,6 +38,11 @@ export class OrderQueryService {
     }
 
     return order;
+  }
+
+  async getFormData(command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto> {
+    this.requireViewPermission(command);
+    return this.ports.reader.getOrderFormData(command);
   }
 
   private requireViewPermission(command: Pick<ListOrdersCommand, 'currentUser'>): void {

@@ -48,6 +48,31 @@ describe('ordersApi', () => {
     );
   });
 
+  it('loads order form reference data', async () => {
+    const response = {
+      clients: [{ id: 1, name: 'Client' }],
+      materials: [{ id: 2, name: 'MDF', unitId: 1 }],
+      millingTypes: [{ id: 3, name: 'Modern', costPerSqm: 120 }],
+      edgeTypes: [{ id: 4, name: 'PVC' }],
+      films: [{ id: 5, name: 'White' }],
+      orderStatuses: [{ id: 6, name: 'New', color: '#ffffff' }],
+      paymentStatuses: [{ id: 7, name: 'Unpaid', code: 'unpaid', color: '#ff0000' }],
+      paymentTypes: [{ id: 8, name: 'Cash' }],
+      productionStatuses: [{ id: 9, name: 'Cut', code: 'cut', color: '#00ff00' }],
+      workshops: [{ id: 10, name: 'Workshop' }],
+      employees: [{ id: 11, fullName: 'Employee' }],
+      units: [{ id: 12, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
+    };
+    const fetchMock = mockFetch(response);
+
+    await expect(ordersApi.getFormData()).resolves.toEqual(response);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/orders/form-data',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('creates an order with one POST /api/v1/orders request', async () => {
     const dto = createSaveOrderDto();
     const order = createOrderDto();

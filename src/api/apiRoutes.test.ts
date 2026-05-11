@@ -7,6 +7,7 @@ describe('apiRoutes', () => {
     expect(BACKEND_API_PREFIX).toBe('/api/v1');
     expect(backendApiPath('orders')).toBe('/api/v1/orders');
     expect(apiRoutes.auth.login).toBe('/api/v1/auth/login');
+    expect(apiRoutes.orders.formData).toBe('/api/v1/orders/form-data');
     expect(apiRoutes.orders.byId(42)).toBe('/api/v1/orders/42');
     expect(apiRoutes.orders.calendarDate(42)).toBe('/api/v1/orders/42/calendar-date');
     expect(apiRoutes.orders.orderStatus(42)).toBe('/api/v1/orders/42/order-status');

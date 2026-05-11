@@ -98,6 +98,38 @@ describe('PgOrderReadRepository', () => {
       version: 3,
     });
   });
+
+  it('loads active order form reference data with stable API field names', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await expect(
+      repository.getOrderFormData({
+        currentUser: currentUser('42'),
+      }),
+    ).resolves.toEqual({
+      clients: [{ id: 1, name: 'Client A' }],
+      materials: [{ id: 10, name: 'MDF 16', unitId: 2 }],
+      millingTypes: [{ id: 20, name: 'Modern', costPerSqm: 120.5 }],
+      edgeTypes: [{ id: 30, name: 'PVC 2mm' }],
+      films: [{ id: 40, name: 'White matte' }],
+      orderStatuses: [{ id: 50, name: 'New', code: null, color: '#ffffff' }],
+      paymentStatuses: [{ id: 60, name: 'Unpaid', code: null, color: '#ff0000' }],
+      paymentTypes: [{ id: 70, name: 'Cash' }],
+      productionStatuses: [{ id: 80, name: 'Cut', code: 'cut', color: '#00ff00' }],
+      workshops: [{ id: 90, name: 'Main workshop' }],
+      employees: [{ id: 100, fullName: 'Test Employee' }],
+      units: [{ id: 110, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
+    });
+
+    const referenceQueries = database.queries.slice(-12).map((query) => query.text);
+    expect(referenceQueries.join('\n')).toContain('FROM clients');
+    expect(referenceQueries.join('\n')).toContain('FROM payment_statuses');
+    expect(referenceQueries.join('\n')).not.toContain('payment_status_code');
+    expect(referenceQueries.filter((query) => query.includes('WHERE is_active = true'))).toHaveLength(
+      11,
+    );
+  });
 });
 
 function createDatabase() {
@@ -225,6 +257,54 @@ function createDatabase() {
             },
           ],
         };
+      }
+
+      if (text.includes('FROM clients')) {
+        return { rows: [{ id: '1', name: 'Client A' }] };
+      }
+
+      if (text.includes('FROM materials')) {
+        return { rows: [{ id: '10', name: 'MDF 16', unit_id: '2' }] };
+      }
+
+      if (text.includes('FROM milling_types')) {
+        return { rows: [{ id: '20', name: 'Modern', cost_per_sqm: '120.50' }] };
+      }
+
+      if (text.includes('FROM edge_types')) {
+        return { rows: [{ id: '30', name: 'PVC 2mm' }] };
+      }
+
+      if (text.includes('FROM films')) {
+        return { rows: [{ id: '40', name: 'White matte' }] };
+      }
+
+      if (text.includes('FROM order_statuses')) {
+        return { rows: [{ id: '50', name: 'New', code: null, color: '#ffffff' }] };
+      }
+
+      if (text.includes('FROM payment_statuses')) {
+        return { rows: [{ id: '60', name: 'Unpaid', code: null, color: '#ff0000' }] };
+      }
+
+      if (text.includes('FROM payment_types')) {
+        return { rows: [{ id: '70', name: 'Cash' }] };
+      }
+
+      if (text.includes('FROM production_statuses')) {
+        return { rows: [{ id: '80', name: 'Cut', code: 'cut', color: '#00ff00' }] };
+      }
+
+      if (text.includes('FROM workshops')) {
+        return { rows: [{ id: '90', name: 'Main workshop' }] };
+      }
+
+      if (text.includes('FROM employees')) {
+        return { rows: [{ id: '100', full_name: 'Test Employee' }] };
+      }
+
+      if (text.includes('FROM units')) {
+        return { rows: [{ id: '110', code: 'pcs', name: 'Pieces', symbol: 'pcs' }] };
       }
 
       return { rows: [] };

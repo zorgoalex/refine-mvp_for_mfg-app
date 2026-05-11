@@ -6,6 +6,7 @@ import type {
   ImportOrderSnapshotBatchResponse,
   ImportOrderSnapshotResponse,
   OrderDto,
+  OrderFormDataResponse,
   OrderListQuery,
   OrderListResponse,
   OrderResponse,
@@ -16,6 +17,10 @@ import type {
 export const ordersApi = {
   list(params: OrderListQuery = {}): Promise<OrderListResponse> {
     return httpClient.get<OrderListResponse>(withQuery(apiRoutes.orders.list, params));
+  },
+
+  getFormData(): Promise<OrderFormDataResponse> {
+    return httpClient.get<OrderFormDataResponse>(apiRoutes.orders.formData);
   },
 
   async getById(orderId: number): Promise<OrderDto> {

@@ -1,4 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { OrderDto, OrderListResponseDto } from '../dto/order.dto';
 
 export const ORDER_LIST_SORT_FIELDS = [
@@ -46,7 +47,12 @@ export interface GetOrderByIdCommand {
   orderId: number;
 }
 
+export interface GetOrderFormDataCommand {
+  currentUser: CurrentUser;
+}
+
 export interface OrderReadRepositoryPort {
   listOrders(command: ListOrdersCommand): Promise<OrderListResponseDto>;
   getOrderById(command: GetOrderByIdCommand): Promise<OrderDto | null>;
+  getOrderFormData(command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto>;
 }

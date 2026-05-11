@@ -15,6 +15,7 @@ export const apiRoutes = {
   },
   orders: {
     list: backendApiPath('/orders'),
+    formData: backendApiPath('/orders/form-data'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
     status: (orderId: number) => backendApiPath(`/orders/${orderId}/status`),
     calendarDate: (orderId: number) => backendApiPath(`/orders/${orderId}/calendar-date`),

@@ -120,6 +120,51 @@ export interface ImportOrderSnapshotBatchResponse {
   >;
 }
 
+export interface IdNameLookup {
+  id: number;
+  name: string;
+}
+
+export interface MaterialLookup extends IdNameLookup {
+  unitId: number | null;
+}
+
+export interface MillingTypeLookup extends IdNameLookup {
+  costPerSqm: number | null;
+}
+
+export interface StatusLookup extends IdNameLookup {
+  code?: string | null;
+  color?: string | null;
+}
+
+export interface EmployeeLookup {
+  id: number;
+  fullName: string;
+}
+
+export interface UnitLookup {
+  id: number;
+  code: string;
+  name: string;
+  symbol?: string;
+}
+
+export interface OrderFormDataResponse {
+  clients: IdNameLookup[];
+  materials: MaterialLookup[];
+  millingTypes: MillingTypeLookup[];
+  edgeTypes: IdNameLookup[];
+  films: IdNameLookup[];
+  orderStatuses: StatusLookup[];
+  paymentStatuses: StatusLookup[];
+  paymentTypes: IdNameLookup[];
+  productionStatuses: StatusLookup[];
+  workshops: IdNameLookup[];
+  employees: EmployeeLookup[];
+  units: UnitLookup[];
+}
+
 export interface SaveOrderHeaderDto {
   orderName: string;
   clientId: number;

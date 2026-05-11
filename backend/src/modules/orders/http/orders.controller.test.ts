@@ -4,6 +4,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { OrderQueryService } from '../application/order-query.service';
 import type { OrderTransactionService } from '../application/order-transaction.service';
+import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { OrderDto, OrderListResponseDto } from '../dto/order.dto';
 import type { SaveOrderDto } from '../dto/save-order.dto';
 import { OrdersController, parseOrderId, parseOrderListQuery } from './orders.controller';
@@ -85,6 +86,42 @@ describe('OrdersController read endpoints', () => {
       order,
     });
     expect(calls).toEqual(['get:42:manager-id']);
+  });
+
+  it('returns order form reference data through the read query service', async () => {
+    const response = createOrderFormDataResponse();
+    const calls: string[] = [];
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      queries: {
+        async getFormData(command) {
+          calls.push(`form-data:${command.currentUser.id}`);
+          return response;
+        },
+      },
+    });
+
+    await expect(controller.getFormData({ user: currentUser('manager-id') })).resolves.toBe(
+      response,
+    );
+    expect(calls).toEqual(['form-data:manager-id']);
+  });
+
+  it('requires authenticated current user before form data query service', async () => {
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+    });
+
+    await expect(controller.getFormData({})).rejects.toMatchObject({
+      code: 'AUTH_REQUIRED',
+      statusCode: 401,
+    } satisfies Partial<ApiError>);
   });
 
   it('normalizes list query with whitelist defaults', () => {
@@ -337,5 +374,22 @@ function createOrderDto(overrides: { orderId: number }): OrderDto {
     version: 1,
     createdAt: '2026-04-30T00:00:00.000Z',
     updatedAt: '2026-04-30T00:00:00.000Z',
+  };
+}
+
+function createOrderFormDataResponse(): OrderFormDataResponseDto {
+  return {
+    clients: [{ id: 1, name: 'Client' }],
+    materials: [{ id: 2, name: 'MDF', unitId: 1 }],
+    millingTypes: [{ id: 3, name: 'Modern', costPerSqm: 120 }],
+    edgeTypes: [{ id: 4, name: 'PVC' }],
+    films: [{ id: 5, name: 'White' }],
+    orderStatuses: [{ id: 6, name: 'New', color: '#ffffff' }],
+    paymentStatuses: [{ id: 7, name: 'Unpaid', code: 'unpaid', color: '#ff0000' }],
+    paymentTypes: [{ id: 8, name: 'Cash' }],
+    productionStatuses: [{ id: 9, name: 'Cut', code: 'cut', color: '#00ff00' }],
+    workshops: [{ id: 10, name: 'Workshop' }],
+    employees: [{ id: 11, fullName: 'Employee' }],
+    units: [{ id: 12, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
   };
 }

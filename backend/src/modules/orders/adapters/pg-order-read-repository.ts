@@ -1,7 +1,9 @@
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
+import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { OrderDto, OrderListItemDto, OrderListResponseDto } from '../dto/order.dto';
 import type {
+  GetOrderFormDataCommand,
   GetOrderByIdCommand,
   ListOrdersCommand,
   OrderListSortBy,
@@ -172,6 +174,36 @@ interface OrderDowelingLinkRow extends QueryResultRow {
 
 interface CountRow extends QueryResultRow {
   total: string | number;
+}
+
+interface IdNameLookupRow extends QueryResultRow {
+  id: string | number;
+  name: string;
+}
+
+interface MaterialLookupRow extends IdNameLookupRow {
+  unit_id: string | number | null;
+}
+
+interface MillingTypeLookupRow extends IdNameLookupRow {
+  cost_per_sqm: string | number | null;
+}
+
+interface StatusLookupRow extends IdNameLookupRow {
+  code: string | null;
+  color: string | null;
+}
+
+interface EmployeeLookupRow extends QueryResultRow {
+  id: string | number;
+  full_name: string;
+}
+
+interface UnitLookupRow extends QueryResultRow {
+  id: string | number;
+  code: string;
+  name: string;
+  symbol: string | null;
 }
 
 export class PgOrderReadRepository implements OrderReadRepositoryPort {
@@ -381,6 +413,134 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     );
   }
 
+  async getOrderFormData(_command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto> {
+    const [
+      clients,
+      materials,
+      millingTypes,
+      edgeTypes,
+      films,
+      orderStatuses,
+      paymentStatuses,
+      paymentTypes,
+      productionStatuses,
+      workshops,
+      employees,
+      units,
+    ] = await Promise.all([
+      this.database.query<IdNameLookupRow>(
+        `
+        SELECT client_id AS id, client_name::text AS name
+        FROM clients
+        WHERE is_active = true
+        ORDER BY client_name ASC, client_id ASC
+        `,
+      ),
+      this.database.query<MaterialLookupRow>(
+        `
+        SELECT material_id AS id, material_name AS name, unit_id
+        FROM materials
+        WHERE is_active = true
+        ORDER BY material_name ASC, material_id ASC
+        `,
+      ),
+      this.database.query<MillingTypeLookupRow>(
+        `
+        SELECT milling_type_id AS id, milling_type_name AS name, cost_per_sqm
+        FROM milling_types
+        WHERE is_active = true
+        ORDER BY sort_order ASC, milling_type_name ASC, milling_type_id ASC
+        `,
+      ),
+      this.database.query<IdNameLookupRow>(
+        `
+        SELECT edge_type_id AS id, edge_type_name AS name
+        FROM edge_types
+        WHERE is_active = true
+        ORDER BY sort_order ASC, edge_type_name ASC, edge_type_id ASC
+        `,
+      ),
+      this.database.query<IdNameLookupRow>(
+        `
+        SELECT film_id AS id, film_name AS name
+        FROM films
+        WHERE is_active = true
+        ORDER BY film_name ASC, film_id ASC
+        `,
+      ),
+      this.database.query<StatusLookupRow>(
+        `
+        SELECT order_status_id AS id, order_status_name AS name, NULL::text AS code, color
+        FROM order_statuses
+        WHERE is_active = true
+        ORDER BY sort_order ASC, order_status_name ASC, order_status_id ASC
+        `,
+      ),
+      this.database.query<StatusLookupRow>(
+        `
+        SELECT payment_status_id AS id, payment_status_name AS name, NULL::text AS code, color
+        FROM payment_statuses
+        WHERE is_active = true
+        ORDER BY sort_order ASC, payment_status_name ASC, payment_status_id ASC
+        `,
+      ),
+      this.database.query<IdNameLookupRow>(
+        `
+        SELECT type_paid_id AS id, type_paid_name AS name
+        FROM payment_types
+        WHERE is_active = true
+        ORDER BY sort_order ASC, type_paid_name ASC, type_paid_id ASC
+        `,
+      ),
+      this.database.query<StatusLookupRow>(
+        `
+        SELECT production_status_id AS id, production_status_name AS name, production_status_code AS code, color
+        FROM production_statuses
+        WHERE is_active = true
+        ORDER BY sort_order ASC, production_status_name ASC, production_status_id ASC
+        `,
+      ),
+      this.database.query<IdNameLookupRow>(
+        `
+        SELECT workshop_id AS id, workshop_name AS name
+        FROM workshops
+        WHERE is_active = true
+        ORDER BY workshop_name ASC, workshop_id ASC
+        `,
+      ),
+      this.database.query<EmployeeLookupRow>(
+        `
+        SELECT employee_id AS id, full_name
+        FROM employees
+        WHERE is_active = true
+        ORDER BY full_name ASC, employee_id ASC
+        `,
+      ),
+      this.database.query<UnitLookupRow>(
+        `
+        SELECT unit_id AS id, unit_code AS code, COALESCE(unit_name, unit_code) AS name, unit_symbol AS symbol
+        FROM units
+        ORDER BY unit_code ASC, unit_id ASC
+        `,
+      ),
+    ]);
+
+    return {
+      clients: clients.rows.map(mapIdNameLookup),
+      materials: materials.rows.map(mapMaterialLookup),
+      millingTypes: millingTypes.rows.map(mapMillingTypeLookup),
+      edgeTypes: edgeTypes.rows.map(mapIdNameLookup),
+      films: films.rows.map(mapIdNameLookup),
+      orderStatuses: orderStatuses.rows.map(mapStatusLookup),
+      paymentStatuses: paymentStatuses.rows.map(mapStatusLookup),
+      paymentTypes: paymentTypes.rows.map(mapIdNameLookup),
+      productionStatuses: productionStatuses.rows.map(mapStatusLookup),
+      workshops: workshops.rows.map(mapIdNameLookup),
+      employees: employees.rows.map(mapEmployeeLookup),
+      units: units.rows.map(mapUnitLookup),
+    };
+  }
+
   private buildListWhere(command: ListOrdersCommand, params: unknown[]): string {
     const clauses = ['o.delete_flag = false'];
 
@@ -419,6 +579,54 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
 
     return `WHERE ${clauses.join(' AND ')}`;
   }
+}
+
+function mapIdNameLookup(row: IdNameLookupRow) {
+  return {
+    id: toNumber(row.id),
+    name: row.name,
+  };
+}
+
+function mapMaterialLookup(row: MaterialLookupRow) {
+  return {
+    id: toNumber(row.id),
+    name: row.name,
+    unitId: toNullableNumber(row.unit_id),
+  };
+}
+
+function mapMillingTypeLookup(row: MillingTypeLookupRow) {
+  return {
+    id: toNumber(row.id),
+    name: row.name,
+    costPerSqm: toNullableNumber(row.cost_per_sqm),
+  };
+}
+
+function mapStatusLookup(row: StatusLookupRow) {
+  return {
+    id: toNumber(row.id),
+    name: row.name,
+    code: row.code,
+    color: row.color,
+  };
+}
+
+function mapEmployeeLookup(row: EmployeeLookupRow) {
+  return {
+    id: toNumber(row.id),
+    fullName: row.full_name,
+  };
+}
+
+function mapUnitLookup(row: UnitLookupRow) {
+  return {
+    id: toNumber(row.id),
+    code: row.code,
+    name: row.name,
+    ...(row.symbol ? { symbol: row.symbol } : {}),
+  };
 }
 
 function mapOrderDto(

@@ -37,5 +37,11 @@ describe('UnavailableOrderReadRepository', () => {
       code: 'SERVICE_UNAVAILABLE',
       statusCode: 503,
     } satisfies Partial<ApiError>);
+    await expect(
+      repository.getOrderFormData({ currentUser: command.currentUser }),
+    ).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      statusCode: 503,
+    } satisfies Partial<ApiError>);
   });
 });

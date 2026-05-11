@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { OrderListResponseDto } from '../dto/order.dto';
 import type { OrderReadRepositoryPort } from './order-query.types';
 import { OrderQueryService } from './order-query.service';
@@ -39,6 +40,9 @@ describe('OrderQueryService', () => {
         async getOrderById() {
           throw new Error('get should not be called');
         },
+        async getOrderFormData() {
+          throw new Error('form data should not be called');
+        },
       },
     });
 
@@ -58,6 +62,9 @@ describe('OrderQueryService', () => {
         async getOrderById(command) {
           return command.orderId === 42 ? order : null;
         },
+        async getOrderFormData() {
+          throw new Error('form data should not be called');
+        },
       },
     });
 
@@ -69,6 +76,44 @@ describe('OrderQueryService', () => {
       statusCode: 404,
       details: { orderId: 99 },
     } satisfies Partial<ApiError>);
+  });
+
+  it('requires orders.view permission before loading order form data', async () => {
+    const service = new OrderQueryService({
+      reader: readerThatShouldNotBeCalled(),
+    });
+
+    await expect(
+      service.getFormData({ currentUser: userWithoutOrderView() }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: {
+        requiredPermissions: ['orders.view'],
+      },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('delegates form data loading to read repository after permission check', async () => {
+    const response = createOrderFormDataResponse();
+    const calls: string[] = [];
+    const service = new OrderQueryService({
+      reader: {
+        async listOrders() {
+          throw new Error('list should not be called');
+        },
+        async getOrderById() {
+          throw new Error('get should not be called');
+        },
+        async getOrderFormData(command) {
+          calls.push(`form-data:${command.currentUser.id}`);
+          return response;
+        },
+      },
+    });
+
+    await expect(service.getFormData({ currentUser: currentUser() })).resolves.toBe(response);
+    expect(calls).toEqual(['form-data:manager-id']);
   });
 });
 
@@ -110,5 +155,25 @@ function readerThatShouldNotBeCalled(): OrderReadRepositoryPort {
     async getOrderById() {
       throw new Error('getById should not be called');
     },
+    async getOrderFormData() {
+      throw new Error('getOrderFormData should not be called');
+    },
+  };
+}
+
+function createOrderFormDataResponse(): OrderFormDataResponseDto {
+  return {
+    clients: [{ id: 1, name: 'Client' }],
+    materials: [{ id: 2, name: 'MDF', unitId: 1 }],
+    millingTypes: [{ id: 3, name: 'Modern', costPerSqm: 120 }],
+    edgeTypes: [{ id: 4, name: 'PVC' }],
+    films: [{ id: 5, name: 'White' }],
+    orderStatuses: [{ id: 6, name: 'New', color: '#ffffff' }],
+    paymentStatuses: [{ id: 7, name: 'Unpaid', code: 'unpaid', color: '#ff0000' }],
+    paymentTypes: [{ id: 8, name: 'Cash' }],
+    productionStatuses: [{ id: 9, name: 'Cut', code: 'cut', color: '#00ff00' }],
+    workshops: [{ id: 10, name: 'Workshop' }],
+    employees: [{ id: 11, fullName: 'Employee' }],
+    units: [{ id: 12, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
   };
 }

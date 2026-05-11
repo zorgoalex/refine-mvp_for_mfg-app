@@ -10,6 +10,7 @@ import {
 } from '../application/order-query.types';
 import { OrderTransactionService } from '../application/order-transaction.service';
 import type { OrderDto, OrderListResponseDto, OrderResponseDto } from '../dto/order.dto';
+import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { SaveOrderDto } from '../dto/save-order.dto';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
@@ -37,6 +38,14 @@ export class OrdersController {
 
     const currentUser = this.requireCurrentUser(request);
     return this.orderQueries.list({ currentUser, query: parseOrderListQuery(query) });
+  }
+
+  @Get('form-data')
+  async getFormData(@Req() request: RequestWithCurrentUser): Promise<OrderFormDataResponseDto> {
+    this.assertOrdersReadEnabled();
+
+    const currentUser = this.requireCurrentUser(request);
+    return this.orderQueries.getFormData({ currentUser });
   }
 
   @Get(':orderId')
