@@ -51,6 +51,7 @@ next-env.d.ts
 
 
 # ai
+.codex/
 ai_docs/
 docs/
 !docs/
