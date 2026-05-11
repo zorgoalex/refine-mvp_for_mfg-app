@@ -58,7 +58,6 @@ test.describe('Client phones stage canary', () => {
     await page.goto(`${frontendUrl}/clients/create`, { waitUntil: 'domcontentloaded' });
     await page.locator('#client_name').fill(clientName);
     await page.locator('#notes').fill(`E2E-Тест client phones canary ${runId}`);
-    await page.locator('#ref_key_1c').fill(`client-phone-stage-${runId}`);
     await openAddPhoneDialog(page);
     const createDialog = page.getByRole('dialog', { name: 'Добавить телефон' });
     await fillTextIn(createDialog, 'phone_number', firstPhoneCreateNumber);
@@ -67,7 +66,7 @@ test.describe('Client phones stage canary', () => {
     await createDialog.getByRole('button', { name: 'Добавить' }).click();
 
     const createResponsePromise = waitForClientPhoneApiResponse(page, 'POST');
-    await page.getByRole('button', { name: /Сохранить/ }).click();
+    await clickPageSave(page);
     const createResponse = await createResponsePromise;
     await expectOk(createResponse);
     const createBody = (await createResponse.json()) as ClientPhoneResponse;
@@ -87,7 +86,7 @@ test.describe('Client phones stage canary', () => {
     await editDialog.getByRole('button', { name: 'Сохранить' }).click();
 
     const updateResponsePromise = waitForClientPhoneApiResponse(page, 'PATCH', firstPhoneId);
-    await page.getByRole('button', { name: /Сохранить/ }).click();
+    await clickPageSave(page);
     const updateResponse = await updateResponsePromise;
     await expectOk(updateResponse);
     await expect(page).toHaveURL(new RegExp(`/clients/show/${clientId}`), { timeout: 30000 });
@@ -170,7 +169,7 @@ test.describe('Client phones stage canary', () => {
       waitForClientPhoneApiResponse(page, 'DELETE', firstPhoneId),
       waitForClientPhoneApiResponse(page, 'DELETE', secondPhoneId),
     ]);
-    await page.getByRole('button', { name: /Сохранить/ }).click();
+    await clickPageSave(page);
     const deleteResponses = await deleteResponsesPromise;
     await Promise.all(deleteResponses.map(expectOk));
     await expect(page).toHaveURL(new RegExp(`/clients/show/${clientId}`), { timeout: 30000 });
@@ -311,6 +310,10 @@ function authHeaders(token: string | null) {
 async function openAddPhoneDialog(page: Page) {
   const phonesCard = page.locator('.ant-card').filter({ hasText: 'Телефоны' });
   await phonesCard.getByRole('button', { name: 'Добавить' }).click();
+}
+
+async function clickPageSave(page: Page) {
+  await page.getByRole('button', { name: 'save Сохранить' }).click();
 }
 
 async function openEditPhoneDialog(page: Page, phoneNumber: string) {
