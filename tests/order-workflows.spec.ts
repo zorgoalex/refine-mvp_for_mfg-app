@@ -76,6 +76,59 @@ test.describe('Order workflows', () => {
             amount: 4800,
         });
     });
+
+    test('keeps inline detail dimensions when price recalculates amount', async ({ page }) => {
+        const db = await setupWorkflowMockApi(page);
+
+        await page.goto('/orders');
+        await page.getByRole('button', { name: 'Создать заказ' }).click();
+
+        const orderDialog = page.getByRole('dialog', { name: 'Создание нового заказа' });
+        await expect(orderDialog).toBeVisible();
+
+        await orderDialog.getByRole('tab', { name: 'Детали заказа' }).click();
+        const detailsCard = orderDialog.locator('.ant-card').filter({ hasText: 'Всего позиций' }).first();
+        await detailsCard.locator('button').filter({ hasText: '+' }).first().click();
+
+        const heightInput = detailsCard.locator('input#height');
+        const widthInput = detailsCard.locator('input#width');
+        const quantityInput = detailsCard.locator('input#quantity');
+        const priceInput = detailsCard.locator('input#milling_cost_per_sqm');
+        const amountInput = detailsCard.locator('input#detail_cost');
+
+        await heightInput.click();
+        await page.keyboard.type('600');
+        await page.keyboard.press('Tab');
+        await page.keyboard.type('400');
+        await page.keyboard.press('Tab');
+        await page.keyboard.type('2');
+        await page.keyboard.press('Tab');
+        await priceInput.click();
+        await page.keyboard.type('10000');
+
+        await expect(heightInput).toHaveValue(/^600(?:[,.]00)?$/);
+        await expect(widthInput).toHaveValue(/^400(?:[,.]00)?$/);
+        await expect(quantityInput).toHaveValue('2');
+        await expect(amountInput).toHaveValue(/4\s?800(?:[,.]00)?/);
+
+        await detailsCard.getByRole('button').filter({ has: page.locator('.anticon-check') }).click();
+
+        await orderDialog.getByRole('tab', { name: 'Основная информация' }).click();
+        await selectAntdOption(page, orderDialog.locator('.ant-form-item').filter({ hasText: 'Клиент' }).first(), 'Базовый клиент');
+        await orderDialog.getByPlaceholder('Введите название заказа').fill('E2E заказ inline detail');
+
+        await orderDialog.getByRole('button', { name: 'Сохранить' }).first().click();
+
+        await expect.poll(() => db.order_details.length).toBe(1);
+        expect(db.order_details[0]).toMatchObject({
+            height: 600,
+            width: 400,
+            quantity: 2,
+            area: 0.48,
+            milling_cost_per_sqm: 10000,
+            detail_cost: 4800,
+        });
+    });
 });
 
 async function selectAntdOption(page: Page, formItem: Locator, optionText: string) {

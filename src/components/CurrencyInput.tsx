@@ -2,7 +2,7 @@
 // Focus: hides ".00" for integers, shows empty for 0
 // Blur: shows ".00" and "0"
 
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import React, { useState } from 'react';
 import { InputNumber, InputNumberProps } from 'antd';
 import { formatNumber, numberParser } from '../utils/numberFormat';
 
@@ -48,50 +48,16 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
   autoFocus,
   ...props
 }) => {
-  const inputRef = useRef<HTMLInputElement>(null);
   // Initialize isFocused based on autoFocus prop
   const [isFocused, setIsFocused] = useState(!!autoFocus);
 
-  // Handle autoFocus: format input immediately after mount
-  useLayoutEffect(() => {
-    if (autoFocus) {
-      const input = inputRef.current?.querySelector?.('input') || inputRef.current;
-      if (input && input instanceof HTMLInputElement) {
-        const numValue = typeof value === 'number' ? value : undefined;
-        input.value = formatFocused(numValue, precision);
-      }
-    }
-  }, []); // Only on mount
-
-  // Update input display when focus changes
-  useEffect(() => {
-    const input = inputRef.current?.querySelector?.('input') || inputRef.current;
-    if (input && input instanceof HTMLInputElement) {
-      const numValue = typeof value === 'number' ? value : undefined;
-      const displayValue = isFocused
-        ? formatFocused(numValue, precision)
-        : formatBlurred(numValue, precision);
-
-      // Only update if different to avoid cursor jumping
-      if (input.value !== displayValue) {
-        input.value = displayValue;
-      }
-    }
-  }, [isFocused, value, precision]);
-
   const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
     setIsFocused(true);
-    // Format immediately on focus
-    const numValue = typeof value === 'number' ? value : undefined;
-    e.target.value = formatFocused(numValue, precision);
     onFocus?.(e);
   };
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     setIsFocused(false);
-    // Format immediately on blur
-    const numValue = typeof value === 'number' ? value : undefined;
-    e.target.value = formatBlurred(numValue, precision);
     onBlur?.(e);
   };
 
@@ -105,7 +71,6 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
 
   return (
     <InputNumber
-      ref={inputRef}
       {...props}
       autoFocus={autoFocus}
       value={value}
