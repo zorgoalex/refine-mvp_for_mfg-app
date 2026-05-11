@@ -63,6 +63,18 @@ Current implemented foundation:
   and calls Google Apps Script only when `BACKEND_ENABLE_ORDER_EXPORT=true`,
   `BACKEND_EXPORT_DISABLED=false`, `DATABASE_URL`, `GAS_WEBAPP_URL`, and `GAS_API_KEY`
   are configured;
+- order JSON snapshot transfer:
+  `GET /api/v1/orders/:orderId/snapshot`,
+  `GET /api/v1/orders/snapshot/batch?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD`,
+  `POST /api/v1/orders/snapshot/import`, and
+  `POST /api/v1/orders/snapshot/import-batch` export/import full order snapshots
+  through Postgres when `DATABASE_URL` is configured and `BACKEND_ENABLE_ORDERS=true`;
+  import also requires `BACKEND_ORDERS_READ_ONLY=false`. The file contract is
+  versioned (`formatVersion=1.0.0`, `exporterService.version=1.0.0`), service
+  version is included in exported file names, repeated imports are idempotent
+  through `order_import_entity_map`, and batch export/import uses one ZIP with
+  one `.erp-order.json` per order. Apply
+  `db/migrations/005_order_snapshot_import_mapping.sql` before enabling import;
 - production actions DB adapter:
   `PATCH /api/v1/orders/:orderId/calendar-date`,
   `PATCH /api/v1/orders/:orderId/order-status`,
@@ -133,6 +145,8 @@ GET http://localhost:3000/health/live
 GET http://localhost:3000/health/ready
 GET http://localhost:3000/docs-json
 POST http://localhost:3000/api/v1/auth/login
+GET http://localhost:3000/api/v1/orders/1/snapshot
+GET http://localhost:3000/api/v1/orders/snapshot/batch?dateFrom=2026-05-01&dateTo=2026-05-11
 ```
 
 Runtime env defaults are local-only:
@@ -246,6 +260,9 @@ Enabled-flow smoke status:
   rejected, image upload returned `uploadId`, analyze by `uploadId` succeeded, audit rows
   `vlm.upload`/`vlm.analyze` were verified, smoke rows were cleaned up, and
   `BACKEND_VLM_DISABLED=true` returned HTTP 503 for upload/analyze rollback.
+- 2026-05-11 order JSON snapshot transfer was added locally: unit/API coverage
+  and production builds passed for backend/frontend. Migration
+  `005_order_snapshot_import_mapping.sql` is required before real DB import.
 
 Next implementation steps:
 

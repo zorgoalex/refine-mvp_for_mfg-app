@@ -150,6 +150,23 @@ Backend users/export/VLM cutover mode за `VITE_USE_BACKEND_USERS=true`,
 Legacy Vercel Functions остаются rollback path, пока соответствующие backend flags и
 external provider env не включены на runtime.
 
+Order JSON snapshot transfer работает через NestJS backend, когда
+`BACKEND_ENABLE_ORDERS=true`. Экспорт доступен при `orders.export`, импорт —
+при `orders.import` и выключенном `BACKEND_ORDERS_READ_ONLY`. UI добавляет:
+
+- в просмотре заказа кнопку `JSON snapshot` для одиночной выгрузки
+  `.erp-order.json`;
+- в списке заказов кнопку `Выгрузка JSON` для ZIP-выгрузки заказов,
+  созданных за выбранный период (`orders.created_at::date`);
+- в списке заказов кнопку `Загрузка JSON` для одиночного `.erp-order.json`
+  или batch `.erp-order-batch.zip`.
+
+Перед использованием импорта нужно применить миграцию
+`backend/db/migrations/005_order_snapshot_import_mapping.sql`. Формат
+версионирован: `formatVersion=1.0.0`, `exporterService.version=1.0.0`; версия
+сервиса включается в имя файла. Подробный контракт:
+[docs/order-json-snapshot-v1.md](docs/order-json-snapshot-v1.md).
+
 Frontend runtime config для canary/rollback загружается до React bootstrap из
 `/runtime-config.json` или из `VITE_RUNTIME_CONFIG_URL`. Если файл отсутствует
 или невалиден, используются build-time `VITE_*` значения. Пример лежит в
@@ -309,6 +326,7 @@ GitHub Actions пока не используется; проверки пере
 клиента.
 Users backend cutover checklist: [docs/users-cutover-readiness.md](docs/users-cutover-readiness.md).
 Order export backend cutover checklist: [docs/order-export-cutover-readiness.md](docs/order-export-cutover-readiness.md).
+Order JSON snapshot transfer contract: [docs/order-json-snapshot-v1.md](docs/order-json-snapshot-v1.md).
 VLM backend cutover checklist: [docs/vlm-cutover-readiness.md](docs/vlm-cutover-readiness.md).
 Frontend runtime config checklist: [docs/frontend-runtime-config-readiness.md](docs/frontend-runtime-config-readiness.md).
 Runtime config canary checklist: [docs/runtime-config-canary-readiness.md](docs/runtime-config-canary-readiness.md).
