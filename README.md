@@ -245,6 +245,9 @@ npm run dev:full
 - `npm run preview` — preview build.
 - `npm run test` — unit/API tests через Vitest.
 - `npm run test:e2e` — Playwright tests.
+- `npm run test:e2e:frontend-pages` — Playwright smoke для всех зарегистрированных frontend routes.
+- `npm run test:e2e:calendar` — Playwright smoke календаря, включая проверку `orders_view.version`.
+- `npm run test:e2e:calendar-stage-canary` — opt-in Playwright smoke для deployed stage календаря против реальной Hasura schema.
 - `npm run test:e2e:users-cutover` — Playwright smoke для backend users cutover flags.
 - `npm run test:e2e:order-export-cutover` — Playwright smoke для backend order export cutover flag.
 - `npm run test:e2e:payments-stage-canary` — opt-in Playwright smoke для stage payments UI/backend path с реальными DB writes на тестовом заказе.
@@ -269,6 +272,8 @@ E2E:
 ```bash
 npm run test:e2e
 npx playwright test tests/reference-workflows.spec.ts --project=chromium
+npm run test:e2e:frontend-pages
+npm run test:e2e:calendar
 npm run test:e2e:users-cutover
 npm run test:e2e:order-export-cutover
 npm run test:e2e:production-actions-cutover
@@ -279,7 +284,16 @@ npm run test:e2e:runtime-config
 npm run test:runtime-config-canary
 ```
 
+Opt-in stage canaries require the deployed stage environment and VPS DB/Docker
+access where noted by the specific checklist:
+
+```bash
+npm run test:e2e:calendar-stage-canary
+```
+
 Playwright запускает `npm run dev:full` через `webServer` и использует `http://localhost:5173` как `baseURL`.
+CI запускает только Vite и выставляет `PLAYWRIGHT_SKIP_WEB_SERVER=true` для
+mocked frontend e2e, потому что эти тесты сами мокают runtime-config и GraphQL.
 `tests/reference-workflows.spec.ts` покрывает CRUD справочников: создание записи,
 редактирование всех полей формы, удаление записи и отдельный workflow телефонов
 клиента.

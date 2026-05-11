@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feat/backend-erp-stage1
+
+jobs:
+  test:
+    name: Unit, build, and frontend e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Start Vite
+        run: |
+          nohup npm run dev -- --host localhost > "$RUNNER_TEMP/vite.log" 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://localhost:5173 >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/vite.log"
+          exit 1
+
+      - name: Calendar e2e
+        run: npm run test:e2e:calendar -- --project=chromium
+        env:
+          PLAYWRIGHT_SKIP_WEB_SERVER: "true"
+
+      - name: Frontend pages e2e
+        run: npm run test:e2e:frontend-pages -- --project=chromium
+        env:
+          PLAYWRIGHT_SKIP_WEB_SERVER: "true"
+
+      - name: Upload Playwright report artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            playwright-report/
+            test-results/
+            ${{ runner.temp }}/vite.log
+          if-no-files-found: ignore
