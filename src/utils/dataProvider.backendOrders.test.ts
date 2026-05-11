@@ -2,18 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const listOrders = vi.fn();
 const getOrderById = vi.fn();
+const deleteOrder = vi.fn();
 
 describe('dataProvider backend orders read routing', () => {
   beforeEach(() => {
     vi.resetModules();
     listOrders.mockReset();
     getOrderById.mockReset();
+    deleteOrder.mockReset();
     vi.doMock('../config/featureFlags', () => ({
       featureFlags: {
         useBackendAuth: true,
         useBackendPermissions: true,
         useBackendOrdersRead: true,
-        useBackendOrdersWrite: false,
+        useBackendOrdersWrite: true,
         useBackendPayments: false,
         useBackendClientPhones: false,
         useBackendProductionActions: false,
@@ -28,6 +30,7 @@ describe('dataProvider backend orders read routing', () => {
       ordersApi: {
         list: listOrders,
         getById: getOrderById,
+        delete: deleteOrder,
       },
     }));
     vi.stubGlobal('localStorage', createLocalStorageMock());
@@ -175,6 +178,45 @@ describe('dataProvider backend orders read routing', () => {
       order_status_name: 'New',
       version: 4,
     });
+  });
+
+  it('routes orders delete to backend with required version and never calls Hasura', async () => {
+    deleteOrder.mockResolvedValue({
+      success: true,
+      orderId: 15,
+      auditId: 'audit-delete-1',
+      requestId: 'request-delete-1',
+    });
+    const { dataProvider } = await import('./dataProvider');
+
+    await expect(
+      dataProvider('').deleteOne({
+        resource: 'orders',
+        id: 15,
+        meta: { version: 4, idempotencyKey: 'order-delete-key-1' },
+      }),
+    ).resolves.toEqual({ data: { order_id: 15 } });
+
+    expect(deleteOrder).toHaveBeenCalledWith(15, {
+      version: 4,
+      idempotencyKey: 'order-delete-key-1',
+    });
+  });
+
+  it('fails backend orders delete before Hasura fallback when version is missing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { dataProvider } = await import('./dataProvider');
+
+    await expect(
+      dataProvider('').deleteOne({ resource: 'orders', id: 15 }),
+    ).rejects.toMatchObject({
+      message: 'Order version is required for backend delete',
+      statusCode: 400,
+    });
+
+    expect(deleteOrder).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

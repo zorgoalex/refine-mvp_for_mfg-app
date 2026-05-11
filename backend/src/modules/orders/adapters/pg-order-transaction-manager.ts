@@ -1,16 +1,22 @@
+import { createHash } from 'crypto';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PgOrderReadRepository } from './pg-order-read-repository';
 import type {
+  DeleteOrderCommand,
   LockedOrderRow,
+  LockedOrderDeleteRow,
   OrderChildReference,
+  OrderDeleteAuditInput,
+  OrderDeleteOutboxInput,
+  OrderDeleteIdempotencyResult,
   OrderSaveAuditEvent,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
 } from '../application/order-transaction.types';
-import type { OrderDto } from '../dto/order.dto';
+import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
@@ -20,6 +26,11 @@ import type {
   NormalizedSaveOrderWorkshopDto,
   OrderTotalsDto,
 } from '../dto/save-order.dto';
+import {
+  OrderDeleteIdempotencyFailedError,
+  OrderDeleteIdempotencyInProgressError,
+  OrderDeleteIdempotencyKeyReusedError,
+} from '../errors/order.errors';
 
 const CHILD_TABLES = {
   detail: { table: 'order_details', pk: 'detail_id' },
@@ -28,6 +39,28 @@ const CHILD_TABLES = {
   requirement: { table: 'order_resource_requirements', pk: 'requirement_id' },
   dowelingLink: { table: 'order_doweling_links', pk: 'order_doweling_link_id' },
 } as const;
+
+const SOURCE = 'backend-orders-command';
+
+interface IdempotencyRow {
+  idempotency_key: string;
+  request_hash: string;
+  response_json: DeleteOrderResponseDto | string | null;
+  status: string;
+}
+
+interface LockedOrderDeleteDbRow {
+  order_id: string | number;
+  order_name: string;
+  client_id: string | number | null;
+  version: string | number;
+  created_by: string | number | null;
+  manager_id: string | number | null;
+}
+
+interface AuditRow {
+  audit_id: string;
+}
 
 export class PgOrderTransactionManager implements OrderTransactionManagerPort {
   constructor(private readonly database: DatabaseService) {}
@@ -44,6 +77,19 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     await this.tx.query('SELECT set_session_user($1)', [userId]);
   }
 
+  async reconcileOrderDeleteIdempotency(
+    command: DeleteOrderCommand,
+  ): Promise<OrderDeleteIdempotencyResult> {
+    return reconcileOrderDeleteIdempotency(this.tx, command);
+  }
+
+  async completeOrderDeleteIdempotency(
+    idempotencyKey: string,
+    response: DeleteOrderResponseDto,
+  ): Promise<void> {
+    await completeOrderDeleteIdempotency(this.tx, idempotencyKey, response);
+  }
+
   async loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null> {
     const result = await this.tx.query<{ order_id: string | number; version: string | number }>(
       `
@@ -57,6 +103,30 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     const row = result.rows[0];
 
     return row ? { orderId: Number(row.order_id), version: Number(row.version) } : null;
+  }
+
+  async loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null> {
+    const result = await this.tx.query<LockedOrderDeleteDbRow>(
+      `
+      SELECT order_id, order_name, client_id, version, created_by, manager_id
+      FROM orders
+      WHERE order_id = $1 AND delete_flag = false
+      FOR UPDATE
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+
+    return row
+      ? {
+          orderId: Number(row.order_id),
+          orderName: row.order_name,
+          clientId: row.client_id === null ? null : Number(row.client_id),
+          version: Number(row.version),
+          createdByUserId: row.created_by === null ? null : String(row.created_by),
+          managerUserId: row.manager_id === null ? null : String(row.manager_id),
+        }
+      : null;
   }
 
   async assertChildOwnership(
@@ -485,6 +555,26 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     return nextVersion;
   }
 
+  async softDeleteOrder(input: { orderId: number; previousVersion: number }): Promise<number> {
+    const nextVersion = input.previousVersion + 1;
+    const result = await this.tx.query<{ version: string | number }>(
+      `
+      UPDATE orders
+      SET delete_flag = true,
+          version = $2
+      WHERE order_id = $1 AND delete_flag = false
+      RETURNING version
+      `,
+      [input.orderId, nextVersion],
+    );
+
+    if (!result.rows[0]) {
+      throw new ApiError(500, 'ORDER_DELETE_FAILED', 'Не удалось удалить заказ');
+    }
+
+    return Number(result.rows[0].version);
+  }
+
   async writeAuditEvent(event: OrderSaveAuditEvent): Promise<void> {
     await this.tx.query(
       `
@@ -498,6 +588,14 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         JSON.stringify({ source: 'backend-orders-transaction' }),
       ],
     );
+  }
+
+  async writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string> {
+    return writeOrderDeleteAudit(this.tx, input);
+  }
+
+  async enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void> {
+    await enqueueOrderDeleteOutbox(this.tx, input);
   }
 
   readOrder(orderId: number): Promise<OrderDto> {
@@ -521,6 +619,220 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         return order;
       });
   }
+}
+
+async function reconcileOrderDeleteIdempotency(
+  tx: TransactionClient,
+  command: DeleteOrderCommand,
+): Promise<OrderDeleteIdempotencyResult> {
+  const requestShape = {
+    actorUserId: command.currentUser.id,
+    commandName: 'orders.delete',
+    orderId: command.orderId,
+    version: command.version,
+  };
+  const requestHash = hashRequest(requestShape);
+  const inserted = await tx.query<IdempotencyRow>(
+    `
+    INSERT INTO command_idempotency_keys (
+      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
+    )
+    VALUES ($1, 'orders.delete', $2, 'order', $3, $4, 'processing')
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING idempotency_key, request_hash, response_json, status
+    `,
+    [command.idempotencyKey, Number(command.currentUser.id), String(command.orderId), requestHash],
+  );
+
+  if (inserted.rows[0]) {
+    return {};
+  }
+
+  const existing = await tx.query<IdempotencyRow>(
+    `
+    SELECT idempotency_key, request_hash, response_json, status
+    FROM command_idempotency_keys
+    WHERE idempotency_key = $1
+    FOR UPDATE
+    `,
+    [command.idempotencyKey],
+  );
+  const row = existing.rows[0];
+
+  if (!row) {
+    throw new OrderDeleteIdempotencyInProgressError(command.idempotencyKey);
+  }
+  if (row.request_hash !== requestHash) {
+    throw new OrderDeleteIdempotencyKeyReusedError(command.idempotencyKey);
+  }
+  if (row.status === 'completed' && row.response_json) {
+    return { completedResponse: parseStoredDeleteResponse(row.response_json) };
+  }
+  if (row.status === 'failed') {
+    throw new OrderDeleteIdempotencyFailedError(command.idempotencyKey);
+  }
+
+  throw new OrderDeleteIdempotencyInProgressError(command.idempotencyKey);
+}
+
+async function completeOrderDeleteIdempotency(
+  tx: TransactionClient,
+  idempotencyKey: string,
+  response: DeleteOrderResponseDto,
+): Promise<void> {
+  await tx.query(
+    `
+    UPDATE command_idempotency_keys
+    SET status = 'completed',
+        response_json = $2::jsonb,
+        completed_at = now()
+    WHERE idempotency_key = $1
+    `,
+    [idempotencyKey, JSON.stringify(response)],
+  );
+}
+
+async function writeOrderDeleteAudit(
+  tx: TransactionClient,
+  input: OrderDeleteAuditInput,
+): Promise<string> {
+  const beforeJson = orderDeleteBeforeJson(input.order);
+  const afterJson = orderDeleteAfterJson(input.order, input.nextVersion);
+  const diffJson = orderDeleteDiffJson(input.order.version, input.nextVersion);
+  const metadataJson = orderDeleteMetadataJson(input);
+  const result = await tx.query<AuditRow>(
+    `
+    INSERT INTO audit_log (
+      event, entity_type, entity_id, user_id, request_id, source,
+      related_order_id, related_client_id,
+      before_json, after_json, diff_json, metadata_json
+    )
+    VALUES (
+      'orders.delete', 'order', $1, $2, $3, $4,
+      $5, $6,
+      $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb
+    )
+    RETURNING audit_id
+    `,
+    [
+      String(input.order.orderId),
+      input.currentUser.id,
+      input.requestId,
+      SOURCE,
+      input.order.orderId,
+      input.order.clientId,
+      JSON.stringify(beforeJson),
+      JSON.stringify(afterJson),
+      JSON.stringify(diffJson),
+      JSON.stringify(metadataJson),
+    ],
+  );
+
+  return result.rows[0].audit_id;
+}
+
+async function enqueueOrderDeleteOutbox(
+  tx: TransactionClient,
+  input: OrderDeleteOutboxInput,
+): Promise<void> {
+  await tx.query(
+    `
+    INSERT INTO outbox_events (
+      event_type, aggregate_type, aggregate_id, payload_json, idempotency_key
+    )
+    VALUES ($1, 'order', $2, $3::jsonb, $4)
+    ON CONFLICT (idempotency_key) DO NOTHING
+    `,
+    [
+      'order.deleted',
+      String(input.order.orderId),
+      JSON.stringify({
+        source: SOURCE,
+        eventType: 'order.deleted',
+        idempotencyKey: input.idempotencyKey,
+        outboxIdempotencyKey: `${input.idempotencyKey}:order.deleted`,
+        actorUserId: input.currentUser.id,
+        requestId: input.requestId,
+        auditId: input.auditId,
+        orderId: input.order.orderId,
+        clientId: input.order.clientId,
+        orderName: input.order.orderName,
+        previousVersion: input.order.version,
+        version: input.nextVersion,
+        scope: {
+          createdByUserId: input.order.createdByUserId,
+          managerUserId: input.order.managerUserId,
+        },
+      }),
+      `${input.idempotencyKey}:order.deleted`,
+    ],
+  );
+}
+
+function orderDeleteBeforeJson(order: LockedOrderDeleteRow): Record<string, unknown> {
+  return {
+    orderId: order.orderId,
+    orderName: order.orderName,
+    clientId: order.clientId,
+    deleteFlag: false,
+    version: order.version,
+  };
+}
+
+function orderDeleteAfterJson(
+  order: LockedOrderDeleteRow,
+  nextVersion: number,
+): Record<string, unknown> {
+  return {
+    ...orderDeleteBeforeJson(order),
+    deleteFlag: true,
+    version: nextVersion,
+  };
+}
+
+function orderDeleteDiffJson(previousVersion: number, nextVersion: number): Record<string, unknown> {
+  return {
+    deleteFlag: { before: false, after: true },
+    version: { before: previousVersion, after: nextVersion },
+  };
+}
+
+function orderDeleteMetadataJson(input: OrderDeleteAuditInput): Record<string, unknown> {
+  return {
+    source: SOURCE,
+    commandName: 'orders.delete',
+    actorUserId: input.currentUser.id,
+    previousVersion: input.order.version,
+    version: input.nextVersion,
+  };
+}
+
+function hashRequest(value: Record<string, unknown>): string {
+  return createHash('sha256').update(stableStringify(value)).digest('hex');
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(object[key])}`)
+    .join(',')}}`;
+}
+
+function parseStoredDeleteResponse(
+  responseJson: DeleteOrderResponseDto | string,
+): DeleteOrderResponseDto {
+  return typeof responseJson === 'string'
+    ? (JSON.parse(responseJson) as DeleteOrderResponseDto)
+    : responseJson;
 }
 
 function groupChildReferences(refs: readonly OrderChildReference[]) {

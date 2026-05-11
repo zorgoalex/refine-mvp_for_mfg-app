@@ -40,6 +40,30 @@ export class OrderVersionConflictError extends ApiError {
   }
 }
 
+export class OrderDeleteIdempotencyKeyReusedError extends ApiError {
+  constructor(idempotencyKey: string) {
+    super(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request', {
+      idempotencyKey,
+    });
+  }
+}
+
+export class OrderDeleteIdempotencyInProgressError extends ApiError {
+  constructor(idempotencyKey: string) {
+    super(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing', {
+      idempotencyKey,
+    });
+  }
+}
+
+export class OrderDeleteIdempotencyFailedError extends ApiError {
+  constructor(idempotencyKey: string) {
+    super(409, 'IDEMPOTENCY_FAILED', 'Idempotent command previously failed', {
+      idempotencyKey,
+    });
+  }
+}
+
 export class ChildEntityNotFoundError extends ApiError {
   constructor(entityType: string, id: number) {
     super(404, 'CHILD_ENTITY_NOT_FOUND', 'Дочерняя запись заказа не найдена', {

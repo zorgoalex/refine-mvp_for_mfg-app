@@ -28,6 +28,13 @@ export interface OrderResponseDto {
   order: OrderDto;
 }
 
+export interface DeleteOrderResponseDto {
+  success: true;
+  orderId: number;
+  auditId?: string;
+  requestId: string;
+}
+
 export interface OrderListResponseDto {
   data: OrderListItemDto[];
   pagination: PaginationDto;

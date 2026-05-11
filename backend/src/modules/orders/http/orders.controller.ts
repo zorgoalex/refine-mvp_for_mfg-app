@@ -1,4 +1,17 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  HttpCode,
+  Inject,
+  Param,
+  Post,
+  Put,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OrderQueryService } from '../application/order-query.service';
@@ -9,7 +22,12 @@ import {
   type SortOrder,
 } from '../application/order-query.types';
 import { OrderTransactionService } from '../application/order-transaction.service';
-import type { OrderDto, OrderListResponseDto, OrderResponseDto } from '../dto/order.dto';
+import type {
+  DeleteOrderResponseDto,
+  OrderDto,
+  OrderListResponseDto,
+  OrderResponseDto,
+} from '../dto/order.dto';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { SaveOrderDto } from '../dto/save-order.dto';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
@@ -91,6 +109,26 @@ export class OrdersController {
     return { order };
   }
 
+  @Delete(':orderId')
+  @HttpCode(200)
+  async delete(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Headers('if-match') ifMatchHeader: string | string[] | undefined,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | string[] | undefined,
+  ): Promise<DeleteOrderResponseDto> {
+    this.assertOrdersWriteEnabled();
+
+    const currentUser = this.requireCurrentUser(request);
+    return this.orders.delete({
+      currentUser,
+      orderId: parseOrderId(orderIdParam),
+      version: parseIfMatchVersion(ifMatchHeader),
+      idempotencyKey: parseIdempotencyKeyHeader(idempotencyKeyHeader),
+      requestId: request.requestId,
+    });
+  }
+
   private assertOrdersWriteEnabled(): void {
     const flags = this.runtimeConfig.getFeatureFlags();
 
@@ -159,6 +197,46 @@ export function parseOrderId(value: string): number {
   }
 
   return orderId;
+}
+
+export function parseIfMatchVersion(value: string | string[] | undefined): number {
+  const raw = singleValue(value)?.trim();
+
+  if (!raw) {
+    throw headerError('If-Match', 'If-Match header is required');
+  }
+
+  const unquoted = raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
+
+  if (!/^\d+$/.test(unquoted)) {
+    throw headerError('If-Match', 'If-Match must be a non-negative integer version');
+  }
+
+  const version = Number(unquoted);
+
+  if (!Number.isSafeInteger(version)) {
+    throw headerError('If-Match', 'If-Match must be a safe integer version');
+  }
+
+  return version;
+}
+
+export function parseIdempotencyKeyHeader(value: string | string[] | undefined): string {
+  const idempotencyKey = singleValue(value)?.trim();
+
+  if (!idempotencyKey) {
+    throw headerError('Idempotency-Key', 'Idempotency-Key header is required');
+  }
+
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 200) {
+    throw headerError('Idempotency-Key', 'Idempotency-Key length must be between 8 and 200');
+  }
+
+  return idempotencyKey;
+}
+
+function headerError(header: string, message: string): ApiError {
+  return new ApiError(400, 'BAD_REQUEST', message, { header });
 }
 
 function parseSortBy(value: string | string[] | undefined): OrderListSortBy {

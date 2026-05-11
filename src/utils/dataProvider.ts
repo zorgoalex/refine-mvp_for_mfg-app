@@ -1318,6 +1318,22 @@ async function deleteBackendPaymentIfEnabled(resource: string, id: number | stri
   return { data: { payment_id: response.paymentId } };
 }
 
+async function deleteBackendOrderIfEnabled(resource: string, id: number | string, meta?: AnyObject) {
+  if (!shouldUseBackendOrderMutation(resource)) {
+    return null;
+  }
+
+  const response = await ordersApi.delete(Number(id), {
+    version: requireOrderDeleteVersion(meta),
+    idempotencyKey: optionalString(meta?.idempotencyKey),
+  });
+  return { data: { order_id: response.orderId } };
+}
+
+function shouldUseBackendOrderMutation(resource: string): boolean {
+  return featureFlags.useBackendOrdersWrite && resource === 'orders';
+}
+
 function shouldUseBackendPaymentMutation(resource: string, meta?: AnyObject): boolean {
   return (
     featureFlags.useBackendPayments &&
@@ -1328,6 +1344,20 @@ function shouldUseBackendPaymentMutation(resource: string, meta?: AnyObject): bo
 
 function shouldUseBackendClientPhoneMutation(resource: string): boolean {
   return featureFlags.useBackendClientPhones && resource === 'client_phones';
+}
+
+function requireOrderDeleteVersion(meta?: AnyObject): number {
+  const version = meta?.version ?? meta?.orderVersion;
+
+  if (!Number.isInteger(version) || version < 0) {
+    throw { message: 'Order version is required for backend delete', statusCode: 400 };
+  }
+
+  return version;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 function mapBackendUserToLegacyRow(user: UserDto): AnyObject {
@@ -1704,6 +1734,11 @@ export const dataProvider = (_apiUrl: string) => {
     },
 
     deleteOne: async ({ resource, id, meta }: AnyObject) => {
+      const backendOrder = await deleteBackendOrderIfEnabled(resource, id, meta);
+      if (backendOrder) {
+        return backendOrder;
+      }
+
       const backendPayment = await deleteBackendPaymentIfEnabled(resource, id, meta);
       if (backendPayment) {
         return backendPayment;

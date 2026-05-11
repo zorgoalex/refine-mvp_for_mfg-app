@@ -71,9 +71,16 @@ export interface ChangeOrderStatusRequest {
   version: number;
 }
 
+export interface DeleteOrderRequest {
+  version: number;
+  idempotencyKey?: string;
+}
+
 export interface DeleteOrderResponse {
+  success: true;
   orderId: number;
-  deleted: boolean;
+  auditId?: string;
+  requestId: string;
 }
 
 export interface ExportOrderRequest {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, type UserRole } from '../../../permissions/permissions';
-import type { OrderDto } from '../dto/order.dto';
+import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
@@ -20,7 +20,11 @@ import {
 } from '../errors/order.errors';
 import type {
   LockedOrderRow,
+  LockedOrderDeleteRow,
   OrderChildReference,
+  OrderDeleteAuditInput,
+  OrderDeleteIdempotencyResult,
+  OrderDeleteOutboxInput,
   OrderSaveAuditEvent,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
@@ -49,7 +53,8 @@ interface FakeState {
   nextRequirementId: number;
   nextDowelingLinkId: number;
   orders: Map<number, FakeOrderRecord>;
-  auditEvents: OrderSaveAuditEvent[];
+  auditEvents: Array<OrderSaveAuditEvent | { action: 'orders.delete'; orderId: number; actorUserId: string; requestId: string; nextVersion: number }>;
+  outboxEvents: Array<{ eventType: string; orderId: number; requestId: string }>;
 }
 
 class FakeOrderTransactions implements OrderTransactionManagerPort {
@@ -66,7 +71,9 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
     nextDowelingLinkId: 5000,
     orders: new Map(),
     auditEvents: [],
+    outboxEvents: [],
   };
+  completedDeleteResponse?: DeleteOrderResponseDto;
 
   async runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
     this.calls.push('begin');
@@ -119,10 +126,36 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.call('setSessionUser');
   }
 
+  async reconcileOrderDeleteIdempotency(): Promise<OrderDeleteIdempotencyResult> {
+    this.call('reconcileOrderDeleteIdempotency');
+    return this.owner.completedDeleteResponse
+      ? { completedResponse: this.owner.completedDeleteResponse }
+      : {};
+  }
+
+  async completeOrderDeleteIdempotency(): Promise<void> {
+    this.call('completeOrderDeleteIdempotency');
+  }
+
   async loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null> {
     this.call('loadOrderForUpdate');
     const order = this.state.orders.get(orderId);
     return order ? { orderId, version: order.version } : null;
+  }
+
+  async loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null> {
+    this.call('loadOrderForDelete');
+    const order = this.state.orders.get(orderId);
+    return order
+      ? {
+          orderId,
+          orderName: order.header.orderName,
+          clientId: order.header.clientId,
+          version: order.version,
+          createdByUserId: 'user_admin',
+          managerUserId: order.header.managerId === null ? null : String(order.header.managerId),
+        }
+      : null;
   }
 
   async assertChildOwnership(orderId: number, refs: readonly OrderChildReference[]): Promise<void> {
@@ -268,9 +301,37 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     return order.version;
   }
 
+  async softDeleteOrder(input: { orderId: number; previousVersion: number }): Promise<number> {
+    this.call('softDeleteOrder');
+    const order = this.getOrder(input.orderId);
+    order.version = input.previousVersion + 1;
+    return order.version;
+  }
+
   async writeAuditEvent(event: OrderSaveAuditEvent): Promise<void> {
     this.call('writeAuditEvent');
     this.state.auditEvents.push(event);
+  }
+
+  async writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string> {
+    this.call('writeOrderDeleteAudit');
+    this.state.auditEvents.push({
+      action: 'orders.delete',
+      orderId: input.order.orderId,
+      actorUserId: input.currentUser.id,
+      requestId: input.requestId,
+      nextVersion: input.nextVersion,
+    });
+    return 'audit-delete-1';
+  }
+
+  async enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void> {
+    this.call('enqueueOrderDeleteOutbox');
+    this.state.outboxEvents.push({
+      eventType: 'order.deleted',
+      orderId: input.order.orderId,
+      requestId: input.requestId,
+    });
   }
 
   async readOrder(orderId: number): Promise<OrderDto> {
@@ -501,6 +562,153 @@ describe('OrderTransactionService', () => {
 
     expect(result.version).toBe(1);
     expect(result.details[0].quantity).toBe(4);
+  });
+
+  it('soft-deletes an order with stale check, audit, outbox and idempotency completion', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({ orderId: 42, version: 3 });
+
+    const result = await new OrderTransactionService({ transactions }).delete({
+      currentUser: currentUser('admin'),
+      orderId: 42,
+      version: 3,
+      idempotencyKey: 'order-delete-key-1',
+      requestId: 'request-delete-1',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      orderId: 42,
+      auditId: 'audit-delete-1',
+      requestId: 'request-delete-1',
+    });
+    expect(transactions.state.orders.get(42)?.version).toBe(4);
+    expect(transactions.state.auditEvents).toEqual([
+      {
+        action: 'orders.delete',
+        orderId: 42,
+        actorUserId: 'user_admin',
+        requestId: 'request-delete-1',
+        nextVersion: 4,
+      },
+    ]);
+    expect(transactions.state.outboxEvents).toEqual([
+      { eventType: 'order.deleted', orderId: 42, requestId: 'request-delete-1' },
+    ]);
+    expect(transactions.calls).toEqual([
+      'begin',
+      'setSessionUser',
+      'reconcileOrderDeleteIdempotency',
+      'loadOrderForDelete',
+      'softDeleteOrder',
+      'writeOrderDeleteAudit',
+      'enqueueOrderDeleteOutbox',
+      'completeOrderDeleteIdempotency',
+      'commit',
+    ]);
+  });
+
+  it('returns stored delete idempotency response before loading a soft-deleted order', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.completedDeleteResponse = {
+      success: true,
+      orderId: 42,
+      auditId: 'audit-delete-1',
+      requestId: 'request-delete-1',
+    };
+
+    await expect(
+      new OrderTransactionService({ transactions }).delete({
+        currentUser: currentUser('admin'),
+        orderId: 42,
+        version: 999,
+        idempotencyKey: 'order-delete-key-1',
+        requestId: 'request-delete-1',
+      }),
+    ).resolves.toEqual(transactions.completedDeleteResponse);
+
+    expect(transactions.calls).toEqual([
+      'begin',
+      'setSessionUser',
+      'reconcileOrderDeleteIdempotency',
+      'commit',
+    ]);
+  });
+
+  it('rejects stale order delete before mutation, audit, outbox and idempotency completion', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({ orderId: 42, version: 5 });
+
+    await expect(
+      new OrderTransactionService({ transactions }).delete({
+        currentUser: currentUser('admin'),
+        orderId: 42,
+        version: 3,
+        idempotencyKey: 'order-delete-key-2',
+      }),
+    ).rejects.toBeInstanceOf(OrderVersionConflictError);
+
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.state.outboxEvents).toEqual([]);
+    expect(transactions.calls).toEqual([
+      'begin',
+      'setSessionUser',
+      'reconcileOrderDeleteIdempotency',
+      'loadOrderForDelete',
+      'rollback',
+    ]);
+  });
+
+  it('rejects order delete without delete permission after locking the active order', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({ orderId: 42, version: 3 });
+
+    await expect(
+      new OrderTransactionService({ transactions }).delete({
+        currentUser: currentUser('manager'),
+        orderId: 42,
+        version: 3,
+        idempotencyKey: 'order-delete-key-3',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { requiredPermissions: ['orders.delete'] },
+    } satisfies Partial<ApiError>);
+
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.state.outboxEvents).toEqual([]);
+    expect(transactions.calls).toEqual([
+      'begin',
+      'setSessionUser',
+      'reconcileOrderDeleteIdempotency',
+      'loadOrderForDelete',
+      'rollback',
+    ]);
+  });
+
+  it('returns not found for missing active order delete', async () => {
+    const transactions = new FakeOrderTransactions();
+
+    await expect(
+      new OrderTransactionService({ transactions }).delete({
+        currentUser: currentUser('admin'),
+        orderId: 999,
+        version: 1,
+        idempotencyKey: 'order-delete-key-4',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ORDER_NOT_FOUND',
+      statusCode: 404,
+    } satisfies Partial<ApiError>);
+
+    expect(transactions.calls).toEqual([
+      'begin',
+      'setSessionUser',
+      'reconcileOrderDeleteIdempotency',
+      'loadOrderForDelete',
+      'rollback',
+    ]);
   });
 
   it('returns version conflict before child mutations and does not write audit', async () => {
@@ -830,6 +1038,7 @@ function cloneState(state: FakeState): FakeState {
       ]),
     ),
     auditEvents: state.auditEvents.map((event) => ({ ...event })),
+    outboxEvents: state.outboxEvents.map((event) => ({ ...event })),
   };
 }
 

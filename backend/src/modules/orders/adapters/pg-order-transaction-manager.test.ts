@@ -91,16 +91,158 @@ describe('PgOrderTransactionManager', () => {
     expect(updateQuery?.params[14]).toBe(120);
     expect(updateQuery?.params[15]).toBe(100);
   });
+
+  it('soft-deletes orders with idempotency, queryable audit, outbox and completion', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction(async (uow) => {
+      await uow.setSessionUser('42');
+      await expect(
+        uow.reconcileOrderDeleteIdempotency({
+          currentUser: currentUser(),
+          orderId: 100,
+          version: 2,
+          idempotencyKey: 'order-delete-key-1',
+          requestId: 'request-delete-1',
+        }),
+      ).resolves.toEqual({});
+      const lockedOrder = await uow.loadOrderForDelete(100);
+      expect(lockedOrder).toMatchObject({
+        orderId: 100,
+        orderName: 'A-100',
+        clientId: 5,
+        version: 2,
+      });
+      const nextVersion = await uow.softDeleteOrder({ orderId: 100, previousVersion: 2 });
+      expect(nextVersion).toBe(3);
+      const auditId = await uow.writeOrderDeleteAudit({
+        currentUser: currentUser(),
+        requestId: 'request-delete-1',
+        order: lockedOrder!,
+        nextVersion,
+      });
+      await uow.enqueueOrderDeleteOutbox({
+        currentUser: currentUser(),
+        requestId: 'request-delete-1',
+        order: lockedOrder!,
+        nextVersion,
+        auditId,
+        idempotencyKey: 'order-delete-key-1',
+      });
+      await uow.completeOrderDeleteIdempotency('order-delete-key-1', {
+        success: true,
+        orderId: 100,
+        auditId,
+        requestId: 'request-delete-1',
+      });
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    const allParams = JSON.stringify(database.queries.map((query) => query.params));
+    expect(sql).toContain('INSERT INTO command_idempotency_keys');
+    expect(sql).toContain('SELECT order_id, order_name, client_id, version, created_by, manager_id FROM orders');
+    expect(sql).toContain('UPDATE orders SET delete_flag = true, version = $2');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('related_order_id, related_client_id');
+    expect(sql).toContain('INSERT INTO outbox_events');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+    const outboxPayload = JSON.parse(
+      database.queries.find((query) => query.params[0] === 'order.deleted')?.params[2] as string,
+    );
+    expect(allParams).toContain('orders.delete');
+    expect(allParams).toContain('order.deleted');
+    expect(allParams).toContain('request-delete-1');
+    expect(allParams).toContain('order-delete-key-1:order.deleted');
+    expect(outboxPayload.idempotencyKey).toBe('order-delete-key-1');
+    expect(outboxPayload.outboxIdempotencyKey).toBe('order-delete-key-1:order.deleted');
+    expect(outboxPayload.actorUserId).toBe('42');
+    expect(outboxPayload.requestId).toBe('request-delete-1');
+    expect(outboxPayload.previousVersion).toBe(2);
+    expect(outboxPayload.version).toBe(3);
+    expect(allParams).toContain('previousVersion');
+    expect(allParams).toContain('actorUserId');
+  });
+
+  it('rejects reused order delete idempotency keys before loading the order', async () => {
+    const database = createDatabase({ idempotencyHashMismatch: true });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await expect(
+      manager.runInTransaction((uow) =>
+        uow.reconcileOrderDeleteIdempotency({
+          currentUser: currentUser(),
+          orderId: 100,
+          version: 2,
+          idempotencyKey: 'order-delete-key-1',
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: 'IDEMPOTENCY_KEY_REUSED',
+      statusCode: 409,
+    });
+
+    expect(normalizedSql(database.queries)).not.toContain('FROM orders WHERE order_id');
+  });
 });
 
-function createDatabase(options: { childCount?: number } = {}) {
+function createDatabase(options: { childCount?: number; idempotencyHashMismatch?: boolean } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  let lastRequestHash: unknown = 'hash';
   const tx = {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
+      const normalized = normalizeSql(text);
+
+      if (normalized.startsWith('INSERT INTO command_idempotency_keys')) {
+        lastRequestHash = params[3];
+        return options.idempotencyHashMismatch
+          ? { rows: [], rowCount: 0 }
+          : {
+              rows: [
+                {
+                  idempotency_key: params[0],
+                  request_hash: params[3],
+                  response_json: null,
+                  status: 'processing',
+                },
+              ],
+              rowCount: 1,
+            };
+      }
+
+      if (normalized.startsWith('SELECT idempotency_key, request_hash')) {
+        return {
+          rows: [
+            {
+              idempotency_key: params[0],
+              request_hash: options.idempotencyHashMismatch ? 'different-hash' : lastRequestHash,
+              response_json: null,
+              status: 'completed',
+            },
+          ],
+          rowCount: 1,
+        };
+      }
 
       if (text.includes('SELECT order_id, version')) {
         return { rows: [{ order_id: 100, version: 2 }], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('SELECT order_id, order_name')) {
+        return {
+          rows: [
+            {
+              order_id: 100,
+              order_name: 'A-100',
+              client_id: 5,
+              version: 2,
+              created_by: 42,
+              manager_id: 42,
+            },
+          ],
+          rowCount: 1,
+        };
       }
 
       if (text.includes('COUNT(*)::int AS count')) {
@@ -109,6 +251,14 @@ function createDatabase(options: { childCount?: number } = {}) {
 
       if (text.includes('RETURNING order_id')) {
         return { rows: [{ order_id: 100 }], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('UPDATE orders SET delete_flag')) {
+        return { rows: [{ version: params[1] }], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('INSERT INTO audit_log')) {
+        return { rows: [{ audit_id: 'audit-delete-1' }], rowCount: 1 };
       }
 
       return { rows: [], rowCount: 1 };
@@ -123,6 +273,10 @@ function createDatabase(options: { childCount?: number } = {}) {
       },
     } as unknown as DatabaseService,
   };
+}
+
+function normalizedSql(databaseQueries: Array<{ text: string }>): string {
+  return databaseQueries.map((query) => normalizeSql(query.text)).join('\n');
 }
 
 function header(): NormalizedSaveOrderHeaderDto {

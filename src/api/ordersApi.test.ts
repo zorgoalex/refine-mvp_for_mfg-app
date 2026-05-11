@@ -101,10 +101,25 @@ describe('ordersApi', () => {
   });
 
   it('changes status and deletes by order id', async () => {
-    const fetchMock = mockFetch({ order: createOrderDto() }, { orderId: 15, deleted: true });
+    const fetchMock = mockFetch(
+      { order: createOrderDto() },
+      {
+        success: true,
+        orderId: 15,
+        auditId: 'audit-delete-1',
+        requestId: 'request-delete-1',
+      },
+    );
 
     await ordersApi.changeStatus(15, { orderStatusId: 3, version: 4 });
-    await ordersApi.delete(15);
+    await expect(
+      ordersApi.delete(15, { version: 4, idempotencyKey: 'order-delete-key-1' }),
+    ).resolves.toEqual({
+      success: true,
+      orderId: 15,
+      auditId: 'audit-delete-1',
+      requestId: 'request-delete-1',
+    });
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15/status');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
@@ -113,6 +128,9 @@ describe('ordersApi', () => {
     );
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/15');
     expect(fetchMock.mock.calls[1][1]?.method).toBe('DELETE');
+    const deleteHeaders = fetchMock.mock.calls[1][1]?.headers as Headers;
+    expect(deleteHeaders.get('If-Match')).toBe('"4"');
+    expect(deleteHeaders.get('Idempotency-Key')).toBe('order-delete-key-1');
   });
 
   it('rejects invalid order ids before fetch', async () => {
@@ -120,6 +138,9 @@ describe('ordersApi', () => {
 
     expect(() => validateOrderId(0)).toThrow('Invalid orderId');
     await expect(ordersApi.getById(1.5)).rejects.toThrow('Invalid orderId');
+    expect(() => ordersApi.delete(1, { version: -1, idempotencyKey: 'order-delete-key-1' })).toThrow(
+      'Invalid order version',
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

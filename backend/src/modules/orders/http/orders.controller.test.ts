@@ -7,7 +7,13 @@ import type { OrderTransactionService } from '../application/order-transaction.s
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { OrderDto, OrderListResponseDto } from '../dto/order.dto';
 import type { SaveOrderDto } from '../dto/save-order.dto';
-import { OrdersController, parseOrderId, parseOrderListQuery } from './orders.controller';
+import {
+  OrdersController,
+  parseIdempotencyKeyHeader,
+  parseIfMatchVersion,
+  parseOrderId,
+  parseOrderListQuery,
+} from './orders.controller';
 import type { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
 describe('OrdersController read endpoints', () => {
@@ -257,6 +263,71 @@ describe('OrdersController write endpoints', () => {
     expect(calls).toEqual(['update:42:manager-id:3']);
   });
 
+  it('parses stale-safe delete headers and delegates delete to OrderTransactionService', async () => {
+    const calls: string[] = [];
+    const response = {
+      success: true as const,
+      orderId: 42,
+      auditId: 'audit-delete-1',
+      requestId: 'request-delete-1',
+    };
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: false,
+      },
+      service: {
+        async delete(command) {
+          calls.push(
+            `delete:${command.orderId}:${command.currentUser.id}:${command.version}:${command.idempotencyKey}:${command.requestId}`,
+          );
+          return response;
+        },
+      },
+    });
+
+    await expect(
+      controller.delete(
+        { user: currentUser('manager-id'), requestId: 'request-delete-1' },
+        '42',
+        '"3"',
+        'order-delete-key-1',
+      ),
+    ).resolves.toBe(response);
+    expect(calls).toEqual(['delete:42:manager-id:3:order-delete-key-1:request-delete-1']);
+  });
+
+  it('requires authenticated current user before delete transaction service', async () => {
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: false,
+      },
+    });
+
+    await expect(
+      controller.delete({}, '42', '3', 'order-delete-key-1'),
+    ).rejects.toMatchObject({
+      code: 'AUTH_REQUIRED',
+      statusCode: 401,
+    } satisfies Partial<ApiError>);
+  });
+
+  it('rejects missing delete command headers as BAD_REQUEST', () => {
+    expect(() => parseIfMatchVersion(undefined)).toThrow(ApiError);
+    expect(() => parseIfMatchVersion('raw')).toThrow(ApiError);
+    expect(() => parseIfMatchVersion('""')).toThrow(ApiError);
+    expect(() => parseIfMatchVersion('" "')).toThrow(ApiError);
+    expect(() => parseIfMatchVersion('1e0')).toThrow(ApiError);
+    expect(() => parseIfMatchVersion('0x10')).toThrow(ApiError);
+    expect(parseIfMatchVersion('"4"')).toBe(4);
+    expect(parseIfMatchVersion('0')).toBe(0);
+
+    expect(() => parseIdempotencyKeyHeader(undefined)).toThrow(ApiError);
+    expect(() => parseIdempotencyKeyHeader('short')).toThrow(ApiError);
+    expect(parseIdempotencyKeyHeader('  order-delete-key-1  ')).toBe('order-delete-key-1');
+  });
+
   it('rejects invalid path order ids as BAD_REQUEST', () => {
     expect(() => parseOrderId('0')).toThrow(ApiError);
     expect(() => parseOrderId('raw_sql')).toThrow(ApiError);
@@ -275,6 +346,9 @@ function createController(options: {
     },
     async update() {
       throw new Error('update should not be called');
+    },
+    async delete() {
+      throw new Error('delete should not be called');
     },
     ...options.service,
   } as unknown as OrderTransactionService;

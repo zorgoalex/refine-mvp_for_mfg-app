@@ -1,6 +1,6 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
-import type { OrderDto } from '../dto/order.dto';
+import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
@@ -23,9 +23,30 @@ export interface UpdateOrderCommand {
   dto: SaveOrderDto;
 }
 
+export interface DeleteOrderCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  version: number;
+  idempotencyKey: string;
+  requestId?: string;
+}
+
 export interface LockedOrderRow {
   orderId: number;
   version: number;
+}
+
+export interface LockedOrderDeleteRow {
+  orderId: number;
+  orderName: string;
+  clientId: number | null;
+  version: number;
+  createdByUserId: string | null;
+  managerUserId: string | null;
+}
+
+export interface OrderDeleteIdempotencyResult {
+  completedResponse?: DeleteOrderResponseDto;
 }
 
 export type OrderChildEntityType =
@@ -46,9 +67,27 @@ export interface OrderSaveAuditEvent {
   actorUserId: string;
 }
 
+export interface OrderDeleteAuditInput {
+  currentUser: CurrentUser;
+  requestId: string;
+  order: LockedOrderDeleteRow;
+  nextVersion: number;
+}
+
+export interface OrderDeleteOutboxInput extends OrderDeleteAuditInput {
+  auditId: string;
+  idempotencyKey: string;
+}
+
 export interface OrderWriteUnitOfWork {
   setSessionUser(userId: string): Promise<void>;
+  reconcileOrderDeleteIdempotency(command: DeleteOrderCommand): Promise<OrderDeleteIdempotencyResult>;
+  completeOrderDeleteIdempotency(
+    idempotencyKey: string,
+    response: DeleteOrderResponseDto,
+  ): Promise<void>;
   loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null>;
+  loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null>;
   assertChildOwnership(orderId: number, refs: readonly OrderChildReference[]): Promise<void>;
   createOrderHeader(input: {
     header: NormalizedSaveOrderHeaderDto;
@@ -86,7 +125,10 @@ export interface OrderWriteUnitOfWork {
     previousVersion: number | null;
     currentUser: CurrentUser;
   }): Promise<number>;
+  softDeleteOrder(input: { orderId: number; previousVersion: number }): Promise<number>;
   writeAuditEvent(event: OrderSaveAuditEvent): Promise<void>;
+  writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string>;
+  enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void>;
   readOrder(orderId: number): Promise<OrderDto>;
 }
 

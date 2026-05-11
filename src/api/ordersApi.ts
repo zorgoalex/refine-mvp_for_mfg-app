@@ -2,6 +2,7 @@ import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import type {
   ChangeOrderStatusRequest,
+  DeleteOrderRequest,
   DeleteOrderResponse,
   ImportOrderSnapshotBatchResponse,
   ImportOrderSnapshotResponse,
@@ -51,9 +52,17 @@ export const ordersApi = {
     );
   },
 
-  delete(orderId: number): Promise<DeleteOrderResponse> {
-    return httpClient.delete<DeleteOrderResponse>(
+  delete(orderId: number, request: DeleteOrderRequest): Promise<DeleteOrderResponse> {
+    const version = validateOrderVersion(request.version);
+    return httpClient.request<DeleteOrderResponse>(
       apiRoutes.orders.byId(validateOrderId(orderId)),
+      {
+        method: 'DELETE',
+        headers: {
+          'If-Match': `"${version}"`,
+          'Idempotency-Key': request.idempotencyKey ?? createOrderDeleteIdempotencyKey(),
+        },
+      },
     );
   },
 
@@ -105,6 +114,23 @@ export function validateOrderId(orderId: number): number {
   }
 
   return orderId;
+}
+
+export function validateOrderVersion(version: number): number {
+  if (!Number.isInteger(version) || version < 0) {
+    throw new Error('Invalid order version');
+  }
+
+  return version;
+}
+
+export function createOrderDeleteIdempotencyKey(): string {
+  const uuid =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  return `order-delete:${uuid}`;
 }
 
 function saveBlob(blob: Blob, fileName: string): void {
