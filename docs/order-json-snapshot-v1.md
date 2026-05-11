@@ -67,6 +67,48 @@ Feature/runtime requirements:
 Batch import posts a base64 ZIP in JSON. The backend body limit is set to
 `50mb` in `backend/src/main.ts`.
 
+## Stage Deployment Notes
+
+Snapshot routes are served by the VPS NestJS backend container, while the UI is
+deployed separately. If the frontend has the snapshot buttons but
+`GET /api/v1/orders/:orderId/snapshot` returns HTTP 404 `Cannot GET ...`, the
+backend container is likely still running an older image. Rebuild and recreate
+only the backend service, then verify the route returns `401 AUTH_REQUIRED`
+without a token instead of `404`.
+
+For the current split VPS layout:
+
+```bash
+cd /home/ovhubu/projects/erp_dev
+git -C repo_erp pull
+docker compose \
+  --env-file .env \
+  --project-directory . \
+  -f repo_erp/ops/templates/docker-compose.vps.yml \
+  up -d --build --no-deps backend
+```
+
+Import requires migration
+`repo_erp/backend/db/migrations/005_order_snapshot_import_mapping.sql`. Apply
+it before enabling import on a database:
+
+```bash
+docker exec -i erp_dev-postgresdb-1 \
+  psql -U postgres -d erpdb -v ON_ERROR_STOP=1 -f - \
+  < repo_erp/backend/db/migrations/005_order_snapshot_import_mapping.sql
+```
+
+Stage verification on 2026-05-12:
+
+- `https://backend.dev.mebelkz.app/health/ready` returned ready;
+- unauthenticated snapshot routes returned `401 AUTH_REQUIRED`, not `404`;
+- authenticated export of order `11157` returned snapshot v1 with client,
+  client phone, 18 details, and 1 payment;
+- batch export for `2026-05-11..2026-05-11` returned ZIP with
+  `X-Order-Snapshot-Count=4`;
+- authenticated empty import reached validation and returned HTTP 422;
+- stage DB has `order_import_runs`, `order_import_entity_map`, and `pgcrypto`.
+
 ## Contract
 
 Minimal shape:

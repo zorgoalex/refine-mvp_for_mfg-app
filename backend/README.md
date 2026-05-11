@@ -263,6 +263,17 @@ Enabled-flow smoke status:
 - 2026-05-11 order JSON snapshot transfer was added locally: unit/API coverage
   and production builds passed for backend/frontend. Migration
   `005_order_snapshot_import_mapping.sql` is required before real DB import.
+- 2026-05-12 stage snapshot export incident was caused by deploy drift: Vercel
+  frontend already called `/api/v1/orders/:orderId/snapshot`, while the VPS
+  backend container was still an older image without `OrderSnapshotController`.
+  Rebuilding/recreating only `backend` fixed the 404; startup logs now map the
+  single export, batch export, single import, and batch import routes.
+  Migration `005_order_snapshot_import_mapping.sql` was applied on stage.
+  Authenticated probes passed: order `11157` single export returned snapshot
+  v1 with client, phones, details, and payments; batch export for
+  `2026-05-11` returned ZIP with `X-Order-Snapshot-Count=4`; empty import
+  returned expected HTTP 422 validation. `ops/smoke-vps.sh --skip-docker`
+  passed.
 
 Next implementation steps:
 

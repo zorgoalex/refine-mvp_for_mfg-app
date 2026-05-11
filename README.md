@@ -167,6 +167,12 @@ Order JSON snapshot transfer работает через NestJS backend, ког�
 сервиса включается в имя файла. Подробный контракт:
 [docs/order-json-snapshot-v1.md](docs/order-json-snapshot-v1.md).
 
+Stage note 2026-05-12: после frontend deploy кнопка выгрузки может получить
+HTTP 404 `Cannot GET /api/v1/orders/:id/snapshot`, если VPS backend container
+ещё не пересобран с новым контроллером. Лечение: rebuild/recreate только
+`backend`, затем применить `005_order_snapshot_import_mapping.sql` для import
+mapping и проверить authenticated single/batch export.
+
 Frontend runtime config для canary/rollback загружается до React bootstrap из
 `/runtime-config.json` или из `VITE_RUNTIME_CONFIG_URL`. Если файл отсутствует
 или невалиден, используются build-time `VITE_*` значения. Пример лежит в
