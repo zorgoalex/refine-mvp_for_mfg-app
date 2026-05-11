@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from "react";
+import type { Dayjs } from "dayjs";
 import {
   IResourceComponentsProps,
   useMany,
@@ -13,7 +14,7 @@ import {
   CreateButton,
   useSelect,
 } from "@refinedev/antd";
-import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox } from "antd";
+import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload } from "antd";
 import {
   EyeOutlined,
   EditOutlined,
@@ -23,6 +24,8 @@ import {
   FilterOutlined,
   ClearOutlined,
   CheckCircleOutlined,
+  DownloadOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 
@@ -50,6 +53,10 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [showResultCount, setShowResultCount] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
+  const [snapshotBatchOpen, setSnapshotBatchOpen] = useState(false);
+  const [snapshotBatchRange, setSnapshotBatchRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [snapshotBatchExporting, setSnapshotBatchExporting] = useState(false);
+  const [snapshotImporting, setSnapshotImporting] = useState(false);
 
   // Получаем текущего пользователя для фильтра "Мои заказы"
   const currentUser = authStorage.getUser();
@@ -416,6 +423,50 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     }
     setCurrent(1); // Сброс на первую страницу
   }, [currentUser?.id, filters, setFilters, setCurrent]);
+
+  const handleSnapshotBatchExport = async () => {
+    if (!snapshotBatchRange) {
+      message.warning("Выберите период создания заказов");
+      return;
+    }
+
+    const [from, to] = snapshotBatchRange;
+    setSnapshotBatchExporting(true);
+    try {
+      await ordersApi.downloadSnapshotBatch(from.format("YYYY-MM-DD"), to.format("YYYY-MM-DD"));
+      message.success("Пакетная выгрузка JSON snapshot создана");
+      setSnapshotBatchOpen(false);
+    } catch (error) {
+      message.error("Не удалось создать пакетную выгрузку");
+      console.error("Ошибка пакетной выгрузки snapshot:", error);
+    } finally {
+      setSnapshotBatchExporting(false);
+    }
+  };
+
+  const handleSnapshotImport = async (file: File) => {
+    setSnapshotImporting(true);
+    try {
+      const isZip = file.name.toLowerCase().endsWith(".zip");
+      if (isZip) {
+        const result = await ordersApi.importSnapshotBatchFile(file);
+        if (result.failed > 0) {
+          message.warning(`Импортировано: ${result.imported}, ошибок: ${result.failed}`);
+        } else {
+          message.success(`Импортировано заказов: ${result.imported}`);
+        }
+      } else {
+        const result = await ordersApi.importSnapshotFile(file);
+        message.success(`Заказ ${result.orderName}: ${result.status}`);
+      }
+      setCurrent(1);
+    } catch (error) {
+      message.error("Не удалось импортировать snapshot");
+      console.error("Ошибка импорта snapshot:", error);
+    } finally {
+      setSnapshotImporting(false);
+    }
+  };
 
   // Количество записей
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
@@ -799,9 +850,47 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             >
               Создать заказ
             </Button>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={() => setSnapshotBatchOpen(true)}
+            >
+              Выгрузка JSON
+            </Button>
+            <Upload
+              accept=".erp-order.json,.json,.erp-order-batch.zip,.zip,application/json,application/zip"
+              showUploadList={false}
+              beforeUpload={(file) => {
+                void handleSnapshotImport(file);
+                return false;
+              }}
+            >
+              <Button icon={<UploadOutlined />} loading={snapshotImporting}>
+                Загрузка JSON
+              </Button>
+            </Upload>
           </>
         )}
       >
+        <Modal
+          title="Пакетная выгрузка JSON snapshot"
+          open={snapshotBatchOpen}
+          onOk={handleSnapshotBatchExport}
+          confirmLoading={snapshotBatchExporting}
+          onCancel={() => setSnapshotBatchOpen(false)}
+          okText="Выгрузить"
+          cancelText="Отмена"
+        >
+          <Form layout="vertical">
+            <Form.Item label="Период создания заказов">
+              <RangePicker
+                style={{ width: "100%" }}
+                format="DD.MM.YYYY"
+                value={snapshotBatchRange}
+                onChange={(value) => setSnapshotBatchRange(value as [Dayjs, Dayjs] | null)}
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
         {filtersVisible && (
           <Card style={{ marginBottom: 16 }}>
             <Form form={form} layout="vertical" onFinish={handleFilter}>

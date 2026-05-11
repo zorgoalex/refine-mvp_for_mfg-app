@@ -87,6 +87,34 @@ async function request<T>(
   return body as T;
 }
 
+async function download(
+  path: string,
+  options: RequestOptions = {},
+  retryOnUnauthorized = true,
+): Promise<{ blob: Blob; fileName: string | null }> {
+  const response = await fetch(buildApiUrl(path), buildRequestInit({ ...options, method: options.method ?? 'GET' }));
+
+  if (response.status === 401 && retryOnUnauthorized && !options.skipAuthRefresh) {
+    const newAccessToken = await refreshAccessToken();
+
+    if (newAccessToken) {
+      return download(path, options, false);
+    }
+
+    authSession.clear();
+  }
+
+  if (!response.ok) {
+    const body = (await readJsonBody(response)) as BackendErrorBody | null;
+    throw createApiErrorFromBody(response.status, response.statusText, body);
+  }
+
+  return {
+    blob: await response.blob(),
+    fileName: parseContentDispositionFileName(response.headers.get('Content-Disposition')),
+  };
+}
+
 function buildRequestInit(options: RequestOptions): RequestInit {
   const { skipAuthRefresh: _skipAuthRefresh, ...requestOptions } = options;
   const headers = new Headers(requestOptions.headers);
@@ -148,6 +176,7 @@ function trimTrailingSlash(value: string): string {
 
 export const httpClient = {
   request,
+  download,
 
   get: <T>(path: string, options?: RequestOptions) =>
     request<T>(path, { ...options, method: 'GET' }),
@@ -178,3 +207,19 @@ export const httpClient = {
 };
 
 export { ApiError };
+
+function parseContentDispositionFileName(value: string | null): string | null {
+  if (!value) return null;
+
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+
+  const asciiMatch = /filename="([^"]+)"/i.exec(value);
+  return asciiMatch?.[1] ?? null;
+}

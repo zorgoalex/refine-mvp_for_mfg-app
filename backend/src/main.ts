@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { ApiErrorFilter } from './common/errors/api-error.filter';
 import { createRequestIdMiddleware } from './common/request-id/request-id.middleware';
@@ -11,13 +12,15 @@ import type { BackendEnv } from './config/env.validation';
 import { setupSwagger } from './config/swagger';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, bodyParser: false });
   const config = app.get(ConfigService<BackendEnv, true>);
   const cors = createCorsRuntimeOptions({
     CORS_ALLOWED_ORIGINS: config.get('CORS_ALLOWED_ORIGINS', { infer: true }),
     CORS_ALLOW_CREDENTIALS: config.get('CORS_ALLOW_CREDENTIALS', { infer: true }),
   });
 
+  app.use(json({ limit: '50mb' }));
+  app.use(urlencoded({ limit: '50mb', extended: true }));
   app.use(createRequestIdMiddleware(config.get('REQUEST_ID_HEADER', { infer: true })));
   app.useGlobalFilters(new ApiErrorFilter());
   app.setGlobalPrefix(toNestGlobalPrefix(config.get('API_PREFIX', { infer: true })), {

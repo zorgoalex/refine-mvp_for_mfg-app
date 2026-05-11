@@ -89,6 +89,37 @@ export interface ExportOrderResponse {
   externalId?: string | null;
 }
 
+export interface ImportOrderSnapshotResponse {
+  success: true;
+  status: 'created' | 'updated' | 'noop';
+  orderId: number;
+  orderName: string;
+  payloadHash: string;
+  importRunId: string | null;
+  summary: {
+    details: number;
+    payments: number;
+    workshops: number;
+    requirements: number;
+    dowelingLinks: number;
+    productionStatusEvents: number;
+    clientPhones: number;
+    deadlineInstances: number;
+    deadlineEvents: number;
+  };
+}
+
+export interface ImportOrderSnapshotBatchResponse {
+  success: true;
+  total: number;
+  imported: number;
+  failed: number;
+  results: Array<
+    | ({ fileName: string } & ImportOrderSnapshotResponse)
+    | { fileName: string; success: false; errorCode: string; message: string }
+  >;
+}
+
 export interface SaveOrderHeaderDto {
   orderName: string;
   clientId: number;

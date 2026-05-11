@@ -23,6 +23,10 @@ export const apiRoutes = {
       backendApiPath(`/orders/${orderId}/production-stage-events/${productionStatusId}`),
     exportGoogleDrive: (orderId: number) =>
       backendApiPath(`/orders/${orderId}/export/google-drive`),
+    snapshot: (orderId: number) => backendApiPath(`/orders/${orderId}/snapshot`),
+    snapshotBatch: backendApiPath('/orders/snapshot/batch'),
+    importSnapshot: backendApiPath('/orders/snapshot/import'),
+    importSnapshotBatch: backendApiPath('/orders/snapshot/import-batch'),
     deadlines: (orderId: number) => backendApiPath(`/orders/${orderId}/deadlines`),
     deadlineEvents: (orderId: number) => backendApiPath(`/orders/${orderId}/deadline-events`),
     deadlineSummary: (orderId: number) => backendApiPath(`/orders/${orderId}/deadline-summary`),

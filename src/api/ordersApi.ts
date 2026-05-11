@@ -3,6 +3,8 @@ import { httpClient } from './httpClient';
 import type {
   ChangeOrderStatusRequest,
   DeleteOrderResponse,
+  ImportOrderSnapshotBatchResponse,
+  ImportOrderSnapshotResponse,
   OrderDto,
   OrderListQuery,
   OrderListResponse,
@@ -49,6 +51,35 @@ export const ordersApi = {
       apiRoutes.orders.byId(validateOrderId(orderId)),
     );
   },
+
+  async downloadSnapshot(orderId: number): Promise<void> {
+    const response = await httpClient.download(apiRoutes.orders.snapshot(validateOrderId(orderId)));
+    saveBlob(response.blob, response.fileName ?? `order-${orderId}-snapshot.erp-order.json`);
+  },
+
+  async downloadSnapshotBatch(dateFrom: string, dateTo: string): Promise<void> {
+    const response = await httpClient.download(
+      withQuery(apiRoutes.orders.snapshotBatch, { dateFrom, dateTo }),
+    );
+    saveBlob(response.blob, response.fileName ?? `orders-${dateFrom}-${dateTo}.erp-order-batch.zip`);
+  },
+
+  async importSnapshotFile(file: File): Promise<ImportOrderSnapshotResponse> {
+    const snapshot = JSON.parse(await file.text());
+    return httpClient.post<ImportOrderSnapshotResponse>(apiRoutes.orders.importSnapshot, {
+      snapshot,
+    });
+  },
+
+  async importSnapshotBatchFile(file: File): Promise<ImportOrderSnapshotBatchResponse> {
+    return httpClient.post<ImportOrderSnapshotBatchResponse>(
+      apiRoutes.orders.importSnapshotBatch,
+      {
+        fileName: file.name,
+        zipBase64: await fileToBase64(file),
+      },
+    );
+  },
 };
 
 export function withQuery(path: string, params: Record<string, unknown>): string {
@@ -69,4 +100,28 @@ export function validateOrderId(orderId: number): number {
   }
 
   return orderId;
+}
+
+function saveBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+
+  return btoa(binary);
 }

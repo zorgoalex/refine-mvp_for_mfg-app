@@ -45,6 +45,7 @@ export const PERMISSIONS = [
   'orders.change_status',
   'orders.change_production_status',
   'orders.export',
+  'orders.import',
   'orders.view_financials',
   'orders.view_audit',
 
@@ -161,6 +162,7 @@ export const ROLE_PERMISSIONS = {
     'orders.change_status',
     'orders.change_production_status',
     'orders.export',
+    'orders.import',
     'orders.view_financials',
     'orders.view_audit',
 
@@ -228,6 +230,7 @@ export const ROLE_PERMISSIONS = {
     'orders.change_status',
     'orders.change_production_status',
     'orders.export',
+    'orders.import',
     'orders.view_financials',
 
     'payments.view',
@@ -282,6 +285,7 @@ export const ROLE_PERMISSIONS = {
     'orders.change_status',
     'orders.change_production_status',
     'orders.export',
+    'orders.import',
 
     'clients.view',
     'clients.create',

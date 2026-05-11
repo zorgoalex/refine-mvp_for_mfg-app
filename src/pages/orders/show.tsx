@@ -1,7 +1,7 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Collapse, Table, Breadcrumb, message } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined } from "@ant-design/icons";
 import { useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useNavigate } from "react-router-dom";
@@ -19,6 +19,7 @@ import { featureFlags } from "../../config/featureFlags";
 import { shouldShowOrderLoading } from "./utils/orderShowLoading";
 import { getDowelingOrderShowPath } from "./utils/dowelingOrderPaths";
 import { resolveOrderExportClientName, toOrderExportClient } from "./utils/orderExportClient";
+import { ordersApi } from "../../api/ordersApi";
 
 const { Panel } = Collapse;
 
@@ -192,6 +193,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   // Состояние для экспорта
   const [isExporting, setIsExporting] = useState(false);
+  const [isSnapshotExporting, setIsSnapshotExporting] = useState(false);
 
   // Hook for updating order
   const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
@@ -377,6 +379,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }
   };
 
+  const handleExportSnapshot = async () => {
+    if (!record?.order_id) return;
+
+    setIsSnapshotExporting(true);
+    try {
+      await ordersApi.downloadSnapshot(record.order_id);
+      message.success('JSON snapshot заказа выгружен');
+    } catch (error) {
+      message.error('Не удалось выгрузить JSON snapshot');
+      console.error('Ошибка snapshot export:', error);
+    } finally {
+      setIsSnapshotExporting(false);
+    }
+  };
+
   return (
     <Show
       isLoading={showLoading}
@@ -419,6 +436,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             disabled={!record || details.length === 0 || isClientResolving}
           >
             Экспорт в Excel
+          </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={handleExportSnapshot}
+            loading={isSnapshotExporting}
+            disabled={!record}
+          >
+            JSON snapshot
           </Button>
         </>
       )}

@@ -14,6 +14,7 @@ export type PermissionName =
   | 'orders.update'
   | 'orders.delete'
   | 'orders.export'
+  | 'orders.import'
   | 'orders.change_status'
   | 'payments.view'
   | 'payments.create'
