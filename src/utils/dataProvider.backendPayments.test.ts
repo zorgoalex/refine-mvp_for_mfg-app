@@ -17,6 +17,8 @@ describe('dataProvider backend payments mutation routing', () => {
         useBackendOrdersRead: false,
         useBackendOrdersWrite: false,
         useBackendPayments: true,
+        useBackendClientPhones: false,
+        useBackendProductionActions: false,
         useBackendOrderExport: false,
         useBackendUsers: false,
         useBackendVlm: false,

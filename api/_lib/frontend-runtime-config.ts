@@ -6,6 +6,7 @@ export interface FrontendRuntimeConfigResponse {
     backendOrdersRead: boolean;
     backendOrdersWrite: boolean;
     backendPayments: boolean;
+    backendClientPhones: boolean;
     backendProductionActions: boolean;
     backendOrderExport: boolean;
     backendUsers: boolean;
@@ -23,6 +24,13 @@ export function buildFrontendRuntimeConfig(
   env: EnvSource = process.env,
 ): FrontendRuntimeConfigResponse {
   const backendOrders = readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDERS, false);
+  const backendProductionActions = readBooleanEnv(
+    env.RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS,
+    false,
+  );
+  const backendClientPhones =
+    readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_CLIENT_PHONES, false) &&
+    backendProductionActions;
 
   return {
     apiUrl: normalizeApiUrl(env.RUNTIME_CONFIG_API_URL),
@@ -32,10 +40,8 @@ export function buildFrontendRuntimeConfig(
       backendOrdersRead: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDERS_READ, backendOrders),
       backendOrdersWrite: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDERS_WRITE, backendOrders),
       backendPayments: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_PAYMENTS, false),
-      backendProductionActions: readBooleanEnv(
-        env.RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS,
-        false,
-      ),
+      backendClientPhones,
+      backendProductionActions,
       backendOrderExport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDER_EXPORT, false),
       backendUsers: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_USERS, false),
       backendVlm: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_VLM, false),

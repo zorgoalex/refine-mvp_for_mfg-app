@@ -100,6 +100,7 @@ const envSchema = z
     BACKEND_ENABLE_AUTH: booleanFromEnv.default(false),
     BACKEND_ENABLE_ORDERS: booleanFromEnv.default(false),
     BACKEND_ENABLE_PAYMENTS: booleanFromEnv.default(false),
+    BACKEND_ENABLE_CLIENT_PHONES: booleanFromEnv.default(false),
     BACKEND_ENABLE_PRODUCTION_ACTIONS: booleanFromEnv.default(false),
     BACKEND_ENABLE_ORDER_EXPORT: booleanFromEnv.default(false),
     BACKEND_ENABLE_USERS: booleanFromEnv.default(false),
@@ -208,6 +209,22 @@ const envSchema = z
         code: 'custom',
         message: 'DATABASE_URL is required when BACKEND_ENABLE_PAYMENTS is true',
         path: ['DATABASE_URL'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_CLIENT_PHONES && !env.DATABASE_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'DATABASE_URL is required when BACKEND_ENABLE_CLIENT_PHONES is true',
+        path: ['DATABASE_URL'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_CLIENT_PHONES && !env.BACKEND_ENABLE_PRODUCTION_ACTIONS) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'BACKEND_ENABLE_PRODUCTION_ACTIONS=true is required when BACKEND_ENABLE_CLIENT_PHONES is true',
+        path: ['BACKEND_ENABLE_PRODUCTION_ACTIONS'],
       });
     }
 

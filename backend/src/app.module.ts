@@ -5,6 +5,7 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DeadlinesModule } from './modules/deadlines/deadlines.module';
 import { HealthModule } from './modules/health/health.module';
+import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProductionActionsModule } from './modules/production-actions/production-actions.module';
@@ -20,6 +21,7 @@ import { PermissionsModule } from './permissions/permissions.module';
     }),
     DatabaseModule,
     AuthModule,
+    ClientPhonesModule,
     DeadlinesModule,
     HealthModule,
     OrdersModule,

@@ -31,6 +31,10 @@ export const apiRoutes = {
     list: backendApiPath('/payments'),
     byId: (paymentId: number) => backendApiPath(`/payments/${paymentId}`),
   },
+  clientPhones: {
+    list: backendApiPath('/client-phones'),
+    byId: (phoneId: number) => backendApiPath(`/client-phones/${phoneId}`),
+  },
   deadlines: {
     list: backendApiPath('/deadlines'),
     byId: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}`),

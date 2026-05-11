@@ -7,6 +7,7 @@ const FEATURE_KEYS = [
   'backendOrdersRead',
   'backendOrdersWrite',
   'backendPayments',
+  'backendClientPhones',
   'backendProductionActions',
   'backendOrderExport',
   'backendUsers',
@@ -85,6 +86,21 @@ const STAGED_CANARY_FILES = [
       'backendOrdersRead',
       'backendOrdersWrite',
       'backendPayments',
+      'backendProductionActions',
+      'backendOrderExport',
+      'backendUsers',
+      'backendVlm',
+    ],
+  },
+  {
+    file: '10-client-phones.json',
+    enabled: [
+      'backendAuth',
+      'backendPermissions',
+      'backendOrdersRead',
+      'backendOrdersWrite',
+      'backendPayments',
+      'backendClientPhones',
       'backendProductionActions',
       'backendOrderExport',
       'backendUsers',
@@ -184,6 +200,10 @@ function validateFeatureDependencies(features, label) {
 
   if (features.backendProductionActions === true && features.backendPayments !== true) {
     errors.push(`${label}: backendProductionActions requires backendPayments`);
+  }
+
+  if (features.backendClientPhones === true && features.backendProductionActions !== true) {
+    errors.push(`${label}: backendClientPhones requires backendProductionActions`);
   }
 
   if (features.backendOrderExport === true && features.backendOrdersRead !== true) {

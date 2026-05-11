@@ -251,6 +251,33 @@ describe('backend env validation', () => {
     });
   });
 
+  it('requires DB when backend client phones are enabled', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_CLIENT_PHONES: 'true',
+        BACKEND_ENABLE_PRODUCTION_ACTIONS: 'true',
+      }),
+    ).toThrow(/DATABASE_URL is required when BACKEND_ENABLE_CLIENT_PHONES is true/);
+
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_CLIENT_PHONES: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      }),
+    ).toThrow(/BACKEND_ENABLE_PRODUCTION_ACTIONS=true is required/);
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_CLIENT_PHONES: 'true',
+        BACKEND_ENABLE_PRODUCTION_ACTIONS: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_CLIENT_PHONES: true,
+      BACKEND_ENABLE_PRODUCTION_ACTIONS: true,
+    });
+  });
+
   it('requires DB when backend production actions are enabled', () => {
     expect(() =>
       validateEnv({

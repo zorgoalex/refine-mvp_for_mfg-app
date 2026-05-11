@@ -3,11 +3,13 @@
 
 import { authStorage, isTokenExpired, refreshAccessToken } from './auth';
 import { logGraphQLError } from './notificationLogger';
+import { clientPhonesApi } from '../api/clientPhonesApi';
 import { ordersApi } from '../api/ordersApi';
 import { paymentsApi } from '../api/paymentsApi';
 import { usersApi } from '../api/usersApi';
 import { mapOrderDtoToFormValues, mapOrderListItemToLegacyRow } from '../api/mappers/orderMapper';
 import type { OrderListQuery, OrderSortBy, SortOrder } from '../api/types/orderApi.types';
+import type { ClientPhoneDto } from '../api/types/clientPhoneApi.types';
 import type { PaymentDto } from '../api/types/paymentApi.types';
 import type { UserDto, UserListQuery } from '../api/types/userApi.types';
 import type { UserRole } from '../api/types/authApi.types';
@@ -1259,6 +1261,40 @@ async function createBackendPaymentIfEnabled(resource: string, variables?: AnyOb
   return { data: mapBackendPaymentToLegacyRow(payment) };
 }
 
+async function createBackendClientPhoneIfEnabled(resource: string, variables?: AnyObject) {
+  if (!shouldUseBackendClientPhoneMutation(resource)) {
+    return null;
+  }
+
+  const phone = await clientPhonesApi.create(mapLegacyClientPhoneCreateVariablesToBackend(variables));
+  return { data: mapBackendClientPhoneToLegacyRow(phone) };
+}
+
+async function updateBackendClientPhoneIfEnabled(
+  resource: string,
+  id: number | string,
+  variables?: AnyObject,
+) {
+  if (!shouldUseBackendClientPhoneMutation(resource)) {
+    return null;
+  }
+
+  const phone = await clientPhonesApi.update(
+    Number(id),
+    mapLegacyClientPhoneUpdateVariablesToBackend(variables),
+  );
+  return { data: mapBackendClientPhoneToLegacyRow(phone) };
+}
+
+async function deleteBackendClientPhoneIfEnabled(resource: string, id: number | string) {
+  if (!shouldUseBackendClientPhoneMutation(resource)) {
+    return null;
+  }
+
+  const response = await clientPhonesApi.delete(Number(id));
+  return { data: { phone_id: response.phoneId } };
+}
+
 async function updateBackendPaymentIfEnabled(
   resource: string,
   id: number | string,
@@ -1290,6 +1326,10 @@ function shouldUseBackendPaymentMutation(resource: string, meta?: AnyObject): bo
   );
 }
 
+function shouldUseBackendClientPhoneMutation(resource: string): boolean {
+  return featureFlags.useBackendClientPhones && resource === 'client_phones';
+}
+
 function mapBackendUserToLegacyRow(user: UserDto): AnyObject {
   return {
     id: user.id,
@@ -1317,6 +1357,53 @@ function mapLegacyPaymentCreateVariablesToBackend(variables: AnyObject = {}) {
     paymentDate: normalizePaymentDate(variables.payment_date),
     notes: normalizeNullableString(variables.notes),
     refKey1c: normalizeNullableString(variables.ref_key_1c),
+  };
+}
+
+function mapLegacyClientPhoneCreateVariablesToBackend(variables: AnyObject = {}) {
+  return {
+    clientId: Number(variables.client_id),
+    phoneNumber: String(variables.phone_number ?? '').trim(),
+    phoneType: variables.phone_type ?? 'mobile',
+    isPrimary: variables.is_primary === true,
+    refKey1c: normalizeNullableString(variables.ref_key_1c),
+  };
+}
+
+function mapLegacyClientPhoneUpdateVariablesToBackend(variables: AnyObject = {}) {
+  const dto: AnyObject = {};
+
+  if (Object.prototype.hasOwnProperty.call(variables, 'client_id')) {
+    dto.clientId = Number(variables.client_id);
+  }
+  if (Object.prototype.hasOwnProperty.call(variables, 'phone_number')) {
+    dto.phoneNumber = String(variables.phone_number ?? '').trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(variables, 'phone_type')) {
+    dto.phoneType = variables.phone_type;
+  }
+  if (Object.prototype.hasOwnProperty.call(variables, 'is_primary')) {
+    dto.isPrimary = variables.is_primary === true;
+  }
+  if (Object.prototype.hasOwnProperty.call(variables, 'ref_key_1c')) {
+    dto.refKey1c = normalizeNullableString(variables.ref_key_1c);
+  }
+
+  return dto;
+}
+
+function mapBackendClientPhoneToLegacyRow(phone: ClientPhoneDto): AnyObject {
+  return {
+    phone_id: phone.phoneId,
+    client_id: phone.clientId,
+    phone_number: phone.phoneNumber,
+    phone_type: phone.phoneType,
+    is_primary: phone.isPrimary,
+    ref_key_1c: phone.refKey1c,
+    created_by: phone.createdBy,
+    edited_by: phone.editedBy,
+    created_at: phone.createdAt,
+    updated_at: phone.updatedAt,
   };
 }
 
@@ -1508,6 +1595,11 @@ export const dataProvider = (_apiUrl: string) => {
         return backendPayment;
       }
 
+      const backendClientPhone = await createBackendClientPhoneIfEnabled(resource, variables);
+      if (backendClientPhone) {
+        return backendClientPhone;
+      }
+
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
@@ -1579,6 +1671,11 @@ export const dataProvider = (_apiUrl: string) => {
         return backendPayment;
       }
 
+      const backendClientPhone = await updateBackendClientPhoneIfEnabled(resource, id, variables);
+      if (backendClientPhone) {
+        return backendClientPhone;
+      }
+
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
@@ -1610,6 +1707,11 @@ export const dataProvider = (_apiUrl: string) => {
       const backendPayment = await deleteBackendPaymentIfEnabled(resource, id, meta);
       if (backendPayment) {
         return backendPayment;
+      }
+
+      const backendClientPhone = await deleteBackendClientPhoneIfEnabled(resource, id);
+      if (backendClientPhone) {
+        return backendClientPhone;
       }
 
       if (resource === "orders_view") {

@@ -1,4 +1,4 @@
-import { Edit } from "@refinedev/antd";
+import { Edit, useForm } from "@refinedev/antd";
 import {
   IResourceComponentsProps,
   useList,
@@ -7,21 +7,21 @@ import {
   useDelete,
 } from "@refinedev/core";
 import { Form, Input, Checkbox, notification, Spin } from "antd";
-import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 import { ClientPhonesSection } from "./components/ClientPhonesSection";
 import { ClientPhone } from "../../types/clients";
 import { useState, useEffect, useCallback } from "react";
 
 export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps, id } = useFormWithHighlight({
+  const { formProps, saveButtonProps, id } = useForm({
     resource: "clients",
-    idField: "client_id",
     action: "edit",
+    redirect: false,
   });
 
   const [phones, setPhones] = useState<ClientPhone[]>([]);
   const [deletedPhones, setDeletedPhones] = useState<number[]>([]);
   const [phonesLoaded, setPhonesLoaded] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Fetch client phones
   const { data: phonesData, isLoading: phonesLoading, refetch: refetchPhones } = useList<ClientPhone>({
@@ -54,69 +54,72 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
 
   // Mutations for phones
   const { mutateAsync: createPhone } = useCreate();
+  const { mutateAsync: updateClient } = useUpdate();
   const { mutateAsync: updatePhone } = useUpdate();
   const { mutateAsync: deletePhone } = useDelete();
 
   // Save phones (called after main form save)
   const savePhones = useCallback(async (clientId: number) => {
-    try {
-      // Delete removed phones
-      for (const phoneId of deletedPhones) {
-        await deletePhone({
-          resource: "client_phones",
-          id: phoneId,
-          meta: { idColumnName: "phone_id" },
-        });
-      }
-
-      // Create or update phones
-      for (const phone of phones) {
-        const phonePayload = {
-          client_id: clientId,
-          phone_number: phone.phone_number,
-          phone_type: phone.phone_type,
-          is_primary: phone.is_primary,
-        };
-
-        if (phone.phone_id) {
-          // Update existing
-          await updatePhone({
-            resource: "client_phones",
-            id: phone.phone_id,
-            values: phonePayload,
-            meta: { idColumnName: "phone_id" },
-          });
-        } else {
-          // Create new
-          await createPhone({
-            resource: "client_phones",
-            values: phonePayload,
-          });
-        }
-      }
-
-      // Reset deleted list
-      setDeletedPhones([]);
-
-      // Refetch phones
-      refetchPhones();
-    } catch (error: any) {
-      notification.error({
-        message: "Ошибка сохранения телефонов",
-        description: error?.message || "Неизвестная ошибка",
+    for (const phoneId of deletedPhones) {
+      await deletePhone({
+        resource: "client_phones",
+        id: phoneId,
+        meta: { idColumnName: "phone_id" },
       });
     }
+
+    for (const phone of phones) {
+      const phonePayload = {
+        client_id: clientId,
+        phone_number: phone.phone_number,
+        phone_type: phone.phone_type,
+        is_primary: phone.is_primary,
+        ref_key_1c: phone.ref_key_1c ?? null,
+      };
+
+      if (phone.phone_id) {
+        await updatePhone({
+          resource: "client_phones",
+          id: phone.phone_id,
+          values: phonePayload,
+          meta: { idColumnName: "phone_id" },
+        });
+      } else {
+        await createPhone({
+          resource: "client_phones",
+          values: phonePayload,
+        });
+      }
+    }
+
+    setDeletedPhones([]);
+    await refetchPhones();
   }, [phones, deletedPhones, createPhone, updatePhone, deletePhone, refetchPhones]);
 
-  // Override save button to save phones too
-  const handleSave = async () => {
-    if (saveButtonProps.onClick) {
-      // Wait for form save
-      await (saveButtonProps.onClick as any)();
-    }
-    // Save phones after client is saved
-    if (id) {
+  const handleFinish = async (values: any) => {
+    if (!id) return;
+
+    setIsSaving(true);
+    try {
+      await updateClient({
+        resource: "clients",
+        id,
+        values,
+        meta: { idColumnName: "client_id" },
+        successNotification: false,
+      });
       await savePhones(Number(id));
+      notification.success({
+        message: "Клиент сохранён",
+      });
+      window.location.href = `${window.location.origin}/clients/show/${id}`;
+    } catch (error: any) {
+      notification.error({
+        message: "Ошибка сохранения клиента или телефонов",
+        description: error?.message || "Неизвестная ошибка",
+      });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -124,10 +127,11 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
     <Edit
       saveButtonProps={{
         ...saveButtonProps,
-        onClick: handleSave,
+        loading: isSaving || saveButtonProps.loading,
+        disabled: isSaving || saveButtonProps.disabled,
       }}
     >
-      <Form {...formProps} layout="vertical">
+      <Form {...formProps} layout="vertical" onFinish={handleFinish}>
         <Form.Item
           label="Название клиента"
           name="client_name"
@@ -165,4 +169,3 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
     </Edit>
   );
 };
-

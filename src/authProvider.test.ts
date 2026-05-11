@@ -14,6 +14,8 @@ describe('authProvider backend cutover mode', () => {
         useBackendOrdersRead: false,
         useBackendOrdersWrite: false,
         useBackendPayments: false,
+        useBackendClientPhones: false,
+        useBackendProductionActions: false,
         useBackendOrderExport: false,
         useBackendUsers: false,
         useBackendVlm: false,

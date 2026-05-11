@@ -16,6 +16,7 @@ describe('featureFlags', () => {
       useBackendOrdersRead: false,
       useBackendOrdersWrite: false,
       useBackendPayments: false,
+      useBackendClientPhones: false,
       useBackendProductionActions: false,
       useBackendOrderExport: false,
       useBackendUsers: false,
@@ -59,6 +60,7 @@ describe('featureFlags', () => {
           VITE_USE_BACKEND_ORDERS_READ: 'true',
           VITE_USE_BACKEND_ORDERS_WRITE: 'true',
           VITE_USE_BACKEND_PAYMENTS: 'false',
+          VITE_USE_BACKEND_CLIENT_PHONES: 'false',
           VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'false',
           VITE_USE_BACKEND_VLM: 'true',
         },
@@ -66,6 +68,7 @@ describe('featureFlags', () => {
           backendAuth: true,
           backendOrdersWrite: false,
           backendPayments: true,
+          backendClientPhones: true,
           backendProductionActions: true,
         },
       ),
@@ -74,6 +77,7 @@ describe('featureFlags', () => {
       useBackendOrdersRead: true,
       useBackendOrdersWrite: false,
       useBackendPayments: true,
+      useBackendClientPhones: true,
       useBackendProductionActions: true,
       useBackendVlm: true,
     });
@@ -90,6 +94,38 @@ describe('featureFlags', () => {
     ).toMatchObject({
       useBackendOrdersRead: true,
       useBackendOrdersWrite: true,
+    });
+  });
+
+  it('fails closed for backend client phones until production actions are enabled', () => {
+    expect(
+      getFeatureFlags({
+        VITE_USE_BACKEND_CLIENT_PHONES: 'true',
+        VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'false',
+      }),
+    ).toMatchObject({
+      useBackendClientPhones: false,
+      useBackendProductionActions: false,
+    });
+
+    expect(
+      getFeatureFlags(
+        { VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'false' },
+        { backendClientPhones: true },
+      ),
+    ).toMatchObject({
+      useBackendClientPhones: false,
+      useBackendProductionActions: false,
+    });
+
+    expect(
+      getFeatureFlags(
+        { VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'true' },
+        { backendClientPhones: true },
+      ),
+    ).toMatchObject({
+      useBackendClientPhones: true,
+      useBackendProductionActions: true,
     });
   });
 

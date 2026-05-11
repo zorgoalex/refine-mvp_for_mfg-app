@@ -11,6 +11,7 @@ describe('frontend runtime config delivery', () => {
         backendOrdersRead: false,
         backendOrdersWrite: false,
         backendPayments: false,
+        backendClientPhones: false,
         backendProductionActions: false,
         backendOrderExport: false,
         backendUsers: false,
@@ -29,6 +30,7 @@ describe('frontend runtime config delivery', () => {
         RUNTIME_CONFIG_BACKEND_ORDERS_READ: 'yes',
         RUNTIME_CONFIG_BACKEND_ORDERS_WRITE: 'on',
         RUNTIME_CONFIG_BACKEND_PAYMENTS: 'true',
+        RUNTIME_CONFIG_BACKEND_CLIENT_PHONES: 'true',
         RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS: 'true',
         RUNTIME_CONFIG_BACKEND_ORDER_EXPORT: 'true',
         RUNTIME_CONFIG_BACKEND_USERS: 'true',
@@ -44,6 +46,7 @@ describe('frontend runtime config delivery', () => {
         backendOrdersRead: true,
         backendOrdersWrite: true,
         backendPayments: true,
+        backendClientPhones: true,
         backendProductionActions: true,
         backendOrderExport: true,
         backendUsers: true,
@@ -62,6 +65,28 @@ describe('frontend runtime config delivery', () => {
     ).toMatchObject({
       backendOrdersRead: true,
       backendOrdersWrite: false,
+    });
+  });
+
+  it('fails closed for backend client phones until production actions are enabled', () => {
+    expect(
+      buildFrontendRuntimeConfig({
+        RUNTIME_CONFIG_BACKEND_CLIENT_PHONES: 'true',
+        RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS: 'false',
+      }).features,
+    ).toMatchObject({
+      backendClientPhones: false,
+      backendProductionActions: false,
+    });
+
+    expect(
+      buildFrontendRuntimeConfig({
+        RUNTIME_CONFIG_BACKEND_CLIENT_PHONES: 'true',
+        RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS: 'true',
+      }).features,
+    ).toMatchObject({
+      backendClientPhones: true,
+      backendProductionActions: true,
     });
   });
 

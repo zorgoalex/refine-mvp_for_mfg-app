@@ -4,6 +4,7 @@ export interface FrontendFeatureFlags {
   useBackendOrdersRead: boolean;
   useBackendOrdersWrite: boolean;
   useBackendPayments: boolean;
+  useBackendClientPhones: boolean;
   useBackendProductionActions: boolean;
   useBackendOrderExport: boolean;
   useBackendUsers: boolean;
@@ -20,6 +21,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendOrdersRead: string | boolean;
   backendOrdersWrite: string | boolean;
   backendPayments: string | boolean;
+  backendClientPhones: string | boolean;
   backendProductionActions: string | boolean;
   backendOrderExport: string | boolean;
   backendUsers: string | boolean;
@@ -46,6 +48,7 @@ export function getFeatureFlags(
       legacyOrdersFlag,
     ),
     useBackendPayments: readBooleanFlag(env.VITE_USE_BACKEND_PAYMENTS, false),
+    useBackendClientPhones: readBooleanFlag(env.VITE_USE_BACKEND_CLIENT_PHONES, false),
     useBackendProductionActions: readBooleanFlag(
       env.VITE_USE_BACKEND_PRODUCTION_ACTIONS,
       false,
@@ -66,7 +69,7 @@ export function mergeRuntimeFeatureFlags(
 ): FrontendFeatureFlags {
   const runtimeOrdersFlag = readOptionalBooleanFlag(runtimeFeatures.backendOrders);
 
-  return {
+  return enforceFrontendFeatureDependencies({
     useBackendAuth: readOptionalBooleanFlag(runtimeFeatures.backendAuth) ?? fallback.useBackendAuth,
     useBackendPermissions:
       readOptionalBooleanFlag(runtimeFeatures.backendPermissions) ?? fallback.useBackendPermissions,
@@ -80,6 +83,9 @@ export function mergeRuntimeFeatureFlags(
       fallback.useBackendOrdersWrite,
     useBackendPayments:
       readOptionalBooleanFlag(runtimeFeatures.backendPayments) ?? fallback.useBackendPayments,
+    useBackendClientPhones:
+      readOptionalBooleanFlag(runtimeFeatures.backendClientPhones) ??
+      fallback.useBackendClientPhones,
     useBackendProductionActions:
       readOptionalBooleanFlag(runtimeFeatures.backendProductionActions) ??
       fallback.useBackendProductionActions,
@@ -93,6 +99,14 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.enableLegacyHasura) ??
       readOptionalBooleanFlag(runtimeFeatures.legacyHasura) ??
       fallback.enableLegacyHasura,
+  });
+}
+
+function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): FrontendFeatureFlags {
+  return {
+    ...flags,
+    useBackendClientPhones:
+      flags.useBackendClientPhones && flags.useBackendProductionActions,
   };
 }
 

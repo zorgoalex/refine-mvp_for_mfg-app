@@ -6,6 +6,7 @@
     "backendOrdersRead": false,
     "backendOrdersWrite": false,
     "backendPayments": false,
+    "backendClientPhones": false,
     "backendProductionActions": false,
     "backendOrderExport": false,
     "backendUsers": false,

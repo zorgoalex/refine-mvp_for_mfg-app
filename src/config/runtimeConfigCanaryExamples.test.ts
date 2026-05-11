@@ -11,6 +11,7 @@ const featureKeys = [
   'backendOrdersRead',
   'backendOrdersWrite',
   'backendPayments',
+  'backendClientPhones',
   'backendProductionActions',
   'backendOrderExport',
   'backendUsers',
@@ -45,6 +46,7 @@ describe('runtime config canary examples', () => {
       '07-vlm.json',
       '08-payments.json',
       '09-production-actions.json',
+      '10-client-phones.json',
       '99-rollback-all-off.json',
     ]);
 

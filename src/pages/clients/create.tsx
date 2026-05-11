@@ -9,18 +9,29 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
   const { list } = useNavigation();
   const [phones, setPhones] = useState<ClientPhone[]>([]);
 
-  const { formProps, saveButtonProps, form } = useForm({
+  const { formProps, saveButtonProps } = useForm({
     resource: "clients",
     action: "create",
     redirect: false,
+    successNotification: false,
     onMutationSuccess: async (data) => {
       const clientId = data?.data?.client_id;
-      if (clientId && phones.length > 0) {
-        // Save phones after client is created
-        await savePhones(clientId);
+      try {
+        if (clientId && phones.length > 0) {
+          await savePhones(clientId);
+        }
+        notification.success({
+          message: "Клиент создан",
+        });
+        list("clients");
+      } catch (error: any) {
+        notification.error({
+          message: "Клиент создан, но телефоны не сохранены",
+          description:
+            error?.message ||
+            `Клиент #${clientId} создан. Исправьте телефон и повторите сохранение в карточке клиента.`,
+        });
       }
-      // Navigate to list
-      list("clients");
     },
   });
 
@@ -29,22 +40,17 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
 
   // Save phones after client is created
   const savePhones = async (clientId: number) => {
-    try {
-      for (const phone of phones) {
-        await createPhone({
-          resource: "client_phones",
-          values: {
-            client_id: clientId,
-            phone_number: phone.phone_number,
-            phone_type: phone.phone_type,
-            is_primary: phone.is_primary,
-          },
-        });
-      }
-    } catch (error: any) {
-      notification.error({
-        message: "Ошибка сохранения телефонов",
-        description: error?.message || "Неизвестная ошибка",
+    for (const phone of phones) {
+      await createPhone({
+        resource: "client_phones",
+        values: {
+          client_id: clientId,
+          phone_number: phone.phone_number,
+          phone_type: phone.phone_type,
+          is_primary: phone.is_primary,
+          ref_key_1c: phone.ref_key_1c ?? null,
+        },
+        successNotification: false,
       });
     }
   };
@@ -87,4 +93,3 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
     </Create>
   );
 };
-

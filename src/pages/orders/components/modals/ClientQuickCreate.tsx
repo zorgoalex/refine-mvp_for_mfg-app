@@ -25,63 +25,60 @@ export const ClientQuickCreate: React.FC<ClientQuickCreateProps> = ({
   onSuccess,
 }) => {
   const [form] = Form.useForm();
-  const { mutate: createClient, isLoading: isClientLoading } = useCreate();
+  const { mutateAsync: createClient, isLoading: isClientLoading } = useCreate();
   const { mutateAsync: createPhone } = useCreate();
 
   const handleOk = async () => {
     try {
       const values = await form.validateFields();
 
-      createClient(
-        {
-          resource: 'clients',
-          values: {
-            client_name: values.client_name.trim(),
-            is_active: true,
-          },
+      const data = await createClient({
+        resource: 'clients',
+        values: {
+          client_name: values.client_name.trim(),
+          is_active: true,
         },
-        {
-          onSuccess: async (data) => {
-            const clientId = data.data.client_id;
+        successNotification: false,
+      });
+      const clientId = data.data.client_id;
 
-            // If phone number provided, create phone record
-            if (values.phone_number?.trim()) {
-              try {
-                await createPhone({
-                  resource: 'client_phones',
-                  values: {
-                    client_id: clientId,
-                    phone_number: values.phone_number.trim(),
-                    phone_type: values.phone_type || 'mobile',
-                    is_primary: values.is_primary || true,
-                  },
-                });
-              } catch (phoneError: any) {
-                notification.warning({
-                  message: 'Клиент создан, но ошибка при сохранении телефона',
-                  description: phoneError?.message || 'Неизвестная ошибка',
-                });
-              }
-            }
-
-            notification.success({
-              message: 'Клиент создан',
-              description: `Клиент "${values.client_name}" успешно создан`,
-            });
-            form.resetFields();
-            onSuccess(clientId);
-            onClose();
-          },
-          onError: (error: any) => {
-            notification.error({
-              message: 'Ошибка создания клиента',
-              description: error?.message || 'Неизвестная ошибка',
-            });
-          },
+      if (values.phone_number?.trim()) {
+        try {
+          await createPhone({
+            resource: 'client_phones',
+            values: {
+              client_id: clientId,
+              phone_number: values.phone_number.trim(),
+              phone_type: values.phone_type || 'mobile',
+              is_primary: values.is_primary ?? true,
+            },
+            successNotification: false,
+          });
+        } catch (phoneError: any) {
+          notification.error({
+            message: 'Клиент создан, но телефон не сохранён',
+            description:
+              phoneError?.message ||
+              `Клиент #${clientId} создан. Исправьте телефон и повторите сохранение в карточке клиента.`,
+          });
+          return;
         }
-      );
+      }
+
+      notification.success({
+        message: 'Клиент создан',
+        description: `Клиент "${values.client_name}" успешно создан`,
+      });
+      form.resetFields();
+      onSuccess(clientId);
+      onClose();
     } catch (error) {
-      // Validation failed
+      if (error instanceof Error) {
+        notification.error({
+          message: 'Ошибка создания клиента',
+          description: error.message,
+        });
+      }
     }
   };
 
