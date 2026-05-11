@@ -6,6 +6,7 @@ export interface FrontendRuntimeConfigResponse {
     backendOrdersRead: boolean;
     backendOrdersWrite: boolean;
     backendPayments: boolean;
+    backendProductionActions: boolean;
     backendOrderExport: boolean;
     backendUsers: boolean;
     backendVlm: boolean;
@@ -31,6 +32,10 @@ export function buildFrontendRuntimeConfig(
       backendOrdersRead: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDERS_READ, backendOrders),
       backendOrdersWrite: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDERS_WRITE, backendOrders),
       backendPayments: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_PAYMENTS, false),
+      backendProductionActions: readBooleanEnv(
+        env.RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS,
+        false,
+      ),
       backendOrderExport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDER_EXPORT, false),
       backendUsers: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_USERS, false),
       backendVlm: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_VLM, false),

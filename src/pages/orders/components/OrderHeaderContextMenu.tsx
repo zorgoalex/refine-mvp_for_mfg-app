@@ -2,13 +2,19 @@
 // Context menu for changing order statuses from the order form header
 // Appears on right-click on the order header summary
 
-import React, { useEffect, useCallback, useMemo } from 'react';
+import React, { useEffect, useCallback, useMemo, useRef } from 'react';
 import { Menu, notification } from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { useList, useUpdate, useInvalidate } from '@refinedev/core';
+import { useDataProvider, useList, useUpdate, useInvalidate } from '@refinedev/core';
 import { useOrderFormStore } from '../../../stores/orderFormStore';
 import { useProductionStatusEvent } from '../../../hooks/useProductionStatusEvent';
+import {
+  createProductionActionIdempotencyKey,
+  isProductionActionVersionConflict,
+  productionActionsApi,
+} from '../../../api/productionActionsApi';
+import { featureFlags } from '../../../config/featureFlags';
 
 export interface OrderHeaderContextMenuProps {
   visible: boolean;
@@ -31,6 +37,23 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
   const { toggleOrderEvent, events, refetch } = useProductionStatusEvent({ orderId: header.order_id });
   const { mutate: updateOrder } = useUpdate();
   const invalidate = useInvalidate();
+  const dataProvider = useDataProvider();
+  const pendingHeaderActionsRef = useRef<Map<number, Promise<void>>>(new Map());
+
+  const queueHeaderAction = useCallback((orderId: number, action: () => Promise<void>) => {
+    const previous = pendingHeaderActionsRef.current.get(orderId) ?? Promise.resolve();
+    const current = previous.then(action);
+    pendingHeaderActionsRef.current.set(orderId, current);
+
+    const cleanup = () => {
+      if (pendingHeaderActionsRef.current.get(orderId) === current) {
+        pendingHeaderActionsRef.current.delete(orderId);
+      }
+    };
+    void current.then(cleanup, cleanup);
+
+    return current;
+  }, []);
 
   // Set of production status IDs that are currently set (have events)
   const activeProductionStatusIds = useMemo(() => {
@@ -77,6 +100,35 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
     code: s.production_status_code,
   }));
 
+  const refreshHeaderFromOrder = useCallback(async () => {
+    if (!header.order_id) return;
+
+    try {
+      const response = await dataProvider().getOne({
+        resource: 'orders',
+        id: header.order_id,
+      });
+      const order = response?.data as Record<string, unknown> | undefined;
+      if (!order) return;
+
+      const fields = [
+        'order_status_id',
+        'payment_status_id',
+        'production_status_id',
+        'production_status_from_details_enabled',
+        'planned_completion_date',
+        'version',
+      ];
+      for (const field of fields) {
+        if (field in order) {
+          updateHeaderField(field as any, order[field] as any);
+        }
+      }
+    } catch (error) {
+      console.warn('[OrderHeaderContextMenu] Failed to refresh header after conflict:', error);
+    }
+  }, [dataProvider, header.order_id, updateHeaderField]);
+
   // Handle click outside and Escape key
   useEffect(() => {
     const handleClickOutside = () => {
@@ -120,6 +172,66 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
       if (!dbField) return;
 
       try {
+        if (featureFlags.useBackendProductionActions) {
+          if (fieldName !== 'order_status') {
+            notification.warning({
+              message: 'Действие недоступно',
+              description: 'Это действие пока не входит в backend production actions',
+              duration: 2,
+            });
+            return;
+          }
+
+          if (!Number.isInteger(header.version)) {
+            notification.warning({
+              message: 'Обновите заказ',
+              description: 'Для изменения статуса нужны актуальные данные заказа',
+              duration: 2,
+            });
+            await refreshHeaderFromOrder();
+            await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+            return;
+          }
+
+          await queueHeaderAction(header.order_id, async () => {
+            const currentHeader = useOrderFormStore.getState().header;
+            if (!Number.isInteger(currentHeader.version)) {
+              await refreshHeaderFromOrder();
+              await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+              return;
+            }
+
+            const commandVersion = currentHeader.version;
+            let rollbackVersion: number | null = commandVersion;
+            try {
+              const responsePromise = productionActionsApi.changeOrderStatus(header.order_id, {
+                orderStatusId: statusId,
+                version: commandVersion,
+                idempotencyKey: createProductionActionIdempotencyKey('order-header-status'),
+              });
+              updateHeaderField('version', commandVersion + 1);
+              const response = await responsePromise;
+              rollbackVersion = null;
+
+              updateHeaderField('order_status_id', statusId);
+              updateHeaderField('version', response.order.version);
+              await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+
+              notification.success({
+                message: 'Статус обновлён',
+                description: `Статус заказа: ${statusName}`,
+                duration: 2,
+              });
+            } catch (error) {
+              if (rollbackVersion !== null) {
+                updateHeaderField('version', rollbackVersion);
+              }
+              throw error;
+            }
+          });
+          return;
+        }
+
         await updateOrder({
           resource: 'orders',
           id: header.order_id,
@@ -136,6 +248,17 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
           duration: 2,
         });
       } catch (error) {
+        if (isProductionActionVersionConflict(error)) {
+          await refreshHeaderFromOrder();
+          await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+          notification.warning({
+            message: 'Данные заказа изменились',
+            description: 'Заказ обновлён. Повторите действие.',
+            duration: 2,
+          });
+          return;
+        }
+
         console.error('[OrderHeaderContextMenu] Error updating status:', error);
         notification.error({
           message: 'Ошибка обновления статуса',
@@ -143,7 +266,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         });
       }
     },
-    [header.order_id, updateOrder, updateHeaderField]
+    [header.order_id, header.version, updateOrder, updateHeaderField, invalidate, refreshHeaderFromOrder, queueHeaderAction]
   );
 
   // Handle production status toggle (add if not exists, remove if exists)
@@ -158,10 +281,45 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
       }
 
       try {
-        const wasAdded = await toggleOrderEvent(header.order_id, statusId);
+        let wasAdded: boolean | null = null;
+        if (featureFlags.useBackendProductionActions) {
+          await queueHeaderAction(header.order_id, async () => {
+            const currentHeader = useOrderFormStore.getState().header;
+            if (!Number.isInteger(currentHeader.version)) {
+              await refreshHeaderFromOrder();
+              await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+              return;
+            }
+
+            const commandVersion = currentHeader.version;
+            let rollbackVersion: number | null = commandVersion;
+            try {
+              updateHeaderField('version', commandVersion + 1);
+              wasAdded = await toggleOrderEvent(header.order_id, statusId, {
+                version: commandVersion,
+                onResponse: (response) => {
+                  updateHeaderField('version', response.order.version);
+                },
+                onVersionConflict: refreshHeaderFromOrder,
+              });
+              rollbackVersion = null;
+            } catch (error) {
+              if (rollbackVersion !== null) {
+                updateHeaderField('version', rollbackVersion);
+              }
+              throw error;
+            }
+          });
+        } else {
+          wasAdded = await toggleOrderEvent(header.order_id, statusId);
+        }
+
+        if (wasAdded === null) {
+          return;
+        }
 
         // Disable auto-update when manually toggling
-        if (header.production_status_from_details_enabled) {
+        if (!featureFlags.useBackendProductionActions && header.production_status_from_details_enabled) {
           await updateOrder({
             resource: 'orders',
             id: header.order_id,
@@ -198,7 +356,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         });
       }
     },
-    [header.order_id, header.production_status_from_details_enabled, toggleOrderEvent, updateOrder, updateHeaderField, refetch, invalidate]
+    [header.order_id, header.production_status_from_details_enabled, toggleOrderEvent, updateOrder, updateHeaderField, refetch, invalidate, refreshHeaderFromOrder, queueHeaderAction]
   );
 
   if (!visible) return null;
@@ -252,11 +410,11 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
       label: 'Статус заказа',
       children: orderStatusItems,
     },
-    {
+    ...(featureFlags.useBackendProductionActions ? [] : [{
       key: 'payment_status',
       label: 'Статус оплаты',
       children: paymentStatusItems,
-    },
+    }]),
     {
       key: 'production_status',
       label: 'Статус производства',

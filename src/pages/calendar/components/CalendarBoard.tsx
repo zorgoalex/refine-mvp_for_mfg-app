@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Spin, Alert, Button, Space, Segmented, Tooltip, message } from 'antd';
 import { LeftOutlined, RightOutlined, CalendarOutlined, ZoomInOutlined, ZoomOutOutlined, UndoOutlined } from '@ant-design/icons';
 import { DndProvider } from 'react-dnd';
@@ -12,7 +12,13 @@ import { useOrderMove } from '../hooks/useOrderMove';
 import { useOrderStatuses } from '../hooks/useOrderStatuses';
 import { useOrderStatusUpdate } from '../hooks/useOrderStatusUpdate';
 import { useProductionStatusEvent } from '../../../hooks/useProductionStatusEvent';
+import { featureFlags } from '../../../config/featureFlags';
 import { DragItem, CalendarOrder, ViewMode } from '../types/calendar';
+import {
+  applyKnownCalendarOrderVersion,
+  reserveCalendarOrderVersion,
+  setCalendarOrderVersion,
+} from '../hooks/orderVersionCache';
 import {
   calculateColumnsPerRow,
   groupDaysIntoRows,
@@ -29,6 +35,7 @@ const CalendarBoard: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.STANDARD);
   // Масштабирование карточек: 1.0 = дефолт (100%), диапазон от 0.7 (70%) до 1.5 (150%)
   const [cardScale, setCardScale] = useState<number>(1.0);
+  const pendingOrderActionsRef = useRef<Map<number, Promise<void>>>(new Map());
   const DEFAULT_SCALE = 1.0;
   const MIN_SCALE = 0.7;
   const MAX_SCALE = 1.5;
@@ -71,26 +78,69 @@ const CalendarBoard: React.FC = () => {
     enabled: contextMenu.visible && !!contextMenu.order?.order_id,
   });
 
+  const queueOrderAction = useCallback((orderId: number, action: () => Promise<void>) => {
+    const previous = pendingOrderActionsRef.current.get(orderId) ?? Promise.resolve();
+    const current = previous.then(action);
+    pendingOrderActionsRef.current.set(orderId, current);
+
+    const cleanup = () => {
+      if (pendingOrderActionsRef.current.get(orderId) === current) {
+        pendingOrderActionsRef.current.delete(orderId);
+      }
+    };
+    void current.then(cleanup, cleanup);
+
+    return current;
+  }, []);
+
+  const applyKnownOrderVersion = useCallback((order: CalendarOrder) => {
+    applyKnownCalendarOrderVersion(order);
+  }, []);
+
+  const reserveOrderVersion = useCallback((order: CalendarOrder, version = order.version) => {
+    reserveCalendarOrderVersion(order.order_id, version);
+  }, []);
+
+  const setOrderVersion = useCallback((order: CalendarOrder, version = order.version) => {
+    setCalendarOrderVersion(order.order_id, version);
+  }, []);
+
   // Set активных production status IDs для контекстного меню
   const activeProductionStatusIds = useMemo(() => {
-    return new Set(productionEvents.map((e) => e.production_status_id));
-  }, [productionEvents]);
+    return new Set(
+      productionEvents
+        .filter((event) => event.order_id === contextMenu.order?.order_id)
+        .map((e) => e.production_status_id),
+    );
+  }, [contextMenu.order?.order_id, productionEvents]);
 
   // Обработчик drop события
   const handleDrop = async (item: DragItem, targetDate: Date, targetDateKey: string) => {
     const { order, sourceDate } = item;
 
-    // Перемещаем заказ на новую дату
-    await moveOrder(order, targetDate, sourceDate, targetDateKey);
+    void queueOrderAction(order.order_id, async () => {
+      applyKnownOrderVersion(order);
+      const version = await moveOrder(order, targetDate, sourceDate, targetDateKey);
+      if (version !== null) {
+        setOrderVersion(order, version);
+      }
+    }).catch((error) => {
+      console.error('[CalendarBoard] Error moving order:', error);
+    });
   };
   
   // Обработчик открытия контекстного меню
   const handleContextMenu = (e: React.MouseEvent, order: CalendarOrder) => {
     e.preventDefault();
+    const menuWidth = 240;
+    const menuHeight = 260;
+    const safeX = Math.max(8, Math.min(e.clientX, window.innerWidth - menuWidth - 8));
+    const safeY = Math.max(8, Math.min(e.clientY, window.innerHeight - menuHeight - 8));
+
     setContextMenu({
       visible: true,
-      x: e.clientX,
-      y: e.clientY,
+      x: safeX,
+      y: safeY,
       order,
     });
   };
@@ -99,7 +149,14 @@ const CalendarBoard: React.FC = () => {
   const handleStatusChange = async (fieldName: string, statusId: number, statusName: string) => {
     if (!contextMenu.order) return;
 
-    await updateStatus(contextMenu.order, fieldName, statusId, statusName);
+    const order = contextMenu.order;
+    await queueOrderAction(order.order_id, async () => {
+      applyKnownOrderVersion(order);
+      const version = await updateStatus(order, fieldName, statusId, statusName);
+      if (version !== null) {
+        setOrderVersion(order, version);
+      }
+    });
   };
 
   // Обработчик toggle статуса производства (установить/снять)
@@ -107,7 +164,23 @@ const CalendarBoard: React.FC = () => {
     if (!contextMenu.order) return;
 
     try {
-      const wasAdded = await toggleOrderEvent(contextMenu.order.order_id, statusId);
+      const order = contextMenu.order;
+      let wasAdded: boolean | null = null;
+      await queueOrderAction(order.order_id, async () => {
+        applyKnownOrderVersion(order);
+        wasAdded = await toggleOrderEvent(order.order_id, statusId, {
+          version: order.version,
+          onResponse: (response) => {
+            order.version = response.order.version;
+            setOrderVersion(order, response.order.version);
+          },
+        });
+        reserveOrderVersion(order);
+      });
+
+      if (wasAdded === null) {
+        return;
+      }
 
       // Refetch events for context menu
       refetchEvents();
@@ -157,7 +230,13 @@ const CalendarBoard: React.FC = () => {
         return;
       }
 
-      await updateStatus(order, 'order_status', issuedStatus.id, 'Выдан');
+      await queueOrderAction(order.order_id, async () => {
+        applyKnownOrderVersion(order);
+        const version = await updateStatus(order, 'order_status', issuedStatus.id, 'Выдан');
+        if (version !== null) {
+          setOrderVersion(order, version);
+        }
+      });
     } else {
       // При снятии галочки — устанавливаем статус "Готов к выдаче"
       const readyStatus = orderStatuses.find(
@@ -169,7 +248,13 @@ const CalendarBoard: React.FC = () => {
         return;
       }
 
-      await updateStatus(order, 'order_status', readyStatus.id, 'Готов к выдаче');
+      await queueOrderAction(order.order_id, async () => {
+        applyKnownOrderVersion(order);
+        const version = await updateStatus(order, 'order_status', readyStatus.id, 'Готов к выдаче');
+        if (version !== null) {
+          setOrderVersion(order, version);
+        }
+      });
     }
   };
 
@@ -362,6 +447,7 @@ const CalendarBoard: React.FC = () => {
           onStatusChange={handleStatusChange}
           onProductionStatusToggle={handleProductionStatusToggle}
           activeProductionStatusIds={activeProductionStatusIds}
+          backendProductionActionsEnabled={featureFlags.useBackendProductionActions}
           statuses={{
             orderStatuses,
             paymentStatuses,

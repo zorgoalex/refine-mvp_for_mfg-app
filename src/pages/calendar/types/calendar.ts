@@ -40,6 +40,7 @@ export interface CalendarOrder {
   order_name: string;
   order_date: string;
   planned_completion_date: string;
+  version: number;
   parts_count: number;
   total_area: number;
   paid_amount: number;

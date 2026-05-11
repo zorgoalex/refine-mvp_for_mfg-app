@@ -1,9 +1,22 @@
 import { useUpdate, useInvalidate, useDataProvider } from '@refinedev/core';
 import { message } from 'antd';
+import { useState } from 'react';
+import {
+  createProductionActionIdempotencyKey,
+  isProductionActionVersionConflict,
+  productionActionsApi,
+} from '../../../api/productionActionsApi';
+import { featureFlags } from '../../../config/featureFlags';
 import { CalendarOrder } from '../types/calendar';
+import {
+  applyKnownCalendarOrderVersion,
+  forgetCalendarOrderVersion,
+  reserveCalendarOrderVersion,
+  setCalendarOrderVersion,
+} from './orderVersionCache';
 
 export interface UseOrderStatusUpdateResult {
-  updateStatus: (order: CalendarOrder, fieldName: string, statusId: number, statusName: string) => Promise<void>;
+  updateStatus: (order: CalendarOrder, fieldName: string, statusId: number, statusName: string) => Promise<number | null>;
   isUpdating: boolean;
 }
 
@@ -17,6 +30,7 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
   const invalidate = useInvalidate();
   const { mutate: updateOrder, isLoading } = useUpdate();
   const dataProvider = useDataProvider();
+  const [isBackendUpdating, setIsBackendUpdating] = useState(false);
 
   /**
    * Обновляет статус заказа
@@ -30,7 +44,73 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
     fieldName: string,
     statusId: number,
     statusName: string
-  ): Promise<void> => {
+  ): Promise<number | null> => {
+    let rollbackVersion: number | null = null;
+
+    if (featureFlags.useBackendProductionActions) {
+      if (fieldName !== 'order_status') {
+        message.warning('Это действие пока недоступно в backend-режиме production actions');
+        return null;
+      }
+
+      applyKnownCalendarOrderVersion(order);
+
+      if (!Number.isInteger(order.version)) {
+        await invalidate({
+          resource: 'orders_view',
+          invalidates: ['list'],
+        });
+        message.warning('Данные заказа устарели. Обновите календарь и повторите действие.');
+        throw new Error('Order version is required for backend order status change');
+      }
+
+      try {
+        setIsBackendUpdating(true);
+        const commandVersion = order.version;
+        const responsePromise = productionActionsApi.changeOrderStatus(order.order_id, {
+          orderStatusId: statusId,
+          version: commandVersion,
+          idempotencyKey: createProductionActionIdempotencyKey('order-status'),
+        });
+        rollbackVersion = commandVersion;
+        order.version = commandVersion + 1;
+        reserveCalendarOrderVersion(order.order_id, order.version);
+        const response = await responsePromise;
+        rollbackVersion = null;
+        message.success(`Статус заказа изменен на "${statusName}" для заказа ${order.order_name}`);
+        order.version = response.order.version;
+        setCalendarOrderVersion(order.order_id, response.order.version);
+        await invalidate({
+          resource: 'orders_view',
+          invalidates: ['list'],
+        });
+        return response.order.version;
+      } catch (error: any) {
+        if (isProductionActionVersionConflict(error)) {
+          if (rollbackVersion !== null) {
+            order.version = rollbackVersion;
+          }
+          forgetCalendarOrderVersion(order.order_id);
+          await invalidate({
+            resource: 'orders_view',
+            invalidates: ['list'],
+          });
+          message.warning('Данные заказа изменились. Календарь обновлён, повторите действие.');
+          return null;
+        }
+
+        if (rollbackVersion !== null) {
+          order.version = rollbackVersion;
+          forgetCalendarOrderVersion(order.order_id);
+        }
+        message.error(`Ошибка обновления статуса: ${error.message || 'Неизвестная ошибка'}`);
+        throw error;
+      } finally {
+        setIsBackendUpdating(false);
+      }
+      return null;
+    }
+
     // Маппинг названий полей на ID-поля в БД
     const fieldMapping: Record<string, string> = {
       'order_status': 'order_status_id',
@@ -42,7 +122,7 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
     
     if (!dbField) {
       message.error(`Неизвестное поле: ${fieldName}`);
-      return;
+      return null;
     }
 
     // Подготовка значений для обновления
@@ -133,10 +213,12 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
       console.error('Failed to update status:', error);
       throw error;
     }
+
+    return null;
   };
 
   return {
     updateStatus,
-    isUpdating: isLoading,
+    isUpdating: isLoading || isBackendUpdating,
   };
 };

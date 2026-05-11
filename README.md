@@ -104,6 +104,7 @@ VITE_USE_BACKEND_PERMISSIONS=false
 VITE_USE_BACKEND_ORDERS_READ=false
 VITE_USE_BACKEND_ORDERS_WRITE=false
 VITE_USE_BACKEND_PAYMENTS=false
+VITE_USE_BACKEND_PRODUCTION_ACTIONS=false
 VITE_USE_BACKEND_USERS=false
 VITE_USE_BACKEND_ORDER_EXPORT=false
 VITE_USE_BACKEND_VLM=false
@@ -185,6 +186,8 @@ npm run dev:full
 - `npm run test:e2e:users-cutover` — Playwright smoke для backend users cutover flags.
 - `npm run test:e2e:order-export-cutover` — Playwright smoke для backend order export cutover flag.
 - `npm run test:e2e:payments-stage-canary` — opt-in Playwright smoke для stage payments UI/backend path с реальными DB writes на тестовом заказе.
+- `npm run test:e2e:production-actions-cutover` — Playwright smoke для backend production actions/calendar moves cutover flag.
+- `npm run test:e2e:production-actions-stage-canary` — opt-in Playwright smoke для stage production actions backend path с audit/outbox/idempotency checks.
 - `npm run test:e2e:vlm-cutover` — Playwright smoke для backend VLM cutover flag.
 - `npm run test:e2e:runtime-config` — Playwright smoke для runtime frontend flags.
 - `npm run test:runtime-config-canary` — проверка staged runtime-config examples для canary.
@@ -206,6 +209,8 @@ npm run test:e2e
 npx playwright test tests/reference-workflows.spec.ts --project=chromium
 npm run test:e2e:users-cutover
 npm run test:e2e:order-export-cutover
+npm run test:e2e:production-actions-cutover
+npm run test:e2e:production-actions-stage-canary
 npm run test:e2e:payments-stage-canary
 npm run test:e2e:vlm-cutover
 npm run test:e2e:runtime-config

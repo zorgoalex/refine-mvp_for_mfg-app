@@ -164,6 +164,7 @@ export const useOrderFormStore = create<OrderFormState>()(
           set(
             (state) => ({
               header: { ...state.header, ...data },
+              version: typeof data.version === 'number' ? data.version : state.version,
               isDirty: true,
             }),
             false,
@@ -174,6 +175,7 @@ export const useOrderFormStore = create<OrderFormState>()(
           set(
             (state) => ({
               header: { ...state.header, [field]: value },
+              version: field === 'version' && typeof value === 'number' ? value : state.version,
               // Не устанавливаем isDirty во время инициализации (пересчёты после loadOrder)
               isDirty: state.isInitializing ? state.isDirty : true,
             }),

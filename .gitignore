@@ -53,6 +53,13 @@ next-env.d.ts
 # ai
 ai_docs/
 docs/
+!docs/
+docs/*
+!docs/runtime-config/
+docs/runtime-config/*
+!docs/runtime-config/canary/
+docs/runtime-config/canary/*
+!docs/runtime-config/canary/09-production-actions.json
 .claude/
 .gemini/
 .factory/

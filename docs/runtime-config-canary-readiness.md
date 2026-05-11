@@ -19,6 +19,7 @@ Example files live in `docs/runtime-config/canary/`.
 | 6 | `06-users.json` | previous + `backendUsers` |
 | 7 | `07-vlm.json` | previous + `backendVlm` |
 | 8 | `08-payments.json` | previous + `backendPayments` |
+| 9 | `09-production-actions.json` | previous + `backendProductionActions` |
 | rollback | `99-rollback-all-off.json` | none |
 
 Each file is complete and explicit about every supported runtime feature key.
@@ -51,6 +52,7 @@ RUNTIME_CONFIG_BACKEND_PERMISSIONS=false
 RUNTIME_CONFIG_BACKEND_ORDERS_READ=false
 RUNTIME_CONFIG_BACKEND_ORDERS_WRITE=false
 RUNTIME_CONFIG_BACKEND_PAYMENTS=false
+RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS=false
 RUNTIME_CONFIG_BACKEND_ORDER_EXPORT=false
 RUNTIME_CONFIG_BACKEND_USERS=false
 RUNTIME_CONFIG_BACKEND_VLM=false
@@ -153,7 +155,12 @@ The smoke script prints only the enabled flag names, not the config body.
     parent order paid/date/status/version recalculation, audit/session user, and
     rollback to legacy Hasura mutations by disabling `backendPayments` and
     `BACKEND_ENABLE_PAYMENTS`.
-11. Expand canary only after scoped smoke, rollback smoke, logs, and audit checks
+11. Enable `09-production-actions.json`; smoke calendar date move, order status
+    change, order-level production stage activate/deactivate, audit/outbox,
+    deadline sync boundary, and no Hasura mutations for backend-owned actions.
+    Use `npm run test:e2e:production-actions-stage-canary` for the opt-in
+    authenticated DB smoke after the stage runtime config is active.
+12. Expand canary only after scoped smoke, rollback smoke, logs, and audit checks
     are clean for the previous step.
 
 ## Rollback
@@ -168,6 +175,7 @@ BACKEND_VLM_DISABLED=true
 BACKEND_ENABLE_USERS=false
 BACKEND_ENABLE_ORDER_EXPORT=false
 BACKEND_ENABLE_PAYMENTS=false
+BACKEND_ENABLE_PRODUCTION_ACTIONS=false
 BACKEND_ENABLE_VLM=false
 ```
 

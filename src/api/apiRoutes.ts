@@ -17,6 +17,10 @@ export const apiRoutes = {
     list: backendApiPath('/orders'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
     status: (orderId: number) => backendApiPath(`/orders/${orderId}/status`),
+    calendarDate: (orderId: number) => backendApiPath(`/orders/${orderId}/calendar-date`),
+    orderStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/order-status`),
+    productionStageEvent: (orderId: number, productionStatusId: number) =>
+      backendApiPath(`/orders/${orderId}/production-stage-events/${productionStatusId}`),
     exportGoogleDrive: (orderId: number) =>
       backendApiPath(`/orders/${orderId}/export/google-drive`),
     deadlines: (orderId: number) => backendApiPath(`/orders/${orderId}/deadlines`),

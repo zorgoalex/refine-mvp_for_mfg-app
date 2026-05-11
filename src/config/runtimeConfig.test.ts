@@ -23,6 +23,7 @@ describe('runtimeConfig', () => {
           backendOrdersRead: true,
           backendOrdersWrite: false,
           backendPayments: true,
+          backendProductionActions: true,
           backendVlm: true,
         },
       },
@@ -31,6 +32,7 @@ describe('runtimeConfig', () => {
         VITE_USE_BACKEND_ORDERS_READ: 'false',
         VITE_USE_BACKEND_ORDERS_WRITE: 'true',
         VITE_USE_BACKEND_PAYMENTS: 'false',
+        VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'false',
         VITE_USE_BACKEND_VLM: 'false',
       },
     );
@@ -41,6 +43,7 @@ describe('runtimeConfig', () => {
       useBackendOrdersRead: true,
       useBackendOrdersWrite: false,
       useBackendPayments: true,
+      useBackendProductionActions: true,
       useBackendVlm: true,
     });
   });

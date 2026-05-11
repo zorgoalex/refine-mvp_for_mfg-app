@@ -139,6 +139,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "edited_by",
     "created_at",
     "updated_at",
+    "version",
   ],
   // Base orders table (for edit)
   orders: [

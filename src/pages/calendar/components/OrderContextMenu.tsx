@@ -13,6 +13,7 @@ export interface OrderContextMenuProps {
   onStatusChange: (fieldName: string, statusId: number, statusName: string) => void;
   onProductionStatusToggle: (statusId: number, statusName: string) => void;
   activeProductionStatusIds: Set<number>;
+  backendProductionActionsEnabled?: boolean;
   statuses: {
     orderStatuses: Array<{ id: number; name: string }>;
     paymentStatuses: Array<{ id: number; name: string }>;
@@ -33,6 +34,7 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
   onStatusChange,
   onProductionStatusToggle,
   activeProductionStatusIds,
+  backendProductionActionsEnabled = false,
   statuses,
 }) => {
   if (!visible) return null;
@@ -109,11 +111,11 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
       label: 'Статус заказа',
       children: orderStatusItems,
     },
-    {
+    ...(backendProductionActionsEnabled ? [] : [{
       key: 'payment_status',
       label: 'Статус оплаты',
       children: paymentStatusItems,
-    },
+    }]),
     {
       key: 'production_status',
       label: 'Статус производства',

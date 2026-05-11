@@ -4,6 +4,7 @@ export interface BackendFeatureFlags {
   auth: boolean;
   orders: boolean;
   payments: boolean;
+  productionActions: boolean;
   orderExport: boolean;
   users: boolean;
   vlm: boolean;
@@ -22,6 +23,7 @@ export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
     auth: env.BACKEND_ENABLE_AUTH,
     orders: env.BACKEND_ENABLE_ORDERS,
     payments: env.BACKEND_ENABLE_PAYMENTS,
+    productionActions: env.BACKEND_ENABLE_PRODUCTION_ACTIONS,
     orderExport: env.BACKEND_ENABLE_ORDER_EXPORT,
     users: env.BACKEND_ENABLE_USERS,
     vlm: env.BACKEND_ENABLE_VLM,

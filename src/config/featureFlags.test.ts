@@ -16,6 +16,7 @@ describe('featureFlags', () => {
       useBackendOrdersRead: false,
       useBackendOrdersWrite: false,
       useBackendPayments: false,
+      useBackendProductionActions: false,
       useBackendOrderExport: false,
       useBackendUsers: false,
       useBackendVlm: false,
@@ -58,12 +59,14 @@ describe('featureFlags', () => {
           VITE_USE_BACKEND_ORDERS_READ: 'true',
           VITE_USE_BACKEND_ORDERS_WRITE: 'true',
           VITE_USE_BACKEND_PAYMENTS: 'false',
+          VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'false',
           VITE_USE_BACKEND_VLM: 'true',
         },
         {
           backendAuth: true,
           backendOrdersWrite: false,
           backendPayments: true,
+          backendProductionActions: true,
         },
       ),
     ).toMatchObject({
@@ -71,6 +74,7 @@ describe('featureFlags', () => {
       useBackendOrdersRead: true,
       useBackendOrdersWrite: false,
       useBackendPayments: true,
+      useBackendProductionActions: true,
       useBackendVlm: true,
     });
   });
