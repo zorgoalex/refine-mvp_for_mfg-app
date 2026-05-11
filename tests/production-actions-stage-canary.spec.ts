@@ -13,7 +13,7 @@ const backendApiUrl = trimTrailingSlash(
 );
 const testOrderId = readNumberEnv('PRODUCTION_ACTIONS_STAGE_ORDER_ID', 11151);
 const testOrderName =
-    process.env.PRODUCTION_ACTIONS_STAGE_ORDER_NAME ?? 'Тест_StageSmoke_20260507111100';
+    process.env.PRODUCTION_ACTIONS_STAGE_ORDER_NAME ?? 'Тест_StageSmoke';
 
 test.describe('Production actions stage canary', () => {
     test.skip(!canaryEnabled, 'Run with PRODUCTION_ACTIONS_STAGE_CANARY=true');
