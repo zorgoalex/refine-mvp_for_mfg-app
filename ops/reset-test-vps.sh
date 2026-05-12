@@ -87,6 +87,7 @@ PROJECT_DIR="$(cd "$(dirname "$PROJECT_DIR")" && pwd)/$(basename "$PROJECT_DIR")
 [[ "$ENV_FILE" = /* ]] || ENV_FILE="$PROJECT_DIR/$ENV_FILE"
 [[ "$COMPOSE_FILE" = /* ]] || COMPOSE_FILE="$PROJECT_DIR/$COMPOSE_FILE"
 BACKUP_ROOT="$(mkdir -p "$BACKUP_ROOT" && cd "$BACKUP_ROOT" && pwd)"
+PROJECT_PARENT="$(dirname "$PROJECT_DIR")"
 
 case "$PROJECT_DIR" in
   /home/*/projects/*|/opt/*/*) ;;
@@ -224,8 +225,10 @@ if command -v docker >/dev/null 2>&1; then
 fi
 
 log "Removing project checkout"
+cd "$PROJECT_PARENT"
 "${SUDO[@]}" rm -rf "$PROJECT_DIR"
-run_as_target mkdir -p "$(dirname "$PROJECT_DIR")"
+run_as_target mkdir -p "$PROJECT_PARENT"
+cd "$PROJECT_PARENT"
 
 log "Cloning fresh checkout"
 run_as_target git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$PROJECT_DIR"
