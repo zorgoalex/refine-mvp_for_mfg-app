@@ -2,7 +2,17 @@
 set -euo pipefail
 
 SCRIPT_PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT_DIR="$SCRIPT_PROJECT_DIR"
+REPO_DIR="$SCRIPT_PROJECT_DIR"
+
+default_project_dir() {
+  if [[ "$(basename "$SCRIPT_PROJECT_DIR")" == "repo_erp" ]]; then
+    dirname "$SCRIPT_PROJECT_DIR"
+  else
+    printf '%s\n' "$SCRIPT_PROJECT_DIR"
+  fi
+}
+
+PROJECT_DIR="${ERP_PROJECT_DIR:-$(default_project_dir)}"
 ENV_FILE="$PROJECT_DIR/.env"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 RUN_DNS_CHECK=1
@@ -14,6 +24,8 @@ SKIP_BOOTSTRAP=0
 SKIP_DEPLOY=0
 AUTO_YES=0
 PROJECT_DIR_ARG_SET=0
+ENV_FILE_ARG_SET=0
+COMPOSE_FILE_ARG_SET=0
 RESTORE_BACKUP_PATH=""
 REQUIRE_RESTORE_BACKUP=0
 TRACK_HASURA_AFTER_RESTORE=1
@@ -29,7 +41,7 @@ preferred_project_dir() {
     owner="user"
   fi
 
-  printf '/home/%s/projects/erp' "$owner"
+  printf '/home/%s/projects/erp_dev' "$owner"
 }
 
 PREFERRED_PROJECT_DIR="${ERP_PROJECT_DIR:-$(preferred_project_dir)}"
@@ -41,7 +53,7 @@ setup-vps.sh
 One-command VPS setup for the ERP stack.
 
 First run on a fresh VPS:
-  cd /home/<user>/projects/erp
+  cd /home/<user>/projects/erp_dev/repo_erp
   sudo ops/setup-vps.sh
 
 What it does:
@@ -54,7 +66,7 @@ What it does:
   7. Runs HTTPS health checks and Hasura CORS preflight.
 
 Options:
-  --project-dir PATH       Repo/project directory. Default: repo root.
+  --project-dir PATH       Runtime project directory. Default: parent erp_dev when repo is in repo_erp.
   --env-file PATH          Env file. Default: PROJECT_DIR/.env.
   --compose-file PATH      Compose file. Default: PROJECT_DIR/docker-compose.yml.
   --expected-ip IP         Expected public IP for DNS checks.
@@ -75,8 +87,10 @@ Options:
   -y, --yes               Do not ask for confirmation before deploy.
 
 Default path rule:
-  Without --project-dir, the repo is expected at:
-    /home/<current-user>/projects/erp
+  Without --project-dir, the project is expected at:
+    /home/<current-user>/projects/erp_dev
+  and the repository is expected inside it:
+    /home/<current-user>/projects/erp_dev/repo_erp
   Override with ERP_PROJECT_DIR=/custom/path or --project-dir PATH.
 EOF
 }
@@ -93,8 +107,8 @@ fail() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-dir) PROJECT_DIR="$2"; PROJECT_DIR_ARG_SET=1; shift 2 ;;
-    --env-file) ENV_FILE="$2"; shift 2 ;;
-    --compose-file) COMPOSE_FILE="$2"; shift 2 ;;
+    --env-file) ENV_FILE="$2"; ENV_FILE_ARG_SET=1; shift 2 ;;
+    --compose-file) COMPOSE_FILE="$2"; COMPOSE_FILE_ARG_SET=1; shift 2 ;;
     --expected-ip) EXPECTED_IP="$2"; shift 2 ;;
     --skip-dns) RUN_DNS_CHECK=0; shift ;;
     --skip-smoke) RUN_SMOKE=0; shift ;;
@@ -113,24 +127,35 @@ while [[ $# -gt 0 ]]; do
 done
 
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+REPO_DIR="$(cd "$REPO_DIR" && pwd)"
+[[ "$ENV_FILE_ARG_SET" == "0" ]] && ENV_FILE="$PROJECT_DIR/.env"
+[[ "$COMPOSE_FILE_ARG_SET" == "0" ]] && COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 [[ "$ENV_FILE" = /* ]] || ENV_FILE="$PROJECT_DIR/$ENV_FILE"
 [[ "$COMPOSE_FILE" = /* ]] || COMPOSE_FILE="$PROJECT_DIR/$COMPOSE_FILE"
 
 if [[ "$PROJECT_DIR_ARG_SET" == "0" && "$PROJECT_DIR" != "$PREFERRED_PROJECT_DIR" ]]; then
-  repo_url="$(git -C "$SCRIPT_PROJECT_DIR" remote get-url origin 2>/dev/null || printf '<repo-url>')"
+  repo_url="$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || printf '<repo-url>')"
   parent_dir="$(dirname "$PREFERRED_PROJECT_DIR")"
+  preferred_repo_dir="$PREFERRED_PROJECT_DIR/repo_erp"
 
   cat <<EOF
 The VPS project directory must be:
   $PREFERRED_PROJECT_DIR
 
-Current script directory is:
-  $SCRIPT_PROJECT_DIR
+The repository must be inside it:
+  $preferred_repo_dir
+
+Current runtime directory is:
+  $PROJECT_DIR
+
+Current repository directory is:
+  $REPO_DIR
 
 Clone or move the repository into the required structure, then rerun:
   mkdir -p "$parent_dir"
-  git clone "$repo_url" "$PREFERRED_PROJECT_DIR"
-  cd "$PREFERRED_PROJECT_DIR"
+  mkdir -p "$PREFERRED_PROJECT_DIR/spec_erp"
+  git clone "$repo_url" "$preferred_repo_dir"
+  cd "$preferred_repo_dir"
   sudo ops/setup-vps.sh
 
 If this different path is intentional, rerun with:
@@ -209,17 +234,17 @@ ensure_templates_if_missing() {
     "$PROJECT_DIR/restore"
 
   if [[ ! -f "$COMPOSE_FILE" ]]; then
-    cp "$PROJECT_DIR/ops/templates/docker-compose.vps.yml" "$COMPOSE_FILE"
+    cp "$REPO_DIR/ops/templates/docker-compose.vps.yml" "$COMPOSE_FILE"
     log "Created $COMPOSE_FILE from template"
   fi
 
   if [[ ! -f "$PROJECT_DIR/config/postgres/pg_hba.conf" ]]; then
-    cp "$PROJECT_DIR/ops/templates/pg_hba.vps.conf" "$PROJECT_DIR/config/postgres/pg_hba.conf"
+    cp "$REPO_DIR/ops/templates/pg_hba.vps.conf" "$PROJECT_DIR/config/postgres/pg_hba.conf"
     log "Created config/postgres/pg_hba.conf from template"
   fi
 
   if [[ ! -f "$ENV_FILE" ]]; then
-    cp "$PROJECT_DIR/ops/templates/env.vps.example" "$ENV_FILE"
+    cp "$REPO_DIR/ops/templates/env.vps.example" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
     log "Created $ENV_FILE from template"
   fi
@@ -232,29 +257,29 @@ run_check_env() {
     [[ -n "$EXPECTED_IP" ]] && args+=(--expected-ip "$EXPECTED_IP")
   fi
 
-  "$PROJECT_DIR/ops/check-env.sh" "${args[@]}"
+  "$REPO_DIR/ops/check-env.sh" "${args[@]}"
 }
 
 run_deploy() {
-  local args=(--env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE")
+  local args=(--project-dir "$PROJECT_DIR" --env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE")
   [[ "$FORCE_RECREATE" == "1" ]] && args+=(--force-recreate)
 
-  "$PROJECT_DIR/ops/deploy-stack.sh" "${args[@]}"
+  "$REPO_DIR/ops/deploy-stack.sh" "${args[@]}"
 }
 
 run_smoke() {
-  "$PROJECT_DIR/ops/smoke-vps.sh" --env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE"
+  "$REPO_DIR/ops/smoke-vps.sh" --project-dir "$PROJECT_DIR" --env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE"
 }
 
 run_tests() {
-  "$PROJECT_DIR/ops/run-vps-tests.sh" --project-dir "$PROJECT_DIR" --env-file "$ENV_FILE"
+  "$REPO_DIR/ops/run-vps-tests.sh" --project-dir "$REPO_DIR" --env-file "$ENV_FILE"
 }
 
 apply_hasura_metadata() {
   local metadata_path="$1"
   [[ -n "$metadata_path" ]] || return 1
 
-  "$PROJECT_DIR/ops/apply-hasura-metadata.sh" \
+  "$REPO_DIR/ops/apply-hasura-metadata.sh" \
     --env-file "$ENV_FILE" \
     --metadata "$metadata_path"
   HASURA_METADATA_APPLIED=1
@@ -263,7 +288,8 @@ apply_hasura_metadata() {
 track_hasura_after_restore() {
   [[ "$TRACK_HASURA_AFTER_RESTORE" == "1" ]] || return 0
 
-  "$PROJECT_DIR/ops/track-hasura-public-schema.sh" \
+  "$REPO_DIR/ops/track-hasura-public-schema.sh" \
+    --project-dir "$PROJECT_DIR" \
     --env-file "$ENV_FILE" \
     --compose-file "$COMPOSE_FILE"
 }
@@ -377,6 +403,7 @@ run_restore_backup_if_requested() {
   [[ -n "${PG_DB:-}" ]] || fail "PG_DB is required in .env for DB restore"
 
   local restore_args=(
+    --project-dir "$PROJECT_DIR"
     --env-file "$ENV_FILE"
     --compose-file "$COMPOSE_FILE"
     --main-dump "$main_dump"
@@ -391,7 +418,7 @@ run_restore_backup_if_requested() {
   fi
 
   log "Selected main DB dump: $main_dump"
-  "$PROJECT_DIR/ops/restore-prod-backup.sh" "${restore_args[@]}"
+  "$REPO_DIR/ops/restore-prod-backup.sh" "${restore_args[@]}"
 
   if [[ -n "$HASURA_METADATA_PATH" ]]; then
     hasura_metadata="$(resolve_project_path "$HASURA_METADATA_PATH")"
@@ -416,11 +443,11 @@ apply_standalone_hasura_metadata_if_requested() {
   apply_hasura_metadata "$metadata_path"
 }
 
-[[ -d "$PROJECT_DIR/ops" ]] || fail "ops directory not found under $PROJECT_DIR"
+[[ -d "$REPO_DIR/ops" ]] || fail "ops directory not found under $REPO_DIR"
 
 if [[ "$SKIP_BOOTSTRAP" == "0" ]]; then
   log "Running VPS bootstrap"
-  "$PROJECT_DIR/ops/bootstrap-vps.sh" --project-dir "$PROJECT_DIR"
+  "$REPO_DIR/ops/bootstrap-vps.sh" --project-dir "$PROJECT_DIR"
 else
   log "Skipping bootstrap"
 fi

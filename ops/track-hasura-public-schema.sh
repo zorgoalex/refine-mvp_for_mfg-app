@@ -6,6 +6,8 @@ ENV_FILE="$PROJECT_DIR/.env"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 SCHEMA="public"
 VERIFY=1
+ENV_FILE_ARG_SET=0
+COMPOSE_FILE_ARG_SET=0
 
 usage() {
   cat <<'EOF'
@@ -14,7 +16,7 @@ track-hasura-public-schema.sh
 Track restored PostgreSQL tables/views in Hasura metadata.
 
 Usage:
-  ops/track-hasura-public-schema.sh [--env-file PATH] [--compose-file PATH] [--schema public] [--skip-verify]
+  ops/track-hasura-public-schema.sh [--project-dir PATH] [--env-file PATH] [--compose-file PATH] [--schema public] [--skip-verify]
 EOF
 }
 
@@ -29,8 +31,9 @@ fail() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --env-file) ENV_FILE="$2"; shift 2 ;;
-    --compose-file) COMPOSE_FILE="$2"; shift 2 ;;
+    --project-dir) PROJECT_DIR="$2"; shift 2 ;;
+    --env-file) ENV_FILE="$2"; ENV_FILE_ARG_SET=1; shift 2 ;;
+    --compose-file) COMPOSE_FILE="$2"; COMPOSE_FILE_ARG_SET=1; shift 2 ;;
     --schema) SCHEMA="$2"; shift 2 ;;
     --skip-verify) VERIFY=0; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -38,6 +41,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+[[ "$ENV_FILE_ARG_SET" == "0" ]] && ENV_FILE="$PROJECT_DIR/.env"
+[[ "$COMPOSE_FILE_ARG_SET" == "0" ]] && COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
+[[ "$ENV_FILE" = /* ]] || ENV_FILE="$PROJECT_DIR/$ENV_FILE"
+[[ "$COMPOSE_FILE" = /* ]] || COMPOSE_FILE="$PROJECT_DIR/$COMPOSE_FILE"
 [[ -f "$ENV_FILE" ]] || fail "Env file not found: $ENV_FILE"
 [[ -f "$COMPOSE_FILE" ]] || fail "Compose file not found: $COMPOSE_FILE"
 [[ "$SCHEMA" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || fail "Unsafe schema name: $SCHEMA"

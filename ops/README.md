@@ -70,6 +70,7 @@ docker compose \
 Use one command on the VPS:
 
 ```bash
+cd /home/<user>/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh
 ```
 
@@ -78,6 +79,7 @@ stops because placeholders are still present. Fill `.env`, make sure DNS points
 to the VPS, then run the same command again:
 
 ```bash
+cd /home/<user>/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh
 ```
 
@@ -145,15 +147,16 @@ On the new VPS:
 
 ```bash
 mkdir -p /home/<user>/projects
-git clone <repo-url> /home/<user>/projects/erp
-cd /home/<user>/projects/erp
+mkdir -p /home/<user>/projects/erp_dev/spec_erp
+git clone <repo-url> /home/<user>/projects/erp_dev/repo_erp
+cd /home/<user>/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh
 ```
 
 Fill `.env`:
 
 ```bash
-nano .env
+nano /home/<user>/projects/erp_dev/.env
 ```
 
 Generate new secrets on the VPS:
@@ -174,12 +177,14 @@ Use unique values for:
 After DNS is configured and `.env` is filled, run the same setup script:
 
 ```bash
+cd /home/<user>/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh
 ```
 
 If DNS has not propagated but you know the target IP:
 
 ```bash
+cd /home/<user>/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh --expected-ip <VPS_PUBLIC_IP>
 ```
 
@@ -193,7 +198,8 @@ sudo ops/setup-vps.sh --yes --skip-tests
 To run the same VPS test suite manually:
 
 ```bash
-ops/run-vps-tests.sh
+cd /home/<user>/projects/erp_dev/repo_erp
+ops/run-vps-tests.sh --env-file ../.env
 ```
 
 ## Dedicated Test VPS Reset
@@ -202,6 +208,7 @@ ops/run-vps-tests.sh
 full clean rebuild on a dedicated test VPS, run the reset script explicitly:
 
 ```bash
+cd /home/<user>/projects/erp_dev/repo_erp
 sudo ops/reset-test-vps.sh --confirm erp_test --yes \
   --all-docker \
   --prune-images \
@@ -286,18 +293,18 @@ project unless that project is actually running the NestJS backend.
 ## Updating An Existing VPS
 
 ```bash
-cd /opt/erp
-git pull
-ops/deploy-stack.sh
-ops/smoke-vps.sh
+cd /home/<user>/projects/erp_dev/repo_erp
+git pull --ff-only
+sudo ops/setup-vps.sh --yes
 ```
 
 If only backend code or backend Compose/env flags changed:
 
 ```bash
-git pull
+cd /home/<user>/projects/erp_dev
+git -C repo_erp pull --ff-only
 docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
-ops/smoke-vps.sh
+repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
 ```
 
 If you are running the tracked template directly from the parent runtime root:
@@ -310,32 +317,38 @@ docker compose \
   --project-directory . \
   -f repo_erp/ops/templates/docker-compose.vps.yml \
   up -d --build --no-deps backend
-repo_erp/ops/smoke-vps.sh
+repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
 ```
 
 If only CORS/domain variables changed:
 
 ```bash
+cd /home/<user>/projects/erp_dev/repo_erp
 ops/setup-vps.sh --skip-bootstrap --skip-deploy
+cd ..
 docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hasura backend
-ops/smoke-vps.sh
+repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
 ```
 
 ## Restoring A Production Backup
 
-Upload the backup to the VPS, for example into `/opt/erp/restore`.
+Upload the backup to the VPS, for example into `/home/<user>/projects/erp_dev/restore`.
 
 For the normal one-script flow, prefer:
 
 ```bash
-sudo ops/setup-vps.sh --yes --restore-backup /opt/erp/restore --require-restore-backup
+cd /home/<user>/projects/erp_dev/repo_erp
+sudo ops/setup-vps.sh --yes --restore-backup restore --require-restore-backup
 ```
 
 Then run:
 
 ```bash
 ops/restore-prod-backup.sh \
-  --main-dump /opt/erp/restore/latest.dump \
+  --project-dir /home/<user>/projects/erp_dev \
+  --env-file /home/<user>/projects/erp_dev/.env \
+  --compose-file /home/<user>/projects/erp_dev/docker-compose.yml \
+  --main-dump /home/<user>/projects/erp_dev/restore/latest.dump \
   --confirm-db erpdb
 ```
 
@@ -343,8 +356,11 @@ With globals:
 
 ```bash
 ops/restore-prod-backup.sh \
-  --main-dump /opt/erp/restore/latest.dump \
-  --globals-dump /opt/erp/restore/globals.sql.gz \
+  --project-dir /home/<user>/projects/erp_dev \
+  --env-file /home/<user>/projects/erp_dev/.env \
+  --compose-file /home/<user>/projects/erp_dev/docker-compose.yml \
+  --main-dump /home/<user>/projects/erp_dev/restore/latest.dump \
+  --globals-dump /home/<user>/projects/erp_dev/restore/globals.sql.gz \
   --restore-globals \
   --confirm-db erpdb
 ```
@@ -361,13 +377,15 @@ Hasura metadata backup for custom relationships or permission rules.
 Hasura CORS still fails:
 
 ```bash
-ops/smoke-vps.sh
+cd /home/<user>/projects/erp_dev
+repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
 docker compose --env-file .env -f docker-compose.yml exec -T hasura printenv HASURA_GRAPHQL_CORS_DOMAIN
 ```
 
 If the env is correct but the browser still fails, recreate Hasura:
 
 ```bash
+cd /home/<user>/projects/erp_dev
 docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hasura
 ```
 
@@ -380,6 +398,7 @@ Let's Encrypt certificate is not issued:
 Backend health fails:
 
 ```bash
+cd /home/<user>/projects/erp_dev
 docker compose --env-file .env -f docker-compose.yml logs --tail=200 backend
 ```
 

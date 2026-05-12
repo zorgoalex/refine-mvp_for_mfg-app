@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_DIR="$REPO_DIR"
 SKIP_FIREWALL=0
 POSTGRES_DATA_UID="${POSTGRES_DATA_UID:-70}"
 POSTGRES_DATA_GID="${POSTGRES_DATA_GID:-70}"
@@ -123,17 +124,17 @@ install_templates_if_missing() {
   local env_file="$PROJECT_DIR/.env"
 
   if [[ ! -f "$compose" ]]; then
-    cp "$PROJECT_DIR/ops/templates/docker-compose.vps.yml" "$compose"
+    cp "$REPO_DIR/ops/templates/docker-compose.vps.yml" "$compose"
     log "Created $compose from template"
   fi
 
   if [[ ! -f "$pg_hba" ]]; then
-    cp "$PROJECT_DIR/ops/templates/pg_hba.vps.conf" "$pg_hba"
+    cp "$REPO_DIR/ops/templates/pg_hba.vps.conf" "$pg_hba"
     log "Created $pg_hba from template"
   fi
 
   if [[ ! -f "$env_file" ]]; then
-    cp "$PROJECT_DIR/ops/templates/env.vps.example" "$env_file"
+    cp "$REPO_DIR/ops/templates/env.vps.example" "$env_file"
     chmod 600 "$env_file"
     log "Created $env_file from template; fill it before deploy"
   fi

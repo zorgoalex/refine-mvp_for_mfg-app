@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT_DIR="$SCRIPT_PROJECT_DIR"
+SCRIPT_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+default_runtime_dir() {
+  if [[ "$(basename "$SCRIPT_REPO_DIR")" == "repo_erp" ]]; then
+    dirname "$SCRIPT_REPO_DIR"
+  else
+    printf '%s\n' "$SCRIPT_REPO_DIR"
+  fi
+}
+
+CHECKOUT_DIR="$SCRIPT_REPO_DIR"
+RUNTIME_DIR="$(default_runtime_dir)"
 ENV_FILE=""
 COMPOSE_FILE=""
 REPO_URL=""
@@ -30,9 +40,10 @@ Usage:
   ops/reset-test-vps.sh --confirm COMPOSE_PROJECT_NAME [options]
 
 Options:
-  --project-dir PATH       Project checkout to destroy and recreate. Default: repo root.
-  --env-file PATH          Env file to preserve/restore. Default: PROJECT_DIR/.env.
-  --compose-file PATH      Compose file to stop before cleanup. Default: PROJECT_DIR/docker-compose.yml.
+  --project-dir PATH       Runtime project directory. Default: parent erp_dev when repo is in repo_erp.
+  --repo-dir PATH          Repository checkout to destroy and recreate. Default: current repo root.
+  --env-file PATH          Env file to preserve/restore. Default: runtime PROJECT_DIR/.env.
+  --compose-file PATH      Compose file to stop before cleanup. Default: runtime PROJECT_DIR/docker-compose.yml.
   --repo-url URL           Git repository URL. Default: current origin URL.
   --branch NAME            Branch to clone. Default: current branch.
   --backup-root PATH       Where temporary env/restore backups are stored.
@@ -62,7 +73,8 @@ fail() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project-dir) PROJECT_DIR="$2"; shift 2 ;;
+    --project-dir) RUNTIME_DIR="$2"; shift 2 ;;
+    --repo-dir) CHECKOUT_DIR="$2"; shift 2 ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --compose-file) COMPOSE_FILE="$2"; shift 2 ;;
     --repo-url) REPO_URL="$2"; shift 2 ;;
@@ -80,30 +92,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$PROJECT_DIR" = /* ]] || PROJECT_DIR="$(pwd)/$PROJECT_DIR"
-PROJECT_DIR="$(cd "$(dirname "$PROJECT_DIR")" && pwd)/$(basename "$PROJECT_DIR")"
-[[ -n "$ENV_FILE" ]] || ENV_FILE="$PROJECT_DIR/.env"
-[[ -n "$COMPOSE_FILE" ]] || COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
-[[ "$ENV_FILE" = /* ]] || ENV_FILE="$PROJECT_DIR/$ENV_FILE"
-[[ "$COMPOSE_FILE" = /* ]] || COMPOSE_FILE="$PROJECT_DIR/$COMPOSE_FILE"
+[[ "$RUNTIME_DIR" = /* ]] || RUNTIME_DIR="$(pwd)/$RUNTIME_DIR"
+RUNTIME_DIR="$(cd "$(dirname "$RUNTIME_DIR")" && pwd)/$(basename "$RUNTIME_DIR")"
+[[ "$CHECKOUT_DIR" = /* ]] || CHECKOUT_DIR="$(pwd)/$CHECKOUT_DIR"
+CHECKOUT_DIR="$(cd "$(dirname "$CHECKOUT_DIR")" && pwd)/$(basename "$CHECKOUT_DIR")"
+[[ -n "$ENV_FILE" ]] || ENV_FILE="$RUNTIME_DIR/.env"
+[[ -n "$COMPOSE_FILE" ]] || COMPOSE_FILE="$RUNTIME_DIR/docker-compose.yml"
+[[ "$ENV_FILE" = /* ]] || ENV_FILE="$RUNTIME_DIR/$ENV_FILE"
+[[ "$COMPOSE_FILE" = /* ]] || COMPOSE_FILE="$RUNTIME_DIR/$COMPOSE_FILE"
 BACKUP_ROOT="$(mkdir -p "$BACKUP_ROOT" && cd "$BACKUP_ROOT" && pwd)"
-PROJECT_PARENT="$(dirname "$PROJECT_DIR")"
+CHECKOUT_PARENT="$(dirname "$CHECKOUT_DIR")"
 
-case "$PROJECT_DIR" in
+case "$CHECKOUT_DIR" in
   /home/*/projects/*|/opt/*/*) ;;
-  *) fail "Refusing to reset suspicious project path: $PROJECT_DIR" ;;
+  *) fail "Refusing to reset suspicious repo path: $CHECKOUT_DIR" ;;
 esac
 
-[[ "$PROJECT_DIR" != "/" && "$PROJECT_DIR" != "/home" && "$PROJECT_DIR" != "/opt" ]] \
-  || fail "Refusing to reset top-level directory: $PROJECT_DIR"
+[[ "$CHECKOUT_DIR" != "/" && "$CHECKOUT_DIR" != "/home" && "$CHECKOUT_DIR" != "/opt" ]] \
+  || fail "Refusing to reset top-level directory: $CHECKOUT_DIR"
 
-if [[ -z "$REPO_URL" && -d "$PROJECT_DIR/.git" ]]; then
-  REPO_URL="$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || true)"
+if [[ -z "$REPO_URL" && -d "$CHECKOUT_DIR/.git" ]]; then
+  REPO_URL="$(git -C "$CHECKOUT_DIR" remote get-url origin 2>/dev/null || true)"
 fi
 [[ -n "$REPO_URL" ]] || fail "--repo-url is required when origin URL cannot be detected"
 
-if [[ -z "$BRANCH" && -d "$PROJECT_DIR/.git" ]]; then
-  BRANCH="$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || true)"
+if [[ -z "$BRANCH" && -d "$CHECKOUT_DIR/.git" ]]; then
+  BRANCH="$(git -C "$CHECKOUT_DIR" branch --show-current 2>/dev/null || true)"
 fi
 [[ -n "$BRANCH" ]] || fail "--branch is required when current branch cannot be detected"
 
@@ -123,7 +137,8 @@ if [[ "$AUTO_YES" == "0" ]]; then
   cat <<EOF
 This will destructively reset the ERP test VPS checkout.
 
-  project:         $PROJECT_DIR
+  project:         $RUNTIME_DIR
+  repo checkout:   $CHECKOUT_DIR
   compose project: $COMPOSE_PROJECT_NAME
   repo:            $REPO_URL
   branch:          $BRANCH
@@ -168,7 +183,7 @@ kill_matching() {
   done
 }
 
-backup_dir="$BACKUP_ROOT/$(basename "$PROJECT_DIR")_$(date +%Y%m%d_%H%M%S)"
+backup_dir="$BACKUP_ROOT/$(basename "$CHECKOUT_DIR")_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$backup_dir"
 
 if [[ "$PRESERVE_ENV" == "1" ]]; then
@@ -178,16 +193,16 @@ if [[ "$PRESERVE_ENV" == "1" ]]; then
   chmod 600 "$backup_dir/.env"
 fi
 
-if [[ "$PRESERVE_RESTORE" == "1" && -d "$PROJECT_DIR/restore" ]]; then
+if [[ "$PRESERVE_RESTORE" == "1" && -d "$RUNTIME_DIR/restore" ]]; then
   log "Backing up restore/"
   mkdir -p "$backup_dir/restore"
-  cp -a "$PROJECT_DIR/restore/." "$backup_dir/restore/"
+  cp -a "$RUNTIME_DIR/restore/." "$backup_dir/restore/"
 fi
 
 log "Stopping project deploy/test processes"
-kill_matching TERM "($PROJECT_DIR/ops/setup-vps.sh|$PROJECT_DIR/ops/run-vps-tests.sh|setup-vps.sh .*${COMPOSE_PROJECT_NAME}|run-vps-tests.sh .*${COMPOSE_PROJECT_NAME}|vitest run|playwright test|pg_restore)"
+kill_matching TERM "($CHECKOUT_DIR/ops/setup-vps.sh|$CHECKOUT_DIR/ops/run-vps-tests.sh|setup-vps.sh .*${COMPOSE_PROJECT_NAME}|run-vps-tests.sh .*${COMPOSE_PROJECT_NAME}|vitest run|playwright test|pg_restore)"
 sleep 3
-kill_matching KILL "($PROJECT_DIR/ops/setup-vps.sh|$PROJECT_DIR/ops/run-vps-tests.sh|setup-vps.sh .*${COMPOSE_PROJECT_NAME}|run-vps-tests.sh .*${COMPOSE_PROJECT_NAME}|vitest run|playwright test|pg_restore)"
+kill_matching KILL "($CHECKOUT_DIR/ops/setup-vps.sh|$CHECKOUT_DIR/ops/run-vps-tests.sh|setup-vps.sh .*${COMPOSE_PROJECT_NAME}|run-vps-tests.sh .*${COMPOSE_PROJECT_NAME}|vitest run|playwright test|pg_restore)"
 
 if command -v docker >/dev/null 2>&1; then
   if [[ -f "$COMPOSE_FILE" ]]; then
@@ -225,32 +240,34 @@ if command -v docker >/dev/null 2>&1; then
 fi
 
 log "Removing project checkout"
-cd "$PROJECT_PARENT"
-"${SUDO[@]}" rm -rf "$PROJECT_DIR"
-run_as_target mkdir -p "$PROJECT_PARENT"
-cd "$PROJECT_PARENT"
+cd "$CHECKOUT_PARENT"
+"${SUDO[@]}" rm -rf "$CHECKOUT_DIR"
+run_as_target mkdir -p "$CHECKOUT_PARENT"
+cd "$CHECKOUT_PARENT"
 
 log "Cloning fresh checkout"
-run_as_target git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$PROJECT_DIR"
+run_as_target git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$CHECKOUT_DIR"
 
 if [[ "$PRESERVE_ENV" == "1" ]]; then
   log "Restoring .env"
-  cp "$backup_dir/.env" "$PROJECT_DIR/.env"
-  chmod 600 "$PROJECT_DIR/.env"
+  cp "$backup_dir/.env" "$RUNTIME_DIR/.env"
+  chmod 600 "$RUNTIME_DIR/.env"
 fi
 
 if [[ "$PRESERVE_RESTORE" == "1" && -d "$backup_dir/restore" ]]; then
   log "Restoring restore/"
-  mkdir -p "$PROJECT_DIR/restore"
-  cp -a "$backup_dir/restore/." "$PROJECT_DIR/restore/"
+  mkdir -p "$RUNTIME_DIR/restore"
+  cp -a "$backup_dir/restore/." "$RUNTIME_DIR/restore/"
 fi
 
 if [[ "$TARGET_USER" != "root" ]]; then
-  "${SUDO[@]}" chown -R "$TARGET_USER:$TARGET_GROUP" "$PROJECT_DIR"
+  "${SUDO[@]}" chown -R "$TARGET_USER:$TARGET_GROUP" "$CHECKOUT_DIR"
+  [[ -e "$RUNTIME_DIR/.env" ]] && "${SUDO[@]}" chown "$TARGET_USER:$TARGET_GROUP" "$RUNTIME_DIR/.env"
+  [[ -d "$RUNTIME_DIR/restore" ]] && "${SUDO[@]}" chown -R "$TARGET_USER:$TARGET_GROUP" "$RUNTIME_DIR/restore"
 fi
 
 log "Reset complete"
-cd "$PROJECT_DIR"
+cd "$CHECKOUT_DIR"
 printf 'branch='
 git branch --show-current
 printf 'head='

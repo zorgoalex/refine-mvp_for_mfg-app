@@ -7,6 +7,8 @@ COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 SKIP_DOCKER=0
 SMOKE_ATTEMPTS="${SMOKE_ATTEMPTS:-12}"
 SMOKE_DELAY_SECONDS="${SMOKE_DELAY_SECONDS:-5}"
+ENV_FILE_ARG_SET=0
+COMPOSE_FILE_ARG_SET=0
 
 usage() {
   cat <<'EOF'
@@ -15,7 +17,7 @@ smoke-vps.sh
 Run post-deploy checks against Hasura, backend, and Hasura CORS.
 
 Usage:
-  ops/smoke-vps.sh [--env-file PATH] [--compose-file PATH] [--skip-docker]
+  ops/smoke-vps.sh [--project-dir PATH] [--env-file PATH] [--compose-file PATH] [--skip-docker]
 EOF
 }
 
@@ -30,14 +32,20 @@ fail() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --env-file) ENV_FILE="$2"; shift 2 ;;
-    --compose-file) COMPOSE_FILE="$2"; shift 2 ;;
+    --project-dir) PROJECT_DIR="$2"; shift 2 ;;
+    --env-file) ENV_FILE="$2"; ENV_FILE_ARG_SET=1; shift 2 ;;
+    --compose-file) COMPOSE_FILE="$2"; COMPOSE_FILE_ARG_SET=1; shift 2 ;;
     --skip-docker) SKIP_DOCKER=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
   esac
 done
 
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+[[ "$ENV_FILE_ARG_SET" == "0" ]] && ENV_FILE="$PROJECT_DIR/.env"
+[[ "$COMPOSE_FILE_ARG_SET" == "0" ]] && COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
+[[ "$ENV_FILE" = /* ]] || ENV_FILE="$PROJECT_DIR/$ENV_FILE"
+[[ "$COMPOSE_FILE" = /* ]] || COMPOSE_FILE="$PROJECT_DIR/$COMPOSE_FILE"
 [[ -f "$ENV_FILE" ]] || fail "Env file not found: $ENV_FILE"
 set -a
 # shellcheck disable=SC1090
