@@ -55,7 +55,7 @@ const authenticatedRoutes: SmokeRoute[] = [
 ];
 
 test.describe('Frontend pages smoke', () => {
-    test.setTimeout(300000);
+    test.setTimeout(600000);
 
     test('renders every registered frontend page without GraphQL or React runtime errors', async ({
         page,

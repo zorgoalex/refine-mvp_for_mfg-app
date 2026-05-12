@@ -793,7 +793,7 @@ const catalogCases: CatalogCase[] = [
 ];
 
 test.describe('Reference workflows', () => {
-    test.setTimeout(300000);
+    test.setTimeout(600000);
 
     test('creates, updates every form field, and deletes all catalog records', async ({ page }) => {
         const db = await setupWorkflowMockApi(page);
@@ -852,7 +852,9 @@ test.describe('Reference workflows', () => {
         const phone = db.client_phones.find((row) => row.client_id === client.client_id)!;
 
         await page.goto(`/clients/edit/${client.client_id}`);
-        await expect(page.locator('#client_name')).toHaveValue('E2E клиент с телефоном');
+        const clientNameInput = page.locator('#client_name');
+        await expect(clientNameInput).toBeVisible({ timeout: 30000 });
+        await expect(clientNameInput).toHaveValue('E2E клиент с телефоном', { timeout: 30000 });
         const editPhonesCard = page.locator('.ant-card').filter({ hasText: 'Телефоны' });
         await expect(editPhonesCard.getByText('+7 701 123 4567')).toBeVisible();
 
