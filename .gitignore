@@ -61,6 +61,7 @@ docs/runtime-config/*
 !docs/runtime-config/canary/
 docs/runtime-config/canary/*
 !docs/runtime-config/canary/09-production-actions.json
+!docs/runtime-config/canary/10-client-phones.json
 .claude/
 .gemini/
 .factory/
