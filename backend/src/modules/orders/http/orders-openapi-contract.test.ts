@@ -32,6 +32,7 @@ describe('orders OpenAPI contract', () => {
 
 function readOpenApiContract(): string {
   const candidates = [
+    resolve(process.cwd(), 'contracts/04-api-contract.openapi.yaml'),
     resolve(process.cwd(), '../spec_back-erp/prd_v1/04-api-contract.openapi.yaml'),
     resolve(process.cwd(), '../../spec_back-erp/prd_v1/04-api-contract.openapi.yaml'),
   ];

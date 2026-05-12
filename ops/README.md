@@ -100,6 +100,9 @@ sudo ops/setup-vps.sh --yes
 - `deploy-stack.sh` - creates missing templates and starts/rebuilds the stack.
 - `smoke-vps.sh` - checks HTTPS health endpoints and Hasura CORS preflight.
 - `restore-prod-backup.sh` - destructive DB restore helper for a fresh backup.
+- `reset-test-vps.sh` - separate opt-in destructive reset for a dedicated test
+  VPS: stops the stack/tests, cleans Docker state, reclones the repo, and
+  restores `.env`/`restore/` from a temporary backup.
 - `apply-hasura-metadata.sh` - applies Hasura `metadata.json`.
 - `track-hasura-public-schema.sh` - tracks restored public tables/views in Hasura.
 - `run-vps-tests.sh` - installs npm dependencies in Docker volumes and runs
@@ -191,6 +194,30 @@ To run the same VPS test suite manually:
 
 ```bash
 ops/run-vps-tests.sh
+```
+
+## Dedicated Test VPS Reset
+
+`ops/setup-vps.sh` does not wipe Docker state or reclone the repository. For a
+full clean rebuild on a dedicated test VPS, run the reset script explicitly:
+
+```bash
+sudo ops/reset-test-vps.sh --confirm erp_test --yes \
+  --all-docker \
+  --prune-images \
+  --prune-builder
+```
+
+The `--confirm` value must match `COMPOSE_PROJECT_NAME` from `.env`. The script
+backs up the current `.env` and `restore/`, removes the checkout, reclones the
+current branch from `origin`, restores those files, and then stops. It does not
+run `setup-vps.sh`; run deploy/restore/test after the reset:
+
+```bash
+sudo ops/setup-vps.sh --yes \
+  --expected-ip <VPS_PUBLIC_IP> \
+  --restore-backup restore \
+  --require-restore-backup
 ```
 
 If a DB backup is already uploaded to the VPS and should be restored during

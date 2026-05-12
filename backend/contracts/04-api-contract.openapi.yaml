@@ -1,0 +1,3019 @@
+openapi: 3.0.3
+info:
+  title: ERP/CRM Backend API
+  version: 0.1.0
+  description: |
+    Контракт backend API для первого этапа внедрения NestJS backend-слоя.
+
+    Backend является источником истины для авторизации, прав доступа, транзакционного
+    сохранения заказов, финансовых расчётов, экспорта, VLM-интеграций и аудита.
+
+    Frontend не должен напрямую управлять транзакциями заказа, refresh-token'ами,
+    финансовыми итогами, экспортными payload'ами и проверкой прав доступа.
+
+    Stage-1 backend API использует явное path versioning. Текущая стабильная
+    версия: /api/v1. Неломающие поля можно добавлять в v1; breaking changes
+    требуют /api/v2 и отдельного cutover/deprecation плана.
+
+servers:
+  - url: http://localhost:3000
+    description: Local NestJS backend
+  - url: https://api.example.com
+    description: Production backend placeholder
+
+tags:
+  - name: Auth
+    description: Авторизация, refresh-сессии и текущий пользователь
+  - name: Orders
+    description: Заказы как бизнес-агрегат
+  - name: Order Export
+    description: Экспорт заказов во внешние системы
+  - name: Users
+    description: Управление пользователями
+  - name: VLM
+    description: Загрузка изображений и VLM-анализ
+  - name: Health
+    description: Liveness/readiness проверки backend-сервиса
+
+paths:
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Auth
+      operationId: authLogin
+      summary: Логин пользователя
+      description: |
+        Проверяет логин и пароль, возвращает short-lived access token и выставляет
+        refresh token в HttpOnly cookie. Refresh token не возвращается в response body.
+      x-rate-limit: login_by_ip_and_username
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              default:
+                value:
+                  username: manager
+                  password: password123
+      responses:
+        '200':
+          description: Успешный логин
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/auth/refresh:
+    post:
+      tags:
+        - Auth
+      operationId: authRefresh
+      summary: Обновление access token
+      description: |
+        Использует refresh token из HttpOnly cookie. При успешном refresh выполняется
+        rotation refresh token'а: старый token атомарно отзывается, новый выставляется
+        в HttpOnly cookie.
+      security:
+        - refreshCookie: []
+      x-rate-limit: refresh_by_session
+      responses:
+        '200':
+          description: Новый access token и актуальный пользователь
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - Auth
+      operationId: authLogout
+      summary: Logout пользователя
+      description: |
+        Отзывает текущий refresh token, очищает refresh cookie. Endpoint должен быть
+        идемпотентным: повторный logout не должен падать.
+      security:
+        - bearerAuth: []
+        - refreshCookie: []
+      responses:
+        '200':
+          description: Сессия завершена
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/me:
+    get:
+      tags:
+        - Auth
+      operationId: getCurrentUser
+      summary: Получить текущего пользователя
+      description: Возвращает текущего пользователя, роль и список permissions.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Текущий пользователь
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders:
+    get:
+      tags:
+        - Orders
+      operationId: listOrders
+      summary: Список заказов
+      description: |
+        Возвращает серверно-пагинированный список заказов. Backend применяет permissions,
+        scope пользователя, whitelist допустимых sort/filter полей и не принимает raw SQL/GraphQL поля от frontend.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: sortBy
+          in: query
+          required: false
+          description: Whitelisted поле сортировки.
+          schema:
+            type: string
+            enum:
+              - orderId
+              - orderName
+              - orderDate
+              - plannedCompletionDate
+              - completionDate
+              - issueDate
+              - clientName
+              - orderStatusName
+              - paymentStatusName
+              - productionStatusName
+              - finalAmount
+              - paidAmount
+              - debtAmount
+              - updatedAt
+            default: updatedAt
+        - name: sortOrder
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: desc
+        - name: search
+          in: query
+          required: false
+          description: Поиск по номеру/названию заказа, клиенту и разрешённым текстовым полям.
+          schema:
+            type: string
+            maxLength: 200
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: orderStatusId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: paymentStatusId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: productionStatusId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: dateFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: onlyMyOrders
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Список заказов
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags:
+        - Orders
+      operationId: createOrder
+      summary: Создать заказ
+      description: |
+        Создаёт заказ и все дочерние сущности в одной БД-транзакции. Backend считает
+        финансовые итоги и возвращает полный актуальный OrderDto.
+      security:
+        - bearerAuth: []
+      x-permission: orders.create
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveOrderDto'
+      responses:
+        '201':
+          description: Заказ создан
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveOrderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/form-data:
+    get:
+      tags:
+        - Orders
+      operationId: getOrderFormData
+      summary: Справочные данные для формы заказа
+      description: |
+        Возвращает набор справочников, необходимый для формы заказа, чтобы сократить
+        количество мелких запросов frontend'а.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Справочники формы заказа
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderFormDataResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: getOrderById
+      summary: Получить заказ
+      description: Возвращает полный заказ для show/edit формы.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Полный заказ
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags:
+        - Orders
+      operationId: updateOrder
+      summary: Обновить заказ
+      description: |
+        Обновляет заказ и все дочерние сущности в одной БД-транзакции. Обязательна
+        проверка optimistic locking через поле version.
+      security:
+        - bearerAuth: []
+      x-permission: orders.update
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveOrderDto'
+      responses:
+        '200':
+          description: Заказ обновлён
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveOrderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags:
+        - Orders
+      operationId: deleteOrder
+      summary: Удалить или архивировать заказ
+      description: |
+        Выполняет soft-delete/archive заказа, а не физическое удаление.
+        Команда stale-safe: клиент обязан передать текущую версию заказа в
+        `If-Match`, а retry-safe поведение обеспечивается `Idempotency-Key`.
+      security:
+        - bearerAuth: []
+      x-permission: orders.delete
+      x-transactional: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchVersion'
+      responses:
+        '200':
+          description: Заказ удалён/архивирован
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteOrderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          description: Версия заказа устарела или idempotency key уже используется другим запросом
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+              examples:
+                versionConflict:
+                  value:
+                    error:
+                      code: ORDER_VERSION_CONFLICT
+                      message: Заказ был изменён другим пользователем
+                      details:
+                        currentVersion: 8
+                        clientVersion: 7
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+                idempotencyKeyReused:
+                  value:
+                    error:
+                      code: IDEMPOTENCY_KEY_REUSED
+                      message: Idempotency key was reused with a different request
+                      details:
+                        idempotencyKey: order-delete:01HZX8K5T3M2F5F7K9A2S1QW3E
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+                idempotencyInProgress:
+                  value:
+                    error:
+                      code: IDEMPOTENCY_IN_PROGRESS
+                      message: Idempotent command is still processing
+                      details:
+                        idempotencyKey: order-delete:01HZX8K5T3M2F5F7K9A2S1QW3E
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+                idempotencyFailed:
+                  value:
+                    error:
+                      code: IDEMPOTENCY_FAILED
+                      message: Idempotent command previously failed
+                      details:
+                        idempotencyKey: order-delete:01HZX8K5T3M2F5F7K9A2S1QW3E
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/status:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    patch:
+      tags:
+        - Orders
+      operationId: changeOrderStatus
+      summary: Изменить статус заказа
+      description: Изменяет статус заказа с записью audit event.
+      security:
+        - bearerAuth: []
+      x-permission: orders.change_status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeOrderStatusRequest'
+      responses:
+        '200':
+          description: Статус изменён
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/export/google-drive:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Order Export
+      operationId: exportOrderToGoogleDrive
+      summary: Экспорт заказа в Google Drive
+      description: |
+        Frontend отправляет только orderId и опциональные параметры. Backend сам получает
+        заказ, детали, платежи, клиента, статусы, считает итоговый export payload и вызывает интеграцию.
+      security:
+        - bearerAuth: []
+      x-permission: orders.export
+      x-rate-limit: export_by_user_and_order
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportOrderRequest'
+      responses:
+        '200':
+          description: Заказ экспортирован
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportOrderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/audit:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: getOrderAudit
+      summary: Audit log заказа
+      description: Возвращает audit events по заказу. Endpoint можно включить на этапе 1 или оставить за feature flag.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view_audit
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Audit events заказа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users:
+    get:
+      tags:
+        - Users
+      operationId: listUsers
+      summary: Список пользователей
+      security:
+        - bearerAuth: []
+      x-permission: users.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: role
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/UserRole'
+        - name: isActive
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Список пользователей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags:
+        - Users
+      operationId: createUser
+      summary: Создать пользователя
+      description: Frontend отправляет canonical role name. Backend сам мапит role на role_id.
+      security:
+        - bearerAuth: []
+      x-permission: users.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/UserAlreadyExists'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags:
+        - Users
+      operationId: getUserById
+      summary: Получить пользователя
+      security:
+        - bearerAuth: []
+      x-permission: users.view
+      responses:
+        '200':
+          description: Пользователь
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      tags:
+        - Users
+      operationId: updateUser
+      summary: Обновить пользователя
+      security:
+        - bearerAuth: []
+      x-permission: users.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: Пользователь обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+        '409':
+          $ref: '#/components/responses/UserAlreadyExists'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/{userId}/change-password:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags:
+        - Users
+      operationId: changeUserPassword
+      summary: Сменить пароль пользователя
+      security:
+        - bearerAuth: []
+      x-permission: users.change_password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Пароль изменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangePasswordResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/{userId}/deactivate:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    patch:
+      tags:
+        - Users
+      operationId: deactivateUser
+      summary: Деактивировать пользователя
+      security:
+        - bearerAuth: []
+      x-permission: users.deactivate
+      responses:
+        '200':
+          description: Пользователь деактивирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/{userId}/activate:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    patch:
+      tags:
+        - Users
+      operationId: activateUser
+      summary: Активировать пользователя
+      security:
+        - bearerAuth: []
+      x-permission: users.update
+      responses:
+        '200':
+          description: Пользователь активирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/vlm/health:
+    get:
+      tags:
+        - VLM
+      operationId: getVlmHealth
+      summary: Проверить состояние VLM-интеграции
+      description: |
+        Для обычных пользователей endpoint должен возвращать только безопасный минимум.
+        Расширенная диагностика доступна только пользователям с permission vlm.configure или settings.manage.
+      security:
+        - bearerAuth: []
+      x-permission: vlm.configure
+      responses:
+        '200':
+          description: Статус VLM-интеграции
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VlmHealthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/vlm/upload:
+    post:
+      tags:
+        - VLM
+      operationId: uploadVlmImage
+      summary: Загрузить изображение для VLM-анализа
+      description: |
+        Загружает файл, проверяет размер и MIME type, создаёт запись file_uploads и
+        возвращает uploadId. VLM analyze должен использовать uploadId, а не произвольный внешний URL.
+      security:
+        - bearerAuth: []
+      x-permission: vlm.use
+      x-rate-limit: vlm_upload_by_user
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Изображение для анализа.
+                purpose:
+                  type: string
+                  default: vlm
+                  enum:
+                    - vlm
+                    - order_file
+      responses:
+        '201':
+          description: Файл загружен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VlmUploadResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/vlm/analyze:
+    post:
+      tags:
+        - VLM
+      operationId: analyzeVlmImage
+      summary: Выполнить VLM-анализ изображения
+      description: |
+        Выполняет анализ ранее загруженного изображения. На первом этапе рекомендуется
+        требовать uploadId. Поле imageUrl допускается только для URL, принадлежащих ранее загруженным файлам.
+      security:
+        - bearerAuth: []
+      x-permission: vlm.use
+      x-rate-limit: vlm_analyze_by_user_daily
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VlmAnalyzeRequest'
+      responses:
+        '200':
+          description: Результат анализа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VlmAnalyzeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UploadNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /health/live:
+    get:
+      tags:
+        - Health
+      operationId: liveHealth
+      summary: Liveness probe
+      description: Проверяет, что процесс backend жив.
+      responses:
+        '200':
+          description: Backend process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveHealthResponse'
+
+  /health/ready:
+    get:
+      tags:
+        - Health
+      operationId: readyHealth
+      summary: Readiness probe
+      description: "Проверяет готовность backend обрабатывать запросы: БД, Redis и обязательные интеграции."
+      responses:
+        '200':
+          description: Backend готов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyHealthResponse'
+        '503':
+          description: Backend не готов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyHealthResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Short-lived access token из /api/v1/auth/login или /api/v1/auth/refresh.
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: HttpOnly refresh token cookie. Не доступен frontend JavaScript-коду.
+
+  headers:
+    RequestId:
+      description: Уникальный id запроса для логов и аудита.
+      schema:
+        type: string
+        example: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 25
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Уникальный ключ команды для безопасного retry без повторного удаления/audit/outbox.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 200
+        example: order-delete:01HZX8K5T3M2F5F7K9A2S1QW3E
+    IfMatchVersion:
+      name: If-Match
+      in: header
+      required: true
+      description: Текущая версия заказа для optimistic locking. Допускается число или quoted ETag вида `"4"`.
+      schema:
+        type: string
+        example: '"4"'
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+  responses:
+    BadRequest:
+      description: Некорректные path/query/header параметры
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            badRequest:
+              value:
+                error:
+                  code: BAD_REQUEST
+                  message: Некорректные входные данные
+                  details:
+                    header: If-Match
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    Unauthorized:
+      description: Не авторизован
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            authRequired:
+              value:
+                error:
+                  code: AUTH_REQUIRED
+                  message: Требуется авторизация
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    Forbidden:
+      description: Недостаточно прав
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            permissionDenied:
+              value:
+                error:
+                  code: PERMISSION_DENIED
+                  message: Недостаточно прав для выполнения действия
+                  details:
+                    requiredPermission: orders.update
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    OrderNotFound:
+      description: Заказ не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            notFound:
+              value:
+                error:
+                  code: ORDER_NOT_FOUND
+                  message: Заказ не найден
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    UserNotFound:
+      description: Пользователь не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            notFound:
+              value:
+                error:
+                  code: USER_NOT_FOUND
+                  message: Пользователь не найден
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    UploadNotFound:
+      description: Загрузка не найдена
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            notFound:
+              value:
+                error:
+                  code: UPLOAD_NOT_FOUND
+                  message: Загруженный файл не найден
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    UserAlreadyExists:
+      description: Пользователь с таким username/email уже существует
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            exists:
+              value:
+                error:
+                  code: USER_ALREADY_EXISTS
+                  message: Пользователь с таким username уже существует
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    OrderVersionConflict:
+      description: Конфликт версии заказа
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            versionConflict:
+              value:
+                error:
+                  code: ORDER_VERSION_CONFLICT
+                  message: Заказ был изменён другим пользователем
+                  details:
+                    currentVersion: 8
+                    clientVersion: 7
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    ValidationError:
+      description: Ошибка валидации payload/query params
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            validation:
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Некорректные входные данные
+                  details:
+                    fields:
+                      - path: header.clientId
+                        message: clientId обязателен
+                      - path: details.0.quantity
+                        message: quantity должен быть больше 0
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    RateLimitExceeded:
+      description: Превышен лимит запросов
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            rateLimit:
+              value:
+                error:
+                  code: RATE_LIMIT_EXCEEDED
+                  message: Превышен лимит запросов
+                  details:
+                    retryAfterSeconds: 60
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    PayloadTooLarge:
+      description: Слишком большой payload или файл
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            tooLarge:
+              value:
+                error:
+                  code: PAYLOAD_TOO_LARGE
+                  message: Файл превышает допустимый размер
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    UnsupportedMediaType:
+      description: Неподдерживаемый тип файла
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            unsupported:
+              value:
+                error:
+                  code: UNSUPPORTED_MEDIA_TYPE
+                  message: Неподдерживаемый тип файла
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            internal:
+              value:
+                error:
+                  code: INTERNAL_ERROR
+                  message: Внутренняя ошибка сервера
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+
+  schemas:
+    ApiErrorEnvelope:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ApiError'
+
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+        - requestId
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: Некорректные входные данные
+        details:
+          nullable: true
+          description: Дополнительные сведения об ошибке. Не должен содержать secrets.
+        requestId:
+          type: string
+          example: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+
+    UserRole:
+      type: string
+      enum:
+        - superadmin
+        - admin
+        - manager
+        - top_manager
+        - operator
+        - worker
+        - viewer
+
+    PermissionName:
+      type: string
+      enum:
+        - orders.view
+        - orders.create
+        - orders.update
+        - orders.delete
+        - orders.export
+        - orders.change_status
+        - orders.view_audit
+        - payments.view
+        - payments.create
+        - payments.update
+        - payments.delete
+        - users.view
+        - users.create
+        - users.update
+        - users.change_password
+        - users.deactivate
+        - references.view
+        - references.manage
+        - analytics.view
+        - vlm.use
+        - vlm.configure
+        - settings.view
+        - settings.manage
+
+    AuthUser:
+      type: object
+      required:
+        - id
+        - username
+        - role
+        - permissions
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 42
+        username:
+          type: string
+          example: manager
+        email:
+          type: string
+          format: email
+          nullable: true
+          example: manager@example.com
+        fullName:
+          type: string
+          nullable: true
+          example: Иван Иванов
+        role:
+          $ref: '#/components/schemas/UserRole'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionName'
+        employeeId:
+          type: integer
+          format: int64
+          nullable: true
+        isActive:
+          type: boolean
+          example: true
+
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 100
+        password:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    AuthResponse:
+      type: object
+      required:
+        - accessToken
+        - accessTokenExpiresAt
+        - user
+      properties:
+        accessToken:
+          type: string
+          description: Short-lived JWT access token.
+        accessTokenExpiresAt:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    MeResponse:
+      type: object
+      required:
+        - user
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    LogoutResponse:
+      type: object
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          example: true
+
+    Pagination:
+      type: object
+      required:
+        - page
+        - pageSize
+        - total
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          example: 1
+        pageSize:
+          type: integer
+          minimum: 1
+          example: 25
+        total:
+          type: integer
+          minimum: 0
+          example: 125
+
+    OrderListResponse:
+      type: object
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderListItemDto'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    OrderListItemDto:
+      type: object
+      required:
+        - orderId
+        - orderName
+        - clientId
+        - clientName
+        - orderDate
+        - orderStatusName
+        - paymentStatusName
+        - totalAmount
+        - discount
+        - surcharge
+        - finalAmount
+        - paidAmount
+        - debtAmount
+        - partsCount
+        - totalArea
+        - updatedAt
+        - version
+      properties:
+        orderId:
+          type: integer
+          format: int64
+        orderName:
+          type: string
+        clientId:
+          type: integer
+          format: int64
+        clientName:
+          type: string
+        orderDate:
+          type: string
+          format: date
+        plannedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+        completionDate:
+          type: string
+          format: date
+          nullable: true
+        issueDate:
+          type: string
+          format: date
+          nullable: true
+        orderStatusName:
+          type: string
+        paymentStatusName:
+          type: string
+        productionStatusName:
+          type: string
+          nullable: true
+        totalAmount:
+          type: number
+          format: decimal
+        discount:
+          type: number
+          format: decimal
+        surcharge:
+          type: number
+          format: decimal
+        finalAmount:
+          type: number
+          format: decimal
+        paidAmount:
+          type: number
+          format: decimal
+        debtAmount:
+          type: number
+          format: decimal
+        partsCount:
+          type: integer
+          minimum: 0
+        totalArea:
+          type: number
+          format: decimal
+          minimum: 0
+        managerId:
+          type: integer
+          format: int64
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          minimum: 1
+
+    OrderResponse:
+      type: object
+      required:
+        - order
+      properties:
+        order:
+          $ref: '#/components/schemas/OrderDto'
+
+    SaveOrderResponse:
+      type: object
+      required:
+        - order
+      properties:
+        order:
+          $ref: '#/components/schemas/OrderDto'
+
+    OrderDto:
+      type: object
+      required:
+        - header
+        - details
+        - payments
+        - workshops
+        - requirements
+        - dowelingLinks
+        - totals
+        - version
+      properties:
+        header:
+          $ref: '#/components/schemas/OrderHeaderDto'
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderDetailDto'
+        payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentDto'
+        workshops:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderWorkshopDto'
+        requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderResourceRequirementDto'
+        dowelingLinks:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderDowelingLinkDto'
+        totals:
+          $ref: '#/components/schemas/OrderTotalsDto'
+        version:
+          type: integer
+          minimum: 1
+
+    OrderHeaderDto:
+      type: object
+      required:
+        - orderId
+        - orderName
+        - clientId
+        - orderDate
+        - orderStatusId
+        - version
+      properties:
+        orderId:
+          type: integer
+          format: int64
+        orderName:
+          type: string
+        clientId:
+          type: integer
+          format: int64
+        clientName:
+          type: string
+          nullable: true
+        orderDate:
+          type: string
+          format: date
+        managerId:
+          type: integer
+          format: int64
+          nullable: true
+        priority:
+          type: integer
+          nullable: true
+        orderStatusId:
+          type: integer
+          format: int64
+        paymentStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        productionStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        plannedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+        completionDate:
+          type: string
+          format: date
+          nullable: true
+        issueDate:
+          type: string
+          format: date
+          nullable: true
+        paymentDate:
+          type: string
+          format: date
+          nullable: true
+        discount:
+          type: number
+          format: decimal
+          minimum: 0
+        surcharge:
+          type: number
+          format: decimal
+          minimum: 0
+        linkCuttingFile:
+          type: string
+          nullable: true
+        linkCuttingImageFile:
+          type: string
+          nullable: true
+        linkCadFile:
+          type: string
+          nullable: true
+        linkPdfFile:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        refKey1c:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        version:
+          type: integer
+          minimum: 1
+
+    OrderDetailDto:
+      type: object
+      required:
+        - id
+        - detailNumber
+        - height
+        - width
+        - quantity
+        - materialId
+        - millingTypeId
+        - edgeTypeId
+        - detailCost
+      properties:
+        id:
+          type: integer
+          format: int64
+        clientId:
+          type: string
+          nullable: true
+          description: Временный id frontend строки для сопоставления после save.
+        detailNumber:
+          type: integer
+          minimum: 1
+        detailName:
+          type: string
+          nullable: true
+        height:
+          type: number
+          minimum: 0
+        width:
+          type: number
+          minimum: 0
+        quantity:
+          type: integer
+          minimum: 1
+        materialId:
+          type: integer
+          format: int64
+        millingTypeId:
+          type: integer
+          format: int64
+        edgeTypeId:
+          type: integer
+          format: int64
+        filmId:
+          type: integer
+          format: int64
+          nullable: true
+        millingCostPerSqm:
+          type: number
+          format: decimal
+          nullable: true
+        detailCost:
+          type: number
+          format: decimal
+          minimum: 0
+        priority:
+          type: integer
+          nullable: true
+        productionStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        linkCuttingFile:
+          type: string
+          nullable: true
+        linkCuttingImageFile:
+          type: string
+          nullable: true
+        linkCadFile:
+          type: string
+          nullable: true
+        linkPdfFile:
+          type: string
+          nullable: true
+
+    PaymentDto:
+      type: object
+      required:
+        - id
+        - typePaidId
+        - amount
+        - paymentDate
+      properties:
+        id:
+          type: integer
+          format: int64
+        clientId:
+          type: string
+          nullable: true
+        typePaidId:
+          type: integer
+          format: int64
+        typePaidName:
+          type: string
+          nullable: true
+        amount:
+          type: number
+          format: decimal
+          minimum: 0
+        paymentDate:
+          type: string
+          format: date
+        notes:
+          type: string
+          nullable: true
+
+    OrderWorkshopDto:
+      type: object
+      required:
+        - id
+        - workshopId
+        - productionStatusId
+      properties:
+        id:
+          type: integer
+          format: int64
+        clientId:
+          type: string
+          nullable: true
+        workshopId:
+          type: integer
+          format: int64
+        workshopName:
+          type: string
+          nullable: true
+        productionStatusId:
+          type: integer
+          format: int64
+        receivedDate:
+          type: string
+          format: date
+          nullable: true
+        startedDate:
+          type: string
+          format: date
+          nullable: true
+        completedDate:
+          type: string
+          format: date
+          nullable: true
+        plannedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+        sequenceOrder:
+          type: integer
+          nullable: true
+        responsibleEmployeeId:
+          type: integer
+          format: int64
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    OrderResourceRequirementDto:
+      type: object
+      required:
+        - id
+        - resourceType
+        - requiredQuantity
+        - unitId
+        - requirementStatusId
+      properties:
+        id:
+          type: integer
+          format: int64
+        clientId:
+          type: string
+          nullable: true
+        resourceType:
+          type: string
+          example: material
+        materialId:
+          type: integer
+          format: int64
+          nullable: true
+        filmId:
+          type: integer
+          format: int64
+          nullable: true
+        edgeTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        requiredQuantity:
+          type: number
+          format: decimal
+          minimum: 0
+        unitId:
+          type: integer
+          format: int64
+        wastePercentage:
+          type: number
+          format: decimal
+          minimum: 0
+          nullable: true
+        finalQuantity:
+          type: number
+          format: decimal
+          minimum: 0
+          nullable: true
+        requirementStatusId:
+          type: integer
+          format: int64
+        supplierId:
+          type: integer
+          format: int64
+          nullable: true
+        purchasePrice:
+          type: number
+          format: decimal
+          minimum: 0
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    OrderDowelingLinkDto:
+      type: object
+      required:
+        - id
+        - dowelingOrderId
+      properties:
+        id:
+          type: integer
+          format: int64
+        clientId:
+          type: string
+          nullable: true
+        dowelingOrderId:
+          type: integer
+          format: int64
+        designEngineerId:
+          type: integer
+          format: int64
+          nullable: true
+
+    OrderTotalsDto:
+      type: object
+      required:
+        - totalAmount
+        - discount
+        - surcharge
+        - finalAmount
+        - paidAmount
+        - debtAmount
+        - partsCount
+        - totalArea
+      properties:
+        totalAmount:
+          type: number
+          format: decimal
+          minimum: 0
+        discount:
+          type: number
+          format: decimal
+          minimum: 0
+        surcharge:
+          type: number
+          format: decimal
+          minimum: 0
+        finalAmount:
+          type: number
+          format: decimal
+        paidAmount:
+          type: number
+          format: decimal
+          minimum: 0
+        debtAmount:
+          type: number
+          format: decimal
+        partsCount:
+          type: integer
+          minimum: 0
+        totalArea:
+          type: number
+          format: decimal
+          minimum: 0
+
+    SaveOrderDto:
+      type: object
+      required:
+        - header
+        - details
+        - payments
+        - workshops
+        - requirements
+        - dowelingLinks
+        - deleted
+      properties:
+        header:
+          $ref: '#/components/schemas/SaveOrderHeaderDto'
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/SaveOrderDetailDto'
+        payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/SavePaymentDto'
+        workshops:
+          type: array
+          items:
+            $ref: '#/components/schemas/SaveWorkshopDto'
+        requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/SaveRequirementDto'
+        dowelingLinks:
+          type: array
+          items:
+            $ref: '#/components/schemas/SaveDowelingLinkDto'
+        deleted:
+          $ref: '#/components/schemas/DeletedOrderChildrenDto'
+        version:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Обязателен для PUT /api/v1/orders/{orderId}; не обязателен для POST.
+
+    SaveOrderHeaderDto:
+      type: object
+      required:
+        - orderName
+        - clientId
+        - orderDate
+        - orderStatusId
+      properties:
+        orderName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        clientId:
+          type: integer
+          format: int64
+          minimum: 1
+        orderDate:
+          type: string
+          format: date
+        managerId:
+          type: integer
+          format: int64
+          nullable: true
+        priority:
+          type: integer
+          nullable: true
+        orderStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+        paymentStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        productionStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        plannedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+        completionDate:
+          type: string
+          format: date
+          nullable: true
+        issueDate:
+          type: string
+          format: date
+          nullable: true
+        paymentDate:
+          type: string
+          format: date
+          nullable: true
+        discount:
+          type: number
+          format: decimal
+          minimum: 0
+          default: 0
+        surcharge:
+          type: number
+          format: decimal
+          minimum: 0
+          default: 0
+        linkCuttingFile:
+          type: string
+          nullable: true
+        linkCuttingImageFile:
+          type: string
+          nullable: true
+        linkCadFile:
+          type: string
+          nullable: true
+        linkPdfFile:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        refKey1c:
+          type: string
+          nullable: true
+
+    SaveOrderDetailDto:
+      type: object
+      required:
+        - detailNumber
+        - height
+        - width
+        - quantity
+        - materialId
+        - millingTypeId
+        - edgeTypeId
+      properties:
+        id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Existing DB id. Empty/null means new row.
+        clientId:
+          type: string
+          nullable: true
+          description: Frontend temporary id, e.g. crypto.randomUUID().
+        detailNumber:
+          type: integer
+          minimum: 1
+        detailName:
+          type: string
+          nullable: true
+        height:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+        width:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+        quantity:
+          type: integer
+          minimum: 1
+        materialId:
+          type: integer
+          format: int64
+          minimum: 1
+        millingTypeId:
+          type: integer
+          format: int64
+          minimum: 1
+        edgeTypeId:
+          type: integer
+          format: int64
+          minimum: 1
+        filmId:
+          type: integer
+          format: int64
+          nullable: true
+        millingCostPerSqm:
+          type: number
+          format: decimal
+          minimum: 0
+          nullable: true
+        detailCost:
+          type: number
+          format: decimal
+          minimum: 0
+          nullable: true
+          description: Может быть проигнорирован backend'ом, если стоимость считается на сервере.
+        priority:
+          type: integer
+          nullable: true
+        productionStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        linkCuttingFile:
+          type: string
+          nullable: true
+        linkCuttingImageFile:
+          type: string
+          nullable: true
+        linkCadFile:
+          type: string
+          nullable: true
+        linkPdfFile:
+          type: string
+          nullable: true
+
+    SavePaymentDto:
+      type: object
+      required:
+        - typePaidId
+        - amount
+        - paymentDate
+      properties:
+        id:
+          type: integer
+          format: int64
+          nullable: true
+        clientId:
+          type: string
+          nullable: true
+        typePaidId:
+          type: integer
+          format: int64
+          minimum: 1
+        amount:
+          type: number
+          format: decimal
+          exclusiveMinimum: true
+          minimum: 0
+        paymentDate:
+          type: string
+          format: date
+        notes:
+          type: string
+          nullable: true
+
+    SaveWorkshopDto:
+      type: object
+      required:
+        - workshopId
+        - productionStatusId
+      properties:
+        id:
+          type: integer
+          format: int64
+          nullable: true
+        clientId:
+          type: string
+          nullable: true
+        workshopId:
+          type: integer
+          format: int64
+          minimum: 1
+        productionStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+        receivedDate:
+          type: string
+          format: date
+          nullable: true
+        startedDate:
+          type: string
+          format: date
+          nullable: true
+        completedDate:
+          type: string
+          format: date
+          nullable: true
+        plannedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+        sequenceOrder:
+          type: integer
+          nullable: true
+        responsibleEmployeeId:
+          type: integer
+          format: int64
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    SaveRequirementDto:
+      type: object
+      required:
+        - resourceType
+        - requiredQuantity
+        - unitId
+        - requirementStatusId
+      properties:
+        id:
+          type: integer
+          format: int64
+          nullable: true
+        clientId:
+          type: string
+          nullable: true
+        resourceType:
+          type: string
+          minLength: 1
+          example: material
+        materialId:
+          type: integer
+          format: int64
+          nullable: true
+        filmId:
+          type: integer
+          format: int64
+          nullable: true
+        edgeTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        requiredQuantity:
+          type: number
+          format: decimal
+          exclusiveMinimum: true
+          minimum: 0
+        unitId:
+          type: integer
+          format: int64
+          minimum: 1
+        wastePercentage:
+          type: number
+          format: decimal
+          minimum: 0
+          nullable: true
+        finalQuantity:
+          type: number
+          format: decimal
+          minimum: 0
+          nullable: true
+        requirementStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+        supplierId:
+          type: integer
+          format: int64
+          nullable: true
+        purchasePrice:
+          type: number
+          format: decimal
+          minimum: 0
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    SaveDowelingLinkDto:
+      type: object
+      required:
+        - dowelingOrderId
+      properties:
+        id:
+          type: integer
+          format: int64
+          nullable: true
+        clientId:
+          type: string
+          nullable: true
+        dowelingOrderId:
+          type: integer
+          format: int64
+          minimum: 1
+        designEngineerId:
+          type: integer
+          format: int64
+          nullable: true
+
+    DeletedOrderChildrenDto:
+      type: object
+      properties:
+        detailIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+        paymentIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+        workshopIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+        requirementIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+        dowelingLinkIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+
+    ChangeOrderStatusRequest:
+      type: object
+      required:
+        - orderStatusId
+        - version
+      properties:
+        orderStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+        productionStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        comment:
+          type: string
+          nullable: true
+          maxLength: 1000
+        version:
+          type: integer
+          minimum: 1
+
+    DeleteOrderResponse:
+      type: object
+      required:
+        - success
+        - orderId
+        - requestId
+      properties:
+        success:
+          type: boolean
+          example: true
+        orderId:
+          type: integer
+          format: int64
+        auditId:
+          type: string
+          nullable: true
+          description: ID audit_log события удаления.
+        requestId:
+          type: string
+          description: Correlation/request id команды.
+
+    ExportOrderRequest:
+      type: object
+      properties:
+        format:
+          type: string
+          enum:
+            - xlsx
+          default: xlsx
+        fileName:
+          type: string
+          nullable: true
+          maxLength: 255
+
+    ExportOrderResponse:
+      type: object
+      required:
+        - success
+        - fileName
+      properties:
+        success:
+          type: boolean
+          example: true
+        fileName:
+          type: string
+          example: order_123.xlsx
+        folder:
+          type: string
+          nullable: true
+        xlsxUrl:
+          type: string
+          nullable: true
+        externalId:
+          type: string
+          nullable: true
+          description: Id файла или операции во внешней системе.
+
+    OrderFormDataResponse:
+      type: object
+      required:
+        - clients
+        - materials
+        - millingTypes
+        - edgeTypes
+        - films
+        - orderStatuses
+        - paymentStatuses
+        - paymentTypes
+        - productionStatuses
+        - workshops
+        - employees
+        - units
+      properties:
+        clients:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdNameLookup'
+        materials:
+          type: array
+          items:
+            $ref: '#/components/schemas/MaterialLookup'
+        millingTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MillingTypeLookup'
+        edgeTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdNameLookup'
+        films:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdNameLookup'
+        orderStatuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusLookup'
+        paymentStatuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusLookup'
+        paymentTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdNameLookup'
+        productionStatuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusLookup'
+        workshops:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdNameLookup'
+        employees:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeLookup'
+        units:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnitLookup'
+
+    IdNameLookup:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    MaterialLookup:
+      allOf:
+        - $ref: '#/components/schemas/IdNameLookup'
+        - type: object
+          properties:
+            unitId:
+              type: integer
+              format: int64
+              nullable: true
+
+    MillingTypeLookup:
+      allOf:
+        - $ref: '#/components/schemas/IdNameLookup'
+        - type: object
+          properties:
+            costPerSqm:
+              type: number
+              format: decimal
+              nullable: true
+
+    StatusLookup:
+      allOf:
+        - $ref: '#/components/schemas/IdNameLookup'
+        - type: object
+          properties:
+            code:
+              type: string
+              nullable: true
+            color:
+              type: string
+              nullable: true
+
+    EmployeeLookup:
+      type: object
+      required:
+        - id
+        - fullName
+      properties:
+        id:
+          type: integer
+          format: int64
+        fullName:
+          type: string
+
+    UnitLookup:
+      type: object
+      required:
+        - id
+        - code
+        - name
+      properties:
+        id:
+          type: integer
+          format: int64
+        code:
+          type: string
+        name:
+          type: string
+        symbol:
+          type: string
+          nullable: true
+
+    UserListResponse:
+      type: object
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserDto'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    UserResponse:
+      type: object
+      required:
+        - user
+      properties:
+        user:
+          $ref: '#/components/schemas/UserDto'
+
+    UserDto:
+      type: object
+      required:
+        - id
+        - username
+        - role
+        - permissions
+        - isActive
+        - createdAt
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        fullName:
+          type: string
+          nullable: true
+        role:
+          $ref: '#/components/schemas/UserRole'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionName'
+        employeeId:
+          type: integer
+          format: int64
+          nullable: true
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateUserRequest:
+      type: object
+      required:
+        - username
+        - password
+        - role
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          nullable: true
+        password:
+          type: string
+          minLength: 8
+          maxLength: 200
+        role:
+          $ref: '#/components/schemas/UserRole'
+        employeeId:
+          type: integer
+          format: int64
+          nullable: true
+        fullName:
+          type: string
+          nullable: true
+          maxLength: 255
+        isActive:
+          type: boolean
+          default: true
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          nullable: true
+        role:
+          $ref: '#/components/schemas/UserRole'
+        employeeId:
+          type: integer
+          format: int64
+          nullable: true
+        fullName:
+          type: string
+          nullable: true
+          maxLength: 255
+        isActive:
+          type: boolean
+
+    ChangePasswordRequest:
+      type: object
+      required:
+        - newPassword
+      properties:
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 200
+        revokeExistingSessions:
+          type: boolean
+          default: true
+
+    ChangePasswordResponse:
+      type: object
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          example: true
+        revokedSessions:
+          type: integer
+          minimum: 0
+          example: 2
+
+    VlmHealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+            - unavailable
+        providers:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+              - configured
+            properties:
+              name:
+                type: string
+              configured:
+                type: boolean
+              available:
+                type: boolean
+                nullable: true
+        detailsVisible:
+          type: boolean
+          description: true только для пользователей с расширенными permissions.
+
+    VlmUploadResponse:
+      type: object
+      required:
+        - success
+        - uploadId
+        - url
+        - key
+        - size
+        - contentType
+      properties:
+        success:
+          type: boolean
+          example: true
+        uploadId:
+          type: string
+          example: upl_01HZX8K5T3M2F5F7K9A2S1QW3E
+        url:
+          type: string
+          description: URL загруженного файла. Может быть signed/temporary.
+        key:
+          type: string
+          description: Storage key.
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        size:
+          type: integer
+          minimum: 0
+        contentType:
+          type: string
+          example: image/png
+
+    VlmAnalyzeRequest:
+      type: object
+      properties:
+        uploadId:
+          type: string
+          nullable: true
+          description: Рекомендуемый способ указать изображение.
+        imageUrl:
+          type: string
+          nullable: true
+          description: Допустим только если URL принадлежит ранее загруженному файлу.
+        provider:
+          type: string
+          nullable: true
+          example: openai
+        model:
+          type: string
+          nullable: true
+        promptId:
+          type: string
+          nullable: true
+          description: Legacy/simple prompt id from frontend.
+        promptKv:
+          $ref: '#/components/schemas/PromptKv'
+        providerOrder:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: Опциональный порядок fallback provider'ов. Backend обязан whitelist'ить значения.
+      oneOf:
+        - required:
+            - uploadId
+        - required:
+            - imageUrl
+
+    PromptKv:
+      type: object
+      nullable: true
+      required:
+        - namespace
+        - name
+      properties:
+        namespace:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+          nullable: true
+        lang:
+          type: string
+          nullable: true
+          example: ru
+
+    VlmAnalyzeResponse:
+      type: object
+      required:
+        - success
+        - result
+      properties:
+        success:
+          type: boolean
+          example: true
+        provider:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        uploadId:
+          type: string
+          nullable: true
+        result:
+          type: object
+          additionalProperties: true
+          description: Нормализованный результат анализа.
+        rawResult:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Может возвращаться только в debug/admin режиме. Не включать по умолчанию.
+        usage:
+          type: object
+          nullable: true
+          properties:
+            inputTokens:
+              type: integer
+              nullable: true
+            outputTokens:
+              type: integer
+              nullable: true
+            cost:
+              type: number
+              nullable: true
+
+    AuditListResponse:
+      type: object
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEventDto'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    AuditEventDto:
+      type: object
+      required:
+        - auditId
+        - entityType
+        - entityId
+        - action
+        - userId
+        - requestId
+        - createdAt
+      properties:
+        auditId:
+          type: string
+        entityType:
+          type: string
+          example: order
+        entityId:
+          type: string
+          example: '123'
+        action:
+          type: string
+          example: orders.update
+        userId:
+          type: integer
+          format: int64
+        username:
+          type: string
+          nullable: true
+        role:
+          $ref: '#/components/schemas/UserRole'
+        before:
+          type: object
+          nullable: true
+          additionalProperties: true
+        after:
+          type: object
+          nullable: true
+          additionalProperties: true
+        diff:
+          type: object
+          nullable: true
+          additionalProperties: true
+        requestId:
+          type: string
+        ip:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    LiveHealthResponse:
+      type: object
+      required:
+        - status
+        - uptimeSeconds
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+        uptimeSeconds:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+
+    ReadyHealthResponse:
+      type: object
+      required:
+        - status
+        - checks
+      properties:
+        status:
+          type: string
+          enum:
+            - ready
+            - not_ready
+        checks:
+          type: object
+          required:
+            - database
+            - redis
+          properties:
+            database:
+              $ref: '#/components/schemas/HealthCheckStatus'
+            redis:
+              $ref: '#/components/schemas/HealthCheckStatus'
+            integrations:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/HealthCheckStatus'
+        timestamp:
+          type: string
+          format: date-time
+
+    HealthCheckStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+            - unavailable
+        message:
+          type: string
+          nullable: true
