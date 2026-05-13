@@ -79,7 +79,7 @@ without a token instead of `404`.
 For the current split VPS layout:
 
 ```bash
-cd /home/ovhubu/projects/erp_dev
+cd /home/ovhtest/projects/erp_dev
 git -C repo_erp pull
 docker compose \
   --env-file .env \

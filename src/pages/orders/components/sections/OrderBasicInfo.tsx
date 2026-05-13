@@ -9,6 +9,7 @@ import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
+import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import { ClientQuickCreate } from '../modals/ClientQuickCreate';
 import { DowellingOrderQuickCreate } from '../modals/DowellingOrderQuickCreate';
 import dayjs from 'dayjs';
@@ -19,6 +20,8 @@ export const OrderBasicInfo: React.FC = () => {
   const [dowellingModalOpen, setDowellingModalOpen] = useState(false);
   const [selectedDowelingId, setSelectedDowelingId] = useState<number | undefined>(undefined);
   const [dowelingSearchValue, setDowelingSearchValue] = useState<string>('');
+  const orderFormData = useOrderFormData();
+  const useBackendReferences = orderFormData.enabled;
 
   // Load clients
   const { selectProps: clientSelectProps } = useSelect({
@@ -27,7 +30,11 @@ export const OrderBasicInfo: React.FC = () => {
     optionValue: 'client_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     ...(header.client_id ? { defaultValue: header.client_id } : {}),
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedClientSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.clients, orderFormData.isLoading)
+    : clientSelectProps;
 
   // Load employees (for manager)
   const { selectProps: employeeSelectProps } = useSelect({
@@ -36,7 +43,11 @@ export const OrderBasicInfo: React.FC = () => {
     optionValue: 'employee_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     ...(header.manager_id ? { defaultValue: header.manager_id } : {}),
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedEmployeeSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.employees, orderFormData.isLoading)
+    : employeeSelectProps;
 
   // Load order statuses
   const { selectProps: orderStatusProps } = useSelect({
@@ -45,7 +56,11 @@ export const OrderBasicInfo: React.FC = () => {
     optionValue: 'order_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedOrderStatusProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.orderStatuses, orderFormData.isLoading)
+    : orderStatusProps;
 
   // Load payment statuses
   const { selectProps: paymentStatusProps } = useSelect({
@@ -54,7 +69,11 @@ export const OrderBasicInfo: React.FC = () => {
     optionValue: 'payment_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedPaymentStatusProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.paymentStatuses, orderFormData.isLoading)
+    : paymentStatusProps;
 
   // Load production statuses
   const { selectProps: productionStatusProps } = useSelect({
@@ -63,7 +82,11 @@ export const OrderBasicInfo: React.FC = () => {
     optionValue: 'production_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedProductionStatusProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
+    : productionStatusProps;
 
   // Handler for production status manual change - disables auto-update
   const handleProductionStatusChange = (value: number) => {
@@ -135,7 +158,7 @@ export const OrderBasicInfo: React.FC = () => {
       width: 200,
       render: (_: any, record: any) => (
         <Select
-          {...employeeSelectProps}
+          {...resolvedEmployeeSelectProps}
           value={record.doweling_order?.design_engineer_id}
           onChange={(value, option: any) => {
             const linkId = record.temp_id || record.order_doweling_link_id;
@@ -197,7 +220,7 @@ export const OrderBasicInfo: React.FC = () => {
               validateStatus={!header.client_id ? 'error' : ''}
             >
               <Select
-                {...clientSelectProps}
+                {...resolvedClientSelectProps}
                 value={header.client_id}
                 onChange={(value) => updateHeaderField('client_id', value)}
                 placeholder="Выберите клиента"
@@ -295,7 +318,7 @@ export const OrderBasicInfo: React.FC = () => {
               validateStatus={!header.order_status_id ? 'error' : ''}
             >
               <Select
-                {...orderStatusProps}
+                {...resolvedOrderStatusProps}
                 value={header.order_status_id}
                 onChange={(value) => updateHeaderField('order_status_id', value)}
                 placeholder="Выберите статус"
@@ -311,7 +334,7 @@ export const OrderBasicInfo: React.FC = () => {
               validateStatus={!header.payment_status_id ? 'error' : ''}
             >
               <Select
-                {...paymentStatusProps}
+                {...resolvedPaymentStatusProps}
                 value={header.payment_status_id}
                 onChange={(value) => updateHeaderField('payment_status_id', value)}
                 placeholder="Выберите статус"
@@ -328,7 +351,7 @@ export const OrderBasicInfo: React.FC = () => {
               }
             >
               <Select
-                {...productionStatusProps}
+                {...resolvedProductionStatusProps}
                 value={header.production_status_id}
                 onChange={handleProductionStatusChange}
                 placeholder="Выберите статус"
@@ -341,7 +364,7 @@ export const OrderBasicInfo: React.FC = () => {
           <Col span={5}>
             <Form.Item label="Менеджер">
               <Select
-                {...employeeSelectProps}
+                {...resolvedEmployeeSelectProps}
                 value={header.manager_id}
                 onChange={(value) => updateHeaderField('manager_id', value)}
                 placeholder="Выберите менеджера"

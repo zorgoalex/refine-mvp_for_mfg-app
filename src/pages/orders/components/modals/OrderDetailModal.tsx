@@ -12,6 +12,7 @@ import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { MillingTypeQuickCreate } from './MillingTypeQuickCreate';
 import { EdgeTypeQuickCreate } from './EdgeTypeQuickCreate';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import {
   validateMaterialDimensions,
   getMaterialDimensionDescription,
@@ -40,6 +41,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [edgeTypeModalOpen, setEdgeTypeModalOpen] = useState(false);
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
+  const orderFormData = useOrderFormData();
+  const useBackendReferences = orderFormData.enabled;
 
   // Load reference data with search
   const { selectProps: materialSelectProps } = useSelect({
@@ -49,7 +52,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     pagination: { pageSize: 100 },
     ...(detail?.material_id ? { defaultValue: detail.material_id } : {}),
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedMaterialSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.materials, orderFormData.isLoading)
+    : materialSelectProps;
 
   const { selectProps: millingTypeSelectProps } = useSelect({
     resource: 'milling_types',
@@ -58,7 +65,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
     ...(detail?.milling_type_id ? { defaultValue: detail.milling_type_id } : {}),
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedMillingTypeSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.millingTypes, orderFormData.isLoading)
+    : millingTypeSelectProps;
 
   const { selectProps: edgeTypeSelectProps } = useSelect({
     resource: 'edge_types',
@@ -67,7 +78,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
     ...(detail?.edge_type_id ? { defaultValue: detail.edge_type_id } : {}),
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedEdgeTypeSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.edgeTypes, orderFormData.isLoading)
+    : edgeTypeSelectProps;
 
   const { selectProps: filmSelectProps } = useSelect({
     resource: 'films',
@@ -76,7 +91,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     pagination: { pageSize: 100 },
     ...(detail?.film_id ? { defaultValue: detail.film_id } : {}),
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedFilmSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.films, orderFormData.isLoading)
+    : filmSelectProps;
 
   const { selectProps: productionStatusSelectProps } = useSelect({
     resource: 'production_statuses',
@@ -85,7 +104,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
     ...(detail?.production_status_id ? { defaultValue: detail.production_status_id } : {}),
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedProductionStatusSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
+    : productionStatusSelectProps;
 
   // Load selected material with type information
   const { data: materialData } = useOne({
@@ -365,7 +388,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               }
             >
               <Select
-                {...materialSelectProps}
+                {...resolvedMaterialSelectProps}
                 showSearch
                 placeholder="Выберите материал"
                 onChange={handleMaterialChange}
@@ -395,7 +418,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               name="film_id"
             >
               <Select
-                {...filmSelectProps}
+                {...resolvedFilmSelectProps}
                 showSearch
                 placeholder="Выберите пленку"
                 allowClear
@@ -429,7 +452,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               rules={[{ required: true, message: 'Обязательное поле' }]}
             >
               <Select
-                {...millingTypeSelectProps}
+                {...resolvedMillingTypeSelectProps}
                 placeholder="Выберите тип"
                 dropdownRender={(menu) => (
                   <>
@@ -456,7 +479,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               rules={[{ required: true, message: 'Обязательное поле' }]}
             >
               <Select
-                {...edgeTypeSelectProps}
+                {...resolvedEdgeTypeSelectProps}
                 placeholder="Выберите тип"
                 dropdownRender={(menu) => (
                   <>
@@ -535,7 +558,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <Col span={6}>
             <Form.Item label="Статус производства" name="production_status_id">
               <Select
-                {...productionStatusSelectProps}
+                {...resolvedProductionStatusSelectProps}
                 placeholder="Выберите статус"
                 allowClear
               />

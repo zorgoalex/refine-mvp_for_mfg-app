@@ -8,6 +8,7 @@ import { OrderDetail } from '../../../../types/orders';
 import { numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 
 const { Text } = Typography;
 
@@ -71,6 +72,8 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     production_status_id: false,
     priority: false,
   });
+  const orderFormData = useOrderFormData();
+  const useBackendReferences = orderFormData.enabled;
 
   // Count enabled fields
   const enabledCount = Object.values(enabledFields).filter(Boolean).length;
@@ -82,8 +85,11 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     optionValue: 'material_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     pagination: { mode: 'off' },
-    queryOptions: { enabled: open },
+    queryOptions: { enabled: open && !useBackendReferences },
   });
+  const resolvedMaterialSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.materials, orderFormData.isLoading)
+    : materialSelectProps;
 
   const { selectProps: millingTypeSelectProps } = useSelect({
     resource: 'milling_types',
@@ -92,8 +98,11 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
     pagination: { mode: 'off' },
-    queryOptions: { enabled: open },
+    queryOptions: { enabled: open && !useBackendReferences },
   });
+  const resolvedMillingTypeSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.millingTypes, orderFormData.isLoading)
+    : millingTypeSelectProps;
 
   const { selectProps: edgeTypeSelectProps } = useSelect({
     resource: 'edge_types',
@@ -102,8 +111,11 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
     pagination: { mode: 'off' },
-    queryOptions: { enabled: open },
+    queryOptions: { enabled: open && !useBackendReferences },
   });
+  const resolvedEdgeTypeSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.edgeTypes, orderFormData.isLoading)
+    : edgeTypeSelectProps;
 
   const { selectProps: filmSelectProps } = useSelect({
     resource: 'films',
@@ -111,8 +123,11 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     optionValue: 'film_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     pagination: { mode: 'off' },
-    queryOptions: { enabled: open },
+    queryOptions: { enabled: open && !useBackendReferences },
   });
+  const resolvedFilmSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.films, orderFormData.isLoading)
+    : filmSelectProps;
 
   const { selectProps: productionStatusSelectProps } = useSelect({
     resource: 'production_statuses',
@@ -121,8 +136,11 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
     pagination: { mode: 'off' },
-    queryOptions: { enabled: open },
+    queryOptions: { enabled: open && !useBackendReferences },
   });
+  const resolvedProductionStatusSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
+    : productionStatusSelectProps;
 
   // Reset form when modal opens
   useEffect(() => {
@@ -332,7 +350,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             >
               <Form.Item name="material_id" noStyle>
                 <Select
-                  {...materialSelectProps}
+                  {...resolvedMaterialSelectProps}
                   placeholder="Выберите материал"
                   showSearch
                   filterOption={(input, option) =>
@@ -438,7 +456,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             >
               <Form.Item name="milling_type_id" noStyle>
                 <Select
-                  {...millingTypeSelectProps}
+                  {...resolvedMillingTypeSelectProps}
                   placeholder="Выберите тип фрезеровки"
                   showSearch
                   filterOption={(input, option) =>
@@ -465,7 +483,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             >
               <Form.Item name="edge_type_id" noStyle>
                 <Select
-                  {...edgeTypeSelectProps}
+                  {...resolvedEdgeTypeSelectProps}
                   placeholder="Выберите тип обката"
                   showSearch
                   filterOption={(input, option) =>
@@ -494,7 +512,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             >
               <Form.Item name="film_id" noStyle>
                 <Select
-                  {...filmSelectProps}
+                  {...resolvedFilmSelectProps}
                   placeholder="Выберите плёнку"
                   showSearch
                   allowClear
@@ -522,7 +540,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             >
               <Form.Item name="production_status_id" noStyle>
                 <Select
-                  {...productionStatusSelectProps}
+                  {...resolvedProductionStatusSelectProps}
                   placeholder="Выберите статус"
                   showSearch
                   allowClear

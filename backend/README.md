@@ -220,7 +220,7 @@ runtime, not to the frontend Vercel project.
 If the template is run directly with `-f ../ops/templates/docker-compose.vps.yml`,
 the `.env` file should live in the Compose runtime root passed through
 `--project-directory`. For the current split VPS layout, that is
-`/home/ovhubu/projects/erp_dev/.env`, and it should include
+`/home/ovhtest/projects/erp_dev/.env`, and it should include
 `BACKEND_BUILD_CONTEXT=./repo_erp/backend` so Compose can build this backend
 from the nested repo checkout.
 

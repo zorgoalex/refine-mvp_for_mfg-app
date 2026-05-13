@@ -67,7 +67,12 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const detailsTabRef = useRef<OrderDetailsTabRef>(null);
   const paymentsTabRef = useRef<OrderPaymentsTabRef>(null);
 
-  const { defaultOrderStatus, defaultPaymentStatus, isLoading: statusesLoading } =
+  const {
+    defaultOrderStatus,
+    defaultPaymentStatus,
+    isLoading: statusesLoading,
+    error: statusesError,
+  } =
     useDefaultStatuses();
   const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
@@ -202,6 +207,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       setDirty(false); // Reset dirty flag after initial setup
     }
   }, [mode, defaultOrderStatus, defaultPaymentStatus]);
+
+  useEffect(() => {
+    if (!statusesError) return;
+    notification.error({
+      message: 'Ошибка загрузки справочников формы',
+      description: statusesError.message,
+      duration: 0,
+    });
+  }, [statusesError]);
 
   // Reset store and didInit when orderId changes (handles navigation between orders)
   const didInit = useRef(false);

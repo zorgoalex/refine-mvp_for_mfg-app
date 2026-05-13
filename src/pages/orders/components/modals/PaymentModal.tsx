@@ -8,6 +8,7 @@ import { Payment } from '../../../../types/orders';
 import { numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import dayjs from 'dayjs';
 
 interface PaymentModalProps {
@@ -26,6 +27,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   onCancel,
 }) => {
   const [form] = Form.useForm();
+  const orderFormData = useOrderFormData();
+  const useBackendReferences = orderFormData.enabled;
 
   // Load payment types
   const { selectProps: paymentTypeSelectProps } = useSelect({
@@ -35,7 +38,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
     ...(payment?.type_paid_id ? { defaultValue: payment.type_paid_id } : {}),
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedPaymentTypeSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.paymentTypes, orderFormData.isLoading)
+    : paymentTypeSelectProps;
 
   // Initialize form when payment changes
   useEffect(() => {
@@ -97,7 +104,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 rules={[{ required: true, message: 'Выберите тип оплаты' }]}
               >
                 <Select
-                  {...paymentTypeSelectProps}
+                  {...resolvedPaymentTypeSelectProps}
                   placeholder="Выберите тип оплаты"
                   showSearch
                   optionFilterProp="label"

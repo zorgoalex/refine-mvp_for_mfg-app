@@ -53,9 +53,9 @@ docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps bac
 Direct-template equivalent for the current split VPS layout:
 
 ```bash
-cd /home/ovhubu/projects/erp_dev
+cd /home/ovhtest/projects/erp_dev
 
-# in /home/ovhubu/projects/erp_dev/.env:
+# in /home/ovhtest/projects/erp_dev/.env:
 # BACKEND_BUILD_CONTEXT=./repo_erp/backend
 
 docker compose \
@@ -310,7 +310,7 @@ repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-
 If you are running the tracked template directly from the parent runtime root:
 
 ```bash
-cd /home/ovhubu/projects/erp_dev
+cd /home/ovhtest/projects/erp_dev
 git -C repo_erp pull
 docker compose \
   --env-file .env \

@@ -10,11 +10,14 @@ import { formatNumber, numberParser } from '../../../../utils/numberFormat';
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import dayjs from 'dayjs';
 
 export const OrderFinanceSection: React.FC = () => {
   const { header, updateHeaderField, payments, details } = useOrderFormStore();
   const { getSetting } = useAppSettings();
+  const orderFormData = useOrderFormData();
+  const useBackendReferences = orderFormData.enabled;
 
   // Get minimum order amount from settings
   const minOrderAmount = getSetting<number>(SETTING_KEYS.ORDERS_MIN_TOTAL_AMOUNT) || 0;
@@ -58,7 +61,11 @@ export const OrderFinanceSection: React.FC = () => {
     optionValue: 'payment_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
+    queryOptions: { enabled: !useBackendReferences },
   });
+  const resolvedPaymentStatusSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.paymentStatuses, orderFormData.isLoading)
+    : paymentStatusSelectProps;
 
   const handlePaymentStatusChange = (value: number) => {
     updateHeaderField('payment_status_id', value);
@@ -453,7 +460,7 @@ export const OrderFinanceSection: React.FC = () => {
               style={{ marginBottom: 0 }}
             >
               <Select
-                {...paymentStatusSelectProps}
+                {...resolvedPaymentStatusSelectProps}
                 value={header.payment_status_id}
                 onChange={handlePaymentStatusChange}
                 style={{ width: '100%' }}

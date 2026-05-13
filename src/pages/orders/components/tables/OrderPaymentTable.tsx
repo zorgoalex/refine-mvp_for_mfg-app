@@ -11,6 +11,7 @@ import { useSelect } from '@refinedev/antd';
 import { Payment } from '../../../../types/orders';
 import { formatNumber, numberParser, currencySmartFormatter } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
+import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -41,6 +42,8 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
   highlightedRowKey = null,
 }, ref) => {
   const { payments, updatePayment, deletePayment, setPaymentEditing } = useOrderFormStore();
+  const orderFormData = useOrderFormData();
+  const useBackendReferences = orderFormData.enabled;
 
   // Sort payments by date (newest first)
   const sortedPayments = useMemo(
@@ -82,8 +85,11 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }],
     pagination: { mode: 'off' },
-    queryOptions: { enabled: selectsEnabled },
+    queryOptions: { enabled: selectsEnabled && !useBackendReferences },
   });
+  const resolvedPaymentTypeSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.paymentTypes, orderFormData.isLoading)
+    : paymentTypeSelectProps;
 
   // Watch required fields for visual indication
   const watchedTypePaidId = Form.useWatch('type_paid_id', form);
@@ -232,7 +238,13 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
       width: 200,
       render: (value, record) => {
         if (!isEditing(record)) {
-          return <PaymentTypeCell typePaidId={value} />;
+          return (
+            <PaymentTypeCell
+              typePaidId={value}
+              useBackendReferences={useBackendReferences}
+              namesById={orderFormData.references.paymentTypeNameById}
+            />
+          );
         }
         return (
           <Form.Item
@@ -241,7 +253,7 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
             rules={[{ required: true, message: 'Выберите тип' }]}
           >
             <Select
-              {...paymentTypeSelectProps}
+              {...resolvedPaymentTypeSelectProps}
               autoFocus
               placeholder="Тип оплаты"
               showSearch
@@ -519,16 +531,30 @@ const formatDate = (date: string | Date | null | undefined) => {
 };
 
 // Helper component for loading payment type name
-const PaymentTypeCell: React.FC<{ typePaidId: number }> = ({ typePaidId }) => {
+const PaymentTypeCell: React.FC<{
+  typePaidId: number;
+  useBackendReferences: boolean;
+  namesById: Map<number, string>;
+}> = ({
+  typePaidId,
+  useBackendReferences,
+  namesById,
+}) => {
   const { selectProps } = useSelect({
     resource: 'payment_types',
     optionLabel: 'type_paid_name',
     optionValue: 'type_paid_id',
     defaultValue: typePaidId,
-    queryOptions: { enabled: typePaidId !== null && typePaidId !== undefined },
+    queryOptions: {
+      enabled: !useBackendReferences && typePaidId !== null && typePaidId !== undefined,
+    },
   });
 
   if (typePaidId === null || typePaidId === undefined) return <span style={{ color: '#999' }}>—</span>;
+
+  if (useBackendReferences) {
+    return <span>{namesById.get(Number(typePaidId)) || `ID: ${typePaidId}`}</span>;
+  }
 
   const option = selectProps.options?.find((opt: any) => opt.value === typePaidId);
   return <span>{option?.label || `ID: ${typePaidId}`}</span>;

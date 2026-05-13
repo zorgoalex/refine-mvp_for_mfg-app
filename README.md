@@ -206,9 +206,9 @@ template, если его ещё нет. После ручного измене�
 Для текущей VPS-раскладки:
 
 ```bash
-cd /home/ovhubu/projects/erp_dev
+cd /home/ovhtest/projects/erp_dev
 
-# один раз добавить в /home/ovhubu/projects/erp_dev/.env:
+# один раз добавить в /home/ovhtest/projects/erp_dev/.env:
 # BACKEND_BUILD_CONTEXT=./repo_erp/backend
 
 docker compose \
