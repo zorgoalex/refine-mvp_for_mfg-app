@@ -451,11 +451,81 @@ export async function setupWorkflowMockApi(
         });
     });
 
+    await page.route(/\/api\/v1\/orders\/form-data$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(createOrderFormDataResponse(db)),
+        });
+    });
+
     await page.route(/\/(v1\/graphql|undefined)$/, async (route) => {
         await fulfillGraphql(route, db, options);
     });
 
     return db;
+}
+
+function createOrderFormDataResponse(db: WorkflowMockDb) {
+    return {
+        clients: getRows(db, 'clients').map((row) => toIdName(row, 'client_id', 'client_name')),
+        materials: getRows(db, 'materials').map((row) => ({
+            ...toIdName(row, 'material_id', 'material_name'),
+            unitId: toNullableNumber(row.unit_id),
+        })),
+        millingTypes: getRows(db, 'milling_types').map((row) => ({
+            ...toIdName(row, 'milling_type_id', 'milling_type_name'),
+            costPerSqm: toNullableNumber(row.cost_per_sqm),
+        })),
+        edgeTypes: getRows(db, 'edge_types').map((row) =>
+            toIdName(row, 'edge_type_id', 'edge_type_name'),
+        ),
+        films: getRows(db, 'films').map((row) => toIdName(row, 'film_id', 'film_name')),
+        orderStatuses: getRows(db, 'order_statuses').map((row) =>
+            toStatusLookup(row, 'order_status_id', 'order_status_name'),
+        ),
+        paymentStatuses: getRows(db, 'payment_statuses').map((row) =>
+            toStatusLookup(row, 'payment_status_id', 'payment_status_name'),
+        ),
+        paymentTypes: getRows(db, 'payment_types').map((row) =>
+            toIdName(row, 'type_paid_id', 'type_paid_name'),
+        ),
+        productionStatuses: getRows(db, 'production_statuses').map((row) =>
+            toStatusLookup(row, 'production_status_id', 'production_status_name'),
+        ),
+        workshops: getRows(db, 'workshops').map((row) =>
+            toIdName(row, 'workshop_id', 'workshop_name'),
+        ),
+        employees: getRows(db, 'employees').map((row) => ({
+            id: Number(row.employee_id),
+            fullName: String(row.full_name),
+        })),
+        units: getRows(db, 'units').map((row) => ({
+            id: Number(row.unit_id),
+            code: String(row.unit_code),
+            name: String(row.unit_name),
+            symbol: row.unit_symbol === undefined || row.unit_symbol === null ? undefined : String(row.unit_symbol),
+        })),
+    };
+}
+
+function toIdName(row: Row, idField: string, nameField: string) {
+    return {
+        id: Number(row[idField]),
+        name: String(row[nameField]),
+    };
+}
+
+function toStatusLookup(row: Row, idField: string, nameField: string) {
+    return {
+        ...toIdName(row, idField, nameField),
+        code: row.production_status_code ?? row.order_status_code ?? row.payment_status_code ?? null,
+        color: row.color ?? null,
+    };
+}
+
+function toNullableNumber(value: unknown) {
+    return value === undefined || value === null ? null : Number(value);
 }
 
 async function fulfillGraphql(route: Route, db: WorkflowMockDb, options: WorkflowMockApiOptions) {
