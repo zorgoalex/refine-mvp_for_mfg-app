@@ -9,6 +9,7 @@ describe('apiRoutes', () => {
     expect(apiRoutes.auth.login).toBe('/api/v1/auth/login');
     expect(apiRoutes.orders.formData).toBe('/api/v1/orders/form-data');
     expect(apiRoutes.orders.byId(42)).toBe('/api/v1/orders/42');
+    expect(apiRoutes.orders.status(42)).toBe('/api/v1/orders/42/status');
     expect(apiRoutes.orders.calendarDate(42)).toBe('/api/v1/orders/42/calendar-date');
     expect(apiRoutes.orders.orderStatus(42)).toBe('/api/v1/orders/42/order-status');
     expect(apiRoutes.orders.productionStageEvent(42, 7)).toBe(

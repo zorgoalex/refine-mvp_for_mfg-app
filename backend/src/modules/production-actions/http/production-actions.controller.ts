@@ -59,20 +59,22 @@ export class ProductionActionsController {
     });
   }
 
-  @Patch('order-status')
+  @Patch('status')
   async changeOrderStatus(
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderIdParam: string,
     @Body() body: unknown,
   ): Promise<ProductionActionResponseDto> {
-    this.assertProductionActionsEnabled();
+    return this.executeChangeOrderStatus(request, orderIdParam, body);
+  }
 
-    return this.productionActions.changeOrderStatus({
-      currentUser: this.requireCurrentUser(request),
-      orderId: parseOrderId(orderIdParam),
-      dto: parseOrderStatusRequest(body),
-      requestId: request.requestId,
-    });
+  @Patch('order-status')
+  async changeOrderStatusLegacy(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Body() body: unknown,
+  ): Promise<ProductionActionResponseDto> {
+    return this.executeChangeOrderStatus(request, orderIdParam, body);
   }
 
   @Put('production-stage-events/:productionStatusId')
@@ -126,6 +128,21 @@ export class ProductionActionsController {
     }
 
     return request.user;
+  }
+
+  private executeChangeOrderStatus(
+    request: RequestWithCurrentUser,
+    orderIdParam: string,
+    body: unknown,
+  ): Promise<ProductionActionResponseDto> {
+    this.assertProductionActionsEnabled();
+
+    return this.productionActions.changeOrderStatus({
+      currentUser: this.requireCurrentUser(request),
+      orderId: parseOrderId(orderIdParam),
+      dto: parseOrderStatusRequest(body),
+      requestId: request.requestId,
+    });
   }
 }
 

@@ -25,7 +25,7 @@ export const productionActionsApi = {
     request: ChangeOrderStatusRequest,
   ): Promise<ProductionActionResponse> {
     return httpClient.patch<ProductionActionResponse>(
-      apiRoutes.orders.orderStatus(validateOrderId(orderId)),
+      apiRoutes.orders.status(validateOrderId(orderId)),
       request,
     );
   },

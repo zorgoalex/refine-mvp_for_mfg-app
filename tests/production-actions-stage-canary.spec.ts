@@ -74,7 +74,7 @@ test.describe('Production actions stage canary', () => {
 
         const statusResponse = await patchJson<ProductionActionResponse>(
             request,
-            `/orders/${testOrderId}/order-status`,
+            `/orders/${testOrderId}/status`,
             accessToken,
             {
                 orderStatusId: orderStatus!.orderStatusId,

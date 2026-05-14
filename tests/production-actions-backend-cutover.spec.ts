@@ -410,7 +410,7 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
         });
     });
 
-    await page.route(/\/api\/v1\/orders\/\d+\/order-status$/, async (route) => {
+    await page.route(/\/api\/v1\/orders\/\d+\/status$/, async (route) => {
         const body = JSON.parse(route.request().postData() || '{}');
         api.orderStatusBodies.push(body);
         const orderId = readOrderId(route);

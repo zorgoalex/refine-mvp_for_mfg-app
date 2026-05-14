@@ -77,7 +77,7 @@ Current implemented foundation:
   `db/migrations/005_order_snapshot_import_mapping.sql` before enabling import;
 - production actions DB adapter:
   `PATCH /api/v1/orders/:orderId/calendar-date`,
-  `PATCH /api/v1/orders/:orderId/order-status`,
+  `PATCH /api/v1/orders/:orderId/status` (`/order-status` remains as a legacy alias),
   `PUT /api/v1/orders/:orderId/production-stage-events/:productionStatusId`,
   and `DELETE /api/v1/orders/:orderId/production-stage-events/:productionStatusId`
   update calendar/status/stage facts through Postgres when `DATABASE_URL` is configured

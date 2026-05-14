@@ -46,7 +46,7 @@ describe('productionActionsApi', () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15/calendar-date');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/15/order-status');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/15/status');
     expect(fetchMock.mock.calls[1][1]?.method).toBe('PATCH');
     expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/orders/15/production-stage-events/4');
     expect(fetchMock.mock.calls[2][1]?.method).toBe('PUT');

@@ -72,6 +72,23 @@ describe('ProductionActionsController', () => {
     ]);
   });
 
+  it('keeps the legacy order-status alias for existing callers', async () => {
+    const calls: string[] = [];
+    const controller = createController({
+      flags: { productionActionsEnabled: true },
+      service: {
+        async changeOrderStatus(command) {
+          calls.push(`status:${command.orderId}:${command.dto.orderStatusId}`);
+          return response();
+        },
+      },
+    });
+
+    await controller.changeOrderStatusLegacy({ user: currentUser() }, '15', orderStatusBody());
+
+    expect(calls).toEqual(['status:15:5']);
+  });
+
   it('validates params and request bodies', () => {
     expect(parseOrderId('15')).toBe(15);
     expect(parseProductionStatusId('4')).toBe(4);
