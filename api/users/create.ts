@@ -3,6 +3,7 @@ import { verifyAdminToken } from '../_lib/verify-token';
 import { hashPassword } from '../_lib/password';
 import { hasuraAdminQuery } from '../_lib/db';
 import { logger } from '../_lib/logger';
+import { handleDisabledLegacyVercelFunction } from '../_lib/legacy-production-gate';
 
 /**
  * POST /api/users/create
@@ -24,6 +25,10 @@ import { logger } from '../_lib/logger';
  *   - user: { user_id, username, email, role, full_name, is_active }
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleDisabledLegacyVercelFunction(req, res).disabled) {
+    return;
+  }
+
   // CORS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { handleDisabledLegacyVercelFunction } from './_lib/legacy-production-gate';
 
 /**
  * API-роут для экспорта заказов в Google Drive через Google Apps Script
@@ -39,6 +40,10 @@ type GASResponse = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleDisabledLegacyVercelFunction(req, res).disabled) {
+    return;
+  }
+
   const startTime = Date.now();
 
   // Проверка метода - только POST

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { uploadImage } from '../_lib/vlmClient';
 import { extractToken, verifyToken } from '../_lib/verify-token';
+import { handleDisabledLegacyVercelFunction } from '../_lib/legacy-production-gate';
 
 /**
  * POST /api/vlm/upload
@@ -122,6 +123,10 @@ function splitBuffer(buffer: Buffer, delimiter: Buffer): Buffer[] {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleDisabledLegacyVercelFunction(req, res).disabled) {
+    return;
+  }
+
   // CORS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();

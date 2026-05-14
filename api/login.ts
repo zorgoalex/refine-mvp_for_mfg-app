@@ -5,6 +5,7 @@ import { comparePassword } from './_lib/password';
 import { generateAccessToken, generateRefreshToken } from './_lib/jwt';
 import { rateLimit } from './_lib/rate-limit';
 import { logger } from './_lib/logger';
+import { handleDisabledLegacyVercelFunction } from './_lib/legacy-production-gate';
 
 /**
  * POST /api/login
@@ -21,6 +22,10 @@ import { logger } from './_lib/logger';
  *   - user: { id, username, role }
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleDisabledLegacyVercelFunction(req, res).disabled) {
+    return;
+  }
+
   // CORS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();

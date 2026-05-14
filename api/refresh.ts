@@ -8,6 +8,7 @@ import {
   storeRefreshToken
 } from './_lib/db';
 import { generateAccessToken, generateRefreshToken as genRefreshToken } from './_lib/jwt';
+import { handleDisabledLegacyVercelFunction } from './_lib/legacy-production-gate';
 
 /**
  * POST /api/refresh
@@ -23,6 +24,10 @@ import { generateAccessToken, generateRefreshToken as genRefreshToken } from './
  *   - refreshToken: string (новый JWT, 7 дней)
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleDisabledLegacyVercelFunction(req, res).disabled) {
+    return;
+  }
+
   // CORS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();

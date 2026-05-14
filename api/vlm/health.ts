@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { checkHealth, getVlmApiUrl } from '../_lib/vlmClient';
 import { validateAuth0Config, getTokenCacheInfo } from '../_lib/auth0Token';
+import { handleDisabledLegacyVercelFunction } from '../_lib/legacy-production-gate';
 
 /**
  * GET /api/vlm/health
@@ -15,6 +16,10 @@ import { validateAuth0Config, getTokenCacheInfo } from '../_lib/auth0Token';
  *   - apiUrl: string
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleDisabledLegacyVercelFunction(req, res).disabled) {
+    return;
+  }
+
   // CORS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
