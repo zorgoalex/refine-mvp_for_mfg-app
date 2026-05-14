@@ -28,6 +28,28 @@ describe('orders OpenAPI contract', () => {
     expect(responseSchema).toContain('- requestId');
     expect(responseSchema).toContain('auditId:');
   });
+
+  it('documents GET /api/v1/orders/{orderId}/audit under v1 orders API', () => {
+    const contract = readOpenApiContract();
+    const auditSection = sectionBetween(
+      contract,
+      '  /api/v1/orders/{orderId}/audit:',
+      '  /api/v1/users:',
+    );
+    const responseSchema = sectionBetween(
+      contract,
+      '    AuditListResponse:',
+      '    AuditEventDto:',
+    );
+
+    expect(auditSection).toContain('operationId: getOrderAudit');
+    expect(auditSection).toContain('x-permission: orders.view_audit');
+    expect(auditSection).toContain("$ref: '#/components/parameters/Page'");
+    expect(auditSection).toContain("$ref: '#/components/parameters/PageSize'");
+    expect(auditSection).toContain("'404':");
+    expect(responseSchema).toContain('- requestId');
+    expect(responseSchema).toContain('requestId:');
+  });
 });
 
 function readOpenApiContract(): string {

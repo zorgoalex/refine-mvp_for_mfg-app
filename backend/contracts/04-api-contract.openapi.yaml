@@ -585,7 +585,7 @@ paths:
         - Orders
       operationId: getOrderAudit
       summary: Audit log заказа
-      description: Возвращает audit events по заказу. Endpoint можно включить на этапе 1 или оставить за feature flag.
+      description: Возвращает audit events по заказу.
       security:
         - bearerAuth: []
       x-permission: orders.view_audit
@@ -2896,6 +2896,7 @@ components:
       required:
         - data
         - pagination
+        - requestId
       properties:
         data:
           type: array
@@ -2903,6 +2904,8 @@ components:
             $ref: '#/components/schemas/AuditEventDto'
         pagination:
           $ref: '#/components/schemas/Pagination'
+        requestId:
+          type: string
 
     AuditEventDto:
       type: object
@@ -2929,6 +2932,7 @@ components:
         userId:
           type: integer
           format: int64
+          nullable: true
         username:
           type: string
           nullable: true

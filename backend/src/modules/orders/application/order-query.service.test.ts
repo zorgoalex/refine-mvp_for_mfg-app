@@ -3,7 +3,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
-import type { OrderListResponseDto } from '../dto/order.dto';
+import type { OrderAuditListResponseDto, OrderListResponseDto } from '../dto/order.dto';
 import type { OrderReadRepositoryPort } from './order-query.types';
 import { OrderQueryService } from './order-query.service';
 import { createOrderDtoForQueryTest } from './order-query.test-helpers';
@@ -40,6 +40,9 @@ describe('OrderQueryService', () => {
         async getOrderById() {
           throw new Error('get should not be called');
         },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
+        },
         async getOrderFormData() {
           throw new Error('form data should not be called');
         },
@@ -61,6 +64,9 @@ describe('OrderQueryService', () => {
         },
         async getOrderById(command) {
           return command.orderId === 42 ? order : null;
+        },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
         },
         async getOrderFormData() {
           throw new Error('form data should not be called');
@@ -94,6 +100,80 @@ describe('OrderQueryService', () => {
     } satisfies Partial<ApiError>);
   });
 
+  it('requires orders.view_audit permission before loading order audit', async () => {
+    const service = new OrderQueryService({
+      reader: readerThatShouldNotBeCalled(),
+    });
+
+    await expect(
+      service.getAudit({
+        currentUser: currentUser(),
+        orderId: 42,
+        page: 1,
+        pageSize: 50,
+        requestId: 'request-audit-1',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: {
+        requiredPermissions: ['orders.view_audit'],
+      },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('checks order existence and delegates audit loading after permission checks', async () => {
+    const order = createOrderDtoForQueryTest(42);
+    const response: OrderAuditListResponseDto = {
+      data: [],
+      pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 },
+      requestId: 'request-audit-1',
+    };
+    const calls: string[] = [];
+    const service = new OrderQueryService({
+      reader: {
+        async listOrders() {
+          throw new Error('list should not be called');
+        },
+        async getOrderById(command) {
+          calls.push(`get:${command.orderId}`);
+          return command.orderId === 42 ? order : null;
+        },
+        async getOrderAudit(command) {
+          calls.push(`audit:${command.orderId}:${command.page}:${command.pageSize}`);
+          return response;
+        },
+        async getOrderFormData() {
+          throw new Error('form data should not be called');
+        },
+      },
+    });
+
+    await expect(
+      service.getAudit({
+        currentUser: currentUserWithAuditPermission(),
+        orderId: 42,
+        page: 1,
+        pageSize: 50,
+        requestId: 'request-audit-1',
+      }),
+    ).resolves.toBe(response);
+    await expect(
+      service.getAudit({
+        currentUser: currentUserWithAuditPermission(),
+        orderId: 99,
+        page: 1,
+        pageSize: 50,
+        requestId: 'request-audit-2',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ORDER_NOT_FOUND',
+      statusCode: 404,
+      details: { orderId: 99 },
+    } satisfies Partial<ApiError>);
+    expect(calls).toEqual(['get:42', 'audit:42:1:50', 'get:99']);
+  });
+
   it('delegates form data loading to read repository after permission check', async () => {
     const response = createOrderFormDataResponse();
     const calls: string[] = [];
@@ -104,6 +184,9 @@ describe('OrderQueryService', () => {
         },
         async getOrderById() {
           throw new Error('get should not be called');
+        },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
         },
         async getOrderFormData(command) {
           calls.push(`form-data:${command.currentUser.id}`);
@@ -137,6 +220,16 @@ function userWithoutOrderView(): CurrentUser {
   };
 }
 
+function currentUserWithAuditPermission(): CurrentUser {
+  return {
+    id: 'top-manager-id',
+    username: 'top-manager',
+    role: 'top_manager',
+    roleId: 15,
+    permissions: getPermissionsForRole('top_manager'),
+  };
+}
+
 function defaultQuery() {
   return {
     page: 1,
@@ -154,6 +247,9 @@ function readerThatShouldNotBeCalled(): OrderReadRepositoryPort {
     },
     async getOrderById() {
       throw new Error('getById should not be called');
+    },
+    async getOrderAudit() {
+      throw new Error('getOrderAudit should not be called');
     },
     async getOrderFormData() {
       throw new Error('getOrderFormData should not be called');

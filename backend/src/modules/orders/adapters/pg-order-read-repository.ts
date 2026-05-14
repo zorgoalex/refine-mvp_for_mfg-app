@@ -1,9 +1,16 @@
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
-import type { OrderDto, OrderListItemDto, OrderListResponseDto } from '../dto/order.dto';
+import type {
+  OrderAuditEventDto,
+  OrderAuditListResponseDto,
+  OrderDto,
+  OrderListItemDto,
+  OrderListResponseDto,
+} from '../dto/order.dto';
 import type {
   GetOrderFormDataCommand,
+  GetOrderAuditCommand,
   GetOrderByIdCommand,
   ListOrdersCommand,
   OrderListSortBy,
@@ -174,6 +181,23 @@ interface OrderDowelingLinkRow extends QueryResultRow {
 
 interface CountRow extends QueryResultRow {
   total: string | number;
+}
+
+interface AuditLogRow extends QueryResultRow {
+  audit_id: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  event: string;
+  user_id: string | number | null;
+  username: string | null;
+  role: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  request_id: string;
+  before_json: Record<string, unknown> | null;
+  after_json: Record<string, unknown> | null;
+  diff_json: Record<string, unknown> | null;
+  created_at: string | Date;
 }
 
 interface IdNameLookupRow extends QueryResultRow {
@@ -413,6 +437,44 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     );
   }
 
+  async getOrderAudit(command: GetOrderAuditCommand): Promise<OrderAuditListResponseDto> {
+    const orderIdText = String(command.orderId);
+    const count = await this.database.query<CountRow>(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM audit_log
+      WHERE (entity_type = 'order' AND entity_id = $1)
+        OR related_order_id = $2
+      `,
+      [orderIdText, command.orderId],
+    );
+    const rows = await this.database.query<AuditLogRow>(
+      `
+      SELECT
+        audit_id, entity_type, entity_id, event, user_id, username, role,
+        ip_address, user_agent, request_id, before_json, after_json, diff_json, created_at
+      FROM audit_log
+      WHERE (entity_type = 'order' AND entity_id = $1)
+        OR related_order_id = $2
+      ORDER BY created_at DESC, audit_id DESC
+      LIMIT $3 OFFSET $4
+      `,
+      [orderIdText, command.orderId, command.pageSize, (command.page - 1) * command.pageSize],
+    );
+    const total = toNumber(count.rows[0]?.total ?? 0);
+
+    return {
+      data: rows.rows.map(mapAuditEvent),
+      pagination: {
+        page: command.page,
+        pageSize: command.pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / command.pageSize)),
+      },
+      requestId: command.requestId,
+    };
+  }
+
   async getOrderFormData(_command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto> {
     const [
       clients,
@@ -626,6 +688,25 @@ function mapUnitLookup(row: UnitLookupRow) {
     code: row.code,
     name: row.name,
     ...(row.symbol ? { symbol: row.symbol } : {}),
+  };
+}
+
+function mapAuditEvent(row: AuditLogRow): OrderAuditEventDto {
+  return {
+    auditId: row.audit_id,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    action: row.event,
+    userId: toNullableNumber(row.user_id),
+    username: row.username,
+    role: row.role,
+    before: row.before_json,
+    after: row.after_json,
+    diff: row.diff_json,
+    requestId: row.request_id,
+    ip: row.ip_address,
+    userAgent: row.user_agent,
+    createdAt: toIsoString(row.created_at),
   };
 }
 

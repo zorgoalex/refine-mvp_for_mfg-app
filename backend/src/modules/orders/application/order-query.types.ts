@@ -1,6 +1,6 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
-import type { OrderDto, OrderListResponseDto } from '../dto/order.dto';
+import type { OrderAuditListResponseDto, OrderDto, OrderListResponseDto } from '../dto/order.dto';
 
 export const ORDER_LIST_SORT_FIELDS = [
   'orderId',
@@ -47,6 +47,14 @@ export interface GetOrderByIdCommand {
   orderId: number;
 }
 
+export interface GetOrderAuditCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  page: number;
+  pageSize: number;
+  requestId: string;
+}
+
 export interface GetOrderFormDataCommand {
   currentUser: CurrentUser;
 }
@@ -54,5 +62,6 @@ export interface GetOrderFormDataCommand {
 export interface OrderReadRepositoryPort {
   listOrders(command: ListOrdersCommand): Promise<OrderListResponseDto>;
   getOrderById(command: GetOrderByIdCommand): Promise<OrderDto | null>;
+  getOrderAudit(command: GetOrderAuditCommand): Promise<OrderAuditListResponseDto>;
   getOrderFormData(command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto>;
 }

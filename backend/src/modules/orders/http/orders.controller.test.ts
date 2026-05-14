@@ -11,6 +11,7 @@ import {
   OrdersController,
   parseIdempotencyKeyHeader,
   parseIfMatchVersion,
+  parseOrderAuditQuery,
   parseOrderId,
   parseOrderListQuery,
 } from './orders.controller';
@@ -94,6 +95,52 @@ describe('OrdersController read endpoints', () => {
     expect(calls).toEqual(['get:42:manager-id']);
   });
 
+  it('returns order audit with current user and request id', async () => {
+    const response = {
+      data: [],
+      pagination: { page: 2, pageSize: 50, total: 0, totalPages: 1 },
+      requestId: 'request-audit-1',
+    };
+    const calls: string[] = [];
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      queries: {
+        async getAudit(command) {
+          calls.push(
+            `audit:${command.orderId}:${command.currentUser.id}:${command.page}:${command.pageSize}:${command.requestId}`,
+          );
+          return response;
+        },
+      },
+    });
+
+    await expect(
+      controller.getAudit(
+        { user: currentUser('top-manager-id'), requestId: 'request-audit-1' },
+        '42',
+        { page: '2' },
+      ),
+    ).resolves.toBe(response);
+    expect(calls).toEqual(['audit:42:top-manager-id:2:50:request-audit-1']);
+  });
+
+  it('requires authenticated current user before audit query service', async () => {
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+    });
+
+    await expect(controller.getAudit({}, '42', {})).rejects.toMatchObject({
+      code: 'AUTH_REQUIRED',
+      statusCode: 401,
+    } satisfies Partial<ApiError>);
+  });
+
   it('returns order form reference data through the read query service', async () => {
     const response = createOrderFormDataResponse();
     const calls: string[] = [];
@@ -166,6 +213,7 @@ describe('OrdersController read endpoints', () => {
     expect(() => parseOrderListQuery({ sortBy: 'raw_sql_injection' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ pageSize: '201' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ dateFrom: '30.04.2026' })).toThrow(ApiError);
+    expect(() => parseOrderAuditQuery({ pageSize: '201' })).toThrow(ApiError);
   });
 });
 
@@ -358,6 +406,12 @@ function createController(options: {
     },
     async getById() {
       throw new Error('getById should not be called');
+    },
+    async getAudit() {
+      throw new Error('getAudit should not be called');
+    },
+    async getFormData() {
+      throw new Error('getFormData should not be called');
     },
     ...options.queries,
   } as unknown as OrderQueryService;

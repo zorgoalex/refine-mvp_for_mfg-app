@@ -24,6 +24,7 @@ import {
 import { OrderTransactionService } from '../application/order-transaction.service';
 import type {
   DeleteOrderResponseDto,
+  OrderAuditListResponseDto,
   OrderDto,
   OrderListResponseDto,
   OrderResponseDto,
@@ -78,6 +79,27 @@ export class OrdersController {
     const order = await this.orderQueries.getById({ currentUser, orderId });
 
     return { order };
+  }
+
+  @Get(':orderId/audit')
+  async getAudit(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Query() query: Record<string, string | string[] | undefined>,
+  ): Promise<OrderAuditListResponseDto> {
+    this.assertOrdersReadEnabled();
+
+    const currentUser = this.requireCurrentUser(request);
+    const orderId = parseOrderId(orderIdParam);
+    const auditQuery = parseOrderAuditQuery(query);
+
+    return this.orderQueries.getAudit({
+      currentUser,
+      orderId,
+      page: auditQuery.page,
+      pageSize: auditQuery.pageSize,
+      requestId: request.requestId ?? 'orders-audit',
+    });
   }
 
   @Post()
@@ -197,6 +219,15 @@ export function parseOrderId(value: string): number {
   }
 
   return orderId;
+}
+
+export function parseOrderAuditQuery(
+  query: Record<string, string | string[] | undefined>,
+): { page: number; pageSize: number } {
+  return {
+    page: parsePositiveInteger(query.page, 'page', 1, 1, Number.MAX_SAFE_INTEGER),
+    pageSize: parsePositiveInteger(query.pageSize, 'pageSize', 50, 1, 200),
+  };
 }
 
 export function parseIfMatchVersion(value: string | string[] | undefined): number {

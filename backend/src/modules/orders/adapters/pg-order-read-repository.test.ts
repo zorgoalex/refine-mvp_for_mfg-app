@@ -99,6 +99,54 @@ describe('PgOrderReadRepository', () => {
     });
   });
 
+  it('loads order audit events filtered by order entity and related order id', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await expect(
+      repository.getOrderAudit({
+        currentUser: currentUser('15'),
+        orderId: 100,
+        page: 2,
+        pageSize: 25,
+        requestId: 'request-audit-1',
+      }),
+    ).resolves.toEqual({
+      data: [
+        {
+          auditId: 'audit-1',
+          entityType: 'order',
+          entityId: '100',
+          action: 'orders.status_change',
+          userId: 15,
+          username: 'top-manager',
+          role: 'top_manager',
+          before: { statusId: 1 },
+          after: { statusId: 2 },
+          diff: { statusId: { before: 1, after: 2 } },
+          requestId: 'request-command-1',
+          ip: null,
+          userAgent: 'vitest',
+          createdAt: '2026-05-01T12:00:00.000Z',
+        },
+      ],
+      pagination: {
+        page: 2,
+        pageSize: 25,
+        total: 11,
+        totalPages: 1,
+      },
+      requestId: 'request-audit-1',
+    });
+
+    const auditQueries = database.queries.filter((query) => query.text.includes('FROM audit_log'));
+    expect(auditQueries).toHaveLength(2);
+    expect(auditQueries[0].text).toContain("entity_type = 'order' AND entity_id = $1");
+    expect(auditQueries[0].text).toContain('OR related_order_id = $2');
+    expect(auditQueries[1].text).toContain('ORDER BY created_at DESC, audit_id DESC');
+    expect(auditQueries[1].params).toEqual(['100', 100, 25, 25]);
+  });
+
   it('loads active order form reference data with stable API field names', async () => {
     const database = createDatabase();
     const repository = new PgOrderReadRepository(database.service);
@@ -140,6 +188,29 @@ function createDatabase() {
 
       if (text.includes('COUNT(*)::int')) {
         return { rows: [{ total: 11 }] };
+      }
+
+      if (text.includes('FROM audit_log')) {
+        return {
+          rows: [
+            {
+              audit_id: 'audit-1',
+              entity_type: 'order',
+              entity_id: '100',
+              event: 'orders.status_change',
+              user_id: '15',
+              username: 'top-manager',
+              role: 'top_manager',
+              ip_address: null,
+              user_agent: 'vitest',
+              request_id: 'request-command-1',
+              before_json: { statusId: 1 },
+              after_json: { statusId: 2 },
+              diff_json: { statusId: { before: 1, after: 2 } },
+              created_at: new Date('2026-05-01T12:00:00.000Z'),
+            },
+          ],
+        };
       }
 
       if (text.includes('FROM orders o')) {

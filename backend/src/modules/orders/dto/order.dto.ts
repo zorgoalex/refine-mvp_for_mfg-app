@@ -40,6 +40,29 @@ export interface OrderListResponseDto {
   pagination: PaginationDto;
 }
 
+export interface OrderAuditListResponseDto {
+  data: OrderAuditEventDto[];
+  pagination: PaginationDto;
+  requestId: string;
+}
+
+export interface OrderAuditEventDto {
+  auditId: string;
+  entityType: string | null;
+  entityId: string | null;
+  action: string;
+  userId: number | null;
+  username: string | null;
+  role: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  diff: Record<string, unknown> | null;
+  requestId: string;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
 export interface PaginationDto {
   page: number;
   pageSize: number;

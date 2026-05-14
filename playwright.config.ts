@@ -14,10 +14,13 @@ const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEB_SERVER === 'true';
  */
 export default defineConfig({
     testDir: './tests',
-    fullyParallel: true,
+    // Stateful workflow specs share mocked browser/backend state assumptions and become flaky
+    // when the full-page smoke suite loads every route in parallel. Keep the default local
+    // e2e gate sequential; opt-in cutover/stage scripts still run their targeted specs.
+    fullyParallel: false,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
-    workers: process.env.CI ? 1 : undefined,
+    workers: 1,
     reporter: 'list',
     use: {
         baseURL: 'http://localhost:5173',
