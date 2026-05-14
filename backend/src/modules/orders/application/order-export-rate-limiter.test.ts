@@ -4,7 +4,7 @@ import { getPermissionsForRole } from '../../../permissions/permissions';
 import { InMemoryOrderExportRateLimiter } from './order-export-rate-limiter';
 
 describe('InMemoryOrderExportRateLimiter', () => {
-  it('limits export attempts by user and order', () => {
+  it('limits export attempts by user and order', async () => {
     const limiter = new InMemoryOrderExportRateLimiter({ maxRequests: 2, windowMs: 60_000 });
     const command = {
       currentUser: manager(),
@@ -12,11 +12,11 @@ describe('InMemoryOrderExportRateLimiter', () => {
       request: { format: 'xlsx' as const, fileName: null },
     };
 
-    limiter.assertAllowed(command);
-    limiter.assertAllowed(command);
+    await limiter.assertAllowed(command);
+    await limiter.assertAllowed(command);
 
-    expect(() => limiter.assertAllowed(command)).toThrow('Order export rate limit exceeded');
-    expect(() => limiter.assertAllowed({ ...command, orderId: 43 })).not.toThrow();
+    await expect(limiter.assertAllowed(command)).rejects.toThrow('Order export rate limit exceeded');
+    await expect(limiter.assertAllowed({ ...command, orderId: 43 })).resolves.toBeUndefined();
   });
 });
 

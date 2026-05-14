@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
+import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { PgVlmProvider } from './adapters/pg-vlm-provider';
 import { UnavailableVlmProvider } from './adapters/unavailable-vlm-provider';
 import { VlmService } from './application/vlm.service';
@@ -16,7 +17,11 @@ import { VlmRuntimeConfigService } from './http/vlm-runtime-config.service';
     VlmRuntimeConfigService,
     {
       provide: VlmService,
-      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
+      useFactory: (
+        database: DatabaseService,
+        config: ConfigService<BackendEnv, true>,
+        rateLimits: RateLimitService,
+      ) =>
         new VlmService({
           provider:
             database.isConfigured &&
@@ -35,10 +40,11 @@ import { VlmRuntimeConfigService } from './http/vlm-runtime-config.service';
                   uploadTimeoutMs: config.get('VLM_UPLOAD_TIMEOUT_MS', { infer: true }),
                   analyzeTimeoutMs: config.get('VLM_ANALYZE_TIMEOUT_MS', { infer: true }),
                   analyzeDailyLimit: config.get('VLM_ANALYZE_DAILY_LIMIT', { infer: true }),
+                  rateLimits,
                 })
               : new UnavailableVlmProvider(),
         }),
-      inject: [DatabaseService, ConfigService],
+      inject: [DatabaseService, ConfigService, RateLimitService],
     },
   ],
 })

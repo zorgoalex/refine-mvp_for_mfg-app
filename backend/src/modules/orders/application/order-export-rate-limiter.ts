@@ -1,4 +1,5 @@
 import { ApiError } from '../../../common/errors/api-error';
+import { RateLimitService } from '../../../rate-limit/rate-limit.service';
 import type { ExportOrderCommand, OrderExportRateLimiterPort } from './order-export.types';
 
 export interface InMemoryOrderExportRateLimiterOptions {
@@ -16,7 +17,7 @@ export class InMemoryOrderExportRateLimiter implements OrderExportRateLimiterPor
     },
   ) {}
 
-  assertAllowed(command: ExportOrderCommand): void {
+  async assertAllowed(command: ExportOrderCommand): Promise<void> {
     const key = `${command.currentUser.id}:${command.orderId}`;
     const now = Date.now();
     const windowStart = now - this.options.windowMs;
@@ -32,5 +33,24 @@ export class InMemoryOrderExportRateLimiter implements OrderExportRateLimiterPor
 
     timestamps.push(now);
     this.buckets.set(key, timestamps);
+  }
+}
+
+export class SharedOrderExportRateLimiter implements OrderExportRateLimiterPort {
+  constructor(private readonly rateLimits: RateLimitService) {}
+
+  async assertAllowed(command: ExportOrderCommand): Promise<void> {
+    await this.rateLimits.assertAllowed({
+      rule: {
+        feature: 'order_export',
+        maxRequests: 10,
+        windowMs: 60_000,
+      },
+      subject: {
+        route: 'orders/export',
+        userId: command.currentUser.id,
+        resourceId: command.orderId,
+      },
+    });
   }
 }

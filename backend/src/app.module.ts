@@ -12,6 +12,7 @@ import { ProductionActionsModule } from './modules/production-actions/production
 import { UsersModule } from './modules/users/users.module';
 import { VlmModule } from './modules/vlm/vlm.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { RateLimitModule } from './rate-limit/rate-limit.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { PermissionsModule } from './permissions/permissions.module';
       isGlobal: true,
       validate: validateEnvForNest,
     }),
+    RateLimitModule,
     DatabaseModule,
     AuthModule,
     ClientPhonesModule,

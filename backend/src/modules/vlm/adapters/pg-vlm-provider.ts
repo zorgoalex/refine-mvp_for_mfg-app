@@ -1,6 +1,7 @@
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import { RateLimitService } from '../../../rate-limit/rate-limit.service';
 import type {
   AnalyzeVlmImageCommand,
   GetVlmHealthCommand,
@@ -28,6 +29,7 @@ export interface PgVlmProviderOptions {
   uploadTimeoutMs: number;
   analyzeTimeoutMs: number;
   analyzeDailyLimit: number;
+  rateLimits?: RateLimitService;
   fetchImpl?: FetchLike;
 }
 
@@ -84,9 +86,6 @@ interface AnalyzeProviderResponse {
 export class PgVlmProvider implements VlmProviderPort {
   private readonly fetchImpl: FetchLike;
   private token: CachedToken | null = null;
-  private readonly uploadLimiter = new SlidingWindowLimiter(60, 60_000);
-  private readonly analyzeLimiter = new SlidingWindowLimiter(20, 60_000);
-  private readonly dailyAnalyzeCounter = new DailyCounter();
 
   constructor(
     private readonly database: VlmDatabase,
@@ -123,7 +122,13 @@ export class PgVlmProvider implements VlmProviderPort {
   }
 
   async uploadImage(command: UploadVlmImageCommand): Promise<VlmUploadResponseDto> {
-    this.uploadLimiter.assertAllowed(command.currentUser.id, 'vlm_upload');
+    await this.assertRateLimit({
+      feature: 'vlm_upload',
+      route: 'vlm/upload',
+      userId: command.currentUser.id,
+      maxRequests: 60,
+      windowMs: 60_000,
+    });
     const file = command.dto.file;
     const contentType = getContentType(file);
     const bytes = await getFileBytes(file);
@@ -202,8 +207,20 @@ export class PgVlmProvider implements VlmProviderPort {
   }
 
   async analyzeImage(command: AnalyzeVlmImageCommand): Promise<VlmAnalyzeResponseDto> {
-    this.analyzeLimiter.assertAllowed(command.currentUser.id, 'vlm_analyze');
-    this.dailyAnalyzeCounter.assertAllowed(command.currentUser.id, this.options.analyzeDailyLimit);
+    await this.assertRateLimit({
+      feature: 'vlm_analyze',
+      route: 'vlm/analyze',
+      userId: command.currentUser.id,
+      maxRequests: 20,
+      windowMs: 60_000,
+    });
+    await this.assertRateLimit({
+      feature: 'vlm_analyze_daily',
+      route: 'vlm/analyze',
+      userId: command.currentUser.id,
+      maxRequests: this.options.analyzeDailyLimit,
+      windowMs: msUntilNextUtcDay(),
+    });
 
     const upload = await this.resolveTrustedUpload(command);
     const imageUrl = upload.signed_url ?? upload.public_url;
@@ -313,6 +330,33 @@ export class PgVlmProvider implements VlmProviderPort {
     return upload;
   }
 
+  private async assertRateLimit(input: {
+    feature: string;
+    route: string;
+    userId: string;
+    maxRequests: number;
+    windowMs: number;
+  }): Promise<void> {
+    if (this.options.rateLimits) {
+      await this.options.rateLimits.assertAllowed({
+        rule: {
+          feature: input.feature,
+          maxRequests: input.maxRequests,
+          windowMs: input.windowMs,
+        },
+        subject: {
+          route: input.route,
+          userId: input.userId,
+        },
+      });
+      return;
+    }
+
+    throw new ApiError(503, 'RATE_LIMIT_UNAVAILABLE', 'Rate limit storage is unavailable', {
+      feature: input.feature,
+    });
+  }
+
   private async callAnalyzeProvider(input: {
     token: string;
     imageUrl: string;
@@ -419,50 +463,10 @@ export class PgVlmProvider implements VlmProviderPort {
   }
 }
 
-class SlidingWindowLimiter {
-  private readonly buckets = new Map<string, number[]>();
-
-  constructor(
-    private readonly maxRequests: number,
-    private readonly windowMs: number,
-  ) {}
-
-  assertAllowed(userId: string, action: string): void {
-    const key = `${action}:${userId}`;
-    const now = Date.now();
-    const windowStart = now - this.windowMs;
-    const timestamps = (this.buckets.get(key) ?? []).filter((value) => value > windowStart);
-
-    if (timestamps.length >= this.maxRequests) {
-      throw new ApiError(429, 'RATE_LIMIT_EXCEEDED', 'VLM rate limit exceeded', {
-        feature: action,
-        limit: this.maxRequests,
-        windowMs: this.windowMs,
-      });
-    }
-
-    timestamps.push(now);
-    this.buckets.set(key, timestamps);
-  }
-}
-
-class DailyCounter {
-  private readonly counts = new Map<string, number>();
-
-  assertAllowed(userId: string, limit: number): void {
-    const dateKey = new Date().toISOString().slice(0, 10);
-    const key = `${dateKey}:${userId}`;
-    const count = this.counts.get(key) ?? 0;
-
-    if (count >= limit) {
-      throw new ApiError(429, 'RATE_LIMIT_EXCEEDED', 'VLM daily quota exceeded', {
-        feature: 'vlm_analyze_daily',
-        limit,
-      });
-    }
-
-    this.counts.set(key, count + 1);
-  }
+function msUntilNextUtcDay(): number {
+  const now = new Date();
+  const nextDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.max(1, nextDay - now.getTime());
 }
 
 function buildProviderOrder(provider: string | null | undefined, providerOrder: string[] | null | undefined) {

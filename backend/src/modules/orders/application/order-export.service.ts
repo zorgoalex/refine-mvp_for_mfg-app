@@ -31,7 +31,7 @@ export class OrderExportService {
       });
     }
 
-    this.rateLimiter.assertAllowed(command);
+    await this.rateLimiter.assertAllowed(command);
 
     return this.ports.exporter.exportToGoogleDrive(command);
   }

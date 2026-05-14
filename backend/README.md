@@ -161,6 +161,8 @@ REQUEST_ID_HEADER=x-request-id
 SWAGGER_ENABLED=true
 READINESS_REQUIRE_DATABASE=false
 READINESS_REQUIRE_REDIS=false
+BACKEND_RATE_LIMIT_STORE=memory
+RATE_LIMIT_REDIS_URL=
 DATABASE_SSL=false
 DATABASE_POOL_MIN=1
 DATABASE_POOL_MAX=10
@@ -209,6 +211,43 @@ Docker:
 docker build -t erp-backend-stage1:test .
 docker compose up backend
 ```
+
+For Redis/Valkey-backed rate limit in staging or production, run a Redis-compatible
+service and configure the backend to use it. Local development and tests may keep
+`BACKEND_RATE_LIMIT_STORE=memory`.
+
+Example Compose service:
+
+```yaml
+services:
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    command: ["valkey-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    depends_on:
+      valkey:
+        condition: service_healthy
+    environment:
+      BACKEND_RATE_LIMIT_STORE: redis
+      RATE_LIMIT_REDIS_URL: redis://valkey:6379
+      READINESS_REQUIRE_REDIS: "true"
+
+volumes:
+  valkey_data:
+```
+
+For managed Redis/Valkey, omit the `valkey` service and set
+`RATE_LIMIT_REDIS_URL` or `REDIS_URL` in the runtime `.env`. Do not log or commit
+connection strings when they include credentials.
 
 For VPS deploys, keep Docker Compose changes in the repo template
 `../ops/templates/docker-compose.vps.yml` and runtime secret values in the VPS

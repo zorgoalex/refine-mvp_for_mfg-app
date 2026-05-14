@@ -8,6 +8,7 @@ import { REFRESH_COOKIE_NAME } from '../refresh-cookie';
 import type { AuthSessionHttpPort, LogoutCommand, RefreshCommand } from './auth-session-http.port';
 import { AuthController, readCookie, validateLoginBody } from './auth.controller';
 import type { AuthRuntimeConfigService } from './auth-runtime-config.service';
+import type { RateLimitService } from '../../../rate-limit/rate-limit.service';
 
 interface CookieWrite {
   name: string;
@@ -61,7 +62,7 @@ describe('AuthController HTTP shell', () => {
       }),
     ).resolves.toEqual(createAuthResponse());
 
-    expect(context.calls).toEqual(['login: manager :secret']);
+    expect(context.calls).toEqual(['rate-limit', 'login: manager :secret']);
     expect(context.cookies).toEqual([
       {
         name: REFRESH_COOKIE_NAME,
@@ -103,7 +104,7 @@ describe('AuthController HTTP shell', () => {
       ),
     ).resolves.toEqual(createAuthResponse({ accessToken: 'access_refreshed' }));
 
-    expect(context.calls).toEqual(['refresh:old_refresh_token']);
+    expect(context.calls).toEqual(['rate-limit', 'refresh:old_refresh_token']);
     expect(context.cookies[0]).toMatchObject({
       name: REFRESH_COOKIE_NAME,
       value: 'refresh_token_secret',
@@ -234,9 +235,14 @@ function createController(options: {
       };
     },
   } as AuthRuntimeConfigService;
+  const rateLimits = {
+    async assertAllowed(): Promise<void> {
+      calls.push('rate-limit');
+    },
+  } as RateLimitService;
 
   return {
-    controller: new AuthController(auth, sessions, runtimeConfig),
+    controller: new AuthController(auth, sessions, runtimeConfig, rateLimits),
     response: response as never,
     calls,
     cookies,

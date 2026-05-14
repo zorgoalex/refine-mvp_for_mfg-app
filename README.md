@@ -231,6 +231,39 @@ RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS=true
 BACKEND_ENABLE_PRODUCTION_ACTIONS=true
 ```
 
+Backend rate limit в `staging` и `production` требует Redis/Valkey-backed
+storage. Пример non-secret Compose service для Valkey:
+
+```yaml
+services:
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    command: ["valkey-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    depends_on:
+      valkey:
+        condition: service_healthy
+    environment:
+      BACKEND_RATE_LIMIT_STORE: redis
+      RATE_LIMIT_REDIS_URL: redis://valkey:6379
+      READINESS_REQUIRE_REDIS: "true"
+
+volumes:
+  valkey_data:
+```
+
+Если используется managed Redis/Valkey, service `valkey` не нужен: достаточно
+задать `RATE_LIMIT_REDIS_URL` или `REDIS_URL` в runtime `.env`.
+
 После изменения backend Compose/env пересобирается и перезапускается только
 backend service:
 

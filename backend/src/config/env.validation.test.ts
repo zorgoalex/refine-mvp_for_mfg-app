@@ -15,6 +15,7 @@ describe('backend env validation', () => {
       DATABASE_POOL_MIN: 1,
       DATABASE_POOL_MAX: 10,
       DATABASE_QUERY_TIMEOUT_MS: 10000,
+      BACKEND_RATE_LIMIT_STORE: 'memory',
       ACCESS_TOKEN_TTL_SECONDS: 900,
       REFRESH_TOKEN_TTL_DAYS: 7,
       REFRESH_COOKIE_SAME_SITE: 'lax',
@@ -55,6 +56,8 @@ describe('backend env validation', () => {
         REFRESH_COOKIE_SECURE: 'true',
         REFRESH_COOKIE_SAME_SITE: 'None',
         TRUST_PROXY: 'true',
+        BACKEND_RATE_LIMIT_STORE: 'redis',
+        RATE_LIMIT_REDIS_URL: 'redis://localhost:6379',
         BACKEND_ENABLE_PAYMENTS: 'true',
         BACKEND_ENABLE_PRODUCTION_ACTIONS: 'true',
         BACKEND_ENABLE_DEADLINES: 'true',
@@ -93,6 +96,8 @@ describe('backend env validation', () => {
       REFRESH_COOKIE_SECURE: true,
       REFRESH_COOKIE_SAME_SITE: 'none',
       TRUST_PROXY: true,
+      BACKEND_RATE_LIMIT_STORE: 'redis',
+      RATE_LIMIT_REDIS_URL: 'redis://localhost:6379',
       BACKEND_ENABLE_PAYMENTS: true,
       BACKEND_ENABLE_PRODUCTION_ACTIONS: true,
       BACKEND_ENABLE_DEADLINES: true,
@@ -180,6 +185,46 @@ describe('backend env validation', () => {
       BACKEND_ENABLE_AUTH: true,
       JWT_ACCESS_SECRET: 'x'.repeat(32),
       REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
+      });
+  });
+
+  it('validates Redis-backed rate limit runtime settings', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_RATE_LIMIT_STORE: 'redis',
+      }),
+    ).toThrow(/REDIS_URL or RATE_LIMIT_REDIS_URL/);
+
+    expect(() =>
+      validateEnv({
+        READINESS_REQUIRE_REDIS: 'true',
+      }),
+    ).toThrow(/REDIS_URL or RATE_LIMIT_REDIS_URL/);
+
+    expect(() =>
+      validateEnv({
+        READINESS_REQUIRE_REDIS: 'true',
+        RATE_LIMIT_REDIS_URL: 'redis://localhost:6379',
+      }),
+    ).toThrow(/BACKEND_RATE_LIMIT_STORE=redis/);
+
+    expect(() =>
+      validateEnv({
+        NODE_ENV: 'staging',
+        FRONTEND_ORIGIN: 'https://stage.example.test',
+      }),
+    ).toThrow(/BACKEND_RATE_LIMIT_STORE=redis/);
+
+    expect(
+      validateEnv({
+        NODE_ENV: 'staging',
+        FRONTEND_ORIGIN: 'https://stage.example.test',
+        BACKEND_RATE_LIMIT_STORE: 'redis',
+        RATE_LIMIT_REDIS_URL: 'redis://localhost:6379',
+      }),
+    ).toMatchObject({
+      BACKEND_RATE_LIMIT_STORE: 'redis',
+      RATE_LIMIT_REDIS_URL: 'redis://localhost:6379',
     });
   });
 
@@ -203,6 +248,8 @@ describe('backend env validation', () => {
         REFRESH_TOKEN_PEPPER: 'y'.repeat(32),
         REFRESH_COOKIE_SAME_SITE: 'none',
         REFRESH_COOKIE_SECURE: 'true',
+        BACKEND_RATE_LIMIT_STORE: 'redis',
+        RATE_LIMIT_REDIS_URL: 'redis://localhost:6379',
       }),
     ).toMatchObject({
       REFRESH_COOKIE_SAME_SITE: 'none',

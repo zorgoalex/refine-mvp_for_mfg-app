@@ -16,5 +16,5 @@ export interface OrderExportPort {
 }
 
 export interface OrderExportRateLimiterPort {
-  assertAllowed(command: ExportOrderCommand): void;
+  assertAllowed(command: ExportOrderCommand): Promise<void>;
 }

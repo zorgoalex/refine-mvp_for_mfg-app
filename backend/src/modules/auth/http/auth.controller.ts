@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
+import { RateLimitService } from '../../../rate-limit/rate-limit.service';
 import { AuthService } from '../auth.service';
 import type { AuthResponse, LoginCommand } from '../auth.types';
 import { createClearRefreshCookie, createRefreshCookie, REFRESH_COOKIE_NAME } from '../refresh-cookie';
@@ -28,6 +29,8 @@ export class AuthController {
     private readonly sessions: AuthSessionHttpPort,
     @Inject(AuthRuntimeConfigService)
     private readonly runtimeConfig: AuthRuntimeConfigService,
+    @Inject(RateLimitService)
+    private readonly rateLimits: RateLimitService,
   ) {}
 
   @Post('auth/login')
@@ -39,6 +42,18 @@ export class AuthController {
   ): Promise<AuthResponse> {
     this.assertAuthEnabled();
     validateLoginBody(body);
+    await this.rateLimits.assertAllowed({
+      rule: {
+        feature: 'auth_login',
+        maxRequests: 10,
+        windowMs: 60_000,
+      },
+      subject: {
+        route: 'auth/login',
+        ipAddress: request.ip,
+        username: body.username,
+      },
+    });
 
     const result = await this.auth.login({
       username: body.username,
@@ -65,6 +80,18 @@ export class AuthController {
     if (!refreshToken) {
       throw new ApiError(401, 'REFRESH_TOKEN_MISSING', 'Refresh token отсутствует');
     }
+
+    await this.rateLimits.assertAllowed({
+      rule: {
+        feature: 'auth_refresh',
+        maxRequests: 30,
+        windowMs: 60_000,
+      },
+      subject: {
+        route: 'auth/refresh',
+        ipAddress: request.ip,
+      },
+    });
 
     const result = await this.sessions.refresh({
       refreshToken,

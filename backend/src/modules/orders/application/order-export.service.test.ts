@@ -54,7 +54,7 @@ describe('OrderExportService', () => {
     const calls: string[] = [];
     const service = new OrderExportService({
       rateLimiter: {
-        assertAllowed(command) {
+        async assertAllowed(command) {
           calls.push(`limit:${command.currentUser.id}:${command.orderId}`);
         },
       },

@@ -15,7 +15,9 @@ import { OrderExportService } from './application/order-export.service';
 import { OrderSnapshotService } from './application/order-snapshot.service';
 import { OrderTransactionService } from './application/order-transaction.service';
 import { OrderQueryService } from './application/order-query.service';
+import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { UnavailableOrderTransactionManager } from './adapters/unavailable-order-transaction-manager';
+import { SharedOrderExportRateLimiter } from './application/order-export-rate-limiter';
 import { OrderExportController } from './http/order-export.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
@@ -52,7 +54,11 @@ import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service
     },
     {
       provide: OrderExportService,
-      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
+      useFactory: (
+        database: DatabaseService,
+        config: ConfigService<BackendEnv, true>,
+        rateLimits: RateLimitService,
+      ) =>
         new OrderExportService({
           exporter:
             database.isConfigured &&
@@ -64,8 +70,9 @@ import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service
                   timeoutMs: config.get('GAS_EXPORT_TIMEOUT_MS', { infer: true }),
                 })
               : new UnavailableOrderExporter(),
+          rateLimiter: new SharedOrderExportRateLimiter(rateLimits),
         }),
-      inject: [DatabaseService, ConfigService],
+      inject: [DatabaseService, ConfigService, RateLimitService],
     },
     {
       provide: OrderSnapshotService,

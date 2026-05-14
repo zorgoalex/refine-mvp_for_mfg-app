@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import type { BackendEnv } from '../../config/env.validation';
 import type { DatabaseService } from '../../database/database.service';
+import type { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { HealthService } from './health.service';
 
 function createConfig(values: Partial<BackendEnv>): ConfigService<BackendEnv, true> {
@@ -22,6 +23,12 @@ function createDatabase(input: {
   } as unknown as DatabaseService;
 }
 
+function createRateLimits(input: { ping?: () => Promise<void> } = {}): RateLimitService {
+  return {
+    ping: input.ping ?? vi.fn(),
+  } as unknown as RateLimitService;
+}
+
 describe('HealthService readiness', () => {
   it('skips database ping when database readiness is disabled', async () => {
     const ping = vi.fn();
@@ -32,6 +39,7 @@ describe('HealthService readiness', () => {
         READINESS_REQUIRE_REDIS: false,
       }),
       createDatabase({ isConfigured: false, ping }),
+      createRateLimits(),
     );
 
     await expect(service.ready()).resolves.toMatchObject({
@@ -55,6 +63,7 @@ describe('HealthService readiness', () => {
         READINESS_REQUIRE_REDIS: false,
       }),
       createDatabase({ isConfigured: true, ping }),
+      createRateLimits(),
     );
 
     await expect(service.ready()).resolves.toMatchObject({
@@ -79,6 +88,7 @@ describe('HealthService readiness', () => {
           throw new Error('connection refused');
         }),
       }),
+      createRateLimits(),
     );
 
     await expect(service.ready()).resolves.toMatchObject({
@@ -90,5 +100,27 @@ describe('HealthService readiness', () => {
         },
       },
     });
+  });
+
+  it('pings redis when redis readiness is required', async () => {
+    const ping = vi.fn(async () => undefined);
+    const service = new HealthService(
+      createConfig({
+        APP_NAME: 'erp-backend',
+        READINESS_REQUIRE_DATABASE: false,
+        READINESS_REQUIRE_REDIS: true,
+        RATE_LIMIT_REDIS_URL: 'redis://localhost:6379',
+      }),
+      createDatabase({ isConfigured: false }),
+      createRateLimits({ ping }),
+    );
+
+    await expect(service.ready()).resolves.toMatchObject({
+      status: 'ready',
+      checks: {
+        redis: { status: 'ok' },
+      },
+    });
+    expect(ping).toHaveBeenCalledTimes(1);
   });
 });

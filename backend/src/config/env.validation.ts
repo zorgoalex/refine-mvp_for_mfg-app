@@ -88,7 +88,9 @@ const envSchema = z
     DATABASE_POOL_MIN: z.coerce.number().int().min(0).default(1),
     DATABASE_POOL_MAX: z.coerce.number().int().positive().max(100).default(10),
     DATABASE_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
-    REDIS_URL: z.string().trim().min(1).optional(),
+    REDIS_URL: optionalUrlFromEnv,
+    RATE_LIMIT_REDIS_URL: optionalUrlFromEnv,
+    BACKEND_RATE_LIMIT_STORE: z.enum(['memory', 'redis']).default('memory'),
     READINESS_REQUIRE_DATABASE: booleanFromEnv.default(false),
     READINESS_REQUIRE_REDIS: booleanFromEnv.default(false),
     JWT_ACCESS_SECRET: z.string().trim().min(32).optional(),
@@ -157,6 +159,41 @@ const envSchema = z
         code: 'custom',
         message: 'DATABASE_URL is required when READINESS_REQUIRE_DATABASE is true',
         path: ['DATABASE_URL'],
+      });
+    }
+
+    if (env.READINESS_REQUIRE_REDIS && !(env.REDIS_URL || env.RATE_LIMIT_REDIS_URL)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'REDIS_URL or RATE_LIMIT_REDIS_URL is required when READINESS_REQUIRE_REDIS is true',
+        path: ['REDIS_URL'],
+      });
+    }
+
+    if (env.READINESS_REQUIRE_REDIS && env.BACKEND_RATE_LIMIT_STORE !== 'redis') {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'BACKEND_RATE_LIMIT_STORE=redis is required when READINESS_REQUIRE_REDIS is true',
+        path: ['BACKEND_RATE_LIMIT_STORE'],
+      });
+    }
+
+    if (env.BACKEND_RATE_LIMIT_STORE === 'redis' && !(env.REDIS_URL || env.RATE_LIMIT_REDIS_URL)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'REDIS_URL or RATE_LIMIT_REDIS_URL is required when BACKEND_RATE_LIMIT_STORE=redis',
+        path: ['BACKEND_RATE_LIMIT_STORE'],
+      });
+    }
+
+    if (
+      (env.NODE_ENV === 'staging' || env.NODE_ENV === 'production') &&
+      env.BACKEND_RATE_LIMIT_STORE !== 'redis'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'BACKEND_RATE_LIMIT_STORE=redis is required in staging and production',
+        path: ['BACKEND_RATE_LIMIT_STORE'],
       });
     }
 

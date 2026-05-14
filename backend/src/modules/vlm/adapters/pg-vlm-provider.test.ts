@@ -3,6 +3,8 @@ import type { QueryResult, QueryResultRow } from 'pg';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+import { MemoryRateLimitStore } from '../../../rate-limit/memory-rate-limit.store';
+import { RateLimitService } from '../../../rate-limit/rate-limit.service';
 import { PgVlmProvider } from './pg-vlm-provider';
 
 describe('PgVlmProvider', () => {
@@ -255,6 +257,7 @@ function createProvider(
     uploadTimeoutMs: 1000,
     analyzeTimeoutMs: 1000,
     analyzeDailyLimit,
+    rateLimits: new RateLimitService(new MemoryRateLimitStore()),
     fetchImpl,
   });
 }
