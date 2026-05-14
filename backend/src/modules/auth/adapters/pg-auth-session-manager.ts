@@ -40,6 +40,21 @@ interface RefreshSessionRow extends QueryResultRow {
   is_active: boolean;
 }
 
+interface AuthAuditInput {
+  event: 'auth.login.success' | 'auth.logout' | 'auth.refresh' | 'auth.refresh.reuse_detected';
+  userId: string | number;
+  username: string;
+  roleId: string | number;
+  sessionId: string;
+  tokenFamilyId: string;
+  requestId?: string;
+  userAgent?: string;
+  ipAddress?: string;
+  metadata?: Record<string, unknown>;
+}
+
+const DEFAULT_REQUEST_ID = 'auth-command';
+
 export interface PgAuthSessionManagerOptions {
   refreshTokenPepper: string;
   refreshTokenTtlDays: number;
@@ -55,7 +70,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
 
   async createLoginSession(
     user: AuthUserRecord,
-    context: Pick<LoginCommand, 'userAgent' | 'ipAddress'>,
+    context: Pick<LoginCommand, 'userAgent' | 'ipAddress' | 'requestId'>,
   ): Promise<AuthSessionRecord> {
     const refreshToken = this.tokenService.generateRefreshToken();
     const tokenHash = this.hashRefreshToken(refreshToken);
@@ -97,6 +112,20 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       );
 
       await tx.query('UPDATE users SET last_login_at = now() WHERE user_id = $1', [user.id]);
+      await this.writeAudit(tx, {
+        event: 'auth.login.success',
+        userId: user.id,
+        username: user.username,
+        roleId: user.roleId,
+        sessionId: sessionRow.session_id,
+        tokenFamilyId: sessionRow.token_family_id,
+        requestId: context.requestId,
+        userAgent: context.userAgent,
+        ipAddress: context.ipAddress,
+        metadata: {
+          outcome: 'success',
+        },
+      });
 
       return {
         sessionId: sessionRow.session_id,
@@ -118,7 +147,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       }
 
       if (current.revoked_at) {
-        await this.markReuseDetected(tx, current);
+        await this.markReuseDetected(tx, current, command);
         throw new ApiError(
           401,
           'REFRESH_TOKEN_REUSE_DETECTED',
@@ -192,6 +221,21 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         `,
         [current.session_id],
       );
+      await this.writeAudit(tx, {
+        event: 'auth.refresh',
+        userId: current.user_id,
+        username: current.username,
+        roleId: current.role_id,
+        sessionId: current.session_id,
+        tokenFamilyId: current.token_family_id,
+        requestId: command.requestId,
+        userAgent: command.userAgent,
+        ipAddress: command.ipAddress,
+        metadata: {
+          outcome: 'success',
+          rotated: true,
+        },
+      });
 
       const currentUser = this.toCurrentUser(current, current.session_id);
       const issuedAccessToken = await this.accessTokens.issueAccessToken(currentUser);
@@ -207,14 +251,21 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
   async logout(command: LogoutCommand): Promise<void> {
     if (!command.refreshToken) {
       if (command.currentUser?.sessionId) {
-        await this.database.query(
-          `
-          UPDATE auth_sessions
-          SET status = 'revoked', revoked_at = now(), revoke_reason = 'logout'
-          WHERE session_id = $1 AND status = 'active'
-          `,
-          [command.currentUser.sessionId],
-        );
+        const currentUser = {
+          ...command.currentUser,
+          sessionId: command.currentUser.sessionId,
+        };
+        await this.database.transaction(async (tx) => {
+          await tx.query(
+            `
+            UPDATE auth_sessions
+            SET status = 'revoked', revoked_at = now(), revoke_reason = 'logout'
+            WHERE session_id = $1 AND status = 'active'
+            `,
+            [currentUser.sessionId],
+          );
+          await this.writeCurrentUserLogoutAudit(tx, { ...command, currentUser });
+        });
       }
       return;
     }
@@ -229,6 +280,21 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       }
 
       await this.revokeTokenFamily(tx, current, 'logout');
+      await this.writeAudit(tx, {
+        event: 'auth.logout',
+        userId: current.user_id,
+        username: current.username,
+        roleId: current.role_id,
+        sessionId: current.session_id,
+        tokenFamilyId: current.token_family_id,
+        requestId: command.requestId,
+        userAgent: command.userAgent,
+        ipAddress: command.ipAddress,
+        metadata: {
+          reason: 'logout',
+          refreshTokenPresent: true,
+        },
+      });
     });
   }
 
@@ -261,7 +327,11 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     return result.rows[0] ?? null;
   }
 
-  private async markReuseDetected(tx: TransactionClient, current: RefreshSessionRow): Promise<void> {
+  private async markReuseDetected(
+    tx: TransactionClient,
+    current: RefreshSessionRow,
+    context?: Pick<RefreshCommand, 'requestId' | 'userAgent' | 'ipAddress'>,
+  ): Promise<void> {
     await tx.query(
       `
       UPDATE refresh_tokens
@@ -280,6 +350,21 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       `,
       [current.session_id],
     );
+    await this.writeAudit(tx, {
+      event: 'auth.refresh.reuse_detected',
+      userId: current.user_id,
+      username: current.username,
+      roleId: current.role_id,
+      sessionId: current.session_id,
+      tokenFamilyId: current.token_family_id,
+      requestId: context?.requestId,
+      userAgent: context?.userAgent,
+      ipAddress: context?.ipAddress,
+      metadata: {
+        outcome: 'rejected',
+        reason: 'reuse_detected',
+      },
+    });
   }
 
   private async expireSession(tx: TransactionClient, current: RefreshSessionRow): Promise<void> {
@@ -333,6 +418,64 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     return this.tokenService.hashRefreshToken(refreshToken, this.options.refreshTokenPepper);
   }
 
+  private async writeAudit(tx: TransactionClient, input: AuthAuditInput): Promise<void> {
+    const role = mapRoleIdToRole(Number(input.roleId));
+
+    await tx.query(
+      `
+      INSERT INTO audit_log (
+        event, entity_type, entity_id, user_id, username, role_code, role,
+        request_id, ip_address, user_agent, source, metadata_json
+      )
+      VALUES ($1, 'auth_session', $2, $3, $4, $5, $5, $6, $7::inet, $8, 'backend', $9::jsonb)
+      `,
+      [
+        input.event,
+        input.sessionId,
+        toNullableUserId(input.userId),
+        input.username,
+        role,
+        input.requestId ?? DEFAULT_REQUEST_ID,
+        input.ipAddress ?? null,
+        input.userAgent ?? null,
+        JSON.stringify({
+          sessionId: input.sessionId,
+          tokenFamilyId: input.tokenFamilyId,
+          ...input.metadata,
+        }),
+      ],
+    );
+  }
+
+  private async writeCurrentUserLogoutAudit(
+    tx: TransactionClient,
+    command: LogoutCommand & { currentUser: CurrentUser & { sessionId: string } },
+  ): Promise<void> {
+    await tx.query(
+      `
+      INSERT INTO audit_log (
+        event, entity_type, entity_id, user_id, username, role_code, role,
+        request_id, ip_address, user_agent, source, metadata_json
+      )
+      VALUES ('auth.logout', 'auth_session', $1, $2, $3, $4, $4, $5, $6::inet, $7, 'backend', $8::jsonb)
+      `,
+      [
+        command.currentUser.sessionId,
+        toNullableUserId(command.currentUser.id),
+        command.currentUser.username,
+        command.currentUser.role,
+        command.requestId ?? DEFAULT_REQUEST_ID,
+        command.ipAddress ?? null,
+        command.userAgent ?? null,
+        JSON.stringify({
+          sessionId: command.currentUser.sessionId,
+          reason: 'logout',
+          refreshTokenPresent: false,
+        }),
+      ],
+    );
+  }
+
   private toCurrentUser(row: RefreshSessionRow, sessionId: string): CurrentUser {
     const roleId = Number(row.role_id);
     const role = mapRoleIdToRole(roleId);
@@ -366,4 +509,9 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       },
     };
   }
+}
+
+function toNullableUserId(userId: string | number): number | null {
+  const parsed = Number(userId);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }

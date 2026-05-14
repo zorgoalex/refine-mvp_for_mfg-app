@@ -6,6 +6,7 @@ export interface LoginCommand {
   password: string;
   userAgent?: string;
   ipAddress?: string;
+  requestId?: string;
 }
 
 export interface AuthUserRecord {
@@ -34,8 +35,19 @@ export interface PasswordVerifierPort {
 export interface SessionManagerPort {
   createLoginSession(
     user: AuthUserRecord,
-    context: Pick<LoginCommand, 'userAgent' | 'ipAddress'>,
+    context: Pick<LoginCommand, 'userAgent' | 'ipAddress' | 'requestId'>,
   ): Promise<AuthSessionRecord>;
+}
+
+export interface AuthAuditPort {
+  writeLoginFailed(input: {
+    username: string;
+    user?: Pick<AuthUserRecord, 'id' | 'username' | 'roleId' | 'isActive'>;
+    reason: 'unknown_user' | 'invalid_password' | 'inactive_user';
+    requestId?: string;
+    userAgent?: string;
+    ipAddress?: string;
+  }): Promise<void>;
 }
 
 export interface AccessTokenIssuerPort {

@@ -4,6 +4,7 @@ import { InvalidCredentialsError, UnknownRoleError, UserInactiveError } from './
 import type {
   AccessTokenIssuerPort,
   AuthResponse,
+  AuthAuditPort,
   AuthUserRecord,
   AuthUserRepositoryPort,
   LoginCommand,
@@ -17,6 +18,7 @@ export interface AuthServicePorts {
   passwords: PasswordVerifierPort;
   sessions: SessionManagerPort;
   tokens: AccessTokenIssuerPort;
+  audit: AuthAuditPort;
 }
 
 export class AuthService {
@@ -27,22 +29,26 @@ export class AuthService {
     const user = await this.ports.users.findByUsername(username);
 
     if (!user) {
+      await this.writeLoginFailed(command, username, 'unknown_user');
       throw new InvalidCredentialsError();
     }
 
     const passwordValid = await this.ports.passwords.verify(command.password, user.passwordHash);
 
     if (!passwordValid) {
+      await this.writeLoginFailed(command, username, 'invalid_password', user);
       throw new InvalidCredentialsError();
     }
 
     if (!user.isActive) {
+      await this.writeLoginFailed(command, username, 'inactive_user', user);
       throw new UserInactiveError();
     }
 
     const session = await this.ports.sessions.createLoginSession(user, {
       userAgent: command.userAgent,
       ipAddress: command.ipAddress,
+      requestId: command.requestId,
     });
     const currentUser = this.toCurrentUser(user, session.sessionId);
     const accessToken = await this.ports.tokens.issueAccessToken(currentUser);
@@ -69,6 +75,22 @@ export class AuthService {
       permissions: getPermissionsForRole(role),
       sessionId,
     };
+  }
+
+  private async writeLoginFailed(
+    command: LoginCommand,
+    username: string,
+    reason: 'unknown_user' | 'invalid_password' | 'inactive_user',
+    user?: AuthUserRecord,
+  ): Promise<void> {
+    await this.ports.audit.writeLoginFailed({
+      username,
+      user,
+      reason,
+      requestId: command.requestId,
+      userAgent: command.userAgent,
+      ipAddress: command.ipAddress,
+    });
   }
 
   private toAuthResponse(

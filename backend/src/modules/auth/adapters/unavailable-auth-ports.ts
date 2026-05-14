@@ -30,6 +30,11 @@ export function createUnavailableAuthService(): AuthService {
         return unavailable();
       },
     },
+    audit: {
+      async writeLoginFailed() {
+        return unavailable();
+      },
+    },
   };
 
   return new AuthService(ports);

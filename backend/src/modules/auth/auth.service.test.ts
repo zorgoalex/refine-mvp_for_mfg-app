@@ -4,7 +4,11 @@ import { AuthService } from './auth.service';
 import type { AuthServicePorts } from './auth.service';
 import type { AuthUserRecord } from './auth.types';
 
-function createPorts(user: AuthUserRecord | null, passwordValid = true): AuthServicePorts {
+function createPorts(
+  user: AuthUserRecord | null,
+  passwordValid = true,
+  auditWrites: unknown[] = [],
+): AuthServicePorts {
   return {
     users: {
       async findByUsername() {
@@ -32,6 +36,11 @@ function createPorts(user: AuthUserRecord | null, passwordValid = true): AuthSer
           accessToken: `access_for_${currentUser.id}`,
           expiresAt: new Date('2026-05-01T12:15:00.000Z'),
         };
+      },
+    },
+    audit: {
+      async writeLoginFailed(input) {
+        auditWrites.push(input);
       },
     },
   };
@@ -68,26 +77,60 @@ describe('AuthService login contract', () => {
   });
 
   it('rejects unknown users and wrong passwords with same public error', async () => {
+    const unknownUserAuditWrites: unknown[] = [];
     await expect(
-      new AuthService(createPorts(null)).login({ username: 'missing', password: 'password' }),
-    ).rejects.toBeInstanceOf(InvalidCredentialsError);
-
-    await expect(
-      new AuthService(createPorts(activeUser, false)).login({
-        username: 'superadmin',
-        password: 'wrong',
+      new AuthService(createPorts(null, true, unknownUserAuditWrites)).login({
+        username: 'missing',
+        password: 'password',
+        requestId: 'req-login-failed-1',
       }),
     ).rejects.toBeInstanceOf(InvalidCredentialsError);
+
+    expect(unknownUserAuditWrites).toEqual([
+      expect.objectContaining({
+        username: 'missing',
+        reason: 'unknown_user',
+        requestId: 'req-login-failed-1',
+      }),
+    ]);
+    expect(JSON.stringify(unknownUserAuditWrites)).not.toContain('password');
+
+    const wrongPasswordAuditWrites: unknown[] = [];
+    await expect(
+      new AuthService(createPorts(activeUser, false, wrongPasswordAuditWrites)).login({
+        username: 'superadmin',
+        password: 'wrong',
+        userAgent: 'vitest-agent',
+        ipAddress: '127.0.0.1',
+      }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+    expect(wrongPasswordAuditWrites).toEqual([
+      expect.objectContaining({
+        username: 'superadmin',
+        user: expect.objectContaining({ id: '1', username: 'superadmin' }),
+        reason: 'invalid_password',
+        userAgent: 'vitest-agent',
+        ipAddress: '127.0.0.1',
+      }),
+    ]);
+    expect(JSON.stringify(wrongPasswordAuditWrites)).not.toContain('wrong');
   });
 
   it('rejects inactive users', async () => {
+    const auditWrites: unknown[] = [];
     await expect(
       new AuthService(
         createPorts({
           ...activeUser,
           isActive: false,
-        }),
+        }, true, auditWrites),
       ).login({ username: 'superadmin', password: 'password' }),
     ).rejects.toBeInstanceOf(UserInactiveError);
+    expect(auditWrites).toEqual([
+      expect.objectContaining({
+        username: 'superadmin',
+        reason: 'inactive_user',
+      }),
+    ]);
   });
 });

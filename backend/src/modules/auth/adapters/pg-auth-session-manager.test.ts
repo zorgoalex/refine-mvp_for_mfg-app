@@ -44,7 +44,26 @@ describe('PgAuthSessionManager', () => {
       'INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent) VALUES ($1, $2, $3, $4) RETURNING session_id::text, token_family_id::text',
       'INSERT INTO refresh_tokens ( user_id, session_id, token_hash, token_family_id, expires_at, user_agent, ip_address ) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       'UPDATE users SET last_login_at = now() WHERE user_id = $1',
+      "INSERT INTO audit_log ( event, entity_type, entity_id, user_id, username, role_code, role, request_id, ip_address, user_agent, source, metadata_json ) VALUES ($1, 'auth_session', $2, $3, $4, $5, $5, $6, $7::inet, $8, 'backend', $9::jsonb)",
     ]);
+    const audit = findAudit(database.queries, 'auth.login.success');
+    expect(audit?.params).toEqual([
+      'auth.login.success',
+      'session-1',
+      42,
+      'manager',
+      'manager',
+      'auth-command',
+      '127.0.0.1',
+      'agent',
+      JSON.stringify({
+        sessionId: 'session-1',
+        tokenFamilyId: 'family-1',
+        outcome: 'success',
+      }),
+    ]);
+    expect(JSON.stringify(audit?.params)).not.toContain('refresh-login');
+    expect(JSON.stringify(audit?.params)).not.toContain('pepper');
     vi.useRealTimers();
   });
 
@@ -88,6 +107,24 @@ describe('PgAuthSessionManager', () => {
       true,
     );
     expect(database.queries.some((query) => query.text.includes('replaced_by_token_id'))).toBe(true);
+    const audit = findAudit(database.queries, 'auth.refresh');
+    expect(audit?.params).toEqual([
+      'auth.refresh',
+      'session-1',
+      42,
+      'manager',
+      'manager',
+      'auth-command',
+      '127.0.0.1',
+      'agent',
+      JSON.stringify({
+        sessionId: 'session-1',
+        tokenFamilyId: 'family-1',
+        outcome: 'success',
+        rotated: true,
+      }),
+    ]);
+    expect(JSON.stringify(audit?.params)).not.toContain('refresh-login');
     vi.useRealTimers();
   });
 
@@ -115,6 +152,68 @@ describe('PgAuthSessionManager', () => {
     expect(database.queries.some((query) => query.text.includes("status = 'reuse_detected'"))).toBe(
       true,
     );
+    const audit = findAudit(database.queries, 'auth.refresh.reuse_detected');
+    expect(audit?.params).toEqual([
+      'auth.refresh.reuse_detected',
+      'session-1',
+      42,
+      'manager',
+      'manager',
+      'auth-command',
+      null,
+      null,
+      JSON.stringify({
+        sessionId: 'session-1',
+        tokenFamilyId: 'family-1',
+        outcome: 'rejected',
+        reason: 'reuse_detected',
+      }),
+    ]);
+    expect(JSON.stringify(audit?.params)).not.toContain('refresh-login');
+  });
+
+  it('writes logout audit without storing raw refresh token', async () => {
+    const database = createDatabase({
+      refreshRow: {
+        token_id: 'token-old',
+        user_id: '42',
+        session_id: 'session-1',
+        token_family_id: 'family-1',
+        expires_at: new Date('2026-05-02T12:00:00.000Z'),
+        revoked_at: null,
+        session_status: 'active',
+        username: 'manager',
+        role_id: 10,
+        is_active: true,
+      },
+    });
+    const manager = createManager(database.service);
+
+    await manager.logout({
+      refreshToken: 'refresh-login',
+      userAgent: 'agent',
+      ipAddress: '127.0.0.1',
+      requestId: 'req-logout',
+    });
+
+    const audit = findAudit(database.queries, 'auth.logout');
+    expect(audit?.params).toEqual([
+      'auth.logout',
+      'session-1',
+      42,
+      'manager',
+      'manager',
+      'req-logout',
+      '127.0.0.1',
+      'agent',
+      JSON.stringify({
+        sessionId: 'session-1',
+        tokenFamilyId: 'family-1',
+        reason: 'logout',
+        refreshTokenPresent: true,
+      }),
+    ]);
+    expect(JSON.stringify(audit?.params)).not.toContain('refresh-login');
   });
 });
 
@@ -159,6 +258,9 @@ function createDatabase(options: { refreshRow?: Record<string, unknown> } = {}) 
   return {
     queries,
     service: {
+      async query(text: string, params: readonly unknown[] = []) {
+        return tx.query(text, params);
+      },
       async transaction<T>(handler: (client: typeof tx) => Promise<T>) {
         return handler(tx);
       },
@@ -168,4 +270,13 @@ function createDatabase(options: { refreshRow?: Record<string, unknown> } = {}) 
 
 function normalizeSql(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim();
+}
+
+function findAudit(
+  queries: Array<{ text: string; params: readonly unknown[] }>,
+  event: string,
+): { text: string; params: readonly unknown[] } | undefined {
+  return queries.find(
+    (query) => query.text.includes('INSERT INTO audit_log') && query.params[0] === event,
+  );
 }

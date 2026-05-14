@@ -4,6 +4,7 @@ import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import { AuthService } from './auth.service';
+import { PgAuthAuditRepository } from './adapters/pg-auth-audit-repository';
 import { BcryptPasswordVerifier } from './adapters/bcrypt-password-verifier';
 import { JwtAccessTokenIssuer } from './adapters/jwt-access-token-issuer';
 import { PgAuthSessionManager } from './adapters/pg-auth-session-manager';
@@ -43,6 +44,7 @@ import { TokenService } from './token.service';
           passwords: new BcryptPasswordVerifier(),
           sessions: sessionManager,
           tokens: createAccessTokenIssuer(config),
+          audit: new PgAuthAuditRepository(database),
         });
       },
       inject: [ConfigService, DatabaseService, TokenService],

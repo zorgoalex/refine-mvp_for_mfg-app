@@ -9,6 +9,7 @@ import { AUTH_SESSION_HTTP_PORT, type AuthSessionHttpPort } from './auth-session
 import { AuthRuntimeConfigService } from './auth-runtime-config.service';
 
 type AuthRequest = Request & RequestWithCurrentUser;
+type RequestWithRequestId = Request & { requestId?: string };
 
 export interface LogoutResponse {
   ok: true;
@@ -32,7 +33,7 @@ export class AuthController {
   @Post('auth/login')
   @HttpCode(200)
   async login(
-    @Req() request: Request,
+    @Req() request: RequestWithRequestId,
     @Res({ passthrough: true }) response: Response,
     @Body() body: LoginCommand,
   ): Promise<AuthResponse> {
@@ -44,6 +45,7 @@ export class AuthController {
       password: body.password,
       userAgent: request.get('user-agent') ?? undefined,
       ipAddress: request.ip,
+      requestId: request.requestId,
     });
     this.setRefreshCookie(response, result.refreshToken);
 
@@ -53,7 +55,7 @@ export class AuthController {
   @Post('auth/refresh')
   @HttpCode(200)
   async refresh(
-    @Req() request: Request,
+    @Req() request: RequestWithRequestId,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthResponse> {
     this.assertAuthEnabled();
@@ -68,6 +70,7 @@ export class AuthController {
       refreshToken,
       userAgent: request.get('user-agent') ?? undefined,
       ipAddress: request.ip,
+      requestId: request.requestId,
     });
     this.setRefreshCookie(response, result.refreshToken);
 
@@ -85,6 +88,9 @@ export class AuthController {
     await this.sessions.logout({
       refreshToken: readCookie(request.headers.cookie, REFRESH_COOKIE_NAME) ?? undefined,
       currentUser: request.user,
+      userAgent: request.get('user-agent') ?? undefined,
+      ipAddress: request.ip,
+      requestId: request.requestId,
     });
     this.clearRefreshCookie(response);
 

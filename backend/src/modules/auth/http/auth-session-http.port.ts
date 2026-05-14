@@ -7,11 +7,15 @@ export interface RefreshCommand {
   refreshToken: string;
   userAgent?: string;
   ipAddress?: string;
+  requestId?: string;
 }
 
 export interface LogoutCommand {
   refreshToken?: string;
   currentUser?: CurrentUser;
+  requestId?: string;
+  userAgent?: string;
+  ipAddress?: string;
 }
 
 export interface AuthSessionHttpPort {
