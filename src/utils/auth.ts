@@ -1,4 +1,5 @@
 import type { AuthTokens, UserIdentity } from '../types/auth';
+import { authApi } from '../api/authApi';
 import { authSession } from '../api/authSession';
 import { featureFlags } from '../config/featureFlags';
 
@@ -127,10 +128,23 @@ export function isTokenExpired(token: string): boolean {
 
 /**
  * Обновляет Access Token используя Refresh Token
- * Вызывает /api/refresh endpoint
+ * В backend auth режиме использует cookie-backed /api/v1/auth/refresh.
+ * Legacy localStorage refresh token flow остается только для flag-off режима.
  * @returns новый Access Token или null при ошибке
  */
 export async function refreshAccessToken(): Promise<string | null> {
+  if (featureFlags.useBackendAuth) {
+    try {
+      const data = await authApi.refresh();
+      return data.accessToken;
+    } catch (error) {
+      console.error('Backend token refresh error:', error);
+      authSession.clear();
+      authStorage.clear();
+      return null;
+    }
+  }
+
   const refreshToken = authStorage.getRefreshToken();
 
   if (!refreshToken) {

@@ -14,7 +14,7 @@ import { featureFlags } from './config/featureFlags';
 export const authProvider: AuthBindings = {
   /**
    * Выполняет вход пользователя
-   * Вызывает /api/login и сохраняет токены в localStorage
+   * Backend mode uses /api/v1/auth/login; legacy flag-off mode calls /api/login.
    */
   login: async (credentials: any) => {
     if (featureFlags.useBackendAuth) {
