@@ -19,6 +19,9 @@ const stageFrontendUrl = trimTrailingSlash(
 const stageBackendApiUrl = trimTrailingSlash(
     process.env.FRONTEND_PAGES_STAGE_BACKEND_API_URL ?? 'https://backend.dev.mebelkz.app',
 );
+const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+const stagePostgresContainer =
+    process.env.FRONTEND_PAGES_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
 const ORDERS_VIEW_VERSION_SCHEMA_ERROR = "field 'version' not found in type: 'orders_view'";
 const allowedMissingRecordResources = new Set([
     'order_workshops',
@@ -65,6 +68,11 @@ test.describe('Frontend pages stage canary', () => {
                 consoleErrors.push(message.text());
             }
         });
+        if (vercelAutomationBypassSecret) {
+            await page.context().setExtraHTTPHeaders({
+                'x-vercel-protection-bypass': vercelAutomationBypassSecret,
+            });
+        }
 
         await loginThroughUi(page, credentials.username, credentials.password);
 
@@ -387,7 +395,7 @@ function psql(sql: string): string {
         [
             'exec',
             '-i',
-            'erp_dev-postgresdb-1',
+            stagePostgresContainer,
             'psql',
             '-U',
             'postgres',
