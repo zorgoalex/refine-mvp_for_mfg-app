@@ -141,6 +141,29 @@ describe('dataProvider backend payments mutation routing', () => {
     expect(String(fetchMock.mock.calls[1][1]?.body)).toContain('update_payments_by_pk');
     expect(String(fetchMock.mock.calls[2][1]?.body)).toContain('delete_payments_by_pk');
   });
+
+  it('does not retry Hasura payments mutation when backend payment create fails', async () => {
+    createPayment.mockRejectedValue(new Error('Backend payments unavailable'));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { dataProvider } = await import('./dataProvider');
+
+    await expect(
+      dataProvider('').create({
+        resource: 'payments',
+        variables: {
+          order_id: 15,
+          type_paid_id: 1,
+          amount: 100,
+          payment_date: '2026-05-01',
+        },
+      }),
+    ).rejects.toThrow('Backend payments unavailable');
+
+    expect(createPayment).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 function backendPayment() {

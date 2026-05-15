@@ -98,12 +98,39 @@ describe('saveOrderViaBackend', () => {
     expect(deps.store.setDirty).not.toHaveBeenCalled();
     expect(deps.invalidate).not.toHaveBeenCalled();
   });
+
+  it('propagates backend create failure without touching store or legacy save state', async () => {
+    const values = createFormValues();
+    const dto = createSaveOrderDto();
+    const backendError = new ApiError({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Orders write API is disabled',
+      status: 503,
+      requestId: 'req-orders-disabled',
+    });
+    const deps = createDependencies({
+      dto,
+      mappedFormValues: createFormValues(),
+      createError: backendError,
+    });
+
+    await expect(saveOrderViaBackend(values, false, deps)).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      requestId: 'req-orders-disabled',
+    });
+    expect(deps.createOrder).toHaveBeenCalledWith(dto);
+    expect(deps.updateOrder).not.toHaveBeenCalled();
+    expect(deps.store.loadOrder).not.toHaveBeenCalled();
+    expect(deps.store.setDirty).not.toHaveBeenCalled();
+    expect(deps.invalidate).not.toHaveBeenCalled();
+  });
 });
 
 function createDependencies(params: {
   dto: SaveOrderDto;
   mappedFormValues: OrderFormValues;
   createResponse?: SaveOrderResponse;
+  createError?: Error;
   updateResponse?: SaveOrderResponse;
   updateError?: Error;
 }) {
@@ -117,9 +144,12 @@ function createDependencies(params: {
   const updateOrder = params.updateError
     ? vi.fn().mockRejectedValue(params.updateError)
     : vi.fn().mockResolvedValue(params.updateResponse ?? { order: createOrderDto(10) });
+  const createOrder = params.createError
+    ? vi.fn().mockRejectedValue(params.createError)
+    : vi.fn().mockResolvedValue(params.createResponse ?? { order: createOrderDto(10) });
 
   return {
-    createOrder: vi.fn().mockResolvedValue(params.createResponse ?? { order: createOrderDto(10) }),
+    createOrder,
     updateOrder,
     toSaveDto: vi.fn().mockReturnValue(params.dto),
     toFormValues: vi.fn().mockReturnValue(params.mappedFormValues),

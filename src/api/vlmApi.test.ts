@@ -79,6 +79,34 @@ describe('vlmApi', () => {
     expect(init?.body).not.toContain('provider_order');
   });
 
+  it('propagates backend analyze failure without calling legacy VLM endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'VLM_PROVIDER_UNAVAILABLE',
+            message: 'Provider unavailable',
+            requestId: 'req-vlm-unavailable',
+          },
+        }),
+        {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(vlmApi.analyze({ uploadId: 'upl_1' })).rejects.toMatchObject({
+      code: 'VLM_PROVIDER_UNAVAILABLE',
+      requestId: 'req-vlm-unavailable',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/vlm/analyze');
+    expect(fetchMock.mock.calls[0][0]).not.toBe('/api/vlm/analyze');
+  });
+
   it('normalizes blank optional analyze values', () => {
     expect(
       normalizeVlmAnalyzeRequest({

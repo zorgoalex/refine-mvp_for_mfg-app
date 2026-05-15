@@ -50,6 +50,34 @@ describe('exportApi', () => {
     expect(() => exportApi.exportOrderToGoogleDrive(0)).toThrow('Invalid orderId');
   });
 
+  it('propagates backend export failure without calling legacy export endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'EXPORT_PROVIDER_TIMEOUT',
+            message: 'Provider timeout',
+            requestId: 'req-export-timeout',
+          },
+        }),
+        {
+          status: 504,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(exportApi.exportOrderToGoogleDrive(42)).rejects.toMatchObject({
+      code: 'EXPORT_PROVIDER_TIMEOUT',
+      requestId: 'req-export-timeout',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/42/export/google-drive');
+    expect(fetchMock.mock.calls[0][0]).not.toBe('/api/order-export-to-drive');
+  });
+
   it('normalizes default export request', () => {
     expect(normalizeExportOrderRequest(undefined)).toEqual({ format: 'xlsx' });
     expect(normalizeExportOrderRequest({ format: 'xlsx', fileName: ' ' })).toEqual({
