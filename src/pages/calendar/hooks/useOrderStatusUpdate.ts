@@ -3,6 +3,8 @@ import { message } from 'antd';
 import { useState } from 'react';
 import {
   createProductionActionIdempotencyKey,
+  formatProductionActionPermissionDeniedMessage,
+  isProductionActionPermissionDenied,
   isProductionActionVersionConflict,
   productionActionsApi,
 } from '../../../api/productionActionsApi';
@@ -103,7 +105,10 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
           order.version = rollbackVersion;
           forgetCalendarOrderVersion(order.order_id);
         }
-        message.error(`Ошибка обновления статуса: ${error.message || 'Неизвестная ошибка'}`);
+        const errorMessage = isProductionActionPermissionDenied(error)
+          ? formatProductionActionPermissionDeniedMessage('order_status')
+          : error.message || 'Неизвестная ошибка';
+        message.error(`Ошибка обновления статуса: ${errorMessage}`);
         throw error;
       } finally {
         setIsBackendUpdating(false);

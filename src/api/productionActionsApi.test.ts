@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  formatProductionActionPermissionDeniedMessage,
+  isProductionActionPermissionDenied,
   isProductionActionVersionConflict,
   productionActionsApi,
   validateProductionStatusId,
@@ -90,6 +92,22 @@ describe('productionActionsApi', () => {
       ),
     ).toBe(true);
     expect(isProductionActionVersionConflict(new Error('nope'))).toBe(false);
+  });
+
+  it('formats permission denied production action messages for users', () => {
+    const error = new ApiError({
+      code: 'PERMISSION_DENIED',
+      message: 'Недостаточно прав для выполнения действия',
+      status: 403,
+    });
+
+    expect(isProductionActionPermissionDenied(error)).toBe(true);
+    expect(formatProductionActionPermissionDeniedMessage('order_status')).toBe(
+      'Вы не имеете права менять статус на чужом заказе.',
+    );
+    expect(formatProductionActionPermissionDeniedMessage('production_stage')).toBe(
+      'Вы не имеете права менять этап производства на чужом заказе.',
+    );
   });
 });
 

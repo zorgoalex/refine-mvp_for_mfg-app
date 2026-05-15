@@ -13,6 +13,10 @@ import { useOrderStatuses } from '../hooks/useOrderStatuses';
 import { useOrderStatusUpdate } from '../hooks/useOrderStatusUpdate';
 import { useProductionStatusEvent } from '../../../hooks/useProductionStatusEvent';
 import { featureFlags } from '../../../config/featureFlags';
+import {
+  formatProductionActionPermissionDeniedMessage,
+  isProductionActionPermissionDenied,
+} from '../../../api/productionActionsApi';
 import { DragItem, CalendarOrder, ViewMode } from '../types/calendar';
 import {
   applyKnownCalendarOrderVersion,
@@ -203,7 +207,10 @@ const CalendarBoard: React.FC = () => {
       message.success(wasAdded ? `Этап установлен: ${statusName}` : `Этап снят: ${statusName}`);
     } catch (error) {
       console.error('[CalendarBoard] Error toggling production status:', error);
-      message.error('Ошибка изменения этапа');
+      const errorMessage = isProductionActionPermissionDenied(error)
+        ? formatProductionActionPermissionDeniedMessage('production_stage')
+        : 'Не удалось изменить этап производства';
+      message.error(`Ошибка изменения этапа: ${errorMessage}`);
     }
   };
 

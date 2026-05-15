@@ -127,6 +127,24 @@ describe('PgProductionActionRepository', () => {
     });
     expect(normalizedSql(database.queries)).not.toContain('UPDATE orders SET order_status_id');
   });
+
+  it('allows manager order status change inside own order scope', async () => {
+    const database = createDatabase({ orderCreatedByUserId: 1, orderManagerUserId: 99 });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changeOrderStatus({
+        currentUser: currentUser('manager', '99'),
+        orderId: 15,
+        dto: { orderStatusId: 7, version: 3, idempotencyKey: 'status-key-manager' },
+        requestId: 'request-manager',
+      }),
+    ).resolves.toMatchObject({
+      order: { orderId: 15, orderStatusId: 7, version: 4 },
+    });
+
+    expect(normalizedSql(database.queries)).toContain('UPDATE orders SET order_status_id');
+  });
 });
 
 function createDatabase(options: {

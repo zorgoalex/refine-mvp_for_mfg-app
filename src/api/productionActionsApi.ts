@@ -85,3 +85,17 @@ export function isProductionActionVersionConflict(error: unknown): boolean {
     error.code === 'ORDER_VERSION_CONFLICT'
   );
 }
+
+export function isProductionActionPermissionDenied(error: unknown): boolean {
+  return isApiError(error, 'PERMISSION_DENIED');
+}
+
+export function formatProductionActionPermissionDeniedMessage(
+  action: 'order_status' | 'production_stage',
+): string {
+  if (action === 'production_stage') {
+    return 'Вы не имеете права менять этап производства на чужом заказе.';
+  }
+
+  return 'Вы не имеете права менять статус на чужом заказе.';
+}

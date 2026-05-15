@@ -94,6 +94,74 @@ test.describe('Production actions backend cutover', () => {
         expect(graphqlProductionMutations).toEqual([]);
     });
 
+    test('allows manager to change own order status and drawn stage, then rejects foreign order', async ({
+        page,
+    }) => {
+        const db = createWorkflowMockDb();
+        seedCalendarOrder(db);
+
+        const graphqlProductionMutations: string[] = [];
+        await setupWorkflowMockApi(page, db, {
+            onGraphqlQuery: (query) => {
+                if (productionHasuraMutationPattern.test(query)) {
+                    graphqlProductionMutations.push(query);
+                }
+            },
+        });
+        await setMockFrontendUser(page, {
+            id: '99',
+            user_id: 99,
+            username: 'manager',
+            role: 'manager',
+            role_id: 10,
+        });
+        const api = await setupProductionActionsBackendMock(page, db);
+        api.forbiddenOrderIds.add(16);
+
+        await page.goto('/orders/edit/15');
+        const ownHeader = page.locator('[title="ПКМ — изменить статусы"]').filter({
+            hasText: 'E2E production action order',
+        });
+        await expect(ownHeader).toBeVisible({ timeout: 30000 });
+
+        await ownHeader.click({ button: 'right' });
+        await page.getByText('Статус заказа').click();
+        await page.getByText('Выдан', { exact: true }).click();
+        await expect.poll(() => api.orderStatusBodies.length).toBe(1);
+        expect(api.orderStatusBodies[0]).toMatchObject({
+            orderStatusId: 2,
+            version: 3,
+        });
+
+        await ownHeader.click({ button: 'right' });
+        await page.getByText('Статус производства').click();
+        await page.getByText('Отрисован', { exact: true }).click();
+        await expect.poll(() => api.stageActivations.length).toBe(1);
+        expect(api.stageActivations[0]).toMatchObject({
+            orderId: 15,
+            productionStatusId: 4,
+            body: { version: 4 },
+        });
+
+        await page.goto('/orders/edit/16');
+        const foreignHeader = page.locator('[title="ПКМ — изменить статусы"]').filter({
+            hasText: 'E2E alternate action order',
+        });
+        await expect(foreignHeader).toBeVisible({ timeout: 30000 });
+
+        await foreignHeader.click({ button: 'right' });
+        await page.getByText('Статус заказа').click();
+        await page.getByText('Выдан', { exact: true }).click();
+        await expect.poll(() => api.orderStatusBodies.length).toBe(2);
+        await expect(page.getByText('Ошибка обновления статуса')).toBeVisible();
+        await expect(
+            page.getByText('Вы не имеете права менять статус на чужом заказе.'),
+        ).toBeVisible();
+
+        expect(db.orders.find((order) => order.order_id === 16)?.order_status_id).toBe(1);
+        expect(graphqlProductionMutations).toEqual([]);
+    });
+
     test('recovers from backend version conflict without Hasura mutation fallback', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedCalendarOrder(db);
@@ -326,6 +394,14 @@ function seedCalendarOrder(db: WorkflowMockDb) {
             is_active: true,
         },
     );
+    db.production_statuses.push({
+        production_status_id: 4,
+        production_status_code: 'drawn',
+        production_status_name: 'Отрисован',
+        sort_order: 25,
+        color: 'purple',
+        is_active: true,
+    });
     db.orders.push({
         order_id: 15,
         order_name: 'E2E production action order',
@@ -340,6 +416,8 @@ function seedCalendarOrder(db: WorkflowMockDb) {
         parts_count: 1,
         total_area: 2.5,
         delete_flag: false,
+        created_by: 1,
+        manager_id: 99,
         version: 3,
     });
     db.orders.push({
@@ -356,6 +434,8 @@ function seedCalendarOrder(db: WorkflowMockDb) {
         parts_count: 1,
         total_area: 1.5,
         delete_flag: false,
+        created_by: 1,
+        manager_id: 1,
         version: 3,
     });
 }
@@ -378,6 +458,7 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
         conflictNextOrderStatus: false,
         conflictNextStageActivation: false,
         conflictNextStageDeactivation: false,
+        forbiddenOrderIds: new Set<number>(),
         delayNextOrderStatusMs: 0,
         delayNextStageActivationMs: 0,
     };
@@ -415,6 +496,10 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
         api.orderStatusBodies.push(body);
         const orderId = readOrderId(route);
         const order = findOrder(db, orderId);
+        if (api.forbiddenOrderIds.has(orderId)) {
+            await fulfillApiError(route, 403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия');
+            return;
+        }
         if (api.conflictNextOrderStatus) {
             api.conflictNextOrderStatus = false;
             await fulfillVersionConflict(route, orderId, body.version, order.version);
@@ -460,6 +545,10 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
         const orderId = readOrderId(route);
         const productionStatusId = Number(new URL(route.request().url()).pathname.split('/').pop());
         const order = findOrder(db, orderId);
+        if (api.forbiddenOrderIds.has(orderId)) {
+            await fulfillApiError(route, 403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия');
+            return;
+        }
 
         if (method === 'PUT') {
             api.stageActivations.push({ orderId, productionStatusId, body });
@@ -554,6 +643,26 @@ async function fulfillJson(route: Route, body: unknown) {
         contentType: 'application/json',
         body: JSON.stringify(body),
     });
+}
+
+async function fulfillApiError(route: Route, status: number, code: string, message: string) {
+    await route.fulfill({
+        status,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            error: {
+                code,
+                message,
+                requestId: 'request-forbidden',
+            },
+        }),
+    });
+}
+
+async function setMockFrontendUser(page: Page, user: Record<string, unknown>) {
+    await page.addInitScript((nextUser) => {
+        localStorage.setItem('user', JSON.stringify(nextUser));
+    }, user);
 }
 
 async function delay(ms: number) {

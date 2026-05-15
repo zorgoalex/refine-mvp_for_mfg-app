@@ -11,6 +11,8 @@ import { useOrderFormStore } from '../../../stores/orderFormStore';
 import { useProductionStatusEvent } from '../../../hooks/useProductionStatusEvent';
 import {
   createProductionActionIdempotencyKey,
+  formatProductionActionPermissionDeniedMessage,
+  isProductionActionPermissionDenied,
   isProductionActionVersionConflict,
   productionActionsApi,
 } from '../../../api/productionActionsApi';
@@ -262,7 +264,9 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         console.error('[OrderHeaderContextMenu] Error updating status:', error);
         notification.error({
           message: 'Ошибка обновления статуса',
-          description: 'Не удалось обновить статус заказа',
+          description: isProductionActionPermissionDenied(error)
+            ? formatProductionActionPermissionDeniedMessage('order_status')
+            : 'Не удалось обновить статус заказа',
         });
       }
     },
@@ -352,7 +356,9 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         console.error('[OrderHeaderContextMenu] Error toggling production status:', error);
         notification.error({
           message: 'Ошибка изменения этапа',
-          description: 'Не удалось изменить этап производства',
+          description: isProductionActionPermissionDenied(error)
+            ? formatProductionActionPermissionDeniedMessage('production_stage')
+            : 'Не удалось изменить этап производства',
         });
       }
     },
