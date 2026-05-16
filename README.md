@@ -204,25 +204,25 @@ template, если его ещё нет. После ручного измене�
 искать `data/`, `config/`, `backups/` и `restore/`.
 
 Для текущей VPS-раскладки в этой ветке актуален прямой запуск tracked
-template; root-level `docker-compose.yml` в `/home/ovhtest/projects/erp_dev`
+template; root-level `docker-compose.yml` в `~/projects/erp_dev`
 не используется как отдельный source-of-truth.
 
 ```bash
-cd /home/ovhtest/projects/erp_dev
+cd ~/projects/erp_dev
 
 docker compose \
-  --project-directory /home/ovhtest/projects/erp_dev \
+  --project-directory ~/projects/erp_dev \
   -p erp_test \
   --env-file .env \
   -f repo_erp/ops/templates/docker-compose.vps.yml \
   up -d
 ```
 
-Для этой раскладки `.env` лежит в `/home/ovhtest/projects/erp_dev/.env`, а
+Для этой раскладки `.env` лежит в `~/projects/erp_dev/.env`, а
 `BACKEND_BUILD_CONTEXT=./repo_erp/backend`, потому что backend находится не в
 runtime-корне, а внутри checkout `repo_erp/`. `--project-directory` обязателен:
 Compose должен искать runtime-директории `data/`, `config/`, `backups/` и
-`restore/` именно в `/home/ovhtest/projects/erp_dev`, а не рядом с template.
+`restore/` именно в `~/projects/erp_dev`, а не рядом с template.
 Для обычного checkout, где `backend/`, `ops/`, `.env` и `data/` находятся в
 одном корне, `BACKEND_BUILD_CONTEXT` можно не задавать: default `./backend`.
 
@@ -273,10 +273,10 @@ volumes:
 backend service:
 
 ```bash
-cd /home/ovhtest/projects/erp_dev
+cd ~/projects/erp_dev
 
 docker compose \
-  --project-directory /home/ovhtest/projects/erp_dev \
+  --project-directory ~/projects/erp_dev \
   -p erp_test \
   --env-file .env \
   -f repo_erp/ops/templates/docker-compose.vps.yml \
