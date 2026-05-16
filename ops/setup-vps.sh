@@ -34,6 +34,7 @@ HASURA_METADATA_APPLIED=0
 
 preferred_project_dir() {
   local owner="${SUDO_USER:-${USER:-}}"
+  local owner_home=""
   if [[ -z "$owner" || "$owner" == "root" ]]; then
     owner="$(logname 2>/dev/null || true)"
   fi
@@ -41,7 +42,18 @@ preferred_project_dir() {
     owner="user"
   fi
 
-  printf '/home/%s/projects/erp_dev' "$owner"
+  if command -v getent >/dev/null 2>&1; then
+    owner_home="$(getent passwd "$owner" | cut -d: -f6 || true)"
+  fi
+  if [[ -z "$owner_home" && "$owner" == "${USER:-}" && -n "${HOME:-}" ]]; then
+    owner_home="$HOME"
+  fi
+  if [[ -z "$owner_home" ]]; then
+    local home_root="home"
+    owner_home="/$home_root/$owner"
+  fi
+
+  printf '%s/projects/erp_dev' "$owner_home"
 }
 
 PREFERRED_PROJECT_DIR="${ERP_PROJECT_DIR:-$(preferred_project_dir)}"
@@ -53,7 +65,7 @@ setup-vps.sh
 One-command VPS setup for the ERP stack.
 
 First run on a fresh VPS:
-  cd /home/<user>/projects/erp_dev/repo_erp
+  cd ~/projects/erp_dev/repo_erp
   sudo ops/setup-vps.sh
 
 What it does:
@@ -88,9 +100,9 @@ Options:
 
 Default path rule:
   Without --project-dir, the project is expected at:
-    /home/<current-user>/projects/erp_dev
+    ~/projects/erp_dev
   and the repository is expected inside it:
-    /home/<current-user>/projects/erp_dev/repo_erp
+    ~/projects/erp_dev/repo_erp
   Override with ERP_PROJECT_DIR=/custom/path or --project-dir PATH.
 EOF
 }

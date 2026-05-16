@@ -53,9 +53,9 @@ docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps bac
 Direct-template equivalent for the current split VPS layout:
 
 ```bash
-cd /home/ovhtest/projects/erp_dev
+cd ~/projects/erp_dev
 
-# in /home/ovhtest/projects/erp_dev/.env:
+# in ~/projects/erp_dev/.env:
 # BACKEND_BUILD_CONTEXT=./repo_erp/backend
 
 docker compose \
@@ -70,7 +70,7 @@ docker compose \
 Use one command on the VPS:
 
 ```bash
-cd /home/<user>/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh
 ```
 
@@ -79,7 +79,7 @@ stops because placeholders are still present. Fill `.env`, make sure DNS points
 to the VPS, then run the same command again:
 
 ```bash
-cd /home/<user>/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh
 ```
 
@@ -146,17 +146,16 @@ docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hasu
 On the new VPS:
 
 ```bash
-mkdir -p /home/<user>/projects
-mkdir -p /home/<user>/projects/erp_dev/spec_erp
-git clone <repo-url> /home/<user>/projects/erp_dev/repo_erp
-cd /home/<user>/projects/erp_dev/repo_erp
+mkdir -p ~/projects/erp_dev/spec_erp
+git clone <repo-url> ~/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh
 ```
 
 Fill `.env`:
 
 ```bash
-nano /home/<user>/projects/erp_dev/.env
+nano ~/projects/erp_dev/.env
 ```
 
 Generate new secrets on the VPS:
@@ -177,14 +176,14 @@ Use unique values for:
 After DNS is configured and `.env` is filled, run the same setup script:
 
 ```bash
-cd /home/<user>/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh
 ```
 
 If DNS has not propagated but you know the target IP:
 
 ```bash
-cd /home/<user>/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh --expected-ip <VPS_PUBLIC_IP>
 ```
 
@@ -198,7 +197,7 @@ sudo ops/setup-vps.sh --yes --skip-tests
 To run the same VPS test suite manually:
 
 ```bash
-cd /home/<user>/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 ops/run-vps-tests.sh --env-file ../.env
 ```
 
@@ -208,7 +207,7 @@ ops/run-vps-tests.sh --env-file ../.env
 full clean rebuild on a dedicated test VPS, run the reset script explicitly:
 
 ```bash
-cd /home/<user>/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 sudo ops/reset-test-vps.sh --confirm erp_test --yes \
   --all-docker \
   --prune-images \
@@ -293,7 +292,7 @@ project unless that project is actually running the NestJS backend.
 ## Updating An Existing VPS
 
 ```bash
-cd /home/<user>/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 git pull --ff-only
 sudo ops/setup-vps.sh --yes
 ```
@@ -301,7 +300,7 @@ sudo ops/setup-vps.sh --yes
 If only backend code or backend Compose/env flags changed:
 
 ```bash
-cd /home/<user>/projects/erp_dev
+cd ~/projects/erp_dev
 git -C repo_erp pull --ff-only
 docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
 repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
@@ -310,7 +309,7 @@ repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-
 If you are running the tracked template directly from the parent runtime root:
 
 ```bash
-cd /home/ovhtest/projects/erp_dev
+cd ~/projects/erp_dev
 git -C repo_erp pull
 docker compose \
   --env-file .env \
@@ -323,7 +322,7 @@ repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-
 If only CORS/domain variables changed:
 
 ```bash
-cd /home/<user>/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 ops/setup-vps.sh --skip-bootstrap --skip-deploy
 cd ..
 docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hasura backend
@@ -332,12 +331,12 @@ repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-
 
 ## Restoring A Production Backup
 
-Upload the backup to the VPS, for example into `/home/<user>/projects/erp_dev/restore`.
+Upload the backup to the VPS, for example into `~/projects/erp_dev/restore`.
 
 For the normal one-script flow, prefer:
 
 ```bash
-cd /home/<user>/projects/erp_dev/repo_erp
+cd ~/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh --yes --restore-backup restore --require-restore-backup
 ```
 
@@ -345,10 +344,10 @@ Then run:
 
 ```bash
 ops/restore-prod-backup.sh \
-  --project-dir /home/<user>/projects/erp_dev \
-  --env-file /home/<user>/projects/erp_dev/.env \
-  --compose-file /home/<user>/projects/erp_dev/docker-compose.yml \
-  --main-dump /home/<user>/projects/erp_dev/restore/latest.dump \
+  --project-dir "$HOME/projects/erp_dev" \
+  --env-file "$HOME/projects/erp_dev/.env" \
+  --compose-file "$HOME/projects/erp_dev/docker-compose.yml" \
+  --main-dump "$HOME/projects/erp_dev/restore/latest.dump" \
   --confirm-db erpdb
 ```
 
@@ -356,11 +355,11 @@ With globals:
 
 ```bash
 ops/restore-prod-backup.sh \
-  --project-dir /home/<user>/projects/erp_dev \
-  --env-file /home/<user>/projects/erp_dev/.env \
-  --compose-file /home/<user>/projects/erp_dev/docker-compose.yml \
-  --main-dump /home/<user>/projects/erp_dev/restore/latest.dump \
-  --globals-dump /home/<user>/projects/erp_dev/restore/globals.sql.gz \
+  --project-dir "$HOME/projects/erp_dev" \
+  --env-file "$HOME/projects/erp_dev/.env" \
+  --compose-file "$HOME/projects/erp_dev/docker-compose.yml" \
+  --main-dump "$HOME/projects/erp_dev/restore/latest.dump" \
+  --globals-dump "$HOME/projects/erp_dev/restore/globals.sql.gz" \
   --restore-globals \
   --confirm-db erpdb
 ```
@@ -377,7 +376,7 @@ Hasura metadata backup for custom relationships or permission rules.
 Hasura CORS still fails:
 
 ```bash
-cd /home/<user>/projects/erp_dev
+cd ~/projects/erp_dev
 repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
 docker compose --env-file .env -f docker-compose.yml exec -T hasura printenv HASURA_GRAPHQL_CORS_DOMAIN
 ```
@@ -385,7 +384,7 @@ docker compose --env-file .env -f docker-compose.yml exec -T hasura printenv HAS
 If the env is correct but the browser still fails, recreate Hasura:
 
 ```bash
-cd /home/<user>/projects/erp_dev
+cd ~/projects/erp_dev
 docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hasura
 ```
 
@@ -398,7 +397,7 @@ Let's Encrypt certificate is not issued:
 Backend health fails:
 
 ```bash
-cd /home/<user>/projects/erp_dev
+cd ~/projects/erp_dev
 docker compose --env-file .env -f docker-compose.yml logs --tail=200 backend
 ```
 
