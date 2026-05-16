@@ -12,6 +12,9 @@ const stageCanaryEnabled = process.env.CALENDAR_STAGE_CANARY === 'true';
 const stageFrontendUrl = trimTrailingSlash(
     process.env.CALENDAR_STAGE_FRONTEND_URL ?? 'https://stage.mebelkz.app',
 );
+const stagePostgresContainer =
+    process.env.CALENDAR_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
+const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
 const ORDERS_VIEW_VERSION_SCHEMA_ERROR = "field 'version' not found in type: 'orders_view'";
 
 test.describe('Calendar frontend', () => {
@@ -90,6 +93,11 @@ test.describe('Calendar stage canary', () => {
 
         userId = createSmokeUser(username, password);
         recordGraphqlRequests(page, ordersViewQueries);
+        if (vercelAutomationBypassSecret) {
+            await page.context().setExtraHTTPHeaders({
+                'x-vercel-protection-bypass': vercelAutomationBypassSecret,
+            });
+        }
 
         await loginThroughUi(page, username, password);
         await page.goto(`${stageFrontendUrl}/calendar`, { waitUntil: 'domcontentloaded' });
@@ -247,7 +255,7 @@ function psql(sql: string): string {
         [
             'exec',
             '-i',
-            'erp_dev-postgresdb-1',
+            stagePostgresContainer,
             'psql',
             '-U',
             'postgres',
