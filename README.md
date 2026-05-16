@@ -203,21 +203,26 @@ template, если его ещё нет. После ручного измене�
 который передан через `--project-directory`, потому что там же Compose будет
 искать `data/`, `config/`, `backups/` и `restore/`.
 
-Для текущей VPS-раскладки:
+Для текущей VPS-раскладки в этой ветке актуален прямой запуск tracked
+template; root-level `docker-compose.yml` в `/home/ovhtest/projects/erp_dev`
+не используется как отдельный source-of-truth.
 
 ```bash
 cd /home/ovhtest/projects/erp_dev
 
-# один раз добавить в /home/ovhtest/projects/erp_dev/.env:
-# BACKEND_BUILD_CONTEXT=./repo_erp/backend
-
 docker compose \
+  --project-directory /home/ovhtest/projects/erp_dev \
+  -p erp_test \
   --env-file .env \
-  --project-directory . \
   -f repo_erp/ops/templates/docker-compose.vps.yml \
-  up -d --build --no-deps backend
+  up -d
 ```
 
+Для этой раскладки `.env` лежит в `/home/ovhtest/projects/erp_dev/.env`, а
+`BACKEND_BUILD_CONTEXT=./repo_erp/backend`, потому что backend находится не в
+runtime-корне, а внутри checkout `repo_erp/`. `--project-directory` обязателен:
+Compose должен искать runtime-директории `data/`, `config/`, `backups/` и
+`restore/` именно в `/home/ovhtest/projects/erp_dev`, а не рядом с template.
 Для обычного checkout, где `backend/`, `ops/`, `.env` и `data/` находятся в
 одном корне, `BACKEND_BUILD_CONTEXT` можно не задавать: default `./backend`.
 
@@ -268,11 +273,19 @@ volumes:
 backend service:
 
 ```bash
-docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
+cd /home/ovhtest/projects/erp_dev
+
+docker compose \
+  --project-directory /home/ovhtest/projects/erp_dev \
+  -p erp_test \
+  --env-file .env \
+  -f repo_erp/ops/templates/docker-compose.vps.yml \
+  up -d --build --no-deps backend
 ```
 
-Если используется tracked template напрямую, добавь `--project-directory` и путь
-к template, как в примере выше.
+Для изменения bind порта Postgres в этой раскладке используется
+`PG_TAILSCALE_BIND_IP` в `.env`; текущий compose template публикует
+`postgresdb` как `${PG_TAILSCALE_BIND_IP:-${PG_BIND_IP:-127.0.0.1}}:5432:5432`.
 
 Audit:
 

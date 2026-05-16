@@ -37,7 +37,7 @@ services:
       - -c
       - timezone=Asia/Almaty
     ports:
-      - "${PG_BIND_IP:-127.0.0.1}:5432:5432"
+      - "${PG_TAILSCALE_BIND_IP:-${PG_BIND_IP:-127.0.0.1}}:5432:5432"
     volumes:
       - ./data/postgres/main:/var/lib/postgresql/data
       - ./config/postgres/pg_hba.conf:/etc/postgresql_custom_config/pg_hba.conf:ro
