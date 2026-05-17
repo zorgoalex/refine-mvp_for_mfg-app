@@ -1,0 +1,241 @@
+import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
+import bcrypt from 'bcryptjs';
+import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
+
+const canaryEnabled = process.env.DEADLINE_ENGINE_STAGE_CANARY === 'true';
+const frontendUrl = trimTrailingSlash(
+  process.env.DEADLINE_ENGINE_STAGE_FRONTEND_URL ?? 'https://app-test.mebelkz.app',
+);
+const backendApiUrl = trimTrailingSlash(
+  process.env.DEADLINE_ENGINE_STAGE_BACKEND_API_URL ?? 'https://backend-test.mebelkz.app/api/v1',
+);
+const postgresContainer =
+  process.env.DEADLINE_ENGINE_STAGE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
+const orderId = readNumberEnv('DEADLINE_ENGINE_STAGE_ORDER_ID', 11151);
+const orderName = process.env.DEADLINE_ENGINE_STAGE_ORDER_NAME ?? 'Тест_StageSmoke';
+const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+
+test.describe('Deadline Engine stage canary', () => {
+  test.skip(!canaryEnabled, 'Run with DEADLINE_ENGINE_STAGE_CANARY=true');
+  test.setTimeout(180000);
+
+  let userId: number | null = null;
+
+  test.afterEach(() => {
+    cleanupUser(userId);
+  });
+
+  test('reads order deadlines through backend and renders deployed order panel', async ({
+    page,
+    request,
+  }) => {
+    const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+    const username = `e2e_test_deadlines_${runId}`;
+    const password = crypto.randomBytes(24).toString('base64url');
+
+    const order = loadOrderFixture(orderId);
+    expect(order.orderName).toBe(orderName);
+    expect(order.deadlineCount + order.eventCount).toBeGreaterThanOrEqual(1);
+
+    userId = createSmokeUser(username, password);
+    const token = await loginForApiToken(request, username, password);
+    await expectRuntimeConfig(request);
+
+    const summary = await getJson<OrderDeadlineSummary>(request, `/orders/${orderId}/deadline-summary`, token);
+    expect(summary.orderId).toBe(orderId);
+    expect(summary.counts.active + summary.counts.expired + summary.counts.completedLate + summary.counts.completedOnTime)
+      .toBeGreaterThanOrEqual(0);
+
+    const deadlines = await getJson<OrderDeadlinesResponse>(request, `/orders/${orderId}/deadlines`, token);
+    const events = await getJson<DeadlineEventsResponse>(request, `/orders/${orderId}/deadline-events`, token);
+    expect(deadlines.data.length).toBe(order.deadlineCount);
+    expect(events.data.length).toBe(order.eventCount);
+
+    const pageErrors: string[] = [];
+    const consoleErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+    if (vercelAutomationBypassSecret) {
+      await page.context().setExtraHTTPHeaders({
+        'x-vercel-protection-bypass': vercelAutomationBypassSecret,
+      });
+    }
+
+    await loginThroughUi(page, username, password);
+    await page.goto(`${frontendUrl}/orders/show/${orderId}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('Дедлайны').first()).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/Активные:/).first()).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/Финальный:/).first()).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText('Ошибка загрузки дедлайнов')).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+    expect(consoleErrors.filter((message) => !message.includes('ResizeObserver'))).toEqual([]);
+  });
+});
+
+async function expectRuntimeConfig(request: APIRequestContext) {
+  const response = await request.get(`${frontendUrl}/runtime-config.json`);
+  await expectOk(response);
+  const runtimeConfig = await response.json();
+  expect(runtimeConfig.features?.backendAuth).toBe(true);
+  expect(runtimeConfig.features?.backendOrdersRead).toBe(true);
+  expect(runtimeConfig.features?.backendDeadlines).toBe(true);
+}
+
+async function loginThroughUi(page: Page, username: string, password: string) {
+  await page.goto(`${frontendUrl}/login`, { waitUntil: 'domcontentloaded' });
+  const loginResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/v1/auth/login') &&
+      response.request().method() === 'POST',
+  );
+  await page.locator('input[autocomplete="username"], input#username').fill(username);
+  await page.locator('input[autocomplete="current-password"], input#password').fill(password);
+  await page.getByRole('button', { name: 'Войти' }).click();
+  const loginResponse = await loginResponsePromise;
+  expect(loginResponse.ok()).toBe(true);
+  await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 30000 });
+}
+
+async function loginForApiToken(
+  request: APIRequestContext,
+  username: string,
+  password: string,
+): Promise<string> {
+  const response = await request.post(`${backendApiUrl}/auth/login`, {
+    data: { username, password },
+  });
+  await expectOk(response);
+  const body = await response.json();
+  expect(typeof body.accessToken).toBe('string');
+  return body.accessToken;
+}
+
+async function getJson<T>(
+  request: APIRequestContext,
+  path: string,
+  token: string,
+): Promise<T> {
+  const response = await request.get(`${backendApiUrl}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await expectOk(response);
+  return response.json() as Promise<T>;
+}
+
+async function expectOk(response: APIResponse) {
+  const body = response.ok() ? '' : await response.text();
+  expect(response.ok(), body).toBe(true);
+}
+
+function loadOrderFixture(orderId: number): OrderFixture {
+  return psql<OrderFixture>(
+    `
+    SELECT json_build_object(
+      'orderId', o.order_id,
+      'orderName', o.order_name,
+      'deadlineCount', (
+        SELECT count(*)::int
+        FROM deadlines d
+        WHERE d.order_id = o.order_id
+      ),
+      'eventCount', (
+        SELECT count(*)::int
+        FROM deadline_events de
+        JOIN deadlines d ON d.deadline_id = de.deadline_id
+        WHERE d.order_id = o.order_id
+      )
+    )::text
+    FROM orders o
+    WHERE o.order_id = ${orderId}
+      AND o.delete_flag = false;
+    `,
+    { json: true },
+  );
+}
+
+function createSmokeUser(username: string, password: string): number {
+  const passwordHash = bcrypt.hashSync(password, 10);
+  return Number(
+    psql(`
+      INSERT INTO users (username, password_hash, role, is_active, created_at, updated_at)
+      VALUES ('${escapeSql(username)}', '${escapeSql(passwordHash)}', 'admin', true, now(), now())
+      RETURNING user_id;
+    `),
+  );
+}
+
+function cleanupUser(userId: number | null) {
+  if (!userId) return;
+  psql(`
+    DELETE FROM auth_sessions WHERE user_id = ${userId};
+    DELETE FROM users WHERE user_id = ${userId};
+  `);
+}
+
+function psql<T = string>(sql: string, options: { json?: boolean } = {}): T {
+  const output = execFileSync(
+    'docker',
+    [
+      'exec',
+      '-i',
+      postgresContainer,
+      'psql',
+      '-U',
+      'erp_user',
+      '-d',
+      'erpdb',
+      '-At',
+      '-c',
+      sql,
+    ],
+    { encoding: 'utf8' },
+  ).trim();
+
+  if (options.json) return JSON.parse(output) as T;
+  return output as T;
+}
+
+function readNumberEnv(name: string, fallback: number): number {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
+function escapeSql(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+interface OrderFixture {
+  orderId: number;
+  orderName: string;
+  deadlineCount: number;
+  eventCount: number;
+}
+
+interface OrderDeadlineSummary {
+  orderId: number;
+  finalDeadline: unknown | null;
+  currentStageDeadline: unknown | null;
+  counts: {
+    active: number;
+    expired: number;
+    completedLate: number;
+    completedOnTime: number;
+  };
+}
+
+interface OrderDeadlinesResponse {
+  data: unknown[];
+}
+
+interface DeadlineEventsResponse {
+  data: unknown[];
+}

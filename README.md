@@ -323,6 +323,7 @@ npm run dev:full
 - `npm run test:e2e:payments-stage-canary` — opt-in Playwright smoke для stage payments UI/backend path с реальными DB writes на тестовом заказе.
 - `npm run test:e2e:production-actions-cutover` — Playwright smoke для backend production actions/calendar moves cutover flag.
 - `npm run test:e2e:production-actions-stage-canary` — opt-in Playwright smoke для stage production actions backend path с audit/outbox/idempotency checks.
+- `npm run test:e2e:deadline-engine-stage-canary` - opt-in read-only smoke for deployed Deadline Engine frontend/API stage acceptance.
 - `npm run test:e2e:vlm-cutover` — Playwright smoke для backend VLM cutover flag.
 - `npm run test:e2e:runtime-config` — Playwright smoke для runtime frontend flags.
 - `npm run test:runtime-config-canary` — проверка staged runtime-config examples для canary.
@@ -348,6 +349,7 @@ npm run test:e2e:users-cutover
 npm run test:e2e:order-export-cutover
 npm run test:e2e:production-actions-cutover
 npm run test:e2e:production-actions-stage-canary
+npm run test:e2e:deadline-engine-stage-canary
 npm run test:e2e:payments-stage-canary
 npm run test:e2e:vlm-cutover
 npm run test:e2e:runtime-config
@@ -386,6 +388,7 @@ VPS Docker Compose/deploy checklist: [ops/README.md](ops/README.md).
 Payments stage canary creates/updates/deletes a standalone payment through the
 stage UI/backend path and verifies DB audit/order recalculation. It uses a
 temporary test user and requires access to the stage `erpdb` Docker Postgres.
+Deadline Engine stage canary is read-only for deadline data. It creates a temporary backend user, verifies runtime `backendDeadlines`, reads `/api/v1/orders/:id/deadline-summary`, `/deadlines`, and `/deadline-events`, then opens the deployed order show page and checks the read-only deadline panel.
 Production cutover plan: [../spec_erp/docs/production-cutover-plan.md](../spec_erp/docs/production-cutover-plan.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 
