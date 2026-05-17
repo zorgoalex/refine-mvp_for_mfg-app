@@ -84,9 +84,7 @@ test.describe('Frontend pages stage canary', () => {
                 pageErrors.length = 0;
                 consoleErrors.length = 0;
 
-                await page.goto(`${stageFrontendUrl}${route.path}`, {
-                    waitUntil: 'domcontentloaded',
-                });
+                await navigateWithinApp(page, route.path);
                 await assertStagePageReady(page, route);
                 await flushGraphqlResponses(recorder);
 
@@ -235,6 +233,13 @@ async function loginThroughUi(page: Page, username: string, password: string) {
     const loginResponse = await loginResponsePromise;
     expect(loginResponse.ok()).toBe(true);
     await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 30000 });
+}
+
+async function navigateWithinApp(page: Page, path: string) {
+    await page.evaluate((nextPath) => {
+        window.history.pushState({}, '', nextPath);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+    }, path);
 }
 
 type GraphqlResponseRecorder = {
