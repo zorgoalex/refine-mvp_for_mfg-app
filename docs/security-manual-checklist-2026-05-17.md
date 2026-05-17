@@ -23,11 +23,11 @@
 | Cookies, CORS, and runtime env | Pass | Focused runtime/CORS/readiness tests passed; stage readiness is recorded in Stage Manual Smoke. |
 | Legacy Vercel functions and rollback gates | Pass | Focused legacy/runtime-config tests passed; see Legacy Vercel Functions And Rollback Gates section. |
 | API authorization boundaries | Pass | Focused backend authorization tests passed; broader Playwright client-phones no-fallback smoke failed on notification visibility and is not used as pass evidence. |
-| Rate limit | Blocked | Focused rate-limit tests passed for Redis-backed policy, local/test memory fallback, auth/order/VLM consumers, Redis readiness code coverage, and live stage `/health/ready` Redis readiness; login 429 stage smoke remains blocked in the Rate Limit section. |
+| Rate limit | Pass | Focused rate-limit tests passed for Redis-backed policy, local/test memory fallback, auth/order/VLM consumers, Redis readiness code coverage, live stage `/health/ready` Redis readiness, and login 429 stage smoke. The login smoke returned 10x `401 INVALID_CREDENTIALS`, then `429 RATE_LIMIT_EXCEEDED`. |
 | Secrets and logging | Follow-up | Focused redaction/error tests passed for the backend redaction utility and public error responses, but production logger wiring is not proven and legacy `api/_lib/logger.ts` serializes meta/error directly. |
 | Audit expectations | Follow-up | Implemented backend-owned command audit is covered for auth, users, orders, payments, client phones, production actions, VLM, and deadlines; denied sensitive action audit was not found as explicit coverage and remains follow-up. |
 | Hasura boundary | Follow-up | Retained Hasura reads/report/reference usage and accepted no-mutation guards are documented; known `useOrderSave` nested payments `forceHasuraMutation` exception remains follow-up debt. |
-| Stage manual smoke | Blocked | Stage backend `/health/ready` passed on 2026-05-17 with database, Redis, and config ok; frontend runtime flags and stage canaries were blocked because `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell. |
+| Stage manual smoke | Pass | Stage backend `/health/ready` passed on 2026-05-17 with database, Redis, and config ok. After loading `/home/ovhtest/projects/erp_dev/.env` without printing secrets, protected frontend runtime flags were checked and deadline/frontend pages stage canaries passed. |
 
 ## Auth And Sessions
 
@@ -80,7 +80,7 @@
 | Redis/Valkey-backed rate limit is enabled for stage/prod-like runtime. | Pass | `backend/src/rate-limit/rate-limit.module.ts` selects `RedisRateLimitStore` when `BACKEND_RATE_LIMIT_STORE=redis` using `RATE_LIMIT_REDIS_URL` or `REDIS_URL`; `backend/src/config/env.validation.test.ts` confirms staging requires `BACKEND_RATE_LIMIT_STORE=redis` plus a Redis URL. Focused test command passed 2026-05-17. |
 | Memory fallback is only local/test-safe. | Pass | `backend/src/rate-limit/rate-limit.module.ts` falls back to `MemoryRateLimitStore` only when the store is not `redis`; `backend/src/config/env.validation.test.ts` rejects staging without Redis-backed settings while focused memory-store tests cover local/test behavior. Focused test command passed 2026-05-17. |
 | Stage readiness includes Redis. | Pass | Live stage command passed on 2026-05-17: `curl -fsS https://backend-test.mebelkz.app/health/ready | jq` returned `status: ready` with `redis.status=ok`. Code/test coverage also verifies `READINESS_REQUIRE_REDIS=true` pings Redis through the rate-limit service and staging Redis settings are required. |
-| Login rate-limit smoke evidence is documented or rerun. | Blocked | Prior login 429 smoke was not rerun in this task. Historical context checked in `/home/ovhtest/projects/erp_dev/CONTEXT.md`; the current context line mentions Redis/Valkey rate-limit runtime and related stage acceptance, but does not explicitly state a login 429 stage smoke passed, so this row is not marked Pass. |
+| Login rate-limit smoke evidence is documented or rerun. | Pass | Stage smoke rerun on 2026-05-17 against `https://backend-test.mebelkz.app/api/v1/auth/login` with a unique nonexistent username and dummy password. Attempts 1-10 returned `401 INVALID_CREDENTIALS`; attempt 11 returned `429 RATE_LIMIT_EXCEEDED`. No secrets were printed. |
 
 ## Secrets And Logging
 
@@ -112,8 +112,8 @@
 | Check | Status | Evidence |
 | --- | --- | --- |
 | Stage backend readiness was checked. | Pass | Command passed on 2026-05-17 without secrets: `curl -fsS https://backend-test.mebelkz.app/health/ready | jq` returned JSON `status: ready`; checks included `database.status=ok`, `redis.status=ok`, and `config.status=ok`. |
-| Stage frontend runtime flags were checked without printing secrets. | Blocked | `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell, so the protected `https://app-test.mebelkz.app/runtime-config.json` command was not run and no secret was printed. |
-| Stage deadline/frontend canaries were rerun. | Blocked | `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell, so protected frontend stage credentials are unavailable; `npm run test:e2e:deadline-engine-stage-canary` and `npm run test:e2e:frontend-pages-stage-canary` were not run. |
+| Stage frontend runtime flags were checked without printing secrets. | Pass | After loading `/home/ovhtest/projects/erp_dev/.env` without printing secrets, `https://app-test.mebelkz.app/runtime-config.json` was checked through the Vercel bypass header. Runtime features included `backendAuth=true`, `backendPermissions=true`, `backendOrdersRead=true`, `backendOrdersWrite=true`, `backendPayments=false`, `backendClientPhones=false`, `backendProductionActions=false`, `backendDeadlines=true`, `backendOrderExport=true`, `backendUsers=true`, `backendVlm=true`, `backendReferences=true`, and `enableLegacyHasura=true`. |
+| Stage deadline/frontend canaries were rerun. | Pass | `npm run test:e2e:deadline-engine-stage-canary` passed on 2026-05-17 (1 passed). `npm run test:e2e:frontend-pages-stage-canary` passed on 2026-05-17 (1 passed) with explicit overrides: `FRONTEND_PAGES_STAGE_FRONTEND_URL=https://app-test.mebelkz.app`, `FRONTEND_PAGES_STAGE_BACKEND_API_URL=https://backend-test.mebelkz.app/api/v1`, `FRONTEND_PAGES_STAGE_POSTGRES_CONTAINER=erp_test-postgresdb-1`, and `FRONTEND_PAGES_STAGE_CREATE_USER=true`. |
 
 ## Follow-Up Items
 
@@ -125,12 +125,9 @@
 
 ## Final Decision
 
-- Checklist result: Closed with documented follow-up items and blocked protected-frontend smoke.
+- Checklist result: Closed with documented follow-up items.
 - Blocking failures: none.
-- Blocked checks:
-  - Login rate-limit 429 stage smoke was not rerun; current context did not explicitly prove this smoke passed.
-  - Protected stage frontend runtime flags were not checked because `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell.
-  - Stage deadline/frontend canaries were not rerun because `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell.
+- Blocked checks: none after rerun with `/home/ovhtest/projects/erp_dev/.env`.
 - Follow-up items:
   - `useOrderSave` / nested payments Hasura mutation exception remains the next command-boundary debt.
   - Denied sensitive action audit remains future work because explicit denied-action audit evidence was not found.
@@ -138,4 +135,8 @@
 - Verification before completion:
   - `npm test`: passed on 2026-05-17 (130 files, 500 tests passed, 2 skipped).
   - `npm run build`: passed on 2026-05-17 with the existing Vite large chunk warning.
+  - Protected `runtime-config.json`: passed on 2026-05-17 with `backendAuth=true`, `backendOrdersRead=true`, and `backendDeadlines=true`.
+  - `npm run test:e2e:deadline-engine-stage-canary`: passed on 2026-05-17 (1 passed).
+  - `npm run test:e2e:frontend-pages-stage-canary`: passed on 2026-05-17 (1 passed) with explicit app-test/backend-test/container/create-user overrides.
+  - Login 429 stage smoke: passed on 2026-05-17 with 10x `401 INVALID_CREDENTIALS`, then `429 RATE_LIMIT_EXCEEDED`.
   - `git status --short --branch --untracked-files=all`: branch `feat/backend-erp-stage1` ahead of origin; only intentional untracked `session-handoffs/*.md` files remain.
