@@ -103,9 +103,9 @@
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Retained Hasura use is read/report/reference only. | Pass | Step 4 search found retained Hasura configuration/data-provider usage and spec evidence in `spec_erp/docs/frontend-data-source-parity-matrix.md` allowing lookup/report/reference reads, plus `tests/payments-backend-cutover.spec.ts` explicitly keeps Hasura reads while routing payment mutations to `/api/v1`. |
+| Retained Hasura use is read/report/reference only. | Pass | Step 4 search found retained Hasura configuration/data-provider usage and spec evidence in `/home/ovhtest/projects/erp_dev/spec_erp/docs/frontend-data-source-parity-matrix.md` allowing lookup/report/reference reads, plus `tests/payments-backend-cutover.spec.ts` explicitly keeps Hasura reads while routing payment mutations to `/api/v1`. |
 | Backend-owned mutation flows have tests or network guards preventing forbidden Hasura mutations where accepted. | Pass | `tests/production-actions-backend-cutover.spec.ts` guards `update_orders`, `insert_production_status_events`, and `delete_production_status_events` mutations and asserts no matches; `tests/payments-backend-cutover.spec.ts` guards `insert/update/delete_payments` and asserts none; `src/hooks/useOrderSaveBackend.test.ts` covers backend order create/update behavior. |
-| Known exception `useOrderSave` / nested payments is documented as next command-boundary debt. | Follow-up | `src/hooks/useOrderSave.ts` still defines `LEGACY_ORDER_SAVE_PAYMENT_META = { forceHasuraMutation: true }` and applies it to nested payment create/update/delete within the legacy order-save path. Step 4 search and `spec_erp/docs/full-backend-remaining-work-2026-05-11.md` identify this as the next backend-owned command-boundary debt, not a failure for this checklist. |
+| Known exception `useOrderSave` / nested payments is documented as next command-boundary debt. | Follow-up | `src/hooks/useOrderSave.ts` still defines `LEGACY_ORDER_SAVE_PAYMENT_META = { forceHasuraMutation: true }` and applies it to nested payment create/update/delete within the legacy order-save path. Step 4 search and `/home/ovhtest/projects/erp_dev/spec_erp/docs/full-backend-remaining-work-2026-05-11.md` identify this as the next backend-owned command-boundary debt, not a failure for this checklist. |
 
 ## Stage Manual Smoke
 
@@ -120,3 +120,4 @@
 | --- | --- | --- | --- |
 | `useOrderSave` / nested payments Hasura mutation exception remains the next command-boundary debt after this checklist. | High | Frontend/backend command boundary | Current priority context keeps this out of this checklist scope. |
 | Denied sensitive action audit is not explicitly implemented for permission-denied/backend-forbidden paths. | Medium | Backend audit/security | Step 3 found `PERMISSION_DENIED`/forbidden tests and successful command audit writes, but did not find explicit denied-action audit writes/tests. |
+| Production logger redaction wiring is not proven for all log sinks. | Medium | Backend/legacy logging | Redaction utility tests pass, but Step 1 did not find production imports of `redactLogValue`/`redactLogFields`; legacy `api/_lib/logger.ts` serializes `meta` and `error` directly. |
