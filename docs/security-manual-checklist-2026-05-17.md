@@ -122,3 +122,20 @@
 | `useOrderSave` / nested payments Hasura mutation exception remains the next command-boundary debt after this checklist. | High | Frontend/backend command boundary | Current priority context keeps this out of this checklist scope. |
 | Denied sensitive action audit is not explicitly implemented for permission-denied/backend-forbidden paths. | Medium | Backend audit/security | Step 3 found `PERMISSION_DENIED`/forbidden tests and successful command audit writes, but did not find explicit denied-action audit writes/tests. |
 | Production logger redaction wiring is not proven for all log sinks. | Medium | Backend/legacy logging | Redaction utility tests pass, but Step 1 did not find production imports of `redactLogValue`/`redactLogFields`; legacy `api/_lib/logger.ts` serializes `meta` and `error` directly. |
+
+## Final Decision
+
+- Checklist result: Closed with documented follow-up items and blocked protected-frontend smoke.
+- Blocking failures: none.
+- Blocked checks:
+  - Login rate-limit 429 stage smoke was not rerun; current context did not explicitly prove this smoke passed.
+  - Protected stage frontend runtime flags were not checked because `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell.
+  - Stage deadline/frontend canaries were not rerun because `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell.
+- Follow-up items:
+  - `useOrderSave` / nested payments Hasura mutation exception remains the next command-boundary debt.
+  - Denied sensitive action audit remains future work because explicit denied-action audit evidence was not found.
+  - Production logger redaction wiring remains future work because utility tests pass, but all production log sinks are not proven to use it.
+- Verification before completion:
+  - `npm test`
+  - `npm run build`
+  - `git status --short --branch --untracked-files=all`
