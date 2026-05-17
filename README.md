@@ -389,7 +389,7 @@ VPS Docker Compose/deploy checklist: [ops/README.md](ops/README.md).
 Payments stage canary creates/updates/deletes a standalone payment through the
 stage UI/backend path and verifies DB audit/order recalculation. It uses a
 temporary test user and requires access to the stage `erpdb` Docker Postgres.
-Deadline Engine stage canary is read-only for deadline data. It creates a temporary backend user, verifies runtime `backendDeadlines`, reads `/api/v1/orders/:id/deadline-summary`, `/deadlines`, and `/deadline-events`, then opens the deployed order show page and checks the read-only deadline panel.
+Deadline Engine stage canary is read-only for deadline data. It creates a temporary backend user, verifies runtime `backendDeadlines`, reads `/api/v1/orders/:id/deadline-summary`, `/deadlines`, and `/deadline-events`, then opens the deployed order show page and checks the read-only deadline panel. By default it targets stage order `11166` (`TEST-CODEX-STATUS3-DEBUG-20260516192743`); override with `DEADLINE_ENGINE_STAGE_ORDER_ID` and `DEADLINE_ENGINE_STAGE_ORDER_NAME` when using a different fixture.
 Production cutover plan: [../spec_erp/docs/production-cutover-plan.md](../spec_erp/docs/production-cutover-plan.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 

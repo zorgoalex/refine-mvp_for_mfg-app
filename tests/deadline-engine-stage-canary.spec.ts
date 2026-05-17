@@ -12,8 +12,9 @@ const backendApiUrl = trimTrailingSlash(
 );
 const postgresContainer =
   process.env.DEADLINE_ENGINE_STAGE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
-const orderId = readNumberEnv('DEADLINE_ENGINE_STAGE_ORDER_ID', 11151);
-const orderName = process.env.DEADLINE_ENGINE_STAGE_ORDER_NAME ?? 'Тест_StageSmoke';
+const orderId = readNumberEnv('DEADLINE_ENGINE_STAGE_ORDER_ID', 11166);
+const orderName =
+  process.env.DEADLINE_ENGINE_STAGE_ORDER_NAME ?? 'TEST-CODEX-STATUS3-DEBUG-20260516192743';
 const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
 const mutatingDeadlinePathPrefixes = [
   '/api/v1/deadlines',
@@ -49,13 +50,14 @@ test.describe('Deadline Engine stage canary', () => {
 
     const summary = await getJson<OrderDeadlineSummary>(request, `/orders/${orderId}/deadline-summary`, token);
     expect(summary.orderId).toBe(orderId);
-    expect(summary.counts.active + summary.counts.expired + summary.counts.completedLate + summary.counts.completedOnTime)
-      .toBeGreaterThanOrEqual(0);
 
     const deadlines = await getJson<OrderDeadlinesResponse>(request, `/orders/${orderId}/deadlines`, token);
     const events = await getJson<DeadlineEventsResponse>(request, `/orders/${orderId}/deadline-events`, token);
     expect(deadlines.data.length).toBe(order.deadlineCount);
     expect(events.data.length).toBe(order.eventCount);
+    expect(summary.counts).toEqual(countDeadlineStatuses(deadlines.data));
+    expectSummaryDeadline(summary.finalDeadline, deadlines.data, 'order');
+    expectSummaryDeadline(summary.currentStageDeadline, deadlines.data, 'order_stage');
 
     const pageErrors: string[] = [];
     const consoleErrors: string[] = [];
@@ -378,8 +380,8 @@ interface OrderFixture {
 
 interface OrderDeadlineSummary {
   orderId: number;
-  finalDeadline: unknown | null;
-  currentStageDeadline: unknown | null;
+  finalDeadline: DeadlineSummaryItem | null;
+  currentStageDeadline: DeadlineSummaryItem | null;
   counts: {
     active: number;
     expired: number;
@@ -389,9 +391,47 @@ interface OrderDeadlineSummary {
 }
 
 interface OrderDeadlinesResponse {
-  data: unknown[];
+  data: DeadlineItem[];
 }
 
 interface DeadlineEventsResponse {
   data: unknown[];
+}
+
+interface DeadlineItem {
+  deadlineId: string;
+  entityType: string;
+  status: string;
+}
+
+interface DeadlineSummaryItem {
+  deadlineId: string;
+  status: string;
+}
+
+function countDeadlineStatuses(deadlines: DeadlineItem[]) {
+  return {
+    active: deadlines.filter((deadline) => deadline.status === 'active').length,
+    expired: deadlines.filter((deadline) => deadline.status === 'expired').length,
+    completedLate: deadlines.filter((deadline) => deadline.status === 'completed_late').length,
+    completedOnTime: deadlines.filter((deadline) => deadline.status === 'completed_on_time').length,
+  };
+}
+
+function expectSummaryDeadline(
+  summaryDeadline: DeadlineSummaryItem | null,
+  deadlines: DeadlineItem[],
+  entityType: 'order' | 'order_stage',
+) {
+  if (!summaryDeadline) {
+    expect(deadlines.some((deadline) => deadline.entityType === entityType)).toBe(false);
+    return;
+  }
+
+  const matchingDeadline = deadlines.find(
+    (deadline) =>
+      deadline.deadlineId === summaryDeadline.deadlineId && deadline.entityType === entityType,
+  );
+  expect(matchingDeadline).toBeDefined();
+  expect(summaryDeadline.status).toBe(matchingDeadline?.status);
 }
