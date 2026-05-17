@@ -6,6 +6,7 @@ export interface FrontendFeatureFlags {
   useBackendPayments: boolean;
   useBackendClientPhones: boolean;
   useBackendProductionActions: boolean;
+  useBackendDeadlines: boolean;
   useBackendOrderExport: boolean;
   useBackendUsers: boolean;
   useBackendVlm: boolean;
@@ -23,6 +24,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendPayments: string | boolean;
   backendClientPhones: string | boolean;
   backendProductionActions: string | boolean;
+  backendDeadlines: string | boolean;
   backendOrderExport: string | boolean;
   backendUsers: string | boolean;
   backendVlm: string | boolean;
@@ -53,6 +55,7 @@ export function getFeatureFlags(
       env.VITE_USE_BACKEND_PRODUCTION_ACTIONS,
       false,
     ),
+    useBackendDeadlines: readBooleanFlag(env.VITE_USE_BACKEND_DEADLINES, false),
     useBackendOrderExport: readBooleanFlag(env.VITE_USE_BACKEND_ORDER_EXPORT, false),
     useBackendUsers: readBooleanFlag(env.VITE_USE_BACKEND_USERS, false),
     useBackendVlm: readBooleanFlag(env.VITE_USE_BACKEND_VLM, false),
@@ -89,6 +92,9 @@ export function mergeRuntimeFeatureFlags(
     useBackendProductionActions:
       readOptionalBooleanFlag(runtimeFeatures.backendProductionActions) ??
       fallback.useBackendProductionActions,
+    useBackendDeadlines:
+      readOptionalBooleanFlag(runtimeFeatures.backendDeadlines) ??
+      fallback.useBackendDeadlines,
     useBackendOrderExport:
       readOptionalBooleanFlag(runtimeFeatures.backendOrderExport) ?? fallback.useBackendOrderExport,
     useBackendUsers: readOptionalBooleanFlag(runtimeFeatures.backendUsers) ?? fallback.useBackendUsers,
@@ -107,6 +113,8 @@ function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): Fronte
     ...flags,
     useBackendClientPhones:
       flags.useBackendClientPhones && flags.useBackendProductionActions,
+    useBackendDeadlines:
+      flags.useBackendDeadlines && flags.useBackendAuth && flags.useBackendOrdersRead,
   };
 }
 

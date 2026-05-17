@@ -18,6 +18,7 @@ describe('featureFlags', () => {
       useBackendPayments: false,
       useBackendClientPhones: false,
       useBackendProductionActions: false,
+      useBackendDeadlines: false,
       useBackendOrderExport: false,
       useBackendUsers: false,
       useBackendVlm: false,
@@ -127,6 +128,45 @@ describe('featureFlags', () => {
       useBackendClientPhones: true,
       useBackendProductionActions: true,
     });
+  });
+
+  it('reads backend deadline flag from env and runtime config', () => {
+    expect(
+      getFeatureFlags({
+        VITE_USE_BACKEND_AUTH: 'true',
+        VITE_USE_BACKEND_ORDERS_READ: 'true',
+        VITE_USE_BACKEND_DEADLINES: 'true',
+      }).useBackendDeadlines,
+    ).toBe(true);
+
+    expect(
+      getFeatureFlags(
+        {
+          VITE_USE_BACKEND_AUTH: 'true',
+          VITE_USE_BACKEND_ORDERS_READ: 'true',
+          VITE_USE_BACKEND_DEADLINES: 'false',
+        },
+        { backendDeadlines: true },
+      ).useBackendDeadlines,
+    ).toBe(true);
+  });
+
+  it('disables backend deadlines unless backend auth and orders read are enabled', () => {
+    expect(
+      getFeatureFlags({
+        VITE_USE_BACKEND_DEADLINES: 'true',
+        VITE_USE_BACKEND_AUTH: 'false',
+        VITE_USE_BACKEND_ORDERS_READ: 'true',
+      }).useBackendDeadlines,
+    ).toBe(false);
+
+    expect(
+      getFeatureFlags({
+        VITE_USE_BACKEND_DEADLINES: 'true',
+        VITE_USE_BACKEND_AUTH: 'true',
+        VITE_USE_BACKEND_ORDERS_READ: 'false',
+      }).useBackendDeadlines,
+    ).toBe(false);
   });
 
   it('ignores invalid runtime boolean values and keeps fallback', () => {
