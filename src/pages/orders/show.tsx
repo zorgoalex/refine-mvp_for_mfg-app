@@ -20,6 +20,7 @@ import { shouldShowOrderLoading } from "./utils/orderShowLoading";
 import { getDowelingOrderShowPath } from "./utils/dowelingOrderPaths";
 import { resolveOrderExportClientName, toOrderExportClient } from "./utils/orderExportClient";
 import { ordersApi } from "../../api/ordersApi";
+import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 
 const { Panel } = Collapse;
 
@@ -459,6 +460,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               disableLegacyOrderReads={useBackendOrdersRead}
             />
           </div>
+
+          <OrderDeadlinePanel orderId={record.order_id} />
           
           {/* Финансы */}
           <Collapse
