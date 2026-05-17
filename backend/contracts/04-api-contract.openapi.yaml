@@ -28,6 +28,16 @@ tags:
     description: Заказы как бизнес-агрегат
   - name: Order Export
     description: Экспорт заказов во внешние системы
+  - name: Payments
+    description: Платежи заказа
+  - name: Client Phones
+    description: Телефоны клиентов
+  - name: Production Actions
+    description: Точечные производственные действия над заказом
+  - name: Order Snapshots
+    description: Экспорт и импорт переносимых snapshot'ов заказа
+  - name: Deadlines
+    description: Дедлайны, политики дедлайнов и настройки deadline automation
   - name: Users
     description: Управление пользователями
   - name: VLM
@@ -497,13 +507,15 @@ paths:
       - $ref: '#/components/parameters/OrderId'
     patch:
       tags:
-        - Orders
+        - Production Actions
       operationId: changeOrderStatus
       summary: Изменить статус заказа
-      description: Изменяет статус заказа с записью audit event.
+      description: Изменяет статус заказа с записью audit event и stale-safe проверкой version.
       security:
         - bearerAuth: []
-      x-permission: orders.change_status
+      x-permissions:
+        - orders.change_status
+        - orders.update
       requestBody:
         required: true
         content:
@@ -519,7 +531,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OrderResponse'
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -530,6 +544,189 @@ paths:
           $ref: '#/components/responses/OrderVersionConflict'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/calendar-date:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    patch:
+      tags:
+        - Production Actions
+      operationId: moveOrderCalendarDate
+      summary: Перенести плановую дату заказа
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - calendar.view
+        - orders.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveCalendarDateRequest'
+      responses:
+        '200':
+          description: Плановая дата изменена
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/order-status:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    patch:
+      tags:
+        - Production Actions
+      operationId: changeOrderStatusLegacy
+      summary: Изменить статус заказа через legacy route
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.change_status
+        - orders.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeOrderStatusRequest'
+      responses:
+        '200':
+          description: Статус изменён
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/production-stage-events/{productionStatusId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+      - $ref: '#/components/parameters/ProductionStatusId'
+    put:
+      tags:
+        - Production Actions
+      operationId: activateProductionStage
+      summary: Активировать производственный этап заказа
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.change_production_status
+        - orders.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductionStageEventRequest'
+      responses:
+        '200':
+          description: Производственный этап активирован
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Production Actions
+      operationId: deactivateProductionStage
+      summary: Деактивировать производственный этап заказа
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.change_production_status
+        - orders.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductionStageEventRequest'
+      responses:
+        '200':
+          description: Производственный этап деактивирован
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -555,7 +752,7 @@ paths:
             schema:
               $ref: '#/components/schemas/ExportOrderRequest'
       responses:
-        '200':
+        '201':
           description: Заказ экспортирован
           headers:
             X-Request-Id:
@@ -574,6 +771,20 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/RateLimitExceeded'
+        '502':
+          description: Ошибка upstream export provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '504':
+          description: Timeout upstream export provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -605,6 +816,986 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/OrderNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/snapshot:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Order Snapshots
+      operationId: exportOrderSnapshot
+      summary: Экспортировать snapshot заказа
+      security:
+        - bearerAuth: []
+      x-permission: orders.export
+      responses:
+        '200':
+          description: JSON snapshot файла заказа
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/snapshot/batch:
+    get:
+      tags:
+        - Order Snapshots
+      operationId: exportOrderSnapshotBatch
+      summary: Экспортировать batch snapshot'ов заказов
+      security:
+        - bearerAuth: []
+      x-permission: orders.export
+      parameters:
+        - name: dateFrom
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: ZIP архив JSON snapshot'ов заказов
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+            X-Order-Snapshot-Count:
+              description: Количество snapshot'ов в архиве.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/snapshot/import:
+    post:
+      tags:
+        - Order Snapshots
+      operationId: importOrderSnapshot
+      summary: Импортировать snapshot заказа
+      security:
+        - bearerAuth: []
+      x-permission: orders.import
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportOrderSnapshotRequest'
+      responses:
+        '200':
+          description: Snapshot импортирован
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderImportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/snapshot/import-batch:
+    post:
+      tags:
+        - Order Snapshots
+      operationId: importOrderSnapshotBatch
+      summary: Импортировать batch snapshot'ов заказов
+      security:
+        - bearerAuth: []
+      x-permission: orders.import
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportOrderSnapshotBatchRequest'
+      responses:
+        '200':
+          description: Batch snapshot'ов импортирован
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderImportBatchResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/payments:
+    post:
+      tags:
+        - Payments
+      operationId: createPayment
+      summary: Создать платеж заказа
+      security:
+        - bearerAuth: []
+      x-permission: payments.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Платеж создан
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/payments/{paymentId}:
+    parameters:
+      - $ref: '#/components/parameters/PaymentId'
+    patch:
+      tags:
+        - Payments
+      operationId: updatePayment
+      summary: Обновить платеж заказа
+      security:
+        - bearerAuth: []
+      x-permission: payments.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePaymentRequest'
+      responses:
+        '200':
+          description: Платеж обновлён
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Платеж не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Payments
+      operationId: deletePayment
+      summary: Удалить платеж заказа
+      security:
+        - bearerAuth: []
+      x-permission: payments.delete
+      responses:
+        '200':
+          description: Платеж удалён
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletePaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Платеж не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/client-phones:
+    post:
+      tags:
+        - Client Phones
+      operationId: createClientPhone
+      summary: Создать телефон клиента
+      security:
+        - bearerAuth: []
+      x-permission: clients.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClientPhoneRequest'
+      responses:
+        '201':
+          description: Телефон клиента создан
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientPhoneResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Клиент не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/ClientPhoneConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/client-phones/{phoneId}:
+    parameters:
+      - $ref: '#/components/parameters/PhoneId'
+    patch:
+      tags:
+        - Client Phones
+      operationId: updateClientPhone
+      summary: Обновить телефон клиента
+      security:
+        - bearerAuth: []
+      x-permission: clients.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateClientPhoneRequest'
+      responses:
+        '200':
+          description: Телефон клиента обновлён
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientPhoneResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Телефон клиента не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/ClientPhoneConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Client Phones
+      operationId: deleteClientPhone
+      summary: Удалить телефон клиента
+      security:
+        - bearerAuth: []
+      x-permission: clients.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteClientPhoneRequest'
+      responses:
+        '200':
+          description: Телефон клиента удалён
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteClientPhoneResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Телефон клиента не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/ClientPhoneConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/deadlines:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Deadlines
+      operationId: listOrderDeadlines
+      summary: Список дедлайнов заказа
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.view
+      responses:
+        '200':
+          description: Дедлайны заказа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDeadlineListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/deadline-events:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Deadlines
+      operationId: listOrderDeadlineEvents
+      summary: События дедлайнов заказа
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.audit.view
+      responses:
+        '200':
+          description: События дедлайнов заказа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineEventListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/deadline-summary:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Deadlines
+      operationId: getOrderDeadlineSummary
+      summary: Сводка дедлайнов заказа
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.view
+      responses:
+        '200':
+          description: Сводка дедлайнов заказа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineSummaryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadlines:
+    get:
+      tags:
+        - Deadlines
+      operationId: listDeadlines
+      summary: Список дедлайнов
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: sortBy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - deadlineAt
+              - status
+              - createdAt
+              - updatedAt
+        - name: sortOrder
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+        - name: entityType
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DeadlineEntityType'
+        - name: entityId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: orderId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DeadlineStatus'
+        - name: responsibleUserId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: dateFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: onlyOverdue
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Список дедлайнов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Deadlines
+      operationId: createDeadline
+      summary: Создать дедлайн
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeadlineRequest'
+      responses:
+        '201':
+          description: Дедлайн создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadlines/{deadlineId}:
+    parameters:
+      - $ref: '#/components/parameters/DeadlineId'
+    get:
+      tags:
+        - Deadlines
+      operationId: getDeadlineById
+      summary: Получить дедлайн
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.view
+      responses:
+        '200':
+          description: Дедлайн
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Дедлайн не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags:
+        - Deadlines
+      operationId: overrideDeadline
+      summary: Переопределить дедлайн
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.override
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OverrideDeadlineRequest'
+      responses:
+        '200':
+          description: Дедлайн переопределён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Дедлайн не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadlines/{deadlineId}/pause:
+    parameters:
+      - $ref: '#/components/parameters/DeadlineId'
+    post:
+      tags:
+        - Deadlines
+      operationId: pauseDeadline
+      summary: Поставить дедлайн на паузу
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.pause
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PauseDeadlineRequest'
+      responses:
+        '200':
+          description: Дедлайн поставлен на паузу
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Дедлайн не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadlines/{deadlineId}/resume:
+    parameters:
+      - $ref: '#/components/parameters/DeadlineId'
+    post:
+      tags:
+        - Deadlines
+      operationId: resumeDeadline
+      summary: Возобновить дедлайн
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.pause
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResumeDeadlineRequest'
+      responses:
+        '200':
+          description: Дедлайн возобновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Дедлайн не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadlines/{deadlineId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/DeadlineId'
+    post:
+      tags:
+        - Deadlines
+      operationId: cancelDeadline
+      summary: Отменить дедлайн
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.cancel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelDeadlineRequest'
+      responses:
+        '200':
+          description: Дедлайн отменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Дедлайн не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadline-policies:
+    get:
+      tags:
+        - Deadlines
+      operationId: listDeadlinePolicies
+      summary: Список политик дедлайнов
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.actions.manage
+      responses:
+        '200':
+          description: Политики дедлайнов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlinePolicyListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Deadlines
+      operationId: createDeadlinePolicy
+      summary: Создать политику дедлайнов
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.actions.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeadlinePolicyRequest'
+      responses:
+        '201':
+          description: Политика дедлайнов создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlinePolicyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadline-policies/{policyId}:
+    parameters:
+      - $ref: '#/components/parameters/PolicyId'
+    patch:
+      tags:
+        - Deadlines
+      operationId: updateDeadlinePolicy
+      summary: Обновить политику дедлайнов
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.actions.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeadlinePolicyRequest'
+      responses:
+        '200':
+          description: Политика дедлайнов обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlinePolicyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Политика дедлайнов не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadline-settings:
+    get:
+      tags:
+        - Deadlines
+      operationId: getDeadlineSettings
+      summary: Получить настройки дедлайнов
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.actions.manage
+      responses:
+        '200':
+          description: Настройки дедлайнов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineSettingsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags:
+        - Deadlines
+      operationId: updateDeadlineSettings
+      summary: Обновить настройки дедлайнов
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.actions.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeadlineSettingsRequest'
+      responses:
+        '200':
+          description: Настройки дедлайнов обновлены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineSettingsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -818,7 +2009,7 @@ paths:
       summary: Активировать пользователя
       security:
         - bearerAuth: []
-      x-permission: users.update
+      x-permission: users.activate
       responses:
         '200':
           description: Пользователь активирован
@@ -843,10 +2034,10 @@ paths:
       summary: Проверить состояние VLM-интеграции
       description: |
         Для обычных пользователей endpoint должен возвращать только безопасный минимум.
-        Расширенная диагностика доступна только пользователям с permission vlm.configure или settings.manage.
+        Расширенная диагностика доступна только пользователям с permission vlm.health.view.
       security:
         - bearerAuth: []
-      x-permission: vlm.configure
+      x-permission: vlm.health.view
       responses:
         '200':
           description: Статус VLM-интеграции
@@ -912,6 +2103,20 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/RateLimitExceeded'
+        '502':
+          description: Ошибка upstream VLM provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '504':
+          description: Timeout upstream VLM provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -951,6 +2156,20 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/RateLimitExceeded'
+        '502':
+          description: Ошибка upstream VLM provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '504':
+          description: Timeout upstream VLM provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -1062,6 +2281,44 @@ components:
         type: integer
         format: int64
         minimum: 1
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    PhoneId:
+      name: phoneId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    ProductionStatusId:
+      name: productionStatusId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    DeadlineId:
+      name: deadlineId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PolicyId:
+      name: policyId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     BadRequest:
@@ -1175,6 +2432,64 @@ components:
                     currentVersion: 8
                     clientVersion: 7
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    ClientPhoneConflict:
+      description: Конфликт телефона клиента, refKey или idempotency key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            duplicatePhone:
+              value:
+                error:
+                  code: CLIENT_PHONE_DUPLICATE
+                  message: Client phone already exists
+                  details:
+                    clientId: 123
+                    phoneNumber: '+15551234567'
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+            duplicateRefKey:
+              value:
+                error:
+                  code: CLIENT_PHONE_REF_KEY_DUPLICATE
+                  message: Client phone 1C reference already exists
+                  details:
+                    refKey1c: 4f1dd294-8016-4b1c-a53c-bcae02d88c91
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+            clientChangeUnsupported:
+              value:
+                error:
+                  code: CLIENT_PHONE_CLIENT_CHANGE_UNSUPPORTED
+                  message: Changing client for a phone is not supported
+                  details:
+                    phoneId: 45
+                    currentClientId: 123
+                    requestedClientId: 456
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+            idempotencyKeyReused:
+              value:
+                error:
+                  code: IDEMPOTENCY_KEY_REUSED
+                  message: Idempotency key was reused with a different request
+                  details:
+                    idempotencyKey: client-phone:01HZX8K5T3M2F5F7K9A2S1QW3E
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+            idempotencyInProgress:
+              value:
+                error:
+                  code: IDEMPOTENCY_IN_PROGRESS
+                  message: Idempotent command is still processing
+                  details:
+                    idempotencyKey: client-phone:01HZX8K5T3M2F5F7K9A2S1QW3E
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+            idempotencyFailed:
+              value:
+                error:
+                  code: IDEMPOTENCY_FAILED
+                  message: Idempotent command previously failed
+                  details:
+                    idempotencyKey: client-phone:01HZX8K5T3M2F5F7K9A2S1QW3E
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
     ValidationError:
       description: Ошибка валидации payload/query params
       content:
@@ -1235,6 +2550,23 @@ components:
                   code: UNSUPPORTED_MEDIA_TYPE
                   message: Неподдерживаемый тип файла
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    FeatureDisabled:
+      description: API feature выключена конфигурацией runtime
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            featureDisabled:
+              value:
+                code: SERVICE_UNAVAILABLE
+                message: API feature is disabled
+                details:
+                  feature: deadlines
+                requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
     InternalError:
       description: Внутренняя ошибка сервера
       content:
@@ -1298,21 +2630,35 @@ components:
         - orders.delete
         - orders.export
         - orders.change_status
+        - orders.change_production_status
         - orders.view_audit
         - payments.view
         - payments.create
         - payments.update
         - payments.delete
+        - clients.view
+        - clients.create
+        - clients.update
+        - clients.delete
+        - calendar.view
         - users.view
         - users.create
         - users.update
         - users.change_password
         - users.deactivate
+        - users.activate
         - references.view
         - references.manage
         - analytics.view
         - vlm.use
         - vlm.configure
+        - deadlines.view
+        - deadlines.manage
+        - deadlines.override
+        - deadlines.pause
+        - deadlines.cancel
+        - deadlines.actions.manage
+        - deadlines.audit.view
         - settings.view
         - settings.manage
 
@@ -1368,6 +2714,7 @@ components:
           type: string
           minLength: 1
           maxLength: 200
+          writeOnly: true
 
     AuthResponse:
       type: object
@@ -2371,22 +3718,19 @@ components:
       required:
         - orderStatusId
         - version
+        - idempotencyKey
       properties:
         orderStatusId:
           type: integer
           format: int64
           minimum: 1
-        productionStatusId:
-          type: integer
-          format: int64
-          nullable: true
-        comment:
-          type: string
-          nullable: true
-          maxLength: 1000
         version:
           type: integer
-          minimum: 1
+          minimum: 0
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
 
     DeleteOrderResponse:
       type: object
@@ -2408,6 +3752,586 @@ components:
         requestId:
           type: string
           description: Correlation/request id команды.
+
+    MoveCalendarDateRequest:
+      type: object
+      required:
+        - plannedCompletionDate
+        - version
+        - idempotencyKey
+      properties:
+        plannedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+        version:
+          type: integer
+          minimum: 0
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+
+    ProductionStageEventRequest:
+      type: object
+      required:
+        - version
+        - idempotencyKey
+      properties:
+        version:
+          type: integer
+          minimum: 0
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+
+    ProductionActionResponse:
+      type: object
+      required:
+        - order
+        - requestId
+      properties:
+        order:
+          type: object
+          required:
+            - orderId
+            - version
+          properties:
+            orderId:
+              type: integer
+              format: int64
+            plannedCompletionDate:
+              type: string
+              format: date
+              nullable: true
+            orderStatusId:
+              type: integer
+              format: int64
+            version:
+              type: integer
+              minimum: 0
+        event:
+          type: object
+          nullable: true
+          required:
+            - productionStatusId
+            - active
+          properties:
+            productionEventId:
+              type: integer
+              format: int64
+            productionStatusId:
+              type: integer
+              format: int64
+            active:
+              type: boolean
+        auditId:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+
+    PaymentOrderSummary:
+      type: object
+      required:
+        - orderId
+        - paidAmount
+        - debtAmount
+        - paymentDate
+        - paymentStatusId
+        - version
+      properties:
+        orderId:
+          type: integer
+          format: int64
+        paidAmount:
+          type: number
+          format: decimal
+        debtAmount:
+          type: number
+          format: decimal
+        paymentDate:
+          type: string
+          format: date
+          nullable: true
+        paymentStatusId:
+          type: integer
+          format: int64
+        version:
+          type: integer
+          minimum: 0
+
+    Payment:
+      type: object
+      required:
+        - paymentId
+        - orderId
+        - typePaidId
+        - amount
+        - paymentDate
+        - notes
+        - refKey1c
+        - createdBy
+        - editedBy
+        - createdAt
+        - updatedAt
+      properties:
+        paymentId:
+          type: integer
+          format: int64
+        orderId:
+          type: integer
+          format: int64
+        typePaidId:
+          type: integer
+          format: int64
+        amount:
+          type: number
+          format: decimal
+          minimum: 0
+        paymentDate:
+          type: string
+          format: date
+        notes:
+          type: string
+          maxLength: 1000
+          nullable: true
+        refKey1c:
+          type: string
+          format: uuid
+          nullable: true
+        createdBy:
+          type: integer
+          format: int64
+          nullable: true
+        editedBy:
+          type: integer
+          format: int64
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreatePaymentRequest:
+      type: object
+      required:
+        - orderId
+        - typePaidId
+        - amount
+        - paymentDate
+      properties:
+        orderId:
+          type: integer
+          format: int64
+          minimum: 1
+        typePaidId:
+          type: integer
+          format: int64
+          minimum: 1
+        amount:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+        paymentDate:
+          type: string
+          format: date
+        notes:
+          type: string
+          maxLength: 1000
+          nullable: true
+        refKey1c:
+          type: string
+          format: uuid
+          nullable: true
+
+    UpdatePaymentRequest:
+      type: object
+      minProperties: 1
+      properties:
+        orderId:
+          type: integer
+          format: int64
+          minimum: 1
+        typePaidId:
+          type: integer
+          format: int64
+          minimum: 1
+        amount:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+        paymentDate:
+          type: string
+          format: date
+        notes:
+          type: string
+          maxLength: 1000
+          nullable: true
+        refKey1c:
+          type: string
+          format: uuid
+          nullable: true
+
+    PaymentResponse:
+      type: object
+      required:
+        - payment
+        - order
+      properties:
+        payment:
+          $ref: '#/components/schemas/Payment'
+        order:
+          $ref: '#/components/schemas/PaymentOrderSummary'
+
+    DeletePaymentResponse:
+      type: object
+      required:
+        - paymentId
+        - order
+        - deleted
+      properties:
+        paymentId:
+          type: integer
+          format: int64
+        order:
+          $ref: '#/components/schemas/PaymentOrderSummary'
+        deleted:
+          type: boolean
+          enum:
+            - true
+
+    ClientPhoneType:
+      type: string
+      enum:
+        - mobile
+        - work
+        - home
+        - fax
+
+    ClientPhone:
+      type: object
+      required:
+        - phoneId
+        - clientId
+        - phoneNumber
+        - phoneType
+        - isPrimary
+        - refKey1c
+        - createdBy
+        - editedBy
+        - createdAt
+        - updatedAt
+      properties:
+        phoneId:
+          type: integer
+          format: int64
+        clientId:
+          type: integer
+          format: int64
+        phoneNumber:
+          type: string
+          minLength: 7
+          maxLength: 20
+        phoneType:
+          $ref: '#/components/schemas/ClientPhoneType'
+        isPrimary:
+          type: boolean
+        refKey1c:
+          type: string
+          format: uuid
+          nullable: true
+        createdBy:
+          type: integer
+          format: int64
+          nullable: true
+        editedBy:
+          type: integer
+          format: int64
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateClientPhoneRequest:
+      type: object
+      required:
+        - clientId
+        - phoneNumber
+        - idempotencyKey
+      properties:
+        clientId:
+          type: integer
+          format: int64
+          minimum: 1
+        phoneNumber:
+          type: string
+          minLength: 7
+          maxLength: 20
+        phoneType:
+          allOf:
+            - $ref: '#/components/schemas/ClientPhoneType'
+          default: mobile
+        isPrimary:
+          type: boolean
+          default: false
+        refKey1c:
+          type: string
+          format: uuid
+          nullable: true
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+
+    UpdateClientPhoneRequest:
+      type: object
+      description: |
+        Runtime requires idempotencyKey and at least one mutable field:
+        phoneNumber, phoneType, isPrimary, or refKey1c. clientId is accepted
+        only for validation/compatibility and is not sufficient by itself.
+      required:
+        - idempotencyKey
+      anyOf:
+        - required:
+            - phoneNumber
+        - required:
+            - phoneType
+        - required:
+            - isPrimary
+        - required:
+            - refKey1c
+      properties:
+        clientId:
+          type: integer
+          format: int64
+          minimum: 1
+        phoneNumber:
+          type: string
+          minLength: 7
+          maxLength: 20
+        phoneType:
+          $ref: '#/components/schemas/ClientPhoneType'
+        isPrimary:
+          type: boolean
+        refKey1c:
+          type: string
+          format: uuid
+          nullable: true
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+
+    DeleteClientPhoneRequest:
+      type: object
+      required:
+        - idempotencyKey
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+
+    ClientPhoneResponse:
+      type: object
+      required:
+        - phone
+        - requestId
+      properties:
+        phone:
+          $ref: '#/components/schemas/ClientPhone'
+        demotedPhoneIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+        auditId:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+
+    DeleteClientPhoneResponse:
+      type: object
+      required:
+        - phoneId
+        - clientId
+        - deleted
+        - requestId
+      properties:
+        phoneId:
+          type: integer
+          format: int64
+        clientId:
+          type: integer
+          format: int64
+        deleted:
+          type: boolean
+          enum:
+            - true
+        auditId:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+
+    ImportOrderSnapshotRequest:
+      type: object
+      required:
+        - snapshot
+      properties:
+        snapshot:
+          type: object
+          additionalProperties: true
+          description: Opaque erp.order.snapshot.v1 payload.
+
+    ImportOrderSnapshotBatchRequest:
+      type: object
+      required:
+        - zipBase64
+      properties:
+        fileName:
+          type: string
+          maxLength: 255
+        zipBase64:
+          type: string
+          format: byte
+
+    OrderImportSummary:
+      type: object
+      required:
+        - details
+        - payments
+        - workshops
+        - requirements
+        - dowelingLinks
+        - productionStatusEvents
+        - clientPhones
+        - deadlineInstances
+        - deadlineEvents
+      properties:
+        details:
+          type: integer
+          minimum: 0
+        payments:
+          type: integer
+          minimum: 0
+        workshops:
+          type: integer
+          minimum: 0
+        requirements:
+          type: integer
+          minimum: 0
+        dowelingLinks:
+          type: integer
+          minimum: 0
+        productionStatusEvents:
+          type: integer
+          minimum: 0
+        clientPhones:
+          type: integer
+          minimum: 0
+        deadlineInstances:
+          type: integer
+          minimum: 0
+        deadlineEvents:
+          type: integer
+          minimum: 0
+
+    OrderImportResponse:
+      type: object
+      required:
+        - success
+        - status
+        - orderId
+        - orderName
+        - payloadHash
+        - importRunId
+        - summary
+      properties:
+        success:
+          type: boolean
+          enum:
+            - true
+        status:
+          type: string
+          enum:
+            - created
+            - updated
+            - noop
+        orderId:
+          type: integer
+          format: int64
+        orderName:
+          type: string
+        payloadHash:
+          type: string
+        importRunId:
+          type: string
+          nullable: true
+        summary:
+          $ref: '#/components/schemas/OrderImportSummary'
+
+    OrderImportBatchResponse:
+      type: object
+      required:
+        - success
+        - total
+        - imported
+        - failed
+        - results
+      properties:
+        success:
+          type: boolean
+          enum:
+            - true
+        total:
+          type: integer
+          minimum: 0
+        imported:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        results:
+          type: array
+          items:
+            oneOf:
+              - allOf:
+                  - $ref: '#/components/schemas/OrderImportResponse'
+                  - type: object
+                    required:
+                      - fileName
+                    properties:
+                      fileName:
+                        type: string
+              - type: object
+                required:
+                  - fileName
+                  - success
+                  - errorCode
+                  - message
+                properties:
+                  fileName:
+                    type: string
+                  success:
+                    type: boolean
+                    enum:
+                      - false
+                  errorCode:
+                    type: string
+                  message:
+                    type: string
 
     ExportOrderRequest:
       type: object
@@ -2584,6 +4508,626 @@ components:
           type: string
           nullable: true
 
+    DeadlineEntityType:
+      type: string
+      enum:
+        - order
+        - order_stage
+        - client_action
+        - project
+        - task
+
+    DeadlineSource:
+      type: string
+      enum:
+        - policy
+        - manual
+        - imported
+        - recalculated
+        - system
+
+    DeadlineStatus:
+      type: string
+      enum:
+        - active
+        - paused
+        - expired
+        - completed_on_time
+        - completed_late
+        - cancelled
+        - superseded
+
+    CreateDeadlineRequest:
+      type: object
+      required:
+        - entityType
+        - entityId
+        - deadlineAt
+      properties:
+        entityType:
+          $ref: '#/components/schemas/DeadlineEntityType'
+        entityId:
+          type: string
+          minLength: 1
+          maxLength: 200
+        orderId:
+          type: integer
+          format: int64
+          nullable: true
+        orderWorkshopId:
+          type: integer
+          format: int64
+          nullable: true
+        clientId:
+          type: integer
+          format: int64
+          nullable: true
+        responsibleUserId:
+          type: integer
+          format: int64
+          nullable: true
+        deadlineAt:
+          type: string
+          format: date-time
+        source:
+          allOf:
+            - $ref: '#/components/schemas/DeadlineSource'
+          default: manual
+        metadata:
+          type: object
+          additionalProperties: true
+
+    OverrideDeadlineRequest:
+      type: object
+      required:
+        - deadlineAt
+        - reason
+      properties:
+        deadlineAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        metadata:
+          type: object
+          additionalProperties: true
+
+    PauseDeadlineRequest:
+      type: object
+      required:
+        - pauseMode
+        - pauseReason
+      properties:
+        pauseMode:
+          type: string
+          enum:
+            - pause_without_shift
+            - pause_and_shift_deadline
+        pauseReason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        notes:
+          type: string
+          maxLength: 2000
+          nullable: true
+
+    ResumeDeadlineRequest:
+      type: object
+      properties:
+        notes:
+          type: string
+          maxLength: 2000
+          nullable: true
+
+    CancelDeadlineRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+
+    Deadline:
+      type: object
+      required:
+        - deadlineId
+        - entityType
+        - entityId
+        - deadlineAt
+        - status
+        - source
+        - isManuallyOverridden
+        - createdAt
+        - updatedAt
+      properties:
+        deadlineId:
+          type: string
+          format: uuid
+        policyId:
+          type: string
+          format: uuid
+          nullable: true
+        policyVersionId:
+          type: string
+          format: uuid
+          nullable: true
+        entityType:
+          $ref: '#/components/schemas/DeadlineEntityType'
+        entityId:
+          type: string
+        parentEntityType:
+          type: string
+          nullable: true
+        parentEntityId:
+          type: string
+          nullable: true
+        orderId:
+          type: integer
+          format: int64
+          nullable: true
+        orderWorkshopId:
+          type: integer
+          format: int64
+          nullable: true
+        clientId:
+          type: integer
+          format: int64
+          nullable: true
+        responsibleUserId:
+          type: integer
+          format: int64
+          nullable: true
+        deadlineAt:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/DeadlineStatus'
+        source:
+          $ref: '#/components/schemas/DeadlineSource'
+        isManuallyOverridden:
+          type: boolean
+        policySnapshot:
+          type: object
+          nullable: true
+          additionalProperties: true
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiredAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DeadlineResponse:
+      type: object
+      required:
+        - deadline
+      properties:
+        deadline:
+          $ref: '#/components/schemas/Deadline'
+
+    DeadlineListResponse:
+      type: object
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deadline'
+        pagination:
+          type: object
+          required:
+            - page
+            - pageSize
+            - total
+            - totalPages
+          properties:
+            page:
+              type: integer
+              minimum: 1
+            pageSize:
+              type: integer
+              minimum: 1
+            total:
+              type: integer
+              minimum: 0
+            totalPages:
+              type: integer
+              minimum: 0
+
+    OrderDeadlineListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deadline'
+
+    DeadlineEvent:
+      type: object
+      required:
+        - deadlineEventId
+        - deadlineId
+        - eventType
+        - severity
+        - entityType
+        - entityId
+        - eventAt
+        - createdAt
+      properties:
+        deadlineEventId:
+          type: string
+          format: uuid
+        deadlineId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+        severity:
+          type: string
+          enum:
+            - info
+            - warning
+            - critical
+        entityType:
+          $ref: '#/components/schemas/DeadlineEntityType'
+        entityId:
+          type: string
+        orderId:
+          type: integer
+          format: int64
+          nullable: true
+        orderWorkshopId:
+          type: integer
+          format: int64
+          nullable: true
+        clientId:
+          type: integer
+          format: int64
+          nullable: true
+        deadlineAt:
+          type: string
+          format: date-time
+          nullable: true
+        eventAt:
+          type: string
+          format: date-time
+        delayMinutes:
+          type: integer
+          nullable: true
+        payload:
+          type: object
+          nullable: true
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+
+    DeadlineEventListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineEvent'
+
+    DeadlineSummaryItem:
+      type: object
+      required:
+        - deadlineId
+        - deadlineAt
+        - status
+        - remainingMinutes
+        - delayMinutes
+        - severity
+      properties:
+        deadlineId:
+          type: string
+          format: uuid
+        deadlineAt:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/DeadlineStatus'
+        remainingMinutes:
+          type: integer
+          nullable: true
+        delayMinutes:
+          type: integer
+          nullable: true
+        severity:
+          type: string
+          enum:
+            - info
+            - warning
+            - critical
+
+    DeadlineSummaryResponse:
+      type: object
+      required:
+        - orderId
+        - finalDeadline
+        - currentStageDeadline
+        - counts
+      properties:
+        orderId:
+          type: integer
+          format: int64
+        finalDeadline:
+          allOf:
+            - $ref: '#/components/schemas/DeadlineSummaryItem'
+          nullable: true
+        currentStageDeadline:
+          allOf:
+            - $ref: '#/components/schemas/DeadlineSummaryItem'
+            - type: object
+              required:
+                - orderWorkshopId
+              properties:
+                orderWorkshopId:
+                  type: integer
+                  format: int64
+                  nullable: true
+                stageName:
+                  type: string
+                  nullable: true
+          nullable: true
+        counts:
+          type: object
+          required:
+            - active
+            - expired
+            - completedLate
+            - completedOnTime
+          properties:
+            active:
+              type: integer
+              minimum: 0
+            expired:
+              type: integer
+              minimum: 0
+            completedLate:
+              type: integer
+              minimum: 0
+            completedOnTime:
+              type: integer
+              minimum: 0
+
+    DeadlinePolicyDurationUnit:
+      type: string
+      nullable: true
+      enum:
+        - minute
+        - hour
+        - day
+        - working_hour
+        - working_day
+
+    DeadlinePolicy:
+      type: object
+      required:
+        - policyId
+        - policyCode
+        - policyName
+        - scopeType
+        - isEnabled
+        - createdAt
+        - updatedAt
+      properties:
+        policyId:
+          type: string
+          format: uuid
+        policyCode:
+          type: string
+        policyName:
+          type: string
+        scopeType:
+          $ref: '#/components/schemas/DeadlineEntityType'
+        targetType:
+          type: string
+          nullable: true
+        targetCode:
+          type: string
+          nullable: true
+        durationValue:
+          type: integer
+          nullable: true
+        durationUnit:
+          $ref: '#/components/schemas/DeadlinePolicyDurationUnit'
+        startPoint:
+          type: string
+          nullable: true
+        isEnabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DeadlinePolicyListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlinePolicy'
+
+    DeadlinePolicyResponse:
+      type: object
+      required:
+        - policy
+      properties:
+        policy:
+          $ref: '#/components/schemas/DeadlinePolicy'
+
+    CreateDeadlinePolicyRequest:
+      type: object
+      required:
+        - policyCode
+        - policyName
+        - scopeType
+      properties:
+        policyCode:
+          type: string
+          minLength: 3
+          maxLength: 100
+        policyName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        scopeType:
+          $ref: '#/components/schemas/DeadlineEntityType'
+        targetType:
+          type: string
+          maxLength: 100
+          nullable: true
+        targetCode:
+          type: string
+          maxLength: 100
+          nullable: true
+        durationValue:
+          type: integer
+          nullable: true
+        durationUnit:
+          $ref: '#/components/schemas/DeadlinePolicyDurationUnit'
+        startPoint:
+          type: string
+          maxLength: 100
+          nullable: true
+        isEnabled:
+          type: boolean
+        config:
+          type: object
+          additionalProperties: true
+
+    UpdateDeadlinePolicyRequest:
+      type: object
+      minProperties: 1
+      properties:
+        policyName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        targetType:
+          type: string
+          maxLength: 100
+          nullable: true
+        targetCode:
+          type: string
+          maxLength: 100
+          nullable: true
+        durationValue:
+          type: integer
+          nullable: true
+        durationUnit:
+          $ref: '#/components/schemas/DeadlinePolicyDurationUnit'
+        startPoint:
+          type: string
+          maxLength: 100
+          nullable: true
+        isEnabled:
+          type: boolean
+        config:
+          type: object
+          additionalProperties: true
+
+    DeadlineSettings:
+      type: object
+      required:
+        - reminderEventsEnabled
+        - notifyAssigneeEnabled
+        - notifyManagerEnabled
+        - notifyDepartmentHeadEnabled
+        - setOverdueFlagEnabled
+        - changeOrderStatusEnabled
+        - changeProductionStatusEnabled
+        - escalationEnabled
+        - repeatNotificationsEnabled
+      properties:
+        reminderEventsEnabled:
+          type: boolean
+        notifyAssigneeEnabled:
+          type: boolean
+        notifyManagerEnabled:
+          type: boolean
+        notifyDepartmentHeadEnabled:
+          type: boolean
+        setOverdueFlagEnabled:
+          type: boolean
+        changeOrderStatusEnabled:
+          type: boolean
+        changeProductionStatusEnabled:
+          type: boolean
+        escalationEnabled:
+          type: boolean
+        repeatNotificationsEnabled:
+          type: boolean
+
+    DeadlineSettingsResponse:
+      type: object
+      required:
+        - settings
+      properties:
+        settings:
+          $ref: '#/components/schemas/DeadlineSettings'
+
+    UpdateDeadlineSettingsRequest:
+      type: object
+      minProperties: 1
+      properties:
+        reminderEventsEnabled:
+          type: boolean
+        notifyAssigneeEnabled:
+          type: boolean
+        notifyManagerEnabled:
+          type: boolean
+        notifyDepartmentHeadEnabled:
+          type: boolean
+        setOverdueFlagEnabled:
+          type: boolean
+        changeOrderStatusEnabled:
+          type: boolean
+        changeProductionStatusEnabled:
+          type: boolean
+        escalationEnabled:
+          type: boolean
+        repeatNotificationsEnabled:
+          type: boolean
+
     UserListResponse:
       type: object
       required:
@@ -2666,6 +5210,7 @@ components:
           type: string
           minLength: 8
           maxLength: 200
+          writeOnly: true
         role:
           $ref: '#/components/schemas/UserRole'
         employeeId:
@@ -2713,6 +5258,7 @@ components:
           type: string
           minLength: 8
           maxLength: 200
+          writeOnly: true
         revokeExistingSessions:
           type: boolean
           default: true
