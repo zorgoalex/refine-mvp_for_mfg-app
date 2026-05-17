@@ -52,7 +52,8 @@ describe('Swagger controller metadata', () => {
 });
 
 function readBackendFile(path: string): string {
-  const fullPath = resolve(process.cwd(), path);
-  expect(existsSync(fullPath), `${path} should exist`).toBe(true);
-  return readFileSync(fullPath, 'utf8');
+  const candidates = [resolve(process.cwd(), path), resolve(process.cwd(), 'backend', path)];
+  const fullPath = candidates.find((candidate) => existsSync(candidate));
+  expect(fullPath, `${path} should exist`).toBeDefined();
+  return readFileSync(fullPath as string, 'utf8');
 }
