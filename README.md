@@ -94,6 +94,21 @@
 
 ## Конфигурация и авторизация
 
+Project-level secrets for local/stage smoke commands live outside this repo in
+`/home/ovhtest/projects/erp_dev/.env`. In particular,
+`VERCEL_AUTOMATION_BYPASS_SECRET` for protected Vercel stage checks may be present
+there even when it is not exported in the current shell. Load it only in a
+subshell/command context and never print the file or secret values, for example:
+
+```bash
+set -a
+. /home/ovhtest/projects/erp_dev/.env
+set +a
+curl -fsS \
+  -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+  https://app-test.mebelkz.app/runtime-config.json
+```
+
 Frontend env:
 
 ```env
