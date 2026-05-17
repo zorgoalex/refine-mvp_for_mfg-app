@@ -1,6 +1,7 @@
 import type { AuthTokens, UserIdentity } from '../types/auth';
 import { authApi } from '../api/authApi';
 import { authSession } from '../api/authSession';
+import { legacyApiRoutes } from '../api/legacyApiRoutes';
 import { featureFlags } from '../config/featureFlags';
 
 /**
@@ -129,7 +130,7 @@ export function isTokenExpired(token: string): boolean {
 /**
  * Обновляет Access Token используя Refresh Token
  * В backend auth режиме использует cookie-backed /api/v1/auth/refresh.
- * Legacy localStorage refresh token flow остается только для flag-off режима.
+ * Legacy localStorage refresh token flow uses the legacy refresh endpoint only for flag-off mode.
  * @returns новый Access Token или null при ошибке
  */
 export async function refreshAccessToken(): Promise<string | null> {
@@ -153,7 +154,7 @@ export async function refreshAccessToken(): Promise<string | null> {
   }
 
   try {
-    const response = await fetch('/api/refresh', {
+    const response = await fetch(legacyApiRoutes.auth.refresh, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),

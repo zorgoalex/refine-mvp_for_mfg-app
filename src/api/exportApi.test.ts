@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { exportApi, normalizeExportOrderRequest } from './exportApi';
+import { legacyApiRoutes } from './legacyApiRoutes';
 
 describe('exportApi', () => {
   beforeEach(() => {
@@ -75,7 +76,7 @@ describe('exportApi', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/42/export/google-drive');
-    expect(fetchMock.mock.calls[0][0]).not.toBe('/api/order-export-to-drive');
+    expect(fetchMock.mock.calls[0][0]).not.toBe(legacyApiRoutes.orderExport.toDrive);
   });
 
   it('normalizes default export request', () => {

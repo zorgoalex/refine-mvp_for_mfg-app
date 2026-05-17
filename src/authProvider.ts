@@ -5,6 +5,7 @@ import { logAuthError } from './utils/notificationLogger';
 import { useNotificationStore } from './stores/notificationStore';
 import { authApi } from './api/authApi';
 import { authSession } from './api/authSession';
+import { legacyApiRoutes } from './api/legacyApiRoutes';
 import { featureFlags } from './config/featureFlags';
 
 /**
@@ -14,7 +15,7 @@ import { featureFlags } from './config/featureFlags';
 export const authProvider: AuthBindings = {
   /**
    * Выполняет вход пользователя
-   * Backend mode uses /api/v1/auth/login; legacy flag-off mode calls /api/login.
+   * Backend mode uses /api/v1/auth/login; legacy flag-off mode calls the legacy login endpoint.
    */
   login: async (credentials: any) => {
     if (featureFlags.useBackendAuth) {
@@ -24,7 +25,7 @@ export const authProvider: AuthBindings = {
     try {
       const { username, password } = credentials;
 
-      const response = await fetch('/api/login', {
+      const response = await fetch(legacyApiRoutes.auth.login, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),

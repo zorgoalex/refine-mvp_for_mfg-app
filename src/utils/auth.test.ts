@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { legacyApiRoutes } from '../api/legacyApiRoutes';
 
 describe('auth refresh cutover behavior', () => {
   beforeEach(() => {
@@ -14,7 +15,7 @@ describe('auth refresh cutover behavior', () => {
     vi.resetModules();
   });
 
-  it('uses backend cookie refresh and never calls legacy /api/refresh in backend auth mode', async () => {
+  it('uses backend cookie refresh and never calls legacy refresh endpoint in backend auth mode', async () => {
     vi.doMock('../config/featureFlags', () => ({
       featureFlags: {
         useBackendAuth: true,
@@ -53,7 +54,7 @@ describe('auth refresh cutover behavior', () => {
         credentials: 'include',
       }),
     );
-    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain('/api/refresh');
+    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain(legacyApiRoutes.auth.refresh);
     expect(authSession.getAccessToken()).toBe('backend-access-token');
     expect(localStorage.getItem('refresh_token')).toBeNull();
   });

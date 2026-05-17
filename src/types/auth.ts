@@ -31,13 +31,13 @@ export interface UserIdentity {
 }
 
 /**
- * Ответ от endpoint /api/login
+ * Ответ от legacy login endpoint
  */
 export interface LoginResponse extends AuthTokens {
   user: UserIdentity;
 }
 
 /**
- * Ответ от endpoint /api/refresh
+ * Ответ от legacy refresh endpoint
  */
 export interface RefreshResponse extends AuthTokens {}

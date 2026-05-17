@@ -6,6 +6,7 @@
 
 import type { GenerateOrderExcelParams } from './generateOrderExcel';
 import { formatDate } from '../dateFormat';
+import { legacyApiRoutes } from '../../api/legacyApiRoutes';
 
 /**
  * Кастомная ошибка загрузки на GAS
@@ -125,11 +126,11 @@ export async function uploadOrderExcelToApi(
       productionStatusName: viewData.production_status_name || '',
     };
 
-    console.log('[uploadToApi] Sending to Vercel API: /api/order-export-to-drive');
+    console.log('[uploadToApi] Sending to Vercel API:', legacyApiRoutes.orderExport.toDrive);
     console.log('[uploadToApi] Payload:', orderPayload);
 
     // Отправка POST запроса на Vercel API (безопасный прокси к GAS)
-    const response = await fetch('/api/order-export-to-drive', {
+    const response = await fetch(legacyApiRoutes.orderExport.toDrive, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

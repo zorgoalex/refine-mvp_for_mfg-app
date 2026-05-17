@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canViewNavigationResource,
   canViewSettingsCategory,
+  isLegacyAdminUser,
 } from './navigationPermissions';
 
 describe('navigation permissions', () => {
@@ -20,7 +21,7 @@ describe('navigation permissions', () => {
     ).toBe(false);
   });
 
-  it('uses explicit resource permissions and falls back to references.view', () => {
+  it('uses explicit resource permissions for known resources', () => {
     expect(
       canViewNavigationResource('users', { permissions: ['users.view'] }, true),
     ).toBe(true);
@@ -33,5 +34,54 @@ describe('navigation permissions', () => {
     expect(
       canViewNavigationResource('materials', { permissions: ['orders.view'] }, true),
     ).toBe(false);
+    ['order_statuses', 'payment_statuses', 'payment_types'].forEach((resourceName) => {
+      expect(
+        canViewNavigationResource(resourceName, { permissions: ['references.view'] }, true),
+      ).toBe(true);
+      expect(
+        canViewNavigationResource(resourceName, { permissions: ['orders.view'] }, true),
+      ).toBe(false);
+    });
+  });
+
+  it('requires orders.view for production-adjacent order resources in backend mode', () => {
+    ['doweling_orders_view', 'order_workshops', 'order_resource_requirements'].forEach(
+      (resourceName) => {
+        expect(
+          canViewNavigationResource(
+            resourceName,
+            { permissions: ['references.view'] },
+            true,
+          ),
+        ).toBe(false);
+        expect(
+          canViewNavigationResource(resourceName, { permissions: ['orders.view'] }, true),
+        ).toBe(true);
+      },
+    );
+  });
+
+  it('hides unknown resources in backend mode even when the user has references.view', () => {
+    expect(
+      canViewNavigationResource(
+        'unknown_resource',
+        { permissions: ['references.view'] },
+        true,
+      ),
+    ).toBe(false);
+  });
+
+  it('treats legacy role_id 1 and 2 as admin only when backend permissions are disabled', () => {
+    expect(isLegacyAdminUser({ role_id: 1 }, false)).toBe(true);
+    expect(isLegacyAdminUser({ role_id: 2 }, false)).toBe(true);
+    expect(isLegacyAdminUser({ role_id: 1 }, true)).toBe(false);
+    expect(isLegacyAdminUser({ role_id: 2 }, true)).toBe(false);
+  });
+
+  it('treats legacy admin role strings as admin only when backend permissions are disabled', () => {
+    expect(isLegacyAdminUser({ role: 'admin' }, false)).toBe(true);
+    expect(isLegacyAdminUser({ role: 'superadmin' }, false)).toBe(true);
+    expect(isLegacyAdminUser({ role: 'admin' }, true)).toBe(false);
+    expect(isLegacyAdminUser({ role: 'superadmin' }, true)).toBe(false);
   });
 });

@@ -4,35 +4,22 @@ import { Form, Input, Select, Checkbox, Button, Divider, message, Card } from "a
 import { authStorage } from "../../utils/auth";
 import { useState } from "react";
 import { usersApi } from "../../api/usersApi";
+import { legacyApiRoutes } from "../../api/legacyApiRoutes";
 import { featureFlags } from "../../config/featureFlags";
+import {
+  mapBackendUpdateUserRequest,
+  mapLegacyUserFormToHasuraPayload,
+  mapUserRecordToFormData,
+} from "./userFormMapping";
 
 export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps, queryResult } = useForm({
     // Преобразуем данные при загрузке: role_id → role
     queryOptions: {
-      select: (data) => {
-        const roleIdMap: Record<number, string> = {
-          1: 'admin',
-          10: 'manager',
-          11: 'operator',
-          15: 'top_manager',
-          20: 'worker',
-          100: 'viewer',
-        };
-
-        return {
-          ...data,
-          data: {
-            ...data.data,
-            role:
-              typeof data.data.role === 'string'
-                ? data.data.role
-                : data.data.role_id
-                  ? roleIdMap[data.data.role_id]
-                  : undefined,
-          },
-        };
-      },
+      select: (data) => ({
+        ...data,
+        data: mapUserRecordToFormData(data.data),
+      }),
     },
     // Преобразуем данные при сохранении: role → role_id
     onMutationSuccess: () => {
@@ -44,16 +31,6 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   const [passwordForm] = Form.useForm();
 
   const userId = queryResult?.data?.data?.user_id ?? queryResult?.data?.data?.id;
-
-  // Обратная карта для сохранения
-  const roleNameToId: Record<string, number> = {
-    admin: 1,
-    manager: 10,
-    operator: 11,
-    top_manager: 15,
-    worker: 20,
-    viewer: 100,
-  };
 
   const handlePasswordChange = async (values: { new_password: string }) => {
     setPasswordLoading(true);
@@ -76,7 +53,7 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
         return;
       }
 
-      const response = await fetch('/api/users/change-password', {
+      const response = await fetch(legacyApiRoutes.users.changePassword, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,13 +85,7 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   // Кастомный onFinish для преобразования role → role_id
   const handleFinish = (values: any) => {
     if (featureFlags.useBackendUsers) {
-      usersApi.update(Number(userId), {
-        username: values.username,
-        email: values.email,
-        role: values.role,
-        fullName: values.full_name || null,
-        isActive: values.is_active,
-      }).then(() => {
+      usersApi.update(Number(userId), mapBackendUpdateUserRequest(values)).then(() => {
         message.success('Данные пользователя обновлены');
       }).catch((error) => {
         console.error('Update user error:', error);
@@ -123,19 +94,8 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
       return;
     }
 
-    const { role, ...rest } = values;
-
-    // Преобразуем role в role_id
-    const dataToSave = {
-      ...rest,
-      role_id: role ? roleNameToId[role] : undefined,
-    };
-
-    // Удаляем поле role, чтобы оно не попало в GraphQL
-    delete (dataToSave as any).role;
-
     // Вызываем оригинальный onFinish с преобразованными данными
-    formProps.onFinish?.(dataToSave);
+    formProps.onFinish?.(mapLegacyUserFormToHasuraPayload(values));
   };
 
   return (

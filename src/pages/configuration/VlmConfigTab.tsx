@@ -15,6 +15,7 @@ import {
   ApiOutlined,
 } from '@ant-design/icons';
 import { vlmApi } from '../../api/vlmApi';
+import { legacyApiRoutes } from '../../api/legacyApiRoutes';
 import type { VlmHealthResponse } from '../../api/types/vlmApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { VlmProvidersSection } from './components/VlmProvidersSection';
@@ -57,7 +58,7 @@ export const VlmConfigTab: React.FC = () => {
       if (featureFlags.useBackendVlm) {
         setHealthStatus(mapBackendHealthStatus(await vlmApi.health()));
       } else {
-        const response = await fetch('/api/vlm/health');
+        const response = await fetch(legacyApiRoutes.vlm.health);
         const data = await response.json();
         setHealthStatus(data);
       }

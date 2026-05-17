@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authSession } from './authSession';
+import { legacyApiRoutes } from './legacyApiRoutes';
 import { normalizeVlmAnalyzeRequest, vlmApi } from './vlmApi';
 
 describe('vlmApi', () => {
@@ -104,7 +105,7 @@ describe('vlmApi', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/vlm/analyze');
-    expect(fetchMock.mock.calls[0][0]).not.toBe('/api/vlm/analyze');
+    expect(fetchMock.mock.calls[0][0]).not.toBe(legacyApiRoutes.vlm.analyze);
   });
 
   it('normalizes blank optional analyze values', () => {

@@ -4,7 +4,9 @@ import { Form, Input, Select, Checkbox, message } from "antd";
 import { authStorage } from "../../utils/auth";
 import { useState } from "react";
 import { usersApi } from "../../api/usersApi";
+import { legacyApiRoutes } from "../../api/legacyApiRoutes";
 import { featureFlags } from "../../config/featureFlags";
+import { mapBackendCreateUserRequest } from "./userFormMapping";
 
 export const UserCreate: React.FC<IResourceComponentsProps> = () => {
   const { list } = useNavigation();
@@ -14,14 +16,7 @@ export const UserCreate: React.FC<IResourceComponentsProps> = () => {
     setLoading(true);
     try {
       if (featureFlags.useBackendUsers) {
-        await usersApi.create({
-          username: values.username,
-          email: values.email,
-          password: values.password,
-          role: values.role,
-          fullName: values.full_name || null,
-          isActive: values.is_active ?? true,
-        });
+        await usersApi.create(mapBackendCreateUserRequest(values));
 
         message.success('Пользователь успешно создан');
         list('users');
@@ -35,7 +30,7 @@ export const UserCreate: React.FC<IResourceComponentsProps> = () => {
         return;
       }
 
-      const response = await fetch('/api/users/create', {
+      const response = await fetch(legacyApiRoutes.users.create, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

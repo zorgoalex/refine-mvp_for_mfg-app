@@ -44,6 +44,7 @@ import { featureFlags } from "../config/featureFlags";
 import {
   canViewNavigationResource,
   canViewSettingsCategory,
+  isLegacyAdminUser,
 } from "../utils/navigationPermissions";
 import { can } from "../utils/permissions";
 
@@ -166,17 +167,10 @@ export const CustomSider: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
 
-  const currentUser = useMemo(
-    () => (featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser()),
-    [],
-  );
+  const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
   const legacyIsAdmin = useMemo(
-    () =>
-      currentUser?.role_id === 1 ||
-      currentUser?.role_id === 2 ||
-      currentUser?.role === "admin" ||
-      currentUser?.role === "superadmin",
-    [currentUser],
+    () => isLegacyAdminUser(currentUser, featureFlags.useBackendPermissions),
+    [currentUser, featureFlags.useBackendPermissions],
   );
   const canViewSettings = useMemo(
     () =>
@@ -185,11 +179,11 @@ export const CustomSider: React.FC = () => {
         featureFlags.useBackendPermissions,
         legacyIsAdmin,
       ),
-    [currentUser, legacyIsAdmin],
+    [currentUser, legacyIsAdmin, featureFlags.useBackendPermissions],
   );
   const canCreateOrders = useMemo(
     () => !featureFlags.useBackendPermissions || can("orders.create", currentUser),
-    [currentUser],
+    [currentUser, featureFlags.useBackendPermissions],
   );
 
   const categorizedResources = useMemo(() => {
@@ -224,7 +218,7 @@ export const CustomSider: React.FC = () => {
     });
 
     return categories;
-  }, [resources, currentUser, canViewSettings]);
+  }, [resources, currentUser, canViewSettings, featureFlags.useBackendPermissions]);
 
   const selectedKey = useMemo(() => {
     // Sort resources by route length descending to match longer/more specific routes first

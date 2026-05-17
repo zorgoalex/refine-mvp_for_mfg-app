@@ -9,6 +9,7 @@
 
 import { useState, useCallback } from 'react';
 import { vlmApi } from '../api/vlmApi';
+import { legacyApiRoutes } from '../api/legacyApiRoutes';
 import type { VlmAnalyzeRequest, VlmAnalyzeResponse } from '../api/types/vlmApi.types';
 import { featureFlags } from '../config/featureFlags';
 import {
@@ -103,7 +104,7 @@ export interface AnalyzeOptions {
 // Helper: Get auth token
 // ============================================================================
 
-function getAuthToken(): string | null {
+function getLegacyAuthToken(): string | null {
   return localStorage.getItem('access_token');
 }
 
@@ -159,7 +160,7 @@ export const useVlmApi = (): UseVlmApiResult => {
         };
       }
 
-      const response = await fetch('/api/vlm/health');
+      const response = await fetch(legacyApiRoutes.vlm.health);
       const data = await response.json();
       return data;
     } catch (err: any) {
@@ -180,7 +181,7 @@ export const useVlmApi = (): UseVlmApiResult => {
         return await vlmApi.upload(file, 'vlm');
       }
 
-      const token = getAuthToken();
+      const token = getLegacyAuthToken();
       if (!token) {
         throw new Error('Not authenticated');
       }
@@ -188,7 +189,7 @@ export const useVlmApi = (): UseVlmApiResult => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('/api/vlm/upload', {
+      const response = await fetch(legacyApiRoutes.vlm.upload, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -233,7 +234,7 @@ export const useVlmApi = (): UseVlmApiResult => {
         return mapBackendAnalyzeResult(backendResult);
       }
 
-      const token = getAuthToken();
+      const token = getLegacyAuthToken();
       if (!token) {
         throw new Error('Not authenticated');
       }
@@ -307,7 +308,7 @@ export const useVlmApi = (): UseVlmApiResult => {
         }
       }
 
-      const response = await fetch('/api/vlm/analyze', {
+      const response = await fetch(legacyApiRoutes.vlm.analyze, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

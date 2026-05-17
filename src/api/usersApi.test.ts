@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { legacyApiRoutes } from './legacyApiRoutes';
 import { usersApi, validateUserId } from './usersApi';
 import type { UserDto } from './types/userApi.types';
 
@@ -55,7 +56,7 @@ describe('usersApi', () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/v1/users');
-    expect(url).not.toBe('/api/users/create');
+    expect(url).not.toBe(legacyApiRoutes.users.create);
     expect(init?.method).toBe('POST');
     expect(init?.body).toBe(
       JSON.stringify({
@@ -81,7 +82,7 @@ describe('usersApi', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/users/11');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/users/11/change-password');
-    expect(fetchMock.mock.calls[1][0]).not.toBe('/api/users/change-password');
+    expect(fetchMock.mock.calls[1][0]).not.toBe(legacyApiRoutes.users.changePassword);
     expect(fetchMock.mock.calls[1][1]?.method).toBe('POST');
     expect(fetchMock.mock.calls[1][1]?.body).toBe(
       JSON.stringify({
