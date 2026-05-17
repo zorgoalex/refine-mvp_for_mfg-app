@@ -63,15 +63,15 @@
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Representative protected endpoints reject missing/invalid auth. | Blocked | Evidence not collected yet. |
-| Orders policy tests cover API denial. | Blocked | Evidence not collected yet. |
-| Payments policy tests cover API denial. | Blocked | Evidence not collected yet. |
-| Users policy tests cover API denial. | Blocked | Evidence not collected yet. |
-| Production actions policy tests cover API denial. | Blocked | Evidence not collected yet. |
-| Client phones policy tests cover API denial. | Blocked | Evidence not collected yet. |
-| VLM policy tests cover API denial. | Blocked | Evidence not collected yet. |
-| Deadline Engine policy tests cover API denial. | Blocked | Evidence not collected yet. |
-| UI hiding is not treated as a security boundary. | Blocked | Evidence not collected yet. |
+| Representative protected endpoints reject missing/invalid auth. | Pass | `backend/src/permissions/permissions.guard.test.ts` asserts missing user returns `AUTH_REQUIRED` 401 and missing `orders.update` permission returns `PERMISSION_DENIED` 403; controller tests in orders/users/VLM also reject missing `request.user`. |
+| Orders policy tests cover API denial. | Pass | `backend/src/permissions/policies/order-access.policy.test.ts` denies manager access to foreign orders, worker whole-order update, and viewer update/export; `backend/src/modules/orders/http/orders.controller.test.ts` and `backend/src/modules/orders/http/order-export.controller.test.ts` reject missing users and service-level denials. |
+| Payments policy tests cover API denial. | Pass | `backend/src/permissions/policies/payment-access.policy.test.ts` denies manager payment creation/update on foreign orders and operator payment view; `backend/src/modules/payments/http/payments.controller.test.ts` covers controller rejection paths. |
+| Users policy tests cover API denial. | Pass | `backend/src/permissions/policies/user-access.policy.test.ts` blocks lower-role administration, admin peer/superadmin management, self-deactivation, and activation without target manageability; `backend/src/modules/users/http/users.controller.test.ts` rejects missing users and service denials. |
+| Production actions policy tests cover API denial. | Pass | `backend/src/modules/production-actions/application/production-action.service.test.ts` requires command-specific permissions before delegation; `backend/src/modules/production-actions/adapters/pg-production-action-repository.test.ts` denies manager actions outside own order scope before mutation; `tests/production-actions-backend-cutover.spec.ts` manager scope denial case passed under Playwright. |
+| Client phones policy tests cover API denial. | Pass | `backend/src/modules/client-phones/application/client-phone.service.test.ts` returns `PERMISSION_DENIED` 403 for a user without required client phone permissions; `tests/client-phones-backend-cutover.spec.ts` no-fallback denial case passed under Playwright. |
+| VLM policy tests cover API denial. | Pass | `backend/src/modules/vlm/application/vlm.service.test.ts` requires `vlm.health.view` for health and `vlm.use` for upload/analyze; `backend/src/modules/vlm/http/vlm.controller.test.ts` rejects missing users. |
+| Deadline Engine policy tests cover API denial. | Pass | `backend/src/modules/deadlines/application/deadline-query.service.test.ts` and `backend/src/modules/deadlines/application/deadline-command.service.test.ts` assert `PERMISSION_DENIED` 403 for missing deadline permissions; deadline HTTP tests fail closed when disabled/read-only. |
+| UI hiding is not treated as a security boundary. | Pass | Authorization evidence above is from backend guard, policy, service, repository, controller, and backend-enabled cutover tests; UI-only hiding was not used as pass evidence. |
 
 ## Rate Limit
 
