@@ -71,6 +71,21 @@ services:
     networks:
       - back
 
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - back
+
   hasura:
     image: hasura/graphql-engine:v2.40.0
     restart: unless-stopped
@@ -127,9 +142,11 @@ services:
       TRUST_PROXY: "true"
       SWAGGER_ENABLED: ${BACKEND_SWAGGER_ENABLED:-false}
       READINESS_REQUIRE_DATABASE: "true"
-      READINESS_REQUIRE_REDIS: "false"
+      READINESS_REQUIRE_REDIS: ${READINESS_REQUIRE_REDIS:-true}
       DATABASE_URL: postgres://${PG_USER}:${PG_PASSWORD}@postgresdb:5432/${PG_DB}
       DATABASE_SSL: "false"
+      BACKEND_RATE_LIMIT_STORE: ${BACKEND_RATE_LIMIT_STORE:-redis}
+      RATE_LIMIT_REDIS_URL: ${RATE_LIMIT_REDIS_URL:-redis://valkey:6379}
       JWT_ACCESS_SECRET: ${HASURA_JWT_SECRET}
       REFRESH_TOKEN_PEPPER: ${BACKEND_REFRESH_TOKEN_PEPPER}
       REFRESH_COOKIE_SECURE: "true"
@@ -164,6 +181,8 @@ services:
     depends_on:
       postgresdb:
         condition: service_healthy
+      valkey:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health/live >/dev/null || exit 1"]
       interval: 30s
@@ -190,3 +209,6 @@ networks:
     internal: true
   host_access:
     driver: bridge
+
+volumes:
+  valkey_data:
