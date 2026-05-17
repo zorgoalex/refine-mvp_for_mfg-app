@@ -12,6 +12,15 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OrderQueryService } from '../application/order-query.service';
@@ -36,6 +45,642 @@ import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 export interface SaveOrderResponseDto {
   order: OrderDto;
 }
+
+const nullableStringSwaggerSchema = { type: 'string', nullable: true } as const;
+const nullableIntegerSwaggerSchema = { type: 'integer', nullable: true } as const;
+const nullableNumberSwaggerSchema = { type: 'number', nullable: true } as const;
+const dateOnlySwaggerSchema = { type: 'string', format: 'date' } as const;
+
+const orderPaginationSwaggerSchema = {
+  type: 'object',
+  required: ['page', 'pageSize', 'total', 'totalPages'],
+  properties: {
+    page: { type: 'integer' },
+    pageSize: { type: 'integer' },
+    total: { type: 'integer' },
+    totalPages: { type: 'integer' },
+  },
+} as const;
+
+const saveOrderHeaderSwaggerSchema = {
+  type: 'object',
+  required: ['orderName', 'clientId', 'orderDate', 'orderStatusId'],
+  properties: {
+    orderId: { type: 'integer' },
+    orderName: { type: 'string' },
+    clientId: { type: 'integer' },
+    orderDate: dateOnlySwaggerSchema,
+    priority: { type: 'integer' },
+    managerId: nullableIntegerSwaggerSchema,
+    orderStatusId: { type: 'integer' },
+    paymentStatusId: nullableIntegerSwaggerSchema,
+    productionStatusId: nullableIntegerSwaggerSchema,
+    productionStatusFromDetailsEnabled: { type: 'boolean', default: true },
+    plannedCompletionDate: { ...dateOnlySwaggerSchema, nullable: true },
+    completionDate: { ...dateOnlySwaggerSchema, nullable: true },
+    issueDate: { ...dateOnlySwaggerSchema, nullable: true },
+    paymentDate: { ...dateOnlySwaggerSchema, nullable: true },
+    discount: nullableNumberSwaggerSchema,
+    surcharge: nullableNumberSwaggerSchema,
+    linkCuttingFile: nullableStringSwaggerSchema,
+    linkCuttingImageFile: nullableStringSwaggerSchema,
+    linkCadFile: nullableStringSwaggerSchema,
+    linkPdfFile: nullableStringSwaggerSchema,
+    notes: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+    materialId: nullableIntegerSwaggerSchema,
+    millingTypeId: nullableIntegerSwaggerSchema,
+    edgeTypeId: nullableIntegerSwaggerSchema,
+    filmId: nullableIntegerSwaggerSchema,
+  },
+} as const;
+
+const saveOrderDetailSwaggerSchema = {
+  type: 'object',
+  required: ['height', 'width', 'quantity', 'materialId', 'millingTypeId', 'edgeTypeId'],
+  properties: {
+    id: { type: 'integer' },
+    clientKey: { type: 'string' },
+    detailNumber: { type: 'integer' },
+    detailName: nullableStringSwaggerSchema,
+    height: { type: 'number' },
+    width: { type: 'number' },
+    quantity: { type: 'integer' },
+    materialId: { type: 'integer' },
+    millingTypeId: { type: 'integer' },
+    edgeTypeId: { type: 'integer' },
+    filmId: nullableIntegerSwaggerSchema,
+    area: nullableNumberSwaggerSchema,
+    millingCostPerSqm: nullableNumberSwaggerSchema,
+    detailCost: nullableNumberSwaggerSchema,
+    priority: { type: 'integer' },
+    productionStatusId: nullableIntegerSwaggerSchema,
+    jointOrderId: nullableIntegerSwaggerSchema,
+    note: nullableStringSwaggerSchema,
+    linkCuttingFile: nullableStringSwaggerSchema,
+    linkCuttingImageFile: nullableStringSwaggerSchema,
+    linkCadFile: nullableStringSwaggerSchema,
+    linkPdfFile: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const saveOrderPaymentSwaggerSchema = {
+  type: 'object',
+  required: ['typePaidId', 'amount', 'paymentDate'],
+  properties: {
+    id: { type: 'integer' },
+    clientKey: { type: 'string' },
+    typePaidId: { type: 'integer' },
+    amount: { type: 'number' },
+    paymentDate: dateOnlySwaggerSchema,
+    notes: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const saveOrderWorkshopSwaggerSchema = {
+  type: 'object',
+  required: ['workshopId', 'productionStatusId'],
+  properties: {
+    id: { type: 'integer' },
+    clientKey: { type: 'string' },
+    workshopId: { type: 'integer' },
+    productionStatusId: { type: 'integer' },
+    receivedDate: { ...dateOnlySwaggerSchema, nullable: true },
+    startedDate: { ...dateOnlySwaggerSchema, nullable: true },
+    completedDate: { ...dateOnlySwaggerSchema, nullable: true },
+    plannedCompletionDate: { ...dateOnlySwaggerSchema, nullable: true },
+    sequenceOrder: nullableIntegerSwaggerSchema,
+    responsibleEmployeeId: nullableIntegerSwaggerSchema,
+    notes: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const saveOrderRequirementSwaggerSchema = {
+  type: 'object',
+  required: ['resourceType', 'requiredQuantity', 'unitId', 'requirementStatusId'],
+  properties: {
+    id: { type: 'integer' },
+    clientKey: { type: 'string' },
+    resourceType: { type: 'string' },
+    materialId: nullableIntegerSwaggerSchema,
+    filmId: nullableIntegerSwaggerSchema,
+    edgeTypeId: nullableIntegerSwaggerSchema,
+    requiredQuantity: { type: 'number' },
+    unitId: { type: 'integer' },
+    wastePercentage: nullableNumberSwaggerSchema,
+    finalQuantity: nullableNumberSwaggerSchema,
+    requirementStatusId: { type: 'integer' },
+    supplierId: nullableIntegerSwaggerSchema,
+    purchasePrice: nullableNumberSwaggerSchema,
+    requisitionId: nullableIntegerSwaggerSchema,
+    warehouseId: nullableIntegerSwaggerSchema,
+    reservedAt: { type: 'string', format: 'date-time', nullable: true },
+    consumedAt: { type: 'string', format: 'date-time', nullable: true },
+    notes: nullableStringSwaggerSchema,
+    calculationDetails: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const saveOrderDowelingLinkSwaggerSchema = {
+  type: 'object',
+  required: ['dowelingOrderId'],
+  properties: {
+    id: { type: 'integer' },
+    clientKey: { type: 'string' },
+    dowelingOrderId: { type: 'integer' },
+    designEngineerId: nullableIntegerSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const orderDetailResponseSwaggerSchema = {
+  type: 'object',
+  required: [
+    'id',
+    'orderId',
+    'detailNumber',
+    'detailName',
+    'height',
+    'width',
+    'quantity',
+    'materialId',
+    'millingTypeId',
+    'edgeTypeId',
+    'filmId',
+    'area',
+    'millingCostPerSqm',
+    'detailCost',
+    'priority',
+    'productionStatusId',
+    'jointOrderId',
+    'note',
+    'linkCuttingFile',
+    'linkCuttingImageFile',
+    'linkCadFile',
+    'linkPdfFile',
+    'refKey1c',
+  ],
+  properties: {
+    id: { type: 'integer' },
+    orderId: { type: 'integer' },
+    clientKey: { type: 'string' },
+    detailNumber: { type: 'integer' },
+    detailName: nullableStringSwaggerSchema,
+    height: { type: 'number' },
+    width: { type: 'number' },
+    quantity: { type: 'integer' },
+    materialId: { type: 'integer' },
+    millingTypeId: { type: 'integer' },
+    edgeTypeId: { type: 'integer' },
+    filmId: nullableIntegerSwaggerSchema,
+    area: { type: 'number' },
+    millingCostPerSqm: nullableNumberSwaggerSchema,
+    detailCost: { type: 'number' },
+    priority: { type: 'integer' },
+    productionStatusId: nullableIntegerSwaggerSchema,
+    jointOrderId: nullableIntegerSwaggerSchema,
+    note: nullableStringSwaggerSchema,
+    linkCuttingFile: nullableStringSwaggerSchema,
+    linkCuttingImageFile: nullableStringSwaggerSchema,
+    linkCadFile: nullableStringSwaggerSchema,
+    linkPdfFile: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const orderPaymentResponseSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'orderId', 'typePaidId', 'amount', 'paymentDate', 'notes', 'refKey1c'],
+  properties: {
+    id: { type: 'integer' },
+    orderId: { type: 'integer' },
+    clientKey: { type: 'string' },
+    typePaidId: { type: 'integer' },
+    amount: { type: 'number' },
+    paymentDate: dateOnlySwaggerSchema,
+    notes: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const orderWorkshopResponseSwaggerSchema = {
+  type: 'object',
+  required: [
+    'id',
+    'orderId',
+    'workshopId',
+    'productionStatusId',
+    'receivedDate',
+    'startedDate',
+    'completedDate',
+    'plannedCompletionDate',
+    'sequenceOrder',
+    'responsibleEmployeeId',
+    'notes',
+    'refKey1c',
+  ],
+  properties: {
+    id: { type: 'integer' },
+    orderId: { type: 'integer' },
+    clientKey: { type: 'string' },
+    workshopId: { type: 'integer' },
+    productionStatusId: { type: 'integer' },
+    receivedDate: { ...dateOnlySwaggerSchema, nullable: true },
+    startedDate: { ...dateOnlySwaggerSchema, nullable: true },
+    completedDate: { ...dateOnlySwaggerSchema, nullable: true },
+    plannedCompletionDate: { ...dateOnlySwaggerSchema, nullable: true },
+    sequenceOrder: nullableIntegerSwaggerSchema,
+    responsibleEmployeeId: nullableIntegerSwaggerSchema,
+    notes: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const orderRequirementResponseSwaggerSchema = {
+  type: 'object',
+  required: [
+    'id',
+    'orderId',
+    'resourceType',
+    'materialId',
+    'filmId',
+    'edgeTypeId',
+    'requiredQuantity',
+    'unitId',
+    'wastePercentage',
+    'finalQuantity',
+    'requirementStatusId',
+    'supplierId',
+    'purchasePrice',
+    'requisitionId',
+    'warehouseId',
+    'reservedAt',
+    'consumedAt',
+    'notes',
+    'calculationDetails',
+    'refKey1c',
+  ],
+  properties: {
+    id: { type: 'integer' },
+    orderId: { type: 'integer' },
+    clientKey: { type: 'string' },
+    resourceType: { type: 'string' },
+    materialId: nullableIntegerSwaggerSchema,
+    filmId: nullableIntegerSwaggerSchema,
+    edgeTypeId: nullableIntegerSwaggerSchema,
+    requiredQuantity: { type: 'number' },
+    unitId: { type: 'integer' },
+    wastePercentage: nullableNumberSwaggerSchema,
+    finalQuantity: nullableNumberSwaggerSchema,
+    requirementStatusId: { type: 'integer' },
+    supplierId: nullableIntegerSwaggerSchema,
+    purchasePrice: nullableNumberSwaggerSchema,
+    requisitionId: nullableIntegerSwaggerSchema,
+    warehouseId: nullableIntegerSwaggerSchema,
+    reservedAt: { type: 'string', format: 'date-time', nullable: true },
+    consumedAt: { type: 'string', format: 'date-time', nullable: true },
+    notes: nullableStringSwaggerSchema,
+    calculationDetails: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const orderDowelingLinkResponseSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'orderId', 'dowelingOrderId', 'designEngineerId', 'refKey1c', 'dowelingOrder'],
+  properties: {
+    id: { type: 'integer' },
+    orderId: { type: 'integer' },
+    clientKey: { type: 'string' },
+    dowelingOrderId: { type: 'integer' },
+    designEngineerId: nullableIntegerSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+    dowelingOrder: {
+      type: 'object',
+      nullable: true,
+      required: ['id', 'name', 'designEngineerId'],
+      properties: {
+        id: { type: 'integer' },
+        name: nullableStringSwaggerSchema,
+        designEngineerId: nullableIntegerSwaggerSchema,
+      },
+    },
+  },
+} as const;
+
+const orderHeaderResponseSwaggerSchema = {
+  type: 'object',
+  required: [
+    'orderId',
+    'orderName',
+    'clientId',
+    'clientName',
+    'orderDate',
+    'priority',
+    'managerId',
+    'orderStatusId',
+    'paymentStatusId',
+    'productionStatusId',
+    'productionStatusFromDetailsEnabled',
+    'plannedCompletionDate',
+    'completionDate',
+    'issueDate',
+    'paymentDate',
+    'discount',
+    'surcharge',
+    'totalAmount',
+    'finalAmount',
+    'paidAmount',
+    'partsCount',
+    'totalArea',
+    'linkCuttingFile',
+    'linkCuttingImageFile',
+    'linkCadFile',
+    'linkPdfFile',
+    'notes',
+    'refKey1c',
+    'createdAt',
+    'updatedAt',
+    'version',
+  ],
+  properties: {
+    orderId: { type: 'integer' },
+    orderName: { type: 'string' },
+    clientId: { type: 'integer' },
+    clientName: nullableStringSwaggerSchema,
+    orderDate: dateOnlySwaggerSchema,
+    priority: { type: 'integer' },
+    managerId: nullableIntegerSwaggerSchema,
+    orderStatusId: { type: 'integer' },
+    paymentStatusId: { type: 'integer' },
+    productionStatusId: nullableIntegerSwaggerSchema,
+    productionStatusFromDetailsEnabled: { type: 'boolean' },
+    plannedCompletionDate: { ...dateOnlySwaggerSchema, nullable: true },
+    completionDate: { ...dateOnlySwaggerSchema, nullable: true },
+    issueDate: { ...dateOnlySwaggerSchema, nullable: true },
+    paymentDate: { ...dateOnlySwaggerSchema, nullable: true },
+    discount: { type: 'number' },
+    surcharge: { type: 'number' },
+    totalAmount: { type: 'number' },
+    finalAmount: { type: 'number' },
+    paidAmount: { type: 'number' },
+    partsCount: { type: 'integer' },
+    totalArea: { type: 'number' },
+    linkCuttingFile: nullableStringSwaggerSchema,
+    linkCuttingImageFile: nullableStringSwaggerSchema,
+    linkCadFile: nullableStringSwaggerSchema,
+    linkPdfFile: nullableStringSwaggerSchema,
+    notes: nullableStringSwaggerSchema,
+    refKey1c: nullableStringSwaggerSchema,
+    materialId: nullableIntegerSwaggerSchema,
+    millingTypeId: nullableIntegerSwaggerSchema,
+    edgeTypeId: nullableIntegerSwaggerSchema,
+    filmId: nullableIntegerSwaggerSchema,
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+    version: { type: 'integer' },
+  },
+} as const;
+
+const saveOrderRequestSwaggerSchema = {
+  type: 'object',
+  required: ['header', 'details', 'payments', 'workshops', 'requirements', 'dowelingLinks', 'deleted'],
+  properties: {
+    header: saveOrderHeaderSwaggerSchema,
+    details: { type: 'array', items: saveOrderDetailSwaggerSchema },
+    payments: { type: 'array', items: saveOrderPaymentSwaggerSchema },
+    workshops: { type: 'array', items: saveOrderWorkshopSwaggerSchema },
+    requirements: { type: 'array', items: saveOrderRequirementSwaggerSchema },
+    dowelingLinks: { type: 'array', items: saveOrderDowelingLinkSwaggerSchema },
+    deleted: {
+      type: 'object',
+      properties: {
+        detailIds: { type: 'array', items: { type: 'integer' } },
+        paymentIds: { type: 'array', items: { type: 'integer' } },
+        workshopIds: { type: 'array', items: { type: 'integer' } },
+        requirementIds: { type: 'array', items: { type: 'integer' } },
+        dowelingLinkIds: { type: 'array', items: { type: 'integer' } },
+      },
+    },
+    version: { type: 'integer' },
+    idempotencyKey: { type: 'string' },
+  },
+} as const;
+
+const orderSwaggerSchema = {
+  type: 'object',
+  required: ['header', 'details', 'payments', 'workshops', 'requirements', 'dowelingLinks', 'totals', 'version', 'createdAt', 'updatedAt'],
+  properties: {
+    header: orderHeaderResponseSwaggerSchema,
+    details: { type: 'array', items: orderDetailResponseSwaggerSchema },
+    payments: { type: 'array', items: orderPaymentResponseSwaggerSchema },
+    workshops: { type: 'array', items: orderWorkshopResponseSwaggerSchema },
+    requirements: { type: 'array', items: orderRequirementResponseSwaggerSchema },
+    dowelingLinks: { type: 'array', items: orderDowelingLinkResponseSwaggerSchema },
+    totals: {
+      type: 'object',
+      required: ['totalAmount', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea'],
+      properties: {
+        totalAmount: { type: 'number' },
+        finalAmount: { type: 'number' },
+        paidAmount: { type: 'number' },
+        debtAmount: { type: 'number' },
+        partsCount: { type: 'integer' },
+        totalArea: { type: 'number' },
+      },
+    },
+    version: { type: 'integer' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+} as const;
+
+const saveOrderResponseSwaggerSchema = {
+  type: 'object',
+  required: ['order'],
+  properties: {
+    order: orderSwaggerSchema,
+  },
+} as const;
+
+const orderResponseSwaggerSchema = {
+  type: 'object',
+  required: ['order'],
+  properties: {
+    order: orderSwaggerSchema,
+  },
+} as const;
+
+const orderListItemSwaggerSchema = {
+  type: 'object',
+  required: ['orderId', 'orderName', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'updatedAt', 'version'],
+  properties: {
+    orderId: { type: 'integer' },
+    orderName: { type: 'string' },
+    clientId: { type: 'integer' },
+    clientName: nullableStringSwaggerSchema,
+    orderDate: dateOnlySwaggerSchema,
+    plannedCompletionDate: { ...dateOnlySwaggerSchema, nullable: true },
+    completionDate: { ...dateOnlySwaggerSchema, nullable: true },
+    issueDate: { ...dateOnlySwaggerSchema, nullable: true },
+    paymentDate: { ...dateOnlySwaggerSchema, nullable: true },
+    orderStatusId: { type: 'integer' },
+    orderStatusName: { type: 'string' },
+    paymentStatusId: { type: 'integer' },
+    paymentStatusName: { type: 'string' },
+    productionStatusId: nullableIntegerSwaggerSchema,
+    productionStatusName: nullableStringSwaggerSchema,
+    priority: { type: 'integer' },
+    totalAmount: { type: 'number' },
+    discount: { type: 'number' },
+    surcharge: { type: 'number' },
+    finalAmount: { type: 'number' },
+    paidAmount: { type: 'number' },
+    debtAmount: { type: 'number' },
+    partsCount: { type: 'integer' },
+    totalArea: { type: 'number' },
+    managerId: nullableIntegerSwaggerSchema,
+    notes: nullableStringSwaggerSchema,
+    materialIds: { type: 'array', items: { type: 'integer' } },
+    materialNames: { type: 'array', items: { type: 'string' } },
+    millingTypeId: nullableIntegerSwaggerSchema,
+    millingTypeName: nullableStringSwaggerSchema,
+    dowelingOrderId: nullableIntegerSwaggerSchema,
+    dowelingOrderName: nullableStringSwaggerSchema,
+    designEngineerId: nullableIntegerSwaggerSchema,
+    passedProductionStatusCodes: { type: 'array', items: { type: 'string' } },
+    updatedAt: { type: 'string', format: 'date-time' },
+    version: { type: 'integer' },
+  },
+} as const;
+
+const orderListResponseSwaggerSchema = {
+  type: 'object',
+  required: ['data', 'pagination'],
+  properties: {
+    data: { type: 'array', items: orderListItemSwaggerSchema },
+    pagination: orderPaginationSwaggerSchema,
+  },
+} as const;
+
+const lookupSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'name'],
+  properties: {
+    id: { type: 'integer' },
+    name: { type: 'string' },
+  },
+} as const;
+
+const materialLookupSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'name', 'unitId'],
+  properties: {
+    id: { type: 'integer' },
+    name: { type: 'string' },
+    unitId: nullableIntegerSwaggerSchema,
+  },
+} as const;
+
+const millingTypeLookupSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'name', 'costPerSqm'],
+  properties: {
+    id: { type: 'integer' },
+    name: { type: 'string' },
+    costPerSqm: nullableNumberSwaggerSchema,
+  },
+} as const;
+
+const statusLookupSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'name'],
+  properties: {
+    id: { type: 'integer' },
+    name: { type: 'string' },
+    code: nullableStringSwaggerSchema,
+    color: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const orderFormDataResponseSwaggerSchema = {
+  type: 'object',
+  required: [
+    'clients',
+    'materials',
+    'millingTypes',
+    'edgeTypes',
+    'films',
+    'orderStatuses',
+    'paymentStatuses',
+    'paymentTypes',
+    'productionStatuses',
+    'workshops',
+    'employees',
+    'units',
+  ],
+  properties: {
+    clients: { type: 'array', items: lookupSwaggerSchema },
+    materials: { type: 'array', items: materialLookupSwaggerSchema },
+    millingTypes: { type: 'array', items: millingTypeLookupSwaggerSchema },
+    edgeTypes: { type: 'array', items: lookupSwaggerSchema },
+    films: { type: 'array', items: lookupSwaggerSchema },
+    orderStatuses: { type: 'array', items: statusLookupSwaggerSchema },
+    paymentStatuses: { type: 'array', items: statusLookupSwaggerSchema },
+    paymentTypes: { type: 'array', items: lookupSwaggerSchema },
+    productionStatuses: { type: 'array', items: statusLookupSwaggerSchema },
+    workshops: { type: 'array', items: lookupSwaggerSchema },
+    employees: { type: 'array', items: { type: 'object', required: ['id', 'fullName'], properties: { id: { type: 'integer' }, fullName: { type: 'string' } } } },
+    units: { type: 'array', items: { type: 'object', required: ['id', 'code', 'name'], properties: { id: { type: 'integer' }, code: { type: 'string' }, name: { type: 'string' }, symbol: { type: 'string' } } } },
+  },
+} as const;
+
+const orderAuditListResponseSwaggerSchema = {
+  type: 'object',
+  required: ['data', 'pagination', 'requestId'],
+  properties: {
+    data: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['auditId', 'action', 'requestId', 'createdAt'],
+        properties: {
+          auditId: { type: 'string' },
+          entityType: nullableStringSwaggerSchema,
+          entityId: nullableStringSwaggerSchema,
+          action: { type: 'string' },
+          userId: nullableIntegerSwaggerSchema,
+          username: nullableStringSwaggerSchema,
+          role: nullableStringSwaggerSchema,
+          before: { type: 'object', nullable: true, additionalProperties: true },
+          after: { type: 'object', nullable: true, additionalProperties: true },
+          diff: { type: 'object', nullable: true, additionalProperties: true },
+          requestId: { type: 'string' },
+          ip: nullableStringSwaggerSchema,
+          userAgent: nullableStringSwaggerSchema,
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+    },
+    pagination: orderPaginationSwaggerSchema,
+    requestId: { type: 'string' },
+  },
+} as const;
+
+const deleteOrderResponseSwaggerSchema = {
+  type: 'object',
+  required: ['success', 'orderId', 'requestId'],
+  properties: {
+    success: { type: 'boolean', enum: [true] },
+    orderId: { type: 'integer' },
+    auditId: { type: 'string' },
+    requestId: { type: 'string' },
+  },
+} as const;
 
 @Controller('orders')
 export class OrdersController {

@@ -10,6 +10,14 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -42,6 +50,115 @@ const analyzeRequestSchema = z
   .refine((value) => Boolean(value.uploadId) !== Boolean(value.imageUrl), {
     message: 'Exactly one of uploadId or imageUrl must be provided',
   });
+
+const vlmHealthResponseSwaggerSchema = {
+  type: 'object',
+  required: ['status'],
+  properties: {
+    status: { type: 'string', enum: ['ok', 'degraded', 'unavailable'] },
+    providers: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['name', 'configured'],
+        properties: {
+          name: { type: 'string' },
+          configured: { type: 'boolean' },
+          available: { type: 'boolean', nullable: true },
+        },
+      },
+    },
+    detailsVisible: { type: 'boolean' },
+  },
+} as const;
+
+const vlmUploadRequestSwaggerSchema = {
+  type: 'object',
+  required: ['file'],
+  properties: {
+    file: { type: 'string', format: 'binary' },
+    purpose: { type: 'string', enum: ['vlm', 'order_file'], default: 'vlm' },
+  },
+} as const;
+
+const vlmUploadResponseSwaggerSchema = {
+  type: 'object',
+  required: ['success', 'uploadId', 'url', 'key', 'size', 'contentType'],
+  properties: {
+    success: { type: 'boolean', enum: [true] },
+    uploadId: { type: 'string' },
+    url: { type: 'string' },
+    key: { type: 'string' },
+    width: { type: 'integer', nullable: true },
+    height: { type: 'integer', nullable: true },
+    size: { type: 'integer' },
+    contentType: { type: 'string' },
+  },
+} as const;
+
+const vlmPromptKvSwaggerSchema = {
+  type: 'object',
+  required: ['namespace', 'name'],
+  properties: {
+    namespace: { type: 'string', minLength: 1, maxLength: 100 },
+    name: { type: 'string', minLength: 1, maxLength: 100 },
+    version: { type: 'string', maxLength: 100, nullable: true },
+    lang: { type: 'string', maxLength: 20, nullable: true },
+  },
+} as const;
+
+const vlmAnalyzeRequestSwaggerSchema = {
+  type: 'object',
+  properties: {
+    uploadId: { type: 'string', minLength: 1, maxLength: 100, nullable: true },
+    imageUrl: { type: 'string', format: 'uri', maxLength: 2000, nullable: true },
+    provider: { type: 'string', minLength: 1, maxLength: 100, nullable: true },
+    model: { type: 'string', minLength: 1, maxLength: 200, nullable: true },
+    promptId: { type: 'string', minLength: 1, maxLength: 200, nullable: true },
+    promptKv: { ...vlmPromptKvSwaggerSchema, nullable: true },
+    providerOrder: {
+      type: 'array',
+      maxItems: 10,
+      nullable: true,
+      items: { type: 'string', minLength: 1, maxLength: 100 },
+    },
+  },
+  oneOf: [
+    {
+      required: ['uploadId'],
+      properties: {
+        uploadId: { type: 'string', minLength: 1, maxLength: 100 },
+      },
+    },
+    {
+      required: ['imageUrl'],
+      properties: {
+        imageUrl: { type: 'string', format: 'uri', maxLength: 2000 },
+      },
+    },
+  ],
+} as const;
+
+const vlmAnalyzeResponseSwaggerSchema = {
+  type: 'object',
+  required: ['success', 'result'],
+  properties: {
+    success: { type: 'boolean', enum: [true] },
+    provider: { type: 'string', nullable: true },
+    model: { type: 'string', nullable: true },
+    uploadId: { type: 'string', nullable: true },
+    result: { type: 'object', additionalProperties: true },
+    usage: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        inputTokens: { type: 'integer', nullable: true },
+        outputTokens: { type: 'integer', nullable: true },
+        cost: { type: 'number', nullable: true },
+      },
+    },
+  },
+} as const;
 
 @Controller('vlm')
 export class VlmController {

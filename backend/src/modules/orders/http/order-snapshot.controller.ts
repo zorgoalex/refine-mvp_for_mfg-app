@@ -1,4 +1,13 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -9,6 +18,136 @@ import type {
 } from '../dto/order-snapshot.dto';
 import { parseOrderId } from './orders.controller';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
+
+const snapshotIdentitySwaggerSchema = {
+  type: 'object',
+  required: ['sourceId', 'refKey1c'],
+  properties: {
+    sourceId: { type: 'string' },
+    refKey1c: { type: 'string', nullable: true },
+  },
+} as const;
+
+const orderSnapshotSwaggerSchema = {
+  type: 'object',
+  required: ['schema', 'formatVersion', 'exporterService', 'source', 'identity', 'data', 'references'],
+  properties: {
+    schema: { type: 'string', enum: ['erp.order.snapshot.v1'] },
+    formatVersion: { type: 'string' },
+    exporterService: {
+      type: 'object',
+      required: ['name', 'version', 'compatibleImportVersions'],
+      properties: {
+        name: { type: 'string' },
+        version: { type: 'string' },
+        compatibleImportVersions: { type: 'array', items: { type: 'string' } },
+      },
+    },
+    source: {
+      type: 'object',
+      required: ['sourceInstanceId', 'exportedAt', 'payloadHash'],
+      properties: {
+        sourceInstanceId: { type: 'string' },
+        exportedAt: { type: 'string', format: 'date-time' },
+        payloadHash: { type: 'string' },
+      },
+    },
+    identity: {
+      type: 'object',
+      required: ['order', 'client'],
+      properties: {
+        order: snapshotIdentitySwaggerSchema,
+        client: snapshotIdentitySwaggerSchema,
+      },
+    },
+    data: {
+      type: 'object',
+      additionalProperties: true,
+    },
+    references: { type: 'object', additionalProperties: { type: 'array', items: { type: 'object' } } },
+  },
+} as const;
+
+const importOrderSnapshotRequestSwaggerSchema = {
+  type: 'object',
+  required: ['snapshot'],
+  properties: {
+    snapshot: orderSnapshotSwaggerSchema,
+  },
+} as const;
+
+const importOrderSnapshotBatchRequestSwaggerSchema = {
+  type: 'object',
+  required: ['zipBase64'],
+  properties: {
+    fileName: { type: 'string' },
+    zipBase64: { type: 'string', format: 'byte' },
+  },
+} as const;
+
+const orderSnapshotImportSummarySwaggerSchema = {
+  type: 'object',
+  required: ['details', 'payments', 'workshops', 'requirements', 'dowelingLinks', 'productionStatusEvents', 'clientPhones', 'deadlineInstances', 'deadlineEvents'],
+  properties: {
+    details: { type: 'integer' },
+    payments: { type: 'integer' },
+    workshops: { type: 'integer' },
+    requirements: { type: 'integer' },
+    dowelingLinks: { type: 'integer' },
+    productionStatusEvents: { type: 'integer' },
+    clientPhones: { type: 'integer' },
+    deadlineInstances: { type: 'integer' },
+    deadlineEvents: { type: 'integer' },
+  },
+} as const;
+
+const orderSnapshotImportResponseSwaggerSchema = {
+  type: 'object',
+  required: ['success', 'status', 'orderId', 'orderName', 'payloadHash', 'importRunId', 'summary'],
+  properties: {
+    success: { type: 'boolean', enum: [true] },
+    status: { type: 'string', enum: ['created', 'updated', 'noop'] },
+    orderId: { type: 'integer' },
+    orderName: { type: 'string' },
+    payloadHash: { type: 'string' },
+    importRunId: { type: 'string', nullable: true },
+    summary: orderSnapshotImportSummarySwaggerSchema,
+  },
+} as const;
+
+const orderSnapshotImportBatchResponseSwaggerSchema = {
+  type: 'object',
+  required: ['success', 'total', 'imported', 'failed', 'results'],
+  properties: {
+    success: { type: 'boolean', enum: [true] },
+    total: { type: 'integer' },
+    imported: { type: 'integer' },
+    failed: { type: 'integer' },
+    results: {
+      type: 'array',
+      items: {
+        oneOf: [
+          {
+            allOf: [
+              orderSnapshotImportResponseSwaggerSchema,
+              { type: 'object', required: ['fileName'], properties: { fileName: { type: 'string' } } },
+            ],
+          },
+          {
+            type: 'object',
+            required: ['fileName', 'success', 'errorCode', 'message'],
+            properties: {
+              fileName: { type: 'string' },
+              success: { type: 'boolean', enum: [false] },
+              errorCode: { type: 'string' },
+              message: { type: 'string' },
+            },
+          },
+        ],
+      },
+    },
+  },
+} as const;
 
 @Controller('orders')
 export class OrderSnapshotController {

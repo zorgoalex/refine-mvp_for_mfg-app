@@ -1,4 +1,12 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -35,6 +43,84 @@ const updatePolicyRequestSchema = createPolicyRequestSchema
   .refine((value) => Object.keys(value).length > 0, {
     message: 'At least one field must be provided',
   });
+
+const deadlinePolicyEntityTypeSwaggerSchema = {
+  type: 'string',
+  enum: ['order', 'order_stage', 'client_action', 'project', 'task'],
+} as const;
+
+const deadlinePolicyDurationUnitSwaggerSchema = {
+  type: 'string',
+  enum: ['minute', 'hour', 'day', 'working_hour', 'working_day'],
+  nullable: true,
+} as const;
+
+const createDeadlinePolicyRequestSwaggerSchema = {
+  type: 'object',
+  required: ['policyCode', 'policyName', 'scopeType'],
+  properties: {
+    policyCode: { type: 'string', minLength: 3, maxLength: 100 },
+    policyName: { type: 'string', minLength: 1, maxLength: 255 },
+    scopeType: deadlinePolicyEntityTypeSwaggerSchema,
+    targetType: { type: 'string', maxLength: 100, nullable: true },
+    targetCode: { type: 'string', maxLength: 100, nullable: true },
+    durationValue: { type: 'integer', nullable: true },
+    durationUnit: deadlinePolicyDurationUnitSwaggerSchema,
+    startPoint: { type: 'string', maxLength: 100, nullable: true },
+    isEnabled: { type: 'boolean' },
+    config: { type: 'object', additionalProperties: true },
+  },
+} as const;
+
+const updateDeadlinePolicyRequestSwaggerSchema = {
+  type: 'object',
+  minProperties: 1,
+  properties: {
+    policyName: { type: 'string', minLength: 1, maxLength: 255 },
+    targetType: { type: 'string', maxLength: 100, nullable: true },
+    targetCode: { type: 'string', maxLength: 100, nullable: true },
+    durationValue: { type: 'integer', nullable: true },
+    durationUnit: deadlinePolicyDurationUnitSwaggerSchema,
+    startPoint: { type: 'string', maxLength: 100, nullable: true },
+    isEnabled: { type: 'boolean' },
+    config: { type: 'object', additionalProperties: true },
+  },
+} as const;
+
+const deadlinePolicySwaggerSchema = {
+  type: 'object',
+  required: ['policyId', 'policyCode', 'policyName', 'scopeType', 'isEnabled', 'createdAt', 'updatedAt'],
+  properties: {
+    policyId: { type: 'string', format: 'uuid' },
+    policyCode: { type: 'string' },
+    policyName: { type: 'string' },
+    scopeType: deadlinePolicyEntityTypeSwaggerSchema,
+    targetType: { type: 'string', nullable: true },
+    targetCode: { type: 'string', nullable: true },
+    durationValue: { type: 'integer', nullable: true },
+    durationUnit: deadlinePolicyDurationUnitSwaggerSchema,
+    startPoint: { type: 'string', nullable: true },
+    isEnabled: { type: 'boolean' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+} as const;
+
+const deadlinePolicyResponseSwaggerSchema = {
+  type: 'object',
+  required: ['policy'],
+  properties: {
+    policy: deadlinePolicySwaggerSchema,
+  },
+} as const;
+
+const deadlinePolicyListResponseSwaggerSchema = {
+  type: 'object',
+  required: ['data'],
+  properties: {
+    data: { type: 'array', items: deadlinePolicySwaggerSchema },
+  },
+} as const;
 
 @Controller('deadline-policies')
 export class DeadlinePoliciesController {

@@ -1,4 +1,12 @@
 import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiCookieAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -19,6 +27,53 @@ export interface LogoutResponse {
 export interface MeResponse {
   user: AuthResponse['user'];
 }
+
+const authUserSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'username', 'role', 'roleId', 'permissions'],
+  properties: {
+    id: { type: 'string' },
+    username: { type: 'string' },
+    role: { type: 'string' },
+    roleId: { type: 'integer' },
+    permissions: { type: 'array', items: { type: 'string' } },
+  },
+} as const;
+
+const loginRequestSwaggerSchema = {
+  type: 'object',
+  required: ['username', 'password'],
+  properties: {
+    username: { type: 'string', minLength: 1 },
+    password: { type: 'string', minLength: 1, writeOnly: true },
+  },
+} as const;
+
+const authResponseSwaggerSchema = {
+  type: 'object',
+  required: ['accessToken', 'accessTokenExpiresAt', 'user'],
+  properties: {
+    accessToken: { type: 'string' },
+    accessTokenExpiresAt: { type: 'string', format: 'date-time' },
+    user: authUserSwaggerSchema,
+  },
+} as const;
+
+const logoutResponseSwaggerSchema = {
+  type: 'object',
+  required: ['ok'],
+  properties: {
+    ok: { type: 'boolean', enum: [true] },
+  },
+} as const;
+
+const meResponseSwaggerSchema = {
+  type: 'object',
+  required: ['user'],
+  properties: {
+    user: authUserSwaggerSchema,
+  },
+} as const;
 
 @Controller()
 export class AuthController {

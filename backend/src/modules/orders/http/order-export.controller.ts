@@ -1,4 +1,12 @@
 import { Body, Controller, Inject, Param, Post, Req } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OrderExportService } from '../application/order-export.service';
@@ -9,6 +17,26 @@ import type {
 } from '../dto/export-order.dto';
 import { parseOrderId } from './orders.controller';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
+
+const exportOrderRequestSwaggerSchema = {
+  type: 'object',
+  properties: {
+    format: { type: 'string', enum: ['xlsx'], default: 'xlsx' },
+    fileName: { type: 'string', maxLength: 255, nullable: true },
+  },
+} as const;
+
+const exportOrderResponseSwaggerSchema = {
+  type: 'object',
+  required: ['success', 'fileName'],
+  properties: {
+    success: { type: 'boolean' },
+    fileName: { type: 'string' },
+    folder: { type: 'string', nullable: true },
+    xlsxUrl: { type: 'string', nullable: true },
+    externalId: { type: 'string', nullable: true },
+  },
+} as const;
 
 @Controller('orders')
 export class OrderExportController {

@@ -1,4 +1,11 @@
 import { Body, Controller, Get, Inject, Patch, Req } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -22,6 +29,46 @@ const updateDeadlineSettingsSchema = z
   .refine((value) => Object.keys(value).length > 0, {
     message: 'At least one field must be provided',
   });
+
+const deadlineSettingsSwaggerProperties = {
+  reminderEventsEnabled: { type: 'boolean' },
+  notifyAssigneeEnabled: { type: 'boolean' },
+  notifyManagerEnabled: { type: 'boolean' },
+  notifyDepartmentHeadEnabled: { type: 'boolean' },
+  setOverdueFlagEnabled: { type: 'boolean' },
+  changeOrderStatusEnabled: { type: 'boolean' },
+  changeProductionStatusEnabled: { type: 'boolean' },
+  escalationEnabled: { type: 'boolean' },
+  repeatNotificationsEnabled: { type: 'boolean' },
+} as const;
+
+const updateDeadlineSettingsRequestSwaggerSchema = {
+  type: 'object',
+  minProperties: 1,
+  properties: deadlineSettingsSwaggerProperties,
+} as const;
+
+const deadlineSettingsResponseSwaggerSchema = {
+  type: 'object',
+  required: ['settings'],
+  properties: {
+    settings: {
+      type: 'object',
+      required: [
+        'reminderEventsEnabled',
+        'notifyAssigneeEnabled',
+        'notifyManagerEnabled',
+        'notifyDepartmentHeadEnabled',
+        'setOverdueFlagEnabled',
+        'changeOrderStatusEnabled',
+        'changeProductionStatusEnabled',
+        'escalationEnabled',
+        'repeatNotificationsEnabled',
+      ],
+      properties: deadlineSettingsSwaggerProperties,
+    },
+  },
+} as const;
 
 @Controller('deadline-settings')
 export class DeadlineSettingsController {

@@ -1,4 +1,13 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -61,6 +70,207 @@ const resumeDeadlineRequestSchema = z.object({
 const cancelDeadlineRequestSchema = z.object({
   reason: z.string().trim().min(1).max(1000),
 });
+
+const deadlineEntityTypeSwaggerSchema = {
+  type: 'string',
+  enum: ['order', 'order_stage', 'client_action', 'project', 'task'],
+} as const;
+const deadlineSourceSwaggerSchema = {
+  type: 'string',
+  enum: ['policy', 'manual', 'imported', 'recalculated', 'system'],
+} as const;
+const deadlineStatusSwaggerSchema = {
+  type: 'string',
+  enum: ['active', 'paused', 'expired', 'completed_on_time', 'completed_late', 'cancelled', 'superseded'],
+} as const;
+const deadlineMetadataSwaggerSchema = {
+  type: 'object',
+  additionalProperties: true,
+} as const;
+
+const createDeadlineRequestSwaggerSchema = {
+  type: 'object',
+  required: ['entityType', 'entityId', 'deadlineAt'],
+  properties: {
+    entityType: deadlineEntityTypeSwaggerSchema,
+    entityId: { type: 'string', minLength: 1, maxLength: 200 },
+    orderId: { type: 'integer', nullable: true },
+    orderWorkshopId: { type: 'integer', nullable: true },
+    clientId: { type: 'integer', nullable: true },
+    responsibleUserId: { type: 'integer', nullable: true },
+    deadlineAt: { type: 'string', format: 'date-time' },
+    source: { ...deadlineSourceSwaggerSchema, default: 'manual' },
+    metadata: deadlineMetadataSwaggerSchema,
+  },
+} as const;
+
+const overrideDeadlineRequestSwaggerSchema = {
+  type: 'object',
+  required: ['deadlineAt', 'reason'],
+  properties: {
+    deadlineAt: { type: 'string', format: 'date-time' },
+    reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    metadata: deadlineMetadataSwaggerSchema,
+  },
+} as const;
+
+const pauseDeadlineRequestSwaggerSchema = {
+  type: 'object',
+  required: ['pauseMode', 'pauseReason'],
+  properties: {
+    pauseMode: { type: 'string', enum: ['pause_without_shift', 'pause_and_shift_deadline'] },
+    pauseReason: { type: 'string', minLength: 1, maxLength: 1000 },
+    notes: { type: 'string', maxLength: 2000, nullable: true },
+  },
+} as const;
+
+const resumeDeadlineRequestSwaggerSchema = {
+  type: 'object',
+  properties: {
+    notes: { type: 'string', maxLength: 2000, nullable: true },
+  },
+} as const;
+
+const cancelDeadlineRequestSwaggerSchema = {
+  type: 'object',
+  required: ['reason'],
+  properties: {
+    reason: { type: 'string', minLength: 1, maxLength: 1000 },
+  },
+} as const;
+
+const deadlineSwaggerSchema = {
+  type: 'object',
+  required: ['deadlineId', 'entityType', 'entityId', 'deadlineAt', 'status', 'source', 'isManuallyOverridden', 'createdAt', 'updatedAt'],
+  properties: {
+    deadlineId: { type: 'string', format: 'uuid' },
+    policyId: { type: 'string', format: 'uuid', nullable: true },
+    policyVersionId: { type: 'string', format: 'uuid', nullable: true },
+    entityType: deadlineEntityTypeSwaggerSchema,
+    entityId: { type: 'string' },
+    parentEntityType: { type: 'string', nullable: true },
+    parentEntityId: { type: 'string', nullable: true },
+    orderId: { type: 'integer', nullable: true },
+    orderWorkshopId: { type: 'integer', nullable: true },
+    clientId: { type: 'integer', nullable: true },
+    responsibleUserId: { type: 'integer', nullable: true },
+    deadlineAt: { type: 'string', format: 'date-time' },
+    status: deadlineStatusSwaggerSchema,
+    source: deadlineSourceSwaggerSchema,
+    isManuallyOverridden: { type: 'boolean' },
+    policySnapshot: { type: 'object', nullable: true, additionalProperties: true },
+    metadata: { type: 'object', nullable: true, additionalProperties: true },
+    startedAt: { type: 'string', format: 'date-time', nullable: true },
+    completedAt: { type: 'string', format: 'date-time', nullable: true },
+    expiredAt: { type: 'string', format: 'date-time', nullable: true },
+    cancelledAt: { type: 'string', format: 'date-time', nullable: true },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+} as const;
+
+const deadlineResponseSwaggerSchema = {
+  type: 'object',
+  required: ['deadline'],
+  properties: {
+    deadline: deadlineSwaggerSchema,
+  },
+} as const;
+
+const deadlinePaginationSwaggerSchema = {
+  type: 'object',
+  required: ['page', 'pageSize', 'total', 'totalPages'],
+  properties: {
+    page: { type: 'integer' },
+    pageSize: { type: 'integer' },
+    total: { type: 'integer' },
+    totalPages: { type: 'integer' },
+  },
+} as const;
+
+const deadlineListResponseSwaggerSchema = {
+  type: 'object',
+  required: ['data', 'pagination'],
+  properties: {
+    data: { type: 'array', items: deadlineSwaggerSchema },
+    pagination: deadlinePaginationSwaggerSchema,
+  },
+} as const;
+
+const deadlineEventSwaggerSchema = {
+  type: 'object',
+  required: ['deadlineEventId', 'deadlineId', 'eventType', 'severity', 'entityType', 'entityId', 'eventAt', 'createdAt'],
+  properties: {
+    deadlineEventId: { type: 'string', format: 'uuid' },
+    deadlineId: { type: 'string', format: 'uuid' },
+    eventType: { type: 'string' },
+    severity: { type: 'string', enum: ['info', 'warning', 'critical'] },
+    entityType: deadlineEntityTypeSwaggerSchema,
+    entityId: { type: 'string' },
+    orderId: { type: 'integer', nullable: true },
+    orderWorkshopId: { type: 'integer', nullable: true },
+    clientId: { type: 'integer', nullable: true },
+    deadlineAt: { type: 'string', format: 'date-time', nullable: true },
+    eventAt: { type: 'string', format: 'date-time' },
+    delayMinutes: { type: 'integer', nullable: true },
+    payload: { type: 'object', nullable: true, additionalProperties: true },
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+} as const;
+
+const deadlineEventListResponseSwaggerSchema = {
+  type: 'object',
+  required: ['data'],
+  properties: {
+    data: { type: 'array', items: deadlineEventSwaggerSchema },
+  },
+} as const;
+
+const deadlineSummaryItemSwaggerSchema = {
+  type: 'object',
+  required: ['deadlineId', 'deadlineAt', 'status', 'remainingMinutes', 'delayMinutes', 'severity'],
+  properties: {
+    deadlineId: { type: 'string', format: 'uuid' },
+    deadlineAt: { type: 'string', format: 'date-time' },
+    status: deadlineStatusSwaggerSchema,
+    remainingMinutes: { type: 'integer', nullable: true },
+    delayMinutes: { type: 'integer', nullable: true },
+    severity: { type: 'string', enum: ['info', 'warning', 'critical'] },
+  },
+} as const;
+
+const deadlineSummaryResponseSwaggerSchema = {
+  type: 'object',
+  required: ['orderId', 'finalDeadline', 'currentStageDeadline', 'counts'],
+  properties: {
+    orderId: { type: 'integer' },
+    finalDeadline: { ...deadlineSummaryItemSwaggerSchema, nullable: true },
+    currentStageDeadline: {
+      allOf: [
+        deadlineSummaryItemSwaggerSchema,
+        {
+          type: 'object',
+          required: ['orderWorkshopId'],
+          properties: {
+            orderWorkshopId: { type: 'integer', nullable: true },
+            stageName: { type: 'string', nullable: true },
+          },
+        },
+      ],
+      nullable: true,
+    },
+    counts: {
+      type: 'object',
+      required: ['active', 'expired', 'completedLate', 'completedOnTime'],
+      properties: {
+        active: { type: 'integer' },
+        expired: { type: 'integer' },
+        completedLate: { type: 'integer' },
+        completedOnTime: { type: 'integer' },
+      },
+    },
+  },
+} as const;
 
 @Controller()
 export class DeadlinesController {

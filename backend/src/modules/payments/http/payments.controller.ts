@@ -1,4 +1,12 @@
 import { Body, Controller, Delete, HttpCode, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -36,6 +44,82 @@ const updatePaymentRequestSchema = z
   .refine((value) => Object.keys(value).length > 0, {
     message: 'At least one field must be provided',
   });
+
+const paymentOrderSummarySwaggerSchema = {
+  type: 'object',
+  required: ['orderId', 'paidAmount', 'debtAmount', 'paymentDate', 'paymentStatusId', 'version'],
+  properties: {
+    orderId: { type: 'integer' },
+    paidAmount: { type: 'number' },
+    debtAmount: { type: 'number' },
+    paymentDate: { type: 'string', format: 'date', nullable: true },
+    paymentStatusId: { type: 'integer' },
+    version: { type: 'integer' },
+  },
+} as const;
+
+const paymentSwaggerSchema = {
+  type: 'object',
+  required: ['paymentId', 'orderId', 'typePaidId', 'amount', 'paymentDate', 'notes', 'refKey1c', 'createdBy', 'editedBy', 'createdAt', 'updatedAt'],
+  properties: {
+    paymentId: { type: 'integer' },
+    orderId: { type: 'integer' },
+    typePaidId: { type: 'integer' },
+    amount: { type: 'number' },
+    paymentDate: { type: 'string', format: 'date' },
+    notes: { type: 'string', nullable: true, maxLength: 1000 },
+    refKey1c: { type: 'string', format: 'uuid', nullable: true },
+    createdBy: { type: 'integer', nullable: true },
+    editedBy: { type: 'integer', nullable: true },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time', nullable: true },
+  },
+} as const;
+
+const createPaymentRequestSwaggerSchema = {
+  type: 'object',
+  required: ['orderId', 'typePaidId', 'amount', 'paymentDate'],
+  properties: {
+    orderId: { type: 'integer' },
+    typePaidId: { type: 'integer' },
+    amount: { type: 'number', exclusiveMinimum: 0 },
+    paymentDate: { type: 'string', format: 'date' },
+    notes: { type: 'string', nullable: true, maxLength: 1000 },
+    refKey1c: { type: 'string', format: 'uuid', nullable: true },
+  },
+} as const;
+
+const updatePaymentRequestSwaggerSchema = {
+  type: 'object',
+  minProperties: 1,
+  properties: {
+    orderId: { type: 'integer' },
+    typePaidId: { type: 'integer' },
+    amount: { type: 'number', exclusiveMinimum: 0 },
+    paymentDate: { type: 'string', format: 'date' },
+    notes: { type: 'string', nullable: true, maxLength: 1000 },
+    refKey1c: { type: 'string', format: 'uuid', nullable: true },
+  },
+} as const;
+
+const paymentResponseSwaggerSchema = {
+  type: 'object',
+  required: ['payment', 'order'],
+  properties: {
+    payment: paymentSwaggerSchema,
+    order: paymentOrderSummarySwaggerSchema,
+  },
+} as const;
+
+const deletePaymentResponseSwaggerSchema = {
+  type: 'object',
+  required: ['paymentId', 'order', 'deleted'],
+  properties: {
+    paymentId: { type: 'integer' },
+    order: paymentOrderSummarySwaggerSchema,
+    deleted: { type: 'boolean', enum: [true] },
+  },
+} as const;
 
 @Controller('payments')
 export class PaymentsController {
@@ -153,4 +237,3 @@ function paymentValidationError(error: z.ZodError): ApiError {
     })),
   });
 }
-

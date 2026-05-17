@@ -1,4 +1,12 @@
 import { Body, Controller, Delete, HttpCode, Inject, Param, Patch, Put, Req } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -33,6 +41,63 @@ const stageEventRequestSchema = z.object({
   version: versionSchema,
   idempotencyKey: idempotencyKeySchema,
 });
+
+const actionVersionFieldsSwaggerSchema = {
+  version: { type: 'integer', minimum: 0 },
+  idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
+} as const;
+
+const moveCalendarDateRequestSwaggerSchema = {
+  type: 'object',
+  required: ['plannedCompletionDate', 'version', 'idempotencyKey'],
+  properties: {
+    plannedCompletionDate: { type: 'string', format: 'date', nullable: true },
+    ...actionVersionFieldsSwaggerSchema,
+  },
+} as const;
+
+const changeOrderStatusRequestSwaggerSchema = {
+  type: 'object',
+  required: ['orderStatusId', 'version', 'idempotencyKey'],
+  properties: {
+    orderStatusId: { type: 'integer' },
+    ...actionVersionFieldsSwaggerSchema,
+  },
+} as const;
+
+const productionStageEventRequestSwaggerSchema = {
+  type: 'object',
+  required: ['version', 'idempotencyKey'],
+  properties: actionVersionFieldsSwaggerSchema,
+} as const;
+
+const productionActionResponseSwaggerSchema = {
+  type: 'object',
+  required: ['order', 'requestId'],
+  properties: {
+    order: {
+      type: 'object',
+      required: ['orderId', 'version'],
+      properties: {
+        orderId: { type: 'integer' },
+        plannedCompletionDate: { type: 'string', format: 'date', nullable: true },
+        orderStatusId: { type: 'integer' },
+        version: { type: 'integer' },
+      },
+    },
+    event: {
+      type: 'object',
+      required: ['productionStatusId', 'active'],
+      properties: {
+        productionEventId: { type: 'integer' },
+        productionStatusId: { type: 'integer' },
+        active: { type: 'boolean' },
+      },
+    },
+    auditId: { type: 'string' },
+    requestId: { type: 'string' },
+  },
+} as const;
 
 @Controller('orders/:orderId')
 export class ProductionActionsController {

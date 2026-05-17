@@ -1,4 +1,13 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -46,6 +55,96 @@ const changePasswordRequestSchema = z.object({
   newPassword: z.string().min(8).max(200),
   revokeExistingSessions: z.boolean().default(true),
 });
+
+const userSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'username', 'role', 'permissions', 'isActive', 'createdAt'],
+  properties: {
+    id: { type: 'integer' },
+    username: { type: 'string' },
+    email: { type: 'string', format: 'email', nullable: true },
+    fullName: { type: 'string', nullable: true },
+    role: { type: 'string', enum: USER_ROLES },
+    permissions: { type: 'array', items: { type: 'string' } },
+    employeeId: { type: 'integer', nullable: true },
+    isActive: { type: 'boolean' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time', nullable: true },
+  },
+} as const;
+
+const paginationSwaggerSchema = {
+  type: 'object',
+  required: ['page', 'pageSize', 'total', 'totalPages'],
+  properties: {
+    page: { type: 'integer' },
+    pageSize: { type: 'integer' },
+    total: { type: 'integer' },
+    totalPages: { type: 'integer' },
+  },
+} as const;
+
+const createUserRequestSwaggerSchema = {
+  type: 'object',
+  required: ['username', 'password', 'role'],
+  properties: {
+    username: { type: 'string', minLength: 3, maxLength: 100 },
+    email: { type: 'string', format: 'email', nullable: true },
+    password: { type: 'string', minLength: 8, maxLength: 200, writeOnly: true },
+    role: { type: 'string', enum: USER_ROLES },
+    employeeId: { type: 'integer', nullable: true },
+    fullName: { type: 'string', maxLength: 255, nullable: true },
+    isActive: { type: 'boolean' },
+  },
+} as const;
+
+const updateUserRequestSwaggerSchema = {
+  type: 'object',
+  minProperties: 1,
+  properties: {
+    username: { type: 'string', minLength: 3, maxLength: 100 },
+    email: { type: 'string', format: 'email', nullable: true },
+    role: { type: 'string', enum: USER_ROLES },
+    employeeId: { type: 'integer', nullable: true },
+    fullName: { type: 'string', maxLength: 255, nullable: true },
+    isActive: { type: 'boolean' },
+  },
+} as const;
+
+const changePasswordRequestSwaggerSchema = {
+  type: 'object',
+  required: ['newPassword'],
+  properties: {
+    newPassword: { type: 'string', minLength: 8, maxLength: 200, writeOnly: true },
+    revokeExistingSessions: { type: 'boolean', default: true },
+  },
+} as const;
+
+const userResponseSwaggerSchema = {
+  type: 'object',
+  required: ['user'],
+  properties: {
+    user: userSwaggerSchema,
+  },
+} as const;
+
+const userListResponseSwaggerSchema = {
+  type: 'object',
+  required: ['data', 'pagination'],
+  properties: {
+    data: { type: 'array', items: userSwaggerSchema },
+    pagination: paginationSwaggerSchema,
+  },
+} as const;
+
+const changePasswordResponseSwaggerSchema = {
+  type: 'object',
+  required: ['success', 'revokedSessions'],
+  properties: {
+    success: { type: 'boolean', enum: [true] },
+    revokedSessions: { type: 'integer' },
+  },
+} as const;
 
 @Controller('users')
 export class UsersController {
