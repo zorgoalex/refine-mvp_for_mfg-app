@@ -23,11 +23,11 @@
 | Cookies, CORS, and runtime env | Pass | Focused runtime/CORS/readiness tests passed; stage readiness is recorded in Stage Manual Smoke. |
 | Legacy Vercel functions and rollback gates | Pass | Focused legacy/runtime-config tests passed; see Legacy Vercel Functions And Rollback Gates section. |
 | API authorization boundaries | Pass | Focused backend authorization tests passed; broader Playwright client-phones no-fallback smoke failed on notification visibility and is not used as pass evidence. |
-| Rate limit | Blocked | Focused rate-limit tests passed for Redis-backed policy, local/test memory fallback, auth/order/VLM consumers, and Redis readiness code coverage; login stage smoke remains deferred in the Rate Limit section. |
+| Rate limit | Blocked | Focused rate-limit tests passed for Redis-backed policy, local/test memory fallback, auth/order/VLM consumers, Redis readiness code coverage, and live stage `/health/ready` Redis readiness; login 429 stage smoke remains blocked in the Rate Limit section. |
 | Secrets and logging | Follow-up | Focused redaction/error tests passed for the backend redaction utility and public error responses, but production logger wiring is not proven and legacy `api/_lib/logger.ts` serializes meta/error directly. |
 | Audit expectations | Follow-up | Implemented backend-owned command audit is covered for auth, users, orders, payments, client phones, production actions, VLM, and deadlines; denied sensitive action audit was not found as explicit coverage and remains follow-up. |
 | Hasura boundary | Follow-up | Retained Hasura reads/report/reference usage and accepted no-mutation guards are documented; known `useOrderSave` nested payments `forceHasuraMutation` exception remains follow-up debt. |
-| Stage manual smoke | Blocked | Evidence not collected yet. |
+| Stage manual smoke | Blocked | Stage backend `/health/ready` passed on 2026-05-17 with database, Redis, and config ok; frontend runtime flags and stage canaries were blocked because `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell. |
 
 ## Auth And Sessions
 
@@ -47,7 +47,7 @@
 | CORS does not allow wildcard credentials in production/staging-like env. | Pass | `backend/src/config/env.validation.ts` rejects `CORS_ALLOWED_ORIGINS` containing `*` when `CORS_ALLOW_CREDENTIALS=true`; covered by `backend/src/config/cors.test.ts`. Verified with `npm test -- backend/src/config/cors.test.ts backend/src/config/env.validation.test.ts backend/src/modules/health/health.service.test.ts backend/src/modules/auth/refresh-cookie.test.ts`. |
 | Refresh cookie flags are appropriate for production/staging. | Pass | `backend/src/config/env.validation.ts` requires `REFRESH_COOKIE_SECURE=true` when `REFRESH_COOKIE_SAME_SITE=none` and auth is enabled; `backend/src/modules/auth/refresh-cookie.test.ts` verifies production Secure cookies and staging cross-site canary attributes. Verified with focused command above. |
 | Required backend env validation covers auth, CORS, DB, Redis/rate-limit, feature flags. | Pass | `backend/src/config/env.validation.ts` validates auth DB/secrets, CORS credentials, DB readiness requirements, Redis/rate-limit settings, staging/production Redis rate-limit store, and deadline feature flags. Covered by `backend/src/config/env.validation.test.ts`; focused command above exited 0. |
-| `/health/ready` checks required dependencies in stage-like runtime. | Pass | Code readiness in `backend/src/modules/health/health.service.ts` verifies DB when `READINESS_REQUIRE_DATABASE=true` and Redis when `READINESS_REQUIRE_REDIS=true`; `backend/src/modules/health/health.service.test.ts` covers required DB ping, DB failure, and required Redis ping. Stage runtime evidence is recorded later in Task 10. |
+| `/health/ready` checks required dependencies in stage-like runtime. | Pass | Code readiness in `backend/src/modules/health/health.service.ts` verifies DB when `READINESS_REQUIRE_DATABASE=true` and Redis when `READINESS_REQUIRE_REDIS=true`; `backend/src/modules/health/health.service.test.ts` covers required DB ping, DB failure, and required Redis ping. Live stage command passed on 2026-05-17: `curl -fsS https://backend-test.mebelkz.app/health/ready | jq` returned `status: ready` with `database.status=ok`, `redis.status=ok`, and `config.status=ok`. |
 | Runtime flags are fail-closed where needed and dependencies are explicit. | Pass | `backend/src/config/env.validation.ts` defaults deadline write/export controls to read-only/disabled and requires explicit dependencies for auth, readiness DB, Redis readiness, and Redis-backed rate limits; verified by `backend/src/config/env.validation.test.ts` with the focused command above. |
 
 ## Legacy Vercel Functions And Rollback Gates
@@ -79,8 +79,8 @@
 | --- | --- | --- |
 | Redis/Valkey-backed rate limit is enabled for stage/prod-like runtime. | Pass | `backend/src/rate-limit/rate-limit.module.ts` selects `RedisRateLimitStore` when `BACKEND_RATE_LIMIT_STORE=redis` using `RATE_LIMIT_REDIS_URL` or `REDIS_URL`; `backend/src/config/env.validation.test.ts` confirms staging requires `BACKEND_RATE_LIMIT_STORE=redis` plus a Redis URL. Focused test command passed 2026-05-17. |
 | Memory fallback is only local/test-safe. | Pass | `backend/src/rate-limit/rate-limit.module.ts` falls back to `MemoryRateLimitStore` only when the store is not `redis`; `backend/src/config/env.validation.test.ts` rejects staging without Redis-backed settings while focused memory-store tests cover local/test behavior. Focused test command passed 2026-05-17. |
-| Stage readiness includes Redis. | Pass | Code/test coverage only: `backend/src/modules/health/health.service.test.ts` verifies `READINESS_REQUIRE_REDIS=true` pings Redis through the rate-limit service, and `backend/src/config/env.validation.test.ts` requires Redis URL plus `BACKEND_RATE_LIMIT_STORE=redis` for Redis readiness. Live stage `/health/ready` evidence is deferred to stage smoke. |
-| Login rate-limit smoke evidence is documented or rerun. | Blocked | Evidence not collected yet. |
+| Stage readiness includes Redis. | Pass | Live stage command passed on 2026-05-17: `curl -fsS https://backend-test.mebelkz.app/health/ready | jq` returned `status: ready` with `redis.status=ok`. Code/test coverage also verifies `READINESS_REQUIRE_REDIS=true` pings Redis through the rate-limit service and staging Redis settings are required. |
+| Login rate-limit smoke evidence is documented or rerun. | Blocked | Prior login 429 smoke was not rerun in this task. Historical context checked in `/home/ovhtest/projects/erp_dev/CONTEXT.md`; the current context line mentions Redis/Valkey rate-limit runtime and related stage acceptance, but does not explicitly state a login 429 stage smoke passed, so this row is not marked Pass. |
 
 ## Secrets And Logging
 
@@ -111,8 +111,9 @@
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Stage backend readiness was checked. | Blocked | Evidence not collected yet. |
-| Stage frontend runtime flags were checked without printing secrets. | Blocked | Evidence not collected yet. |
+| Stage backend readiness was checked. | Pass | Command passed on 2026-05-17 without secrets: `curl -fsS https://backend-test.mebelkz.app/health/ready | jq` returned JSON `status: ready`; checks included `database.status=ok`, `redis.status=ok`, and `config.status=ok`. |
+| Stage frontend runtime flags were checked without printing secrets. | Blocked | `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell, so the protected `https://app-test.mebelkz.app/runtime-config.json` command was not run and no secret was printed. |
+| Stage deadline/frontend canaries were rerun. | Blocked | `VERCEL_AUTOMATION_BYPASS_SECRET` is missing in this shell, so protected frontend stage credentials are unavailable; `npm run test:e2e:deadline-engine-stage-canary` and `npm run test:e2e:frontend-pages-stage-canary` were not run. |
 
 ## Follow-Up Items
 
