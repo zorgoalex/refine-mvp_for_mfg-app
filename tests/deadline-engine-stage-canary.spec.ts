@@ -15,6 +15,11 @@ const postgresContainer =
 const orderId = readNumberEnv('DEADLINE_ENGINE_STAGE_ORDER_ID', 11151);
 const orderName = process.env.DEADLINE_ENGINE_STAGE_ORDER_NAME ?? 'Тест_StageSmoke';
 const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+const mutatingDeadlinePathPrefixes = [
+  '/api/v1/deadlines',
+  '/api/v1/deadline-settings',
+  '/api/v1/deadline-policies',
+];
 
 test.describe('Deadline Engine stage canary', () => {
   test.skip(!canaryEnabled, 'Run with DEADLINE_ENGINE_STAGE_CANARY=true');
@@ -31,7 +36,7 @@ test.describe('Deadline Engine stage canary', () => {
     request,
   }) => {
     const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-    const username = `e2e_test_deadlines_${runId}`;
+    const username = `e2e_test_deadlines_${runId}_${crypto.randomBytes(4).toString('hex')}`;
     const password = crypto.randomBytes(24).toString('base64url');
 
     const order = loadOrderFixture(orderId);
@@ -152,8 +157,7 @@ function isMutatingDeadlineRequest(method: string, url: string): boolean {
 
   const pathname = new URL(url).pathname;
   return (
-    pathname.startsWith('/api/v1/deadlines') ||
-    pathname.startsWith('/api/v1/deadline-settings') ||
+    mutatingDeadlinePathPrefixes.some((prefix) => pathname.startsWith(prefix)) ||
     /^\/api\/v1\/orders\/\d+\/deadlines$/.test(pathname) ||
     /^\/api\/v1\/orders\/\d+\/deadline-events$/.test(pathname) ||
     /^\/api\/v1\/orders\/\d+\/deadline-summary$/.test(pathname)
@@ -169,8 +173,8 @@ function isDeadlineGraphqlMutation(method: string, url: string, body: string | n
     const searchText = `${operationName}\n${query}`;
 
     return (
-      /\b(?:insert|update|delete)_deadline_(?:instances|events|pauses)(?:\b|_)/i.test(searchText) ||
-      /\bmutation\b[\s\S]*\bdeadline_(?:instances|events|pauses)\b/i.test(query)
+      /\b(?:insert|update|delete)_deadline_\w*(?:\b|_)/i.test(searchText) ||
+      /\bmutation\b[\s\S]*\bdeadline_\w*\b/i.test(query)
     );
   });
 }
