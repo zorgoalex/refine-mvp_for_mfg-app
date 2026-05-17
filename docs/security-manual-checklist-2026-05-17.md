@@ -23,7 +23,7 @@
 | Cookies, CORS, and runtime env | Pass | Focused runtime/CORS/readiness tests passed; stage readiness is recorded in Stage Manual Smoke. |
 | Legacy Vercel functions and rollback gates | Pass | Focused legacy/runtime-config tests passed; see Legacy Vercel Functions And Rollback Gates section. |
 | API authorization boundaries | Pass | Focused backend authorization tests passed; broader Playwright client-phones no-fallback smoke failed on notification visibility and is not used as pass evidence. |
-| Rate limit | Pass | Focused rate-limit tests passed for Redis-backed policy, local/test memory fallback, auth/order/VLM consumers, and Redis readiness code coverage; login stage smoke remains deferred in the Rate Limit section. |
+| Rate limit | Blocked | Focused rate-limit tests passed for Redis-backed policy, local/test memory fallback, auth/order/VLM consumers, and Redis readiness code coverage; login stage smoke remains deferred in the Rate Limit section. |
 | Secrets and logging | Blocked | Evidence not collected yet. |
 | Audit expectations | Blocked | Evidence not collected yet. |
 | Hasura boundary | Blocked | Evidence not collected yet. |
