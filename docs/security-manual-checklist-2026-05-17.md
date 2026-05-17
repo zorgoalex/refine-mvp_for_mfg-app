@@ -44,11 +44,11 @@
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| CORS does not allow wildcard credentials in production/staging-like env. | Blocked | Evidence not collected yet. |
-| Refresh cookie flags are appropriate for production/staging. | Blocked | Evidence not collected yet. |
-| Required backend env validation covers auth, CORS, DB, Redis/rate-limit, feature flags. | Blocked | Evidence not collected yet. |
-| `/health/ready` checks required dependencies in stage-like runtime. | Blocked | Evidence not collected yet. |
-| Runtime flags are fail-closed where needed and dependencies are explicit. | Blocked | Evidence not collected yet. |
+| CORS does not allow wildcard credentials in production/staging-like env. | Pass | `backend/src/config/env.validation.ts` rejects `CORS_ALLOWED_ORIGINS` containing `*` when `CORS_ALLOW_CREDENTIALS=true`; covered by `backend/src/config/cors.test.ts`. Verified with `npm test -- backend/src/config/cors.test.ts backend/src/config/env.validation.test.ts backend/src/modules/health/health.service.test.ts backend/src/modules/auth/refresh-cookie.test.ts`. |
+| Refresh cookie flags are appropriate for production/staging. | Pass | `backend/src/config/env.validation.ts` requires `REFRESH_COOKIE_SECURE=true` when `REFRESH_COOKIE_SAME_SITE=none` and auth is enabled; `backend/src/modules/auth/refresh-cookie.test.ts` verifies production Secure cookies and staging cross-site canary attributes. Verified with focused command above. |
+| Required backend env validation covers auth, CORS, DB, Redis/rate-limit, feature flags. | Pass | `backend/src/config/env.validation.ts` validates auth DB/secrets, CORS credentials, DB readiness requirements, Redis/rate-limit settings, staging/production Redis rate-limit store, and deadline feature flags. Covered by `backend/src/config/env.validation.test.ts`; focused command above exited 0. |
+| `/health/ready` checks required dependencies in stage-like runtime. | Pass | Code readiness in `backend/src/modules/health/health.service.ts` verifies DB when `READINESS_REQUIRE_DATABASE=true` and Redis when `READINESS_REQUIRE_REDIS=true`; `backend/src/modules/health/health.service.test.ts` covers required DB ping, DB failure, and required Redis ping. Stage runtime evidence is recorded later in Task 10. |
+| Runtime flags are fail-closed where needed and dependencies are explicit. | Pass | `backend/src/config/env.validation.ts` defaults deadline write/export controls to read-only/disabled and requires explicit dependencies for auth, readiness DB, Redis readiness, and Redis-backed rate limits; verified by `backend/src/config/env.validation.test.ts` with the focused command above. |
 
 ## Legacy Vercel Functions And Rollback Gates
 
