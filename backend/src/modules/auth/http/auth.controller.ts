@@ -7,6 +7,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -19,6 +20,8 @@ import { AuthRuntimeConfigService } from './auth-runtime-config.service';
 
 type AuthRequest = Request & RequestWithCurrentUser;
 type RequestWithRequestId = Request & { requestId?: string };
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 export interface LogoutResponse {
   ok: true;
@@ -75,6 +78,7 @@ const meResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Auth')
 @Controller()
 export class AuthController {
   constructor(
@@ -88,6 +92,13 @@ export class AuthController {
     private readonly rateLimits: RateLimitService,
   ) {}
 
+  @ApiBody({ schema: swaggerSchema(loginRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Authenticated session', schema: swaggerSchema(authResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Invalid username or password' })
+  @ApiResponse({ status: 422, description: 'Invalid login payload' })
+  @ApiResponse({ status: 429, description: 'Too many login attempts' })
+  @ApiResponse({ status: 503, description: 'Auth API is disabled' })
+  @ApiOperation({ operationId: 'authLogin', summary: 'Login with username and password' })
   @Post('auth/login')
   @HttpCode(200)
   async login(
@@ -122,6 +133,12 @@ export class AuthController {
     return result.response;
   }
 
+  @ApiCookieAuth(REFRESH_COOKIE_NAME)
+  @ApiResponse({ status: 200, description: 'Refreshed authenticated session', schema: swaggerSchema(authResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Refresh token is missing or invalid' })
+  @ApiResponse({ status: 429, description: 'Too many refresh attempts' })
+  @ApiResponse({ status: 503, description: 'Auth API is disabled' })
+  @ApiOperation({ operationId: 'authRefresh', summary: 'Refresh the current session' })
   @Post('auth/refresh')
   @HttpCode(200)
   async refresh(
@@ -159,6 +176,10 @@ export class AuthController {
     return result.response;
   }
 
+  @ApiResponse({ status: 200, description: 'Logged out', schema: swaggerSchema(logoutResponseSwaggerSchema) })
+  @ApiResponse({ status: 503, description: 'Auth API is disabled' })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  @ApiOperation({ operationId: 'authLogout', summary: 'Logout from the current session' })
   @Post('auth/logout')
   @HttpCode(200)
   async logout(
@@ -179,6 +200,11 @@ export class AuthController {
     return { ok: true };
   }
 
+  @ApiBearerAuth()
+  @ApiResponse({ status: 200, description: 'Current authenticated user', schema: swaggerSchema(meResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 503, description: 'Auth API is disabled' })
+  @ApiOperation({ operationId: 'getCurrentUser', summary: 'Get the current authenticated user' })
   @Get('me')
   me(@Req() request: AuthRequest): MeResponse {
     this.assertAuthEnabled();

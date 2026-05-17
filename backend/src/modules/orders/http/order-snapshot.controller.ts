@@ -8,6 +8,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import type { Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -18,6 +19,10 @@ import type {
 } from '../dto/order-snapshot.dto';
 import { parseOrderId } from './orders.controller';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
+
+const dateOnlySwaggerSchema = { type: 'string', format: 'date' } as const;
 
 const snapshotIdentitySwaggerSchema = {
   type: 'object',
@@ -149,6 +154,8 @@ const orderSnapshotImportBatchResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Order Snapshots')
+@ApiBearerAuth()
 @Controller('orders')
 export class OrderSnapshotController {
   constructor(
@@ -158,6 +165,21 @@ export class OrderSnapshotController {
     private readonly runtimeConfig: OrdersRuntimeConfigService,
   ) {}
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Order snapshot JSON file',
+    content: {
+      'application/json': {
+        schema: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'exportOrderSnapshot', summary: 'Export an order snapshot' })
   @Get(':orderId/snapshot')
   async exportOne(
     @Req() request: RequestWithCurrentUser,
@@ -178,6 +200,28 @@ export class OrderSnapshotController {
     response.send(file.content);
   }
 
+  @ApiQuery({ name: 'dateFrom', required: true, type: String, description: 'Start date', schema: swaggerSchema(dateOnlySwaggerSchema) })
+  @ApiQuery({ name: 'dateTo', required: true, type: String, description: 'End date', schema: swaggerSchema(dateOnlySwaggerSchema) })
+  @ApiResponse({
+    status: 200,
+    description: 'ZIP archive containing order snapshot JSON files',
+    headers: {
+      'X-Order-Snapshot-Count': {
+        description: 'Number of snapshots included in the archive',
+        schema: { type: 'integer', minimum: 0 },
+      },
+    },
+    content: {
+      'application/zip': {
+        schema: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid snapshot batch query' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'exportOrderSnapshotBatch', summary: 'Export a batch of order snapshots' })
   @Get('snapshot/batch')
   async exportBatch(
     @Req() request: RequestWithCurrentUser,
@@ -202,6 +246,13 @@ export class OrderSnapshotController {
     response.send(file.content);
   }
 
+  @ApiBody({ schema: swaggerSchema(importOrderSnapshotRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Imported order snapshot', schema: swaggerSchema(orderSnapshotImportResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid snapshot import payload' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
+  @ApiOperation({ operationId: 'importOrderSnapshot', summary: 'Import an order snapshot' })
   @Post('snapshot/import')
   @HttpCode(200)
   async importOne(
@@ -221,6 +272,13 @@ export class OrderSnapshotController {
     });
   }
 
+  @ApiBody({ schema: swaggerSchema(importOrderSnapshotBatchRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Imported order snapshot batch', schema: swaggerSchema(orderSnapshotImportBatchResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid snapshot batch import payload' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
+  @ApiOperation({ operationId: 'importOrderSnapshotBatch', summary: 'Import an order snapshot batch' })
   @Post('snapshot/import-batch')
   @HttpCode(200)
   async importBatch(

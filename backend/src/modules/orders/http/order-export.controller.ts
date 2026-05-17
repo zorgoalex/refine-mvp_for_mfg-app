@@ -7,6 +7,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OrderExportService } from '../application/order-export.service';
@@ -17,6 +18,8 @@ import type {
 } from '../dto/export-order.dto';
 import { parseOrderId } from './orders.controller';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const exportOrderRequestSwaggerSchema = {
   type: 'object',
@@ -38,6 +41,8 @@ const exportOrderResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Order Export')
+@ApiBearerAuth()
 @Controller('orders')
 export class OrderExportController {
   constructor(
@@ -47,6 +52,18 @@ export class OrderExportController {
     private readonly runtimeConfig: OrdersRuntimeConfigService,
   ) {}
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ required: false, schema: swaggerSchema(exportOrderRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'Exported order file', schema: swaggerSchema(exportOrderResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 422, description: 'Invalid export request' })
+  @ApiResponse({ status: 429, description: 'Export rate limit exceeded' })
+  @ApiResponse({ status: 502, description: 'Upstream provider export failure' })
+  @ApiResponse({ status: 503, description: 'Orders or order export API is disabled' })
+  @ApiResponse({ status: 504, description: 'Upstream provider export timeout' })
+  @ApiOperation({ operationId: 'exportOrderToGoogleDrive', summary: 'Export an order to Google Drive' })
   @Post(':orderId/export/google-drive')
   async exportToGoogleDrive(
     @Req() request: RequestWithCurrentUser,

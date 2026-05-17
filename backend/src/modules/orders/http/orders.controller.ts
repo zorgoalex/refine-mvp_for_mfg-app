@@ -15,12 +15,14 @@ import {
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiHeader,
   ApiOperation,
   ApiParam,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OrderQueryService } from '../application/order-query.service';
@@ -45,6 +47,8 @@ import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 export interface SaveOrderResponseDto {
   order: OrderDto;
 }
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const nullableStringSwaggerSchema = { type: 'string', nullable: true } as const;
 const nullableIntegerSwaggerSchema = { type: 'integer', nullable: true } as const;
@@ -682,6 +686,8 @@ const deleteOrderResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Orders')
+@ApiBearerAuth()
 @Controller('orders')
 export class OrdersController {
   constructor(
@@ -693,6 +699,24 @@ export class OrdersController {
     private readonly runtimeConfig: OrdersRuntimeConfigService,
   ) {}
 
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number' })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number, description: 'Items per page' })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ORDER_LIST_SORT_FIELDS, description: 'Sort field' })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Sort direction' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search text' })
+  @ApiQuery({ name: 'clientId', required: false, type: Number, description: 'Client ID filter' })
+  @ApiQuery({ name: 'orderStatusId', required: false, type: Number, description: 'Order status ID filter' })
+  @ApiQuery({ name: 'paymentStatusId', required: false, type: Number, description: 'Payment status ID filter' })
+  @ApiQuery({ name: 'productionStatusId', required: false, type: Number, description: 'Production status ID filter' })
+  @ApiQuery({ name: 'dateFrom', required: false, type: String, description: 'Start date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
+  @ApiQuery({ name: 'dateTo', required: false, type: String, description: 'End date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
+  @ApiQuery({ name: 'onlyMyOrders', required: false, type: Boolean, description: 'Only orders assigned to the current user' })
+  @ApiResponse({ status: 200, description: 'Order list', schema: swaggerSchema(orderListResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid order list query' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'listOrders', summary: 'List orders' })
   @Get()
   async list(
     @Req() request: RequestWithCurrentUser,
@@ -704,6 +728,11 @@ export class OrdersController {
     return this.orderQueries.list({ currentUser, query: parseOrderListQuery(query) });
   }
 
+  @ApiResponse({ status: 200, description: 'Order form data', schema: swaggerSchema(orderFormDataResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'getOrderFormData', summary: 'Get order form data' })
   @Get('form-data')
   async getFormData(@Req() request: RequestWithCurrentUser): Promise<OrderFormDataResponseDto> {
     this.assertOrdersReadEnabled();
@@ -712,6 +741,13 @@ export class OrdersController {
     return this.orderQueries.getFormData({ currentUser });
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiResponse({ status: 200, description: 'Order', schema: swaggerSchema(orderResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'getOrderById', summary: 'Get an order by ID' })
   @Get(':orderId')
   async getById(
     @Req() request: RequestWithCurrentUser,
@@ -726,6 +762,16 @@ export class OrdersController {
     return { order };
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number' })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number, description: 'Items per page' })
+  @ApiResponse({ status: 200, description: 'Order audit events', schema: swaggerSchema(orderAuditListResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 422, description: 'Invalid order audit query' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'getOrderAudit', summary: 'Get order audit events' })
   @Get(':orderId/audit')
   async getAudit(
     @Req() request: RequestWithCurrentUser,
@@ -747,6 +793,13 @@ export class OrdersController {
     });
   }
 
+  @ApiBody({ schema: swaggerSchema(saveOrderRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'Created order', schema: swaggerSchema(saveOrderResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid save order payload' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
+  @ApiOperation({ operationId: 'createOrder', summary: 'Create an order' })
   @Post()
   async create(
     @Req() request: RequestWithCurrentUser,
@@ -760,6 +813,16 @@ export class OrdersController {
     return { order };
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ schema: swaggerSchema(saveOrderRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Updated order', schema: swaggerSchema(saveOrderResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid save order payload' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
+  @ApiOperation({ operationId: 'updateOrder', summary: 'Update an order' })
   @Put(':orderId')
   @HttpCode(200)
   async update(
@@ -776,6 +839,27 @@ export class OrdersController {
     return { order };
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiHeader({
+    name: 'If-Match',
+    required: true,
+    description: 'Order version/ETag version is required.',
+    schema: { type: 'string' },
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'Idempotency key for safe retry of the delete request.',
+    schema: { type: 'string', minLength: 8, maxLength: 200 },
+  })
+  @ApiResponse({ status: 200, description: 'Deleted order', schema: swaggerSchema(deleteOrderResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Missing or invalid delete request headers' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
+  @ApiOperation({ operationId: 'deleteOrder', summary: 'Delete an order' })
   @Delete(':orderId')
   @HttpCode(200)
   async delete(

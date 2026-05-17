@@ -8,6 +8,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -22,6 +23,8 @@ import type {
   UserResponseDto,
 } from '../dto/user.dto';
 import { UsersRuntimeConfigService } from './users-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const userRoleSchema = z.enum(USER_ROLES);
 const nullableTextSchema = z.string().trim().max(255).nullable().optional();
@@ -146,6 +149,8 @@ const changePasswordResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Users')
+@ApiBearerAuth()
 @Controller('users')
 export class UsersController {
   constructor(
@@ -155,6 +160,17 @@ export class UsersController {
     private readonly runtimeConfig: UsersRuntimeConfigService,
   ) {}
 
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number' })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number, description: 'Items per page' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search by user text fields' })
+  @ApiQuery({ name: 'role', required: false, enum: USER_ROLES, description: 'Filter by role' })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Filter by active status' })
+  @ApiResponse({ status: 200, description: 'User list', schema: swaggerSchema(userListResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid user list query' })
+  @ApiResponse({ status: 503, description: 'Users API is disabled' })
+  @ApiOperation({ operationId: 'listUsers', summary: 'List users' })
   @Get()
   async list(
     @Req() request: RequestWithCurrentUser,
@@ -170,6 +186,13 @@ export class UsersController {
     });
   }
 
+  @ApiParam({ name: 'userId', type: Number, description: 'User ID' })
+  @ApiResponse({ status: 200, description: 'User', schema: swaggerSchema(userResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 503, description: 'Users API is disabled' })
+  @ApiOperation({ operationId: 'getUserById', summary: 'Get a user by ID' })
   @Get(':userId')
   async getById(
     @Req() request: RequestWithCurrentUser,
@@ -187,6 +210,13 @@ export class UsersController {
     return { user };
   }
 
+  @ApiBody({ schema: swaggerSchema(createUserRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'Created user', schema: swaggerSchema(userResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid create user payload' })
+  @ApiResponse({ status: 503, description: 'Users API is disabled' })
+  @ApiOperation({ operationId: 'createUser', summary: 'Create a user' })
   @Post()
   async create(
     @Req() request: RequestWithCurrentUser,
@@ -204,6 +234,15 @@ export class UsersController {
     return { user };
   }
 
+  @ApiParam({ name: 'userId', type: Number, description: 'User ID' })
+  @ApiBody({ schema: swaggerSchema(updateUserRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Updated user', schema: swaggerSchema(userResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 422, description: 'Invalid update user payload' })
+  @ApiResponse({ status: 503, description: 'Users API is disabled' })
+  @ApiOperation({ operationId: 'updateUser', summary: 'Update a user' })
   @Patch(':userId')
   async update(
     @Req() request: RequestWithCurrentUser,
@@ -223,6 +262,15 @@ export class UsersController {
     return { user };
   }
 
+  @ApiParam({ name: 'userId', type: Number, description: 'User ID' })
+  @ApiBody({ schema: swaggerSchema(changePasswordRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Password changed', schema: swaggerSchema(changePasswordResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 422, description: 'Invalid change password payload' })
+  @ApiResponse({ status: 503, description: 'Users API is disabled' })
+  @ApiOperation({ operationId: 'changeUserPassword', summary: 'Change a user password' })
   @Post(':userId/change-password')
   @HttpCode(200)
   async changePassword(
@@ -241,6 +289,13 @@ export class UsersController {
     });
   }
 
+  @ApiParam({ name: 'userId', type: Number, description: 'User ID' })
+  @ApiResponse({ status: 200, description: 'Deactivated user', schema: swaggerSchema(userResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 503, description: 'Users API is disabled' })
+  @ApiOperation({ operationId: 'deactivateUser', summary: 'Deactivate a user' })
   @Patch(':userId/deactivate')
   async deactivate(
     @Req() request: RequestWithCurrentUser,
@@ -258,6 +313,13 @@ export class UsersController {
     return { user };
   }
 
+  @ApiParam({ name: 'userId', type: Number, description: 'User ID' })
+  @ApiResponse({ status: 200, description: 'Activated user', schema: swaggerSchema(userResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 503, description: 'Users API is disabled' })
+  @ApiOperation({ operationId: 'activateUser', summary: 'Activate a user' })
   @Patch(':userId/activate')
   async activate(
     @Req() request: RequestWithCurrentUser,
