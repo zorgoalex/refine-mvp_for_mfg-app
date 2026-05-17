@@ -33,12 +33,12 @@
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Login requires backend auth and returns access token only where expected. | Blocked | Evidence not collected yet. |
-| Refresh token is HttpOnly cookie-backed in backend mode. | Blocked | Evidence not collected yet. |
-| Backend auth mode has no `localStorage refresh_token` dependency. | Blocked | Evidence not collected yet. |
-| Refresh rotation/reuse detection tests exist and pass. | Blocked | Evidence not collected yet. |
-| Logout/session revoke behavior is covered. | Blocked | Evidence not collected yet. |
-| `/api/v1/me` is protected and returns user + permissions. | Blocked | Evidence not collected yet. |
+| Login requires backend auth and returns access token only where expected. | Pass | `backend/src/modules/auth/http/auth.controller.test.ts` asserts disabled auth fails closed and login returns the auth response without `refreshToken`; `src/api/authApi.test.ts` asserts backend login stores only access token/user in memory. Focused command passed: `npm test -- backend/src/modules/auth src/authProvider.test.ts src/api/authApi.test.ts src/utils/auth.test.ts`. |
+| Refresh token is HttpOnly cookie-backed in backend mode. | Pass | `backend/src/modules/auth/http/auth.controller.test.ts` asserts `httpOnly: true`, auth login JSON has no `refreshToken`, and refresh rotates the cookie; `backend/src/modules/auth/refresh-cookie.test.ts` asserts the refresh cookie contract. Focused command passed: `npm test -- backend/src/modules/auth src/authProvider.test.ts src/api/authApi.test.ts src/utils/auth.test.ts`. |
+| Backend auth mode has no `localStorage refresh_token` dependency. | Pass | `src/authProvider.test.ts` asserts backend login stores no `refresh_token` or `access_token` in `localStorage`; `src/utils/auth.test.ts` asserts backend refresh uses `/api/v1/auth/refresh`, not the legacy refresh endpoint, and leaves `localStorage refresh_token` empty. Focused command passed: `npm test -- backend/src/modules/auth src/authProvider.test.ts src/api/authApi.test.ts src/utils/auth.test.ts`. |
+| Refresh rotation/reuse detection tests exist and pass. | Pass | `backend/src/modules/auth/adapters/pg-auth-session-manager.test.ts` asserts atomic refresh rotation, revoked-token reuse detection, session status `reuse_detected`, and reuse audit logging without raw refresh token storage. Focused command passed: `npm test -- backend/src/modules/auth src/authProvider.test.ts src/api/authApi.test.ts src/utils/auth.test.ts`. |
+| Logout/session revoke behavior is covered. | Pass | `backend/src/modules/auth/http/auth.controller.test.ts` asserts logout delegates session revocation and clears the HttpOnly refresh cookie; `backend/src/modules/auth/adapters/pg-auth-session-manager.test.ts` asserts logout audit/session revoke behavior without storing raw refresh tokens; `src/authProvider.test.ts` and `src/api/authApi.test.ts` assert frontend logout clears memory session. Focused command passed: `npm test -- backend/src/modules/auth src/authProvider.test.ts src/api/authApi.test.ts src/utils/auth.test.ts`. |
+| `/api/v1/me` is protected and returns user + permissions. | Pass | `backend/src/modules/auth/http/auth.controller.test.ts` asserts `/api/v1/me` requires current user and returns user permissions without tokens; `src/api/authApi.test.ts` asserts `/api/v1/me` stores the current user without changing the access token. Focused command passed: `npm test -- backend/src/modules/auth src/authProvider.test.ts src/api/authApi.test.ts src/utils/auth.test.ts`. |
 
 ## Cookies, CORS, And Runtime Env
 
