@@ -23,7 +23,7 @@
 | Cookies, CORS, and runtime env | Pass | Focused runtime/CORS/readiness tests passed; stage readiness is recorded in Stage Manual Smoke. |
 | Legacy Vercel functions and rollback gates | Pass | Focused legacy/runtime-config tests passed; see Legacy Vercel Functions And Rollback Gates section. |
 | API authorization boundaries | Pass | Focused backend authorization tests passed; broader Playwright client-phones no-fallback smoke failed on notification visibility and is not used as pass evidence. |
-| Rate limit | Blocked | Evidence not collected yet. |
+| Rate limit | Pass | Focused rate-limit tests passed for Redis-backed policy, local/test memory fallback, auth/order/VLM consumers, and Redis readiness code coverage; login stage smoke remains deferred in the Rate Limit section. |
 | Secrets and logging | Blocked | Evidence not collected yet. |
 | Audit expectations | Blocked | Evidence not collected yet. |
 | Hasura boundary | Blocked | Evidence not collected yet. |
@@ -77,9 +77,9 @@
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Redis/Valkey-backed rate limit is enabled for stage/prod-like runtime. | Blocked | Evidence not collected yet. |
-| Memory fallback is only local/test-safe. | Blocked | Evidence not collected yet. |
-| Stage readiness includes Redis. | Blocked | Evidence not collected yet. |
+| Redis/Valkey-backed rate limit is enabled for stage/prod-like runtime. | Pass | `backend/src/rate-limit/rate-limit.module.ts` selects `RedisRateLimitStore` when `BACKEND_RATE_LIMIT_STORE=redis` using `RATE_LIMIT_REDIS_URL` or `REDIS_URL`; `backend/src/config/env.validation.test.ts` confirms staging requires `BACKEND_RATE_LIMIT_STORE=redis` plus a Redis URL. Focused test command passed 2026-05-17. |
+| Memory fallback is only local/test-safe. | Pass | `backend/src/rate-limit/rate-limit.module.ts` falls back to `MemoryRateLimitStore` only when the store is not `redis`; `backend/src/config/env.validation.test.ts` rejects staging without Redis-backed settings while focused memory-store tests cover local/test behavior. Focused test command passed 2026-05-17. |
+| Stage readiness includes Redis. | Pass | Code/test coverage only: `backend/src/modules/health/health.service.test.ts` verifies `READINESS_REQUIRE_REDIS=true` pings Redis through the rate-limit service, and `backend/src/config/env.validation.test.ts` requires Redis URL plus `BACKEND_RATE_LIMIT_STORE=redis` for Redis readiness. Live stage `/health/ready` evidence is deferred to stage smoke. |
 | Login rate-limit smoke evidence is documented or rerun. | Blocked | Evidence not collected yet. |
 
 ## Secrets And Logging
