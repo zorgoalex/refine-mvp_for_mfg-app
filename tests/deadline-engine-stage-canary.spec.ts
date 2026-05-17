@@ -55,6 +55,7 @@ test.describe('Deadline Engine stage canary', () => {
     const pageErrors: string[] = [];
     const consoleErrors: string[] = [];
     const mutatingDeadlineRequests: string[] = [];
+    const mutatingDeadlineGraphqlRequests: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
@@ -66,6 +67,10 @@ test.describe('Deadline Engine stage canary', () => {
       if (isMutatingDeadlineRequest(request.method(), request.url())) {
         mutatingDeadlineRequests.push(`${request.method()} ${request.url()}`);
       }
+
+      if (isDeadlineGraphqlMutation(request.method(), request.url(), request.postData())) {
+        mutatingDeadlineGraphqlRequests.push(request.postData()?.slice(0, 500) ?? '');
+      }
     });
     await page.goto(`${frontendUrl}/orders/show/${orderId}`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByText('Дедлайны').first()).toBeVisible({ timeout: 30000 });
@@ -73,6 +78,7 @@ test.describe('Deadline Engine stage canary', () => {
     await expect(page.getByText(/Финальный:/).first()).toBeVisible({ timeout: 30000 });
     await expect(page.getByText('Ошибка загрузки дедлайнов')).toHaveCount(0);
     expect(mutatingDeadlineRequests).toEqual([]);
+    expect(mutatingDeadlineGraphqlRequests).toEqual([]);
     expect(loadOrderFixture(orderId)).toEqual(order);
     expect(pageErrors).toEqual([]);
     expect(consoleErrors.filter((message) => !message.includes('ResizeObserver'))).toEqual([]);
@@ -152,6 +158,33 @@ function isMutatingDeadlineRequest(method: string, url: string): boolean {
     /^\/api\/v1\/orders\/\d+\/deadline-events$/.test(pathname) ||
     /^\/api\/v1\/orders\/\d+\/deadline-summary$/.test(pathname)
   );
+}
+
+function isDeadlineGraphqlMutation(method: string, url: string, body: string | null): boolean {
+  if (method.toUpperCase() !== 'POST' || !url.includes('/v1/graphql') || !body) return false;
+
+  return normalizeGraphqlPayloads(body).some((payload) => {
+    const query = typeof payload.query === 'string' ? payload.query : '';
+    const operationName = typeof payload.operationName === 'string' ? payload.operationName : '';
+    const searchText = `${operationName}\n${query}`;
+
+    return (
+      /\b(?:insert|update|delete)_deadline_(?:instances|events|pauses)(?:\b|_)/i.test(searchText) ||
+      /\bmutation\b[\s\S]*\bdeadline_(?:instances|events|pauses)\b/i.test(query)
+    );
+  });
+}
+
+function normalizeGraphqlPayloads(body: string): Array<{ query?: unknown; operationName?: unknown }> {
+  try {
+    const parsed = JSON.parse(body);
+    if (Array.isArray(parsed)) return parsed.filter((payload) => payload && typeof payload === 'object');
+    if (parsed && typeof parsed === 'object') return [parsed];
+  } catch {
+    // Some clients send raw GraphQL documents instead of JSON envelopes.
+  }
+
+  return [{ query: body }];
 }
 
 function loadOrderFixture(orderId: number): OrderFixture {
@@ -268,6 +301,7 @@ function createSmokeUser(username: string, password: string): number {
 function cleanupUser(userId: number | null) {
   if (!userId) return;
   psql(`
+    DELETE FROM refresh_tokens WHERE user_id = ${userId};
     DELETE FROM auth_sessions WHERE user_id = ${userId};
     DELETE FROM users WHERE user_id = ${userId};
   `);
