@@ -7,6 +7,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -19,6 +20,8 @@ import type {
   UpdateClientPhoneRequestDto,
 } from '../dto/client-phone.dto';
 import { ClientPhonesRuntimeConfigService } from './client-phones-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const phoneTypeSchema = z.enum(['mobile', 'work', 'home', 'fax']);
 const phoneNumberSchema = z
@@ -145,6 +148,8 @@ const deleteClientPhoneResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Client Phones')
+@ApiBearerAuth()
 @Controller('client-phones')
 export class ClientPhonesController {
   constructor(
@@ -154,6 +159,15 @@ export class ClientPhonesController {
     private readonly runtimeConfig: ClientPhonesRuntimeConfigService,
   ) {}
 
+  @ApiBody({ schema: swaggerSchema(createClientPhoneRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'Created client phone', schema: swaggerSchema(clientPhoneResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Client not found' })
+  @ApiResponse({ status: 409, description: 'Client phone or idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid client phone payload' })
+  @ApiResponse({ status: 503, description: 'Client phones API is disabled' })
+  @ApiOperation({ operationId: 'createClientPhone', summary: 'Create a client phone' })
   @Post()
   async create(
     @Req() request: RequestWithCurrentUser,
@@ -168,6 +182,17 @@ export class ClientPhonesController {
     });
   }
 
+  @ApiParam({ name: 'phoneId', type: Number, description: 'Client phone ID' })
+  @ApiBody({ schema: swaggerSchema(updateClientPhoneRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Updated client phone', schema: swaggerSchema(clientPhoneResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid client phone ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Client phone not found' })
+  @ApiResponse({ status: 409, description: 'Client phone or idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid client phone payload' })
+  @ApiResponse({ status: 503, description: 'Client phones API is disabled' })
+  @ApiOperation({ operationId: 'updateClientPhone', summary: 'Update a client phone' })
   @Patch(':phoneId')
   async update(
     @Req() request: RequestWithCurrentUser,
@@ -184,6 +209,17 @@ export class ClientPhonesController {
     });
   }
 
+  @ApiParam({ name: 'phoneId', type: Number, description: 'Client phone ID' })
+  @ApiBody({ schema: swaggerSchema(deleteClientPhoneRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Deleted client phone', schema: swaggerSchema(deleteClientPhoneResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid client phone ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Client phone not found' })
+  @ApiResponse({ status: 409, description: 'Client phone or idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid client phone payload' })
+  @ApiResponse({ status: 503, description: 'Client phones API is disabled' })
+  @ApiOperation({ operationId: 'deleteClientPhone', summary: 'Delete a client phone' })
   @Delete(':phoneId')
   @HttpCode(200)
   async delete(

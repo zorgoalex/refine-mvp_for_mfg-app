@@ -7,6 +7,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -18,6 +19,8 @@ import type {
   ProductionStageEventRequestDto,
 } from '../dto/production-action.dto';
 import { ProductionActionsRuntimeConfigService } from './production-actions-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const dateOnlySchema = z
   .string()
@@ -99,6 +102,8 @@ const productionActionResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Production Actions')
+@ApiBearerAuth()
 @Controller('orders/:orderId')
 export class ProductionActionsController {
   constructor(
@@ -108,6 +113,17 @@ export class ProductionActionsController {
     private readonly runtimeConfig: ProductionActionsRuntimeConfigService,
   ) {}
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ schema: swaggerSchema(moveCalendarDateRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Moved order calendar date', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid production action payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'moveOrderCalendarDate', summary: 'Move an order calendar date' })
   @Patch('calendar-date')
   async moveCalendarDate(
     @Req() request: RequestWithCurrentUser,
@@ -124,6 +140,17 @@ export class ProductionActionsController {
     });
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ schema: swaggerSchema(changeOrderStatusRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Changed order status', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid production status or production action payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'changeOrderStatus', summary: 'Change an order status' })
   @Patch('status')
   async changeOrderStatus(
     @Req() request: RequestWithCurrentUser,
@@ -133,6 +160,17 @@ export class ProductionActionsController {
     return this.executeChangeOrderStatus(request, orderIdParam, body);
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ schema: swaggerSchema(changeOrderStatusRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Changed order status', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid production status or production action payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'changeOrderStatusLegacy', summary: 'Change an order status using the legacy route' })
   @Patch('order-status')
   async changeOrderStatusLegacy(
     @Req() request: RequestWithCurrentUser,
@@ -142,6 +180,18 @@ export class ProductionActionsController {
     return this.executeChangeOrderStatus(request, orderIdParam, body);
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiParam({ name: 'productionStatusId', type: Number, description: 'Production status ID' })
+  @ApiBody({ schema: swaggerSchema(productionStageEventRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Activated production stage', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order or production status ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid or missing production status or production action payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'activateProductionStage', summary: 'Activate a production stage' })
   @Put('production-stage-events/:productionStatusId')
   async activateProductionStage(
     @Req() request: RequestWithCurrentUser,
@@ -160,6 +210,18 @@ export class ProductionActionsController {
     });
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiParam({ name: 'productionStatusId', type: Number, description: 'Production status ID' })
+  @ApiBody({ schema: swaggerSchema(productionStageEventRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Deactivated production stage', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order or production status ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid or missing production status or production action payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'deactivateProductionStage', summary: 'Deactivate a production stage' })
   @Delete('production-stage-events/:productionStatusId')
   @HttpCode(200)
   async deactivateProductionStage(

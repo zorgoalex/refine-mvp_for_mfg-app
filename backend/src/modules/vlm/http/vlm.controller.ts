@@ -18,6 +18,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -29,6 +30,8 @@ import type {
   VlmUploadResponseDto,
 } from '../dto/vlm.dto';
 import { VlmRuntimeConfigService, type VlmUploadLimits } from './vlm-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const promptKvSchema = z.object({
   namespace: z.string().trim().min(1).max(100),
@@ -160,6 +163,8 @@ const vlmAnalyzeResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('VLM')
+@ApiBearerAuth()
 @Controller('vlm')
 export class VlmController {
   constructor(
@@ -169,6 +174,11 @@ export class VlmController {
     private readonly runtimeConfig: VlmRuntimeConfigService,
   ) {}
 
+  @ApiResponse({ status: 200, description: 'VLM health', schema: swaggerSchema(vlmHealthResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 503, description: 'VLM API is disabled' })
+  @ApiOperation({ operationId: 'getVlmHealth', summary: 'Get VLM health' })
   @Get('health')
   async health(@Req() request: RequestWithCurrentUser): Promise<VlmHealthResponseDto> {
     this.assertVlmEnabled();
@@ -177,6 +187,18 @@ export class VlmController {
     return this.vlm.getHealth({ currentUser, requestId: request.requestId });
   }
 
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: swaggerSchema(vlmUploadRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'Uploaded VLM image', schema: swaggerSchema(vlmUploadResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 413, description: 'VLM upload file is too large' })
+  @ApiResponse({ status: 422, description: 'Invalid VLM upload payload' })
+  @ApiResponse({ status: 429, description: 'VLM rate limit exceeded' })
+  @ApiResponse({ status: 502, description: 'Upstream VLM provider upload failure' })
+  @ApiResponse({ status: 503, description: 'VLM API or actions are disabled' })
+  @ApiResponse({ status: 504, description: 'Upstream VLM provider upload timeout' })
+  @ApiOperation({ operationId: 'uploadVlmImage', summary: 'Upload a VLM image' })
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
   async upload(
@@ -195,6 +217,17 @@ export class VlmController {
     });
   }
 
+  @ApiBody({ schema: swaggerSchema(vlmAnalyzeRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Analyzed VLM image', schema: swaggerSchema(vlmAnalyzeResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'VLM upload not found' })
+  @ApiResponse({ status: 422, description: 'Invalid VLM analyze payload' })
+  @ApiResponse({ status: 429, description: 'VLM rate limit exceeded' })
+  @ApiResponse({ status: 502, description: 'Upstream VLM provider analyze failure' })
+  @ApiResponse({ status: 503, description: 'VLM API or actions are disabled' })
+  @ApiResponse({ status: 504, description: 'Upstream VLM provider analyze timeout' })
+  @ApiOperation({ operationId: 'analyzeVlmImage', summary: 'Analyze a VLM image' })
   @Post('analyze')
   @HttpCode(200)
   async analyze(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {

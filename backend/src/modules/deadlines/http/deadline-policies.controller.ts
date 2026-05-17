@@ -7,6 +7,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -18,6 +19,8 @@ import type {
   UpdateDeadlinePolicyRequestDto,
 } from '../dto/deadline-policy.dto';
 import { DeadlinesRuntimeConfigService } from './deadlines-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const durationUnitSchema = z
   .enum(['minute', 'hour', 'day', 'working_hour', 'working_day'])
@@ -122,6 +125,8 @@ const deadlinePolicyListResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Deadline Policies')
+@ApiBearerAuth()
 @Controller('deadline-policies')
 export class DeadlinePoliciesController {
   constructor(
@@ -133,6 +138,12 @@ export class DeadlinePoliciesController {
     private readonly runtimeConfig: DeadlinesRuntimeConfigService,
   ) {}
 
+  @ApiResponse({ status: 200, description: 'Deadline policy list', schema: swaggerSchema(deadlinePolicyListResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline policy query' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled' })
+  @ApiOperation({ operationId: 'listDeadlinePolicies', summary: 'List deadline policies' })
   @Get()
   async list(@Req() request: RequestWithCurrentUser) {
     this.assertReadEnabled();
@@ -142,6 +153,13 @@ export class DeadlinePoliciesController {
     });
   }
 
+  @ApiBody({ schema: swaggerSchema(createDeadlinePolicyRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'Created deadline policy', schema: swaggerSchema(deadlinePolicyResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline policy payload' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled or read-only' })
+  @ApiOperation({ operationId: 'createDeadlinePolicy', summary: 'Create a deadline policy' })
   @Post()
   async create(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
     this.assertWriteEnabled();
@@ -154,6 +172,16 @@ export class DeadlinePoliciesController {
     };
   }
 
+  @ApiParam({ name: 'policyId', type: String, description: 'Deadline policy ID' })
+  @ApiBody({ schema: swaggerSchema(updateDeadlinePolicyRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Updated deadline policy', schema: swaggerSchema(deadlinePolicyResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid deadline policy ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Deadline policy not found' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline policy payload' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled or read-only' })
+  @ApiOperation({ operationId: 'updateDeadlinePolicy', summary: 'Update a deadline policy' })
   @Patch(':policyId')
   async update(
     @Req() request: RequestWithCurrentUser,

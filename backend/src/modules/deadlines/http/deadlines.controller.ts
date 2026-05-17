@@ -8,6 +8,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -36,6 +37,8 @@ import type {
   ResumeDeadlineRequestDto,
 } from '../dto/deadline-instance.dto';
 import { DeadlinesRuntimeConfigService } from './deadlines-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const optionalPositiveIntSchema = z.number().int().positive().nullable().optional();
 
@@ -197,6 +200,14 @@ const deadlineListResponseSwaggerSchema = {
   },
 } as const;
 
+const orderDeadlineListResponseSwaggerSchema = {
+  type: 'object',
+  required: ['data'],
+  properties: {
+    data: { type: 'array', items: deadlineSwaggerSchema },
+  },
+} as const;
+
 const deadlineEventSwaggerSchema = {
   type: 'object',
   required: ['deadlineEventId', 'deadlineId', 'eventType', 'severity', 'entityType', 'entityId', 'eventAt', 'createdAt'],
@@ -272,6 +283,8 @@ const deadlineSummaryResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Deadlines')
+@ApiBearerAuth()
 @Controller()
 export class DeadlinesController {
   constructor(
@@ -283,6 +296,13 @@ export class DeadlinesController {
     private readonly runtimeConfig: DeadlinesRuntimeConfigService,
   ) {}
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiResponse({ status: 200, description: 'Order deadlines', schema: swaggerSchema(orderDeadlineListResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid order ID' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled' })
+  @ApiOperation({ operationId: 'listOrderDeadlines', summary: 'List order deadlines' })
   @Get('orders/:orderId/deadlines')
   async listOrderDeadlines(
     @Req() request: RequestWithCurrentUser,
@@ -296,6 +316,13 @@ export class DeadlinesController {
     });
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiResponse({ status: 200, description: 'Order deadline events', schema: swaggerSchema(deadlineEventListResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid order ID' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled' })
+  @ApiOperation({ operationId: 'listOrderDeadlineEvents', summary: 'List order deadline events' })
   @Get('orders/:orderId/deadline-events')
   async listOrderDeadlineEvents(
     @Req() request: RequestWithCurrentUser,
@@ -309,6 +336,13 @@ export class DeadlinesController {
     });
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiResponse({ status: 200, description: 'Order deadline summary', schema: swaggerSchema(deadlineSummaryResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid order ID' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled' })
+  @ApiOperation({ operationId: 'getOrderDeadlineSummary', summary: 'Get order deadline summary' })
   @Get('orders/:orderId/deadline-summary')
   async getOrderDeadlineSummary(
     @Req() request: RequestWithCurrentUser,
@@ -322,6 +356,24 @@ export class DeadlinesController {
     });
   }
 
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number' })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number, description: 'Items per page' })
+  @ApiQuery({ name: 'sortBy', required: false, enum: DEADLINE_LIST_SORT_FIELDS, description: 'Sort field' })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Sort direction' })
+  @ApiQuery({ name: 'entityType', required: false, schema: swaggerSchema(deadlineEntityTypeSwaggerSchema), description: 'Entity type filter' })
+  @ApiQuery({ name: 'entityId', required: false, type: String, description: 'Entity ID filter' })
+  @ApiQuery({ name: 'orderId', required: false, type: Number, description: 'Order ID filter' })
+  @ApiQuery({ name: 'status', required: false, schema: swaggerSchema(deadlineStatusSwaggerSchema), description: 'Deadline status filter' })
+  @ApiQuery({ name: 'responsibleUserId', required: false, type: Number, description: 'Responsible user ID filter' })
+  @ApiQuery({ name: 'dateFrom', required: false, type: String, description: 'Start date filter' })
+  @ApiQuery({ name: 'dateTo', required: false, type: String, description: 'End date filter' })
+  @ApiQuery({ name: 'onlyOverdue', required: false, type: Boolean, description: 'Only overdue deadlines' })
+  @ApiResponse({ status: 200, description: 'Deadline list', schema: swaggerSchema(deadlineListResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline list query' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled' })
+  @ApiOperation({ operationId: 'listDeadlines', summary: 'List deadlines' })
   @Get('deadlines')
   async list(
     @Req() request: RequestWithCurrentUser,
@@ -335,6 +387,14 @@ export class DeadlinesController {
     });
   }
 
+  @ApiParam({ name: 'deadlineId', type: String, description: 'Deadline ID' })
+  @ApiResponse({ status: 200, description: 'Deadline', schema: swaggerSchema(deadlineResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid deadline ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Deadline not found' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled' })
+  @ApiOperation({ operationId: 'getDeadlineById', summary: 'Get a deadline by ID' })
   @Get('deadlines/:deadlineId')
   async getById(
     @Req() request: RequestWithCurrentUser,
@@ -350,6 +410,13 @@ export class DeadlinesController {
     };
   }
 
+  @ApiBody({ schema: swaggerSchema(createDeadlineRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'Created deadline', schema: swaggerSchema(deadlineResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline payload' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled or read-only' })
+  @ApiOperation({ operationId: 'createDeadline', summary: 'Create a deadline' })
   @Post('deadlines')
   async create(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
     this.assertWriteEnabled();
@@ -362,6 +429,16 @@ export class DeadlinesController {
     };
   }
 
+  @ApiParam({ name: 'deadlineId', type: String, description: 'Deadline ID' })
+  @ApiBody({ schema: swaggerSchema(overrideDeadlineRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Overridden deadline', schema: swaggerSchema(deadlineResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid deadline ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Deadline not found' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline payload' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled or read-only' })
+  @ApiOperation({ operationId: 'overrideDeadline', summary: 'Override a deadline' })
   @Patch('deadlines/:deadlineId')
   async override(
     @Req() request: RequestWithCurrentUser,
@@ -379,6 +456,16 @@ export class DeadlinesController {
     };
   }
 
+  @ApiParam({ name: 'deadlineId', type: String, description: 'Deadline ID' })
+  @ApiBody({ schema: swaggerSchema(pauseDeadlineRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Paused deadline', schema: swaggerSchema(deadlineResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid deadline ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Deadline not found' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline payload' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled or read-only' })
+  @ApiOperation({ operationId: 'pauseDeadline', summary: 'Pause a deadline' })
   @Post('deadlines/:deadlineId/pause')
   @HttpCode(200)
   async pause(
@@ -397,6 +484,16 @@ export class DeadlinesController {
     };
   }
 
+  @ApiParam({ name: 'deadlineId', type: String, description: 'Deadline ID' })
+  @ApiBody({ schema: swaggerSchema(resumeDeadlineRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Resumed deadline', schema: swaggerSchema(deadlineResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid deadline ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Deadline not found' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline payload' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled or read-only' })
+  @ApiOperation({ operationId: 'resumeDeadline', summary: 'Resume a deadline' })
   @Post('deadlines/:deadlineId/resume')
   @HttpCode(200)
   async resume(
@@ -415,6 +512,16 @@ export class DeadlinesController {
     };
   }
 
+  @ApiParam({ name: 'deadlineId', type: String, description: 'Deadline ID' })
+  @ApiBody({ schema: swaggerSchema(cancelDeadlineRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Cancelled deadline', schema: swaggerSchema(deadlineResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid deadline ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Deadline not found' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline payload' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled or read-only' })
+  @ApiOperation({ operationId: 'cancelDeadline', summary: 'Cancel a deadline' })
   @Post('deadlines/:deadlineId/cancel')
   @HttpCode(200)
   async cancel(

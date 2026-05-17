@@ -7,6 +7,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -18,6 +19,8 @@ import type {
   UpdatePaymentRequestDto,
 } from '../dto/payment.dto';
 import { PaymentsRuntimeConfigService } from './payments-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const dateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'paymentDate must be YYYY-MM-DD');
 const nullableTextSchema = z.string().trim().max(1000).nullable().optional();
@@ -121,6 +124,8 @@ const deletePaymentResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Payments')
+@ApiBearerAuth()
 @Controller('payments')
 export class PaymentsController {
   constructor(
@@ -130,6 +135,14 @@ export class PaymentsController {
     private readonly runtimeConfig: PaymentsRuntimeConfigService,
   ) {}
 
+  @ApiBody({ schema: swaggerSchema(createPaymentRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'Created payment', schema: swaggerSchema(paymentResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 422, description: 'Invalid payment payload' })
+  @ApiResponse({ status: 503, description: 'Payments API is disabled' })
+  @ApiOperation({ operationId: 'createPayment', summary: 'Create a payment' })
   @Post()
   async create(
     @Req() request: RequestWithCurrentUser,
@@ -147,6 +160,16 @@ export class PaymentsController {
     return result;
   }
 
+  @ApiParam({ name: 'paymentId', type: Number, description: 'Payment ID' })
+  @ApiBody({ schema: swaggerSchema(updatePaymentRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Updated payment', schema: swaggerSchema(paymentResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid payment ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Payment not found' })
+  @ApiResponse({ status: 422, description: 'Invalid payment payload' })
+  @ApiResponse({ status: 503, description: 'Payments API is disabled' })
+  @ApiOperation({ operationId: 'updatePayment', summary: 'Update a payment' })
   @Patch(':paymentId')
   async update(
     @Req() request: RequestWithCurrentUser,
@@ -166,6 +189,14 @@ export class PaymentsController {
     return result;
   }
 
+  @ApiParam({ name: 'paymentId', type: Number, description: 'Payment ID' })
+  @ApiResponse({ status: 200, description: 'Deleted payment', schema: swaggerSchema(deletePaymentResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid payment ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Payment not found' })
+  @ApiResponse({ status: 503, description: 'Payments API is disabled' })
+  @ApiOperation({ operationId: 'deletePayment', summary: 'Delete a payment' })
   @Delete(':paymentId')
   @HttpCode(200)
   async delete(

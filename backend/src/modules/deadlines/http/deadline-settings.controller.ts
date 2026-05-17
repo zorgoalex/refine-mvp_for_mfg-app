@@ -6,6 +6,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -13,6 +14,8 @@ import { DeadlineCommandService } from '../application/deadline-command.service'
 import { DeadlineQueryService } from '../application/deadline-query.service';
 import type { UpdateDeadlineSettingsRequestDto } from '../dto/deadline-settings.dto';
 import { DeadlinesRuntimeConfigService } from './deadlines-runtime-config.service';
+
+const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const updateDeadlineSettingsSchema = z
   .object({
@@ -70,6 +73,8 @@ const deadlineSettingsResponseSwaggerSchema = {
   },
 } as const;
 
+@ApiTags('Deadline Settings')
+@ApiBearerAuth()
 @Controller('deadline-settings')
 export class DeadlineSettingsController {
   constructor(
@@ -81,6 +86,11 @@ export class DeadlineSettingsController {
     private readonly runtimeConfig: DeadlinesRuntimeConfigService,
   ) {}
 
+  @ApiResponse({ status: 200, description: 'Deadline settings', schema: swaggerSchema(deadlineSettingsResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled' })
+  @ApiOperation({ operationId: 'getDeadlineSettings', summary: 'Get deadline settings' })
   @Get()
   async get(@Req() request: RequestWithCurrentUser) {
     this.assertReadEnabled();
@@ -90,6 +100,13 @@ export class DeadlineSettingsController {
     });
   }
 
+  @ApiBody({ schema: swaggerSchema(updateDeadlineSettingsRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Updated deadline settings', schema: swaggerSchema(deadlineSettingsResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid deadline settings payload' })
+  @ApiResponse({ status: 503, description: 'Deadlines API is disabled or read-only' })
+  @ApiOperation({ operationId: 'updateDeadlineSettings', summary: 'Update deadline settings' })
   @Patch()
   async update(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
     this.assertWriteEnabled();
