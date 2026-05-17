@@ -54,29 +54,35 @@ test.describe('Deadline Engine stage canary', () => {
 
     const pageErrors: string[] = [];
     const consoleErrors: string[] = [];
+    const mutatingDeadlineRequests: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });
-    if (vercelAutomationBypassSecret) {
-      await page.context().setExtraHTTPHeaders({
-        'x-vercel-protection-bypass': vercelAutomationBypassSecret,
-      });
-    }
+    await page.context().setExtraHTTPHeaders(frontendRequestHeaders());
 
     await loginThroughUi(page, username, password);
+    page.on('request', (request) => {
+      if (isMutatingDeadlineRequest(request.method(), request.url())) {
+        mutatingDeadlineRequests.push(`${request.method()} ${request.url()}`);
+      }
+    });
     await page.goto(`${frontendUrl}/orders/show/${orderId}`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByText('Дедлайны').first()).toBeVisible({ timeout: 30000 });
     await expect(page.getByText(/Активные:/).first()).toBeVisible({ timeout: 30000 });
     await expect(page.getByText(/Финальный:/).first()).toBeVisible({ timeout: 30000 });
     await expect(page.getByText('Ошибка загрузки дедлайнов')).toHaveCount(0);
+    expect(mutatingDeadlineRequests).toEqual([]);
+    expect(loadOrderFixture(orderId)).toEqual(order);
     expect(pageErrors).toEqual([]);
     expect(consoleErrors.filter((message) => !message.includes('ResizeObserver'))).toEqual([]);
   });
 });
 
 async function expectRuntimeConfig(request: APIRequestContext) {
-  const response = await request.get(`${frontendUrl}/runtime-config.json`);
+  const response = await request.get(`${frontendUrl}/runtime-config.json`, {
+    headers: frontendRequestHeaders(),
+  });
   await expectOk(response);
   const runtimeConfig = await response.json();
   expect(runtimeConfig.features?.backendAuth).toBe(true);
@@ -128,6 +134,23 @@ async function getJson<T>(
 async function expectOk(response: APIResponse) {
   const body = response.ok() ? '' : await response.text();
   expect(response.ok(), body).toBe(true);
+}
+
+function frontendRequestHeaders(): Record<string, string> {
+  if (!vercelAutomationBypassSecret) return {};
+  return { 'x-vercel-protection-bypass': vercelAutomationBypassSecret };
+}
+
+function isMutatingDeadlineRequest(method: string, url: string): boolean {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method.toUpperCase())) return false;
+
+  const pathname = new URL(url).pathname;
+  return (
+    pathname === '/api/v1/deadlines' ||
+    /^\/api\/v1\/orders\/\d+\/deadlines$/.test(pathname) ||
+    /^\/api\/v1\/orders\/\d+\/deadline-events$/.test(pathname) ||
+    /^\/api\/v1\/orders\/\d+\/deadline-summary$/.test(pathname)
+  );
 }
 
 function loadOrderFixture(orderId: number): OrderFixture {
