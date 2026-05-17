@@ -19,10 +19,10 @@
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Auth and sessions | Blocked | Evidence not collected yet. |
-| Cookies, CORS, and runtime env | Blocked | Evidence not collected yet. |
-| Legacy Vercel functions and rollback gates | Blocked | Evidence not collected yet. |
-| API authorization boundaries | Blocked | Evidence not collected yet. |
+| Auth and sessions | Pass | Focused auth/session tests passed; see Auth And Sessions section. |
+| Cookies, CORS, and runtime env | Pass | Focused runtime/CORS/readiness tests passed; stage readiness is recorded in Stage Manual Smoke. |
+| Legacy Vercel functions and rollback gates | Pass | Focused legacy/runtime-config tests passed; see Legacy Vercel Functions And Rollback Gates section. |
+| API authorization boundaries | Pass | Focused backend authorization tests passed; broader Playwright client-phones no-fallback smoke failed on notification visibility and is not used as pass evidence. |
 | Rate limit | Blocked | Evidence not collected yet. |
 | Secrets and logging | Blocked | Evidence not collected yet. |
 | Audit expectations | Blocked | Evidence not collected yet. |
@@ -68,7 +68,7 @@
 | Payments policy tests cover API denial. | Pass | `backend/src/permissions/policies/payment-access.policy.test.ts` denies manager payment creation/update on foreign orders and operator payment view; `backend/src/modules/payments/http/payments.controller.test.ts` covers controller rejection paths. |
 | Users policy tests cover API denial. | Pass | `backend/src/permissions/policies/user-access.policy.test.ts` blocks lower-role administration, admin peer/superadmin management, self-deactivation, and activation without target manageability; `backend/src/modules/users/http/users.controller.test.ts` rejects missing users and service denials. |
 | Production actions policy tests cover API denial. | Pass | `backend/src/modules/production-actions/application/production-action.service.test.ts` requires command-specific permissions before delegation; `backend/src/modules/production-actions/adapters/pg-production-action-repository.test.ts` denies manager actions outside own order scope before mutation. Focused backend command `npm test -- backend/src/modules/production-actions backend/src/modules/client-phones` passed (6 files, 27 tests); targeted Playwright manager-scope denial case also passed. |
-| Client phones policy tests cover API denial. | Pass | `backend/src/modules/client-phones/application/client-phone.service.test.ts` returns `PERMISSION_DENIED` 403 for worker/viewer users without required client phone permissions before repository calls; `backend/src/modules/client-phones/http/client-phones.controller.test.ts` covers fail-closed runtime and validation paths. Focused backend command `npm test -- backend/src/modules/production-actions backend/src/modules/client-phones` passed (6 files, 27 tests). `tests/client-phones-backend-cutover.spec.ts` no-fallback UI smoke was attempted separately but failed on notification visibility, so it is not used as pass evidence here. |
+| Client phones policy tests cover API denial. | Pass | `backend/src/modules/client-phones/application/client-phone.service.test.ts` returns `PERMISSION_DENIED` 403 for worker/viewer create attempts before repository calls; `backend/src/modules/client-phones/http/client-phones.controller.test.ts` covers fail-closed runtime and validation paths. Focused backend command `npm test -- backend/src/modules/production-actions backend/src/modules/client-phones` passed (6 files, 27 tests). `tests/client-phones-backend-cutover.spec.ts` no-fallback UI smoke was attempted separately but failed on notification visibility, so it is not used as pass evidence here. |
 | VLM policy tests cover API denial. | Pass | `backend/src/modules/vlm/application/vlm.service.test.ts` requires `vlm.health.view` for health and `vlm.use` for upload/analyze; `backend/src/modules/vlm/http/vlm.controller.test.ts` rejects missing users. |
 | Deadline Engine policy tests cover API denial. | Pass | `backend/src/modules/deadlines/application/deadline-query.service.test.ts` and `backend/src/modules/deadlines/application/deadline-command.service.test.ts` assert `PERMISSION_DENIED` 403 for missing deadline permissions; deadline HTTP tests fail closed when disabled/read-only. |
 | UI hiding is not treated as a security boundary. | Pass | Authorization evidence above is from backend guard, policy, service, repository, controller, and backend-enabled cutover tests; UI-only hiding was not used as pass evidence. |
