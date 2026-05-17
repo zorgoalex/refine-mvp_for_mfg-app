@@ -146,7 +146,8 @@ function isMutatingDeadlineRequest(method: string, url: string): boolean {
 
   const pathname = new URL(url).pathname;
   return (
-    pathname === '/api/v1/deadlines' ||
+    pathname.startsWith('/api/v1/deadlines') ||
+    pathname.startsWith('/api/v1/deadline-settings') ||
     /^\/api\/v1\/orders\/\d+\/deadlines$/.test(pathname) ||
     /^\/api\/v1\/orders\/\d+\/deadline-events$/.test(pathname) ||
     /^\/api\/v1\/orders\/\d+\/deadline-summary$/.test(pathname)
@@ -161,14 +162,88 @@ function loadOrderFixture(orderId: number): OrderFixture {
       'orderName', o.order_name,
       'deadlineCount', (
         SELECT count(*)::int
-        FROM deadlines d
+        FROM deadline_instances d
         WHERE d.order_id = o.order_id
       ),
       'eventCount', (
         SELECT count(*)::int
         FROM deadline_events de
-        JOIN deadlines d ON d.deadline_id = de.deadline_id
+        JOIN deadline_instances d ON d.deadline_id = de.deadline_id
         WHERE d.order_id = o.order_id
+      ),
+      'deadlineFingerprint', (
+        SELECT md5(coalesce(jsonb_agg(to_jsonb(deadline_row) ORDER BY deadline_row.deadline_id), '[]'::jsonb)::text)
+        FROM (
+          SELECT
+            d.deadline_id::text,
+            d.policy_id::text,
+            d.policy_version_id::text,
+            d.entity_type,
+            d.entity_id,
+            d.parent_entity_type,
+            d.parent_entity_id,
+            d.order_id,
+            d.order_workshop_id,
+            d.client_id,
+            d.responsible_user_id,
+            d.deadline_at,
+            d.status,
+            d.source,
+            d.is_manually_overridden,
+            d.policy_snapshot_json,
+            d.metadata_json,
+            d.started_at,
+            d.completed_at,
+            d.expired_at,
+            d.cancelled_at,
+            d.created_by_user_id,
+            d.updated_by_user_id,
+            d.created_at,
+            d.updated_at
+          FROM deadline_instances d
+          WHERE d.order_id = o.order_id
+        ) deadline_row
+      ),
+      'eventFingerprint', (
+        SELECT md5(coalesce(jsonb_agg(to_jsonb(event_row) ORDER BY event_row.event_at, event_row.deadline_event_id), '[]'::jsonb)::text)
+        FROM (
+          SELECT
+            de.deadline_event_id::text,
+            de.deadline_id::text,
+            de.event_type,
+            de.severity,
+            de.entity_type,
+            de.entity_id,
+            de.order_id,
+            de.order_workshop_id,
+            de.client_id,
+            de.deadline_at,
+            de.event_at,
+            de.delay_minutes,
+            de.payload_json,
+            de.created_at
+          FROM deadline_events de
+          JOIN deadline_instances d ON d.deadline_id = de.deadline_id
+          WHERE d.order_id = o.order_id
+        ) event_row
+      ),
+      'pauseFingerprint', (
+        SELECT md5(coalesce(jsonb_agg(to_jsonb(pause_row) ORDER BY pause_row.paused_at, pause_row.deadline_pause_id), '[]'::jsonb)::text)
+        FROM (
+          SELECT
+            dp.deadline_pause_id::text,
+            dp.deadline_id::text,
+            dp.pause_reason,
+            dp.pause_mode,
+            dp.paused_at,
+            dp.resumed_at,
+            dp.paused_by_user_id,
+            dp.resumed_by_user_id,
+            dp.notes
+          FROM deadline_pauses dp
+          JOIN deadline_instances d ON d.deadline_id = dp.deadline_id
+          WHERE d.order_id = o.order_id
+        ) pause_row
       )
     )::text
     FROM orders o
@@ -241,6 +316,9 @@ interface OrderFixture {
   orderName: string;
   deadlineCount: number;
   eventCount: number;
+  deadlineFingerprint: string;
+  eventFingerprint: string;
+  pauseFingerprint: string;
 }
 
 interface OrderDeadlineSummary {
