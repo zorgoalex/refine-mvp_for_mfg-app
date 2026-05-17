@@ -12,10 +12,12 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_BACKEND_PAYMENTS',
   'RUNTIME_CONFIG_BACKEND_CLIENT_PHONES',
   'RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS',
+  'RUNTIME_CONFIG_BACKEND_DEADLINES',
   'RUNTIME_CONFIG_BACKEND_ORDER_EXPORT',
   'RUNTIME_CONFIG_BACKEND_USERS',
   'RUNTIME_CONFIG_BACKEND_VLM',
   'RUNTIME_CONFIG_BACKEND_REFERENCES',
+  'RUNTIME_CONFIG_ENABLE_LEGACY_HASURA',
 ];
 
 describe('runtime-config handler', () => {
@@ -47,10 +49,12 @@ describe('runtime-config handler', () => {
         backendPayments: false,
         backendClientPhones: false,
         backendProductionActions: false,
+        backendDeadlines: false,
         backendOrderExport: false,
         backendUsers: false,
         backendVlm: false,
         backendReferences: false,
+        enableLegacyHasura: true,
       },
     });
   });
@@ -58,6 +62,8 @@ describe('runtime-config handler', () => {
   it('uses runtime env when explicitly set', () => {
     vi.stubEnv('RUNTIME_CONFIG_API_URL', 'https://api.example.test/');
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_AUTH', 'true');
+    vi.stubEnv('RUNTIME_CONFIG_BACKEND_DEADLINES', 'true');
+    vi.stubEnv('RUNTIME_CONFIG_ENABLE_LEGACY_HASURA', 'false');
 
     const res = createResponse();
 
@@ -67,6 +73,8 @@ describe('runtime-config handler', () => {
       apiUrl: 'https://api.example.test',
       features: {
         backendAuth: true,
+        backendDeadlines: true,
+        enableLegacyHasura: false,
       },
     });
   });

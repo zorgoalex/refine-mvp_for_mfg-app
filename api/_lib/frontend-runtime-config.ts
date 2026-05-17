@@ -8,10 +8,12 @@ export interface FrontendRuntimeConfigResponse {
     backendPayments: boolean;
     backendClientPhones: boolean;
     backendProductionActions: boolean;
+    backendDeadlines: boolean;
     backendOrderExport: boolean;
     backendUsers: boolean;
     backendVlm: boolean;
     backendReferences: boolean;
+    enableLegacyHasura: boolean;
   };
 }
 
@@ -42,10 +44,12 @@ export function buildFrontendRuntimeConfig(
       backendPayments: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_PAYMENTS, false),
       backendClientPhones,
       backendProductionActions,
+      backendDeadlines: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_DEADLINES, false),
       backendOrderExport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDER_EXPORT, false),
       backendUsers: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_USERS, false),
       backendVlm: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_VLM, false),
       backendReferences: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_REFERENCES, false),
+      enableLegacyHasura: readBooleanEnv(env.RUNTIME_CONFIG_ENABLE_LEGACY_HASURA, true),
     },
   };
 }

@@ -13,10 +13,12 @@ describe('frontend runtime config delivery', () => {
         backendPayments: false,
         backendClientPhones: false,
         backendProductionActions: false,
+        backendDeadlines: false,
         backendOrderExport: false,
         backendUsers: false,
         backendVlm: false,
         backendReferences: false,
+        enableLegacyHasura: true,
       },
     });
   });
@@ -32,10 +34,12 @@ describe('frontend runtime config delivery', () => {
         RUNTIME_CONFIG_BACKEND_PAYMENTS: 'true',
         RUNTIME_CONFIG_BACKEND_CLIENT_PHONES: 'true',
         RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS: 'true',
+        RUNTIME_CONFIG_BACKEND_DEADLINES: 'true',
         RUNTIME_CONFIG_BACKEND_ORDER_EXPORT: 'true',
         RUNTIME_CONFIG_BACKEND_USERS: 'true',
         RUNTIME_CONFIG_BACKEND_VLM: 'true',
         RUNTIME_CONFIG_BACKEND_REFERENCES: 'false',
+        RUNTIME_CONFIG_ENABLE_LEGACY_HASURA: 'false',
         GAS_API_KEY: 'must-not-leak',
       }),
     ).toEqual({
@@ -48,10 +52,12 @@ describe('frontend runtime config delivery', () => {
         backendPayments: true,
         backendClientPhones: true,
         backendProductionActions: true,
+        backendDeadlines: true,
         backendOrderExport: true,
         backendUsers: true,
         backendVlm: true,
         backendReferences: false,
+        enableLegacyHasura: false,
       },
     });
   });

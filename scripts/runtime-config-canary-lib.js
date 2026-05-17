@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const FEATURE_KEYS = [
+const ROLLOUT_FEATURE_KEYS = [
   'backendAuth',
   'backendPermissions',
   'backendOrdersRead',
@@ -9,10 +9,20 @@ const FEATURE_KEYS = [
   'backendPayments',
   'backendClientPhones',
   'backendProductionActions',
+  'backendDeadlines',
   'backendOrderExport',
   'backendUsers',
   'backendVlm',
   'backendReferences',
+];
+
+const STATIC_FEATURE_EXPECTATIONS = {
+  enableLegacyHasura: true,
+};
+
+const FEATURE_KEYS = [
+  ...ROLLOUT_FEATURE_KEYS,
+  'enableLegacyHasura',
 ];
 
 const STAGED_CANARY_FILES = [
@@ -107,6 +117,22 @@ const STAGED_CANARY_FILES = [
       'backendVlm',
     ],
   },
+  {
+    file: '11-deadlines.json',
+    enabled: [
+      'backendAuth',
+      'backendPermissions',
+      'backendOrdersRead',
+      'backendOrdersWrite',
+      'backendPayments',
+      'backendClientPhones',
+      'backendProductionActions',
+      'backendDeadlines',
+      'backendOrderExport',
+      'backendUsers',
+      'backendVlm',
+    ],
+  },
   { file: '99-rollback-all-off.json', enabled: [] },
 ];
 
@@ -120,7 +146,7 @@ function getTrueFeatures(config) {
   const features = config && typeof config === 'object' ? config.features : null;
   if (!features || typeof features !== 'object' || Array.isArray(features)) return [];
 
-  return FEATURE_KEYS.filter((key) => features[key] === true);
+  return ROLLOUT_FEATURE_KEYS.filter((key) => features[key] === true);
 }
 
 function validateRuntimeConfig(config, options = {}) {
@@ -167,7 +193,7 @@ function validateRuntimeConfig(config, options = {}) {
 
   if (expectedEnabled) {
     const expected = new Set(expectedEnabled);
-    for (const key of FEATURE_KEYS) {
+    for (const key of ROLLOUT_FEATURE_KEYS) {
       const actual = features[key] === true;
       const wanted = expected.has(key);
       if (actual !== wanted) {
@@ -204,6 +230,14 @@ function validateFeatureDependencies(features, label) {
 
   if (features.backendClientPhones === true && features.backendProductionActions !== true) {
     errors.push(`${label}: backendClientPhones requires backendProductionActions`);
+  }
+
+  if (features.backendDeadlines === true && features.backendAuth !== true) {
+    errors.push(`${label}: backendDeadlines requires backendAuth`);
+  }
+
+  if (features.backendDeadlines === true && features.backendOrdersRead !== true) {
+    errors.push(`${label}: backendDeadlines requires backendOrdersRead`);
   }
 
   if (features.backendOrderExport === true && features.backendOrdersRead !== true) {
@@ -264,6 +298,7 @@ function validateStagedCanaryDirectory(directory) {
         expectedEnabled: stage.enabled,
       }),
     );
+    errors.push(...validateStaticFeatureExpectations(config, stage.file));
   }
 
   const actualFiles = fs
@@ -273,6 +308,20 @@ function validateStagedCanaryDirectory(directory) {
   for (const file of actualFiles) {
     if (!seenFiles.has(file)) {
       errors.push(`${file}: unexpected staged canary JSON file`);
+    }
+  }
+
+  return errors;
+}
+
+function validateStaticFeatureExpectations(config, label) {
+  const errors = [];
+  const features = (config && config.features) || {};
+
+  for (const [key, wanted] of Object.entries(STATIC_FEATURE_EXPECTATIONS)) {
+    const actual = features[key];
+    if (actual !== wanted) {
+      errors.push(`${label}: expected features.${key}=${wanted}, got ${actual}`);
     }
   }
 

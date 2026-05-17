@@ -8,9 +8,11 @@
     "backendPayments": false,
     "backendClientPhones": false,
     "backendProductionActions": false,
+    "backendDeadlines": false,
     "backendOrderExport": true,
     "backendUsers": false,
     "backendVlm": false,
-    "backendReferences": false
+    "backendReferences": false,
+    "enableLegacyHasura": true
   }
 }
