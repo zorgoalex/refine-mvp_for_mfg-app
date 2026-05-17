@@ -50,6 +50,36 @@ describe('orders OpenAPI contract', () => {
     expect(responseSchema).toContain('- requestId');
     expect(responseSchema).toContain('requestId:');
   });
+
+  it('documents order production action endpoints and legacy status alias', () => {
+    const contract = readOpenApiContract();
+
+    expect(contract).toContain('  /api/v1/orders/{orderId}/calendar-date:');
+    expect(contract).toContain('operationId: moveOrderCalendarDate');
+    expect(contract).toContain('  /api/v1/orders/{orderId}/status:');
+    expect(contract).toContain('operationId: changeOrderStatus');
+    expect(contract).toContain('  /api/v1/orders/{orderId}/order-status:');
+    expect(contract).toContain('operationId: changeOrderStatusLegacy');
+    expect(contract).toContain('  /api/v1/orders/{orderId}/production-stage-events/{productionStatusId}:');
+    expect(contract).toContain('operationId: activateProductionStage');
+    expect(contract).toContain('operationId: deactivateProductionStage');
+  });
+
+  it('documents order snapshot export and import endpoints without raw content schemas', () => {
+    const contract = readOpenApiContract();
+
+    expect(contract).toContain('  /api/v1/orders/{orderId}/snapshot:');
+    expect(contract).toContain('operationId: exportOrderSnapshot');
+    expect(contract).toContain('  /api/v1/orders/snapshot/batch:');
+    expect(contract).toContain('operationId: exportOrderSnapshotBatch');
+    expect(contract).toContain('  /api/v1/orders/snapshot/import:');
+    expect(contract).toContain('operationId: importOrderSnapshot');
+    expect(contract).toContain('  /api/v1/orders/snapshot/import-batch:');
+    expect(contract).toContain('operationId: importOrderSnapshotBatch');
+    expect(contract).not.toContain('passwordHash');
+    expect(contract).not.toContain('refreshTokenHash');
+    expect(contract).not.toContain('providerSecret');
+  });
 });
 
 function readOpenApiContract(): string {
