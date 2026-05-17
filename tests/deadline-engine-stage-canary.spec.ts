@@ -288,12 +288,24 @@ function loadOrderFixture(orderId: number): OrderFixture {
 }
 
 function createSmokeUser(username: string, password: string): number {
+  const email = `${username}@example.invalid`;
   const passwordHash = bcrypt.hashSync(password, 10);
+
   return Number(
     psql(`
-      INSERT INTO users (username, password_hash, role, is_active, created_at, updated_at)
-      VALUES ('${escapeSql(username)}', '${escapeSql(passwordHash)}', 'admin', true, now(), now())
-      RETURNING user_id;
+      WITH inserted AS (
+        INSERT INTO users (username, email, password_hash, role_id, full_name, is_active)
+        VALUES (
+          '${escapeSql(username)}',
+          '${escapeSql(email)}',
+          '${escapeSql(passwordHash)}',
+          1,
+          'E2E Test Deadline Engine Stage Canary',
+          true
+        )
+        RETURNING user_id
+      )
+      SELECT user_id FROM inserted;
     `),
   );
 }
@@ -303,7 +315,10 @@ function cleanupUser(userId: number | null) {
   psql(`
     DELETE FROM refresh_tokens WHERE user_id = ${userId};
     DELETE FROM auth_sessions WHERE user_id = ${userId};
-    DELETE FROM users WHERE user_id = ${userId};
+    UPDATE users
+    SET is_active = false,
+        edited_by = NULL
+    WHERE user_id = ${userId};
   `);
 }
 
@@ -319,7 +334,9 @@ function psql<T = string>(sql: string, options: { json?: boolean } = {}): T {
       'erp_user',
       '-d',
       'erpdb',
-      '-At',
+      '-qAtX',
+      '-v',
+      'ON_ERROR_STOP=1',
       '-c',
       sql,
     ],

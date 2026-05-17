@@ -362,6 +362,7 @@ access where noted by the specific checklist:
 ```bash
 npm run test:e2e:frontend-pages-stage-canary
 npm run test:e2e:calendar-stage-canary
+npm run test:e2e:deadline-engine-stage-canary
 ```
 
 `test:e2e:frontend-pages-stage-canary` is read-only by default and expects
