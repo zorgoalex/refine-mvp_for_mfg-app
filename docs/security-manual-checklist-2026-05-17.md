@@ -54,10 +54,10 @@
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Legacy endpoints are disabled in production/staging-like env except `/runtime-config.json`. | Blocked | Evidence not collected yet. |
-| Emergency opt-in variables are explicit. | Blocked | Evidence not collected yet. |
-| Tests for `LEGACY_VERCEL_FUNCTION_DISABLED` behavior pass. | Blocked | Evidence not collected yet. |
-| Frontend backend-enabled paths do not silently fall back to legacy endpoints for auth/users/orders/export/VLM/deadlines. | Blocked | Evidence not collected yet. |
+| Legacy endpoints are disabled in production/staging-like env except `/runtime-config.json`. | Pass | `api/_lib/legacy-production-gate.ts` disables production-like `production`/`prod`/`staging`/`stage`/`preview` legacy functions with `LEGACY_VERCEL_FUNCTION_DISABLED`; `api/legacy-vercel-functions-disabled.test.ts` covers login, refresh, users, order export, and VLM handlers returning 410 while `api/runtime-config.ts` remains the production exception that serves `/runtime-config.json`. |
+| Emergency opt-in variables are explicit. | Pass | `api/_lib/legacy-production-gate.ts` only bypasses the production-like legacy gate when `ENABLE_LEGACY_VERCEL_FUNCTIONS` or `ENABLE_LEGACY_API` is explicitly truthy; `api/_lib/legacy-production-gate.test.ts` covers both emergency opt-ins. |
+| Tests for `LEGACY_VERCEL_FUNCTION_DISABLED` behavior pass. | Pass | Focused command passed on 2026-05-17: `npm test -- api/legacy-vercel-functions-disabled.test.ts api/_lib/legacy-production-gate.test.ts api/_lib/frontend-runtime-config.test.ts api/runtime-config.test.ts src/api/legacyApiRoutes.test.ts src/config/featureFlags.test.ts` (6 files, 34 tests). |
+| Frontend backend-enabled paths do not silently fall back to legacy endpoints for auth/users/orders/export/VLM/deadlines. | Pass | `src/api/legacyApiRoutes.ts` centralizes rollback-only unversioned `/api/*` endpoints and `src/api/legacyApiRoutes.test.ts` asserts they do not include `/api/v1/`; `api/_lib/frontend-runtime-config.test.ts`, `api/runtime-config.test.ts`, and `src/config/featureFlags.test.ts` cover fail-closed runtime flags and backend-enabled overrides. Stage canary code references `tests/frontend-pages-stage-canary.spec.ts` and `tests/deadline-engine-stage-canary.spec.ts` assert backend `/api/v1/auth/login`, runtime `backendAuth`/`backendOrdersRead`/`backendDeadlines`, and no mutating deadline GraphQL fallback paths. |
 
 ## API Authorization Boundaries
 
