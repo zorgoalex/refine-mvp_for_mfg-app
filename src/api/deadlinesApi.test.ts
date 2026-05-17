@@ -48,6 +48,34 @@ describe('deadlinesApi', () => {
     expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
   });
 
+  it('reads order deadlines and events through versioned order endpoints', async () => {
+    const fetchMock = mockFetch(
+      { data: [createDeadline()] },
+      {
+        data: [
+          {
+            deadlineEventId: 'event-1',
+            deadlineId,
+            eventType: 'DEADLINE_CREATED',
+            severity: 'info',
+            eventAt: '2026-05-01T10:00:00.000Z',
+            deadlineAt: '2026-05-02T10:00:00.000Z',
+            delayMinutes: null,
+            payload: null,
+          },
+        ],
+      },
+    );
+
+    await deadlinesApi.listForOrder(42);
+    await deadlinesApi.listEventsForOrder(42);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/42/deadlines');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/42/deadline-events');
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('GET');
+  });
+
   it('creates and controls deadlines through versioned endpoints', async () => {
     const deadline = createDeadline();
     const fetchMock = mockFetch(
