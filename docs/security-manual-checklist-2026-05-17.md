@@ -24,9 +24,9 @@
 | Legacy Vercel functions and rollback gates | Pass | Focused legacy/runtime-config tests passed; see Legacy Vercel Functions And Rollback Gates section. |
 | API authorization boundaries | Pass | Focused backend authorization tests passed; broader Playwright client-phones no-fallback smoke failed on notification visibility and is not used as pass evidence. |
 | Rate limit | Blocked | Focused rate-limit tests passed for Redis-backed policy, local/test memory fallback, auth/order/VLM consumers, and Redis readiness code coverage; login stage smoke remains deferred in the Rate Limit section. |
-| Secrets and logging | Blocked | Evidence not collected yet. |
-| Audit expectations | Blocked | Evidence not collected yet. |
-| Hasura boundary | Blocked | Evidence not collected yet. |
+| Secrets and logging | Pass | Focused redaction/error tests passed; backend redaction covers sensitive keys and token strings, error responses keep public codes/request IDs, and covered VLM upload audit stores metadata rather than raw file bytes. |
+| Audit expectations | Follow-up | Implemented backend-owned command audit is covered for auth, users, orders, payments, client phones, production actions, VLM, and deadlines; denied sensitive action audit was not found as explicit coverage and remains follow-up. |
+| Hasura boundary | Follow-up | Retained Hasura reads/report/reference usage and accepted no-mutation guards are documented; known `useOrderSave` nested payments `forceHasuraMutation` exception remains follow-up debt. |
 | Stage manual smoke | Blocked | Evidence not collected yet. |
 
 ## Auth And Sessions
@@ -86,26 +86,26 @@
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Passwords and password hashes are redacted from logs/errors/tests. | Blocked | Evidence not collected yet. |
-| Access/refresh tokens and Authorization header are redacted. | Blocked | Evidence not collected yet. |
-| GAS/VLM/Auth0/provider secrets are redacted. | Blocked | Evidence not collected yet. |
-| Raw file content is not logged in covered paths. | Blocked | Evidence not collected yet. |
-| Error responses expose request IDs and public error codes, not secrets. | Blocked | Evidence not collected yet. |
+| Passwords and password hashes are redacted from logs/errors/tests. | Pass | `backend/src/common/logging/redaction.ts` treats `/password/i` and `/password_hash/i` keys as sensitive; `backend/src/common/logging/redaction.test.ts` asserts recursive password redaction and `password_hash` key detection. Focused command passed 2026-05-17: `npm test -- backend/src/common/logging/redaction.test.ts backend/src/common/errors api/legacy-vercel-functions-disabled.test.ts` (3 files, 16 tests). |
+| Access/refresh tokens and Authorization header are redacted. | Pass | `backend/src/common/logging/redaction.ts` redacts token-like keys, bearer tokens, JWT strings, and `access_token`/`refresh_token` query values; `backend/src/common/logging/redaction.test.ts` asserts `Authorization: Bearer ...`, `access_token`, and `refresh_token` string redaction. Focused command above exited 0. |
+| GAS/VLM/Auth0/provider secrets are redacted. | Pass | `backend/src/common/logging/redaction.ts` treats `secret`, `api_key`, `gas_api_key`, and `client_secret` keys as sensitive; `backend/src/common/logging/redaction.test.ts` asserts `GAS_API_KEY` and `AUTH0_M2M_CLIENT_SECRET` key coverage. Focused command above exited 0. |
+| Raw file content is not logged in covered paths. | Pass | Covered VLM upload path reads bytes for provider upload but audit metadata is limited to `contentType`, `size`, and `purpose` in `backend/src/modules/vlm/adapters/pg-vlm-provider.ts`; `backend/src/modules/vlm/adapters/pg-vlm-provider.test.ts` asserts upload audit metadata. Search evidence found no backend VLM raw byte logging; legacy `useOrderSave` logs file-link fields and errors, not uploaded raw file bytes. |
+| Error responses expose request IDs and public error codes, not secrets. | Pass | `backend/src/common/errors/api-error.ts` formats `{ error: { code, message, details?, requestId } }`; `createInternalError` emits `INTERNAL_ERROR` with request ID only. `backend/src/common/errors/api-error.test.ts` covers public code/request ID and generic internal errors. `api/legacy-vercel-functions-disabled.test.ts` passed in the focused command above, covering disabled legacy responses. |
 
 ## Audit Expectations
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Existing backend-owned commands write audit events where implemented. | Blocked | Evidence not collected yet. |
-| Denied sensitive action audit is documented as implemented or follow-up. | Blocked | Evidence not collected yet. |
+| Existing backend-owned commands write audit events where implemented. | Pass | Step 3 search found implemented `INSERT INTO audit_log` coverage for auth failed login/session events, orders create/update/delete/export/snapshot, users create/change-password/deactivate, payments create/update/delete, client phones create/update/delete/primary demote, production actions, VLM upload/analyze, and deadline events. Representative tests include `backend/src/modules/auth/adapters/pg-auth-audit-repository.test.ts`, `backend/src/modules/orders/adapters/pg-order-transaction-manager.test.ts`, `backend/src/modules/users/adapters/pg-user-repository.test.ts`, `backend/src/modules/payments/adapters/pg-payment-repository.test.ts`, `backend/src/modules/client-phones/adapters/pg-client-phone-repository.test.ts`, `backend/src/modules/production-actions/adapters/pg-production-action-repository.test.ts`, `backend/src/modules/vlm/adapters/pg-vlm-provider.test.ts`, `backend/src/modules/deadlines/adapters/pg-deadline-repository.test.ts`, and `backend/db/migrations/004_production_actions_audit_outbox.test.ts`. |
+| Denied sensitive action audit is documented as implemented or follow-up. | Follow-up | Step 3 search found many denial paths returning `AUTH_REQUIRED`/`PERMISSION_DENIED` and backend-cutover forbidden cases, but no explicit denied-action `audit_log` write/test comparable to successful command audit. Keep as follow-up before claiming denied sensitive action audit coverage. |
 
 ## Hasura Boundary
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Retained Hasura use is read/report/reference only. | Blocked | Evidence not collected yet. |
-| Backend-owned mutation flows have tests or network guards preventing forbidden Hasura mutations where accepted. | Blocked | Evidence not collected yet. |
-| Known exception `useOrderSave` / nested payments is documented as next command-boundary debt. | Blocked | Evidence not collected yet. |
+| Retained Hasura use is read/report/reference only. | Pass | Step 4 search found retained Hasura configuration/data-provider usage and spec evidence in `spec_erp/docs/frontend-data-source-parity-matrix.md` allowing lookup/report/reference reads, plus `tests/payments-backend-cutover.spec.ts` explicitly keeps Hasura reads while routing payment mutations to `/api/v1`. |
+| Backend-owned mutation flows have tests or network guards preventing forbidden Hasura mutations where accepted. | Pass | `tests/production-actions-backend-cutover.spec.ts` guards `update_orders`, `insert_production_status_events`, and `delete_production_status_events` mutations and asserts no matches; `tests/payments-backend-cutover.spec.ts` guards `insert/update/delete_payments` and asserts none; `src/hooks/useOrderSaveBackend.test.ts` covers backend order create/update behavior. |
+| Known exception `useOrderSave` / nested payments is documented as next command-boundary debt. | Follow-up | `src/hooks/useOrderSave.ts` still defines `LEGACY_ORDER_SAVE_PAYMENT_META = { forceHasuraMutation: true }` and applies it to nested payment create/update/delete within the legacy order-save path. Step 4 search and `spec_erp/docs/full-backend-remaining-work-2026-05-11.md` identify this as the next backend-owned command-boundary debt, not a failure for this checklist. |
 
 ## Stage Manual Smoke
 
@@ -119,3 +119,4 @@
 | Item | Severity | Owner Area | Evidence |
 | --- | --- | --- | --- |
 | `useOrderSave` / nested payments Hasura mutation exception remains the next command-boundary debt after this checklist. | High | Frontend/backend command boundary | Current priority context keeps this out of this checklist scope. |
+| Denied sensitive action audit is not explicitly implemented for permission-denied/backend-forbidden paths. | Medium | Backend audit/security | Step 3 found `PERMISSION_DENIED`/forbidden tests and successful command audit writes, but did not find explicit denied-action audit writes/tests. |
