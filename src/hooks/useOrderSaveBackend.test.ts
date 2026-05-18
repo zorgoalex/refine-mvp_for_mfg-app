@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/apiError';
+import { mapOrderFormToSaveOrderDto } from '../api/mappers/orderMapper';
 import type { OrderDto, SaveOrderDto, SaveOrderResponse } from '../api/types/orderApi.types';
 import type { OrderFormValues } from '../types/orders';
 import {
@@ -82,26 +83,6 @@ describe('saveOrderViaBackend', () => {
       },
     ];
     values.deletedPayments = [72];
-    const dto = createSaveOrderDto();
-    dto.payments = [
-      {
-        id: 71,
-        typePaidId: 2,
-        amount: 500,
-        paymentDate: '2026-05-01',
-        notes: 'advance payment',
-        refKey1c: 'pay-existing',
-      },
-      {
-        clientKey: '1701',
-        typePaidId: 1,
-        amount: 250,
-        paymentDate: '2026-05-02',
-        notes: 'second payment',
-        refKey1c: null,
-      },
-    ];
-    dto.deleted.paymentIds = [72];
     const order = createOrderDto(33);
     order.payments = [
       {
@@ -115,8 +96,9 @@ describe('saveOrderViaBackend', () => {
       },
     ];
     const deps = createDependencies({
-      dto,
+      dto: createSaveOrderDto(),
       mappedFormValues: createFormValues(33),
+      toSaveDto: mapOrderFormToSaveOrderDto,
       updateResponse: { order },
     });
 
@@ -124,7 +106,7 @@ describe('saveOrderViaBackend', () => {
 
     expect(deps.toSaveDto).toHaveBeenCalledWith(values);
     expect(deps.updateOrder).toHaveBeenCalledTimes(1);
-    expect(deps.updateOrder).toHaveBeenCalledWith(33, dto);
+    expect(deps.updateOrder.mock.calls[0][0]).toBe(33);
     expect(deps.createOrder).not.toHaveBeenCalled();
     expect(deps.updateOrder.mock.calls[0][1]).toMatchObject({
       payments: [
@@ -220,6 +202,7 @@ describe('saveOrderViaBackend', () => {
 function createDependencies(params: {
   dto: SaveOrderDto;
   mappedFormValues: OrderFormValues;
+  toSaveDto?: SaveOrderViaBackendDependencies['toSaveDto'];
   createResponse?: SaveOrderResponse;
   createError?: Error;
   updateResponse?: SaveOrderResponse;
@@ -242,7 +225,7 @@ function createDependencies(params: {
   return {
     createOrder,
     updateOrder,
-    toSaveDto: vi.fn().mockReturnValue(params.dto),
+    toSaveDto: vi.fn(params.toSaveDto ?? (() => params.dto)),
     toFormValues: vi.fn().mockReturnValue(params.mappedFormValues),
     getOrderStore: vi.fn().mockReturnValue(store),
     invalidate: vi.fn().mockResolvedValue(undefined),
