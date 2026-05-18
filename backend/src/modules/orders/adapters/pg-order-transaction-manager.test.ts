@@ -5,8 +5,11 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type {
   CalculatedOrderDetailDto,
+  NormalizedSaveOrderDowelingLinkDto,
   NormalizedSaveOrderHeaderDto,
   NormalizedSaveOrderPaymentDto,
+  NormalizedSaveOrderRequirementDto,
+  NormalizedSaveOrderWorkshopDto,
   OrderTotalsDto,
 } from '../dto/save-order.dto';
 
@@ -50,6 +53,43 @@ describe('PgOrderTransactionManager', () => {
     expect(sql).toContain('INSERT INTO payments');
     expect(sql).toContain('DELETE FROM order_details');
     expect(sql).toContain('INSERT INTO audit_log');
+  });
+
+  it('persists operational child workflow rows and doweling engineer side effect', async () => {
+    const database = createDatabase({ restoredRowCount: 0 });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction(async (uow) => {
+      await uow.upsertWorkshops(100, [
+        workshop({ id: 31, workshopId: 7, productionStatusId: 8 }),
+        workshop({ workshopId: 9, productionStatusId: 10, notes: 'new workshop' }),
+      ]);
+      await uow.deleteWorkshops(100, [32]);
+      await uow.upsertRequirements(100, [
+        requirement({ id: 41, resourceType: 'material', materialId: 4 }),
+        requirement({ resourceType: 'film', filmId: 5, requiredQuantity: 2 }),
+      ]);
+      await uow.deleteRequirements(100, [42]);
+      await uow.upsertDowelingLinks(100, [
+        dowelingLink({ id: 51, dowelingOrderId: 44, designEngineerId: 7 }),
+        dowelingLink({ dowelingOrderId: 45, refKey1c: 'new-link' }),
+      ]);
+      await uow.deleteDowelingLinks(100, [52]);
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('UPDATE order_workshops SET workshop_id = $3');
+    expect(sql).toContain('INSERT INTO order_workshops');
+    expect(sql).toContain('DELETE FROM order_workshops');
+    expect(sql).toContain('UPDATE order_resource_requirements SET resource_type = $3');
+    expect(sql).toContain('INSERT INTO order_resource_requirements');
+    expect(sql).toContain('DELETE FROM order_resource_requirements');
+    expect(sql).toContain('UPDATE order_doweling_links SET doweling_order_id = $3');
+    expect(sql).toContain('INSERT INTO order_doweling_links');
+    expect(sql).toContain('UPDATE doweling_orders SET design_engineer_id = $2');
+    expect(sql).toContain('DELETE FROM order_doweling_links');
+    expect(database.queries.some((query) => query.params.includes('new workshop'))).toBe(true);
+    expect(database.queries.some((query) => query.params.includes('new-link'))).toBe(true);
   });
 
   it('rejects child ids from another order before mutation', async () => {
@@ -186,7 +226,13 @@ describe('PgOrderTransactionManager', () => {
   });
 });
 
-function createDatabase(options: { childCount?: number; idempotencyHashMismatch?: boolean } = {}) {
+function createDatabase(
+  options: {
+    childCount?: number;
+    idempotencyHashMismatch?: boolean;
+    restoredRowCount?: number;
+  } = {},
+) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
   const tx = {
@@ -259,6 +305,14 @@ function createDatabase(options: { childCount?: number; idempotencyHashMismatch?
 
       if (normalized.startsWith('INSERT INTO audit_log')) {
         return { rows: [{ audit_id: 'audit-delete-1' }], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('UPDATE order_workshops SET delete_flag = false')) {
+        return { rows: [], rowCount: options.restoredRowCount ?? 1 };
+      }
+
+      if (normalized.startsWith('UPDATE order_doweling_links SET delete_flag = false')) {
+        return { rows: [], rowCount: options.restoredRowCount ?? 1 };
       }
 
       return { rows: [], rowCount: 1 };
@@ -360,6 +414,64 @@ function payment(): NormalizedSaveOrderPaymentDto {
     paymentDate: '2026-05-01',
     notes: null,
     refKey1c: null,
+  };
+}
+
+function workshop(
+  overrides: Partial<NormalizedSaveOrderWorkshopDto> = {},
+): NormalizedSaveOrderWorkshopDto {
+  return {
+    id: overrides.id,
+    clientKey: overrides.clientKey,
+    workshopId: overrides.workshopId ?? 7,
+    productionStatusId: overrides.productionStatusId ?? 8,
+    receivedDate: overrides.receivedDate ?? null,
+    startedDate: overrides.startedDate ?? null,
+    completedDate: overrides.completedDate ?? null,
+    plannedCompletionDate: overrides.plannedCompletionDate ?? null,
+    sequenceOrder: overrides.sequenceOrder ?? null,
+    responsibleEmployeeId: overrides.responsibleEmployeeId ?? null,
+    notes: overrides.notes ?? null,
+    refKey1c: overrides.refKey1c ?? null,
+  };
+}
+
+function requirement(
+  overrides: Partial<NormalizedSaveOrderRequirementDto> = {},
+): NormalizedSaveOrderRequirementDto {
+  return {
+    id: overrides.id,
+    clientKey: overrides.clientKey,
+    resourceType: overrides.resourceType ?? 'material',
+    materialId: overrides.materialId ?? null,
+    filmId: overrides.filmId ?? null,
+    edgeTypeId: overrides.edgeTypeId ?? null,
+    requiredQuantity: overrides.requiredQuantity ?? 1,
+    unitId: overrides.unitId ?? 1,
+    wastePercentage: overrides.wastePercentage ?? null,
+    finalQuantity: overrides.finalQuantity ?? null,
+    requirementStatusId: overrides.requirementStatusId ?? 2,
+    supplierId: overrides.supplierId ?? null,
+    purchasePrice: overrides.purchasePrice ?? null,
+    requisitionId: overrides.requisitionId ?? null,
+    warehouseId: overrides.warehouseId ?? null,
+    reservedAt: overrides.reservedAt ?? null,
+    consumedAt: overrides.consumedAt ?? null,
+    notes: overrides.notes ?? null,
+    calculationDetails: overrides.calculationDetails ?? null,
+    refKey1c: overrides.refKey1c ?? null,
+  };
+}
+
+function dowelingLink(
+  overrides: Partial<NormalizedSaveOrderDowelingLinkDto> = {},
+): NormalizedSaveOrderDowelingLinkDto {
+  return {
+    id: overrides.id,
+    clientKey: overrides.clientKey,
+    dowelingOrderId: overrides.dowelingOrderId ?? 44,
+    designEngineerId: overrides.designEngineerId ?? null,
+    refKey1c: overrides.refKey1c ?? null,
   };
 }
 
