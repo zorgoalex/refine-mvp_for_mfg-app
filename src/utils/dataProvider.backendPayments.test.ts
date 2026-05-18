@@ -104,11 +104,23 @@ describe('dataProvider backend payments mutation routing', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it('keeps legacy order-save payment mutations on Hasura when forceHasuraMutation meta is set', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ data: { insert_payments_one: { payment_id: 31 } } }))
-      .mockResolvedValueOnce(jsonResponse({ data: { update_payments_by_pk: { payment_id: 31 } } }))
-      .mockResolvedValueOnce(jsonResponse({ data: { delete_payments_by_pk: { payment_id: 31 } } }));
+  it('ignores forceHasuraMutation meta and keeps payments on backend when backend payments are enabled', async () => {
+    const payment = backendPayment();
+    createPayment.mockResolvedValue(payment);
+    updatePayment.mockResolvedValue({ ...payment, amount: 120 });
+    deletePayment.mockResolvedValue({
+      paymentId: 31,
+      order: {
+        orderId: 15,
+        paidAmount: 0,
+        debtAmount: 1000,
+        paymentDate: null,
+        paymentStatusId: 1,
+        version: 5,
+      },
+      deleted: true,
+    });
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
     const { dataProvider } = await import('./dataProvider');
@@ -133,13 +145,17 @@ describe('dataProvider backend payments mutation routing', () => {
     });
     await provider.deleteOne({ resource: 'payments', id: 31, meta });
 
-    expect(createPayment).not.toHaveBeenCalled();
-    expect(updatePayment).not.toHaveBeenCalled();
-    expect(deletePayment).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchMock.mock.calls[0][1]?.body)).toContain('insert_payments_one');
-    expect(String(fetchMock.mock.calls[1][1]?.body)).toContain('update_payments_by_pk');
-    expect(String(fetchMock.mock.calls[2][1]?.body)).toContain('delete_payments_by_pk');
+    expect(createPayment).toHaveBeenCalledWith({
+      orderId: 15,
+      typePaidId: 1,
+      amount: 100,
+      paymentDate: '2026-05-01',
+      notes: null,
+      refKey1c: null,
+    });
+    expect(updatePayment).toHaveBeenCalledWith(31, { amount: 120 });
+    expect(deletePayment).toHaveBeenCalledWith(31);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('does not retry Hasura payments mutation when backend payment create fails', async () => {

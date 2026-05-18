@@ -1250,10 +1250,8 @@ async function getBackendUserOneIfEnabled(resource: string, id: number | string)
   };
 }
 
-const FORCE_HASURA_MUTATION_META_KEY = 'forceHasuraMutation';
-
-async function createBackendPaymentIfEnabled(resource: string, variables?: AnyObject, meta?: AnyObject) {
-  if (!shouldUseBackendPaymentMutation(resource, meta)) {
+async function createBackendPaymentIfEnabled(resource: string, variables?: AnyObject, _meta?: AnyObject) {
+  if (!shouldUseBackendPaymentMutation(resource)) {
     return null;
   }
 
@@ -1299,9 +1297,9 @@ async function updateBackendPaymentIfEnabled(
   resource: string,
   id: number | string,
   variables?: AnyObject,
-  meta?: AnyObject,
+  _meta?: AnyObject,
 ) {
-  if (!shouldUseBackendPaymentMutation(resource, meta)) {
+  if (!shouldUseBackendPaymentMutation(resource)) {
     return null;
   }
 
@@ -1309,8 +1307,8 @@ async function updateBackendPaymentIfEnabled(
   return { data: mapBackendPaymentToLegacyRow(payment) };
 }
 
-async function deleteBackendPaymentIfEnabled(resource: string, id: number | string, meta?: AnyObject) {
-  if (!shouldUseBackendPaymentMutation(resource, meta)) {
+async function deleteBackendPaymentIfEnabled(resource: string, id: number | string, _meta?: AnyObject) {
+  if (!shouldUseBackendPaymentMutation(resource)) {
     return null;
   }
 
@@ -1334,12 +1332,8 @@ function shouldUseBackendOrderMutation(resource: string): boolean {
   return featureFlags.useBackendOrdersWrite && resource === 'orders';
 }
 
-function shouldUseBackendPaymentMutation(resource: string, meta?: AnyObject): boolean {
-  return (
-    featureFlags.useBackendPayments &&
-    resource === 'payments' &&
-    meta?.[FORCE_HASURA_MUTATION_META_KEY] !== true
-  );
+function shouldUseBackendPaymentMutation(resource: string): boolean {
+  return featureFlags.useBackendPayments && resource === 'payments';
 }
 
 function shouldUseBackendClientPhoneMutation(resource: string): boolean {
