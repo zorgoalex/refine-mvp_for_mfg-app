@@ -10,8 +10,6 @@ import { isApiError } from '../api/apiError';
 import { featureFlags } from '../config/featureFlags';
 import { saveOrderViaBackend } from './useOrderSaveBackend';
 
-const LEGACY_ORDER_SAVE_PAYMENT_META = { forceHasuraMutation: true };
-
 interface UseOrderSaveResult {
   saveOrder: (values: OrderFormValues, isEdit: boolean) => Promise<number | null>;
   isSaving: boolean;
@@ -62,6 +60,8 @@ export const useOrderSave = (): UseOrderSaveResult => {
         return savedOrderId;
       }
 
+      // Legacy rollback path for useBackendOrdersWrite=false. Backend-enabled
+      // order saves return above through saveOrderViaBackend with one order command.
       // ========== STEP 1: Save/Update orders (header) ==========
       if (isEdit && values.header.order_id) {
         // Update existing order
@@ -417,7 +417,6 @@ export const useOrderSave = (): UseOrderSaveResult => {
               resource: 'payments',
               id: payment.payment_id,
               variables: updateData,
-              meta: LEGACY_ORDER_SAVE_PAYMENT_META,
             });
           } else {
             // Create new payment - exclude temp_id, payment_id and all audit/system fields
@@ -428,7 +427,6 @@ export const useOrderSave = (): UseOrderSaveResult => {
                 ...paymentData,
                 order_id: createdOrderId,
               },
-              meta: LEGACY_ORDER_SAVE_PAYMENT_META,
             });
             // Track this payment for ID update
             newPaymentsToCreate.push({ tempId: payment.temp_id, promise: createPromise });
@@ -458,7 +456,6 @@ export const useOrderSave = (): UseOrderSaveResult => {
           dataProvider().deleteOne({
             resource: 'payments',
             id: paymentId,
-            meta: LEGACY_ORDER_SAVE_PAYMENT_META,
           })
         );
         await Promise.all(deletePaymentPromises);
