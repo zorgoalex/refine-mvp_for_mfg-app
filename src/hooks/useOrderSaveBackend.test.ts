@@ -60,6 +60,97 @@ describe('saveOrderViaBackend', () => {
     expect(deps.createOrder).not.toHaveBeenCalled();
   });
 
+  it('updates an order with nested payments through one backend order command', async () => {
+    const values = createFormValues(33);
+    values.payments = [
+      {
+        payment_id: 71,
+        order_id: 33,
+        type_paid_id: 2,
+        amount: 500,
+        payment_date: '2026-05-01',
+        notes: 'advance payment',
+        ref_key_1c: 'pay-existing',
+      },
+      {
+        temp_id: 1701,
+        order_id: 33,
+        type_paid_id: 1,
+        amount: 250,
+        payment_date: '2026-05-02',
+        notes: 'second payment',
+      },
+    ];
+    values.deletedPayments = [72];
+    const dto = createSaveOrderDto();
+    dto.payments = [
+      {
+        id: 71,
+        typePaidId: 2,
+        amount: 500,
+        paymentDate: '2026-05-01',
+        notes: 'advance payment',
+        refKey1c: 'pay-existing',
+      },
+      {
+        clientKey: '1701',
+        typePaidId: 1,
+        amount: 250,
+        paymentDate: '2026-05-02',
+        notes: 'second payment',
+        refKey1c: null,
+      },
+    ];
+    dto.deleted.paymentIds = [72];
+    const order = createOrderDto(33);
+    order.payments = [
+      {
+        paymentId: 71,
+        orderId: 33,
+        typePaidId: 2,
+        amount: 500,
+        paymentDate: '2026-05-01',
+        notes: 'advance payment',
+        refKey1c: 'pay-existing',
+      },
+    ];
+    const deps = createDependencies({
+      dto,
+      mappedFormValues: createFormValues(33),
+      updateResponse: { order },
+    });
+
+    await expect(saveOrderViaBackend(values, true, deps)).resolves.toBe(33);
+
+    expect(deps.toSaveDto).toHaveBeenCalledWith(values);
+    expect(deps.updateOrder).toHaveBeenCalledTimes(1);
+    expect(deps.updateOrder).toHaveBeenCalledWith(33, dto);
+    expect(deps.createOrder).not.toHaveBeenCalled();
+    expect(deps.updateOrder.mock.calls[0][1]).toMatchObject({
+      payments: [
+        {
+          id: 71,
+          typePaidId: 2,
+          amount: 500,
+          paymentDate: '2026-05-01',
+          notes: 'advance payment',
+          refKey1c: 'pay-existing',
+        },
+        {
+          clientKey: '1701',
+          typePaidId: 1,
+          amount: 250,
+          paymentDate: '2026-05-02',
+          notes: 'second payment',
+          refKey1c: null,
+        },
+      ],
+      deleted: {
+        paymentIds: [72],
+      },
+    });
+  });
+
   it('rejects update without real order_id before calling backend', async () => {
     const values = createFormValues();
     const deps = createDependencies({
