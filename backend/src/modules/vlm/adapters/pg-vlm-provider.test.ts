@@ -151,6 +151,35 @@ describe('PgVlmProvider', () => {
     ]);
   });
 
+  it('does not return raw provider payloads from analyze responses', async () => {
+    const database = new FakeVlmDatabase(
+      [
+        { match: 'FROM file_uploads', rows: [uploadRow()] },
+        { match: 'INSERT INTO audit_log', rows: [] },
+      ],
+      [],
+    );
+    const provider = createProvider(database, async (url) => {
+      if (String(url).includes('/oauth/token')) {
+        return response({ access_token: 'm2m-token', expires_in: 3600 });
+      }
+      return response({
+        model: 'zai/model-a',
+        choices: [{ message: { content: '{"items":[{"name":"detail"}]}' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        providerDebug: { secretTrace: 'internal-upstream-payload' },
+      });
+    });
+
+    const result = await provider.analyzeImage({
+      currentUser: currentUser('manager', '10'),
+      dto: { uploadId: '11111111-1111-4111-8111-111111111111' },
+    });
+
+    expect(result).not.toHaveProperty('rawResult');
+    expect(JSON.stringify(result)).not.toContain('internal-upstream-payload');
+  });
+
   it('rejects arbitrary imageUrl values before provider call', async () => {
     const database = new FakeVlmDatabase([{ match: 'FROM file_uploads', rows: [] }], []);
     let fetchCalled = false;

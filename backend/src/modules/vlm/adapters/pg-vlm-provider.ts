@@ -253,7 +253,6 @@ export class PgVlmProvider implements VlmProviderPort {
             items: parsed.items,
             parseError: parsed.parseError,
           },
-          rawResult: providerResponse,
           usage: {
             inputTokens: usage?.prompt_tokens ?? null,
             outputTokens: usage?.completion_tokens ?? null,

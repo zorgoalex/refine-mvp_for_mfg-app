@@ -60,7 +60,6 @@ export interface VlmAnalyzeResponseDto {
   model?: string | null;
   uploadId?: string | null;
   result: Record<string, unknown>;
-  rawResult?: Record<string, unknown> | null;
   usage?: {
     inputTokens?: number | null;
     outputTokens?: number | null;
