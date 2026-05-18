@@ -1,70 +1,86 @@
-import { existsSync, readFileSync } from 'fs';
-import { resolve } from 'path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { relative, resolve, sep } from 'path';
 import { describe, expect, it } from 'vitest';
 
-const EXPECTED_BACKEND_V1_ROUTES = [
-  'POST /api/v1/auth/login',
-  'POST /api/v1/auth/refresh',
-  'POST /api/v1/auth/logout',
-  'GET /api/v1/me',
-  'GET /api/v1/orders',
-  'POST /api/v1/orders',
-  'GET /api/v1/orders/form-data',
-  'GET /api/v1/orders/{orderId}',
-  'PUT /api/v1/orders/{orderId}',
-  'DELETE /api/v1/orders/{orderId}',
-  'GET /api/v1/orders/{orderId}/audit',
-  'POST /api/v1/orders/{orderId}/export/google-drive',
-  'GET /api/v1/orders/{orderId}/snapshot',
-  'GET /api/v1/orders/snapshot/batch',
-  'POST /api/v1/orders/snapshot/import',
-  'POST /api/v1/orders/snapshot/import-batch',
-  'PATCH /api/v1/orders/{orderId}/calendar-date',
-  'PATCH /api/v1/orders/{orderId}/status',
-  'PATCH /api/v1/orders/{orderId}/order-status',
-  'PUT /api/v1/orders/{orderId}/production-stage-events/{productionStatusId}',
-  'DELETE /api/v1/orders/{orderId}/production-stage-events/{productionStatusId}',
-  'POST /api/v1/payments',
-  'PATCH /api/v1/payments/{paymentId}',
-  'DELETE /api/v1/payments/{paymentId}',
-  'POST /api/v1/client-phones',
-  'PATCH /api/v1/client-phones/{phoneId}',
-  'DELETE /api/v1/client-phones/{phoneId}',
-  'GET /api/v1/users',
-  'POST /api/v1/users',
-  'GET /api/v1/users/{userId}',
-  'PATCH /api/v1/users/{userId}',
-  'POST /api/v1/users/{userId}/change-password',
-  'PATCH /api/v1/users/{userId}/deactivate',
-  'PATCH /api/v1/users/{userId}/activate',
-  'GET /api/v1/vlm/health',
-  'POST /api/v1/vlm/upload',
-  'POST /api/v1/vlm/analyze',
-  'GET /api/v1/orders/{orderId}/deadlines',
-  'GET /api/v1/orders/{orderId}/deadline-events',
-  'GET /api/v1/orders/{orderId}/deadline-summary',
-  'GET /api/v1/deadlines',
-  'GET /api/v1/deadlines/{deadlineId}',
-  'POST /api/v1/deadlines',
-  'PATCH /api/v1/deadlines/{deadlineId}',
-  'POST /api/v1/deadlines/{deadlineId}/pause',
-  'POST /api/v1/deadlines/{deadlineId}/resume',
-  'POST /api/v1/deadlines/{deadlineId}/cancel',
-  'GET /api/v1/deadline-policies',
-  'POST /api/v1/deadline-policies',
-  'PATCH /api/v1/deadline-policies/{policyId}',
-  'GET /api/v1/deadline-settings',
-  'PATCH /api/v1/deadline-settings',
-] as const;
+const API_PREFIX = '/api/v1';
+const ROUTE_DECORATOR_PATTERN = /^\s*@(Get|Post|Put|Patch|Delete)\(\s*(?:(['"`])([^'"`]*)\2)?\s*\)/gm;
 
 describe('OpenAPI static contract route parity', () => {
   it('documents every implemented backend-owned /api/v1 route', () => {
     const contract = readOpenApiContract();
-    const documentedRoutes = collectDocumentedRoutes(contract);
+    const implementedRoutes = collectImplementedRoutes().sort();
+    const documentedRoutes = collectDocumentedRoutes(contract).sort();
 
-    expect(documentedRoutes.sort()).toEqual([...EXPECTED_BACKEND_V1_ROUTES].sort());
+    expect(
+      implementedRoutes.length,
+      'Expected to discover backend-owned controller routes from source files',
+    ).toBeGreaterThan(0);
+
+    expect(
+      documentedRoutes.filter((route) => !implementedRoutes.includes(route)),
+      formatRouteDiff('Contract routes with no implemented controller route', implementedRoutes, documentedRoutes),
+    ).toEqual([]);
+    expect(
+      implementedRoutes.filter((route) => !documentedRoutes.includes(route)),
+      formatRouteDiff('Implemented controller routes missing from static OpenAPI contract', implementedRoutes, documentedRoutes),
+    ).toEqual([]);
   });
 });
+
+function backendRoot(): string {
+  const candidates = [resolve(process.cwd(), 'backend'), process.cwd()];
+  const root = candidates.find((candidate) => existsSync(resolve(candidate, 'src/modules')));
+
+  expect(root, 'Expected to find backend root from repo root or backend cwd').toBeDefined();
+
+  return root as string;
+}
+
+function collectImplementedRoutes(): string[] {
+  return backendControllerFiles().flatMap((file) => routesFromController(file));
+}
+
+function backendControllerFiles(): string[] {
+  return walk(resolve(backendRoot(), 'src/modules'))
+    .filter((file) => file.endsWith('controller.ts'))
+    .filter((file) => !normalizePath(relative(backendRoot(), file)).startsWith('src/modules/health/'))
+    .sort();
+}
+
+function routesFromController(file: string): string[] {
+  const source = readFileSync(file, 'utf8');
+  const controllerPrefix = parseControllerPrefix(source, file);
+  const routes: string[] = [];
+
+  for (const match of source.matchAll(ROUTE_DECORATOR_PATTERN)) {
+    const method = match[1].toUpperCase();
+    const routePath = match[3] ?? '';
+    routes.push(`${method} ${toOpenApiPath(controllerPrefix, routePath)}`);
+  }
+
+  return routes;
+}
+
+function parseControllerPrefix(source: string, file: string): string {
+  const match = /@Controller\(\s*(?:(['"`])([^'"`]*)\1)?\s*\)/m.exec(source);
+
+  expect(
+    match,
+    `${normalizePath(relative(backendRoot(), file))} should declare a static @Controller(...) prefix`,
+  ).toBeDefined();
+
+  return match?.[2] ?? '';
+}
+
+function toOpenApiPath(controllerPrefix: string, routePath: string): string {
+  const joinedPath = [API_PREFIX, controllerPrefix, routePath]
+    .filter((part) => part.length > 0)
+    .join('/')
+    .replace(/\/+/g, '/')
+    .replace(/\/:([^/]+)/g, '/{$1}');
+
+  return joinedPath === '' ? '/' : joinedPath;
+}
 
 function readOpenApiContract(): string {
   const candidates = [
@@ -76,6 +92,15 @@ function readOpenApiContract(): string {
   expect(contractPath).toBeDefined();
 
   return readFileSync(contractPath as string, 'utf8');
+}
+
+function walk(directory: string): string[] {
+  return readdirSync(directory).flatMap((entry) => {
+    const fullPath = resolve(directory, entry);
+    const stat = statSync(fullPath);
+
+    return stat.isDirectory() ? walk(fullPath) : [fullPath];
+  });
 }
 
 function collectDocumentedRoutes(contract: string): string[] {
@@ -97,4 +122,30 @@ function collectDocumentedRoutes(contract: string): string[] {
   }
 
   return routes;
+}
+
+function formatRouteDiff(title: string, implementedRoutes: string[], documentedRoutes: string[]): string {
+  const implementedOnly = implementedRoutes.filter((route) => !documentedRoutes.includes(route));
+  const documentedOnly = documentedRoutes.filter((route) => !implementedRoutes.includes(route));
+
+  return [
+    title,
+    '',
+    `Implemented controller routes (${implementedRoutes.length}):`,
+    formatRouteList(implementedRoutes),
+    '',
+    `Missing from contract (${implementedOnly.length}):`,
+    formatRouteList(implementedOnly),
+    '',
+    `Documented only (${documentedOnly.length}):`,
+    formatRouteList(documentedOnly),
+  ].join('\n');
+}
+
+function formatRouteList(routes: string[]): string {
+  return routes.length > 0 ? routes.map((route) => `  - ${route}`).join('\n') : '  - none';
+}
+
+function normalizePath(path: string): string {
+  return path.split(sep).join('/');
 }

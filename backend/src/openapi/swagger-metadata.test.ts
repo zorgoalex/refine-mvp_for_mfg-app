@@ -1,32 +1,19 @@
-import { existsSync, readFileSync } from 'fs';
-import { resolve } from 'path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { relative, resolve, sep } from 'path';
 import { describe, expect, it } from 'vitest';
-
-const CONTROLLER_FILES = [
-  'src/modules/auth/http/auth.controller.ts',
-  'src/modules/users/http/users.controller.ts',
-  'src/modules/orders/http/orders.controller.ts',
-  'src/modules/orders/http/order-export.controller.ts',
-  'src/modules/orders/http/order-snapshot.controller.ts',
-  'src/modules/payments/http/payments.controller.ts',
-  'src/modules/client-phones/http/client-phones.controller.ts',
-  'src/modules/production-actions/http/production-actions.controller.ts',
-  'src/modules/vlm/http/vlm.controller.ts',
-  'src/modules/deadlines/http/deadlines.controller.ts',
-  'src/modules/deadlines/http/deadline-policies.controller.ts',
-  'src/modules/deadlines/http/deadline-settings.controller.ts',
-] as const;
 
 describe('Swagger controller metadata', () => {
   it('tags every backend-owned controller included in the stage-1 API contract', () => {
-    const missingTags = CONTROLLER_FILES.filter((file) => !readBackendFile(file).includes('@ApiTags('));
+    const missingTags = backendControllerFiles()
+      .filter((file) => !readFileSync(file, 'utf8').includes('@ApiTags('))
+      .map(relativeBackendPath);
 
     expect(missingTags).toEqual([]);
   });
 
   it('documents every route handler with @ApiOperation metadata', () => {
-    const missingOperationMetadata = CONTROLLER_FILES.flatMap((file) => {
-      const source = readBackendFile(file);
+    const missingOperationMetadata = backendControllerFiles().flatMap((file) => {
+      const source = readFileSync(file, 'utf8');
       const lines = source.split('\n');
       const missing: string[] = [];
 
@@ -40,7 +27,7 @@ describe('Swagger controller metadata', () => {
           .join('\n');
 
         if (!precedingDecoratorBlock.includes('@ApiOperation(')) {
-          missing.push(`${file}:${index + 1}:${lines[index].trim()}`);
+          missing.push(`${relativeBackendPath(file)}:${index + 1}:${lines[index].trim()}`);
         }
       }
 
@@ -51,9 +38,31 @@ describe('Swagger controller metadata', () => {
   });
 });
 
-function readBackendFile(path: string): string {
-  const candidates = [resolve(process.cwd(), path), resolve(process.cwd(), 'backend', path)];
-  const fullPath = candidates.find((candidate) => existsSync(candidate));
-  expect(fullPath, `${path} should exist`).toBeDefined();
-  return readFileSync(fullPath as string, 'utf8');
+function backendRoot(): string {
+  const candidates = [resolve(process.cwd(), 'backend'), process.cwd()];
+  const root = candidates.find((candidate) => existsSync(resolve(candidate, 'src/modules')));
+
+  expect(root, 'Expected to find backend root from repo root or backend cwd').toBeDefined();
+
+  return root as string;
+}
+
+function backendControllerFiles(): string[] {
+  return walk(resolve(backendRoot(), 'src/modules'))
+    .filter((file) => file.endsWith('controller.ts'))
+    .filter((file) => !relativeBackendPath(file).startsWith('src/modules/health/'))
+    .sort();
+}
+
+function walk(directory: string): string[] {
+  return readdirSync(directory).flatMap((entry) => {
+    const fullPath = resolve(directory, entry);
+    const stat = statSync(fullPath);
+
+    return stat.isDirectory() ? walk(fullPath) : [fullPath];
+  });
+}
+
+function relativeBackendPath(path: string): string {
+  return relative(backendRoot(), path).split(sep).join('/');
 }

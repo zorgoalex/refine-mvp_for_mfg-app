@@ -125,9 +125,6 @@ paths:
       description: |
         Отзывает текущий refresh token, очищает refresh cookie. Endpoint должен быть
         идемпотентным: повторный logout не должен падать.
-      security:
-        - bearerAuth: []
-        - refreshCookie: []
       responses:
         '200':
           description: Сессия завершена
@@ -5418,11 +5415,6 @@ components:
           type: object
           additionalProperties: true
           description: Нормализованный результат анализа.
-        rawResult:
-          type: object
-          nullable: true
-          additionalProperties: true
-          description: Может возвращаться только в debug/admin режиме. Не включать по умолчанию.
         usage:
           type: object
           nullable: true
