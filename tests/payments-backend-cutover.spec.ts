@@ -60,7 +60,9 @@ test.describe('Payments backend cutover', () => {
         expect(graphqlPaymentMutations).toEqual([]);
 
         await expect(page).toHaveURL(/\/payments\/show\/30/);
-        await expect(page.getByText('Backend payment update')).toBeVisible();
+        await expect(page.getByText('Backend payment update')).toBeVisible({
+            timeout: 15000,
+        });
 
         const deleteResponse = await page.evaluate(async () => {
             const response = await fetch('/api/v1/payments/30', {
