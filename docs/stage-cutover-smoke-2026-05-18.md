@@ -26,11 +26,7 @@
 
 ## Command Log
 
-```bash
-grep -q '^VERCEL_AUTOMATION_BYPASS_SECRET=' /home/ovhtest/projects/erp_dev/.env && echo 'Vercel bypass env key present'
-```
-
-Result: Exited 0 and printed only `Vercel bypass env key present`.
+Result: Protected Vercel bypass env key presence check exited 0 and printed only `"Vercel bypass env key present"`.
 
 ```bash
 npm run smoke:stage-cutover
@@ -40,4 +36,4 @@ Result: Failed at the first gate. Runtime config smoke printed mismatches for `f
 
 ## Follow-Ups
 
-- Correct the staging runtime config to match `docs/runtime-config/canary/11-deadlines.json`, then rerun `npm run smoke:stage-cutover`.
+- Align the staging runtime config feature flags with `docs/runtime-config/canary/11-deadlines.json` before rerunning the full `npm run smoke:stage-cutover` smoke.
