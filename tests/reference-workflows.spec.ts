@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { setupWorkflowMockApi, type WorkflowMockDb } from './helpers/mockWorkflowApi';
 
@@ -792,10 +794,24 @@ const catalogCases: CatalogCase[] = [
     },
 ];
 
+const nonReferenceCrudResources = new Set([
+    'payments',
+    'users',
+    'order_workshops',
+    'order_resource_requirements',
+]);
+
 test.describe('Reference workflows', () => {
     test.setTimeout(600000);
 
-    test('creates, updates every form field, and deletes all catalog records', async ({ page }) => {
+    test('covers every active CRUD reference resource declared in App', async () => {
+        const appResources = readCrudResourcesFromApp().filter((resource) => !nonReferenceCrudResources.has(resource));
+        const coveredResources = catalogCases.map((catalog) => catalog.resource).sort();
+
+        expect(coveredResources).toEqual(appResources);
+    });
+
+    test('creates, reads, updates every form field, lists, and deletes all catalog records', async ({ page }) => {
         const db = await setupWorkflowMockApi(page);
 
         for (const catalog of catalogCases) {
@@ -909,6 +925,40 @@ test.describe('Reference workflows', () => {
     });
 });
 
+function readCrudResourcesFromApp() {
+    const appSource = readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf8');
+    const resourcesStart = appSource.indexOf('resources={[');
+    const resourcesEnd = appSource.indexOf('options={{', resourcesStart);
+    const resourcesSource = appSource.slice(resourcesStart, resourcesEnd);
+    const resources: Array<{ name: string; create: boolean; edit: boolean; show: boolean }> = [];
+    let current: (typeof resources)[number] | null = null;
+
+    for (const line of resourcesSource.split('\n')) {
+        const nameMatch = line.match(/name:\s*"([^"]+)"/);
+        if (nameMatch) {
+            if (current) {
+                resources.push(current);
+            }
+            current = { name: nameMatch[1], create: false, edit: false, show: false };
+        }
+        if (!current) {
+            continue;
+        }
+        current.create ||= /\bcreate:\s*"/.test(line);
+        current.edit ||= /\bedit:\s*"/.test(line);
+        current.show ||= /\bshow:\s*"/.test(line);
+    }
+
+    if (current) {
+        resources.push(current);
+    }
+
+    return resources
+        .filter((resource) => resource.create && resource.edit && resource.show)
+        .map((resource) => resource.name)
+        .sort();
+}
+
 async function createUpdateAndDeleteCatalog(page: Page, db: WorkflowMockDb, catalog: CatalogCase) {
     await page.goto(`${catalog.path}/create`);
     await catalog.fillCreate(page);
@@ -926,6 +976,8 @@ async function createUpdateAndDeleteCatalog(page: Page, db: WorkflowMockDb, cata
         ...catalog.expectedCreate,
     });
 
+    await assertCatalogRecordVisibleInList(page, catalog, catalog.createName);
+
     await page.goto(`${catalog.path}/edit/${created[catalog.idField]}`);
     const nameInput = page.locator(`#${catalog.nameField}`);
     await expect(nameInput).toBeVisible();
@@ -942,7 +994,24 @@ async function createUpdateAndDeleteCatalog(page: Page, db: WorkflowMockDb, cata
         });
     await settleNavigation(page, editUrl);
 
+    await assertCatalogRecordVisibleInShow(page, catalog, created[catalog.idField], catalog.updateName);
+
     await deleteCatalogRecord(page, db, catalog, created[catalog.idField]);
+}
+
+async function assertCatalogRecordVisibleInList(page: Page, catalog: CatalogCase, name: string) {
+    await page.goto(catalog.path);
+    await expect(page.locator('.ant-table-row').filter({ hasText: name })).toBeVisible({ timeout: 30000 });
+}
+
+async function assertCatalogRecordVisibleInShow(
+    page: Page,
+    catalog: CatalogCase,
+    id: number | string,
+    name: string,
+) {
+    await page.goto(`${catalog.path}/show/${id}`);
+    await expect(page.getByText(name, { exact: true })).toBeVisible({ timeout: 30000 });
 }
 
 async function deleteCatalogRecord(page: Page, db: WorkflowMockDb, catalog: CatalogCase, id: number | string) {
