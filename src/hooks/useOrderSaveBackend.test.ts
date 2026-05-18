@@ -133,6 +133,212 @@ describe('saveOrderViaBackend', () => {
     });
   });
 
+  it('updates an order with operational child workflow writes through one backend order command', async () => {
+    const values = createFormValues(33);
+    values.workshops = [
+      {
+        order_workshop_id: 81,
+        order_id: 33,
+        workshop_id: 7,
+        production_status_id: 8,
+        received_date: '2026-05-01T09:00:00.000Z',
+        started_date: null,
+        completed_date: '',
+        planned_completion_date: '2026-05-06',
+        sequence_order: '' as unknown as number,
+        responsible_employee_id: '' as unknown as number,
+        notes: '  ',
+        ref_key_1c: 'workshop-ref',
+      },
+      {
+        temp_id: 1801,
+        order_id: 33,
+        workshop_id: 9,
+        production_status_id: 10,
+        received_date: '2026-05-02',
+        started_date: '2026-05-03',
+        completed_date: null,
+        planned_completion_date: undefined,
+        sequence_order: 2,
+        responsible_employee_id: 12,
+        notes: 'new workshop',
+      },
+    ];
+    values.requirements = [
+      {
+        requirement_id: 91,
+        order_id: 33,
+        resource_type: 'material',
+        material_id: '4' as unknown as number,
+        film_id: '' as unknown as number,
+        edge_type_id: null,
+        required_quantity: '12.5' as unknown as number,
+        unit_id: '1' as unknown as number,
+        waste_percentage: '' as unknown as number,
+        final_quantity: null,
+        requirement_status_id: '2' as unknown as number,
+        supplier_id: '' as unknown as number,
+        purchase_price: '30' as unknown as number,
+        requisition_id: null,
+        warehouse_id: undefined,
+        reserved_at: new Date('2026-05-01T10:00:00.000Z'),
+        consumed_at: '',
+        notes: '',
+        calculation_details: ' ',
+        ref_key_1c: 'requirement-ref',
+      },
+      {
+        temp_id: 1901,
+        order_id: 33,
+        resource_type: 'film',
+        material_id: null,
+        film_id: 5,
+        edge_type_id: null,
+        required_quantity: 2,
+        unit_id: 1,
+        requirement_status_id: 3,
+      },
+    ];
+    values.dowelingLinks = [
+      {
+        order_doweling_link_id: 101,
+        temp_id: 2001,
+        order_id: 33,
+        doweling_order_id: '44' as unknown as number,
+        doweling_order: {
+          doweling_order_id: 44,
+          doweling_order_name: 'Doweling A',
+          design_engineer_id: '7' as unknown as number,
+          design_engineer: 'Engineer',
+        },
+        ref_key_1c: '',
+      },
+      {
+        temp_id: 2002,
+        order_id: 33,
+        doweling_order_id: 45,
+        doweling_order: {
+          doweling_order_id: 45,
+          doweling_order_name: 'Doweling B',
+          design_engineer_id: null,
+        },
+        ref_key_1c: 'link-ref',
+      },
+    ];
+    values.deletedWorkshops = [82];
+    values.deletedRequirements = [92];
+    values.deletedDowelingLinks = [102];
+    const order = createOrderDto(33);
+    const deps = createDependencies({
+      dto: createSaveOrderDto(),
+      mappedFormValues: createFormValues(33),
+      updateResponse: { order },
+    });
+    deps.toSaveDto.mockImplementation(mapOrderFormToSaveOrderDto);
+
+    await expect(saveOrderViaBackend(values, true, deps)).resolves.toBe(33);
+
+    expect(deps.updateOrder).toHaveBeenCalledTimes(1);
+    expect(deps.updateOrder).toHaveBeenCalledWith(
+      33,
+      expect.objectContaining({
+        workshops: [
+          {
+            id: 81,
+            workshopId: 7,
+            productionStatusId: 8,
+            receivedDate: '2026-05-01',
+            startedDate: null,
+            completedDate: null,
+            plannedCompletionDate: '2026-05-06',
+            sequenceOrder: null,
+            responsibleEmployeeId: null,
+            notes: null,
+            refKey1c: 'workshop-ref',
+          },
+          {
+            clientKey: '1801',
+            workshopId: 9,
+            productionStatusId: 10,
+            receivedDate: '2026-05-02',
+            startedDate: '2026-05-03',
+            completedDate: null,
+            plannedCompletionDate: null,
+            sequenceOrder: 2,
+            responsibleEmployeeId: 12,
+            notes: 'new workshop',
+            refKey1c: null,
+          },
+        ],
+        requirements: [
+          {
+            id: 91,
+            resourceType: 'material',
+            materialId: 4,
+            filmId: null,
+            edgeTypeId: null,
+            requiredQuantity: 12.5,
+            unitId: 1,
+            wastePercentage: null,
+            finalQuantity: null,
+            requirementStatusId: 2,
+            supplierId: null,
+            purchasePrice: 30,
+            requisitionId: null,
+            warehouseId: null,
+            reservedAt: '2026-05-01T10:00:00.000Z',
+            consumedAt: null,
+            notes: null,
+            calculationDetails: null,
+            refKey1c: 'requirement-ref',
+          },
+          {
+            clientKey: '1901',
+            resourceType: 'film',
+            materialId: null,
+            filmId: 5,
+            edgeTypeId: null,
+            requiredQuantity: 2,
+            unitId: 1,
+            wastePercentage: null,
+            finalQuantity: null,
+            requirementStatusId: 3,
+            supplierId: null,
+            purchasePrice: null,
+            requisitionId: null,
+            warehouseId: null,
+            reservedAt: null,
+            consumedAt: null,
+            notes: null,
+            calculationDetails: null,
+            refKey1c: null,
+          },
+        ],
+        dowelingLinks: [
+          {
+            id: 101,
+            clientKey: '2001',
+            dowelingOrderId: 44,
+            designEngineerId: 7,
+            refKey1c: null,
+          },
+          {
+            clientKey: '2002',
+            dowelingOrderId: 45,
+            designEngineerId: null,
+            refKey1c: 'link-ref',
+          },
+        ],
+        deleted: expect.objectContaining({
+          workshopIds: [82],
+          requirementIds: [92],
+          dowelingLinkIds: [102],
+        }),
+      }),
+    );
+    expect(deps.createOrder).not.toHaveBeenCalled();
+  });
+
   it('rejects update without real order_id before calling backend', async () => {
     const values = createFormValues();
     const deps = createDependencies({
