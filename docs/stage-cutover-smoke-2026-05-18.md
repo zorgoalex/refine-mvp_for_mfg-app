@@ -12,7 +12,7 @@
 
 | Gate | Status | Evidence |
 | --- | --- | --- |
-| Runtime config matches `docs/runtime-config/canary/11-deadlines.json` | Not run | Run `npm run smoke:runtime-config -- --url=https://app-test.mebelkz.app/runtime-config.json --expect=docs/runtime-config/canary/11-deadlines.json`. |
+| Runtime config matches `docs/runtime-config/canary/11-deadlines.json` | Fail | `npm run smoke:stage-cutover` failed in `npm run smoke:runtime-config -- --url https://app-test.mebelkz.app/runtime-config.json --expect docs/runtime-config/canary/11-deadlines.json` because runtime config feature flags differed from the canary: `backendPayments`, `backendClientPhones`, and `backendProductionActions` were `false`; `backendReferences` was `true`. Classified as runtime config mismatch. No later gates were claimed. |
 | Backend `/health/live` and `/health/ready` pass with DB/Redis/config ready | Not run | Run through `npm run smoke:staging-gates`. |
 | Legacy Vercel production-disable does not break `/runtime-config.json` | Not run | Record runtime config smoke result; optionally record legacy endpoint probe separately. |
 | Frontend routes load without GraphQL/runtime errors | Not run | Run `npm run test:e2e:frontend-pages-stage-canary`. |
@@ -30,8 +30,8 @@
 npm run smoke:stage-cutover
 ```
 
-Result: Not run yet.
+Result: Failed at the first gate. Runtime config smoke printed mismatches for `features.backendPayments`, `features.backendClientPhones`, `features.backendProductionActions`, and `features.backendReferences`, then `Stage cutover smoke failed: runtime config all-on expectation failed with exit code 1`.
 
 ## Follow-Ups
 
-- No follow-ups recorded before the smoke run.
+- Correct the staging runtime config to match `docs/runtime-config/canary/11-deadlines.json`, then rerun `npm run smoke:stage-cutover`.
