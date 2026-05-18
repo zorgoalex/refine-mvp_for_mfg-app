@@ -104,23 +104,36 @@ function parseArgs(rawArgs) {
 
   for (let index = 0; index < rawArgs.length; index += 1) {
     const arg = rawArgs[index];
-    const readValue = () => rawArgs[++index];
-    if (arg === '--frontend-url') options.frontendUrl = readValue();
+    const readValue = (optionName) => {
+      const value = rawArgs[index + 1];
+      if (!value || value.startsWith('--')) {
+        throw new Error(`Missing value for ${optionName}`);
+      }
+      index += 1;
+      return value;
+    };
+    if (arg === '--frontend-url') options.frontendUrl = readValue(arg);
     else if (arg.startsWith('--frontend-url=')) options.frontendUrl = arg.slice(15);
-    else if (arg === '--backend-base-url') options.backendBaseUrl = readValue();
+    else if (arg === '--backend-base-url') options.backendBaseUrl = readValue(arg);
     else if (arg.startsWith('--backend-base-url=')) options.backendBaseUrl = arg.slice(19);
-    else if (arg === '--backend-api-url') options.backendApiUrl = readValue();
+    else if (arg === '--backend-api-url') options.backendApiUrl = readValue(arg);
     else if (arg.startsWith('--backend-api-url=')) options.backendApiUrl = arg.slice(18);
-    else if (arg === '--postgres-container') options.postgresContainer = readValue();
+    else if (arg === '--postgres-container') options.postgresContainer = readValue(arg);
     else if (arg.startsWith('--postgres-container=')) options.postgresContainer = arg.slice(21);
-    else if (arg === '--env-file') options.envFile = readValue();
+    else if (arg === '--env-file') options.envFile = readValue(arg);
     else if (arg.startsWith('--env-file=')) options.envFile = arg.slice(11);
     else if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--help' || arg === '-h') usageAndExit(0);
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
-  for (const key of ['frontendUrl', 'backendBaseUrl', 'backendApiUrl', 'postgresContainer']) {
+  for (const key of [
+    'frontendUrl',
+    'backendBaseUrl',
+    'backendApiUrl',
+    'postgresContainer',
+    'envFile',
+  ]) {
     if (!options[key]) throw new Error(`Missing ${key}`);
   }
 

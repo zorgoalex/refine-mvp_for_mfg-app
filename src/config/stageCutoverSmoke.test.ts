@@ -4,7 +4,7 @@ import {
   parseDotenvFile,
   redactCommandForLog,
 } from '../../scripts/stage-cutover-smoke-lib.js';
-import { buildStageCutoverCommands } from '../../scripts/stage-cutover-smoke.js';
+import { buildStageCutoverCommands, parseArgs } from '../../scripts/stage-cutover-smoke.js';
 
 describe('stage cutover smoke helpers', () => {
   it('loads only allowlisted env values and keeps secrets available without logging them', () => {
@@ -62,5 +62,17 @@ describe('stage cutover smoke command plan', () => {
       'unit regression suite',
       'production build',
     ]);
+  });
+});
+
+describe('stage cutover smoke argument parsing', () => {
+  it('rejects missing values for options that require one', () => {
+    expect(() => parseArgs(['--env-file'])).toThrow('Missing value for --env-file');
+  });
+
+  it('rejects flag-looking values for options that require one', () => {
+    expect(() => parseArgs(['--frontend-url', '--dry-run'])).toThrow(
+      'Missing value for --frontend-url',
+    );
   });
 });
