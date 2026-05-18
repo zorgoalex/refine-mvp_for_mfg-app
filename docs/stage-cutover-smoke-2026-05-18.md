@@ -27,6 +27,12 @@
 ## Command Log
 
 ```bash
+grep -q '^VERCEL_AUTOMATION_BYPASS_SECRET=' /home/ovhtest/projects/erp_dev/.env && echo 'Vercel bypass env key present'
+```
+
+Result: Exited 0 and printed only `Vercel bypass env key present`.
+
+```bash
 npm run smoke:stage-cutover
 ```
 
