@@ -477,6 +477,137 @@ describe('OrderTransactionService', () => {
     ]);
   });
 
+  it('updates operational child workflow collections inside the order transaction', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+      workshops: [
+        workshop({ id: 31, workshopId: 7, productionStatusId: 8, notes: 'old workshop' }),
+        workshop({ id: 32, workshopId: 8, productionStatusId: 8 }),
+      ],
+      requirements: [
+        requirement({ id: 41, resourceType: 'material', materialId: 4, requiredQuantity: 1 }),
+        requirement({ id: 42, resourceType: 'film', filmId: 5, requiredQuantity: 1 }),
+      ],
+      dowelingLinks: [
+        dowelingLink({ id: 51, dowelingOrderId: 44, designEngineerId: null }),
+        dowelingLink({ id: 52, dowelingOrderId: 45, designEngineerId: null }),
+      ],
+    });
+
+    const result = await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [
+          {
+            id: 11,
+            height: 500,
+            width: 500,
+            quantity: 1,
+            materialId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 5000,
+          },
+        ],
+        payments: [],
+        workshops: [
+          {
+            id: 31,
+            workshopId: 9,
+            productionStatusId: 10,
+            receivedDate: '2026-05-01',
+            plannedCompletionDate: '2026-05-05',
+            notes: 'updated workshop',
+          },
+          {
+            clientKey: 'new-workshop',
+            workshopId: 11,
+            productionStatusId: 12,
+            sequenceOrder: 2,
+            responsibleEmployeeId: 99,
+          },
+        ],
+        requirements: [
+          {
+            id: 41,
+            resourceType: 'material',
+            materialId: 6,
+            requiredQuantity: 3,
+            unitId: 1001,
+            requirementStatusId: 1001,
+            purchasePrice: 25,
+          },
+          {
+            clientKey: 'new-requirement',
+            resourceType: 'edge',
+            edgeTypeId: 7,
+            requiredQuantity: 4,
+            unitId: 1001,
+            requirementStatusId: 1001,
+          },
+        ],
+        dowelingLinks: [
+          {
+            id: 51,
+            dowelingOrderId: 46,
+            designEngineerId: 12,
+          },
+          {
+            clientKey: 'new-doweling-link',
+            dowelingOrderId: 47,
+            designEngineerId: null,
+          },
+        ],
+        deleted: {
+          workshopIds: [32],
+          requirementIds: [42],
+          dowelingLinkIds: [52],
+        },
+        version: 3,
+      }),
+    });
+
+    expect(result.version).toBe(4);
+    expect(result.workshops).toMatchObject([
+      { id: 31, workshopId: 9, productionStatusId: 10, notes: 'updated workshop' },
+      { id: 3000, clientKey: 'new-workshop', workshopId: 11, productionStatusId: 12 },
+    ]);
+    expect(result.requirements).toMatchObject([
+      { id: 41, resourceType: 'material', materialId: 6, requiredQuantity: 3 },
+      { id: 4000, clientKey: 'new-requirement', resourceType: 'edge', edgeTypeId: 7 },
+    ]);
+    expect(result.dowelingLinks).toMatchObject([
+      { id: 51, dowelingOrderId: 46, designEngineerId: 12 },
+      { id: 5000, clientKey: 'new-doweling-link', dowelingOrderId: 47 },
+    ]);
+    expect(transactions.calls).toContain('assertChildOwnership');
+    expect(transactions.calls).toContain('upsertWorkshops');
+    expect(transactions.calls).toContain('deleteWorkshops');
+    expect(transactions.calls).toContain('upsertRequirements');
+    expect(transactions.calls).toContain('deleteRequirements');
+    expect(transactions.calls).toContain('upsertDowelingLinks');
+    expect(transactions.calls).toContain('deleteDowelingLinks');
+    expect(transactions.calls.indexOf('updateOrderTotalsAndVersion')).toBeGreaterThan(
+      transactions.calls.indexOf('deleteDowelingLinks'),
+    );
+    expect(transactions.state.auditEvents).toEqual([
+      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager' },
+    ]);
+  });
+
   it('updates a legacy order whose current optimistic lock version is zero', async () => {
     const transactions = new FakeOrderTransactions();
     transactions.seedOrder({
