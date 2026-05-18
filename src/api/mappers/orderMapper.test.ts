@@ -113,6 +113,139 @@ describe('orderMapper', () => {
     expect(json).not.toContain('doweling_order_name');
   });
 
+  it('maps operational child workflow collections to SaveOrderDto', () => {
+    const values = createFormValues();
+    values.details = [];
+    values.payments = [];
+    values.deletedDetails = [];
+    values.deletedPayments = [];
+    values.workshops = [
+      {
+        order_workshop_id: 81,
+        order_id: 10,
+        workshop_id: '7' as unknown as number,
+        production_status_id: '8' as unknown as number,
+        received_date: '2026-05-01T09:00:00.000Z',
+        started_date: null,
+        completed_date: '',
+        planned_completion_date: undefined,
+        sequence_order: '' as unknown as number,
+        responsible_employee_id: '' as unknown as number,
+        notes: '  ',
+        ref_key_1c: 'workshop-ref',
+        created_by: 1,
+      },
+    ];
+    values.requirements = [
+      {
+        requirement_id: 91,
+        order_id: 10,
+        resource_type: 'material',
+        material_id: '4' as unknown as number,
+        film_id: '' as unknown as number,
+        edge_type_id: null,
+        required_quantity: '12.5' as unknown as number,
+        unit_id: '1' as unknown as number,
+        waste_percentage: '' as unknown as number,
+        final_quantity: null,
+        requirement_status_id: '2' as unknown as number,
+        supplier_id: '' as unknown as number,
+        purchase_price: '30' as unknown as number,
+        requisition_id: null,
+        warehouse_id: undefined,
+        reserved_at: new Date('2026-05-01T10:00:00.000Z'),
+        consumed_at: '',
+        notes: '',
+        calculation_details: ' ',
+        is_active: false,
+        ref_key_1c: 'requirement-ref',
+        created_by: 1,
+      },
+    ];
+    values.dowelingLinks = [
+      {
+        order_doweling_link_id: 101,
+        temp_id: 2001,
+        order_id: 10,
+        doweling_order_id: '44' as unknown as number,
+        doweling_order: {
+          doweling_order_id: 44,
+          doweling_order_name: 'Doweling A',
+          design_engineer_id: '7' as unknown as number,
+          design_engineer: 'Engineer',
+        },
+        ref_key_1c: '',
+        created_by: 1,
+      },
+    ];
+    values.deletedWorkshops = [82, 0];
+    values.deletedRequirements = [92, -1];
+    values.deletedDowelingLinks = [102, 102];
+
+    const dto = mapOrderFormToSaveOrderDto(values);
+
+    expect(dto.workshops).toEqual([
+      {
+        id: 81,
+        clientKey: undefined,
+        workshopId: 7,
+        productionStatusId: 8,
+        receivedDate: '2026-05-01',
+        startedDate: null,
+        completedDate: null,
+        plannedCompletionDate: null,
+        sequenceOrder: null,
+        responsibleEmployeeId: null,
+        notes: null,
+        refKey1c: 'workshop-ref',
+      },
+    ]);
+    expect(dto.requirements).toEqual([
+      {
+        id: 91,
+        clientKey: undefined,
+        resourceType: 'material',
+        materialId: 4,
+        filmId: null,
+        edgeTypeId: null,
+        requiredQuantity: 12.5,
+        unitId: 1,
+        wastePercentage: null,
+        finalQuantity: null,
+        requirementStatusId: 2,
+        supplierId: null,
+        purchasePrice: 30,
+        requisitionId: null,
+        warehouseId: null,
+        reservedAt: '2026-05-01T10:00:00.000Z',
+        consumedAt: null,
+        notes: null,
+        calculationDetails: null,
+        refKey1c: 'requirement-ref',
+      },
+    ]);
+    expect(dto.dowelingLinks).toEqual([
+      {
+        id: 101,
+        clientKey: '2001',
+        dowelingOrderId: 44,
+        designEngineerId: 7,
+        refKey1c: null,
+      },
+    ]);
+    expect(dto.deleted).toEqual({
+      detailIds: [],
+      paymentIds: [],
+      workshopIds: [82],
+      requirementIds: [92],
+      dowelingLinkIds: [102],
+    });
+    const json = JSON.stringify(dto);
+    expect(json).not.toContain('created_by');
+    expect(json).not.toContain('is_active');
+    expect(json).not.toContain('doweling_order_name');
+  });
+
   it('throws on missing required values instead of coercing them to zero', () => {
     const missingClient = createFormValues();
     missingClient.header.client_id = '' as unknown as number;
