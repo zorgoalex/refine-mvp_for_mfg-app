@@ -75,9 +75,21 @@ function buildStageCutoverCommands(options) {
         'tests/vlm-backend-cutover.spec.ts',
         'tests/payments-backend-cutover.spec.ts',
         'tests/production-actions-backend-cutover.spec.ts',
+        'tests/client-phones-backend-cutover.spec.ts',
         'tests/order-save-backend-command-boundary.spec.ts',
         '--project=chromium',
       ],
+      env: {
+        VITE_USE_BACKEND_AUTH: 'true',
+        VITE_USE_BACKEND_PERMISSIONS: 'true',
+        VITE_USE_BACKEND_USERS: 'true',
+        VITE_USE_BACKEND_ORDER_EXPORT: 'true',
+        VITE_USE_BACKEND_VLM: 'true',
+        VITE_USE_BACKEND_PAYMENTS: 'true',
+        VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'true',
+        VITE_USE_BACKEND_CLIENT_PHONES: 'true',
+        VITE_USE_BACKEND_ORDERS_WRITE: 'true',
+      },
     },
     {
       label: 'unit regression suite',
@@ -152,16 +164,28 @@ function run(options) {
   const commands = buildStageCutoverCommands(options);
 
   for (const step of commands) {
-    const printable = redactCommandForLog(`${step.command} ${step.args.join(' ')}`, childEnv);
+    const stepEnv = {
+      ...childEnv,
+      ...(step.env || {}),
+    };
+    const commandText = [
+      ...Object.entries(step.env || {}).map(([key, value]) => `${key}=${value}`),
+      step.command,
+      ...step.args,
+    ].join(' ');
+    const printable = redactCommandForLog(commandText, stepEnv);
     console.log(`\n== ${step.label} ==`);
     console.log(printable);
     if (options.dryRun) continue;
     const result = spawnSync(step.command, step.args, {
       cwd: path.resolve(__dirname, '..'),
-      env: childEnv,
+      env: stepEnv,
       stdio: 'inherit',
       shell: process.platform === 'win32',
     });
+    if (result.error) {
+      throw new Error(`${step.label} failed to start: ${result.error.message}`);
+    }
     if (result.status !== 0) {
       throw new Error(`${step.label} failed with exit code ${result.status}`);
     }

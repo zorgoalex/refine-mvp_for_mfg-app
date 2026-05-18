@@ -63,6 +63,41 @@ describe('stage cutover smoke command plan', () => {
       'production build',
     ]);
   });
+
+  it('runs local cutover regressions with all required backend flags', () => {
+    const command = buildStageCutoverCommands({
+      frontendUrl: 'https://app-test.mebelkz.app',
+      backendBaseUrl: 'https://backend-test.mebelkz.app',
+      backendApiUrl: 'https://backend-test.mebelkz.app/api/v1',
+    }).find((step) => step.label === 'local cutover regression specs');
+
+    expect(command).toMatchObject({
+      command: 'npx',
+      args: [
+        'playwright',
+        'test',
+        'tests/users-backend-cutover.spec.ts',
+        'tests/order-export-backend-cutover.spec.ts',
+        'tests/vlm-backend-cutover.spec.ts',
+        'tests/payments-backend-cutover.spec.ts',
+        'tests/production-actions-backend-cutover.spec.ts',
+        'tests/client-phones-backend-cutover.spec.ts',
+        'tests/order-save-backend-command-boundary.spec.ts',
+        '--project=chromium',
+      ],
+      env: {
+        VITE_USE_BACKEND_AUTH: 'true',
+        VITE_USE_BACKEND_PERMISSIONS: 'true',
+        VITE_USE_BACKEND_USERS: 'true',
+        VITE_USE_BACKEND_ORDER_EXPORT: 'true',
+        VITE_USE_BACKEND_VLM: 'true',
+        VITE_USE_BACKEND_PAYMENTS: 'true',
+        VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'true',
+        VITE_USE_BACKEND_CLIENT_PHONES: 'true',
+        VITE_USE_BACKEND_ORDERS_WRITE: 'true',
+      },
+    });
+  });
 });
 
 describe('stage cutover smoke argument parsing', () => {
