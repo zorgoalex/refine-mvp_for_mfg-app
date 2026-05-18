@@ -101,6 +101,50 @@ describe('normalizeSaveOrderDto', () => {
     });
   });
 
+  it('preserves omitted versus null doweling design engineer intent', () => {
+    const normalized = normalizeSaveOrderDto(
+      createRawOrder({
+        dowelingLinks: [
+          {
+            dowelingOrderId: 44,
+          },
+          {
+            dowelingOrderId: 45,
+            designEngineerId: null,
+          },
+          {
+            dowelingOrderId: 46,
+            designEngineerId: '7' as unknown as number,
+          },
+        ],
+      }),
+    );
+
+    expect(normalized.dowelingLinks).toEqual([
+      {
+        id: undefined,
+        clientKey: undefined,
+        dowelingOrderId: 44,
+        designEngineerId: undefined,
+        refKey1c: null,
+      },
+      {
+        id: undefined,
+        clientKey: undefined,
+        dowelingOrderId: 45,
+        designEngineerId: null,
+        refKey1c: null,
+      },
+      {
+        id: undefined,
+        clientKey: undefined,
+        dowelingOrderId: 46,
+        designEngineerId: 7,
+        refKey1c: null,
+      },
+    ]);
+  });
+
   it('rejects missing required aggregate arrays', () => {
     const invalid = {
       ...createRawOrder(),

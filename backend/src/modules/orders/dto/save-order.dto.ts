@@ -266,7 +266,7 @@ export type NormalizedSaveOrderDowelingLinkDto = Omit<
   SaveOrderDowelingLinkDto,
   'designEngineerId' | 'refKey1c'
 > & {
-  designEngineerId: number | null;
+  designEngineerId?: number | null;
   refKey1c: string | null;
 };
 

@@ -72,7 +72,7 @@ describe('PgOrderTransactionManager', () => {
       await uow.deleteRequirements(100, [42]);
       await uow.upsertDowelingLinks(100, [
         dowelingLink({ id: 51, dowelingOrderId: 44, designEngineerId: 7 }),
-        dowelingLink({ dowelingOrderId: 45, refKey1c: 'new-link' }),
+        dowelingLink({ dowelingOrderId: 45, designEngineerId: null, refKey1c: 'new-link' }),
       ]);
       await uow.deleteDowelingLinks(100, [52]);
     });
@@ -88,6 +88,14 @@ describe('PgOrderTransactionManager', () => {
     expect(sql).toContain('INSERT INTO order_doweling_links');
     expect(sql).toContain('UPDATE doweling_orders SET design_engineer_id = $2');
     expect(sql).toContain('DELETE FROM order_doweling_links');
+    expect(
+      database.queries.some(
+        (query) =>
+          normalizeSql(query.text).startsWith('UPDATE doweling_orders SET design_engineer_id') &&
+          query.params[0] === 45 &&
+          query.params[1] === null,
+      ),
+    ).toBe(true);
     expect(database.queries.some((query) => query.params.includes('new workshop'))).toBe(true);
     expect(database.queries.some((query) => query.params.includes('new-link'))).toBe(true);
   });

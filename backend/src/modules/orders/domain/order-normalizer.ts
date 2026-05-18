@@ -223,7 +223,10 @@ function normalizeDowelingLink(link: SaveOrderDowelingLinkDto): NormalizedSaveOr
     id: optionalInteger(raw.id, 'dowelingLinks[].id') ?? undefined,
     clientKey: normalizeClientKey(raw),
     dowelingOrderId: requiredNumber(raw.dowelingOrderId, 'dowelingLinks[].dowelingOrderId'),
-    designEngineerId: optionalInteger(raw.designEngineerId, 'dowelingLinks[].designEngineerId'),
+    designEngineerId:
+      'designEngineerId' in raw
+        ? optionalInteger(raw.designEngineerId, 'dowelingLinks[].designEngineerId')
+        : undefined,
     refKey1c: normalizeOptionalString(raw.refKey1c),
   };
 }

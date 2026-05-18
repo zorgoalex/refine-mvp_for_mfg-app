@@ -505,7 +505,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         }
       }
 
-      if (link.designEngineerId) {
+      if (link.designEngineerId !== undefined) {
         await this.tx.query(
           'UPDATE doweling_orders SET design_engineer_id = $2 WHERE doweling_order_id = $1',
           [link.dowelingOrderId, link.designEngineerId],
