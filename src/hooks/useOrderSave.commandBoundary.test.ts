@@ -15,12 +15,16 @@ describe('useOrderSave payment command boundary', () => {
   it('does not attach meta to payments create/update/delete calls', () => {
     const source = readFileSync(USE_ORDER_SAVE_PATH, 'utf8');
     const paymentMutationBlocks = Array.from(
-      source.matchAll(/dataProvider\(\)\.(?:create|update|deleteOne)\(\{\s*resource:\s*['"]payments['"][\s\S]*?\n\s*\}\)/g),
-      (match) => match[0],
+      source.matchAll(/dataProvider\(\)\.(create|update|deleteOne)\(\{\s*resource:\s*['"]payments['"][\s\S]*?\n\s*\}\)/g),
+      (match) => ({ operation: match[1], block: match[0] }),
     );
 
-    expect(paymentMutationBlocks.length).toBeGreaterThan(0);
-    expect(paymentMutationBlocks).toEqual(
+    expect(paymentMutationBlocks.map(({ operation }) => operation).sort()).toEqual([
+      'create',
+      'deleteOne',
+      'update',
+    ]);
+    expect(paymentMutationBlocks.map(({ block }) => block)).toEqual(
       expect.not.arrayContaining([expect.stringContaining('meta:')]),
     );
   });
