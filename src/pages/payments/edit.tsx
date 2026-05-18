@@ -2,6 +2,7 @@ import { Edit, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, InputNumber, DatePicker, Select, Input, Row, Col, Divider } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
+import { useEffect } from "react";
 import dayjs from "dayjs";
 
 export const PaymentEdit: React.FC<IResourceComponentsProps> = () => {
@@ -10,13 +11,14 @@ export const PaymentEdit: React.FC<IResourceComponentsProps> = () => {
   const { selectProps: orderSelect } = useSelect({ resource: "orders", optionLabel: "order_name", optionValue: "order_id", defaultValue: current?.order_id });
   const { selectProps: typeSelect } = useSelect({ resource: "payment_types", optionLabel: "type_paid_name", optionValue: "type_paid_id", defaultValue: current?.type_paid_id });
 
-  // Convert date string to dayjs object for DatePicker
-  if (current?.payment_date) {
-    formProps.initialValues = {
-      ...formProps.initialValues,
-      payment_date: dayjs(current.payment_date)
-    };
-  }
+  useEffect(() => {
+    if (!current) return;
+
+    formProps.form?.setFieldsValue({
+      ...current,
+      payment_date: current.payment_date ? dayjs(current.payment_date) : undefined,
+    });
+  }, [current, formProps.form]);
 
   return (
     <Edit saveButtonProps={saveButtonProps} title="Редактирование платежа">
@@ -70,4 +72,3 @@ export const PaymentEdit: React.FC<IResourceComponentsProps> = () => {
     </Edit>
   );
 };
-

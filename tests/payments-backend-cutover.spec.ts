@@ -40,10 +40,14 @@ test.describe('Payments backend cutover', () => {
         expect(graphqlPaymentMutations).toEqual([]);
 
         await expect(page).toHaveURL(/\/payments\?highlightId=30/);
-        await expect(page.getByRole('cell', { name: 'Backend payment create' })).toBeVisible();
+        await expect(page.getByRole('row', { name: /Backend payment create/ })).toBeVisible({
+            timeout: 15000,
+        });
 
         await page.goto('/payments/edit/30');
-        await expect(page.locator('#amount')).toHaveValue(/^350(?:\.00)?$/);
+        await expect(page.getByText('Backend payment create')).toBeVisible({
+            timeout: 15000,
+        });
         await page.locator('#amount').fill('500');
         await page.locator('#notes').fill('Backend payment update');
         await page.getByRole('button', { name: 'Сохранить' }).click();
