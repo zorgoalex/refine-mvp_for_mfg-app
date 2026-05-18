@@ -29,7 +29,8 @@
     "test:e2e:runtime-config": "playwright test tests/frontend-runtime-config.spec.ts",
     "test:runtime-config-canary": "node scripts/check-runtime-config-canary.js",
     "smoke:runtime-config": "node scripts/smoke-runtime-config.js",
-    "smoke:staging-gates": "node scripts/smoke-staging-gates.js"
+    "smoke:staging-gates": "node scripts/smoke-staging-gates.js",
+    "smoke:stage-cutover": "node scripts/stage-cutover-smoke.js"
   },
   "keywords": [],
   "author": "",

@@ -4,6 +4,7 @@ import {
   parseDotenvFile,
   redactCommandForLog,
 } from '../../scripts/stage-cutover-smoke-lib.js';
+import { buildStageCutoverCommands } from '../../scripts/stage-cutover-smoke.js';
 
 describe('stage cutover smoke helpers', () => {
   it('loads only allowlisted env values and keeps secrets available without logging them', () => {
@@ -38,5 +39,28 @@ describe('stage cutover smoke helpers', () => {
 
     expect(text).toContain('VERCEL_AUTOMATION_BYPASS_SECRET=[redacted]');
     expect(text).not.toContain('secret-value');
+  });
+});
+
+describe('stage cutover smoke command plan', () => {
+  it('runs gates before mutating canaries and local regression last', () => {
+    const commands = buildStageCutoverCommands({
+      frontendUrl: 'https://app-test.mebelkz.app',
+      backendBaseUrl: 'https://backend-test.mebelkz.app',
+      backendApiUrl: 'https://backend-test.mebelkz.app/api/v1',
+    }).map((command) => command.label);
+
+    expect(commands).toEqual([
+      'runtime config all-on expectation',
+      'staging runtime and health gates',
+      'frontend pages stage canary',
+      'payments stage canary',
+      'production actions stage canary',
+      'client phones stage canary',
+      'deadline engine stage canary',
+      'local cutover regression specs',
+      'unit regression suite',
+      'production build',
+    ]);
   });
 });
