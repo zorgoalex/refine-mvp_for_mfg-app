@@ -10,6 +10,8 @@ const productionActionsCutoverEnabled =
 
 const productionHasuraMutationPattern =
     /(?:^|[^A-Za-z0-9_])(?:update_orders(?:_by_pk)?|insert_production_status_events(?:_one)?|delete_production_status_events(?:_by_pk)?)\s*\(/;
+const initialCalendarDate = relativeDate(0);
+const targetCalendarDate = relativeDate(1);
 
 test.describe('Production actions backend cutover', () => {
     test.skip(
@@ -38,12 +40,14 @@ test.describe('Production actions backend cutover', () => {
         const card = page.locator('.order-card').filter({ hasText: 'E2E production action order' });
         await expect(card).toBeVisible({ timeout: 30000 });
 
-        const targetColumn = page.locator('.day-column').filter({ hasText: '(12.05.2026)' });
+        const targetColumn = page.locator('.day-column').filter({
+            hasText: `(${targetCalendarDate.display})`,
+        });
         await expect(targetColumn).toBeVisible();
         await card.dragTo(targetColumn);
         await expect.poll(() => api.calendarDateBodies.length).toBe(1);
         expect(api.calendarDateBodies[0]).toMatchObject({
-            plannedCompletionDate: '2026-05-12',
+            plannedCompletionDate: targetCalendarDate.iso,
             version: 3,
         });
 
@@ -406,8 +410,8 @@ function seedCalendarOrder(db: WorkflowMockDb) {
         order_id: 15,
         order_name: 'E2E production action order',
         client_id: 1,
-        order_date: '2026-05-10',
-        planned_completion_date: '2026-05-11',
+        order_date: initialCalendarDate.iso,
+        planned_completion_date: initialCalendarDate.iso,
         order_status_id: 1,
         payment_status_id: 1,
         production_status_id: 1,
@@ -424,8 +428,8 @@ function seedCalendarOrder(db: WorkflowMockDb) {
         order_id: 16,
         order_name: 'E2E alternate action order',
         client_id: 1,
-        order_date: '2026-05-10',
-        planned_completion_date: '2026-05-11',
+        order_date: initialCalendarDate.iso,
+        planned_completion_date: initialCalendarDate.iso,
         order_status_id: 1,
         payment_status_id: 1,
         production_status_id: 1,
@@ -572,7 +576,7 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
                 order_id: orderId,
                 detail_id: null,
                 production_status_id: productionStatusId,
-                event_at: '2026-05-11T00:00:00.000Z',
+                event_at: `${initialCalendarDate.iso}T00:00:00.000Z`,
             };
             db.production_status_events.push(event);
             order.version = Number(order.version) + 1;
@@ -635,6 +639,20 @@ function findOrder(db: WorkflowMockDb, orderId: number) {
     }
 
     return order;
+}
+
+function relativeDate(offsetDays: number) {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() + offsetDays);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+
+    return {
+        iso: `${year}-${month}-${day}`,
+        display: `${day}.${month}.${year}`,
+    };
 }
 
 async function fulfillJson(route: Route, body: unknown) {
