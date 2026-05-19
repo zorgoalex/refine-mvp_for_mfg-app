@@ -66,8 +66,8 @@ describe('PgOrderTransactionManager', () => {
       ]);
       await uow.deleteWorkshops(100, [32]);
       await uow.upsertRequirements(100, [
-        requirement({ id: 41, resourceType: 'material', materialId: 4 }),
-        requirement({ resourceType: 'film', filmId: 5, requiredQuantity: 2 }),
+        requirement({ id: 41, resourceType: 'material', materialId: 4, finalQuantity: 1.25 }),
+        requirement({ resourceType: 'film', filmId: 5, requiredQuantity: 2, finalQuantity: 2.5 }),
       ]);
       await uow.deleteRequirements(100, [42]);
       await uow.upsertDowelingLinks(100, [
@@ -94,13 +94,32 @@ describe('PgOrderTransactionManager', () => {
     });
     expect(sql).not.toContain('DELETE FROM order_workshops');
     expect(sql).toContain('UPDATE order_resource_requirements SET resource_type = $3');
+    expect(sql).toContain('waste_percentage = $9, final_quantity = $10');
+    expect(sql).toContain('requirement_status_id = $11');
     expect(sql).toContain('INSERT INTO order_resource_requirements');
+    expect(sql).toContain(
+      'unit_id, waste_percentage, final_quantity, requirement_status_id, supplier_id',
+    );
+    expect(sql).toContain('$7, $8, $9, $10, $11');
     expect(sql).toContain('UPDATE order_resource_requirements SET is_active = false');
+    expectScopedUpdate(database.queries, {
+      startsWith: 'UPDATE order_resource_requirements SET resource_type = $3',
+      whereClause: 'WHERE requirement_id = $1 AND order_id = $2',
+      params: [41, 100],
+    });
     expectScopedUpdate(database.queries, {
       startsWith: 'UPDATE order_resource_requirements SET is_active = false',
       whereClause: 'WHERE requirement_id = ANY($1::bigint[]) AND order_id = $2',
       params: [[42], 100],
     });
+    const requirementUpdate = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('UPDATE order_resource_requirements SET resource_type'),
+    );
+    const requirementInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO order_resource_requirements'),
+    );
+    expect(requirementUpdate?.params[9]).toBe(1.25);
+    expect(requirementInsert?.params[8]).toBe(2.5);
     expect(sql).not.toContain('DELETE FROM order_resource_requirements');
     expect(sql).toContain('UPDATE order_doweling_links SET doweling_order_id = $3');
     expect(sql).toContain('ref_key_1c = $4, delete_flag = false');

@@ -451,9 +451,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           UPDATE order_resource_requirements
           SET resource_type = $3, material_id = $4, film_id = $5, edge_type_id = $6,
               required_quantity = $7, unit_id = $8, waste_percentage = $9,
-              requirement_status_id = $10, supplier_id = $11, purchase_price = $12,
-              requisition_id = $13, warehouse_id = $14, reserved_at = $15, consumed_at = $16,
-              notes = $17, calculation_details = $18, ref_key_1c = $19, is_active = true
+              final_quantity = $10, requirement_status_id = $11, supplier_id = $12,
+              purchase_price = $13, requisition_id = $14, warehouse_id = $15,
+              reserved_at = $16, consumed_at = $17, notes = $18,
+              calculation_details = $19, ref_key_1c = $20, is_active = true
           WHERE requirement_id = $1 AND order_id = $2
           `,
           requirementParams(requirement.id, orderId, requirement),
@@ -463,10 +464,11 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           `
           INSERT INTO order_resource_requirements (
             order_id, resource_type, material_id, film_id, edge_type_id, required_quantity,
-            unit_id, waste_percentage, requirement_status_id, supplier_id, purchase_price,
-            requisition_id, warehouse_id, reserved_at, consumed_at, notes, calculation_details, ref_key_1c
+            unit_id, waste_percentage, final_quantity, requirement_status_id, supplier_id,
+            purchase_price, requisition_id, warehouse_id, reserved_at, consumed_at, notes,
+            calculation_details, ref_key_1c
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
           `,
           requirementParamsForInsert(orderId, requirement),
         );
@@ -969,6 +971,7 @@ function requirementParamsForInsertValues(requirement: NormalizedSaveOrderRequir
     requirement.requiredQuantity,
     requirement.unitId,
     requirement.wastePercentage,
+    requirement.finalQuantity,
     requirement.requirementStatusId,
     requirement.supplierId,
     requirement.purchasePrice,
