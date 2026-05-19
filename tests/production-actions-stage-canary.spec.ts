@@ -14,6 +14,9 @@ const backendApiUrl = trimTrailingSlash(
 const testOrderId = readNumberEnv('PRODUCTION_ACTIONS_STAGE_ORDER_ID', 11151);
 const testOrderName =
     process.env.PRODUCTION_ACTIONS_STAGE_ORDER_NAME ?? 'Тест_StageSmoke';
+const postgresContainer =
+    process.env.PRODUCTION_ACTIONS_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
+const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
 
 test.describe('Production actions stage canary', () => {
     test.skip(!canaryEnabled, 'Run with PRODUCTION_ACTIONS_STAGE_CANARY=true');
@@ -149,12 +152,19 @@ test.describe('Production actions stage canary', () => {
 });
 
 async function expectRuntimeConfig(request: APIRequestContext) {
-    const response = await request.get(`${frontendUrl}/runtime-config.json`);
+    const response = await request.get(`${frontendUrl}/runtime-config.json`, {
+        headers: frontendRequestHeaders(),
+    });
     await expectOk(response);
     const runtimeConfig = await response.json();
     expect(runtimeConfig.features?.backendAuth).toBe(true);
     expect(runtimeConfig.features?.backendPayments).toBe(true);
     expect(runtimeConfig.features?.backendProductionActions).toBe(true);
+}
+
+function frontendRequestHeaders(): Record<string, string> {
+    if (!vercelAutomationBypassSecret) return {};
+    return { 'x-vercel-protection-bypass': vercelAutomationBypassSecret };
 }
 
 async function loginForApiToken(
@@ -488,7 +498,7 @@ function psql(sql: string, options: { json?: boolean } = {}): unknown {
         [
             'exec',
             '-i',
-            'erp_dev-postgresdb-1',
+            postgresContainer,
             'psql',
             '-U',
             'postgres',

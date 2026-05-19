@@ -8,6 +8,7 @@ export interface WorkflowMockApiOptions {
     onGraphqlQuery?: (query: string) => void;
     onGraphqlError?: (message: string, query: string) => void;
     graphqlErrorForQuery?: (query: string) => string | null | undefined;
+    runtimeConfig?: false | Record<string, boolean>;
 }
 
 const AUTH_TOKEN =
@@ -437,6 +438,101 @@ export async function setupWorkflowMockApi(
             }),
         });
     });
+
+    await page.route(/\/api\/v1\/auth\/refresh$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                accessToken: AUTH_TOKEN,
+                accessTokenExpiresAt: '2030-01-01T00:00:00.000Z',
+                user: {
+                    id: '1',
+                    userId: 1,
+                    username: 'admin',
+                    role: 'admin',
+                    roleId: 1,
+                    permissions: [
+                        'orders.view',
+                        'orders.create',
+                        'orders.update',
+                        'orders.export',
+                        'payments.view',
+                        'payments.create',
+                        'payments.update',
+                        'payments.delete',
+                        'clients.view',
+                        'clients.create',
+                        'clients.update',
+                        'production.actions',
+                        'settings.view',
+                    ],
+                },
+            }),
+        });
+    });
+
+    await page.route(/\/api\/v1\/me$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                user: {
+                    id: '1',
+                    userId: 1,
+                    username: 'admin',
+                    role: 'admin',
+                    roleId: 1,
+                    permissions: [
+                        'orders.view',
+                        'orders.create',
+                        'orders.update',
+                        'orders.export',
+                        'payments.view',
+                        'payments.create',
+                        'payments.update',
+                        'payments.delete',
+                        'clients.view',
+                        'clients.create',
+                        'clients.update',
+                        'production.actions',
+                        'settings.view',
+                    ],
+                },
+            }),
+        });
+    });
+
+    if (options.runtimeConfig !== false) {
+        await page.route(/\/runtime-config\.json$/, async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    apiUrl: '',
+                    features: {
+                        backendAuth: process.env.VITE_USE_BACKEND_AUTH === 'true',
+                        backendPermissions: process.env.VITE_USE_BACKEND_PERMISSIONS === 'true',
+                        backendUsers: process.env.VITE_USE_BACKEND_USERS === 'true',
+                        backendOrdersRead:
+                            process.env.VITE_USE_BACKEND_ORDERS_READ === 'true' ||
+                            process.env.VITE_USE_BACKEND_ORDERS === 'true',
+                        backendOrdersWrite: process.env.VITE_USE_BACKEND_ORDERS_WRITE === 'true',
+                        backendOrderExport: process.env.VITE_USE_BACKEND_ORDER_EXPORT === 'true',
+                        backendVlm: process.env.VITE_USE_BACKEND_VLM === 'true',
+                        backendPayments: process.env.VITE_USE_BACKEND_PAYMENTS === 'true',
+                        backendProductionActions:
+                            process.env.VITE_USE_BACKEND_PRODUCTION_ACTIONS === 'true',
+                        backendClientPhones: process.env.VITE_USE_BACKEND_CLIENT_PHONES === 'true',
+                        backendDeadlines: false,
+                        backendReferences: false,
+                        enableLegacyHasura: true,
+                        ...options.runtimeConfig,
+                    },
+                }),
+            });
+        });
+    }
 
     await page.route(/\/api\/order-export-to-drive$/, async (route) => {
         await route.fulfill({

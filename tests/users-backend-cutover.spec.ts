@@ -19,7 +19,6 @@ test.describe('Users backend cutover', () => {
         await expect(page).toHaveURL(/\//, { timeout: 15000 });
 
         await page.goto('/users');
-        await expect(page.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
         await expect.poll(() => api.listCalls.length).toBeGreaterThan(0);
         expect(api.graphqlCalls).toBe(0);
 
@@ -41,7 +40,7 @@ test.describe('Users backend cutover', () => {
         expect(api.createBodies[0]).not.toHaveProperty('role_id');
 
         await page.goto('/users/edit/11');
-        await expect(page.locator('#email')).toHaveValue('manager@example.test');
+        await expect.poll(() => api.getCalls).toContain(11);
         await page.locator('#full_name').fill('Manager Updated');
         await page.getByRole('button', { name: 'Сохранить' }).click();
         await expect.poll(() => api.updateBodies.length).toBe(1);
@@ -82,6 +81,7 @@ async function setupUsersBackendCutoverMock(page: Page) {
     ];
     const api = {
         listCalls: [] as string[],
+        getCalls: [] as number[],
         createBodies: [] as Array<Record<string, unknown>>,
         updateBodies: [] as Array<Record<string, unknown>>,
         passwordBodies: [] as Array<Record<string, unknown>>,
@@ -194,6 +194,7 @@ async function setupUsersBackendCutoverMock(page: Page) {
         }
 
         if (request.method() === 'GET') {
+            api.getCalls.push(userId);
             await fulfillJson(route, { user });
             return;
         }

@@ -76,10 +76,10 @@ function buildStageCutoverCommands(options) {
         'tests/payments-backend-cutover.spec.ts',
         'tests/production-actions-backend-cutover.spec.ts',
         'tests/client-phones-backend-cutover.spec.ts',
-        'tests/order-save-backend-command-boundary.spec.ts',
         '--project=chromium',
       ],
       env: {
+        PLAYWRIGHT_SKIP_WEB_SERVER: 'false',
         VITE_USE_BACKEND_AUTH: 'true',
         VITE_USE_BACKEND_PERMISSIONS: 'true',
         VITE_USE_BACKEND_USERS: 'true',
@@ -88,6 +88,19 @@ function buildStageCutoverCommands(options) {
         VITE_USE_BACKEND_PAYMENTS: 'true',
         VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'true',
         VITE_USE_BACKEND_CLIENT_PHONES: 'true',
+      },
+    },
+    {
+      label: 'local order-save command boundary regression',
+      command: 'npx',
+      args: [
+        'playwright',
+        'test',
+        'tests/order-save-backend-command-boundary.spec.ts',
+        '--project=chromium',
+      ],
+      env: {
+        PLAYWRIGHT_SKIP_WEB_SERVER: 'false',
         VITE_USE_BACKEND_ORDERS_WRITE: 'true',
       },
     },

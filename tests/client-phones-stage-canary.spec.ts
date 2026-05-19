@@ -13,6 +13,9 @@ const backendApiUrl = trimTrailingSlash(
   process.env.CLIENT_PHONES_STAGE_BACKEND_API_URL ??
     'https://backend.dev.mebelkz.app/api/v1',
 );
+const postgresContainer =
+  process.env.CLIENT_PHONES_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
+const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
 
 test.describe('Client phones stage canary', () => {
   test.skip(!canaryEnabled, 'Run with CLIENT_PHONES_STAGE_CANARY=true');
@@ -51,6 +54,11 @@ test.describe('Client phones stage canary', () => {
 
     userId = createSmokeUser(username, password);
     accessToken = await loginForApiToken(request, username, password);
+    if (vercelAutomationBypassSecret) {
+      await page.context().setExtraHTTPHeaders({
+        'x-vercel-protection-bypass': vercelAutomationBypassSecret,
+      });
+    }
 
     recordClientPhoneNetwork(page, clientPhoneApiCalls, graphqlPhoneMutations);
     await loginThroughUi(page, username, password);
@@ -196,7 +204,9 @@ test.describe('Client phones stage canary', () => {
 });
 
 async function expectRuntimeConfig(request: APIRequestContext) {
-  const response = await request.get(`${frontendUrl}/runtime-config.json`);
+  const response = await request.get(`${frontendUrl}/runtime-config.json`, {
+    headers: frontendRequestHeaders(),
+  });
   await expectOk(response);
   const runtimeConfig = await response.json();
   expect(runtimeConfig.features?.backendAuth).toBe(true);
@@ -204,6 +214,11 @@ async function expectRuntimeConfig(request: APIRequestContext) {
   expect(runtimeConfig.features?.backendPayments).toBe(true);
   expect(runtimeConfig.features?.backendProductionActions).toBe(true);
   expect(runtimeConfig.features?.backendClientPhones).toBe(true);
+}
+
+function frontendRequestHeaders(): Record<string, string> {
+  if (!vercelAutomationBypassSecret) return {};
+  return { 'x-vercel-protection-bypass': vercelAutomationBypassSecret };
 }
 
 function recordClientPhoneNetwork(
@@ -594,7 +609,7 @@ function psql(sql: string, options: { json?: boolean } = {}): unknown {
     [
       'exec',
       '-i',
-      'erp_dev-postgresdb-1',
+      postgresContainer,
       'psql',
       '-U',
       'postgres',

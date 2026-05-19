@@ -52,9 +52,8 @@ test.describe('Client phones backend cutover', () => {
 
     const phone = db.client_phones.find((row) => row.client_id === client.client_id)!;
     await page.goto(`/clients/edit/${client.client_id}`);
-    await expect(phonesCard.getByText('+7 701 123 4567')).toBeVisible();
-
     const editPhonesCard = page.locator('.ant-card').filter({ hasText: 'Телефоны' });
+    await expect(editPhonesCard.getByText('+7 701 123 4567')).toBeVisible({ timeout: 10000 });
     await editPhonesCard.locator('tr').filter({ hasText: '+7 701 123 4567' }).locator('button').first().click();
     const editDialog = page.getByRole('dialog', { name: 'Редактировать телефон' });
     await fillTextIn(editDialog, 'phone_number', '+7 702 765 4321');

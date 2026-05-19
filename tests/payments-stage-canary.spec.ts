@@ -18,6 +18,9 @@ const paymentDateUi = process.env.PAYMENTS_STAGE_PAYMENT_DATE_UI ?? '10.05.2026'
 const paymentDateSql = process.env.PAYMENTS_STAGE_PAYMENT_DATE_SQL ?? '2026-05-10';
 const createAmount = readNumberEnv('PAYMENTS_STAGE_CREATE_AMOUNT', 345.67);
 const updateAmount = readNumberEnv('PAYMENTS_STAGE_UPDATE_AMOUNT', 456.78);
+const postgresContainer =
+    process.env.PAYMENTS_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
+const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
 
 test.describe('Payments stage canary', () => {
     test.skip(!canaryEnabled, 'Run with PAYMENTS_STAGE_CANARY=true');
@@ -51,6 +54,11 @@ test.describe('Payments stage canary', () => {
 
         userId = createSmokeUser(username, password);
         accessToken = await loginForApiToken(request, username, password);
+        if (vercelAutomationBypassSecret) {
+            await page.context().setExtraHTTPHeaders({
+                'x-vercel-protection-bypass': vercelAutomationBypassSecret,
+            });
+        }
 
         await expectBackendPaymentsRuntimeConfig(request);
         recordPaymentNetwork(page, paymentApiCalls, graphqlPaymentMutations);
@@ -138,11 +146,18 @@ test.describe('Payments stage canary', () => {
 });
 
 async function expectBackendPaymentsRuntimeConfig(request: APIRequestContext) {
-    const response = await request.get(`${frontendUrl}/runtime-config.json`);
+    const response = await request.get(`${frontendUrl}/runtime-config.json`, {
+        headers: frontendRequestHeaders(),
+    });
     expect(response.ok()).toBe(true);
     const runtimeConfig = await response.json();
     expect(runtimeConfig.features?.backendPayments).toBe(true);
     expect(runtimeConfig.features?.backendAuth).toBe(true);
+}
+
+function frontendRequestHeaders(): Record<string, string> {
+    if (!vercelAutomationBypassSecret) return {};
+    return { 'x-vercel-protection-bypass': vercelAutomationBypassSecret };
 }
 
 function recordPaymentNetwork(
@@ -483,7 +498,7 @@ function psql(sql: string, options: { json?: boolean } = {}): unknown {
         [
             'exec',
             '-i',
-            'erp_dev-postgresdb-1',
+            postgresContainer,
             'psql',
             '-U',
             'postgres',

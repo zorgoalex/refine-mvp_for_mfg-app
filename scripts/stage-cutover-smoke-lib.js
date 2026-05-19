@@ -49,15 +49,19 @@ function buildStageCutoverEnv(dotenvValues, options) {
     PAYMENTS_STAGE_CANARY: 'true',
     PAYMENTS_STAGE_FRONTEND_URL: options.frontendUrl,
     PAYMENTS_STAGE_BACKEND_API_URL: options.backendApiUrl,
+    PAYMENTS_STAGE_POSTGRES_CONTAINER: options.postgresContainer,
     PRODUCTION_ACTIONS_STAGE_CANARY: 'true',
     PRODUCTION_ACTIONS_STAGE_FRONTEND_URL: options.frontendUrl,
     PRODUCTION_ACTIONS_STAGE_BACKEND_API_URL: options.backendApiUrl,
+    PRODUCTION_ACTIONS_STAGE_POSTGRES_CONTAINER: options.postgresContainer,
     CLIENT_PHONES_STAGE_CANARY: 'true',
     CLIENT_PHONES_STAGE_FRONTEND_URL: options.frontendUrl,
     CLIENT_PHONES_STAGE_BACKEND_API_URL: options.backendApiUrl,
+    CLIENT_PHONES_STAGE_POSTGRES_CONTAINER: options.postgresContainer,
     DEADLINE_ENGINE_STAGE_CANARY: 'true',
     DEADLINE_ENGINE_STAGE_FRONTEND_URL: options.frontendUrl,
     DEADLINE_ENGINE_STAGE_BACKEND_API_URL: options.backendApiUrl,
+    DEADLINE_ENGINE_STAGE_POSTGRES_CONTAINER: options.postgresContainer,
   };
 
   for (const [key, value] of Object.entries(dotenvValues || {})) {

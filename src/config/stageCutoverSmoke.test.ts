@@ -28,6 +28,11 @@ describe('stage cutover smoke helpers', () => {
     expect(env.UNRELATED).toBeUndefined();
     expect(env.FRONTEND_PAGES_STAGE_FRONTEND_URL).toBe('https://app-test.mebelkz.app');
     expect(env.FRONTEND_PAGES_STAGE_BACKEND_API_URL).toBe('https://backend-test.mebelkz.app/api/v1');
+    expect(env.FRONTEND_PAGES_STAGE_POSTGRES_CONTAINER).toBe('erp_test-postgresdb-1');
+    expect(env.PAYMENTS_STAGE_POSTGRES_CONTAINER).toBe('erp_test-postgresdb-1');
+    expect(env.PRODUCTION_ACTIONS_STAGE_POSTGRES_CONTAINER).toBe('erp_test-postgresdb-1');
+    expect(env.CLIENT_PHONES_STAGE_POSTGRES_CONTAINER).toBe('erp_test-postgresdb-1');
+    expect(env.DEADLINE_ENGINE_STAGE_POSTGRES_CONTAINER).toBe('erp_test-postgresdb-1');
     expect(env.PLAYWRIGHT_SKIP_WEB_SERVER).toBe('true');
   });
 
@@ -59,6 +64,7 @@ describe('stage cutover smoke command plan', () => {
       'client phones stage canary',
       'deadline engine stage canary',
       'local cutover regression specs',
+      'local order-save command boundary regression',
       'unit regression suite',
       'production build',
     ]);
@@ -82,10 +88,10 @@ describe('stage cutover smoke command plan', () => {
         'tests/payments-backend-cutover.spec.ts',
         'tests/production-actions-backend-cutover.spec.ts',
         'tests/client-phones-backend-cutover.spec.ts',
-        'tests/order-save-backend-command-boundary.spec.ts',
         '--project=chromium',
       ],
       env: {
+        PLAYWRIGHT_SKIP_WEB_SERVER: 'false',
         VITE_USE_BACKEND_AUTH: 'true',
         VITE_USE_BACKEND_PERMISSIONS: 'true',
         VITE_USE_BACKEND_USERS: 'true',
@@ -94,6 +100,27 @@ describe('stage cutover smoke command plan', () => {
         VITE_USE_BACKEND_PAYMENTS: 'true',
         VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'true',
         VITE_USE_BACKEND_CLIENT_PHONES: 'true',
+      },
+    });
+  });
+
+  it('isolates the order-save command-boundary regression flag from other local specs', () => {
+    const command = buildStageCutoverCommands({
+      frontendUrl: 'https://app-test.mebelkz.app',
+      backendBaseUrl: 'https://backend-test.mebelkz.app',
+      backendApiUrl: 'https://backend-test.mebelkz.app/api/v1',
+    }).find((step) => step.label === 'local order-save command boundary regression');
+
+    expect(command).toMatchObject({
+      command: 'npx',
+      args: [
+        'playwright',
+        'test',
+        'tests/order-save-backend-command-boundary.spec.ts',
+        '--project=chromium',
+      ],
+      env: {
+        PLAYWRIGHT_SKIP_WEB_SERVER: 'false',
         VITE_USE_BACKEND_ORDERS_WRITE: 'true',
       },
     });

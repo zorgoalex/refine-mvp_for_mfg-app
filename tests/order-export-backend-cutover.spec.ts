@@ -8,8 +8,10 @@ test.describe('Order export backend cutover', () => {
     test.setTimeout(90000);
 
     test('auto-export after order save calls backend export with minimal payload', async ({ page }) => {
-        const db = await setupWorkflowMockApi(page);
-        const backendExportBodies: Array<Record<string, unknown>> = [];
+        const db = await setupWorkflowMockApi(page, undefined, {
+            runtimeConfig: { backendPayments: false },
+        });
+        let backendExportBody: Record<string, unknown> | null = null;
         let legacyExportCalls = 0;
 
         await page.route(/\/api\/order-export-to-drive$/, async (route) => {
@@ -21,8 +23,8 @@ test.describe('Order export backend cutover', () => {
             });
         });
 
-        await page.route(/\/api\/v1\/orders\/\d+\/export\/google-drive$/, async (route) => {
-            backendExportBodies.push(JSON.parse(route.request().postData() || '{}'));
+        await page.route('**/api/v1/orders/*/export/google-drive', async (route) => {
+            backendExportBody = JSON.parse(route.request().postData() || '{}');
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -67,13 +69,13 @@ test.describe('Order export backend cutover', () => {
         await orderDialog.getByRole('button', { name: 'Сохранить' }).first().click();
 
         await expect.poll(() => db.orders.length).toBe(1);
-        await expect.poll(() => backendExportBodies.length).toBe(1);
+        await expect.poll(() => backendExportBody, { timeout: 30000 }).not.toBeNull();
         expect(legacyExportCalls).toBe(0);
-        expect(backendExportBodies[0]).toEqual({ format: 'xlsx' });
-        expect(backendExportBodies[0]).not.toHaveProperty('items');
-        expect(backendExportBodies[0]).not.toHaveProperty('payments');
-        expect(backendExportBodies[0]).not.toHaveProperty('clientPhone');
-        expect(backendExportBodies[0]).not.toHaveProperty('apiKey');
+        expect(backendExportBody).toEqual({ format: 'xlsx' });
+        expect(backendExportBody).not.toHaveProperty('items');
+        expect(backendExportBody).not.toHaveProperty('payments');
+        expect(backendExportBody).not.toHaveProperty('clientPhone');
+        expect(backendExportBody).not.toHaveProperty('apiKey');
     });
 });
 

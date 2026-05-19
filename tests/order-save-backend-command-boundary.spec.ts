@@ -23,6 +23,7 @@ test.describe('Order save backend command boundary', () => {
 
         const forbiddenGraphqlMutations: string[] = [];
         await setupWorkflowMockApi(page, db, {
+            runtimeConfig: false,
             onGraphqlQuery: (query) => {
                 if (/\b(?:insert|update|delete)_(?:order_workshops|order_resource_requirements|order_doweling_links|doweling_orders)(?:_by_pk|_one)?\b/.test(query)) {
                     forbiddenGraphqlMutations.push(query);
