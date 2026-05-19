@@ -186,12 +186,12 @@ export class OrderTransactionService {
     await unitOfWork.deleteDetails(orderId, prepared.order.deleted.detailIds);
     await unitOfWork.upsertPayments(orderId, prepared.order.payments);
     await unitOfWork.deletePayments(orderId, prepared.order.deleted.paymentIds);
-    await unitOfWork.upsertWorkshops(orderId, prepared.order.workshops);
     await unitOfWork.deleteWorkshops(orderId, prepared.order.deleted.workshopIds);
-    await unitOfWork.upsertRequirements(orderId, prepared.order.requirements);
+    await unitOfWork.upsertWorkshops(orderId, prepared.order.workshops);
     await unitOfWork.deleteRequirements(orderId, prepared.order.deleted.requirementIds);
-    await unitOfWork.upsertDowelingLinks(orderId, prepared.order.dowelingLinks);
+    await unitOfWork.upsertRequirements(orderId, prepared.order.requirements);
     await unitOfWork.deleteDowelingLinks(orderId, prepared.order.deleted.dowelingLinkIds);
+    await unitOfWork.upsertDowelingLinks(orderId, prepared.order.dowelingLinks);
   }
 
   private async readAndAssertVersion(

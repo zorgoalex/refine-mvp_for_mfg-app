@@ -395,12 +395,12 @@ describe('OrderTransactionService', () => {
       'deleteDetails',
       'upsertPayments',
       'deletePayments',
-      'upsertWorkshops',
       'deleteWorkshops',
-      'upsertRequirements',
+      'upsertWorkshops',
       'deleteRequirements',
-      'upsertDowelingLinks',
+      'upsertRequirements',
       'deleteDowelingLinks',
+      'upsertDowelingLinks',
       'updateOrderTotalsAndVersion',
       'writeAuditEvent',
       'readOrder',
@@ -600,8 +600,11 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toContain('deleteRequirements');
     expect(transactions.calls).toContain('upsertDowelingLinks');
     expect(transactions.calls).toContain('deleteDowelingLinks');
+    expect(transactions.calls.indexOf('deleteDowelingLinks')).toBeLessThan(
+      transactions.calls.indexOf('upsertDowelingLinks'),
+    );
     expect(transactions.calls.indexOf('updateOrderTotalsAndVersion')).toBeGreaterThan(
-      transactions.calls.indexOf('deleteDowelingLinks'),
+      transactions.calls.indexOf('upsertDowelingLinks'),
     );
     expect(transactions.state.auditEvents).toEqual([
       { action: 'orders.update', orderId: 42, actorUserId: 'user_manager' },
