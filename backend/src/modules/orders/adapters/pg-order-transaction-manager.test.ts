@@ -80,14 +80,17 @@ describe('PgOrderTransactionManager', () => {
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('UPDATE order_workshops SET workshop_id = $3');
     expect(sql).toContain('INSERT INTO order_workshops');
-    expect(sql).toContain('DELETE FROM order_workshops');
+    expect(sql).toContain('UPDATE order_workshops SET delete_flag = true');
+    expect(sql).not.toContain('DELETE FROM order_workshops');
     expect(sql).toContain('UPDATE order_resource_requirements SET resource_type = $3');
     expect(sql).toContain('INSERT INTO order_resource_requirements');
-    expect(sql).toContain('DELETE FROM order_resource_requirements');
+    expect(sql).toContain('UPDATE order_resource_requirements SET is_active = false');
+    expect(sql).not.toContain('DELETE FROM order_resource_requirements');
     expect(sql).toContain('UPDATE order_doweling_links SET doweling_order_id = $3');
     expect(sql).toContain('INSERT INTO order_doweling_links');
     expect(sql).toContain('UPDATE doweling_orders SET design_engineer_id = $2');
-    expect(sql).toContain('DELETE FROM order_doweling_links');
+    expect(sql).toContain('UPDATE order_doweling_links SET delete_flag = true');
+    expect(sql).not.toContain('DELETE FROM order_doweling_links');
     expect(
       database.queries.some(
         (query) =>
@@ -98,6 +101,23 @@ describe('PgOrderTransactionManager', () => {
     ).toBe(true);
     expect(database.queries.some((query) => query.params.includes('new workshop'))).toBe(true);
     expect(database.queries.some((query) => query.params.includes('new-link'))).toBe(true);
+  });
+
+  it('does not update doweling engineer when designEngineerId is omitted', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+    const linkWithoutEngineer: NormalizedSaveOrderDowelingLinkDto = {
+      dowelingOrderId: 46,
+      refKey1c: 'omitted-engineer',
+    };
+
+    await manager.runInTransaction((uow) => uow.upsertDowelingLinks(100, [linkWithoutEngineer]));
+
+    expect(
+      database.queries.some((query) =>
+        normalizeSql(query.text).startsWith('UPDATE doweling_orders SET design_engineer_id'),
+      ),
+    ).toBe(false);
   });
 
   it('rejects child ids from another order before mutation', async () => {

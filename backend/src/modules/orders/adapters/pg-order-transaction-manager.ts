@@ -428,7 +428,15 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   async deleteWorkshops(orderId: number, ids: readonly number[]): Promise<void> {
-    await deleteByIds(this.tx, 'order_workshops', 'order_workshop_id', orderId, ids);
+    await softDeleteByIds(
+      this.tx,
+      'order_workshops',
+      'order_workshop_id',
+      'delete_flag',
+      true,
+      orderId,
+      ids,
+    );
   }
 
   async upsertRequirements(
@@ -466,7 +474,15 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   async deleteRequirements(orderId: number, ids: readonly number[]): Promise<void> {
-    await deleteByIds(this.tx, 'order_resource_requirements', 'requirement_id', orderId, ids);
+    await softDeleteByIds(
+      this.tx,
+      'order_resource_requirements',
+      'requirement_id',
+      'is_active',
+      false,
+      orderId,
+      ids,
+    );
   }
 
   async upsertDowelingLinks(
@@ -515,7 +531,15 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   async deleteDowelingLinks(orderId: number, ids: readonly number[]): Promise<void> {
-    await deleteByIds(this.tx, 'order_doweling_links', 'order_doweling_link_id', orderId, ids);
+    await softDeleteByIds(
+      this.tx,
+      'order_doweling_links',
+      'order_doweling_link_id',
+      'delete_flag',
+      true,
+      orderId,
+      ids,
+    );
   }
 
   async updateOrderTotalsAndVersion(input: {
@@ -950,6 +974,31 @@ async function deleteByIds(
   await tx.query(
     `
     DELETE FROM ${table}
+    WHERE ${pk} = ANY($1::bigint[]) AND order_id = $2
+    `,
+    [ids, orderId],
+  );
+}
+
+async function softDeleteByIds(
+  tx: TransactionClient,
+  table: string,
+  pk: string,
+  column: string,
+  value: boolean,
+  orderId: number,
+  ids: readonly number[],
+): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+
+  const valueSql = value ? 'true' : 'false';
+
+  await tx.query(
+    `
+    UPDATE ${table}
+    SET ${column} = ${valueSql}
     WHERE ${pk} = ANY($1::bigint[]) AND order_id = $2
     `,
     [ids, orderId],
