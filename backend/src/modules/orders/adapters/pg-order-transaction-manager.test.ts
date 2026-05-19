@@ -110,7 +110,11 @@ describe('PgOrderTransactionManager', () => {
       params: [51, 100],
     });
     expect(sql).toContain('INSERT INTO order_doweling_links');
-    expect(sql).toContain('UPDATE doweling_orders SET design_engineer_id = $2');
+    expect(sql).toContain('UPDATE doweling_orders d SET design_engineer_id = $3');
+    expect(sql).toContain('d.delete_flag = false');
+    expect(sql).toContain('odl.order_id = $1');
+    expect(sql).toContain('odl.doweling_order_id = d.doweling_order_id');
+    expect(sql).toContain('odl.delete_flag = false');
     expect(sql).toContain('UPDATE order_doweling_links SET delete_flag = true');
     expectScopedUpdate(database.queries, {
       startsWith: 'UPDATE order_doweling_links SET delete_flag = true',
@@ -121,9 +125,10 @@ describe('PgOrderTransactionManager', () => {
     expect(
       database.queries.some(
         (query) =>
-          normalizeSql(query.text).startsWith('UPDATE doweling_orders SET design_engineer_id') &&
-          query.params[0] === 45 &&
-          query.params[1] === null,
+          normalizeSql(query.text).startsWith('UPDATE doweling_orders d SET design_engineer_id') &&
+          query.params[0] === 100 &&
+          query.params[1] === 45 &&
+          query.params[2] === null,
       ),
     ).toBe(true);
     expect(database.queries.some((query) => query.params.includes('new workshop'))).toBe(true);
@@ -142,9 +147,23 @@ describe('PgOrderTransactionManager', () => {
 
     expect(
       database.queries.some((query) =>
-        normalizeSql(query.text).startsWith('UPDATE doweling_orders SET design_engineer_id'),
+        normalizeSql(query.text).startsWith('UPDATE doweling_orders d SET design_engineer_id'),
       ),
     ).toBe(false);
+  });
+
+  it('rejects doweling engineer updates when the active order link is missing', async () => {
+    const database = createDatabase({ dowelingEngineerRowCount: 0 });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await expect(
+      manager.runInTransaction((uow) =>
+        uow.upsertDowelingLinks(100, [dowelingLink({ dowelingOrderId: 46, designEngineerId: 9 })]),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'DOWELING_ORDER_NOT_LINKED',
+    });
   });
 
   it('rejects child ids from another order before mutation', async () => {
@@ -284,6 +303,7 @@ describe('PgOrderTransactionManager', () => {
 function createDatabase(
   options: {
     childCount?: number;
+    dowelingEngineerRowCount?: number;
     idempotencyHashMismatch?: boolean;
     restoredRowCount?: number;
   } = {},
@@ -368,6 +388,10 @@ function createDatabase(
 
       if (normalized.startsWith('UPDATE order_doweling_links SET delete_flag = false')) {
         return { rows: [], rowCount: options.restoredRowCount ?? 1 };
+      }
+
+      if (normalized.startsWith('UPDATE doweling_orders')) {
+        return { rows: [], rowCount: options.dowelingEngineerRowCount ?? 1 };
       }
 
       return { rows: [], rowCount: 1 };

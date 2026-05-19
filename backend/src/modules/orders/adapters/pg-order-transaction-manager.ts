@@ -523,10 +523,31 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       }
 
       if (link.designEngineerId !== undefined) {
-        await this.tx.query(
-          'UPDATE doweling_orders SET design_engineer_id = $2 WHERE doweling_order_id = $1',
-          [link.dowelingOrderId, link.designEngineerId],
+        const engineerUpdate = await this.tx.query(
+          `
+          UPDATE doweling_orders d
+          SET design_engineer_id = $3
+          WHERE d.doweling_order_id = $2
+            AND d.delete_flag = false
+            AND EXISTS (
+              SELECT 1
+              FROM order_doweling_links odl
+              WHERE odl.order_id = $1
+                AND odl.doweling_order_id = d.doweling_order_id
+                AND odl.delete_flag = false
+            )
+          `,
+          [orderId, link.dowelingOrderId, link.designEngineerId],
         );
+
+        if (engineerUpdate.rowCount === 0) {
+          throw new ApiError(
+            422,
+            'DOWELING_ORDER_NOT_LINKED',
+            'Doweling order is not linked to order',
+            { orderId, dowelingOrderId: link.dowelingOrderId },
+          );
+        }
       }
     }
   }
