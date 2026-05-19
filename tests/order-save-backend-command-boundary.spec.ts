@@ -34,6 +34,7 @@ test.describe('Order save backend command boundary', () => {
 
         await page.goto('/orders/edit/15');
         await expect(page.getByText('Backend command boundary order', { exact: true })).toBeVisible({ timeout: 30000 });
+        await deleteWorkflowChildrenThroughStore(page);
         await page.getByRole('tab', { name: 'Основная информация' }).click();
         await page.getByPlaceholder('Введите название заказа').fill('Backend command boundary order saved');
         await page.getByRole('button', { name: /Сохранить/ }).click();
@@ -68,9 +69,9 @@ test.describe('Order save backend command boundary', () => {
                 }),
             ],
             deleted: expect.objectContaining({
-                workshopIds: [],
-                requirementIds: [],
-                dowelingLinkIds: [],
+                workshopIds: [82],
+                requirementIds: [92],
+                dowelingLinkIds: [102],
             }),
         });
         expect(forbiddenGraphqlMutations).toEqual([]);
@@ -105,6 +106,20 @@ function seedOrderAggregate(db: WorkflowMockDb) {
         sequence_order: null,
         responsible_employee_id: null,
         notes: 'existing workshop',
+        ref_key_1c: null,
+    });
+    db.order_workshops.push({
+        order_workshop_id: 82,
+        order_id: 15,
+        workshop_id: 2,
+        production_status_id: 2,
+        received_date: '2026-05-02',
+        started_date: null,
+        completed_date: null,
+        planned_completion_date: '2026-05-11',
+        sequence_order: null,
+        responsible_employee_id: null,
+        notes: 'workshop deleted before save',
         ref_key_1c: null,
     });
     db.order_details.push({
@@ -156,6 +171,29 @@ function seedOrderAggregate(db: WorkflowMockDb) {
         ref_key_1c: null,
         is_active: true,
     });
+    db.order_resource_requirements.push({
+        requirement_id: 92,
+        order_id: 15,
+        resource_type: 'material',
+        material_id: 1,
+        film_id: null,
+        edge_type_id: null,
+        required_quantity: 3,
+        unit_id: 1,
+        waste_percentage: null,
+        final_quantity: 3,
+        requirement_status_id: 1,
+        supplier_id: null,
+        purchase_price: null,
+        requisition_id: null,
+        warehouse_id: null,
+        reserved_at: null,
+        consumed_at: null,
+        notes: 'requirement deleted before save',
+        calculation_details: null,
+        ref_key_1c: null,
+        is_active: true,
+    });
     db.doweling_orders.push({
         doweling_order_id: 44,
         doweling_order_name: 'Boundary doweling',
@@ -163,6 +201,14 @@ function seedOrderAggregate(db: WorkflowMockDb) {
         production_status_id: 1,
         payment_status_id: 1,
         doweling_order_date: '2026-05-01',
+    });
+    db.doweling_orders.push({
+        doweling_order_id: 45,
+        doweling_order_name: 'Deleted boundary doweling',
+        design_engineer_id: 2,
+        production_status_id: 1,
+        payment_status_id: 1,
+        doweling_order_date: '2026-05-02',
     });
     db.order_doweling_links.push({
         order_doweling_link_id: 101,
@@ -174,6 +220,27 @@ function seedOrderAggregate(db: WorkflowMockDb) {
             doweling_order_name: 'Boundary doweling',
             design_engineer_id: 1,
         },
+    });
+    db.order_doweling_links.push({
+        order_doweling_link_id: 102,
+        order_id: 15,
+        doweling_order_id: 45,
+        ref_key_1c: null,
+        doweling_order: {
+            doweling_order_id: 45,
+            doweling_order_name: 'Deleted boundary doweling',
+            design_engineer_id: 2,
+        },
+    });
+}
+
+async function deleteWorkflowChildrenThroughStore(page: Page) {
+    await page.evaluate(async () => {
+        const { useOrderFormStore } = await import('/src/stores/orderFormStore.ts');
+        const store = useOrderFormStore.getState();
+        store.deleteWorkshop(82, 82);
+        store.deleteRequirement(92, 92);
+        store.deleteDowelingLink(102, 102);
     });
 }
 
