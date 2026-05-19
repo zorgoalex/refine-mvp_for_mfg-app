@@ -80,18 +80,43 @@ describe('PgOrderTransactionManager', () => {
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('UPDATE order_workshops SET workshop_id = $3');
     expect(sql).toContain('ref_key_1c = $12, delete_flag = false');
+    expectScopedUpdate(database.queries, {
+      startsWith: 'UPDATE order_workshops SET workshop_id = $3',
+      whereClause: 'WHERE order_workshop_id = $1 AND order_id = $2',
+      params: [31, 100],
+    });
     expect(sql).toContain('INSERT INTO order_workshops');
     expect(sql).toContain('UPDATE order_workshops SET delete_flag = true');
+    expectScopedUpdate(database.queries, {
+      startsWith: 'UPDATE order_workshops SET delete_flag = true',
+      whereClause: 'WHERE order_workshop_id = ANY($1::bigint[]) AND order_id = $2',
+      params: [[32], 100],
+    });
     expect(sql).not.toContain('DELETE FROM order_workshops');
     expect(sql).toContain('UPDATE order_resource_requirements SET resource_type = $3');
     expect(sql).toContain('INSERT INTO order_resource_requirements');
     expect(sql).toContain('UPDATE order_resource_requirements SET is_active = false');
+    expectScopedUpdate(database.queries, {
+      startsWith: 'UPDATE order_resource_requirements SET is_active = false',
+      whereClause: 'WHERE requirement_id = ANY($1::bigint[]) AND order_id = $2',
+      params: [[42], 100],
+    });
     expect(sql).not.toContain('DELETE FROM order_resource_requirements');
     expect(sql).toContain('UPDATE order_doweling_links SET doweling_order_id = $3');
     expect(sql).toContain('ref_key_1c = $4, delete_flag = false');
+    expectScopedUpdate(database.queries, {
+      startsWith: 'UPDATE order_doweling_links SET doweling_order_id = $3',
+      whereClause: 'WHERE order_doweling_link_id = $1 AND order_id = $2',
+      params: [51, 100],
+    });
     expect(sql).toContain('INSERT INTO order_doweling_links');
     expect(sql).toContain('UPDATE doweling_orders SET design_engineer_id = $2');
     expect(sql).toContain('UPDATE order_doweling_links SET delete_flag = true');
+    expectScopedUpdate(database.queries, {
+      startsWith: 'UPDATE order_doweling_links SET delete_flag = true',
+      whereClause: 'WHERE order_doweling_link_id = ANY($1::bigint[]) AND order_id = $2',
+      params: [[52], 100],
+    });
     expect(sql).not.toContain('DELETE FROM order_doweling_links');
     expect(
       database.queries.some(
@@ -517,4 +542,21 @@ function currentUser(): CurrentUser {
 
 function normalizeSql(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim();
+}
+
+function expectScopedUpdate(
+  queries: Array<{ text: string; params: readonly unknown[] }>,
+  expected: {
+    startsWith: string;
+    whereClause: string;
+    params: readonly unknown[];
+  },
+): void {
+  const query = queries.find((candidate) =>
+    normalizeSql(candidate.text).startsWith(expected.startsWith),
+  );
+
+  expect(query).toBeDefined();
+  expect(normalizeSql(query!.text)).toContain(expected.whereClause);
+  expect(query!.params.slice(0, expected.params.length)).toEqual(expected.params);
 }
