@@ -79,6 +79,7 @@ describe('PgOrderTransactionManager', () => {
 
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('UPDATE order_workshops SET workshop_id = $3');
+    expect(sql).toContain('ref_key_1c = $12, delete_flag = false');
     expect(sql).toContain('INSERT INTO order_workshops');
     expect(sql).toContain('UPDATE order_workshops SET delete_flag = true');
     expect(sql).not.toContain('DELETE FROM order_workshops');
@@ -87,6 +88,7 @@ describe('PgOrderTransactionManager', () => {
     expect(sql).toContain('UPDATE order_resource_requirements SET is_active = false');
     expect(sql).not.toContain('DELETE FROM order_resource_requirements');
     expect(sql).toContain('UPDATE order_doweling_links SET doweling_order_id = $3');
+    expect(sql).toContain('ref_key_1c = $4, delete_flag = false');
     expect(sql).toContain('INSERT INTO order_doweling_links');
     expect(sql).toContain('UPDATE doweling_orders SET design_engineer_id = $2');
     expect(sql).toContain('UPDATE order_doweling_links SET delete_flag = true');

@@ -374,7 +374,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           UPDATE order_workshops
           SET workshop_id = $3, production_status_id = $4, received_date = $5,
               started_date = $6, completed_date = $7, planned_completion_date = $8,
-              sequence_order = $9, responsible_employee_id = $10, notes = $11, ref_key_1c = $12
+              sequence_order = $9, responsible_employee_id = $10, notes = $11,
+              ref_key_1c = $12, delete_flag = false
           WHERE order_workshop_id = $1 AND order_id = $2
           `,
           workshopParams(workshop.id, orderId, workshop),
@@ -494,7 +495,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         await this.tx.query(
           `
           UPDATE order_doweling_links
-          SET doweling_order_id = $3, ref_key_1c = $4
+          SET doweling_order_id = $3, ref_key_1c = $4, delete_flag = false
           WHERE order_doweling_link_id = $1 AND order_id = $2
           `,
           [link.id, orderId, link.dowelingOrderId, link.refKey1c],
