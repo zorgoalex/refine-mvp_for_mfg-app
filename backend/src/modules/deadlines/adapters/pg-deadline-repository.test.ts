@@ -232,6 +232,63 @@ describe('PgDeadlineRepository', () => {
     expect(sql).toContain('FOR UPDATE SKIP LOCKED');
     expect(sql).toContain('ON CONFLICT (idempotency_key)');
   });
+
+  it('writes worker-created event audit and outbox with deadline-engine source and worker context', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await repository.createDeadlineEvent({
+      deadlineId: '11111111-1111-4111-8111-111111111111',
+      eventType: 'DEADLINE_EXPIRED',
+      severity: 'critical',
+      entityType: 'order',
+      entityId: '100',
+      orderId: 100,
+      clientId: 5,
+      deadlineAt: '2026-05-02T10:00:00.000Z',
+      eventAt: '2026-05-03T10:00:00.000Z',
+      delayMinutes: 1440,
+      payload: {
+        status: 'expired',
+        source: 'deadline-engine',
+        workerId: 'worker-a',
+        actorUserId: '42',
+        requestId: 'req-worker-1',
+      },
+    });
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params[5]).toBe('deadline-engine');
+
+    const outbox = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    expect(JSON.parse(String(outbox?.params[2]))).toMatchObject({
+      source: 'deadline-engine',
+      actorUserId: '42',
+      requestId: 'req-worker-1',
+      workerId: 'worker-a',
+    });
+  });
+
+  it('caps due worker scan with FOR UPDATE SKIP LOCKED and configured limit', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await repository.findDueDeadlinesForUpdate({
+      now: '2026-05-02T10:00:00.000Z',
+      limit: 25,
+      workerId: 'worker-acceptance',
+    });
+
+    const query = database.queries.find((item) =>
+      normalizeSql(item.text).includes('FOR UPDATE SKIP LOCKED'),
+    );
+    expect(normalizeSql(query?.text ?? '')).toContain('LIMIT $2 FOR UPDATE SKIP LOCKED');
+    expect(query?.params).toEqual(['2026-05-02T10:00:00.000Z', 25]);
+  });
 });
 
 function createDatabase() {

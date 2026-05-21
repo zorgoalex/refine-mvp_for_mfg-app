@@ -15,12 +15,18 @@ import { DeadlineQueryService } from './application/deadline-query.service';
 import { DeadlineWorkerService } from './application/deadline-worker.service';
 import { DeadlinePoliciesController } from './http/deadline-policies.controller';
 import { DeadlineSettingsController } from './http/deadline-settings.controller';
+import { DeadlineWorkerController } from './http/deadline-worker.controller';
 import { DeadlinesController } from './http/deadlines.controller';
 import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.service';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [DeadlinesController, DeadlinePoliciesController, DeadlineSettingsController],
+  controllers: [
+    DeadlinesController,
+    DeadlinePoliciesController,
+    DeadlineSettingsController,
+    DeadlineWorkerController,
+  ],
   providers: [
     DeadlinesRuntimeConfigService,
     DeadlineActionDispatcherService,

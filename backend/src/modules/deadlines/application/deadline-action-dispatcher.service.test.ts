@@ -95,6 +95,59 @@ describe('DeadlineActionDispatcherService', () => {
       result: { auditEventQueued: true },
     });
   });
+
+  it('does not call notification port when notifications are disabled', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const calls: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_assignee' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: {
+        async createNotification(input) {
+          calls.push(input);
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: false },
+    });
+
+    expect(calls).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_assignee',
+      status: 'skipped',
+      skipReason: 'notifications_disabled',
+      idempotencyKey: 'event-1:notify_assignee:order:42',
+    });
+  });
+
+  it('builds separate action execution idempotency keys per action type', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({ actionRuleId: 'rule-a', actionType: 'write_audit' }),
+          createRule({ actionRuleId: 'rule-b', actionType: 'notify_manager' }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    });
+
+    expect(executions.map((execution) => execution.idempotencyKey)).toEqual([
+      'event-1:write_audit:order:42',
+      'event-1:notify_manager:order:42',
+    ]);
+  });
 });
 
 function createRepository(input: {

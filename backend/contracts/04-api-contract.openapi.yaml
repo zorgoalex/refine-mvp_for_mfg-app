@@ -1783,6 +1783,59 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/deadline-worker/process-due-now:
+    post:
+      tags:
+        - Deadline Worker
+      operationId: processDueDeadlinesNow
+      summary: Process one manual Deadline Engine worker batch
+      description: Runs a single backend-owned worker batch. This endpoint does not start an interval, poller, scheduler, or queue consumer.
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.worker.manage
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                now:
+                  type: string
+                  format: date-time
+                limit:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: Manual worker batch processed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - scanned
+                  - processed
+                  - expired
+                  - completed
+                properties:
+                  scanned:
+                    type: integer
+                  processed:
+                    type: integer
+                  expired:
+                    type: integer
+                  completed:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/deadline-policies:
     get:
       tags:

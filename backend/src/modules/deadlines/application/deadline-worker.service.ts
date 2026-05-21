@@ -22,6 +22,8 @@ export interface ProcessDueDeadlinesCommand {
   now: string;
   limit: number;
   workerId: string;
+  actorUserId?: string;
+  requestId?: string;
   config: DeadlineActionDispatcherConfig;
 }
 
@@ -72,8 +74,18 @@ export class DeadlineWorkerService {
               deadline,
               targetState.completedAt ?? command.now,
               command.now,
+              command.workerId,
+              command.actorUserId,
+              command.requestId,
             )
-          : await this.markExpired(unitOfWork.deadlines, deadline, command.now);
+          : await this.markExpired(
+              unitOfWork.deadlines,
+              deadline,
+              command.now,
+              command.workerId,
+              command.actorUserId,
+              command.requestId,
+            );
         const event = await unitOfWork.deadlines.createDeadlineEvent(eventInput);
 
         await this.dispatcher.dispatch({
@@ -100,6 +112,9 @@ export class DeadlineWorkerService {
     repository: DeadlineRepositoryPort,
     deadline: DeadlineInstanceDto,
     now: string,
+    workerId: string,
+    actorUserId?: string,
+    requestId?: string,
   ): Promise<CreateDeadlineEventInput> {
     await repository.markDeadlineExpired({
       deadlineId: deadline.deadlineId,
@@ -118,7 +133,13 @@ export class DeadlineWorkerService {
       deadlineAt: deadline.deadlineAt,
       eventAt: now,
       delayMinutes: calculateDelayMinutes({ deadlineAt: deadline.deadlineAt, occurredAt: now }),
-      payload: { status: 'expired' },
+      payload: {
+        status: 'expired',
+        source: 'deadline-engine',
+        workerId,
+        actorUserId: actorUserId ?? null,
+        requestId: requestId ?? null,
+      },
     };
   }
 
@@ -127,6 +148,9 @@ export class DeadlineWorkerService {
     deadline: DeadlineInstanceDto,
     completedAt: string,
     now: string,
+    workerId: string,
+    actorUserId?: string,
+    requestId?: string,
   ): Promise<CreateDeadlineEventInput> {
     const status = getCompletionDeadlineStatus({
       completedAt,
@@ -154,7 +178,14 @@ export class DeadlineWorkerService {
         status === 'completed_late'
           ? calculateDelayMinutes({ deadlineAt: deadline.deadlineAt, occurredAt: completedAt })
           : 0,
-      payload: { status, completedAt },
+      payload: {
+        status,
+        completedAt,
+        source: 'deadline-engine',
+        workerId,
+        actorUserId: actorUserId ?? null,
+        requestId: requestId ?? null,
+      },
     };
   }
 }

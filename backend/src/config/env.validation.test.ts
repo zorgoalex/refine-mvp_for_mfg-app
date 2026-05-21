@@ -439,4 +439,23 @@ describe('backend env validation', () => {
       }),
     ).toThrow(/BACKEND_DEADLINE_WORKER_ID/);
   });
+
+  it('keeps worker actions and notifications disabled when manual worker processing is enabled', () => {
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_DEADLINES: 'true',
+        BACKEND_DEADLINES_READ_ONLY: 'false',
+        BACKEND_ENABLE_DEADLINE_WORKER: 'true',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_DEADLINES: true,
+      BACKEND_DEADLINES_READ_ONLY: false,
+      BACKEND_ENABLE_DEADLINE_WORKER: true,
+      BACKEND_DEADLINE_ACTIONS_ENABLED: false,
+      BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: false,
+      BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS: 60000,
+      BACKEND_DEADLINE_WORKER_BATCH_SIZE: 100,
+      BACKEND_DEADLINE_WORKER_ID: 'backend-local',
+    });
+  });
 });

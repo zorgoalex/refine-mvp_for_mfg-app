@@ -132,6 +132,81 @@ describe('DeadlineWorkerService', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ eventType: 'DEADLINE_EXPIRED' });
   });
+
+  it('records worker source, worker id, actor, and request id on expired events', async () => {
+    const events: DeadlineEventDto[] = [];
+    const repository = createRepository({
+      due: [createDeadline()],
+      events,
+      executions: [],
+      rules: [],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager(repository),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+    });
+
+    await worker.processDueDeadlines({
+      now: '2026-05-01T10:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      actorUserId: '42',
+      requestId: 'req-worker-1',
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    });
+
+    expect(events[0]).toMatchObject({
+      eventType: 'DEADLINE_EXPIRED',
+      payload: {
+        status: 'expired',
+        source: 'deadline-engine',
+        workerId: 'worker-a',
+        actorUserId: '42',
+        requestId: 'req-worker-1',
+      },
+    });
+  });
+
+  it('marks completed target as completed_on_time when completed before deadline', async () => {
+    const events: DeadlineEventDto[] = [];
+    const repository = createRepository({
+      due: [createDeadline()],
+      events,
+      executions: [],
+      rules: [],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager(repository),
+      targetResolver: createTargetResolver({
+        isCompleted: true,
+        completedAt: '2026-05-01T08:30:00.000Z',
+      }),
+      notificationPort: createNotificationPort(),
+    });
+
+    await worker.processDueDeadlines({
+      now: '2026-05-01T10:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      actorUserId: '42',
+      requestId: 'req-worker-2',
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    });
+
+    expect(events[0]).toMatchObject({
+      eventType: 'DEADLINE_COMPLETED_ON_TIME',
+      delayMinutes: 0,
+      payload: {
+        status: 'completed_on_time',
+        completedAt: '2026-05-01T08:30:00.000Z',
+        source: 'deadline-engine',
+        workerId: 'worker-a',
+        actorUserId: '42',
+        requestId: 'req-worker-2',
+      },
+    });
+  });
 });
 
 function transactionManager(repository: DeadlineRepositoryPort): DeadlineTransactionManagerPort {

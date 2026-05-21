@@ -876,6 +876,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     const reason = typeof payload.reason === 'string' ? payload.reason : null;
     const beforeStatus = typeof payload.beforeStatus === 'string' ? payload.beforeStatus : null;
     const afterStatus = typeof payload.afterStatus === 'string' ? payload.afterStatus : null;
+    const workerId = typeof payload.workerId === 'string' ? payload.workerId : null;
     const source = typeof payload.source === 'string'
       ? payload.source
       : requestId
@@ -904,6 +905,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
           reason,
           beforeStatus,
           afterStatus,
+          ...(workerId ? { workerId } : {}),
           source,
         }),
         `deadline-event:${event.deadlineEventId}:outbox`,
