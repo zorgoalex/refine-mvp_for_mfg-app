@@ -5,11 +5,12 @@ import { PgProductionActionRepository } from './adapters/pg-production-action-re
 import { UnavailableProductionActionRepository } from './adapters/unavailable-production-action-repository';
 import { ProductionActionService } from './application/production-action.service';
 import { ProductionActionsRuntimeConfigService } from './http/production-actions-runtime-config.service';
+import { OrderDetailProductionActionsController } from './http/order-detail-production-actions.controller';
 import { ProductionActionsController } from './http/production-actions.controller';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [ProductionActionsController],
+  controllers: [ProductionActionsController, OrderDetailProductionActionsController],
   providers: [
     ProductionActionsRuntimeConfigService,
     {

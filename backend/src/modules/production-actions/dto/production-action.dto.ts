@@ -12,15 +12,34 @@ export interface ChangeOrderStatusRequestDto {
   idempotencyKey: string;
 }
 
+export interface ChangePaymentStatusRequestDto {
+  paymentStatusId: number;
+  version: number;
+  idempotencyKey: string;
+}
+
+export interface ChangeProductionStatusRequestDto {
+  productionStatusId: number;
+  version: number;
+  idempotencyKey: string;
+}
+
 export interface ProductionStageEventRequestDto {
   version: number;
   idempotencyKey: string;
+}
+
+export interface DetailProductionStageEventRequestDto {
+  idempotencyKey: string;
+  note?: string | null;
 }
 
 export interface ProductionActionOrderResponseDto {
   orderId: number;
   plannedCompletionDate?: DateOnlyString | null;
   orderStatusId?: number;
+  paymentStatusId?: number;
+  productionStatusId?: number;
   version: number;
 }
 

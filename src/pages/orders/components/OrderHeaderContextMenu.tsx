@@ -175,15 +175,6 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
 
       try {
         if (featureFlags.useBackendProductionActions) {
-          if (fieldName !== 'order_status') {
-            notification.warning({
-              message: 'Действие недоступно',
-              description: 'Это действие пока не входит в backend production actions',
-              duration: 2,
-            });
-            return;
-          }
-
           if (!Number.isInteger(header.version)) {
             notification.warning({
               message: 'Обновите заказ',
@@ -206,22 +197,30 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
             const commandVersion = currentHeader.version;
             let rollbackVersion: number | null = commandVersion;
             try {
-              const responsePromise = productionActionsApi.changeOrderStatus(header.order_id, {
-                orderStatusId: statusId,
-                version: commandVersion,
-                idempotencyKey: createProductionActionIdempotencyKey('order-header-status'),
-              });
+              const responsePromise = fieldName === 'payment_status'
+                ? productionActionsApi.changePaymentStatus(header.order_id, {
+                    paymentStatusId: statusId,
+                    version: commandVersion,
+                    idempotencyKey: createProductionActionIdempotencyKey('order-header-payment-status'),
+                  })
+                : productionActionsApi.changeOrderStatus(header.order_id, {
+                    orderStatusId: statusId,
+                    version: commandVersion,
+                    idempotencyKey: createProductionActionIdempotencyKey('order-header-status'),
+                  });
               updateHeaderField('version', commandVersion + 1);
               const response = await responsePromise;
               rollbackVersion = null;
 
-              updateHeaderField('order_status_id', statusId);
+              updateHeaderField(dbField as any, statusId);
               updateHeaderField('version', response.order.version);
               await invalidate({ resource: 'orders_view', invalidates: ['list'] });
 
               notification.success({
                 message: 'Статус обновлён',
-                description: `Статус заказа: ${statusName}`,
+                description: `${
+                  fieldName === 'order_status' ? 'Статус заказа' : 'Статус оплаты'
+                }: ${statusName}`,
                 duration: 2,
               });
             } catch (error) {
@@ -265,7 +264,9 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         notification.error({
           message: 'Ошибка обновления статуса',
           description: isProductionActionPermissionDenied(error)
-            ? formatProductionActionPermissionDeniedMessage('order_status')
+            ? formatProductionActionPermissionDeniedMessage(
+                fieldName === 'payment_status' ? 'payment_status' : 'order_status',
+              )
             : 'Не удалось обновить статус заказа',
         });
       }
@@ -416,11 +417,11 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
       label: 'Статус заказа',
       children: orderStatusItems,
     },
-    ...(featureFlags.useBackendProductionActions ? [] : [{
+    {
       key: 'payment_status',
       label: 'Статус оплаты',
       children: paymentStatusItems,
-    }]),
+    },
     {
       key: 'production_status',
       label: 'Статус производства',

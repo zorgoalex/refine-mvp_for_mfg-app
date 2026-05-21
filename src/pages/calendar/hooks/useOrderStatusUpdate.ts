@@ -50,7 +50,7 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
     let rollbackVersion: number | null = null;
 
     if (featureFlags.useBackendProductionActions) {
-      if (fieldName !== 'order_status') {
+      if (fieldName !== 'order_status' && fieldName !== 'payment_status') {
         message.warning('Это действие пока недоступно в backend-режиме production actions');
         return null;
       }
@@ -69,17 +69,24 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
       try {
         setIsBackendUpdating(true);
         const commandVersion = order.version;
-        const responsePromise = productionActionsApi.changeOrderStatus(order.order_id, {
-          orderStatusId: statusId,
-          version: commandVersion,
-          idempotencyKey: createProductionActionIdempotencyKey('order-status'),
-        });
+        const responsePromise = fieldName === 'payment_status'
+          ? productionActionsApi.changePaymentStatus(order.order_id, {
+              paymentStatusId: statusId,
+              version: commandVersion,
+              idempotencyKey: createProductionActionIdempotencyKey('payment-status'),
+            })
+          : productionActionsApi.changeOrderStatus(order.order_id, {
+              orderStatusId: statusId,
+              version: commandVersion,
+              idempotencyKey: createProductionActionIdempotencyKey('order-status'),
+            });
         rollbackVersion = commandVersion;
         order.version = commandVersion + 1;
         reserveCalendarOrderVersion(order.order_id, order.version);
         const response = await responsePromise;
         rollbackVersion = null;
-        message.success(`Статус заказа изменен на "${statusName}" для заказа ${order.order_name}`);
+        const displayName = fieldName === 'payment_status' ? 'Статус оплаты' : 'Статус заказа';
+        message.success(`${displayName} изменен на "${statusName}" для заказа ${order.order_name}`);
         order.version = response.order.version;
         setCalendarOrderVersion(order.order_id, response.order.version);
         await invalidate({
@@ -106,7 +113,9 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
           forgetCalendarOrderVersion(order.order_id);
         }
         const errorMessage = isProductionActionPermissionDenied(error)
-          ? formatProductionActionPermissionDeniedMessage('order_status')
+          ? formatProductionActionPermissionDeniedMessage(
+              fieldName === 'payment_status' ? 'payment_status' : 'order_status',
+            )
           : error.message || 'Неизвестная ошибка';
         message.error(`Ошибка обновления статуса: ${errorMessage}`);
         throw error;

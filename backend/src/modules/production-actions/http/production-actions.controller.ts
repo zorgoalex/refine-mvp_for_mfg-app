@@ -14,6 +14,9 @@ import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { ProductionActionService } from '../application/production-action.service';
 import type {
   ChangeOrderStatusRequestDto,
+  ChangePaymentStatusRequestDto,
+  ChangeProductionStatusRequestDto,
+  DetailProductionStageEventRequestDto,
   MoveCalendarDateRequestDto,
   ProductionActionResponseDto,
   ProductionStageEventRequestDto,
@@ -40,9 +43,26 @@ const orderStatusRequestSchema = z.object({
   idempotencyKey: idempotencyKeySchema,
 });
 
+const paymentStatusRequestSchema = z.object({
+  paymentStatusId: z.number().int().positive(),
+  version: versionSchema,
+  idempotencyKey: idempotencyKeySchema,
+});
+
+const productionStatusRequestSchema = z.object({
+  productionStatusId: z.number().int().positive(),
+  version: versionSchema,
+  idempotencyKey: idempotencyKeySchema,
+});
+
 const stageEventRequestSchema = z.object({
   version: versionSchema,
   idempotencyKey: idempotencyKeySchema,
+});
+
+const detailStageEventRequestSchema = z.object({
+  idempotencyKey: idempotencyKeySchema,
+  note: z.string().trim().max(1000).nullable().optional(),
 });
 
 const actionVersionFieldsSwaggerSchema = {
@@ -68,6 +88,24 @@ const changeOrderStatusRequestSwaggerSchema = {
   },
 } as const;
 
+const changePaymentStatusRequestSwaggerSchema = {
+  type: 'object',
+  required: ['paymentStatusId', 'version', 'idempotencyKey'],
+  properties: {
+    paymentStatusId: { type: 'integer' },
+    ...actionVersionFieldsSwaggerSchema,
+  },
+} as const;
+
+const changeProductionStatusRequestSwaggerSchema = {
+  type: 'object',
+  required: ['productionStatusId', 'version', 'idempotencyKey'],
+  properties: {
+    productionStatusId: { type: 'integer', minimum: 1 },
+    ...actionVersionFieldsSwaggerSchema,
+  },
+} as const;
+
 const productionStageEventRequestSwaggerSchema = {
   type: 'object',
   required: ['version', 'idempotencyKey'],
@@ -85,6 +123,8 @@ const productionActionResponseSwaggerSchema = {
         orderId: { type: 'integer' },
         plannedCompletionDate: { type: 'string', format: 'date', nullable: true },
         orderStatusId: { type: 'integer' },
+        paymentStatusId: { type: 'integer' },
+        productionStatusId: { type: 'integer' },
         version: { type: 'integer' },
       },
     },
@@ -178,6 +218,60 @@ export class ProductionActionsController {
     @Body() body: unknown,
   ): Promise<ProductionActionResponseDto> {
     return this.executeChangeOrderStatus(request, orderIdParam, body);
+  }
+
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ schema: swaggerSchema(changePaymentStatusRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Changed payment status', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid payment status or production action payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'changePaymentStatus', summary: 'Change an order payment status' })
+  @Patch('payment-status')
+  async changePaymentStatus(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Body() body: unknown,
+  ): Promise<ProductionActionResponseDto> {
+    this.assertProductionActionsEnabled();
+
+    return this.productionActions.changePaymentStatus({
+      currentUser: this.requireCurrentUser(request),
+      orderId: parseOrderId(orderIdParam),
+      dto: parsePaymentStatusRequest(body),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ schema: swaggerSchema(changeProductionStatusRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Changed production status', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid production status or production action payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'changeProductionStatus', summary: 'Change an order current production status' })
+  @Patch('production-status')
+  async changeProductionStatus(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Body() body: unknown,
+  ): Promise<ProductionActionResponseDto> {
+    this.assertProductionActionsEnabled();
+
+    return this.productionActions.changeProductionStatus({
+      currentUser: this.requireCurrentUser(request),
+      orderId: parseOrderId(orderIdParam),
+      dto: parseProductionStatusRequest(body),
+      requestId: request.requestId,
+    });
   }
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
@@ -285,6 +379,18 @@ export function parseOrderId(value: string): number {
   return orderId;
 }
 
+export function parseOrderDetailId(value: string): number {
+  const detailId = Number(value);
+
+  if (!Number.isInteger(detailId) || detailId <= 0) {
+    throw new ApiError(400, 'BAD_REQUEST', 'Invalid order detail id', {
+      field: 'detailId',
+    });
+  }
+
+  return detailId;
+}
+
 export function parseProductionStatusId(value: string): number {
   const productionStatusId = Number(value);
 
@@ -315,8 +421,35 @@ export function parseOrderStatusRequest(body: unknown): ChangeOrderStatusRequest
   return parsed.data;
 }
 
+export function parsePaymentStatusRequest(body: unknown): ChangePaymentStatusRequestDto {
+  const parsed = paymentStatusRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw productionActionValidationError(parsed.error);
+  }
+
+  return parsed.data;
+}
+
+export function parseProductionStatusRequest(body: unknown): ChangeProductionStatusRequestDto {
+  const parsed = productionStatusRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw productionActionValidationError(parsed.error);
+  }
+
+  return parsed.data;
+}
+
 export function parseStageEventRequest(body: unknown): ProductionStageEventRequestDto {
   const parsed = stageEventRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw productionActionValidationError(parsed.error);
+  }
+
+  return parsed.data;
+}
+
+export function parseDetailStageEventRequest(body: unknown): DetailProductionStageEventRequestDto {
+  const parsed = detailStageEventRequestSchema.safeParse(body);
   if (!parsed.success) {
     throw productionActionValidationError(parsed.error);
   }

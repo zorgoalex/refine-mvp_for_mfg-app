@@ -111,11 +111,11 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
       label: 'Статус заказа',
       children: orderStatusItems,
     },
-    ...(backendProductionActionsEnabled ? [] : [{
+    {
       key: 'payment_status',
       label: 'Статус оплаты',
       children: paymentStatusItems,
-    }]),
+    },
     {
       key: 'production_status',
       label: 'Статус производства',

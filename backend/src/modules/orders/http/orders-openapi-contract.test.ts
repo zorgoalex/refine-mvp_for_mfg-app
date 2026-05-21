@@ -58,6 +58,7 @@ describe('orders OpenAPI contract', () => {
     expect(contract).toContain('operationId: moveOrderCalendarDate');
     expect(contract).toContain('  /api/v1/orders/{orderId}/status:');
     expect(contract).toContain('operationId: changeOrderStatus');
+    expect(contract).toContain('  /api/v1/orders/{orderId}/production-status:');
     expect(contract).toContain('  /api/v1/orders/{orderId}/order-status:');
     expect(contract).toContain('operationId: changeOrderStatusLegacy');
     expect(contract).toContain('  /api/v1/orders/{orderId}/production-stage-events/{productionStatusId}:');

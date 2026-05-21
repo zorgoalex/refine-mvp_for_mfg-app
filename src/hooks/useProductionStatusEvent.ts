@@ -289,6 +289,16 @@ export const useProductionStatusEvent = (
    */
   const recordDetailEvent = useCallback(
     async (detailId: number, productionStatusId: number, note?: string) => {
+      if (featureFlags.useBackendProductionActions) {
+        await productionActionsApi.activateDetailProductionStage(detailId, productionStatusId, {
+          idempotencyKey: createProductionActionIdempotencyKey('detail-production-stage-activate'),
+          note: note || null,
+        });
+        await invalidate({ resource: 'production_status_events', invalidates: ['list'] });
+        refetch();
+        return;
+      }
+
       try {
         await dataProvider().create({
           resource: 'production_status_events',
@@ -324,7 +334,7 @@ export const useProductionStatusEvent = (
         throw error;
       }
     },
-    [dataProvider]
+    [dataProvider, invalidate, refetch]
   );
 
   /**

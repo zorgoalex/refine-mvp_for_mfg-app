@@ -3,16 +3,25 @@
 // Row 2: Order Status, Payment Status, Manager, Priority
 // Row 3: Doweling Orders Table (Name, Engineer)
 
-import React, { useState } from 'react';
-import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm, Switch, Tooltip } from 'antd';
+import React, { useCallback, useRef, useState } from 'react';
+import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm, Switch, Tooltip, notification } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
+import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import { ClientQuickCreate } from '../modals/ClientQuickCreate';
 import { DowellingOrderQuickCreate } from '../modals/DowellingOrderQuickCreate';
 import dayjs from 'dayjs';
+import {
+  createProductionActionIdempotencyKey,
+  formatProductionActionPermissionDeniedMessage,
+  isProductionActionPermissionDenied,
+  isProductionActionVersionConflict,
+  productionActionsApi,
+} from '../../../../api/productionActionsApi';
+import { featureFlags } from '../../../../config/featureFlags';
 
 export const OrderBasicInfo: React.FC = () => {
   const { header, updateHeaderField, dowelingLinks, addDowelingLink, updateDowelingLink, deleteDowelingLink } = useOrderFormStore();
@@ -20,6 +29,10 @@ export const OrderBasicInfo: React.FC = () => {
   const [dowellingModalOpen, setDowellingModalOpen] = useState(false);
   const [selectedDowelingId, setSelectedDowelingId] = useState<number | undefined>(undefined);
   const [dowelingSearchValue, setDowelingSearchValue] = useState<string>('');
+  const [productionStatusPending, setProductionStatusPending] = useState(false);
+  const productionStatusPendingRef = useRef(false);
+  const dataProvider = useDataProvider();
+  const invalidate = useInvalidate();
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
 
@@ -88,14 +101,109 @@ export const OrderBasicInfo: React.FC = () => {
     ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
     : productionStatusProps;
 
-  // Handler for production status manual change - disables auto-update
-  const handleProductionStatusChange = (value: number) => {
+  const refreshHeaderFromOrder = useCallback(async () => {
+    if (!header.order_id) return;
+
+    try {
+      const response = await dataProvider().getOne({
+        resource: 'orders',
+        id: header.order_id,
+      });
+      const order = response?.data as Record<string, unknown> | undefined;
+      if (!order) return;
+
+      const fields = [
+        'production_status_id',
+        'production_status_from_details_enabled',
+        'version',
+      ];
+      for (const field of fields) {
+        if (field in order) {
+          updateHeaderField(field as any, order[field] as any);
+        }
+      }
+    } catch (error) {
+      console.warn('[OrderBasicInfo] Failed to refresh header after conflict:', error);
+    }
+  }, [dataProvider, header.order_id, updateHeaderField]);
+
+  const handleProductionStatusChange = useCallback(async (value: number | undefined) => {
+    if (value === undefined) {
+      if (!featureFlags.useBackendProductionActions) {
+        updateHeaderField('production_status_id', value as any);
+      }
+      return;
+    }
+
+    if (
+      featureFlags.useBackendProductionActions &&
+      header.order_id &&
+      Number.isInteger(header.version)
+    ) {
+      if (productionStatusPendingRef.current) {
+        return;
+      }
+
+      productionStatusPendingRef.current = true;
+      setProductionStatusPending(true);
+      const commandVersion = header.version;
+      updateHeaderField('version', commandVersion + 1);
+      try {
+        const response = await productionActionsApi.changeProductionStatus(header.order_id, {
+          productionStatusId: value,
+          version: commandVersion,
+          idempotencyKey: createProductionActionIdempotencyKey('order-header-production-status'),
+        });
+        updateHeaderField('production_status_id', value);
+        updateHeaderField('production_status_from_details_enabled', false);
+        updateHeaderField('version', response.order.version);
+        await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+        notification.success({ message: 'Статус производства обновлён', duration: 2 });
+        return;
+      } catch (error) {
+        updateHeaderField('version', commandVersion);
+        if (isProductionActionVersionConflict(error)) {
+          await refreshHeaderFromOrder();
+          await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+          notification.warning({ message: 'Данные заказа изменились', description: 'Заказ обновлён. Повторите действие.', duration: 2 });
+          return;
+        }
+        notification.error({
+          message: 'Ошибка обновления статуса производства',
+          description: isProductionActionPermissionDenied(error)
+            ? formatProductionActionPermissionDeniedMessage('production_stage')
+            : 'Не удалось обновить статус производства',
+        });
+        return;
+      } finally {
+        productionStatusPendingRef.current = false;
+        setProductionStatusPending(false);
+      }
+    }
+
+    if (featureFlags.useBackendProductionActions && header.order_id) {
+      notification.warning({
+        message: 'Обновите заказ',
+        description: 'Для изменения статуса производства нужны актуальные данные заказа',
+        duration: 2,
+      });
+      await refreshHeaderFromOrder();
+      await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+      return;
+    }
+
     updateHeaderField('production_status_id', value);
-    // При ручном изменении статуса отключаем автообновление
     if (header.production_status_from_details_enabled) {
       updateHeaderField('production_status_from_details_enabled', false);
     }
-  };
+  }, [
+    header.order_id,
+    header.version,
+    header.production_status_from_details_enabled,
+    updateHeaderField,
+    invalidate,
+    refreshHeaderFromOrder,
+  ]);
 
   // Load existing doweling orders for selection
   const { selectProps: dowelingSelectProps, queryResult: dowelingQueryResult } = useSelect({
@@ -295,7 +403,15 @@ export const OrderBasicInfo: React.FC = () => {
               }}
             >
               <Tooltip title="При включении статус производства заказа рассчитывается автоматически из статусов деталей">
-                <span>Автообновление статусов производства</span>
+                <span
+                  onClick={() => updateHeaderField(
+                    'production_status_from_details_enabled',
+                    !(header.production_status_from_details_enabled ?? true),
+                  )}
+                  style={{ cursor: 'pointer' }}
+                >
+                  Автообновление статусов производства
+                </span>
               </Tooltip>
               <Switch
                 checked={header.production_status_from_details_enabled ?? true}
@@ -350,14 +466,16 @@ export const OrderBasicInfo: React.FC = () => {
                 </Tooltip>
               }
             >
-              <Select
-                {...resolvedProductionStatusProps}
-                value={header.production_status_id}
-                onChange={handleProductionStatusChange}
-                placeholder="Выберите статус"
-                disabled={header.production_status_from_details_enabled ?? true}
-                allowClear
-              />
+              <div aria-label="Статус производства">
+                <Select
+                  {...resolvedProductionStatusProps}
+                  value={header.production_status_id}
+                  onChange={(value) => { void handleProductionStatusChange(value); }}
+                  placeholder="Выберите статус"
+                  disabled={(header.production_status_from_details_enabled ?? true) || productionStatusPending}
+                  allowClear={!featureFlags.useBackendProductionActions}
+                />
+              </div>
             </Form.Item>
           </Col>
 

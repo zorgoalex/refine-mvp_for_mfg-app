@@ -59,6 +59,7 @@ test.describe('Production actions stage canary', () => {
         const keys = {
             calendar: `production-actions-calendar:${runId}`,
             status: `production-actions-status:${runId}`,
+            productionCurrentStatus: `production-actions-current-status:${runId}`,
             stageActivate: `production-actions-stage-activate:${runId}`,
             stageDeactivate: `production-actions-stage-deactivate:${runId}`,
         };
@@ -87,16 +88,31 @@ test.describe('Production actions stage canary', () => {
         );
         expect(statusResponse.order.version).toBe(Number(baseline.version) + 2);
 
+        const productionCurrentStatusResponse = await patchJson<ProductionActionResponse>(
+            request,
+            `/orders/${testOrderId}/production-status`,
+            accessToken,
+            {
+                productionStatusId: productionStatus!.productionStatusId,
+                version: statusResponse.order.version,
+                idempotencyKey: keys.productionCurrentStatus,
+            },
+        );
+        expect(productionCurrentStatusResponse.order.version).toBe(Number(baseline.version) + 3);
+        expect(productionCurrentStatusResponse.order.productionStatusId).toBe(
+            productionStatus!.productionStatusId,
+        );
+
         const activateResponse = await putJson<ProductionActionResponse>(
             request,
             `/orders/${testOrderId}/production-stage-events/${productionStatus!.productionStatusId}`,
             accessToken,
             {
-                version: statusResponse.order.version,
+                version: productionCurrentStatusResponse.order.version,
                 idempotencyKey: keys.stageActivate,
             },
         );
-        expect(activateResponse.order.version).toBe(Number(baseline.version) + 3);
+        expect(activateResponse.order.version).toBe(Number(baseline.version) + 4);
         expect(activateResponse.event?.active).toBe(true);
         expect(activateResponse.event?.productionEventId).toBeGreaterThan(0);
 
@@ -109,7 +125,7 @@ test.describe('Production actions stage canary', () => {
                 idempotencyKey: keys.stageDeactivate,
             },
         );
-        expect(deactivateResponse.order.version).toBe(Number(baseline.version) + 4);
+        expect(deactivateResponse.order.version).toBe(Number(baseline.version) + 5);
         expect(deactivateResponse.event?.active).toBe(false);
 
         const replayResponse = await patchJson<ProductionActionResponse>(
@@ -124,10 +140,29 @@ test.describe('Production actions stage canary', () => {
         );
         expect(replayResponse.order.version).toBe(calendarResponse.order.version);
 
+        const productionCurrentReplayResponse = await patchJson<ProductionActionResponse>(
+            request,
+            `/orders/${testOrderId}/production-status`,
+            accessToken,
+            {
+                productionStatusId: productionStatus!.productionStatusId,
+                version: statusResponse.order.version,
+                idempotencyKey: keys.productionCurrentStatus,
+            },
+        );
+        expect(productionCurrentReplayResponse.order.version).toBe(
+            productionCurrentStatusResponse.order.version,
+        );
+
         const after = loadOrderSnapshot(testOrderId);
         expect(after.plannedCompletionDate).toBe(calendarDate);
         expect(Number(after.orderStatusId)).toBe(orderStatus!.orderStatusId);
-        expect(Number(after.version)).toBe(Number(baseline.version) + 4);
+        expect(Number(after.productionStatusId)).toBe(productionStatus!.productionStatusId);
+        expect(after.productionStatusFromDetailsEnabled).toBe(false);
+        for (const detail of after.detailStatuses) {
+            expect(Number(detail.productionStatusId)).toBe(productionStatus!.productionStatusId);
+        }
+        expect(Number(after.version)).toBe(Number(baseline.version) + 5);
         expect(productionEventExists(testOrderId, productionStatus!.productionStatusId)).toBe(false);
 
         const db = loadCommandSnapshot({
@@ -140,14 +175,17 @@ test.describe('Production actions stage canary', () => {
         });
         expect(Number(db.calendarAuditCount)).toBeGreaterThanOrEqual(1);
         expect(Number(db.statusAuditCount)).toBeGreaterThanOrEqual(1);
+        expect(Number(db.productionCurrentStatusAuditCount)).toBeGreaterThanOrEqual(1);
         expect(Number(db.stageActivateAuditCount)).toBeGreaterThanOrEqual(1);
         expect(Number(db.stageDeactivateAuditCount)).toBeGreaterThanOrEqual(1);
         expect(Number(db.calendarOutboxCount)).toBeGreaterThanOrEqual(1);
         expect(Number(db.deadlineOutboxCount)).toBeGreaterThanOrEqual(1);
         expect(Number(db.statusOutboxCount)).toBeGreaterThanOrEqual(1);
+        expect(Number(db.productionCurrentStatusOutboxCount)).toBeGreaterThanOrEqual(1);
         expect(Number(db.stageActivateOutboxCount)).toBeGreaterThanOrEqual(1);
         expect(Number(db.stageDeactivateOutboxCount)).toBeGreaterThanOrEqual(1);
-        expect(Number(db.completedCommandCount)).toBe(4);
+        expect(Number(db.productionCurrentStatusEventCount)).toBe(0);
+        expect(Number(db.completedCommandCount)).toBe(5);
     });
 });
 
@@ -244,8 +282,25 @@ function loadOrderSnapshot(orderId: number): OrderSnapshot {
             'orderDate', o.order_date::text,
             'plannedCompletionDate', o.planned_completion_date::text,
             'orderStatusId', o.order_status_id,
+            'productionStatusId', o.production_status_id,
+            'productionStatusFromDetailsEnabled', o.production_status_from_details_enabled,
             'version', o.version,
-            'ordersViewVersion', ov.version
+            'ordersViewVersion', ov.version,
+            'detailStatuses', COALESCE(
+                (
+                    SELECT json_agg(
+                        json_build_object(
+                            'detailId', od.detail_id,
+                            'productionStatusId', od.production_status_id
+                        )
+                        ORDER BY od.detail_id
+                    )
+                    FROM order_details od
+                    WHERE od.order_id = o.order_id
+                      AND COALESCE(od.delete_flag, false) = false
+                ),
+                '[]'::json
+            )
         )::text
         FROM orders o
         JOIN orders_view ov ON ov.order_id = o.order_id
@@ -279,6 +334,11 @@ function loadUnusedProductionStatus(orderId: number): ProductionStatusTarget | n
         )::text
         FROM production_statuses ps
         WHERE ps.is_active = true
+          AND ps.production_status_id IS DISTINCT FROM (
+            SELECT production_status_id
+            FROM orders
+            WHERE order_id = ${orderId}
+          )
           AND NOT EXISTS (
             SELECT 1
             FROM production_status_events pse
@@ -296,7 +356,10 @@ function loadCommandSnapshot(input: {
     productionStatus: ProductionStatusTarget;
     productionEventId: number;
     startedAt: string;
-    keys: Record<'calendar' | 'status' | 'stageActivate' | 'stageDeactivate', string>;
+    keys: Record<
+        'calendar' | 'status' | 'productionCurrentStatus' | 'stageActivate' | 'stageDeactivate',
+        string
+    >;
 }): CommandSnapshot {
     const keyValues = Object.values(input.keys).map((key) => `'${sqlQuote(key)}'`).join(', ');
 
@@ -334,6 +397,17 @@ function loadCommandSnapshot(input: {
                   AND stage_code = '${sqlQuote(input.productionStatus.productionStatusCode)}'
                   AND created_at >= TIMESTAMPTZ '${sqlQuote(input.startedAt)}'
             ),
+            'productionCurrentStatusAuditCount', (
+                SELECT count(*)
+                FROM audit_log
+                WHERE event = 'orders.production_status_change'
+                  AND source = 'backend-production-command'
+                  AND related_order_id = ${input.orderId}
+                  AND status_field = 'productionCurrentStatus'
+                  AND status_id = ${input.productionStatus.productionStatusId}
+                  AND status_code = '${sqlQuote(input.productionStatus.productionStatusCode)}'
+                  AND created_at >= TIMESTAMPTZ '${sqlQuote(input.startedAt)}'
+            ),
             'stageDeactivateAuditCount', (
                 SELECT count(*)
                 FROM audit_log
@@ -365,6 +439,12 @@ function loadCommandSnapshot(input: {
                 WHERE event_type = 'order.status_changed'
                   AND idempotency_key = '${sqlQuote(input.keys.status)}'
             ),
+            'productionCurrentStatusOutboxCount', (
+                SELECT count(*)
+                FROM outbox_events
+                WHERE event_type = 'order.production_status_changed'
+                  AND idempotency_key = '${sqlQuote(input.keys.productionCurrentStatus)}'
+            ),
             'stageActivateOutboxCount', (
                 SELECT count(*)
                 FROM outbox_events
@@ -376,6 +456,13 @@ function loadCommandSnapshot(input: {
                 FROM outbox_events
                 WHERE event_type = 'production.stage_deactivated'
                   AND idempotency_key = '${sqlQuote(input.keys.stageDeactivate)}'
+            ),
+            'productionCurrentStatusEventCount', (
+                SELECT count(*)
+                FROM production_status_events
+                WHERE order_id = ${input.orderId}
+                  AND production_status_id = ${input.productionStatus.productionStatusId}
+                  AND event_at >= TIMESTAMPTZ '${sqlQuote(input.startedAt)}'
             ),
             'completedCommandCount', (
                 SELECT count(*)
@@ -431,6 +518,12 @@ function cleanupOrder(order: OrderSnapshot | null, targetProductionStatusId: num
                 : `DATE '${sqlQuote(order.plannedCompletionDate)}'`
         },
             order_status_id = ${Number(order.orderStatusId)},
+            production_status_id = ${
+                order.productionStatusId === null ? 'NULL' : Number(order.productionStatusId)
+            },
+            production_status_from_details_enabled = ${
+                order.productionStatusFromDetailsEnabled ? 'true' : 'false'
+            },
             version = version + 1
         WHERE order_id = ${Number(order.orderId)}
           AND (
@@ -440,8 +533,31 @@ function cleanupOrder(order: OrderSnapshot | null, targetProductionStatusId: num
                     : `DATE '${sqlQuote(order.plannedCompletionDate)}'`
             }
             OR order_status_id IS DISTINCT FROM ${Number(order.orderStatusId)}
+            OR production_status_id IS DISTINCT FROM ${
+                order.productionStatusId === null ? 'NULL' : Number(order.productionStatusId)
+            }
+            OR production_status_from_details_enabled IS DISTINCT FROM ${
+                order.productionStatusFromDetailsEnabled ? 'true' : 'false'
+            }
           );
     `);
+
+    if (order.detailStatuses.length > 0) {
+        const values = order.detailStatuses
+            .map(
+                (detail) =>
+                    `(${Number(detail.detailId)}, ${
+                        detail.productionStatusId === null ? 'NULL' : Number(detail.productionStatusId)
+                    })`,
+            )
+            .join(', ');
+        psql(`
+            UPDATE order_details AS od
+            SET production_status_id = restore.production_status_id
+            FROM (VALUES ${values}) AS restore(detail_id, production_status_id)
+            WHERE od.detail_id = restore.detail_id;
+        `);
+    }
 }
 
 function cleanupUser(id: number | null) {
@@ -550,6 +666,7 @@ interface ProductionActionResponse {
         orderId: number;
         plannedCompletionDate?: string | null;
         orderStatusId?: number;
+        productionStatusId?: number;
         version: number;
     };
     event?: {
@@ -566,8 +683,14 @@ interface OrderSnapshot {
     orderDate: string;
     plannedCompletionDate: string | null;
     orderStatusId: number;
+    productionStatusId: number | null;
+    productionStatusFromDetailsEnabled: boolean;
     version: number;
     ordersViewVersion: number;
+    detailStatuses: Array<{
+        detailId: number;
+        productionStatusId: number | null;
+    }>;
 }
 
 interface OrderStatusTarget {
@@ -584,12 +707,15 @@ interface ProductionStatusTarget {
 interface CommandSnapshot {
     calendarAuditCount: string;
     statusAuditCount: string;
+    productionCurrentStatusAuditCount: string;
     stageActivateAuditCount: string;
     stageDeactivateAuditCount: string;
     calendarOutboxCount: string;
     deadlineOutboxCount: string;
     statusOutboxCount: string;
+    productionCurrentStatusOutboxCount: string;
     stageActivateOutboxCount: string;
     stageDeactivateOutboxCount: string;
+    productionCurrentStatusEventCount: string;
     completedCommandCount: string;
 }

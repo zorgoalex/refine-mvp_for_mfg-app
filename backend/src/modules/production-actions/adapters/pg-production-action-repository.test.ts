@@ -145,6 +145,221 @@ describe('PgProductionActionRepository', () => {
 
     expect(normalizedSql(database.queries)).toContain('UPDATE orders SET order_status_id');
   });
+
+  it('changes manual payment status with idempotency, audit, and outbox', async () => {
+    const database = createDatabase();
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.changePaymentStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { paymentStatusId: 3, version: 3, idempotencyKey: 'payment-status-key-1' },
+      requestId: 'request-payment-status',
+    });
+
+    expect(result).toMatchObject({
+      order: { orderId: 15, paymentStatusId: 3, version: 4 },
+      auditId: 'audit-id-1',
+      requestId: 'request-payment-status',
+    });
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('SELECT set_session_user($1)');
+    expect(sql).toContain('INSERT INTO command_idempotency_keys');
+    expect(sql).toContain('SELECT payment_status_id, payment_status_name');
+    expect(sql).toContain('UPDATE orders SET payment_status_id');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(JSON.stringify(database.queries.map((query) => query.params))).toContain(
+      'order.payment_status_changed',
+    );
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
+
+  it('changes manual production current status with idempotency, cascade metadata, audit, and outbox', async () => {
+    const database = createDatabase({
+      orderProductionStatusId: 1,
+      productionStatusFromDetailsEnabled: false,
+      detailStatusRowsBefore: [
+        { detail_id: 101, production_status_id: 1 },
+        { detail_id: 102, production_status_id: 3 },
+      ],
+      detailStatusRowsAfter: [
+        { detail_id: 101, production_status_id: 2 },
+        { detail_id: 102, production_status_id: 2 },
+      ],
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.changeProductionStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { productionStatusId: 2, version: 3, idempotencyKey: 'production-status-key-1' },
+      requestId: 'request-production-status',
+    });
+
+    expect(result).toMatchObject({
+      order: { orderId: 15, productionStatusId: 2, version: 4 },
+      auditId: 'audit-id-1',
+      requestId: 'request-production-status',
+    });
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('SELECT set_session_user($1)');
+    expect(sql).toContain('INSERT INTO command_idempotency_keys');
+    expect(sql).toContain(
+      'SELECT production_status_id, production_status_name, production_status_code',
+    );
+    expect(sql).toContain(
+      'FROM order_details WHERE order_id = $1 AND COALESCE(delete_flag, false) = false ORDER BY detail_id FOR UPDATE',
+    );
+    expect(sql).toContain(
+      'UPDATE orders SET production_status_id = $2, production_status_from_details_enabled = false, version = version + 1',
+    );
+    expect(sql).not.toContain('production_status_events');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('orders.production_status_change');
+    expect(params).toContain('order.production_status_changed');
+    expect(params).toContain('"affectedDetailIds":[101,102]');
+    expect(params).toContain('"affectedDetailCount":2');
+    expect(params).toContain('"beforeStatusDistribution":{"1":1,"3":1}');
+    expect(params).toContain('"afterStatusDistribution":{"2":2}');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
+
+  it('changes derived production current status by switching to manual mode with detail metadata', async () => {
+    const database = createDatabase({
+      orderProductionStatusId: 1,
+      productionStatusFromDetailsEnabled: true,
+      detailStatusRowsBefore: [
+        { detail_id: 101, production_status_id: 1 },
+        { detail_id: 102, production_status_id: 3 },
+      ],
+      detailStatusRowsAfter: [
+        { detail_id: 101, production_status_id: 2 },
+        { detail_id: 102, production_status_id: 2 },
+      ],
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.changeProductionStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: {
+        productionStatusId: 2,
+        version: 3,
+        idempotencyKey: 'production-status-derived-key-1',
+      },
+      requestId: 'request-production-status-derived',
+    });
+
+    expect(result.order).toEqual({ orderId: 15, productionStatusId: 2, version: 4 });
+    expect(result).toMatchObject({
+      auditId: 'audit-id-1',
+      requestId: 'request-production-status-derived',
+    });
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain(
+      'UPDATE orders SET production_status_id = $2, production_status_from_details_enabled = false, version = version + 1',
+    );
+    expect(sql).toContain('SELECT detail_id, production_status_id FROM order_details');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('orders.production_status_change');
+    expect(params).toContain('order.production_status_changed');
+    expect(params).toContain('"productionStatusFromDetailsEnabled":false');
+    expect(params).toContain('"previousProductionStatusFromDetailsEnabled":true');
+    expect(params).toContain('"affectedDetailIds":[101,102]');
+    expect(params).toContain('"affectedDetailCount":2');
+    expect(params).toContain('"beforeStatusDistribution":{"1":1,"3":1}');
+    expect(params).toContain('"afterStatusDistribution":{"2":2}');
+  });
+
+  it('completes same manual production status command without duplicate audit or outbox', async () => {
+    const database = createDatabase({
+      orderProductionStatusId: 2,
+      productionStatusFromDetailsEnabled: false,
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.changeProductionStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { productionStatusId: 2, version: 3, idempotencyKey: 'production-status-noop-key-1' },
+      requestId: 'request-production-status-noop',
+    });
+
+    expect(result).toMatchObject({
+      order: { orderId: 15, productionStatusId: 2, version: 3 },
+      requestId: 'request-production-status-noop',
+    });
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET production_status_id');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
+
+  it('activates a detail production stage with detail lock, event, audit, and outbox', async () => {
+    const database = createDatabase({ existingDetailProductionEventId: null });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.activateDetailProductionStage({
+      currentUser: currentUser(),
+      detailId: 99,
+      productionStatusId: 4,
+      dto: { idempotencyKey: 'detail-stage-key-1', note: 'started cutting' },
+      requestId: 'request-detail-stage',
+    });
+
+    expect(result).toMatchObject({
+      order: { orderId: 15, version: 3 },
+      event: { productionEventId: 42, productionStatusId: 4, active: true },
+      auditId: 'audit-id-1',
+      requestId: 'request-detail-stage',
+    });
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('SELECT set_session_user($1)');
+    expect(sql).toContain('INSERT INTO command_idempotency_keys');
+    expect(sql).toContain('FROM order_details od JOIN orders o ON o.order_id = od.order_id');
+    expect(sql).toContain('o.production_status_id');
+    expect(sql).toContain('o.production_status_from_details_enabled');
+    expect(sql).toContain('FOR UPDATE');
+    expect(sql).toContain('INSERT INTO production_status_events');
+    expect(sql).toContain('ON CONFLICT (detail_id, production_status_id) WHERE detail_id IS NOT NULL');
+    expect(sql).not.toContain('UPDATE orders SET version = version + 1');
+    expect(sql).toContain('INSERT INTO audit_log');
+    const params = JSON.stringify(database.queries.map((query) => query.params));
+    expect(params).toContain('production.detail_stage_activated');
+    expect(params).toContain('order_detail');
+    expect(params).toContain('detail-stage-key-1');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
+
+  it('completes duplicate detail production stage commands without duplicate outbox', async () => {
+    const database = createDatabase({ existingDetailProductionEventId: 77 });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.activateDetailProductionStage({
+      currentUser: currentUser(),
+      detailId: 99,
+      productionStatusId: 4,
+      dto: { idempotencyKey: 'detail-stage-duplicate-key-1' },
+      requestId: 'request-detail-stage-duplicate',
+    });
+
+    expect(result).toMatchObject({
+      order: { orderId: 15, version: 3 },
+      event: { productionEventId: 77, productionStatusId: 4, active: true },
+      requestId: 'request-detail-stage-duplicate',
+    });
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('INSERT INTO production_status_events');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
 });
 
 function createDatabase(options: {
@@ -153,6 +368,11 @@ function createDatabase(options: {
   orderManagerUserId?: number | null;
   existingProductionEventId?: number | null;
   idempotencyCompletedResponse?: unknown;
+  existingDetailProductionEventId?: number | null;
+  orderProductionStatusId?: number | null;
+  productionStatusFromDetailsEnabled?: boolean;
+  detailStatusRowsBefore?: Array<{ detail_id: number; production_status_id: number | null }>;
+  detailStatusRowsAfter?: Array<{ detail_id: number; production_status_id: number | null }>;
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
@@ -202,6 +422,10 @@ function createDatabase(options: {
               order_date: '2026-05-01',
               planned_completion_date: '2026-05-10',
               order_status_id: 5,
+              payment_status_id: 1,
+              production_status_id: options.orderProductionStatusId ?? 1,
+              production_status_from_details_enabled:
+                options.productionStatusFromDetailsEnabled ?? false,
               version: options.orderVersion ?? 3,
               created_by: options.orderCreatedByUserId ?? 1,
               manager_id: options.orderManagerUserId ?? null,
@@ -213,6 +437,13 @@ function createDatabase(options: {
 
       if (normalized.startsWith('SELECT order_status_id, order_status_name')) {
         return { rows: [{ order_status_id: params[0], order_status_name: 'Выдан' }], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('SELECT payment_status_id, payment_status_name')) {
+        return {
+          rows: [{ payment_status_id: params[0], payment_status_name: 'Оплачено' }],
+          rowCount: 1,
+        };
       }
 
       if (normalized.startsWith('SELECT production_status_id')) {
@@ -228,6 +459,16 @@ function createDatabase(options: {
         };
       }
 
+      if (normalized.startsWith('SELECT event_id FROM production_status_events WHERE detail_id')) {
+        return {
+          rows:
+            options.existingDetailProductionEventId === null
+              ? []
+              : [{ event_id: options.existingDetailProductionEventId ?? 42 }],
+          rowCount: options.existingDetailProductionEventId === null ? 0 : 1,
+        };
+      }
+
       if (normalized.startsWith('SELECT event_id FROM production_status_events')) {
         return {
           rows:
@@ -238,13 +479,44 @@ function createDatabase(options: {
         };
       }
 
+      if (normalized.startsWith('SELECT od.detail_id')) {
+        return {
+          rows: [
+            {
+              detail_id: 99,
+              order_id: 15,
+              client_id: 969,
+              production_status_id: options.orderProductionStatusId ?? 1,
+              production_status_from_details_enabled:
+                options.productionStatusFromDetailsEnabled ?? false,
+              version: options.orderVersion ?? 3,
+              created_by: options.orderCreatedByUserId ?? 1,
+              manager_id: options.orderManagerUserId ?? null,
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+
       if (normalized.startsWith('INSERT INTO production_status_events')) {
         return { rows: [{ event_id: 42 }], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('SELECT detail_id, production_status_id FROM order_details')) {
+        const updateAlreadyRan = queries.some((query) =>
+          normalizeSql(query.text).startsWith('UPDATE orders SET production_status_id'),
+        );
+        const rows = updateAlreadyRan
+          ? (options.detailStatusRowsAfter ?? [])
+          : (options.detailStatusRowsBefore ?? []);
+        return { rows, rowCount: rows.length };
       }
 
       if (
         normalized.startsWith('UPDATE orders SET planned_completion_date') ||
         normalized.startsWith('UPDATE orders SET order_status_id') ||
+        normalized.startsWith('UPDATE orders SET payment_status_id') ||
+        normalized.startsWith('UPDATE orders SET production_status_id') ||
         normalized.startsWith('UPDATE orders SET version = version + 1')
       ) {
         return { rows: [{ version: 4 }], rowCount: 1 };
@@ -280,6 +552,23 @@ function currentUser(role: CurrentUser['role'] = 'admin', id = '1'): CurrentUser
 
 function normalizedSql(queries: Array<{ text: string }>): string {
   return queries.map((query) => normalizeSql(query.text)).join('\n');
+}
+
+function normalizedParams(queries: Array<{ params: readonly unknown[] }>): string {
+  return JSON.stringify(
+    queries.map((query) =>
+      query.params.map((param) => {
+        if (typeof param !== 'string' || !param.startsWith('{')) {
+          return param;
+        }
+        try {
+          return JSON.parse(param) as unknown;
+        } catch {
+          return param;
+        }
+      }),
+    ),
+  );
 }
 
 function normalizeSql(sql: string): string {

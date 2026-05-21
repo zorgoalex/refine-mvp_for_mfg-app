@@ -18,6 +18,8 @@ export const apiRoutes = {
     formData: backendApiPath('/orders/form-data'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
     status: (orderId: number) => backendApiPath(`/orders/${orderId}/status`),
+    paymentStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/payment-status`),
+    productionStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/production-status`),
     calendarDate: (orderId: number) => backendApiPath(`/orders/${orderId}/calendar-date`),
     orderStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/order-status`),
     productionStageEvent: (orderId: number, productionStatusId: number) =>
@@ -31,6 +33,10 @@ export const apiRoutes = {
     deadlines: (orderId: number) => backendApiPath(`/orders/${orderId}/deadlines`),
     deadlineEvents: (orderId: number) => backendApiPath(`/orders/${orderId}/deadline-events`),
     deadlineSummary: (orderId: number) => backendApiPath(`/orders/${orderId}/deadline-summary`),
+  },
+  orderDetails: {
+    productionStageEvent: (detailId: number, productionStatusId: number) =>
+      backendApiPath(`/order-details/${detailId}/production-stage-events/${productionStatusId}`),
   },
   payments: {
     list: backendApiPath('/payments'),

@@ -60,14 +60,22 @@ test.describe('Production actions backend cutover', () => {
         });
 
         await card.click({ button: 'right' });
-        await expect(page.getByText('Статус оплаты')).toHaveCount(0);
+        await page.getByText('Статус оплаты').click();
+        await page.getByText('Оплачено', { exact: true }).click();
+        await expect.poll(() => api.paymentStatusBodies.length).toBe(1);
+        expect(api.paymentStatusBodies[0]).toMatchObject({
+            paymentStatusId: 3,
+            version: 5,
+        });
+
+        await card.click({ button: 'right' });
         await page.getByText('Статус производства').click();
         await page.getByText('В работе', { exact: true }).click();
         await expect.poll(() => api.stageActivations.length).toBe(1);
         expect(api.stageActivations[0]).toMatchObject({
             orderId: 15,
             productionStatusId: 2,
-            body: { version: 5 },
+            body: { version: 6 },
         });
 
         await card.click({ button: 'right' });
@@ -77,7 +85,7 @@ test.describe('Production actions backend cutover', () => {
         expect(api.stageDeactivations[0]).toMatchObject({
             orderId: 15,
             productionStatusId: 2,
-            body: { version: 6 },
+            body: { version: 7 },
         });
 
         await page.goto('/orders/edit/15');
@@ -86,15 +94,53 @@ test.describe('Production actions backend cutover', () => {
         });
         await expect(header).toBeVisible({ timeout: 30000 });
         await header.click({ button: 'right' });
-        await expect(page.getByText('Статус оплаты')).toHaveCount(0);
+        await page.getByText('Статус оплаты').click();
+        await page.getByText('Частично оплачено', { exact: true }).click();
+        await expect.poll(() => api.paymentStatusBodies.length).toBe(2);
+        expect(api.paymentStatusBodies[1]).toMatchObject({
+            paymentStatusId: 2,
+            version: 8,
+        });
+
+        await header.click({ button: 'right' });
         await page.getByText('Статус заказа').click();
         await page.getByText('Готов к выдаче', { exact: true }).click();
         await expect.poll(() => api.orderStatusBodies.length).toBe(2);
         expect(api.orderStatusBodies[1]).toMatchObject({
             orderStatusId: 3,
-            version: 7,
+            version: 9,
         });
 
+        expect(graphqlProductionMutations).toEqual([]);
+    });
+
+    test('routes manual current production status select to backend without Hasura mutations', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedCalendarOrder(db);
+        seedOrderDetail(db);
+
+        const graphqlProductionMutations: string[] = [];
+        await setupWorkflowMockApi(page, db, {
+            onGraphqlQuery: (query) => {
+                if (productionHasuraMutationPattern.test(query)) {
+                    graphqlProductionMutations.push(query);
+                }
+            },
+        });
+        const api = await setupProductionActionsBackendMock(page, db);
+
+        await page.goto('/orders/edit/15');
+        await page.getByRole('tab', { name: 'Основная информация' }).click();
+        await expect(page.getByLabel('Статус производства')).toBeVisible({ timeout: 30000 });
+        await page.getByText('Автообновление статусов производства').click();
+        await page.getByLabel('Статус производства').click();
+        await page.getByText('В работе', { exact: true }).click();
+
+        await expect.poll(() => api.productionStatusBodies.length).toBe(1);
+        expect(api.productionStatusBodies[0]).toMatchObject({ productionStatusId: 2, version: 3 });
+        expect(db.orders[0].production_status_id).toBe(2);
+        expect(db.orders[0].version).toBe(4);
+        expect(db.order_details[0].production_status_id).toBe(2);
         expect(graphqlProductionMutations).toEqual([]);
     });
 
@@ -379,6 +425,124 @@ test.describe('Production actions backend cutover', () => {
         });
         expect(graphqlProductionMutations).toEqual([]);
     });
+
+    test('routes detail production stage activation to backend without Hasura mutations', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedCalendarOrder(db);
+        seedOrderDetail(db);
+
+        const graphqlProductionMutations: string[] = [];
+        await setupWorkflowMockApi(page, db, {
+            onGraphqlQuery: (query) => {
+                if (productionHasuraMutationPattern.test(query)) {
+                    graphqlProductionMutations.push(query);
+                }
+            },
+        });
+        const api = await setupProductionActionsBackendMock(page, db);
+
+        await page.goto('/calendar');
+        const response = await callDetailStageEndpoint(page, 1501, 2, {
+            idempotencyKey: 'detail-stage-key-1',
+            note: 'started cutting',
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toMatchObject({
+            order: { orderId: 15 },
+            event: { productionEventId: 200, productionStatusId: 2, active: true },
+            requestId: 'request-detail-stage-on',
+        });
+        expect(api.detailStageActivations).toEqual([
+            {
+                detailId: 1501,
+                productionStatusId: 2,
+                body: { idempotencyKey: 'detail-stage-key-1', note: 'started cutting' },
+            },
+        ]);
+        expect(db.production_status_events).toContainEqual(
+            expect.objectContaining({
+                event_id: 200,
+                order_id: null,
+                detail_id: 1501,
+                production_status_id: 2,
+                note: 'started cutting',
+            }),
+        );
+        expect(graphqlProductionMutations).toEqual([]);
+    });
+
+    test('keeps duplicate detail production stage activation idempotent', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedCalendarOrder(db);
+        seedOrderDetail(db);
+
+        const graphqlProductionMutations: string[] = [];
+        await setupWorkflowMockApi(page, db, {
+            onGraphqlQuery: (query) => {
+                if (productionHasuraMutationPattern.test(query)) {
+                    graphqlProductionMutations.push(query);
+                }
+            },
+        });
+        const api = await setupProductionActionsBackendMock(page, db);
+
+        await page.goto('/calendar');
+        const first = await callDetailStageEndpoint(page, 1501, 2, {
+            idempotencyKey: 'detail-stage-key-duplicate-1',
+        });
+        const second = await callDetailStageEndpoint(page, 1501, 2, {
+            idempotencyKey: 'detail-stage-key-duplicate-2',
+        });
+
+        expect(first.status).toBe(200);
+        expect(second.status).toBe(200);
+        expect(first.body.event).toMatchObject({ productionEventId: 200, active: true });
+        expect(second.body.event).toMatchObject({ productionEventId: 200, active: true });
+        expect(api.detailStageActivations).toHaveLength(2);
+        expect(
+            db.production_status_events.filter(
+                (event) => event.detail_id === 1501 && event.production_status_id === 2,
+            ),
+        ).toHaveLength(1);
+        expect(graphqlProductionMutations).toEqual([]);
+    });
+
+    test('rejects detail production stage activation outside scoped order access', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedCalendarOrder(db);
+        seedOrderDetail(db, { detailId: 1601, orderId: 16 });
+
+        const graphqlProductionMutations: string[] = [];
+        await setupWorkflowMockApi(page, db, {
+            onGraphqlQuery: (query) => {
+                if (productionHasuraMutationPattern.test(query)) {
+                    graphqlProductionMutations.push(query);
+                }
+            },
+        });
+        const api = await setupProductionActionsBackendMock(page, db);
+        api.forbiddenOrderIds.add(16);
+
+        await page.goto('/calendar');
+        const response = await callDetailStageEndpoint(page, 1601, 2, {
+            idempotencyKey: 'detail-stage-forbidden-1',
+        });
+
+        expect(response.status).toBe(403);
+        expect(response.body).toMatchObject({
+            error: { code: 'PERMISSION_DENIED' },
+        });
+        expect(api.detailStageActivations).toEqual([
+            {
+                detailId: 1601,
+                productionStatusId: 2,
+                body: { idempotencyKey: 'detail-stage-forbidden-1' },
+            },
+        ]);
+        expect(db.production_status_events).toEqual([]);
+        expect(graphqlProductionMutations).toEqual([]);
+    });
 });
 
 function seedCalendarOrder(db: WorkflowMockDb) {
@@ -415,6 +579,7 @@ function seedCalendarOrder(db: WorkflowMockDb) {
         order_status_id: 1,
         payment_status_id: 1,
         production_status_id: 1,
+        production_status_from_details_enabled: true,
         final_amount: 1000,
         paid_amount: 0,
         parts_count: 1,
@@ -433,6 +598,7 @@ function seedCalendarOrder(db: WorkflowMockDb) {
         order_status_id: 1,
         payment_status_id: 1,
         production_status_id: 1,
+        production_status_from_details_enabled: true,
         final_amount: 1000,
         paid_amount: 0,
         parts_count: 1,
@@ -444,10 +610,31 @@ function seedCalendarOrder(db: WorkflowMockDb) {
     });
 }
 
+function seedOrderDetail(
+    db: WorkflowMockDb,
+    options: { detailId?: number; orderId?: number } = {},
+) {
+    db.order_details.push({
+        detail_id: options.detailId ?? 1501,
+        order_id: options.orderId ?? 15,
+        detail_number: 1,
+        detail_name: 'E2E detail production event',
+        height: 100,
+        width: 200,
+        quantity: 1,
+        area: 0.02,
+        production_status_id: 1,
+        delete_flag: false,
+        version: 0,
+    });
+}
+
 async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb) {
     const api = {
         calendarDateBodies: [] as Array<Record<string, unknown>>,
         orderStatusBodies: [] as Array<Record<string, unknown>>,
+        paymentStatusBodies: [] as Array<Record<string, unknown>>,
+        productionStatusBodies: [] as Array<Record<string, unknown>>,
         stageActivations: [] as Array<{
             orderId: number;
             productionStatusId: number;
@@ -455,6 +642,11 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
         }>,
         stageDeactivations: [] as Array<{
             orderId: number;
+            productionStatusId: number;
+            body: Record<string, unknown>;
+        }>,
+        detailStageActivations: [] as Array<{
+            detailId: number;
             productionStatusId: number;
             body: Record<string, unknown>;
         }>,
@@ -543,6 +735,68 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
         });
     });
 
+    await page.route(/\/api\/v1\/orders\/\d+\/payment-status$/, async (route) => {
+        const body = JSON.parse(route.request().postData() || '{}');
+        api.paymentStatusBodies.push(body);
+        const orderId = readOrderId(route);
+        const order = findOrder(db, orderId);
+        if (api.forbiddenOrderIds.has(orderId)) {
+            await fulfillApiError(route, 403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия');
+            return;
+        }
+        if (Number(body.version) !== Number(order.version)) {
+            await fulfillVersionConflict(route, orderId, body.version, order.version);
+            return;
+        }
+        if (Number(order.payment_status_id) !== Number(body.paymentStatusId)) {
+            order.payment_status_id = body.paymentStatusId;
+            order.version = Number(order.version) + 1;
+        }
+
+        await fulfillJson(route, {
+            order: {
+                orderId,
+                paymentStatusId: order.payment_status_id,
+                version: order.version,
+            },
+            requestId: 'request-payment-status',
+        });
+    });
+
+    await page.route(/\/api\/v1\/orders\/\d+\/production-status$/, async (route) => {
+        const body = JSON.parse(route.request().postData() || '{}');
+        api.productionStatusBodies.push(body);
+        const orderId = readOrderId(route);
+        const order = findOrder(db, orderId);
+        if (api.forbiddenOrderIds.has(orderId)) {
+            await fulfillApiError(route, 403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия');
+            return;
+        }
+        if (Number(body.version) !== Number(order.version)) {
+            await fulfillVersionConflict(route, orderId, body.version, order.version);
+            return;
+        }
+        if (Number(order.production_status_id) !== Number(body.productionStatusId)) {
+            order.production_status_id = body.productionStatusId;
+            order.production_status_from_details_enabled = false;
+            for (const detail of db.order_details) {
+                if (Number(detail.order_id) === orderId && !detail.delete_flag) {
+                    detail.production_status_id = body.productionStatusId;
+                }
+            }
+            order.version = Number(order.version) + 1;
+        }
+
+        await fulfillJson(route, {
+            order: {
+                orderId,
+                productionStatusId: order.production_status_id,
+                version: order.version,
+            },
+            requestId: 'request-production-status',
+        });
+    });
+
     await page.route(/\/api\/v1\/orders\/\d+\/production-stage-events\/\d+$/, async (route) => {
         const method = route.request().method();
         const body = JSON.parse(route.request().postData() || '{}');
@@ -623,13 +877,94 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
         await route.fallback();
     });
 
+    await page.route(/\/api\/v1\/order-details\/\d+\/production-stage-events\/\d+$/, async (route) => {
+        const method = route.request().method();
+        const body = JSON.parse(route.request().postData() || '{}');
+        const detailId = readOrderDetailId(route);
+        const productionStatusId = Number(new URL(route.request().url()).pathname.split('/').pop());
+
+        if (method !== 'PUT') {
+            await route.fallback();
+            return;
+        }
+
+        api.detailStageActivations.push({ detailId, productionStatusId, body });
+        const detail = findOrderDetail(db, detailId);
+        const order = findOrder(db, Number(detail.order_id));
+        if (api.forbiddenOrderIds.has(Number(order.order_id))) {
+            await fulfillApiError(route, 403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия');
+            return;
+        }
+
+        const existingEvent = db.production_status_events.find(
+            (event) =>
+                Number(event.detail_id) === detailId &&
+                Number(event.production_status_id) === productionStatusId,
+        );
+        const event = existingEvent ?? {
+            event_id: 200,
+            order_id: null,
+            detail_id: detailId,
+            production_status_id: productionStatusId,
+            event_at: `${initialCalendarDate.iso}T00:00:00.000Z`,
+            event_by: 1,
+            note: body.note ?? null,
+            payload: {},
+        };
+        if (!existingEvent) {
+            db.production_status_events.push(event);
+        }
+
+        await fulfillJson(route, {
+            order: { orderId: order.order_id, version: order.version },
+            event: {
+                productionEventId: event.event_id,
+                productionStatusId,
+                active: true,
+            },
+            requestId: 'request-detail-stage-on',
+        });
+    });
+
     return api;
+}
+
+async function callDetailStageEndpoint(
+    page: Page,
+    detailId: number,
+    productionStatusId: number,
+    body: Record<string, unknown>,
+): Promise<{ status: number; body: any }> {
+    return page.evaluate(
+        async ({ detailId: nextDetailId, productionStatusId: nextProductionStatusId, body: nextBody }) => {
+            const response = await fetch(
+                `/api/v1/order-details/${nextDetailId}/production-stage-events/${nextProductionStatusId}`,
+                {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(nextBody),
+                },
+            );
+
+            return {
+                status: response.status,
+                body: await response.json(),
+            };
+        },
+        { detailId, productionStatusId, body },
+    );
 }
 
 function readOrderId(route: Route): number {
     const parts = new URL(route.request().url()).pathname.split('/');
     const orderIndex = parts.findIndex((part) => part === 'orders');
     return Number(parts[orderIndex + 1]);
+}
+
+function readOrderDetailId(route: Route): number {
+    const parts = new URL(route.request().url()).pathname.split('/');
+    const detailIndex = parts.findIndex((part) => part === 'order-details');
+    return Number(parts[detailIndex + 1]);
 }
 
 function findOrder(db: WorkflowMockDb, orderId: number) {
@@ -639,6 +974,15 @@ function findOrder(db: WorkflowMockDb, orderId: number) {
     }
 
     return order;
+}
+
+function findOrderDetail(db: WorkflowMockDb, detailId: number) {
+    const detail = db.order_details.find((item) => item.detail_id === detailId);
+    if (!detail) {
+        throw new Error(`Missing order detail ${detailId}`);
+    }
+
+    return detail;
 }
 
 function relativeDate(offsetDays: number) {

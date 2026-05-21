@@ -546,6 +546,100 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/payment-status:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    patch:
+      tags:
+        - Production Actions
+      operationId: changePaymentStatus
+      summary: Изменить статус оплаты заказа
+      description: Изменяет ручной статус оплаты заказа с записью audit event и stale-safe проверкой version.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.update
+        - payments.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePaymentStatusRequest'
+      responses:
+        '200':
+          description: Статус оплаты изменён
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/production-status:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    patch:
+      tags:
+        - Production Actions
+      operationId: changeProductionStatus
+      summary: Изменить текущий производственный статус заказа
+      description: Изменяет текущий производственный статус заказа с записью audit event и stale-safe проверкой version.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.change_production_status
+        - orders.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeProductionStatusRequest'
+      responses:
+        '200':
+          description: Changed order production current status
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/orders/{orderId}/calendar-date:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -720,6 +814,56 @@ paths:
           $ref: '#/components/responses/OrderNotFound'
         '409':
           $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/order-details/{detailId}/production-stage-events/{productionStatusId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderDetailId'
+      - $ref: '#/components/parameters/ProductionStatusId'
+    put:
+      tags:
+        - Production Actions
+      operationId: activateDetailProductionStage
+      summary: Активировать производственный этап детали заказа
+      description: |
+        Команда идемпотентно фиксирует событие производственного этапа для детали заказа.
+        Версия заказа не требуется: повтор той же команды не создает повторный audit/outbox.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.change_production_status
+        - orders.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetailProductionStageEventRequest'
+      responses:
+        '200':
+          description: Производственный этап детали активирован
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -2252,6 +2396,14 @@ components:
         type: integer
         format: int64
         minimum: 1
+    OrderDetailId:
+      name: detailId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -2428,6 +2580,21 @@ components:
                   details:
                     currentVersion: 8
                     clientVersion: 7
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    IdempotencyConflict:
+      description: Конфликт idempotency key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            idempotencyKeyReused:
+              value:
+                error:
+                  code: IDEMPOTENCY_KEY_REUSED
+                  message: Idempotency key was reused with a different request
+                  details:
+                    idempotencyKey: detail-production-stage:01HZX8K5T3M2F5F7K9A2S1QW3E
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
     ClientPhoneConflict:
       description: Конфликт телефона клиента, refKey или idempotency key
@@ -3729,6 +3896,44 @@ components:
           minLength: 8
           maxLength: 200
 
+    ChangePaymentStatusRequest:
+      type: object
+      required:
+        - paymentStatusId
+        - version
+        - idempotencyKey
+      properties:
+        paymentStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+        version:
+          type: integer
+          minimum: 0
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+
+    ChangeProductionStatusRequest:
+      type: object
+      required:
+        - productionStatusId
+        - version
+        - idempotencyKey
+      properties:
+        productionStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+        version:
+          type: integer
+          minimum: 0
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+
     DeleteOrderResponse:
       type: object
       required:
@@ -3783,6 +3988,20 @@ components:
           minLength: 8
           maxLength: 200
 
+    DetailProductionStageEventRequest:
+      type: object
+      required:
+        - idempotencyKey
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+        note:
+          type: string
+          nullable: true
+          maxLength: 1000
+
     ProductionActionResponse:
       type: object
       required:
@@ -3803,6 +4022,12 @@ components:
               format: date
               nullable: true
             orderStatusId:
+              type: integer
+              format: int64
+            paymentStatusId:
+              type: integer
+              format: int64
+            productionStatusId:
               type: integer
               format: int64
             version:

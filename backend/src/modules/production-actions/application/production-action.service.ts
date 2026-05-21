@@ -3,7 +3,10 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import type { PermissionName } from '../../../permissions/permissions';
 import type {
   ActivateProductionStageCommand,
+  ActivateDetailProductionStageCommand,
   ChangeOrderStatusCommand,
+  ChangePaymentStatusCommand,
+  ChangeProductionStatusCommand,
   DeactivateProductionStageCommand,
   MoveCalendarDateCommand,
   ProductionActionRepositoryPort,
@@ -31,6 +34,19 @@ export class ProductionActionService {
     return this.ports.productionActions.changeOrderStatus(command);
   }
 
+  async changePaymentStatus(command: ChangePaymentStatusCommand) {
+    this.requirePermissions(command.currentUser, ['payments.update', 'orders.update']);
+    return this.ports.productionActions.changePaymentStatus(command);
+  }
+
+  async changeProductionStatus(command: ChangeProductionStatusCommand) {
+    this.requirePermissions(command.currentUser, [
+      'orders.change_production_status',
+      'orders.update',
+    ]);
+    return this.ports.productionActions.changeProductionStatus(command);
+  }
+
   async activateProductionStage(command: ActivateProductionStageCommand) {
     this.requirePermissions(command.currentUser, [
       'orders.change_production_status',
@@ -45,6 +61,14 @@ export class ProductionActionService {
       'orders.update',
     ]);
     return this.ports.productionActions.deactivateProductionStage(command);
+  }
+
+  async activateDetailProductionStage(command: ActivateDetailProductionStageCommand) {
+    this.requirePermissions(command.currentUser, [
+      'orders.change_production_status',
+      'orders.update',
+    ]);
+    return this.ports.productionActions.activateDetailProductionStage(command);
   }
 
   private requirePermissions(

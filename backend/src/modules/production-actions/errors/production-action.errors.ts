@@ -6,8 +6,14 @@ export class ProductionActionOrderNotFoundError extends ApiError {
   }
 }
 
+export class ProductionActionOrderDetailNotFoundError extends ApiError {
+  constructor(detailId: number) {
+    super(404, 'ORDER_DETAIL_NOT_FOUND', 'Order detail not found', { detailId });
+  }
+}
+
 export class ProductionActionStatusNotFoundError extends ApiError {
-  constructor(statusType: 'order_status' | 'production_status', statusId: number) {
+  constructor(statusType: 'order_status' | 'payment_status' | 'production_status', statusId: number) {
     super(422, 'VALIDATION_ERROR', 'Status not found or inactive', {
       errors: [{ field: statusType, message: 'Status not found or inactive' }],
       statusType,

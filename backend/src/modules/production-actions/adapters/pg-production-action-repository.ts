@@ -7,7 +7,10 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type {
   ActivateProductionStageCommand,
+  ActivateDetailProductionStageCommand,
   ChangeOrderStatusCommand,
+  ChangePaymentStatusCommand,
+  ChangeProductionStatusCommand,
   DeactivateProductionStageCommand,
   MoveCalendarDateCommand,
   ProductionActionRepositoryPort,
@@ -17,6 +20,7 @@ import {
   ProductionActionIdempotencyFailedError,
   ProductionActionIdempotencyInProgressError,
   ProductionActionIdempotencyKeyReusedError,
+  ProductionActionOrderDetailNotFoundError,
   ProductionActionOrderNotFoundError,
   ProductionActionStatusNotFoundError,
   ProductionActionVersionConflictError,
@@ -30,6 +34,9 @@ interface LockedOrderRow extends QueryResultRow {
   order_date: string | Date;
   planned_completion_date: string | Date | null;
   order_status_id: string | number;
+  payment_status_id: string | number;
+  production_status_id: string | number | null;
+  production_status_from_details_enabled: boolean | string | number | null;
   version: string | number;
   created_by: string | number | null;
   manager_id: string | number | null;
@@ -38,6 +45,11 @@ interface LockedOrderRow extends QueryResultRow {
 interface OrderStatusRow extends QueryResultRow {
   order_status_id: string | number;
   order_status_name: string;
+}
+
+interface PaymentStatusRow extends QueryResultRow {
+  payment_status_id: string | number;
+  payment_status_name: string;
 }
 
 interface ProductionStatusRow extends QueryResultRow {
@@ -65,22 +77,54 @@ interface IdempotencyRow extends QueryResultRow {
   status: 'processing' | 'completed' | 'failed';
 }
 
+interface DetailProductionStatusRow extends QueryResultRow {
+  detail_id: string | number;
+  production_status_id: string | number | null;
+}
+
+interface DetailProductionStatusSnapshot {
+  detailIds: number[];
+  statusDistribution: Record<string, number>;
+}
+
 interface LockedOrder {
   orderId: number;
   clientId: number | null;
   orderDate: string;
   plannedCompletionDate: string | null;
   orderStatusId: number;
+  paymentStatusId: number;
+  productionStatusId: number | null;
+  productionStatusFromDetailsEnabled: boolean;
   version: number;
   createdByUserId: string | null;
   managerUserId: string | null;
 }
 
+interface LockedOrderDetailRow extends QueryResultRow {
+  detail_id: string | number;
+  order_id: string | number;
+  client_id: string | number | null;
+  production_status_id: string | number | null;
+  production_status_from_details_enabled: boolean | string | number | null;
+  version: string | number;
+  created_by: string | number | null;
+  manager_id: string | number | null;
+}
+
+interface LockedOrderDetail {
+  detailId: number;
+  order: LockedOrder;
+}
+
 type CommandName =
   | 'orders.calendar_move'
   | 'orders.status_change'
+  | 'orders.payment_status_change'
+  | 'orders.production_status_change'
   | 'production.stage_activate'
-  | 'production.stage_deactivate';
+  | 'production.stage_deactivate'
+  | 'production.detail_stage_activate';
 
 export class PgProductionActionRepository implements ProductionActionRepositoryPort {
   private readonly orderAccessPolicy = new OrderAccessPolicy();
@@ -326,6 +370,274 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
     });
   }
 
+  changePaymentStatus(command: ChangePaymentStatusCommand): Promise<ProductionActionResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+
+      const requestId = requestIdOrFallback(command.requestId);
+      const idempotency = await reconcileIdempotency(tx, {
+        idempotencyKey: command.dto.idempotencyKey,
+        commandName: 'orders.payment_status_change',
+        currentUser: command.currentUser,
+        entityType: 'order',
+        entityId: String(command.orderId),
+        requestShape: {
+          actorUserId: command.currentUser.id,
+          commandName: 'orders.payment_status_change',
+          orderId: command.orderId,
+          paymentStatusId: command.dto.paymentStatusId,
+        },
+      });
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse;
+      }
+
+      const order = await loadOrderForUpdate(tx, command.orderId);
+      this.assertOrderScope(command.currentUser, order, ['orders.update', 'payments.update']);
+      const status = await loadPaymentStatus(tx, command.dto.paymentStatusId);
+      assertVersion(order, command.dto.version);
+
+      if (order.paymentStatusId === command.dto.paymentStatusId) {
+        const response = {
+          order: {
+            orderId: order.orderId,
+            paymentStatusId: order.paymentStatusId,
+            version: order.version,
+          },
+          requestId,
+        };
+        await completeIdempotency(tx, command.dto.idempotencyKey, response);
+        return response;
+      }
+
+      const nextVersion = await updatePaymentStatus(tx, order.orderId, status.paymentStatusId);
+      const auditId = await writeAudit(tx, {
+        event: 'orders.payment_status_change',
+        currentUser: command.currentUser,
+        requestId,
+        order,
+        source: SOURCE,
+        statusField: 'paymentStatus',
+        statusId: status.paymentStatusId,
+        statusName: status.paymentStatusName,
+        beforeJson: {
+          paymentStatusId: order.paymentStatusId,
+          version: order.version,
+        },
+        afterJson: {
+          paymentStatusId: status.paymentStatusId,
+          paymentStatusName: status.paymentStatusName,
+          version: nextVersion,
+        },
+        diffJson: {
+          paymentStatusId: {
+            before: order.paymentStatusId,
+            after: status.paymentStatusId,
+          },
+        },
+        metadataJson: {
+          source: SOURCE,
+          orderId: order.orderId,
+          clientId: order.clientId,
+          paymentStatusId: status.paymentStatusId,
+          paymentStatusName: status.paymentStatusName,
+          action: 'payment_status_change',
+          statusField: 'paymentStatus',
+          requestId,
+        },
+      });
+
+      await enqueueOutbox(tx, {
+        eventType: 'order.payment_status_changed',
+        aggregateType: 'order',
+        aggregateId: String(order.orderId),
+        idempotencyKey: command.dto.idempotencyKey,
+        payload: {
+          eventType: 'order.payment_status_changed',
+          actorUserId: command.currentUser.id,
+          requestId,
+          entityType: 'order',
+          entityId: String(order.orderId),
+          orderId: order.orderId,
+          clientId: order.clientId,
+          paymentStatusId: status.paymentStatusId,
+          action: 'payment_status_change',
+          scope: { source: 'order-header' },
+          idempotencyKey: command.dto.idempotencyKey,
+        },
+      });
+
+      const response = {
+        order: {
+          orderId: order.orderId,
+          paymentStatusId: status.paymentStatusId,
+          version: nextVersion,
+        },
+        auditId,
+        requestId,
+      };
+      await completeIdempotency(tx, command.dto.idempotencyKey, response);
+      return response;
+    });
+  }
+
+  changeProductionStatus(
+    command: ChangeProductionStatusCommand,
+  ): Promise<ProductionActionResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+
+      const requestId = requestIdOrFallback(command.requestId);
+      const idempotency = await reconcileIdempotency(tx, {
+        idempotencyKey: command.dto.idempotencyKey,
+        commandName: 'orders.production_status_change',
+        currentUser: command.currentUser,
+        entityType: 'order',
+        entityId: String(command.orderId),
+        requestShape: {
+          actorUserId: command.currentUser.id,
+          commandName: 'orders.production_status_change',
+          orderId: command.orderId,
+          productionStatusId: command.dto.productionStatusId,
+        },
+      });
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse;
+      }
+
+      const order = await loadOrderForUpdate(tx, command.orderId);
+      this.assertOrderScope(command.currentUser, order, [
+        'orders.update',
+        'orders.change_production_status',
+      ]);
+      const status = await loadProductionStatus(tx, command.dto.productionStatusId);
+      assertVersion(order, command.dto.version);
+
+      if (
+        order.productionStatusId === status.productionStatusId &&
+        !order.productionStatusFromDetailsEnabled
+      ) {
+        const response = {
+          order: {
+            orderId: order.orderId,
+            productionStatusId: order.productionStatusId ?? undefined,
+            version: order.version,
+          },
+          requestId,
+        };
+        await completeIdempotency(tx, command.dto.idempotencyKey, response);
+        return response;
+      }
+
+      const beforeDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
+      // Manual-mode detail sync is handled by the existing DB trigger on this order update;
+      // the after snapshot captures the trigger result.
+      const nextVersion = await updateProductionStatus(
+        tx,
+        order.orderId,
+        status.productionStatusId,
+      );
+      const afterDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
+      const affectedDetailIds = beforeDetails.detailIds.filter((detailId) =>
+        afterDetails.detailIds.includes(detailId),
+      );
+      const nextProductionStatusFromDetailsEnabled = false;
+
+      const auditId = await writeAudit(tx, {
+        event: 'orders.production_status_change',
+        currentUser: command.currentUser,
+        requestId,
+        order,
+        source: SOURCE,
+        statusField: 'productionCurrentStatus',
+        statusId: status.productionStatusId,
+        statusName: status.productionStatusName,
+        statusCode: status.productionStatusCode,
+        beforeJson: {
+          productionStatusId: order.productionStatusId,
+          productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+          version: order.version,
+          detailStatusDistribution: beforeDetails.statusDistribution,
+        },
+        afterJson: {
+          productionStatusId: status.productionStatusId,
+          productionStatusName: status.productionStatusName,
+          productionStatusCode: status.productionStatusCode,
+          productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
+          version: nextVersion,
+          detailStatusDistribution: afterDetails.statusDistribution,
+        },
+        diffJson: {
+          productionStatusId: {
+            before: order.productionStatusId,
+            after: status.productionStatusId,
+          },
+          productionStatusFromDetailsEnabled: {
+            before: order.productionStatusFromDetailsEnabled,
+            after: nextProductionStatusFromDetailsEnabled,
+          },
+          affectedDetailIds,
+          affectedDetailCount: affectedDetailIds.length,
+          beforeStatusDistribution: beforeDetails.statusDistribution,
+          afterStatusDistribution: afterDetails.statusDistribution,
+        },
+        metadataJson: {
+          source: SOURCE,
+          orderId: order.orderId,
+          clientId: order.clientId,
+          productionStatusId: status.productionStatusId,
+          productionStatusCode: status.productionStatusCode,
+          productionStatusName: status.productionStatusName,
+          productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
+          previousProductionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+          affectedDetailIds,
+          affectedDetailCount: affectedDetailIds.length,
+          beforeStatusDistribution: beforeDetails.statusDistribution,
+          afterStatusDistribution: afterDetails.statusDistribution,
+          action: 'production_status_change',
+          statusField: 'productionCurrentStatus',
+          requestId,
+        },
+      });
+
+      await enqueueOutbox(tx, {
+        eventType: 'order.production_status_changed',
+        aggregateType: 'order',
+        aggregateId: String(order.orderId),
+        idempotencyKey: command.dto.idempotencyKey,
+        payload: {
+          eventType: 'order.production_status_changed',
+          actorUserId: command.currentUser.id,
+          requestId,
+          entityType: 'order',
+          entityId: String(order.orderId),
+          orderId: order.orderId,
+          clientId: order.clientId,
+          productionStatusId: status.productionStatusId,
+          productionStatusCode: status.productionStatusCode,
+          productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
+          affectedDetailIds,
+          affectedDetailCount: affectedDetailIds.length,
+          action: 'production_status_change',
+          scope: { source: 'order-header' },
+          idempotencyKey: command.dto.idempotencyKey,
+        },
+      });
+
+      const response = {
+        order: {
+          orderId: order.orderId,
+          productionStatusId: status.productionStatusId,
+          version: nextVersion,
+        },
+        auditId,
+        requestId,
+      };
+      await completeIdempotency(tx, command.dto.idempotencyKey, response);
+      return response;
+    });
+  }
+
   activateProductionStage(
     command: ActivateProductionStageCommand,
   ): Promise<ProductionActionResponseDto> {
@@ -336,6 +648,153 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
     command: DeactivateProductionStageCommand,
   ): Promise<ProductionActionResponseDto> {
     return this.setProductionStageState(command, false);
+  }
+
+  activateDetailProductionStage(
+    command: ActivateDetailProductionStageCommand,
+  ): Promise<ProductionActionResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+
+      const requestId = requestIdOrFallback(command.requestId);
+      const idempotency = await reconcileIdempotency(tx, {
+        idempotencyKey: command.dto.idempotencyKey,
+        commandName: 'production.detail_stage_activate',
+        currentUser: command.currentUser,
+        entityType: 'order_detail',
+        entityId: String(command.detailId),
+        requestShape: {
+          actorUserId: command.currentUser.id,
+          commandName: 'production.detail_stage_activate',
+          detailId: command.detailId,
+          productionStatusId: command.productionStatusId,
+          note: command.dto.note ?? null,
+        },
+      });
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse;
+      }
+
+      const detail = await loadOrderDetailForUpdate(tx, command.detailId);
+      this.assertOrderScope(command.currentUser, detail.order, [
+        'orders.update',
+        'orders.change_production_status',
+      ]);
+      const productionStatus = await loadProductionStatus(tx, command.productionStatusId);
+
+      const existingEventId = await findDetailProductionEventId(
+        tx,
+        detail.detailId,
+        productionStatus.productionStatusId,
+      );
+      if (existingEventId !== null) {
+        const response = {
+          order: {
+            orderId: detail.order.orderId,
+            version: detail.order.version,
+          },
+          event: {
+            productionEventId: existingEventId,
+            productionStatusId: productionStatus.productionStatusId,
+            active: true,
+          },
+          requestId,
+        };
+        await completeIdempotency(tx, command.dto.idempotencyKey, response);
+        return response;
+      }
+
+      const productionEventId = await insertDetailProductionEvent(tx, {
+        detailId: detail.detailId,
+        productionStatusId: productionStatus.productionStatusId,
+        note: command.dto.note ?? null,
+        currentUser: command.currentUser,
+        requestId,
+      });
+      const auditId = await writeAudit(tx, {
+        event: 'production.detail_stage_activate',
+        currentUser: command.currentUser,
+        requestId,
+        order: detail.order,
+        entityType: 'order_detail',
+        entityId: String(detail.detailId),
+        source: SOURCE,
+        relatedProductionEventId: productionEventId,
+        stageCode: productionStatus.productionStatusCode,
+        statusField: 'productionDetailStage',
+        statusId: productionStatus.productionStatusId,
+        statusName: productionStatus.productionStatusName,
+        statusCode: productionStatus.productionStatusCode,
+        beforeJson: {
+          active: false,
+        },
+        afterJson: {
+          active: true,
+          detailId: detail.detailId,
+          productionEventId,
+          productionStatusId: productionStatus.productionStatusId,
+          productionStatusCode: productionStatus.productionStatusCode,
+        },
+        diffJson: {
+          active: {
+            before: false,
+            after: true,
+          },
+        },
+        metadataJson: {
+          source: SOURCE,
+          orderId: detail.order.orderId,
+          clientId: detail.order.clientId,
+          detailId: detail.detailId,
+          productionEventId,
+          productionStatusId: productionStatus.productionStatusId,
+          productionStatusCode: productionStatus.productionStatusCode,
+          productionStatusName: productionStatus.productionStatusName,
+          action: 'activate',
+          statusField: 'productionDetailStage',
+          requestId,
+        },
+      });
+
+      await enqueueOutbox(tx, {
+        eventType: 'production.detail_stage_activated',
+        aggregateType: 'order_detail',
+        aggregateId: String(detail.detailId),
+        idempotencyKey: command.dto.idempotencyKey,
+        payload: {
+          eventType: 'production.detail_stage_activated',
+          actorUserId: command.currentUser.id,
+          requestId,
+          entityType: 'order_detail',
+          entityId: String(detail.detailId),
+          orderId: detail.order.orderId,
+          clientId: detail.order.clientId,
+          detailId: detail.detailId,
+          productionEventId,
+          productionStatusId: productionStatus.productionStatusId,
+          productionStatusCode: productionStatus.productionStatusCode,
+          action: 'activate',
+          scope: { source: 'order-detail' },
+          idempotencyKey: command.dto.idempotencyKey,
+        },
+      });
+
+      const response = {
+        order: {
+          orderId: detail.order.orderId,
+          version: detail.order.version,
+        },
+        event: {
+          productionEventId,
+          productionStatusId: productionStatus.productionStatusId,
+          active: true,
+        },
+        auditId,
+        requestId,
+      };
+      await completeIdempotency(tx, command.dto.idempotencyKey, response);
+      return response;
+    });
   }
 
   private setProductionStageState(
@@ -598,8 +1057,8 @@ async function loadOrderForUpdate(tx: TransactionClient, orderId: number): Promi
   const result = await tx.query<LockedOrderRow>(
     `
     SELECT
-      order_id, client_id, order_date, planned_completion_date, order_status_id,
-      version, created_by, manager_id
+      order_id, client_id, order_date, planned_completion_date, order_status_id, payment_status_id,
+      production_status_id, production_status_from_details_enabled, version, created_by, manager_id
     FROM orders
     WHERE order_id = $1 AND delete_flag = false
     FOR UPDATE
@@ -617,9 +1076,57 @@ async function loadOrderForUpdate(tx: TransactionClient, orderId: number): Promi
     orderDate: toDateOnly(row.order_date) ?? '',
     plannedCompletionDate: toDateOnly(row.planned_completion_date),
     orderStatusId: toNumber(row.order_status_id),
+    paymentStatusId: toNumber(row.payment_status_id),
+    productionStatusId: toNullableNumber(row.production_status_id),
+    productionStatusFromDetailsEnabled: toBoolean(row.production_status_from_details_enabled, true),
     version: toNumber(row.version),
     createdByUserId: toNullableString(row.created_by),
     managerUserId: toNullableString(row.manager_id),
+  };
+}
+
+async function loadOrderDetailForUpdate(
+  tx: TransactionClient,
+  detailId: number,
+): Promise<LockedOrderDetail> {
+  const result = await tx.query<LockedOrderDetailRow>(
+    `
+    SELECT
+      od.detail_id,
+      o.order_id,
+      o.client_id,
+      o.production_status_id,
+      o.production_status_from_details_enabled,
+      o.version,
+      o.created_by,
+      o.manager_id
+    FROM order_details od
+    JOIN orders o ON o.order_id = od.order_id
+    WHERE od.detail_id = $1 AND COALESCE(od.delete_flag, false) = false AND o.delete_flag = false
+    FOR UPDATE
+    `,
+    [detailId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new ProductionActionOrderDetailNotFoundError(detailId);
+  }
+
+  return {
+    detailId: toNumber(row.detail_id),
+    order: {
+      orderId: toNumber(row.order_id),
+      clientId: toNullableNumber(row.client_id),
+      orderDate: '',
+      plannedCompletionDate: null,
+      orderStatusId: 0,
+      paymentStatusId: 0,
+      productionStatusId: toNullableNumber(row.production_status_id),
+      productionStatusFromDetailsEnabled: toBoolean(row.production_status_from_details_enabled, true),
+      version: toNumber(row.version),
+      createdByUserId: toNullableString(row.created_by),
+      managerUserId: toNullableString(row.manager_id),
+    },
   };
 }
 
@@ -644,6 +1151,30 @@ async function loadOrderStatus(
   return {
     orderStatusId: toNumber(row.order_status_id),
     orderStatusName: row.order_status_name,
+  };
+}
+
+async function loadPaymentStatus(
+  tx: TransactionClient,
+  paymentStatusId: number,
+): Promise<{ paymentStatusId: number; paymentStatusName: string }> {
+  const result = await tx.query<PaymentStatusRow>(
+    `
+    SELECT payment_status_id, payment_status_name
+    FROM payment_statuses
+    WHERE payment_status_id = $1 AND is_active = true
+    LIMIT 1
+    `,
+    [paymentStatusId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new ProductionActionStatusNotFoundError('payment_status', paymentStatusId);
+  }
+
+  return {
+    paymentStatusId: toNumber(row.payment_status_id),
+    paymentStatusName: row.payment_status_name,
   };
 }
 
@@ -739,6 +1270,71 @@ async function updateOrderStatus(
   return toNumber(result.rows[0].version);
 }
 
+async function updatePaymentStatus(
+  tx: TransactionClient,
+  orderId: number,
+  paymentStatusId: number,
+): Promise<number> {
+  const result = await tx.query<VersionRow>(
+    `
+    UPDATE orders
+    SET payment_status_id = $2,
+        version = version + 1
+    WHERE order_id = $1
+    RETURNING version
+    `,
+    [orderId, paymentStatusId],
+  );
+
+  return toNumber(result.rows[0].version);
+}
+
+async function loadDetailProductionStatusSnapshot(
+  tx: TransactionClient,
+  orderId: number,
+): Promise<DetailProductionStatusSnapshot> {
+  const result = await tx.query<DetailProductionStatusRow>(
+    `
+    SELECT detail_id, production_status_id
+    FROM order_details
+    WHERE order_id = $1 AND COALESCE(delete_flag, false) = false
+    ORDER BY detail_id
+    FOR UPDATE
+    `,
+    [orderId],
+  );
+
+  const detailIds: number[] = [];
+  const statusDistribution: Record<string, number> = {};
+  for (const row of result.rows) {
+    detailIds.push(toNumber(row.detail_id));
+    const key = row.production_status_id === null ? 'null' : String(row.production_status_id);
+    statusDistribution[key] = (statusDistribution[key] ?? 0) + 1;
+  }
+
+  return { detailIds, statusDistribution };
+}
+
+async function updateProductionStatus(
+  tx: TransactionClient,
+  orderId: number,
+  productionStatusId: number,
+): Promise<number> {
+  const result = await tx.query<VersionRow>(
+    `
+    UPDATE orders
+    SET production_status_id = $2,
+        production_status_from_details_enabled = false,
+        version = version + 1
+    WHERE order_id = $1
+    RETURNING version
+    `,
+    [orderId, productionStatusId],
+  );
+
+  return toNumber(result.rows[0].version);
+}
+
 async function incrementOrderVersion(tx: TransactionClient, orderId: number): Promise<number> {
   const result = await tx.query<VersionRow>(
     `
@@ -766,6 +1362,24 @@ async function findProductionEventId(
     FOR UPDATE
     `,
     [orderId, productionStatusId],
+  );
+
+  return result.rows[0] ? toNumber(result.rows[0].event_id) : null;
+}
+
+async function findDetailProductionEventId(
+  tx: TransactionClient,
+  detailId: number,
+  productionStatusId: number,
+): Promise<number | null> {
+  const result = await tx.query<ProductionEventRow>(
+    `
+    SELECT event_id
+    FROM production_status_events
+    WHERE detail_id = $1 AND production_status_id = $2
+    FOR UPDATE
+    `,
+    [detailId, productionStatusId],
   );
 
   return result.rows[0] ? toNumber(result.rows[0].event_id) : null;
@@ -804,6 +1418,41 @@ async function insertProductionEvent(
   return toNumber(result.rows[0].event_id);
 }
 
+async function insertDetailProductionEvent(
+  tx: TransactionClient,
+  input: {
+    detailId: number;
+    productionStatusId: number;
+    note: string | null;
+    currentUser: CurrentUser;
+    requestId: string;
+  },
+): Promise<number> {
+  const result = await tx.query<ProductionEventRow>(
+    `
+    INSERT INTO production_status_events (
+      order_id, detail_id, production_status_id, event_by, note, payload
+    )
+    VALUES (NULL, $1, $2, $3, $4, $5::jsonb)
+    ON CONFLICT (detail_id, production_status_id) WHERE detail_id IS NOT NULL
+    DO UPDATE SET payload = production_status_events.payload
+    RETURNING event_id
+    `,
+    [
+      input.detailId,
+      input.productionStatusId,
+      Number(input.currentUser.id),
+      input.note,
+      JSON.stringify({
+        source: SOURCE,
+        requestId: input.requestId,
+      }),
+    ],
+  );
+
+  return toNumber(result.rows[0].event_id);
+}
+
 async function deleteProductionEvent(tx: TransactionClient, eventId: number): Promise<void> {
   await tx.query('DELETE FROM production_status_events WHERE event_id = $1', [eventId]);
 }
@@ -815,6 +1464,8 @@ async function writeAudit(
     currentUser: CurrentUser;
     requestId: string;
     order: LockedOrder;
+    entityType?: string;
+    entityId?: string;
     source: string;
     relatedProductionEventId?: number | null;
     statusField?: string;
@@ -837,16 +1488,17 @@ async function writeAudit(
       before_json, after_json, diff_json, metadata_json
     )
     VALUES (
-      $1, 'order', $2, $3, $4, $5,
-      $6, $7, $8,
-      $9, $10, $11, $12, $13,
-      $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb
+      $1, $2, $3, $4, $5, $6,
+      $7, $8, $9,
+      $10, $11, $12, $13, $14,
+      $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb
     )
     RETURNING audit_id
     `,
     [
       input.event,
-      String(input.order.orderId),
+      input.entityType ?? 'order',
+      input.entityId ?? String(input.order.orderId),
       input.currentUser.id,
       input.requestId,
       input.source,
@@ -934,6 +1586,13 @@ function toNumber(value: string | number): number {
 
 function toNullableNumber(value: string | number | null): number | null {
   return value === null ? null : Number(value);
+}
+
+function toBoolean(value: boolean | string | number | null, fallback: boolean): boolean {
+  if (value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  return value === 'true' || value === 't' || value === '1';
 }
 
 function toNullableString(value: string | number | null): string | null {
