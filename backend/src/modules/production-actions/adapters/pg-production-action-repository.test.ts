@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -39,8 +40,15 @@ describe('PgProductionActionRepository', () => {
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
   });
 
-  it('returns stored idempotent response before stale version checks', async () => {
+  it('returns stored idempotent response only for the same versioned request', async () => {
     const database = createDatabase({
+      idempotencyExistingRequestHash: hashStable({
+        actorUserId: '1',
+        commandName: 'orders.calendar_move',
+        orderId: 15,
+        plannedCompletionDate: '2026-05-20',
+        version: 3,
+      }),
       idempotencyCompletedResponse: {
         order: { orderId: 15, plannedCompletionDate: '2026-05-20', version: 4 },
         requestId: 'request-1',
@@ -54,13 +62,43 @@ describe('PgProductionActionRepository', () => {
         orderId: 15,
         dto: {
           plannedCompletionDate: '2026-05-20',
-          version: 999,
+          version: 3,
           idempotencyKey: 'move-key-1',
         },
         requestId: 'request-1',
       }),
     ).resolves.toMatchObject({
       order: { orderId: 15, version: 4 },
+    });
+    expect(normalizedSql(database.queries)).not.toContain('FROM orders WHERE order_id');
+  });
+
+  it('rejects a reused production status idempotency key with a different version', async () => {
+    const database = createDatabase({
+      idempotencyExistingRequestHash: hashStable({
+        actorUserId: '1',
+        commandName: 'orders.production_status_change',
+        orderId: 15,
+        productionStatusId: 2,
+        version: 3,
+      }),
+      idempotencyCompletedResponse: {
+        order: { orderId: 15, productionStatusId: 2, version: 4 },
+        requestId: 'request-production-status',
+      },
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changeProductionStatus({
+        currentUser: currentUser(),
+        orderId: 15,
+        dto: { productionStatusId: 2, version: 999, idempotencyKey: 'production-status-key-1' },
+        requestId: 'request-production-status',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'IDEMPOTENCY_KEY_REUSED',
     });
     expect(normalizedSql(database.queries)).not.toContain('FROM orders WHERE order_id');
   });
@@ -368,6 +406,7 @@ function createDatabase(options: {
   orderManagerUserId?: number | null;
   existingProductionEventId?: number | null;
   idempotencyCompletedResponse?: unknown;
+  idempotencyExistingRequestHash?: string;
   existingDetailProductionEventId?: number | null;
   orderProductionStatusId?: number | null;
   productionStatusFromDetailsEnabled?: boolean;
@@ -404,7 +443,7 @@ function createDatabase(options: {
           rows: [
             {
               idempotency_key: params[0],
-              request_hash: lastRequestHash,
+              request_hash: options.idempotencyExistingRequestHash ?? lastRequestHash,
               response_json: options.idempotencyCompletedResponse,
               status: 'completed',
             },
@@ -573,4 +612,22 @@ function normalizedParams(queries: Array<{ params: readonly unknown[] }>): strin
 
 function normalizeSql(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim();
+}
+
+function hashStable(value: Record<string, unknown>): string {
+  return createHash('sha256').update(stableStringify(value)).digest('hex');
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(object[key])}`)
+    .join(',')}}`;
 }

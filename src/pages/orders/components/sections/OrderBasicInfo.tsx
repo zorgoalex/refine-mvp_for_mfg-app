@@ -22,9 +22,23 @@ import {
   productionActionsApi,
 } from '../../../../api/productionActionsApi';
 import { featureFlags } from '../../../../config/featureFlags';
+import { ordersApi } from '../../../../api/ordersApi';
+import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 
 export const OrderBasicInfo: React.FC = () => {
-  const { header, updateHeaderField, dowelingLinks, addDowelingLink, updateDowelingLink, deleteDowelingLink } = useOrderFormStore();
+  const {
+    header,
+    updateHeaderField,
+    dowelingLinks,
+    addDowelingLink,
+    updateDowelingLink,
+    deleteDowelingLink,
+    syncDetailsProductionStatus,
+    loadOrder,
+    setDirty,
+    setInitializing,
+    syncOriginals,
+  } = useOrderFormStore();
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [dowellingModalOpen, setDowellingModalOpen] = useState(false);
   const [selectedDowelingId, setSelectedDowelingId] = useState<number | undefined>(undefined);
@@ -127,6 +141,22 @@ export const OrderBasicInfo: React.FC = () => {
     }
   }, [dataProvider, header.order_id, updateHeaderField]);
 
+  const refreshFullOrderFromBackend = useCallback(async () => {
+    if (!header.order_id) return false;
+
+    try {
+      const order = await ordersApi.getById(header.order_id);
+      loadOrder(mapOrderDtoToFormValues(order));
+      setDirty(false);
+      setInitializing(false);
+      syncOriginals();
+      return true;
+    } catch (error) {
+      console.warn('[OrderBasicInfo] Failed to refresh full order after conflict:', error);
+      return false;
+    }
+  }, [header.order_id, loadOrder, setDirty, setInitializing, syncOriginals]);
+
   const handleProductionStatusChange = useCallback(async (value: number | undefined) => {
     if (value === undefined) {
       if (!featureFlags.useBackendProductionActions) {
@@ -156,6 +186,7 @@ export const OrderBasicInfo: React.FC = () => {
         });
         updateHeaderField('production_status_id', value);
         updateHeaderField('production_status_from_details_enabled', false);
+        syncDetailsProductionStatus(value);
         updateHeaderField('version', response.order.version);
         await invalidate({ resource: 'orders_view', invalidates: ['list'] });
         notification.success({ message: 'Статус производства обновлён', duration: 2 });
@@ -163,7 +194,15 @@ export const OrderBasicInfo: React.FC = () => {
       } catch (error) {
         updateHeaderField('version', commandVersion);
         if (isProductionActionVersionConflict(error)) {
-          await refreshHeaderFromOrder();
+          const refreshed = await refreshFullOrderFromBackend();
+          if (!refreshed) {
+            notification.error({
+              message: 'Данные заказа изменились',
+              description: 'Не удалось обновить позиции заказа. Перезагрузите страницу перед сохранением.',
+              duration: 0,
+            });
+            return;
+          }
           await invalidate({ resource: 'orders_view', invalidates: ['list'] });
           notification.warning({ message: 'Данные заказа изменились', description: 'Заказ обновлён. Повторите действие.', duration: 2 });
           return;
@@ -201,8 +240,10 @@ export const OrderBasicInfo: React.FC = () => {
     header.version,
     header.production_status_from_details_enabled,
     updateHeaderField,
+    syncDetailsProductionStatus,
     invalidate,
     refreshHeaderFromOrder,
+    refreshFullOrderFromBackend,
   ]);
 
   // Load existing doweling orders for selection

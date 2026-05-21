@@ -147,6 +147,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           commandName: 'orders.calendar_move',
           orderId: command.orderId,
           plannedCompletionDate: command.dto.plannedCompletionDate,
+          version: command.dto.version,
         },
       });
       if (idempotency.completedResponse) {
@@ -272,6 +273,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           commandName: 'orders.status_change',
           orderId: command.orderId,
           orderStatusId: command.dto.orderStatusId,
+          version: command.dto.version,
         },
       });
       if (idempotency.completedResponse) {
@@ -386,6 +388,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           commandName: 'orders.payment_status_change',
           orderId: command.orderId,
           paymentStatusId: command.dto.paymentStatusId,
+          version: command.dto.version,
         },
       });
       if (idempotency.completedResponse) {
@@ -499,6 +502,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           commandName: 'orders.production_status_change',
           orderId: command.orderId,
           productionStatusId: command.dto.productionStatusId,
+          version: command.dto.version,
         },
       });
       if (idempotency.completedResponse) {
@@ -819,6 +823,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           commandName,
           orderId: command.orderId,
           productionStatusId: command.productionStatusId,
+          version: command.dto.version,
           active,
         },
       });

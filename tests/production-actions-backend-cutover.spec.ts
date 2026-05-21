@@ -144,6 +144,69 @@ test.describe('Production actions backend cutover', () => {
         expect(graphqlProductionMutations).toEqual([]);
     });
 
+    test('keeps detail statuses aligned when saving after manual current production status change', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedCalendarOrder(db);
+        seedOrderDetail(db);
+
+        await setupWorkflowMockApi(page, db, {
+            runtimeConfig: { backendOrdersWrite: true },
+        });
+        const api = await setupProductionActionsBackendMock(page, db);
+
+        await page.goto('/orders/edit/15');
+        await page.getByRole('tab', { name: 'Основная информация' }).click();
+        await expect(page.getByLabel('Статус производства')).toBeVisible({ timeout: 30000 });
+        await page.getByText('Автообновление статусов производства').click();
+        await page.getByLabel('Статус производства').click();
+        await page.getByText('В работе', { exact: true }).click();
+        await expect.poll(() => api.productionStatusBodies.length).toBe(1);
+
+        await page.getByRole('button', { name: /Сохранить/ }).click();
+        await expect.poll(() => api.orderUpdateBodies.length).toBe(1);
+
+        expect(api.orderUpdateBodies[0].details).toEqual([
+            expect.objectContaining({ id: 1501, productionStatusId: 2 }),
+        ]);
+        expect(db.order_details[0].production_status_id).toBe(2);
+    });
+
+    test('refreshes detail statuses before saving after manual current production status conflict', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedCalendarOrder(db);
+        seedOrderDetail(db);
+
+        await setupWorkflowMockApi(page, db, {
+            runtimeConfig: { backendOrdersWrite: true },
+        });
+        const api = await setupProductionActionsBackendMock(page, db);
+
+        await page.goto('/orders/edit/15');
+        await page.getByRole('tab', { name: 'Основная информация' }).click();
+        await expect(page.getByLabel('Статус производства')).toBeVisible({ timeout: 30000 });
+
+        db.orders[0].version = 4;
+        db.orders[0].production_status_id = 2;
+        db.orders[0].production_status_from_details_enabled = false;
+        db.order_details[0].production_status_id = 2;
+        api.conflictNextProductionStatus = true;
+
+        await page.getByText('Автообновление статусов производства').click();
+        await page.getByLabel('Статус производства').click();
+        await page.getByText('В работе', { exact: true }).click();
+        await expect.poll(() => api.productionStatusBodies.length).toBe(1);
+        await expect(page.getByText('Данные заказа изменились')).toBeVisible();
+
+        await page.getByPlaceholder('Введите название заказа').fill('E2E production action order conflict save');
+        await page.getByRole('button', { name: /Сохранить/ }).click();
+        await expect.poll(() => api.orderUpdateBodies.length).toBe(1);
+
+        expect(api.orderUpdateBodies[0].details).toEqual([
+            expect.objectContaining({ id: 1501, productionStatusId: 2 }),
+        ]);
+        expect(db.order_details[0].production_status_id).toBe(2);
+    });
+
     test('allows manager to change own order status and drawn stage, then rejects foreign order', async ({
         page,
     }) => {
@@ -623,7 +686,21 @@ function seedOrderDetail(
         width: 200,
         quantity: 1,
         area: 0.02,
+        material_id: 1,
+        milling_type_id: 1,
+        edge_type_id: 1,
+        film_id: null,
+        milling_cost_per_sqm: 10000,
+        detail_cost: 1000,
+        priority: 100,
         production_status_id: 1,
+        joint_order_id: null,
+        note: 'existing detail',
+        link_cutting_file: null,
+        link_cutting_image_file: null,
+        link_cad_file: null,
+        link_pdf_file: null,
+        ref_key_1c: null,
         delete_flag: false,
         version: 0,
     });
@@ -650,8 +727,10 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
             productionStatusId: number;
             body: Record<string, unknown>;
         }>,
+        orderUpdateBodies: [] as Array<Record<string, any>>,
         conflictNextCalendarDate: false,
         conflictNextOrderStatus: false,
+        conflictNextProductionStatus: false,
         conflictNextStageActivation: false,
         conflictNextStageDeactivation: false,
         forbiddenOrderIds: new Set<number>(),
@@ -744,6 +823,11 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
             await fulfillApiError(route, 403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия');
             return;
         }
+        if (api.conflictNextProductionStatus) {
+            api.conflictNextProductionStatus = false;
+            await fulfillVersionConflict(route, orderId, body.version, order.version);
+            return;
+        }
         if (Number(body.version) !== Number(order.version)) {
             await fulfillVersionConflict(route, orderId, body.version, order.version);
             return;
@@ -794,6 +878,37 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
                 version: order.version,
             },
             requestId: 'request-production-status',
+        });
+    });
+
+    await page.route(/\/api\/v1\/orders\/\d+$/, async (route) => {
+        const method = route.request().method();
+        const orderId = readOrderId(route);
+        if (method === 'GET') {
+            await fulfillJson(route, toBackendOrderResponse(db, orderId));
+            return;
+        }
+        if (method !== 'PUT') {
+            await route.fallback();
+            return;
+        }
+
+        const body = JSON.parse(route.request().postData() || '{}');
+        api.orderUpdateBodies.push(body);
+        const order = findOrder(db, orderId);
+        order.version = Number(order.version) + 1;
+        for (const detailDto of body.details ?? []) {
+            const detail = db.order_details.find((item) => Number(item.detail_id) === Number(detailDto.id));
+            if (detail && 'productionStatusId' in detailDto) {
+                detail.production_status_id = detailDto.productionStatusId;
+            }
+        }
+
+        await fulfillJson(route, {
+            order: {
+                ...toBackendOrderResponse(db, orderId).order,
+                version: order.version,
+            },
         });
     });
 
@@ -927,6 +1042,72 @@ async function setupProductionActionsBackendMock(page: Page, db: WorkflowMockDb)
     });
 
     return api;
+}
+
+function toBackendOrderResponse(db: WorkflowMockDb, orderId: number) {
+    const order = findOrder(db, orderId);
+    return {
+        order: {
+            header: {
+                orderId,
+                orderName: order.order_name,
+                clientId: order.client_id,
+                orderDate: order.order_date,
+                plannedCompletionDate: order.planned_completion_date,
+                orderStatusId: order.order_status_id,
+                paymentStatusId: order.payment_status_id,
+                productionStatusId: order.production_status_id,
+                productionStatusFromDetailsEnabled: order.production_status_from_details_enabled,
+                finalAmount: order.final_amount,
+                paidAmount: order.paid_amount,
+                partsCount: order.parts_count,
+                totalArea: order.total_area,
+                version: order.version,
+            },
+            details: db.order_details
+                .filter((detail) => Number(detail.order_id) === orderId && !detail.delete_flag)
+                .map((detail) => ({
+                    id: detail.detail_id,
+                    orderId,
+                    detailNumber: detail.detail_number,
+                    detailName: detail.detail_name,
+                    height: detail.height,
+                    width: detail.width,
+                    quantity: detail.quantity,
+                    area: detail.area,
+                    materialId: detail.material_id,
+                    millingTypeId: detail.milling_type_id,
+                    edgeTypeId: detail.edge_type_id,
+                    filmId: detail.film_id,
+                    millingCostPerSqm: detail.milling_cost_per_sqm,
+                    detailCost: detail.detail_cost,
+                    priority: detail.priority,
+                    productionStatusId: detail.production_status_id,
+                    jointOrderId: detail.joint_order_id,
+                    note: detail.note,
+                    linkCuttingFile: detail.link_cutting_file,
+                    linkCuttingImageFile: detail.link_cutting_image_file,
+                    linkCadFile: detail.link_cad_file,
+                    linkPdfFile: detail.link_pdf_file,
+                    refKey1c: detail.ref_key_1c,
+                })),
+            payments: [],
+            workshops: [],
+            requirements: [],
+            dowelingLinks: [],
+            totals: {
+                totalAmount: order.final_amount,
+                discount: 0,
+                surcharge: 0,
+                finalAmount: order.final_amount,
+                paidAmount: order.paid_amount,
+                debtAmount: Number(order.final_amount) - Number(order.paid_amount),
+                partsCount: order.parts_count,
+                totalArea: order.total_area,
+            },
+            version: order.version,
+        },
+    };
 }
 
 async function callDetailStageEndpoint(

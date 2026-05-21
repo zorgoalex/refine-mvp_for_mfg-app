@@ -72,6 +72,7 @@ const generateTempId = (): number => {
   insertDetailAfter: (afterTempId: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   updateDetail: (tempId: number, data: Partial<OrderDetail>) => void;
   updateDetailId: (tempId: number, detailId: number) => void; // Update detail_id after DB create
+  syncDetailsProductionStatus: (productionStatusId: number) => void;
   deleteDetail: (tempId: number, detailId?: number) => void;
   reorderDetails: () => void; // Renumber detail_number
 
@@ -281,6 +282,24 @@ export const useOrderFormStore = create<OrderFormState>()(
             }),
             false,
             'updateDetailId'
+          ),
+
+        syncDetailsProductionStatus: (productionStatusId) =>
+          set(
+            (state) => ({
+              details: state.details.map((detail) => ({
+                ...detail,
+                production_status_id: productionStatusId,
+              })),
+              originalDetails: Object.fromEntries(
+                Object.entries(state.originalDetails).map(([detailId, detail]) => [
+                  detailId,
+                  { ...detail, production_status_id: productionStatusId },
+                ]),
+              ) as Record<number, OrderDetail>,
+            }),
+            false,
+            'syncDetailsProductionStatus'
           ),
 
         deleteDetail: (tempId, detailId) => {
