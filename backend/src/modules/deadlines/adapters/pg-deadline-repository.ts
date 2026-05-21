@@ -193,6 +193,16 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     return row ? mapDeadline(row) : null;
   }
 
+  async getDeadlineByIdForUpdate(deadlineId: string): Promise<DeadlineInstanceDto | null> {
+    const result = await this.database.query<DeadlineRow>(
+      `SELECT ${DEADLINE_COLUMNS} FROM deadline_instances WHERE deadline_id = $1 FOR UPDATE`,
+      [deadlineId],
+    );
+    const row = result.rows[0];
+
+    return row ? mapDeadline(row) : null;
+  }
+
   async listOrderDeadlines(orderId: number): Promise<DeadlineInstanceDto[]> {
     const result = await this.database.query<DeadlineRow>(
       `
@@ -552,6 +562,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
   }
 
   async cancelDeadline(command: import('../application/deadline.types').CancelDeadlineCommand): Promise<DeadlineInstanceDto> {
+    const current = await this.requireDeadline(command.deadlineId);
     const result = await this.database.query<DeadlineRow>(
       `
       UPDATE deadline_instances
@@ -559,12 +570,21 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
           cancelled_at = now(),
           updated_by_user_id = $2,
           updated_at = now()
-      WHERE deadline_id = $1
+      WHERE deadline_id = $1 AND status NOT IN ('expired', 'completed_on_time', 'completed_late', 'cancelled', 'superseded')
       RETURNING ${DEADLINE_COLUMNS}
       `,
       [command.deadlineId, Number(command.currentUser.id)],
     );
-    const deadline = mapDeadline(result.rows[0]);
+    const row = result.rows[0];
+    if (!row) {
+      throw new ApiError(409, 'DEADLINE_INVALID_STATUS_TRANSITION', 'Deadline status transition is not allowed', {
+        deadlineId: command.deadlineId,
+        fromStatus: current.status,
+        toStatus: 'cancelled',
+      });
+    }
+
+    const deadline = mapDeadline(row);
     await this.createDeadlineEvent({
       deadlineId: deadline.deadlineId,
       eventType: 'DEADLINE_CANCELLED',
@@ -576,7 +596,14 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       clientId: deadline.clientId,
       deadlineAt: deadline.deadlineAt,
       eventAt: new Date().toISOString(),
-      payload: { reason: command.dto.reason, actorUserId: command.currentUser.id },
+      payload: {
+        reason: command.dto.reason,
+        actorUserId: command.currentUser.id,
+        requestId: command.requestId ?? 'deadline-command',
+        source: 'backend-deadline-command',
+        beforeStatus: current.status,
+        afterStatus: deadline.status,
+      },
     });
 
     return deadline;
@@ -787,28 +814,81 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
   }
 
   private async writeAuditEvent(event: DeadlineEventDto): Promise<void> {
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    const beforeStatus = typeof payload.beforeStatus === 'string' ? payload.beforeStatus : null;
+    const afterStatus = typeof payload.afterStatus === 'string' ? payload.afterStatus : null;
+    const reason = typeof payload.reason === 'string' ? payload.reason : null;
+    const requestId = typeof payload.requestId === 'string' ? payload.requestId : 'deadline-engine';
+    const source = typeof payload.source === 'string'
+      ? payload.source
+      : typeof payload.requestId === 'string'
+        ? 'backend-deadline-command'
+        : 'deadline-engine';
+    const actorUserId =
+      typeof payload.actorUserId === 'string' || typeof payload.actorUserId === 'number'
+        ? String(payload.actorUserId)
+        : null;
+
     await this.database.query(
       `
-      INSERT INTO audit_log (event, entity_type, entity_id, request_id, metadata_json)
-      VALUES ($1, 'deadline', $2, 'deadline-engine', $3::jsonb)
+      INSERT INTO audit_log (
+        event, entity_type, entity_id, user_id, request_id, source,
+        related_order_id, related_client_id,
+        before_json, after_json, diff_json, metadata_json
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8,
+        $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb
+      )
       `,
       [
         `deadlines.${event.eventType.toLowerCase()}`,
+        'deadline',
         event.deadlineId,
+        actorUserId,
+        requestId,
+        source,
+        event.orderId ?? null,
+        event.clientId ?? null,
+        JSON.stringify(beforeStatus ? { status: beforeStatus } : {}),
+        JSON.stringify(afterStatus ? { status: afterStatus } : {}),
+        JSON.stringify(beforeStatus && afterStatus ? { status: { from: beforeStatus, to: afterStatus } } : {}),
         JSON.stringify({
           deadlineEventId: event.deadlineEventId,
           eventType: event.eventType,
-          orderId: event.orderId ?? null,
+          entityType: event.entityType,
+          entityId: event.entityId,
+          orderWorkshopId: event.orderWorkshopId ?? null,
+          reason,
         }),
       ],
     );
   }
 
   private async enqueueOutboxEvent(event: DeadlineEventDto): Promise<void> {
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    const requestId = typeof payload.requestId === 'string' ? payload.requestId : null;
+    const actorUserId =
+      typeof payload.actorUserId === 'string' || typeof payload.actorUserId === 'number'
+        ? String(payload.actorUserId)
+        : null;
+    const reason = typeof payload.reason === 'string' ? payload.reason : null;
+    const beforeStatus = typeof payload.beforeStatus === 'string' ? payload.beforeStatus : null;
+    const afterStatus = typeof payload.afterStatus === 'string' ? payload.afterStatus : null;
+    const source = typeof payload.source === 'string'
+      ? payload.source
+      : requestId
+        ? 'backend-deadline-command'
+        : 'deadline-engine';
+
     await this.database.query(
       `
-      INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json)
-      VALUES ($1, 'deadline', $2, $3::jsonb)
+      INSERT INTO outbox_events (
+        event_type, aggregate_type, aggregate_id, payload_json, idempotency_key
+      )
+      VALUES ($1, 'deadline', $2, $3::jsonb, $4)
+      ON CONFLICT (idempotency_key) DO NOTHING
       `,
       [
         'deadline.event.created',
@@ -819,7 +899,14 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
           entityType: event.entityType,
           entityId: event.entityId,
           orderId: event.orderId ?? null,
+          requestId,
+          actorUserId,
+          reason,
+          beforeStatus,
+          afterStatus,
+          source,
         }),
+        `deadline-event:${event.deadlineEventId}:outbox`,
       ],
     );
   }

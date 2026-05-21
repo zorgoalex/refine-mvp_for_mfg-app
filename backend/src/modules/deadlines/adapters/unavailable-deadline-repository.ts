@@ -28,6 +28,10 @@ export class UnavailableDeadlineRepository implements DeadlineRepositoryPort {
     throw deadlineAdapterUnavailableError('deadline_repository');
   }
 
+  async getDeadlineByIdForUpdate(_deadlineId: string): Promise<DeadlineInstanceDto | null> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
   async listOrderDeadlines(_orderId: number): Promise<DeadlineInstanceDto[]> {
     throw deadlineAdapterUnavailableError('deadline_repository');
   }

@@ -91,6 +91,47 @@ describe('DeadlineWorkerService', () => {
       delayMinutes: 30,
     });
   });
+
+  it('does not create duplicate terminal events on repeated worker runs', async () => {
+    const events: DeadlineEventDto[] = [];
+    const due = [createDeadline()];
+    const repository = createRepository({
+      due,
+      events,
+      executions: [],
+      rules: [],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager({
+        ...repository,
+        async findDueDeadlinesForUpdate() {
+          return due.filter((deadline) => deadline.status === 'active');
+        },
+        async markDeadlineExpired(markInput) {
+          due[0] = createDeadline({ status: 'expired', expiredAt: markInput.expiredAt });
+          return due[0];
+        },
+      }),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+    });
+
+    await worker.processDueDeadlines({
+      now: '2026-05-01T10:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    });
+    await worker.processDueDeadlines({
+      now: '2026-05-01T10:01:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ eventType: 'DEADLINE_EXPIRED' });
+  });
 });
 
 function transactionManager(repository: DeadlineRepositoryPort): DeadlineTransactionManagerPort {
@@ -112,6 +153,9 @@ function createRepository(input: {
       return { data: [], total: 0 };
     },
     async getDeadlineById() {
+      return null;
+    },
+    async getDeadlineByIdForUpdate() {
       return null;
     },
     async listOrderDeadlines() {

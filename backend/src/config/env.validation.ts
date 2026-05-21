@@ -113,6 +113,7 @@ const envSchema = z
     BACKEND_VLM_DISABLED: booleanFromEnv.default(true),
     BACKEND_DEADLINES_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_ENABLE_DEADLINE_WORKER: booleanFromEnv.default(false),
+    BACKEND_ENABLE_DEADLINE_ORDER_SYNC: booleanFromEnv.default(false),
     BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
     BACKEND_DEADLINE_WORKER_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(100),
     BACKEND_DEADLINE_WORKER_ID: z.string().trim().min(1).default('backend-local'),

@@ -408,6 +408,34 @@ describe('OrderTransactionService', () => {
     ]);
   });
 
+  it('does not sync deadlines after order save unless a deadline sync port is wired', async () => {
+    const transactionsWithoutSync = new FakeOrderTransactions();
+    const syncCalls: string[] = [];
+
+    await new OrderTransactionService({ transactions: transactionsWithoutSync }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto(),
+    });
+
+    expect(syncCalls).toEqual([]);
+
+    const transactionsWithSync = new FakeOrderTransactions();
+
+    await new OrderTransactionService({
+      transactions: transactionsWithSync,
+      deadlineSync: {
+        async syncOrderDeadlinesAfterSave(command) {
+          syncCalls.push(`${command.eventType}:${command.orderId}:${command.currentUser.id}`);
+        },
+      },
+    }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto(),
+    });
+
+    expect(syncCalls).toEqual(['ORDER_CREATED:100:user_manager']);
+  });
+
   it('updates an order after lock, version check and child ownership validation', async () => {
     const transactions = new FakeOrderTransactions();
     transactions.seedOrder({

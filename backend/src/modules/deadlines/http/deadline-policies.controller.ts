@@ -162,7 +162,7 @@ export class DeadlinePoliciesController {
   @ApiOperation({ operationId: 'createDeadlinePolicy', summary: 'Create a deadline policy' })
   @Post()
   async create(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
-    this.assertWriteEnabled();
+    this.assertWriteOperationEnabled('createPolicy');
 
     return {
       policy: await this.commands.createPolicy({
@@ -188,7 +188,7 @@ export class DeadlinePoliciesController {
     @Param('policyId') policyIdParam: string,
     @Body() body: unknown,
   ) {
-    this.assertWriteEnabled();
+    this.assertWriteOperationEnabled('updatePolicy');
 
     return {
       policy: await this.commands.updatePolicy({
@@ -220,6 +220,15 @@ export class DeadlinePoliciesController {
         mode: 'read_only',
       });
     }
+  }
+
+  private assertWriteOperationEnabled(operation: 'createPolicy' | 'updatePolicy'): void {
+    this.assertWriteEnabled();
+
+    throw new ApiError(503, 'DEADLINE_WRITE_OPERATION_DISABLED', 'Deadline write operation is disabled', {
+      feature: 'deadlines',
+      operation,
+    });
   }
 
   private requireCurrentUser(request: RequestWithCurrentUser) {

@@ -70,30 +70,35 @@ export interface ListOrderDeadlineEventsCommand extends ListOrderDeadlinesComman
 
 export interface CreateDeadlineCommand {
   currentUser: CurrentUser;
+  requestId?: string;
   dto: CreateDeadlineRequestDto;
 }
 
 export interface OverrideDeadlineCommand {
   currentUser: CurrentUser;
   deadlineId: string;
+  requestId?: string;
   dto: OverrideDeadlineRequestDto;
 }
 
 export interface PauseDeadlineCommand {
   currentUser: CurrentUser;
   deadlineId: string;
+  requestId?: string;
   dto: PauseDeadlineRequestDto;
 }
 
 export interface ResumeDeadlineCommand {
   currentUser: CurrentUser;
   deadlineId: string;
+  requestId?: string;
   dto: ResumeDeadlineRequestDto;
 }
 
 export interface CancelDeadlineCommand {
   currentUser: CurrentUser;
   deadlineId: string;
+  requestId?: string;
   dto: CancelDeadlineRequestDto;
 }
 
@@ -178,6 +183,7 @@ export interface DeadlineRepositoryPort {
     total: number;
   }>;
   getDeadlineById(deadlineId: string): Promise<DeadlineInstanceDto | null>;
+  getDeadlineByIdForUpdate(deadlineId: string): Promise<DeadlineInstanceDto | null>;
   listOrderDeadlines(orderId: number): Promise<DeadlineInstanceDto[]>;
   listOrderDeadlineEvents(orderId: number): Promise<DeadlineEventDto[]>;
   listPolicies(): Promise<DeadlinePolicyDto[]>;

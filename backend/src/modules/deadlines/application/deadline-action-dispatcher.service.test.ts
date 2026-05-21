@@ -66,10 +66,13 @@ describe('DeadlineActionDispatcherService', () => {
       config: { actionsEnabled: true, notificationsEnabled: false },
     });
 
-    expect(executions[0]).toMatchObject({
-      status: 'skipped',
-      skipReason: 'notifications_disabled',
-    });
+    expect(executions).toMatchObject([
+      {
+        actionType: 'notify_assignee',
+        status: 'skipped',
+        skipReason: 'notifications_disabled',
+      },
+    ]);
   });
 
   it('executes write_audit action when enabled', async () => {
@@ -103,6 +106,9 @@ function createRepository(input: {
       return { data: [], total: 0 };
     },
     async getDeadlineById() {
+      return null;
+    },
+    async getDeadlineByIdForUpdate() {
       return null;
     },
     async listOrderDeadlines() {

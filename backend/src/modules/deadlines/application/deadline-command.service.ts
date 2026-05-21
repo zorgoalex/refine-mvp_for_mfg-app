@@ -93,7 +93,7 @@ export class DeadlineCommandService {
     this.requirePermission(command, 'deadlines.cancel');
 
     return this.ports.transactions.runInTransaction(async (unitOfWork) => {
-      const deadline = await unitOfWork.deadlines.getDeadlineById(command.deadlineId);
+      const deadline = await unitOfWork.deadlines.getDeadlineByIdForUpdate(command.deadlineId);
       if (!deadline) {
         throw new DeadlineNotFoundError(command.deadlineId);
       }

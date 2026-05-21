@@ -23,6 +23,20 @@ import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
 
+export function shouldEnableOrderDeadlineSync(input: {
+  databaseConfigured: boolean;
+  deadlinesEnabled: boolean;
+  deadlinesReadOnly: boolean;
+  orderSyncEnabled: boolean;
+}): boolean {
+  return (
+    input.databaseConfigured &&
+    input.deadlinesEnabled &&
+    !input.deadlinesReadOnly &&
+    input.orderSyncEnabled
+  );
+}
+
 @Module({
   imports: [DatabaseModule],
   controllers: [OrdersController, OrderExportController, OrderSnapshotController],
@@ -36,7 +50,12 @@ import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service
             ? new PgOrderTransactionManager(database)
             : new UnavailableOrderTransactionManager(),
           deadlineSync:
-            database.isConfigured && config.get('BACKEND_ENABLE_DEADLINES', { infer: true })
+            shouldEnableOrderDeadlineSync({
+              databaseConfigured: database.isConfigured,
+              deadlinesEnabled: config.get('BACKEND_ENABLE_DEADLINES', { infer: true }),
+              deadlinesReadOnly: config.get('BACKEND_DEADLINES_READ_ONLY', { infer: true }),
+              orderSyncEnabled: config.get('BACKEND_ENABLE_DEADLINE_ORDER_SYNC', { infer: true }),
+            })
               ? new PgOrderDeadlineSync(database)
               : undefined,
         }),

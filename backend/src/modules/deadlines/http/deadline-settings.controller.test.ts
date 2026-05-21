@@ -51,6 +51,19 @@ describe('DeadlineSettingsController', () => {
       ApiError,
     );
   });
+
+  it('keeps settings update fail-closed in deadline write mode for cancel-only slice', async () => {
+    const controller = createController({
+      flags: { deadlinesEnabled: true, deadlinesReadOnly: false },
+    });
+
+    await expect(
+      controller.update({ user: currentUser() }, { notifyAssigneeEnabled: true }),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'DEADLINE_WRITE_OPERATION_DISABLED',
+    } satisfies Partial<ApiError>);
+  });
 });
 
 function createController(options: {

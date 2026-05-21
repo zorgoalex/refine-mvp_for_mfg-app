@@ -419,7 +419,7 @@ export class DeadlinesController {
   @ApiOperation({ operationId: 'createDeadline', summary: 'Create a deadline' })
   @Post('deadlines')
   async create(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
-    this.assertWriteEnabled();
+    this.assertWriteOperationEnabled('create');
 
     return {
       deadline: await this.commands.create({
@@ -445,7 +445,7 @@ export class DeadlinesController {
     @Param('deadlineId') deadlineIdParam: string,
     @Body() body: unknown,
   ) {
-    this.assertWriteEnabled();
+    this.assertWriteOperationEnabled('override');
 
     return {
       deadline: await this.commands.override({
@@ -473,7 +473,7 @@ export class DeadlinesController {
     @Param('deadlineId') deadlineIdParam: string,
     @Body() body: unknown,
   ) {
-    this.assertWriteEnabled();
+    this.assertWriteOperationEnabled('pause');
 
     return {
       deadline: await this.commands.pause({
@@ -501,7 +501,7 @@ export class DeadlinesController {
     @Param('deadlineId') deadlineIdParam: string,
     @Body() body: unknown,
   ) {
-    this.assertWriteEnabled();
+    this.assertWriteOperationEnabled('resume');
 
     return {
       deadline: await this.commands.resume({
@@ -529,12 +529,13 @@ export class DeadlinesController {
     @Param('deadlineId') deadlineIdParam: string,
     @Body() body: unknown,
   ) {
-    this.assertWriteEnabled();
+    this.assertWriteOperationEnabled('cancel');
 
     return {
       deadline: await this.commands.cancel({
         currentUser: this.requireCurrentUser(request),
         deadlineId: parseDeadlineId(deadlineIdParam),
+        requestId: request.requestId,
         dto: parseCancelDeadlineRequest(body),
       }),
     };
@@ -560,6 +561,19 @@ export class DeadlinesController {
       throw new ApiError(503, 'DEADLINES_READ_ONLY', 'Deadlines write API is disabled', {
         feature: 'deadlines',
         mode: 'read_only',
+      });
+    }
+  }
+
+  private assertWriteOperationEnabled(
+    operation: 'create' | 'override' | 'pause' | 'resume' | 'cancel',
+  ): void {
+    this.assertWriteEnabled();
+
+    if (operation !== 'cancel') {
+      throw new ApiError(503, 'DEADLINE_WRITE_OPERATION_DISABLED', 'Deadline write operation is disabled', {
+        feature: 'deadlines',
+        operation,
       });
     }
   }

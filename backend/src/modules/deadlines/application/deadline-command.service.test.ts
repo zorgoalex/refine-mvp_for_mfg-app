@@ -53,17 +53,17 @@ describe('DeadlineCommandService', () => {
     } satisfies Partial<ApiError>);
   });
 
-  it('delegates cancel through transaction after status check', async () => {
+  it('delegates cancel through transaction after locked status check', async () => {
     const calls: string[] = [];
     const service = new DeadlineCommandService({
       transactions: transactionManager(
         createRepository({
-          async getDeadlineById(deadlineId) {
-            calls.push(`get:${deadlineId}`);
+          async getDeadlineByIdForUpdate(deadlineId) {
+            calls.push(`lock:${deadlineId}`);
             return createDeadline({ status: 'active' });
           },
           async cancelDeadline(command) {
-            calls.push(`cancel:${command.deadlineId}:${command.dto.reason}`);
+            calls.push(`cancel:${command.deadlineId}:${command.dto.reason}:${command.requestId}`);
             return createDeadline({ status: 'cancelled' });
           },
         }),
@@ -74,10 +74,45 @@ describe('DeadlineCommandService', () => {
       service.cancel({
         currentUser: currentUser(),
         deadlineId: 'deadline-id',
+        requestId: 'req-cancel-1',
         dto: { reason: 'Заказ отменен' },
       }),
     ).resolves.toMatchObject({ status: 'cancelled' });
-    expect(calls).toEqual(['get:deadline-id', 'cancel:deadline-id:Заказ отменен']);
+    expect(calls).toEqual([
+      'lock:deadline-id',
+      'cancel:deadline-id:Заказ отменен:req-cancel-1',
+    ]);
+  });
+
+  it('rejects repeated cancel before repository writes terminal events', async () => {
+    const calls: string[] = [];
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(
+        createRepository({
+          async getDeadlineByIdForUpdate(deadlineId) {
+            calls.push(`lock:${deadlineId}`);
+            return createDeadline({ status: 'cancelled' });
+          },
+          async cancelDeadline() {
+            calls.push('cancel');
+            return createDeadline({ status: 'cancelled' });
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      service.cancel({
+        currentUser: currentUser(),
+        deadlineId: 'deadline-id',
+        requestId: 'req-cancel-2',
+        dto: { reason: 'Повторная отмена' },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_INVALID_STATUS_TRANSITION',
+    } satisfies Partial<ApiError>);
+    expect(calls).toEqual(['lock:deadline-id']);
   });
 });
 
@@ -105,6 +140,9 @@ function createRepository(overrides: Partial<DeadlineRepositoryPort> = {}): Dead
       return { data: [], total: 0 };
     },
     async getDeadlineById() {
+      return createDeadline();
+    },
+    async getDeadlineByIdForUpdate() {
       return createDeadline();
     },
     async listOrderDeadlines() {

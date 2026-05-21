@@ -99,6 +99,9 @@ function createRepository(): DeadlineRepositoryPort {
     async getDeadlineById() {
       return null;
     },
+    async getDeadlineByIdForUpdate() {
+      return null;
+    },
     async listOrderDeadlines() {
       return [];
     },

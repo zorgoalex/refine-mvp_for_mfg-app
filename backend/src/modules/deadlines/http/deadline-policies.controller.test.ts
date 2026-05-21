@@ -70,6 +70,37 @@ describe('DeadlinePoliciesController', () => {
       }),
     ).toThrow(ApiError);
   });
+
+  it('keeps policy writes fail-closed in deadline write mode for cancel-only slice', async () => {
+    const controller = createController({
+      flags: { deadlinesEnabled: true, deadlinesReadOnly: false },
+    });
+
+    await expect(
+      controller.create(
+        { user: currentUser() },
+        {
+          policyCode: 'order.final',
+          policyName: 'Final order deadline',
+          scopeType: 'order',
+        },
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'DEADLINE_WRITE_OPERATION_DISABLED',
+    } satisfies Partial<ApiError>);
+
+    await expect(
+      controller.update(
+        { user: currentUser() },
+        '11111111-1111-4111-8111-111111111111',
+        { policyName: 'Updated deadline policy' },
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'DEADLINE_WRITE_OPERATION_DISABLED',
+    } satisfies Partial<ApiError>);
+  });
 });
 
 function createController(options: {
