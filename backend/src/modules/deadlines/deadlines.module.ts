@@ -12,6 +12,7 @@ import { UnavailableDeadlineTransactionManager } from './adapters/unavailable-de
 import { DeadlineActionDispatcherService } from './application/deadline-action-dispatcher.service';
 import { DeadlineCommandService } from './application/deadline-command.service';
 import { DeadlineQueryService } from './application/deadline-query.service';
+import { DeadlineWorkerSchedulerService } from './application/deadline-worker-scheduler.service';
 import { DeadlineWorkerService } from './application/deadline-worker.service';
 import { DeadlinePoliciesController } from './http/deadline-policies.controller';
 import { DeadlineSettingsController } from './http/deadline-settings.controller';
@@ -65,6 +66,14 @@ import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.s
             : new UnavailableDeadlineNotificationPort(),
         }),
       inject: [DatabaseService],
+    },
+    {
+      provide: DeadlineWorkerSchedulerService,
+      useFactory: (
+        worker: DeadlineWorkerService,
+        runtimeConfig: DeadlinesRuntimeConfigService,
+      ) => new DeadlineWorkerSchedulerService(worker, runtimeConfig),
+      inject: [DeadlineWorkerService, DeadlinesRuntimeConfigService],
     },
   ],
 })
