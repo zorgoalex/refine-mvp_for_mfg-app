@@ -32,6 +32,8 @@ export function createOrderDtoForQueryTest(orderId: number): OrderDto {
       refKey1c: null,
       createdAt: '2026-04-30T00:00:00.000Z',
       updatedAt: '2026-04-30T00:00:00.000Z',
+      createdBy: 15,
+      editedBy: 16,
       version: 1,
     },
     details: [],
@@ -50,5 +52,7 @@ export function createOrderDtoForQueryTest(orderId: number): OrderDto {
     version: 1,
     createdAt: '2026-04-30T00:00:00.000Z',
     updatedAt: '2026-04-30T00:00:00.000Z',
+    createdBy: 15,
+    editedBy: 16,
   };
 }
