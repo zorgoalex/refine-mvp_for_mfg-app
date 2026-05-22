@@ -49,7 +49,8 @@ describe('deadline worker fixture helper', () => {
     expect(sql).toContain("fixtureRole', 'cancel'");
     expect(sql).toContain("fixtureRole', 'manual-worker'");
     expect(sql).toContain("fixtureRole', 'scheduled-worker'");
-    expect(sql).toContain("action_type, is_enabled, config_json");
+    expect(sql).not.toMatch(/INSERT INTO deadline_action_rules/i);
+    expect(sql).not.toContain("fixtureRole', 'worker-action'");
   });
 
   it('snapshots action rules and notifications as fixture evidence', () => {
@@ -102,8 +103,9 @@ describe('deadline worker fixture helper', () => {
       'deadline_action_rules',
     ]);
     expect(deleteStatements[0].statement).toMatch(
-      /DELETE\s+FROM\s+deadline_action_executions\b[\s\S]*WHERE[\s\S]*(fixture_deadline_events|fixture_action_rules|metadata_json->>'fixtureKey')/i,
+      /DELETE\s+FROM\s+deadline_action_executions\b[\s\S]*WHERE[\s\S]*fixture_deadline_events/i,
     );
+    expect(deleteStatements[0].statement).not.toMatch(/action_rule_id/i);
     expect(deleteStatements[1].statement).toMatch(
       /DELETE\s+FROM\s+outbox_events\b[\s\S]*WHERE[\s\S]*(fixture_deadline_events|fixture_deadline_instances|metadata_json->>'fixtureKey')/i,
     );

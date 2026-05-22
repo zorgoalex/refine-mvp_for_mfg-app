@@ -100,11 +100,9 @@ function fixtureActionRuleCte(config) {
 function restoreBodySql(config) {
   return `
 WITH ${fixtureDeadlineCte(config)},
-${fixtureEventCte()},
-${fixtureActionRuleCte(config)}
+${fixtureEventCte()}
 DELETE FROM deadline_action_executions
-WHERE deadline_event_id IN (SELECT deadline_event_id FROM fixture_deadline_events)
-   OR action_rule_id IN (SELECT action_rule_id FROM fixture_action_rules);
+WHERE deadline_event_id IN (SELECT deadline_event_id FROM fixture_deadline_events);
 
 WITH ${fixtureDeadlineCte(config)}
 DELETE FROM outbox_events
@@ -267,19 +265,6 @@ VALUES
     ${sqlLiteral(config.now)}::timestamptz,
     ${sqlLiteral(config.now)}::timestamptz
   );
-
-INSERT INTO deadline_action_rules (
-  scope_type, event_type, action_type, is_enabled, config_json, created_at, updated_at
-)
-VALUES (
-  'order',
-  'DEADLINE_EXPIRED',
-  'notify_assignee',
-  true,
-  jsonb_build_object('fixtureKey', ${sqlLiteral(config.fixtureKey)}, 'fixtureRole', 'worker-action', 'createdBy', 'deadline-worker-fixture'),
-  ${sqlLiteral(config.now)}::timestamptz,
-  ${sqlLiteral(config.now)}::timestamptz
-);
 
 COMMIT;
 
