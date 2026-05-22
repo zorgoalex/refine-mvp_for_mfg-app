@@ -77,6 +77,7 @@ function fixtureDeadlineCte(config) {
     SELECT deadline_id
     FROM deadline_instances
     WHERE metadata_json->>'fixtureKey' = ${sqlLiteral(config.fixtureKey)}
+      AND order_id = ${config.orderId}
   )`;
 }
 
@@ -115,12 +116,19 @@ DELETE FROM audit_log
 WHERE entity_type = 'deadline'
   AND entity_id IN (SELECT deadline_id::text FROM fixture_deadline_instances);
 
+WITH ${fixtureDeadlineCte(config)},
+${fixtureEventCte()}
+DELETE FROM notifications
+WHERE source_type = 'deadline'
+  AND source_id IN (SELECT deadline_event_id::text FROM fixture_deadline_events);
+
 WITH ${fixtureDeadlineCte(config)}
 DELETE FROM deadline_events
 WHERE deadline_id IN (SELECT deadline_id FROM fixture_deadline_instances);
 
 DELETE FROM deadline_instances
-WHERE metadata_json->>'fixtureKey' = ${sqlLiteral(config.fixtureKey)};
+WHERE metadata_json->>'fixtureKey' = ${sqlLiteral(config.fixtureKey)}
+  AND order_id = ${config.orderId};
 
 WITH ${fixtureActionRuleCte(config)}
 DELETE FROM deadline_action_rules
@@ -135,6 +143,7 @@ WITH fixture_deadline_instances AS (
   SELECT deadline_id
   FROM deadline_instances
   WHERE metadata_json->>'fixtureKey' = ${sqlLiteral(config.fixtureKey)}
+    AND order_id = ${config.orderId}
 ),
 fixture_deadline_events AS (
   SELECT de.deadline_event_id
@@ -150,6 +159,7 @@ fixture_counts AS (
   SELECT
     (SELECT COUNT(*)::int FROM fixture_deadline_instances) AS deadline_count,
     (SELECT COUNT(*)::int FROM fixture_deadline_events) AS event_count,
+    (SELECT COUNT(*)::int FROM fixture_action_rules) AS action_rule_count,
     (
       SELECT COUNT(*)::int
       FROM audit_log al
@@ -164,6 +174,12 @@ fixture_counts AS (
     ) AS outbox_count,
     (
       SELECT COUNT(*)::int
+      FROM notifications n
+      JOIN fixture_deadline_events fde ON fde.deadline_event_id::text = n.source_id
+      WHERE n.source_type = 'deadline'
+    ) AS notification_count,
+    (
+      SELECT COUNT(*)::int
       FROM deadline_action_executions dae
       JOIN fixture_deadline_events fde ON fde.deadline_event_id = dae.deadline_event_id
     ) AS action_execution_count
@@ -173,10 +189,12 @@ SELECT json_build_object(
   'orderId', ${config.orderId},
   'deadlineCount', deadline_count,
   'eventCount', event_count,
+  'actionRuleCount', action_rule_count,
   'auditCount', audit_count,
   'outboxCount', outbox_count,
+  'notificationCount', notification_count,
   'actionExecutionCount', action_execution_count,
-  'fingerprint', md5(concat_ws(':', ${sqlLiteral(config.fixtureKey)}, ${config.orderId}, deadline_count, event_count, audit_count, outbox_count, action_execution_count))
+  'fingerprint', md5(concat_ws(':', ${sqlLiteral(config.fixtureKey)}, ${config.orderId}, deadline_count, event_count, action_rule_count, audit_count, outbox_count, notification_count, action_execution_count))
 )::text
 FROM fixture_counts;
 `.trim();
