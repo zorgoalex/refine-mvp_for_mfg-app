@@ -1250,6 +1250,17 @@ async function getBackendUserOneIfEnabled(resource: string, id: number | string)
   };
 }
 
+async function getBackendUsersManyIfEnabled(resource: string, ids: Array<number | string>) {
+  if (!featureFlags.useBackendUsers || resource !== 'users') {
+    return null;
+  }
+
+  const users = await Promise.all(ids.map((id) => usersApi.getById(Number(id))));
+  return {
+    data: users.map(mapBackendUserToLegacyRow),
+  };
+}
+
 async function createBackendPaymentIfEnabled(resource: string, variables?: AnyObject, _meta?: AnyObject) {
   if (!shouldUseBackendPaymentMutation(resource)) {
     return null;
@@ -1760,6 +1771,11 @@ export const dataProvider = (_apiUrl: string) => {
 
     // Minimal stubs for unused methods in MVP
     getMany: async ({ resource, ids }: AnyObject) => {
+      const backendUsers = await getBackendUsersManyIfEnabled(resource, ids);
+      if (backendUsers) {
+        return backendUsers;
+      }
+
       const idCol = ID_COLUMNS[resource] ?? "id";
       const selection = fieldsFor(resource);
       const query = `

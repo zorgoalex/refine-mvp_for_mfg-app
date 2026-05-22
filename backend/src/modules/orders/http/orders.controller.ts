@@ -409,6 +409,8 @@ const orderHeaderResponseSwaggerSchema = {
     'refKey1c',
     'createdAt',
     'updatedAt',
+    'createdBy',
+    'editedBy',
     'version',
   ],
   properties: {
@@ -446,6 +448,8 @@ const orderHeaderResponseSwaggerSchema = {
     filmId: nullableIntegerSwaggerSchema,
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
+    createdBy: nullableIntegerSwaggerSchema,
+    editedBy: nullableIntegerSwaggerSchema,
     version: { type: 'integer' },
   },
 } as const;
@@ -521,7 +525,7 @@ const orderResponseSwaggerSchema = {
 
 const orderListItemSwaggerSchema = {
   type: 'object',
-  required: ['orderId', 'orderName', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'updatedAt', 'version'],
+  required: ['orderId', 'orderName', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'createdBy', 'editedBy', 'updatedAt', 'version'],
   properties: {
     orderId: { type: 'integer' },
     orderName: { type: 'string' },
@@ -557,6 +561,8 @@ const orderListItemSwaggerSchema = {
     dowelingOrderName: nullableStringSwaggerSchema,
     designEngineerId: nullableIntegerSwaggerSchema,
     passedProductionStatusCodes: { type: 'array', items: { type: 'string' } },
+    createdBy: nullableIntegerSwaggerSchema,
+    editedBy: nullableIntegerSwaggerSchema,
     updatedAt: { type: 'string', format: 'date-time' },
     version: { type: 'integer' },
   },

@@ -339,6 +339,8 @@ npm run dev:full
 - `npm run test:e2e:production-actions-cutover` — Playwright smoke для backend production actions/calendar moves cutover flag.
 - `npm run test:e2e:production-actions-stage-canary` — opt-in Playwright smoke для stage production actions backend path с audit/outbox/idempotency checks.
 - `npm run test:e2e:deadline-engine-stage-canary` - opt-in read-only smoke for deployed Deadline Engine frontend/API stage acceptance.
+- `npm run test:e2e:order-ui-full-coverage` — opt-in durable Playwright coverage для заказа: заполняет формы, кликает кнопки, проверяет поля, вкладки, creator history и оставляет созданный заказ.
+- `npm run test:e2e:order-created-by-stage-canary` — opt-in deployed backend canary: проверяет, что stage `/api/v1/orders/:id` отдает `createdBy/editedBy` для order UI.
 - `npm run test:e2e:vlm-cutover` — Playwright smoke для backend VLM cutover flag.
 - `npm run test:e2e:runtime-config` — Playwright smoke для runtime frontend flags.
 - `npm run test:runtime-config-canary` — проверка staged runtime-config examples для canary.
@@ -365,11 +367,26 @@ npm run test:e2e:order-export-cutover
 npm run test:e2e:production-actions-cutover
 npm run test:e2e:production-actions-stage-canary
 npm run test:e2e:deadline-engine-stage-canary
+npm run test:e2e:order-ui-full-coverage
+npm run test:e2e:order-created-by-stage-canary
 npm run test:e2e:payments-stage-canary
 npm run test:e2e:vlm-cutover
 npm run test:e2e:runtime-config
 npm run test:runtime-config-canary
 ```
+
+### Обязательное правило для крупных изменений фронта
+
+Любое крупное изменение frontend UI, форм, вкладок, таблиц, кнопок, data-provider/mapping слоя или backend/frontend order flow должно обновлять `tests/order-ui-full-form-coverage.spec.ts`. Тест обязан оставаться полноценным пользовательским E2E: через UI заполнить все затронутые формы и вкладки, прокликать заявленные кнопки, проверить отображение и сохранение всех затронутых полей, снять скриншоты ключевых форм/вкладок и проверить историю создания через постоянного пользователя `codex_playwright`.
+
+Перед завершением такого изменения нужно запускать:
+
+```bash
+set -a; . /home/ovhtest/projects/erp_dev/.env; set +a
+npm run test:e2e:order-ui-full-coverage
+```
+
+Тест создает durable-заказы с префиксом `E2E codex full coverage` и не удаляет их. Если изменение сознательно не затрагивает order UI, в ревью нужно явно написать, почему этот full coverage тест не обновлялся и не запускался.
 
 Opt-in stage canaries require the deployed stage environment and VPS DB/Docker
 access where noted by the specific checklist:

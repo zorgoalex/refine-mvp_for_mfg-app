@@ -84,6 +84,8 @@ interface OrderHeaderRow extends QueryResultRow {
   total_area: string | number | null;
   created_at: string | Date;
   updated_at: string | Date;
+  created_by: string | number | null;
+  edited_by: string | number | null;
   version: string | number;
   ref_key_1c: string | null;
   material_ids: unknown[] | null;
@@ -265,7 +267,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           o.discount, o.surcharge, o.notes, o.manager_id,
           o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
           o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
-          o.created_at, o.updated_at, o.version, o.ref_key_1c
+          o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c
         FROM orders o
         LEFT JOIN clients c ON c.client_id = o.client_id
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
@@ -364,7 +366,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.discount, o.surcharge, o.notes, o.manager_id,
         o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
         o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
-        o.created_at, o.updated_at, o.version, o.ref_key_1c
+        o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c
       FROM orders o
       LEFT JOIN clients c ON c.client_id = o.client_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
@@ -750,6 +752,8 @@ function mapOrderDto(
       refKey1c: row.ref_key_1c,
       createdAt: toIsoString(row.created_at),
       updatedAt: toIsoString(row.updated_at),
+      createdBy: toNullableNumber(row.created_by),
+      editedBy: toNullableNumber(row.edited_by),
       version: toNumber(row.version),
     },
     details: details.map(mapDetail),
@@ -768,6 +772,8 @@ function mapOrderDto(
     version: toNumber(row.version),
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
+    createdBy: toNullableNumber(row.created_by),
+    editedBy: toNullableNumber(row.edited_by),
   };
 }
 
@@ -807,6 +813,8 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
     dowelingOrderName: row.latest_doweling_order_name,
     designEngineerId: toNullableNumber(row.latest_design_engineer_id),
     passedProductionStatusCodes: toStringArray(row.passed_production_status_codes),
+    createdBy: toNullableNumber(row.created_by),
+    editedBy: toNullableNumber(row.edited_by),
     updatedAt: toIsoString(row.updated_at),
     version: toNumber(row.version),
   };

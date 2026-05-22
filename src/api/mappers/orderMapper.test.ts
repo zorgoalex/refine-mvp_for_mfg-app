@@ -298,6 +298,8 @@ describe('orderMapper', () => {
         linkPdfFile: null,
         notes: 'done',
         refKey1c: 'order-ref',
+        createdBy: 15,
+        editedBy: 16,
         version: 4,
       },
       details: [
@@ -421,6 +423,8 @@ describe('orderMapper', () => {
       paid_amount: 400,
       parts_count: 2,
       total_area: 0.4,
+      created_by: 15,
+      edited_by: 16,
       version: 4,
       doweling_order_id: 44,
       doweling_order_name: 'Doweling A',

@@ -131,6 +131,46 @@ describe('dataProvider backend users cutover routing', () => {
     });
     expect(result.data).not.toHaveProperty('password_hash');
   });
+
+  it('routes users getMany to backend by id so order creator labels resolve', async () => {
+    getUserById
+      .mockResolvedValueOnce({
+        id: 15,
+        username: 'creator_user',
+        email: 'creator@example.test',
+        fullName: 'Creator User',
+        role: 'manager',
+        permissions: ['users.view'],
+        employeeId: null,
+        isActive: true,
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: null,
+      })
+      .mockResolvedValueOnce({
+        id: 16,
+        username: 'editor_user',
+        email: 'editor@example.test',
+        fullName: 'Editor User',
+        role: 'admin',
+        permissions: ['users.view'],
+        employeeId: null,
+        isActive: true,
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: null,
+      });
+    const { dataProvider } = await import('./dataProvider');
+
+    const result = await dataProvider('').getMany({ resource: 'users', ids: [15, 16] });
+
+    expect(getUserById).toHaveBeenCalledTimes(2);
+    expect(getUserById).toHaveBeenNthCalledWith(1, 15);
+    expect(getUserById).toHaveBeenNthCalledWith(2, 16);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(result.data).toMatchObject([
+      { user_id: 15, username: 'creator_user' },
+      { user_id: 16, username: 'editor_user' },
+    ]);
+  });
 });
 
 describe('dataProvider users rollback routing', () => {

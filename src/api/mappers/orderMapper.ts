@@ -171,6 +171,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     ref_key_1c: order.header.refKey1c ?? null,
     created_at: order.header.createdAt ?? undefined,
     updated_at: order.header.updatedAt ?? undefined,
+    created_by: optionalNumber(order.header.createdBy) ?? undefined,
+    edited_by: optionalNumber(order.header.editedBy) ?? undefined,
     version: order.version,
   };
 
@@ -236,6 +238,8 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     doweling_order_name: item.dowelingOrderName ?? null,
     design_engineer_id: item.designEngineerId ?? null,
     passed_production_status_codes: item.passedProductionStatusCodes ?? [],
+    created_by: item.createdBy ?? undefined,
+    edited_by: item.editedBy ?? undefined,
     updated_at: item.updatedAt,
     version: item.version,
   };

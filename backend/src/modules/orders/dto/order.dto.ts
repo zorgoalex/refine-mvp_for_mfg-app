@@ -22,6 +22,8 @@ export interface OrderDto {
   version: number;
   createdAt: string;
   updatedAt: string;
+  createdBy: number | null;
+  editedBy: number | null;
 }
 
 export interface OrderResponseDto {
@@ -105,6 +107,8 @@ export interface OrderListItemDto {
   dowelingOrderName: string | null;
   designEngineerId: number | null;
   passedProductionStatusCodes: string[];
+  createdBy: number | null;
+  editedBy: number | null;
   updatedAt: string;
   version: number;
 }
@@ -120,6 +124,8 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   totalArea: number;
   createdAt: string;
   updatedAt: string;
+  createdBy: number | null;
+  editedBy: number | null;
   version: number;
 };
 

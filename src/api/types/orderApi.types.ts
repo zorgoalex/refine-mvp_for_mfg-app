@@ -359,6 +359,8 @@ export interface OrderHeaderDto {
   refKey1c?: string | null;
   createdAt?: IsoDateTimeString | null;
   updatedAt?: IsoDateTimeString | null;
+  createdBy?: number | null;
+  editedBy?: number | null;
   version?: number;
 }
 
@@ -504,6 +506,8 @@ export interface OrderListItemDto {
   dowelingOrderName?: string | null;
   designEngineerId?: number | null;
   passedProductionStatusCodes?: string[];
+  createdBy?: number | null;
+  editedBy?: number | null;
   updatedAt?: IsoDateTimeString;
   version?: number;
 }
