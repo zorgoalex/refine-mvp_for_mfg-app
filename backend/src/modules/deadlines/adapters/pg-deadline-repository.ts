@@ -13,6 +13,7 @@ import type {
   CreateActionExecutionInput,
   CreateDeadlineCommand,
   CreateDeadlineEventInput,
+  CreateDeadlineEventResult,
   CreateDeadlinePolicyCommand,
   DeadlineListQuery,
   DeadlineRepositoryPort,
@@ -666,7 +667,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     return row ? mapDeadline(row) : this.requireDeadline(input.deadlineId);
   }
 
-  async createDeadlineEvent(input: CreateDeadlineEventInput): Promise<DeadlineEventDto> {
+  async createDeadlineEvent(input: CreateDeadlineEventInput): Promise<CreateDeadlineEventResult> {
     const result = await this.database.query<DeadlineEventRow>(
       `
       INSERT INTO deadline_events (
@@ -698,12 +699,14 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     const row = result.rows[0];
     const event = mapEvent(row);
 
-    if (row.was_inserted !== false) {
+    const created = row.was_inserted !== false;
+
+    if (created) {
       await this.writeAuditEvent(event);
       await this.enqueueOutboxEvent(event);
     }
 
-    return event;
+    return { event, created };
   }
 
   async listActionRules(input: {

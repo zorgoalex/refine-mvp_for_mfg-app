@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DeadlineActionExecutionDto, DeadlineActionRuleDto } from '../dto/deadline-action-rule.dto';
 import type { DeadlineEventDto, DeadlineInstanceDto } from '../dto/deadline-instance.dto';
 import { DeadlineWorkerService } from './deadline-worker.service';
@@ -135,6 +135,52 @@ describe('DeadlineWorkerService', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ eventType: 'DEADLINE_EXPIRED' });
+  });
+
+  it('does not dispatch actions when terminal event creation returns an idempotent duplicate', async () => {
+    const existingEvent = createEvent({
+      deadlineEventId: 'event-existing',
+      eventType: 'DEADLINE_EXPIRED',
+    });
+    const dispatch = vi.fn();
+    const createNotification = vi.fn();
+    const notificationPort = createNotificationPort(createNotification);
+    const repository = createRepository({
+      due: [createDeadline()],
+      events: [],
+      executions: [],
+      rules: [createRule({ actionType: 'notify_user' })],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager({
+        ...repository,
+        async createDeadlineEvent() {
+          return { event: existingEvent, created: false };
+        },
+      }),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort,
+      dispatcher: { dispatch } as never,
+    });
+
+    await expect(
+      worker.processDueDeadlines({
+        now: '2026-05-01T10:00:00.000Z',
+        limit: 100,
+        workerId: 'worker-a',
+        trigger: 'scheduler',
+        schedulerRunId: 'scheduler-run-1',
+        config: { actionsEnabled: true, notificationsEnabled: true },
+      }),
+    ).resolves.toEqual({
+      scanned: 1,
+      processed: 1,
+      expired: 1,
+      completed: 0,
+    });
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(createNotification).not.toHaveBeenCalled();
   });
 
   it('records worker source, worker id, actor, and request id on expired events', async () => {
@@ -298,7 +344,7 @@ function createRepository(input: {
         ...eventInput,
       };
       input.events.push(event);
-      return event;
+      return { event, created: true };
     },
     async listActionRules() {
       return input.rules;
@@ -334,9 +380,30 @@ function createTargetResolver(input: {
   };
 }
 
-function createNotificationPort(): DeadlineNotificationPort {
+function createNotificationPort(
+  createNotification: DeadlineNotificationPort['createNotification'] = async () => {},
+): DeadlineNotificationPort {
   return {
-    async createNotification() {},
+    createNotification,
+  };
+}
+
+function createEvent(overrides: Partial<DeadlineEventDto> = {}): DeadlineEventDto {
+  return {
+    deadlineEventId: 'event-1',
+    deadlineId: 'deadline-1',
+    eventType: 'DEADLINE_EXPIRED',
+    severity: 'critical',
+    entityType: 'order',
+    entityId: '42',
+    orderId: 42,
+    deadlineAt: '2026-05-01T09:00:00.000Z',
+    eventAt: '2026-05-01T10:00:00.000Z',
+    delayMinutes: 60,
+    payload: {},
+    idempotencyKey: 'deadline-terminal:deadline-1:DEADLINE_EXPIRED:deadline-engine',
+    createdAt: '2026-05-01T10:00:00.000Z',
+    ...overrides,
   };
 }
 

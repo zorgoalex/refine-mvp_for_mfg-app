@@ -8,6 +8,7 @@ import type {
   CreateActionExecutionInput,
   CreateDeadlineCommand,
   CreateDeadlineEventInput,
+  CreateDeadlineEventResult,
   CreateDeadlinePolicyCommand,
   DeadlineRepositoryPort,
   FindDueDeadlinesCommand,
@@ -94,7 +95,7 @@ export class UnavailableDeadlineRepository implements DeadlineRepositoryPort {
     throw deadlineAdapterUnavailableError('deadline_repository');
   }
 
-  async createDeadlineEvent(_input: CreateDeadlineEventInput): Promise<DeadlineEventDto> {
+  async createDeadlineEvent(_input: CreateDeadlineEventInput): Promise<CreateDeadlineEventResult> {
     throw deadlineAdapterUnavailableError('deadline_repository');
   }
 

@@ -92,15 +92,18 @@ export class DeadlineWorkerService {
               command.actorUserId,
               command.requestId,
             );
-        const event = await unitOfWork.deadlines.createDeadlineEvent(eventInput);
+        const eventResult = await unitOfWork.deadlines.createDeadlineEvent(eventInput);
+        const { event } = eventResult;
 
-        await this.dispatcher.dispatch({
-          event,
-          repository: unitOfWork.deadlines,
-          targetResolver: this.ports.targetResolver,
-          notificationPort: this.ports.notificationPort,
-          config: command.config,
-        });
+        if (eventResult.created) {
+          await this.dispatcher.dispatch({
+            event,
+            repository: unitOfWork.deadlines,
+            targetResolver: this.ports.targetResolver,
+            notificationPort: this.ports.notificationPort,
+            config: command.config,
+          });
+        }
 
         result.processed += 1;
         if (event.eventType === 'DEADLINE_EXPIRED') {

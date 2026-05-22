@@ -77,8 +77,10 @@ describe('PgDeadlineRepository terminal event idempotency integration', () => {
       idempotencyKey,
     });
 
-    expect(duplicate.deadlineEventId).toBe(first.deadlineEventId);
-    expect(duplicate.eventAt).toBe(first.eventAt);
+    expect(first.created).toBe(true);
+    expect(duplicate.created).toBe(false);
+    expect(duplicate.event.deadlineEventId).toBe(first.event.deadlineEventId);
+    expect(duplicate.event.eventAt).toBe(first.event.eventAt);
     await expect(
       pool.query<{ count: string }>('SELECT COUNT(*)::int AS count FROM deadline_events'),
     ).resolves.toMatchObject({ rows: [{ count: 1 }] });

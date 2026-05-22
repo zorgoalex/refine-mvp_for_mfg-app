@@ -322,13 +322,42 @@ describe('PgDeadlineRepository', () => {
         idempotencyKey: 'deadline-terminal:11111111-1111-4111-8111-111111111111:DEADLINE_EXPIRED:deadline-engine',
       }),
     ).resolves.toMatchObject({
-      deadlineEventId: '22222222-2222-4222-8222-222222222222',
+      created: false,
+      event: {
+        deadlineEventId: '22222222-2222-4222-8222-222222222222',
+      },
     });
 
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('(xmax = 0) AS was_inserted');
     expect(sql).not.toContain('INSERT INTO audit_log');
     expect(sql).not.toContain('INSERT INTO outbox_events');
+  });
+
+  it('reports newly inserted deadline events as created', async () => {
+    const database = createDatabase({ eventWasInserted: true });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.createDeadlineEvent({
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        eventType: 'DEADLINE_EXPIRED',
+        severity: 'critical',
+        entityType: 'order',
+        entityId: '100',
+        orderId: 100,
+        clientId: 5,
+        deadlineAt: '2026-05-02T10:00:00.000Z',
+        eventAt: '2026-05-03T10:00:00.000Z',
+        payload: { source: 'deadline-engine', trigger: 'scheduler' },
+        idempotencyKey: 'deadline-terminal:11111111-1111-4111-8111-111111111111:DEADLINE_EXPIRED:deadline-engine',
+      }),
+    ).resolves.toMatchObject({
+      created: true,
+      event: {
+        deadlineEventId: '22222222-2222-4222-8222-222222222222',
+      },
+    });
   });
 
   it('caps due worker scan with FOR UPDATE SKIP LOCKED and configured limit', async () => {

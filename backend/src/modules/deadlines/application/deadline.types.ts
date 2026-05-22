@@ -163,6 +163,11 @@ export interface CreateDeadlineEventInput {
   idempotencyKey?: string | null;
 }
 
+export interface CreateDeadlineEventResult {
+  event: DeadlineEventDto;
+  created: boolean;
+}
+
 export interface CreateActionExecutionInput {
   deadlineEventId: string;
   actionRuleId?: string | null;
@@ -207,7 +212,7 @@ export interface DeadlineRepositoryPort {
     status: Extract<DeadlineStatus, 'completed_on_time' | 'completed_late'>;
     completedAt: string;
   }): Promise<DeadlineInstanceDto>;
-  createDeadlineEvent(input: CreateDeadlineEventInput): Promise<DeadlineEventDto>;
+  createDeadlineEvent(input: CreateDeadlineEventInput): Promise<CreateDeadlineEventResult>;
   listActionRules(input: {
     scopeType: DeadlineEntityType;
     eventType: DeadlineEventType;
