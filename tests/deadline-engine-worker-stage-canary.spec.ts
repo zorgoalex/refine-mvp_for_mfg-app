@@ -177,7 +177,7 @@ test.describe('deadline engine worker stage write canary', () => {
       expect(typeof scheduledError).toBe('object');
       expect(scheduledError).not.toBeNull();
       expect(Array.isArray(scheduledError)).toBe(false);
-      expect((scheduledError as { code?: unknown }).code).toBe(
+      expect(errorCode(scheduledError)).toBe(
         'DEADLINE_WORKER_SCHEDULER_OWNER_MISMATCH',
       );
     }
@@ -240,6 +240,16 @@ async function parseResponseBody(response: APIResponse): Promise<unknown> {
     return response.json();
   }
   return { text: await response.text() };
+}
+
+function errorCode(body: unknown): unknown {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const record = body as { code?: unknown; error?: unknown };
+  if (record.code !== undefined) return record.code;
+  if (!record.error || typeof record.error !== 'object' || Array.isArray(record.error)) {
+    return undefined;
+  }
+  return (record.error as { code?: unknown }).code;
 }
 
 function createSmokeUser(username: string, password: string): number {
