@@ -138,6 +138,57 @@ check_hasura_cors() {
   fail "Hasura CORS does not allow ${FRONTEND_ORIGIN}"
 }
 
+check_live_schema() {
+  local query
+  local result
+
+  [[ "${BACKEND_ENABLE_DEADLINES:-false}" == "true" ]] || return 0
+
+  query="
+    SELECT json_build_object(
+      'deadlineEventsIdempotencyKey',
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'deadline_events'
+          AND column_name = 'idempotency_key'
+      ),
+      'deadlineEventsIdempotencyIndex',
+      EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'deadline_events'
+          AND indexname = 'uq_deadline_events_idempotency_key'
+      )
+    )::text;
+  "
+
+  result="$(
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgresdb \
+      psql -U "$PG_USER" -d "$PG_DB" -tA -v ON_ERROR_STOP=1 -c "$query"
+  )"
+
+  case "$result" in
+    *'"deadlineEventsIdempotencyKey" : true'*|*'"deadlineEventsIdempotencyKey":true'*)
+      ;;
+    *)
+      fail "Live DB schema drift: deadline_events.idempotency_key is missing while BACKEND_ENABLE_DEADLINES=true"
+      ;;
+  esac
+
+  case "$result" in
+    *'"deadlineEventsIdempotencyIndex" : true'*|*'"deadlineEventsIdempotencyIndex":true'*)
+      ;;
+    *)
+      fail "Live DB schema drift: uq_deadline_events_idempotency_key is missing while BACKEND_ENABLE_DEADLINES=true"
+      ;;
+  esac
+
+  log "OK live DB deadline_events idempotency schema"
+}
+
 check_url "https://${HASURA_FQDN}/healthz" "200"
 check_url "https://${BACKEND_FQDN}/health/live" "200"
 check_hasura_cors
@@ -145,6 +196,7 @@ check_hasura_cors
 if [[ "$SKIP_DOCKER" == "0" && -f "$COMPOSE_FILE" ]] && command -v docker >/dev/null 2>&1; then
   cd "$PROJECT_DIR"
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
+  check_live_schema
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T hasura printenv HASURA_GRAPHQL_CORS_DOMAIN | grep -F "$FRONTEND_ORIGIN" >/dev/null \
     || fail "Running Hasura container does not contain FRONTEND_ORIGIN in HASURA_GRAPHQL_CORS_DOMAIN"
 fi

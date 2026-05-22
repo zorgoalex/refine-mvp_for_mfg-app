@@ -28,6 +28,49 @@ describe('schema preflight', () => {
     );
   });
 
+  it('detects deadline_events schema drift when idempotency_key is missing', () => {
+    const sql = `
+      CREATE TABLE deadline_events (
+        deadline_event_id UUID PRIMARY KEY,
+        deadline_id UUID NOT NULL,
+        event_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        order_id BIGINT,
+        payload_json JSONB,
+        created_at TIMESTAMPTZ NOT NULL
+      );
+    `;
+
+    expect(getSchemaPreflightIssueCodes(sql)).toContain(
+      'DEADLINE_EVENTS_IDEMPOTENCY_KEY_MISSING',
+    );
+  });
+
+  it('accepts deadline_events.idempotency_key added by an additive migration', () => {
+    const sql = `
+      CREATE TABLE deadline_events (
+        deadline_event_id UUID PRIMARY KEY,
+        deadline_id UUID NOT NULL,
+        event_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        order_id BIGINT,
+        payload_json JSONB,
+        created_at TIMESTAMPTZ NOT NULL
+      );
+
+      ALTER TABLE deadline_events
+        ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+    `;
+
+    expect(getSchemaPreflightIssueCodes(sql)).not.toContain(
+      'DEADLINE_EVENTS_IDEMPOTENCY_KEY_MISSING',
+    );
+  });
+
   it('detects the known blockers in postgresql_schema_v_14.sql', () => {
     const schema = readFileSync(
       new URL('./fixtures/postgresql_schema_v_14.preflight.sql', import.meta.url),

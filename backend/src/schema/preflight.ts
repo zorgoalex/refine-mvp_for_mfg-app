@@ -50,6 +50,17 @@ function getColumnType(sql: string, tableName: string, columnName: string): stri
   return match?.[1]?.toUpperCase() ?? null;
 }
 
+function hasColumn(sql: string, tableName: string, columnName: string): boolean {
+  const block = extractCreateTableBlock(sql, tableName);
+  const createTableColumn = new RegExp(`^\\s*${columnName}\\s+`, 'im').test(block);
+  const additiveColumn = new RegExp(
+    `ALTER\\s+TABLE\\s+${tableName}\\s+ADD\\s+COLUMN\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${columnName}\\b`,
+    'i',
+  ).test(sql);
+
+  return createTableColumn || additiveColumn;
+}
+
 function hasUniqueOnColumn(sql: string, tableName: string, columnName: string): boolean {
   const block = extractCreateTableBlock(sql, tableName);
   const uniqueConstraint = new RegExp(
@@ -196,6 +207,21 @@ export function checkSchemaPreflight(sql: string): SchemaPreflightIssue[] {
       title: 'audit_log table is missing',
       details: 'The backend PRD requires audit_log for auth, orders, users, export, and VLM events.',
       recommendation: 'Add an additive migration for audit_log before enabling backend critical flows.',
+    });
+  }
+
+  if (
+    hasCreateTable(sql, 'deadline_events') &&
+    !hasColumn(sql, 'deadline_events', 'idempotency_key')
+  ) {
+    addIssue(issues, {
+      code: 'DEADLINE_EVENTS_IDEMPOTENCY_KEY_MISSING',
+      severity: 'blocker',
+      title: 'deadline_events.idempotency_key is missing',
+      details:
+        'The Deadline Engine backend reads and writes deadline_events.idempotency_key for idempotent event handling.',
+      recommendation:
+        'Apply the additive deadline migration that adds deadline_events.idempotency_key and uq_deadline_events_idempotency_key before deploying deadline-enabled backend code.',
     });
   }
 

@@ -100,7 +100,8 @@ sudo ops/setup-vps.sh --yes
 - `bootstrap-vps.sh` - installs Docker, opens firewall ports, creates folders.
 - `check-env.sh` - validates `.env`, CORS origins, placeholders, optional DNS.
 - `deploy-stack.sh` - creates missing templates and starts/rebuilds the stack.
-- `smoke-vps.sh` - checks HTTPS health endpoints and Hasura CORS preflight.
+- `smoke-vps.sh` - checks HTTPS health endpoints, Hasura CORS preflight, and
+  deadline live-schema drift when deadlines are enabled.
 - `restore-prod-backup.sh` - destructive DB restore helper for a fresh backup.
 - `reset-test-vps.sh` - separate opt-in destructive reset for a dedicated test
   VPS: stops the stack/tests, cleans Docker state, reclones the repo, and
@@ -305,6 +306,12 @@ git -C repo_erp pull --ff-only
 docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
 repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
 ```
+
+When `BACKEND_ENABLE_DEADLINES=true`, `smoke-vps.sh` also checks the live
+business DB for `deadline_events.idempotency_key` and
+`uq_deadline_events_idempotency_key`. This prevents deploying deadline-enabled
+backend code against a database that has not received the additive Deadline
+Engine idempotency migration.
 
 If you are running the tracked template directly from the parent runtime root:
 
