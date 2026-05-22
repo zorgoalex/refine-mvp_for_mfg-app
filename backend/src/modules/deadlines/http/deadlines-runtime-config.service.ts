@@ -6,6 +6,7 @@ export interface DeadlinesFeatureFlags {
   deadlinesEnabled: boolean;
   deadlinesReadOnly: boolean;
   deadlineWorkerEnabled: boolean;
+  deadlineWorkerSchedulerOwner: 'none' | 'in_process' | 'external';
   deadlineActionsEnabled: boolean;
   deadlineNotificationsEnabled: boolean;
   deadlineWorkerPollIntervalMs: number;
@@ -22,6 +23,9 @@ export class DeadlinesRuntimeConfigService {
       deadlinesEnabled: this.config.get('BACKEND_ENABLE_DEADLINES', { infer: true }),
       deadlinesReadOnly: this.config.get('BACKEND_DEADLINES_READ_ONLY', { infer: true }),
       deadlineWorkerEnabled: this.config.get('BACKEND_ENABLE_DEADLINE_WORKER', { infer: true }),
+      deadlineWorkerSchedulerOwner: this.config.get('BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER', {
+        infer: true,
+      }),
       deadlineActionsEnabled: this.config.get('BACKEND_DEADLINE_ACTIONS_ENABLED', { infer: true }),
       deadlineNotificationsEnabled: this.config.get('BACKEND_DEADLINE_NOTIFICATIONS_ENABLED', {
         infer: true,

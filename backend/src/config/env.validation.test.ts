@@ -24,6 +24,7 @@ describe('backend env validation', () => {
       BACKEND_ENABLE_PRODUCTION_ACTIONS: false,
       BACKEND_DEADLINES_READ_ONLY: true,
       BACKEND_ENABLE_DEADLINE_WORKER: false,
+      BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER: 'none',
       BACKEND_ENABLE_DEADLINE_ORDER_SYNC: false,
       BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS: 60000,
       BACKEND_DEADLINE_WORKER_BATCH_SIZE: 100,
@@ -438,6 +439,36 @@ describe('backend env validation', () => {
         BACKEND_DEADLINE_WORKER_ID: '',
       }),
     ).toThrow(/BACKEND_DEADLINE_WORKER_ID/);
+  });
+
+  it('keeps deadline scheduler owner disabled by default and separate from manual worker gate', () => {
+    const env = validateEnv({});
+
+    expect(env.BACKEND_ENABLE_DEADLINE_WORKER).toBe(false);
+    expect(env.BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER).toBe('none');
+    expect(env.BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS).toBe(60000);
+    expect(env.BACKEND_DEADLINE_WORKER_BATCH_SIZE).toBe(100);
+    expect(env.BACKEND_DEADLINE_WORKER_ID).toBe('backend-local');
+  });
+
+  it('accepts exactly one deadline scheduler owner mode', () => {
+    expect(
+      validateEnv({
+        BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER: 'in_process',
+      }).BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER,
+    ).toBe('in_process');
+
+    expect(
+      validateEnv({
+        BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER: 'external',
+      }).BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER,
+    ).toBe('external');
+
+    expect(() =>
+      validateEnv({
+        BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER: 'both',
+      }),
+    ).toThrow(/BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER/);
   });
 
   it('keeps worker actions and notifications disabled when manual worker processing is enabled', () => {
