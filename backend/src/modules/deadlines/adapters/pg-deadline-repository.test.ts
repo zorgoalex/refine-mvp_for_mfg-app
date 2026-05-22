@@ -115,6 +115,9 @@ describe('PgDeadlineRepository', () => {
         entityId: '100',
         orderWorkshopId: null,
         reason: 'Заказ отменен',
+        trigger: 'manual',
+        workerId: null,
+        schedulerRunId: null,
       }),
     ]);
     const outbox = database.queries.find((query) =>
@@ -134,6 +137,9 @@ describe('PgDeadlineRepository', () => {
         reason: 'Заказ отменен',
         beforeStatus: 'active',
         afterStatus: 'cancelled',
+        trigger: 'manual',
+        workerId: null,
+        schedulerRunId: null,
         source: 'backend-deadline-command',
       }),
       'deadline-event:22222222-2222-4222-8222-222222222222:outbox',
@@ -196,7 +202,7 @@ describe('PgDeadlineRepository', () => {
     const audit = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
     );
-    expect(audit?.params[5]).toBe('deadline-engine');
+    expect(audit?.params[5]).toBe('deadline-engine-manual');
 
     const outbox = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
@@ -205,6 +211,9 @@ describe('PgDeadlineRepository', () => {
       source: 'deadline-engine',
       actorUserId: null,
       requestId: null,
+      trigger: 'manual',
+      workerId: null,
+      schedulerRunId: null,
     });
   });
 
@@ -251,26 +260,75 @@ describe('PgDeadlineRepository', () => {
       payload: {
         status: 'expired',
         source: 'deadline-engine',
+        trigger: 'scheduler',
         workerId: 'worker-a',
+        schedulerRunId: 'scheduler-run-1',
         actorUserId: '42',
         requestId: 'req-worker-1',
       },
+      idempotencyKey: 'deadline-terminal:11111111-1111-4111-8111-111111111111:DEADLINE_EXPIRED:deadline-engine',
     });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('deadline_id, event_type, severity, entity_type, entity_id, order_id, order_workshop_id, client_id, deadline_at, event_at, delay_minutes, payload_json, idempotency_key');
+    expect(sql).toContain('ON CONFLICT (idempotency_key)');
+    expect(sql).toContain('WHERE idempotency_key IS NOT NULL DO UPDATE');
 
     const audit = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
     );
-    expect(audit?.params[5]).toBe('deadline-engine');
+    expect(audit?.params[5]).toBe('deadline-engine-scheduler');
+    expect(JSON.parse(String(audit?.params[11]))).toMatchObject({
+      trigger: 'scheduler',
+      workerId: 'worker-a',
+      schedulerRunId: 'scheduler-run-1',
+    });
 
     const outbox = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
     );
     expect(JSON.parse(String(outbox?.params[2]))).toMatchObject({
       source: 'deadline-engine',
+      trigger: 'scheduler',
       actorUserId: '42',
       requestId: 'req-worker-1',
       workerId: 'worker-a',
+      schedulerRunId: 'scheduler-run-1',
     });
+    const deadlineEventInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_events'),
+    );
+    expect(deadlineEventInsert?.params.at(-1)).toBe(
+      'deadline-terminal:11111111-1111-4111-8111-111111111111:DEADLINE_EXPIRED:deadline-engine',
+    );
+  });
+
+  it('does not write audit or outbox side effects when an idempotent event already exists', async () => {
+    const database = createDatabase({ eventWasInserted: false });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.createDeadlineEvent({
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        eventType: 'DEADLINE_EXPIRED',
+        severity: 'critical',
+        entityType: 'order',
+        entityId: '100',
+        orderId: 100,
+        clientId: 5,
+        deadlineAt: '2026-05-02T10:00:00.000Z',
+        eventAt: '2026-05-03T10:00:00.000Z',
+        payload: { source: 'deadline-engine', trigger: 'scheduler' },
+        idempotencyKey: 'deadline-terminal:11111111-1111-4111-8111-111111111111:DEADLINE_EXPIRED:deadline-engine',
+      }),
+    ).resolves.toMatchObject({
+      deadlineEventId: '22222222-2222-4222-8222-222222222222',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('(xmax = 0) AS was_inserted');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
   });
 
   it('caps due worker scan with FOR UPDATE SKIP LOCKED and configured limit', async () => {
@@ -291,7 +349,7 @@ describe('PgDeadlineRepository', () => {
   });
 });
 
-function createDatabase() {
+function createDatabase(options: { eventWasInserted?: boolean } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const client = {
     async query(text: string, params: readonly unknown[] = []) {
@@ -302,7 +360,7 @@ function createDatabase() {
       }
 
       if (text.includes('RETURNING') && text.includes('deadline_events')) {
-        return { rows: [eventRow(params)] };
+        return { rows: [eventRow(params, options.eventWasInserted ?? true)] };
       }
 
       if (text.includes('RETURNING') && text.includes('deadline_action_executions')) {
@@ -368,7 +426,7 @@ function baseDeadlineRow() {
   };
 }
 
-function eventRow(params: readonly unknown[] = []) {
+function eventRow(params: readonly unknown[] = [], wasInserted = true) {
   return {
     deadline_event_id: '22222222-2222-4222-8222-222222222222',
     deadline_id: String(params[0] ?? '11111111-1111-4111-8111-111111111111'),
@@ -392,6 +450,8 @@ function eventRow(params: readonly unknown[] = []) {
       typeof params[11] === 'string'
         ? (JSON.parse(params[11]) as Record<string, unknown>)
         : {},
+    idempotency_key: (params[12] as string | null | undefined) ?? null,
+    was_inserted: wasInserted,
     created_at: new Date('2026-05-01T10:00:00.000Z'),
   };
 }

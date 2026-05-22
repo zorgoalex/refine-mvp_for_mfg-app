@@ -31,6 +31,7 @@ describe('DeadlineWorkerService', () => {
         now: '2026-05-01T10:00:00.000Z',
         limit: 100,
         workerId: 'worker-a',
+        trigger: 'manual',
         config: { actionsEnabled: false, notificationsEnabled: false },
       }),
     ).resolves.toEqual({
@@ -82,6 +83,7 @@ describe('DeadlineWorkerService', () => {
       now: '2026-05-01T10:00:00.000Z',
       limit: 100,
       workerId: 'worker-a',
+      trigger: 'manual',
       config: { actionsEnabled: true, notificationsEnabled: true },
     });
 
@@ -120,12 +122,14 @@ describe('DeadlineWorkerService', () => {
       now: '2026-05-01T10:00:00.000Z',
       limit: 100,
       workerId: 'worker-a',
+      trigger: 'manual',
       config: { actionsEnabled: false, notificationsEnabled: false },
     });
     await worker.processDueDeadlines({
       now: '2026-05-01T10:01:00.000Z',
       limit: 100,
       workerId: 'worker-a',
+      trigger: 'manual',
       config: { actionsEnabled: false, notificationsEnabled: false },
     });
 
@@ -151,6 +155,7 @@ describe('DeadlineWorkerService', () => {
       now: '2026-05-01T10:00:00.000Z',
       limit: 100,
       workerId: 'worker-a',
+      trigger: 'manual',
       actorUserId: '42',
       requestId: 'req-worker-1',
       config: { actionsEnabled: false, notificationsEnabled: false },
@@ -161,10 +166,13 @@ describe('DeadlineWorkerService', () => {
       payload: {
         status: 'expired',
         source: 'deadline-engine',
+        trigger: 'manual',
         workerId: 'worker-a',
         actorUserId: '42',
         requestId: 'req-worker-1',
+        schedulerRunId: null,
       },
+      idempotencyKey: 'deadline-terminal:deadline-1:DEADLINE_EXPIRED:deadline-engine',
     });
   });
 
@@ -189,6 +197,8 @@ describe('DeadlineWorkerService', () => {
       now: '2026-05-01T10:00:00.000Z',
       limit: 100,
       workerId: 'worker-a',
+      trigger: 'scheduler',
+      schedulerRunId: 'scheduler-run-1',
       actorUserId: '42',
       requestId: 'req-worker-2',
       config: { actionsEnabled: false, notificationsEnabled: false },
@@ -201,10 +211,13 @@ describe('DeadlineWorkerService', () => {
         status: 'completed_on_time',
         completedAt: '2026-05-01T08:30:00.000Z',
         source: 'deadline-engine',
+        trigger: 'scheduler',
         workerId: 'worker-a',
         actorUserId: '42',
         requestId: 'req-worker-2',
+        schedulerRunId: 'scheduler-run-1',
       },
+      idempotencyKey: 'deadline-terminal:deadline-1:DEADLINE_COMPLETED_ON_TIME:deadline-engine',
     });
   });
 });

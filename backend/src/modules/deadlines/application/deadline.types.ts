@@ -160,6 +160,7 @@ export interface CreateDeadlineEventInput {
   eventAt: string;
   delayMinutes?: number | null;
   payload?: Record<string, unknown> | null;
+  idempotencyKey?: string | null;
 }
 
 export interface CreateActionExecutionInput {

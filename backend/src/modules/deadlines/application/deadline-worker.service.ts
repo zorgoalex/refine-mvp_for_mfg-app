@@ -22,6 +22,8 @@ export interface ProcessDueDeadlinesCommand {
   now: string;
   limit: number;
   workerId: string;
+  trigger: 'manual' | 'scheduler';
+  schedulerRunId?: string;
   actorUserId?: string;
   requestId?: string;
   config: DeadlineActionDispatcherConfig;
@@ -75,6 +77,8 @@ export class DeadlineWorkerService {
               targetState.completedAt ?? command.now,
               command.now,
               command.workerId,
+              command.trigger,
+              command.schedulerRunId,
               command.actorUserId,
               command.requestId,
             )
@@ -83,6 +87,8 @@ export class DeadlineWorkerService {
               deadline,
               command.now,
               command.workerId,
+              command.trigger,
+              command.schedulerRunId,
               command.actorUserId,
               command.requestId,
             );
@@ -113,6 +119,8 @@ export class DeadlineWorkerService {
     deadline: DeadlineInstanceDto,
     now: string,
     workerId: string,
+    trigger: 'manual' | 'scheduler',
+    schedulerRunId?: string,
     actorUserId?: string,
     requestId?: string,
   ): Promise<CreateDeadlineEventInput> {
@@ -133,12 +141,15 @@ export class DeadlineWorkerService {
       deadlineAt: deadline.deadlineAt,
       eventAt: now,
       delayMinutes: calculateDelayMinutes({ deadlineAt: deadline.deadlineAt, occurredAt: now }),
+      idempotencyKey: terminalEventIdempotencyKey(deadline.deadlineId, 'DEADLINE_EXPIRED'),
       payload: {
         status: 'expired',
         source: 'deadline-engine',
+        trigger,
         workerId,
         actorUserId: actorUserId ?? null,
         requestId: requestId ?? null,
+        schedulerRunId: schedulerRunId ?? null,
       },
     };
   }
@@ -149,6 +160,8 @@ export class DeadlineWorkerService {
     completedAt: string,
     now: string,
     workerId: string,
+    trigger: 'manual' | 'scheduler',
+    schedulerRunId?: string,
     actorUserId?: string,
     requestId?: string,
   ): Promise<CreateDeadlineEventInput> {
@@ -162,10 +175,12 @@ export class DeadlineWorkerService {
       completedAt,
     });
 
+    const eventType =
+      status === 'completed_on_time' ? 'DEADLINE_COMPLETED_ON_TIME' : 'DEADLINE_COMPLETED_LATE';
+
     return {
       deadlineId: deadline.deadlineId,
-      eventType:
-        status === 'completed_on_time' ? 'DEADLINE_COMPLETED_ON_TIME' : 'DEADLINE_COMPLETED_LATE',
+      eventType,
       severity: status === 'completed_on_time' ? 'info' : 'warning',
       entityType: deadline.entityType,
       entityId: deadline.entityId,
@@ -178,14 +193,21 @@ export class DeadlineWorkerService {
         status === 'completed_late'
           ? calculateDelayMinutes({ deadlineAt: deadline.deadlineAt, occurredAt: completedAt })
           : 0,
+      idempotencyKey: terminalEventIdempotencyKey(deadline.deadlineId, eventType),
       payload: {
         status,
         completedAt,
         source: 'deadline-engine',
+        trigger,
         workerId,
         actorUserId: actorUserId ?? null,
         requestId: requestId ?? null,
+        schedulerRunId: schedulerRunId ?? null,
       },
     };
   }
+}
+
+function terminalEventIdempotencyKey(deadlineId: string, eventType: string): string {
+  return `deadline-terminal:${deadlineId}:${eventType}:deadline-engine`;
 }

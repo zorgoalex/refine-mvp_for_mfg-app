@@ -131,6 +131,13 @@ CREATE INDEX IF NOT EXISTS idx_deadline_events_order
 CREATE INDEX IF NOT EXISTS idx_deadline_events_type
   ON deadline_events(event_type, event_at DESC);
 
+ALTER TABLE deadline_events
+  ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_deadline_events_idempotency_key
+  ON deadline_events (idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS deadline_action_rules (
   action_rule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   policy_id UUID REFERENCES deadline_policies(policy_id) ON DELETE CASCADE,

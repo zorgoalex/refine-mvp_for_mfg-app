@@ -58,6 +58,7 @@ export class DeadlineWorkerController {
       now: parsedBody.now ?? new Date().toISOString(),
       limit: cappedLimit,
       workerId: flags.deadlineWorkerId,
+      trigger: 'manual',
       actorUserId: currentUser.id,
       requestId: request.requestId,
       config: {

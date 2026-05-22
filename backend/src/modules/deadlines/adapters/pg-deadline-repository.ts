@@ -62,6 +62,8 @@ interface DeadlineEventRow {
   event_at: string | Date;
   delay_minutes: string | number | null;
   payload_json: Record<string, unknown> | null;
+  idempotency_key: string | null;
+  was_inserted?: boolean;
   created_at: string | Date;
 }
 
@@ -120,7 +122,7 @@ const DEADLINE_COLUMNS = `
 const EVENT_COLUMNS = `
   deadline_event_id, deadline_id, event_type, severity, entity_type, entity_id,
   order_id, order_workshop_id, client_id, deadline_at, event_at, delay_minutes,
-  payload_json, created_at
+  payload_json, idempotency_key, created_at
 `;
 
 const POLICY_COLUMNS = `
@@ -669,10 +671,13 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       `
       INSERT INTO deadline_events (
         deadline_id, event_type, severity, entity_type, entity_id, order_id,
-        order_workshop_id, client_id, deadline_at, event_at, delay_minutes, payload_json
+        order_workshop_id, client_id, deadline_at, event_at, delay_minutes, payload_json,
+        idempotency_key
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, $10::timestamptz, $11, $12::jsonb)
-      RETURNING ${EVENT_COLUMNS}
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, $10::timestamptz, $11, $12::jsonb, $13)
+      ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE
+      SET idempotency_key = deadline_events.idempotency_key
+      RETURNING ${EVENT_COLUMNS}, (xmax = 0) AS was_inserted
       `,
       [
         input.deadlineId,
@@ -687,11 +692,16 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         input.eventAt,
         input.delayMinutes ?? null,
         JSON.stringify(input.payload ?? {}),
+        input.idempotencyKey ?? null,
       ],
     );
-    const event = mapEvent(result.rows[0]);
-    await this.writeAuditEvent(event);
-    await this.enqueueOutboxEvent(event);
+    const row = result.rows[0];
+    const event = mapEvent(row);
+
+    if (row.was_inserted !== false) {
+      await this.writeAuditEvent(event);
+      await this.enqueueOutboxEvent(event);
+    }
 
     return event;
   }
@@ -824,10 +834,14 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       : typeof payload.requestId === 'string'
         ? 'backend-deadline-command'
         : 'deadline-engine';
+    const trigger = payload.trigger === 'scheduler' ? 'scheduler' : 'manual';
+    const auditSource = source === 'deadline-engine' ? `deadline-engine-${trigger}` : source;
     const actorUserId =
       typeof payload.actorUserId === 'string' || typeof payload.actorUserId === 'number'
         ? String(payload.actorUserId)
         : null;
+    const workerId = typeof payload.workerId === 'string' ? payload.workerId : null;
+    const schedulerRunId = typeof payload.schedulerRunId === 'string' ? payload.schedulerRunId : null;
 
     await this.database.query(
       `
@@ -848,7 +862,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         event.deadlineId,
         actorUserId,
         requestId,
-        source,
+        auditSource,
         event.orderId ?? null,
         event.clientId ?? null,
         JSON.stringify(beforeStatus ? { status: beforeStatus } : {}),
@@ -861,6 +875,9 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
           entityId: event.entityId,
           orderWorkshopId: event.orderWorkshopId ?? null,
           reason,
+          trigger,
+          workerId,
+          schedulerRunId,
         }),
       ],
     );
@@ -877,6 +894,8 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     const beforeStatus = typeof payload.beforeStatus === 'string' ? payload.beforeStatus : null;
     const afterStatus = typeof payload.afterStatus === 'string' ? payload.afterStatus : null;
     const workerId = typeof payload.workerId === 'string' ? payload.workerId : null;
+    const trigger = payload.trigger === 'scheduler' ? 'scheduler' : 'manual';
+    const schedulerRunId = typeof payload.schedulerRunId === 'string' ? payload.schedulerRunId : null;
     const source = typeof payload.source === 'string'
       ? payload.source
       : requestId
@@ -905,7 +924,9 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
           reason,
           beforeStatus,
           afterStatus,
-          ...(workerId ? { workerId } : {}),
+          trigger,
+          workerId,
+          schedulerRunId,
           source,
         }),
         `deadline-event:${event.deadlineEventId}:outbox`,

@@ -118,6 +118,7 @@ describe('DeadlineWorkerController', () => {
         now: '2026-05-21T10:00:00.000Z',
         limit: 25,
         workerId: 'worker-acceptance',
+        trigger: 'manual',
         actorUserId: '42',
         requestId: undefined,
         config: {
