@@ -29,6 +29,7 @@ test.describe('deadline engine worker stage write canary', () => {
     const restored = runFixture('restore');
     expect(restored.fixtureKey).toBe(fixtureKey);
     expect(restored.orderId).toBe(fixtureOrderId);
+    expectRestoredFixtureEmpty(restored);
 
     const created = runFixture('create');
     expect(created.fixtureKey).toBe(fixtureKey);
@@ -38,19 +39,21 @@ test.describe('deadline engine worker stage write canary', () => {
   });
 
   test.afterAll(() => {
+    let restoreError: unknown;
     try {
       if (fixtureKey && fixtureOrderId && process.env.DEADLINE_WORKER_FIXTURE_RESTORE === 'true') {
         const restored = runFixture('restore');
-        expect(restored.deadlineCount).toBe(0);
-        expect(restored.eventCount).toBe(0);
-        expect(restored.auditCount).toBe(0);
-        expect(restored.outboxCount).toBe(0);
-        expect(restored.actionExecutionCount).toBe(0);
-        if (restored.actionRuleCount !== undefined) expect(restored.actionRuleCount).toBe(0);
-        if (restored.notificationCount !== undefined) expect(restored.notificationCount).toBe(0);
+        expectRestoredFixtureEmpty(restored);
       }
+    } catch (error) {
+      restoreError = error;
     } finally {
-      cleanupUser(userId);
+      try {
+        cleanupUser(userId);
+      } catch (cleanupError) {
+        if (!restoreError) throw cleanupError;
+      }
+      if (restoreError) throw restoreError;
     }
   });
 
@@ -134,9 +137,8 @@ test.describe('deadline engine worker stage write canary', () => {
         headers: { Authorization: `Bearer ${token}` },
       },
     );
-    const scheduledBody = await scheduledResponse.json();
-
     if (scheduledResponse.ok()) {
+      const scheduledBody = await scheduledResponse.json();
       expect(scheduledBody).toEqual({
         scanned: 1,
         processed: 1,
@@ -169,11 +171,27 @@ test.describe('deadline engine worker stage write canary', () => {
         skippedNotifications: 1,
       });
     } else {
-      expect(scheduledResponse.status(), JSON.stringify(scheduledBody)).toBe(503);
-      expect(scheduledBody.code).toBe('DEADLINE_WORKER_SCHEDULER_OWNER_MISMATCH');
+      const scheduledError = await parseResponseBody(scheduledResponse);
+      expect(scheduledResponse.status(), JSON.stringify(scheduledError)).toBe(503);
+      expect(typeof scheduledError).toBe('object');
+      expect(scheduledError).not.toBeNull();
+      expect(Array.isArray(scheduledError)).toBe(false);
+      expect((scheduledError as { code?: unknown }).code).toBe(
+        'DEADLINE_WORKER_SCHEDULER_OWNER_MISMATCH',
+      );
     }
   });
 });
+
+function expectRestoredFixtureEmpty(snapshot: FixtureSnapshot) {
+  expect(snapshot.deadlineCount).toBe(0);
+  expect(snapshot.eventCount).toBe(0);
+  expect(snapshot.auditCount).toBe(0);
+  expect(snapshot.outboxCount).toBe(0);
+  expect(snapshot.actionExecutionCount).toBe(0);
+  if (snapshot.actionRuleCount !== undefined) expect(snapshot.actionRuleCount).toBe(0);
+  if (snapshot.notificationCount !== undefined) expect(snapshot.notificationCount).toBe(0);
+}
 
 function requireCanaryEnv() {
   if (!fixtureKey.trim()) {
@@ -215,6 +233,14 @@ async function expectOk(response: APIResponse) {
   expect(response.ok(), body).toBe(true);
 }
 
+async function parseResponseBody(response: APIResponse): Promise<unknown> {
+  const contentType = response.headers()['content-type'] ?? '';
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+  return { text: await response.text() };
+}
+
 function createSmokeUser(username: string, password: string): number {
   const email = `${username}@example.invalid`;
   const passwordHash = bcrypt.hashSync(password, 10);
@@ -227,7 +253,7 @@ function createSmokeUser(username: string, password: string): number {
           '${escapeSql(username)}',
           '${escapeSql(email)}',
           '${escapeSql(passwordHash)}',
-          1,
+          2,
           'E2E Test Deadline Worker Stage Canary',
           true
         )
