@@ -1831,6 +1831,63 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadline-worker/process-due-scheduled:
+    post:
+      tags:
+        - Deadline Worker
+      operationId: processDueDeadlinesScheduled
+      summary: Process one scheduled Deadline Engine worker batch
+      description: Runs a single platform-cron-owned worker batch. This endpoint requires an external scheduler owner.
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.worker.schedule
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                now:
+                  type: string
+                  format: date-time
+                limit:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: Scheduled worker batch processed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - scanned
+                  - processed
+                  - expired
+                  - completed
+                properties:
+                  scanned:
+                    type: integer
+                  processed:
+                    type: integer
+                  expired:
+                    type: integer
+                  completed:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/FeatureDisabled'
         '500':
@@ -2876,6 +2933,8 @@ components:
         - deadlines.cancel
         - deadlines.actions.manage
         - deadlines.audit.view
+        - deadlines.worker.manage
+        - deadlines.worker.schedule
         - settings.view
         - settings.manage
 

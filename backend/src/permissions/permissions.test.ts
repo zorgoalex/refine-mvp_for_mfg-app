@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'fs';
+import { resolve } from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   can,
@@ -49,9 +51,11 @@ describe('permissions foundation', () => {
 
   it('assigns deadline permissions by role without giving worker controls to service admin', () => {
     expect(can('superadmin', 'deadlines.worker.manage')).toBe(true);
+    expect(can('superadmin', 'deadlines.worker.schedule')).toBe(true);
     expect(can('admin', 'deadlines.manage')).toBe(true);
     expect(can('admin', 'deadlines.actions.manage')).toBe(true);
     expect(can('admin', 'deadlines.worker.manage')).toBe(false);
+    expect(can('admin', 'deadlines.worker.schedule')).toBe(false);
 
     expect(can('top_manager', 'deadlines.audit.view')).toBe(true);
     expect(can('manager', 'deadlines.override')).toBe(true);
@@ -74,4 +78,37 @@ describe('permissions foundation', () => {
     ]);
     expect(HASURA_ALLOWED_ROLES.admin).not.toContain('superadmin');
   });
+
+  it('keeps Task 4 deadline worker permissions in the static OpenAPI PermissionName enum', () => {
+    const contract = readOpenApiContract();
+    const contractPermissions = readPermissionNameEnum(contract);
+    const deadlineWorkerPermissions = PERMISSIONS.filter((permission) =>
+      permission.startsWith('deadlines.worker.'),
+    );
+
+    expect(contractPermissions).toEqual(expect.arrayContaining(deadlineWorkerPermissions));
+  });
 });
+
+function readOpenApiContract(): string {
+  const candidates = [
+    resolve(process.cwd(), 'backend/contracts/04-api-contract.openapi.yaml'),
+    resolve(process.cwd(), 'contracts/04-api-contract.openapi.yaml'),
+  ];
+  const contractPath = candidates.find((candidate) => existsSync(candidate));
+
+  expect(contractPath).toBeDefined();
+
+  return readFileSync(contractPath as string, 'utf8');
+}
+
+function readPermissionNameEnum(contract: string): string[] {
+  const match = /    PermissionName:\n      type: string\n      enum:\n((?:        - .+\n)+)/.exec(contract);
+
+  expect(match, 'Expected PermissionName enum in static OpenAPI contract').toBeDefined();
+
+  return (match?.[1] ?? '')
+    .trim()
+    .split('\n')
+    .map((line) => line.trim().replace(/^- /, ''));
+}

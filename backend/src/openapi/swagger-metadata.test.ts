@@ -23,7 +23,7 @@ describe('Swagger controller metadata', () => {
         }
 
         const precedingDecoratorBlock = lines
-          .slice(Math.max(0, index - 12), index)
+          .slice(Math.max(0, index - 24), index)
           .join('\n');
 
         if (!precedingDecoratorBlock.includes('@ApiOperation(')) {
@@ -35,6 +35,35 @@ describe('Swagger controller metadata', () => {
     });
 
     expect(missingOperationMetadata).toEqual([]);
+  });
+
+  it('documents Deadline Worker request validation failures in Swagger metadata', () => {
+    const controllerSource = readFileSync(
+      resolve(backendRoot(), 'src/modules/deadlines/http/deadline-worker.controller.ts'),
+      'utf8',
+    );
+
+    expect(routeDecoratorBlock(controllerSource, "Post('process-due-now')")).toContain(
+      '@ApiResponse({ status: 422',
+    );
+    expect(routeDecoratorBlock(controllerSource, "Post('process-due-scheduled')")).toContain(
+      '@ApiResponse({ status: 422',
+    );
+  });
+
+  it('documents Deadline Worker request body schemas in Swagger metadata', () => {
+    const controllerSource = readFileSync(
+      resolve(backendRoot(), 'src/modules/deadlines/http/deadline-worker.controller.ts'),
+      'utf8',
+    );
+
+    for (const routeDecorator of ["Post('process-due-now')", "Post('process-due-scheduled')"]) {
+      const decoratorBlock = routeDecoratorBlock(controllerSource, routeDecorator);
+
+      expect(decoratorBlock).toContain('@ApiBody({');
+      expect(decoratorBlock).toContain("now: { type: 'string', format: 'date-time' }");
+      expect(decoratorBlock).toContain("limit: { type: 'integer', minimum: 1 }");
+    }
   });
 });
 
@@ -65,4 +94,14 @@ function walk(directory: string): string[] {
 
 function relativeBackendPath(path: string): string {
   return relative(backendRoot(), path).split(sep).join('/');
+}
+
+function routeDecoratorBlock(source: string, routeDecorator: string): string {
+  const routeIndex = source.indexOf(`@${routeDecorator}`);
+
+  expect(routeIndex, `Expected to find @${routeDecorator}`).toBeGreaterThanOrEqual(0);
+
+  const linesBeforeRoute = source.slice(0, routeIndex).split('\n');
+
+  return linesBeforeRoute.slice(-20).join('\n');
 }

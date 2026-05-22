@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { REQUIRED_PERMISSIONS_METADATA_KEY } from '../../../permissions/require-permissions.decorator';
 import { DeadlineWorkerController, parseProcessDueNowRequest } from './deadline-worker.controller';
 import type { DeadlinesFeatureFlags } from './deadlines-runtime-config.service';
 
@@ -190,6 +191,129 @@ describe('DeadlineWorkerController', () => {
     );
     expect(parseProcessDueNowRequest({ limit: 5 })).toEqual({ limit: 5 });
   });
+
+  it('rejects scheduled processing when scheduler owner is none', async () => {
+    const controller = createController({
+      flags: flags({ deadlineWorkerSchedulerOwner: 'none' }),
+    });
+
+    await expect(
+      controller.processDueScheduled(
+        { user: currentUser({ permissions: ['deadlines.worker.schedule'] }) },
+        {},
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'DEADLINE_WORKER_SCHEDULER_OWNER_MISMATCH',
+    });
+  });
+
+  it('rejects scheduled processing when scheduler owner is in_process', async () => {
+    const controller = createController({
+      flags: flags({ deadlineWorkerSchedulerOwner: 'in_process' }),
+    });
+
+    await expect(
+      controller.processDueScheduled(
+        { user: currentUser({ permissions: ['deadlines.worker.schedule'] }) },
+        {},
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'DEADLINE_WORKER_SCHEDULER_OWNER_MISMATCH',
+    });
+  });
+
+  it('delegates scheduled processing for external scheduler owner', async () => {
+    const calls: unknown[] = [];
+    const controller = createController({
+      worker: {
+        async processDueDeadlines(command: unknown) {
+          calls.push(command);
+          return { scanned: 3, processed: 2, expired: 1, completed: 1 };
+        },
+      },
+      flags: flags({
+        deadlineWorkerSchedulerOwner: 'external',
+        deadlineWorkerBatchSize: 20,
+        deadlineWorkerId: 'worker-scheduled',
+        deadlineActionsEnabled: true,
+        deadlineNotificationsEnabled: false,
+      }),
+    });
+
+    await expect(
+      controller.processDueScheduled(
+        {
+          user: currentUser({ permissions: ['deadlines.worker.schedule'] }),
+          requestId: 'req-scheduler-1',
+        },
+        {
+          now: '2026-05-21T13:00:00.000Z',
+          limit: 99,
+        },
+      ),
+    ).resolves.toEqual({ scanned: 3, processed: 2, expired: 1, completed: 1 });
+
+    expect(calls).toEqual([
+      {
+        now: '2026-05-21T13:00:00.000Z',
+        limit: 20,
+        workerId: 'worker-scheduled',
+        trigger: 'scheduler',
+        schedulerRunId: 'deadline-worker-scheduled-req-scheduler-1',
+        actorUserId: '42',
+        requestId: 'req-scheduler-1',
+        config: {
+          actionsEnabled: true,
+          notificationsEnabled: false,
+        },
+      },
+    ]);
+  });
+
+  it('rejects scheduled processing without scheduled worker permission even with manual worker permission', async () => {
+    const calls: unknown[] = [];
+    const controller = createController({
+      worker: {
+        async processDueDeadlines(command: unknown) {
+          calls.push(command);
+          return { scanned: 0, processed: 0, expired: 0, completed: 0 };
+        },
+      },
+      flags: flags({ deadlineWorkerSchedulerOwner: 'external' }),
+    });
+
+    await expect(
+      controller.processDueScheduled(
+        { user: currentUser({ permissions: ['deadlines.worker.manage'] }) },
+        {},
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('requires scheduled worker permission metadata without manual worker manage permission', async () => {
+    const controller = createController({
+      flags: flags({ deadlineWorkerSchedulerOwner: 'external' }),
+    });
+
+    const requiredPermissions = Reflect.getMetadata(
+      REQUIRED_PERMISSIONS_METADATA_KEY,
+      DeadlineWorkerController.prototype.processDueScheduled,
+    );
+
+    expect(requiredPermissions).toEqual(['deadlines.worker.schedule']);
+    await expect(
+      controller.processDueScheduled(
+        { user: currentUser({ permissions: ['deadlines.worker.schedule'] }) },
+        {},
+      ),
+    ).resolves.toEqual({ scanned: 0, processed: 0, expired: 0, completed: 0 });
+  });
 });
 
 function createController(overrides: {
@@ -218,6 +342,7 @@ function flags(overrides: Partial<DeadlinesFeatureFlags> = {}): DeadlinesFeature
     deadlineWorkerPollIntervalMs: 60000,
     deadlineWorkerBatchSize: 100,
     deadlineWorkerId: 'backend-local',
+    deadlineWorkerSchedulerOwner: 'none',
     ...overrides,
   };
 }

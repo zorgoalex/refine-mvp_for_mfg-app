@@ -118,6 +118,7 @@ export const PERMISSIONS = [
   'deadlines.actions.manage',
   'deadlines.audit.view',
   'deadlines.worker.manage',
+  'deadlines.worker.schedule',
 
   'settings.view',
   'settings.manage',
@@ -135,6 +136,7 @@ const ADMIN_SERVICE_EXCLUDED_PERMISSIONS = [
   'permissions.manage',
   'system.superadmin',
   'deadlines.worker.manage',
+  'deadlines.worker.schedule',
 ] as const satisfies PermissionName[];
 
 const adminServiceExcludedPermissions = new Set<PermissionName>(ADMIN_SERVICE_EXCLUDED_PERMISSIONS);
