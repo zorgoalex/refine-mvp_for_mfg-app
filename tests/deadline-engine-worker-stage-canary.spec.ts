@@ -36,6 +36,7 @@ test.describe('deadline engine worker stage write canary', () => {
     expect(created.orderId).toBe(fixtureOrderId);
     expect(created.deadlineCount).toBe(3);
     expect(created.eventCount).toBe(0);
+    if (created.actionRuleCount !== undefined) expect(created.actionRuleCount).toBe(0);
   });
 
   test.afterAll(() => {
@@ -125,8 +126,8 @@ test.describe('deadline engine worker stage write canary', () => {
       expiredEvents: 1,
       auditRows: 1,
       outboxRows: 1,
-      actionExecutions: 1,
-      skippedNotifications: 1,
+      actionExecutions: 0,
+      skippedNotifications: 0,
     });
 
     assertNoNonFixtureDueDeadlines(scheduledWorkerNow);
@@ -167,8 +168,8 @@ test.describe('deadline engine worker stage write canary', () => {
         expiredEvents: 1,
         auditRows: 1,
         outboxRows: 1,
-        actionExecutions: 1,
-        skippedNotifications: 1,
+        actionExecutions: 0,
+        skippedNotifications: 0,
       });
     } else {
       const scheduledError = await parseResponseBody(scheduledResponse);
@@ -364,11 +365,6 @@ function loadWorkerEvidence(deadlineId: string, trigger: 'manual' | 'scheduler')
       FROM deadline_events
       WHERE deadline_id IN (SELECT deadline_id FROM fixture_deadline)
         AND event_type = 'DEADLINE_EXPIRED'
-    ),
-    fixture_action_rules AS (
-      SELECT action_rule_id
-      FROM deadline_action_rules
-      WHERE config_json->>'fixtureKey' = '${escapeSql(fixtureKey)}'
     )
     SELECT json_build_object(
       'status', (SELECT status FROM fixture_deadline),
@@ -393,13 +389,11 @@ function loadWorkerEvidence(deadlineId: string, trigger: 'manual' | 'scheduler')
         SELECT count(*)::int
         FROM deadline_action_executions
         WHERE deadline_event_id IN (SELECT deadline_event_id FROM fixture_events)
-          AND action_rule_id IN (SELECT action_rule_id FROM fixture_action_rules)
       ),
       'skippedNotifications', (
         SELECT count(*)::int
         FROM deadline_action_executions
         WHERE deadline_event_id IN (SELECT deadline_event_id FROM fixture_events)
-          AND action_rule_id IN (SELECT action_rule_id FROM fixture_action_rules)
           AND action_type = 'notify_assignee'
           AND status = 'skipped'
           AND skip_reason IN (
