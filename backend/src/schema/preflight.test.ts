@@ -188,6 +188,31 @@ describe('schema preflight', () => {
     );
   });
 
+  it('rejects notification idempotency index with additional partial predicate filters', () => {
+    const issues = checkSchemaPreflight(`
+      CREATE TABLE notifications (
+        notification_id UUID PRIMARY KEY,
+        user_id BIGINT,
+        level TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        idempotency_key TEXT
+      );
+      CREATE UNIQUE INDEX uq_notifications_idempotency_key
+        ON notifications(idempotency_key)
+        WHERE idempotency_key IS NOT NULL AND source_type = 'deadline';
+    `);
+
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        code: 'notifications.idempotency_index_missing',
+        severity: 'error',
+      }),
+    );
+  });
+
   it('accepts notification idempotency schema added by the deadline notification migration', () => {
     const issues = checkSchemaPreflight(`
       CREATE TABLE notifications (

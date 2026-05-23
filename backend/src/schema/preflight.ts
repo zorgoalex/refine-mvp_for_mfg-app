@@ -82,16 +82,18 @@ function hasUniqueOnColumn(sql: string, tableName: string, columnName: string): 
 }
 
 function hasNotificationIdempotencyIndex(sql: string): boolean {
-  return new RegExp(
+  const match = new RegExp(
     [
       'CREATE\\s+UNIQUE\\s+INDEX',
       '(?:\\s+IF\\s+NOT\\s+EXISTS)?',
       '\\s+uq_notifications_idempotency_key\\b',
       '[^;]*?ON\\s+notifications\\s*\\(\\s*idempotency_key\\s*\\)',
-      '[^;]*?WHERE\\s+idempotency_key\\s+IS\\s+NOT\\s+NULL\\b',
+      '[^;]*?WHERE\\s+([^;]+?)\\s*(?:;|$)',
     ].join(''),
     'i',
-  ).test(sql);
+  ).exec(sql);
+
+  return match?.[1]?.replace(/\s+/g, ' ').trim().toUpperCase() === 'IDEMPOTENCY_KEY IS NOT NULL';
 }
 
 function getInsertLeadingNumbers(sql: string, tableName: string): number[] {
