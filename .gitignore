@@ -56,10 +56,12 @@ ai_docs/
 /session-handoffs/
 /docs/
 .claude/
+.agents/
 .gemini/
 .factory/
 CLAUDE.md
 AGENTS.md
+skills-lock.json
 
 
 # Playwright
