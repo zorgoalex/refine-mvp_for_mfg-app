@@ -479,6 +479,7 @@ export class DeadlinesController {
       deadline: await this.commands.pause({
         currentUser: this.requireCurrentUser(request),
         deadlineId: parseDeadlineId(deadlineIdParam),
+        requestId: request.requestId,
         dto: parsePauseDeadlineRequest(body),
       }),
     };
@@ -507,6 +508,7 @@ export class DeadlinesController {
       deadline: await this.commands.resume({
         currentUser: this.requireCurrentUser(request),
         deadlineId: parseDeadlineId(deadlineIdParam),
+        requestId: request.requestId,
         dto: parseResumeDeadlineRequest(body),
       }),
     };
@@ -570,7 +572,8 @@ export class DeadlinesController {
   ): void {
     this.assertWriteEnabled();
 
-    if (operation !== 'cancel') {
+    const enabledOperations = new Set<typeof operation>(['pause', 'resume', 'cancel']);
+    if (!enabledOperations.has(operation)) {
       throw new ApiError(503, 'DEADLINE_WRITE_OPERATION_DISABLED', 'Deadline write operation is disabled', {
         feature: 'deadlines',
         operation,

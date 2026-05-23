@@ -104,7 +104,59 @@ describe('DeadlinesController', () => {
     ]);
   });
 
-  it('keeps non-slice deadline mutations fail-closed in write mode', async () => {
+  it('allows pause and resume in write mode and propagates request id', async () => {
+    const calls: string[] = [];
+    const deadline = createDeadline();
+    const controller = createController({
+      flags: {
+        deadlinesEnabled: true,
+        deadlinesReadOnly: false,
+      },
+      commands: {
+        async pause(command) {
+          calls.push(
+            `pause:${command.deadlineId}:${command.currentUser.id}:${command.requestId}:${command.dto.pauseMode}:${command.dto.pauseReason}:${command.dto.notes}`,
+          );
+          return { ...deadline, status: 'paused' };
+        },
+        async resume(command) {
+          calls.push(
+            `resume:${command.deadlineId}:${command.currentUser.id}:${command.requestId}:${command.dto.notes}`,
+          );
+          return { ...deadline, status: 'active' };
+        },
+      },
+    });
+
+    const deadlineId = '11111111-1111-4111-8111-111111111111';
+
+    await expect(
+      controller.pause(
+        { user: currentUser('admin-id'), requestId: 'req-deadline-pause' },
+        deadlineId,
+        {
+          pauseMode: 'pause_without_shift',
+          pauseReason: 'Ожидание клиента',
+          notes: 'Client confirmed delay',
+        },
+      ),
+    ).resolves.toEqual({ deadline: { ...deadline, status: 'paused' } });
+
+    await expect(
+      controller.resume(
+        { user: currentUser('admin-id'), requestId: 'req-deadline-resume' },
+        deadlineId,
+        { notes: 'Client replied' },
+      ),
+    ).resolves.toEqual({ deadline });
+
+    expect(calls).toEqual([
+      'pause:11111111-1111-4111-8111-111111111111:admin-id:req-deadline-pause:pause_without_shift:Ожидание клиента:Client confirmed delay',
+      'resume:11111111-1111-4111-8111-111111111111:admin-id:req-deadline-resume:Client replied',
+    ]);
+  });
+
+  it('keeps create and override fail-closed in write mode', async () => {
     const controller = createController({
       flags: {
         deadlinesEnabled: true,
@@ -126,29 +178,62 @@ describe('DeadlinesController', () => {
       code: 'DEADLINE_WRITE_OPERATION_DISABLED',
     } satisfies Partial<ApiError>);
 
-    const deadlineId = '11111111-1111-4111-8111-111111111111';
-    const blockedOperations = [
-      () =>
-        controller.override(
-          { user: currentUser('admin-id') },
-          deadlineId,
-          { deadlineAt: '2026-05-03T10:00:00.000Z', reason: 'Manual correction' },
-        ),
-      () =>
-        controller.pause(
-          { user: currentUser('admin-id') },
-          deadlineId,
-          { pauseMode: 'pause_without_shift', pauseReason: 'Ожидание клиента' },
-        ),
-      () => controller.resume({ user: currentUser('admin-id') }, deadlineId, {}),
-    ];
+    await expect(
+      controller.override(
+        { user: currentUser('admin-id') },
+        '11111111-1111-4111-8111-111111111111',
+        { deadlineAt: '2026-05-03T10:00:00.000Z', reason: 'Manual correction' },
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'DEADLINE_WRITE_OPERATION_DISABLED',
+    } satisfies Partial<ApiError>);
+  });
 
-    for (const operation of blockedOperations) {
-      await expect(operation()).rejects.toMatchObject({
-        statusCode: 503,
-        code: 'DEADLINE_WRITE_OPERATION_DISABLED',
-      } satisfies Partial<ApiError>);
-    }
+  it('keeps pause and resume blocked in read-only mode', async () => {
+    const calls: string[] = [];
+    const controller = createController({
+      flags: {
+        deadlinesEnabled: true,
+        deadlinesReadOnly: true,
+      },
+      commands: {
+        async pause() {
+          calls.push('pause');
+          return createDeadline({ status: 'paused' });
+        },
+        async resume() {
+          calls.push('resume');
+          return createDeadline();
+        },
+      },
+    });
+
+    const deadlineId = '11111111-1111-4111-8111-111111111111';
+
+    await expect(
+      controller.pause(
+        { user: currentUser('admin-id'), requestId: 'req-read-only-pause' },
+        deadlineId,
+        { pauseMode: 'pause_without_shift', pauseReason: 'Ожидание клиента' },
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'DEADLINES_READ_ONLY',
+    } satisfies Partial<ApiError>);
+
+    await expect(
+      controller.resume(
+        { user: currentUser('admin-id'), requestId: 'req-read-only-resume' },
+        deadlineId,
+        {},
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'DEADLINES_READ_ONLY',
+    } satisfies Partial<ApiError>);
+
+    expect(calls).toEqual([]);
   });
 
   it('normalizes list query and validates whitelisted values', () => {
