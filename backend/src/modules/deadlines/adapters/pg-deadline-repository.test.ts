@@ -34,17 +34,19 @@ describe('PgDeadlineRepository', () => {
     expect(sql).toContain('ORDER BY d.deadline_at ASC');
   });
 
-  it('creates manual deadlines with lifecycle event, audit and outbox rows', async () => {
+  it('creates manual deadlines idempotently with lifecycle event, audit and outbox rows', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
 
     await expect(
       repository.createDeadlineInstance({
         currentUser: currentUser(),
+        requestId: 'req-create-1',
         dto: {
           entityType: 'order',
           entityId: '100',
           orderId: 100,
+          clientId: 5,
           deadlineAt: '2026-05-02T10:00:00.000Z',
           source: 'manual',
           metadata: { label: 'Manual' },
@@ -57,9 +59,57 @@ describe('PgDeadlineRepository', () => {
 
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('INSERT INTO deadline_instances');
+    expect(sql).toContain('idempotency_key');
+    expect(sql).toContain('ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE');
     expect(sql).toContain('INSERT INTO deadline_events');
     expect(sql).toContain('INSERT INTO audit_log');
     expect(sql).toContain('INSERT INTO outbox_events');
+
+    const createInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_instances'),
+    );
+    expect(createInsert?.params.at(-1)).toBe('deadline-create:req-create-1');
+
+    const eventInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_events'),
+    );
+    expect(JSON.parse(String(eventInsert?.params[11]))).toMatchObject({
+      source: 'backend-deadline-command',
+      requestId: 'req-create-1',
+      actorUserId: '42',
+      afterStatus: 'active',
+    });
+    expect(eventInsert?.params[12]).toBe(
+      'deadline-command:11111111-1111-4111-8111-111111111111:DEADLINE_CREATED:req-create-1',
+    );
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params).toEqual([
+      'deadlines.deadline_created',
+      'deadline',
+      '11111111-1111-4111-8111-111111111111',
+      '42',
+      'req-create-1',
+      'backend-deadline-command',
+      100,
+      5,
+      JSON.stringify({}),
+      JSON.stringify({ status: 'active' }),
+      JSON.stringify({ status: { from: null, to: 'active' } }),
+      JSON.stringify({
+        deadlineEventId: '22222222-2222-4222-8222-222222222222',
+        eventType: 'DEADLINE_CREATED',
+        entityType: 'order',
+        entityId: '100',
+        orderWorkshopId: null,
+        reason: null,
+        trigger: 'manual',
+        workerId: null,
+        schedulerRunId: null,
+      }),
+    ]);
   });
 
   it('cancels deadlines through a row lock with queryable audit and outbox dimensions', async () => {
@@ -784,6 +834,7 @@ function baseDeadlineRow() {
     completed_at: null,
     expired_at: null,
     cancelled_at: null,
+    idempotency_key: null,
     created_at: new Date('2026-05-01T10:00:00.000Z'),
     updated_at: new Date('2026-05-01T10:00:00.000Z'),
   };

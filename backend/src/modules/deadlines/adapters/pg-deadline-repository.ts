@@ -47,6 +47,7 @@ export interface DeadlineRow {
   completed_at: string | Date | null;
   expired_at: string | Date | null;
   cancelled_at: string | Date | null;
+  idempotency_key: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -119,7 +120,7 @@ const DEADLINE_COLUMNS = `
   parent_entity_type, parent_entity_id, order_id, order_workshop_id, client_id,
   responsible_user_id, deadline_at, status, source, is_manually_overridden,
   policy_snapshot_json, metadata_json, started_at, completed_at, expired_at,
-  cancelled_at, created_at, updated_at
+  cancelled_at, idempotency_key, created_at, updated_at
 `;
 
 const EVENT_COLUMNS = `
@@ -367,14 +368,19 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
   }
 
   async createDeadlineInstance(command: CreateDeadlineCommand): Promise<DeadlineInstanceDto> {
+    const requestId = command.requestId ?? 'deadline-command';
+    const idempotencyKey =
+      command.requestId ? `deadline-create:${command.requestId}` : null;
     const result = await this.database.query<DeadlineRow>(
       `
       INSERT INTO deadline_instances (
         entity_type, entity_id, order_id, order_workshop_id, client_id,
         responsible_user_id, deadline_at, source, metadata_json,
-        created_by_user_id, updated_by_user_id
+        created_by_user_id, updated_by_user_id, idempotency_key
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9::jsonb, $10, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9::jsonb, $10, $10, $11)
+      ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE
+      SET idempotency_key = deadline_instances.idempotency_key
       RETURNING ${DEADLINE_COLUMNS}
       `,
       [
@@ -388,6 +394,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         command.dto.source ?? 'manual',
         JSON.stringify(command.dto.metadata ?? {}),
         Number(command.currentUser.id),
+        idempotencyKey,
       ],
     );
     const deadline = mapDeadline(result.rows[0]);
@@ -402,7 +409,13 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       clientId: deadline.clientId,
       deadlineAt: deadline.deadlineAt,
       eventAt: new Date().toISOString(),
-      payload: { source: deadline.source, actorUserId: command.currentUser.id },
+      payload: {
+        source: 'backend-deadline-command',
+        requestId,
+        actorUserId: command.currentUser.id,
+        afterStatus: deadline.status,
+      },
+      idempotencyKey: `deadline-command:${deadline.deadlineId}:DEADLINE_CREATED:${requestId}`,
     });
 
     return deadline;
@@ -904,7 +917,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         event.clientId ?? null,
         JSON.stringify(beforeStatus ? { status: beforeStatus } : {}),
         JSON.stringify(afterStatus ? { status: afterStatus } : {}),
-        JSON.stringify(beforeStatus && afterStatus ? { status: { from: beforeStatus, to: afterStatus } } : {}),
+        JSON.stringify(afterStatus ? { status: { from: beforeStatus, to: afterStatus } } : {}),
         JSON.stringify({
           deadlineEventId: event.deadlineEventId,
           eventType: event.eventType,
