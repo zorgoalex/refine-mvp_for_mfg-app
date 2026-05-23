@@ -27,12 +27,18 @@ describe('DeadlineCommandService', () => {
     } satisfies Partial<ApiError>);
   });
 
-  it('rejects pause for non-active deadlines', async () => {
+  it('rejects pause for non-active deadlines after locking the row', async () => {
+    const calls: string[] = [];
     const service = new DeadlineCommandService({
       transactions: transactionManager(
         createRepository({
-          async getDeadlineById() {
+          async getDeadlineByIdForUpdate(deadlineId) {
+            calls.push(`lock:${deadlineId}`);
             return createDeadline({ status: 'completed_on_time' });
+          },
+          async pauseDeadline() {
+            calls.push('pause');
+            return createDeadline({ status: 'paused' });
           },
         }),
       ),
@@ -42,6 +48,7 @@ describe('DeadlineCommandService', () => {
       service.pause({
         currentUser: currentUser(),
         deadlineId: 'deadline-id',
+        requestId: 'req-pause-invalid',
         dto: {
           pauseMode: 'pause_and_shift_deadline',
           pauseReason: 'Ожидание клиента',
@@ -51,6 +58,105 @@ describe('DeadlineCommandService', () => {
       statusCode: 409,
       code: 'DEADLINE_INVALID_STATUS_TRANSITION',
     } satisfies Partial<ApiError>);
+    expect(calls).toEqual(['lock:deadline-id']);
+  });
+
+  it('delegates pause through transaction after locked status check', async () => {
+    const calls: string[] = [];
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(
+        createRepository({
+          async getDeadlineByIdForUpdate(deadlineId) {
+            calls.push(`lock:${deadlineId}`);
+            return createDeadline({ status: 'active' });
+          },
+          async pauseDeadline(command) {
+            calls.push(
+              `pause:${command.deadlineId}:${command.dto.pauseMode}:${command.dto.pauseReason}:${command.requestId}`,
+            );
+            return createDeadline({ status: 'paused' });
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      service.pause({
+        currentUser: currentUser(),
+        deadlineId: 'deadline-id',
+        requestId: 'req-pause-1',
+        dto: {
+          pauseMode: 'pause_without_shift',
+          pauseReason: 'Ожидание клиента',
+        },
+      }),
+    ).resolves.toMatchObject({ status: 'paused' });
+    expect(calls).toEqual([
+      'lock:deadline-id',
+      'pause:deadline-id:pause_without_shift:Ожидание клиента:req-pause-1',
+    ]);
+  });
+
+  it('delegates resume through transaction after locked status check', async () => {
+    const calls: string[] = [];
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(
+        createRepository({
+          async getDeadlineByIdForUpdate(deadlineId) {
+            calls.push(`lock:${deadlineId}`);
+            return createDeadline({ status: 'paused' });
+          },
+          async resumeDeadline(command) {
+            calls.push(`resume:${command.deadlineId}:${command.dto.notes}:${command.requestId}`);
+            return createDeadline({ status: 'active' });
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      service.resume({
+        currentUser: currentUser(),
+        deadlineId: 'deadline-id',
+        requestId: 'req-resume-1',
+        dto: { notes: 'Client replied' },
+      }),
+    ).resolves.toMatchObject({ status: 'active' });
+    expect(calls).toEqual([
+      'lock:deadline-id',
+      'resume:deadline-id:Client replied:req-resume-1',
+    ]);
+  });
+
+  it('rejects resume for non-paused deadlines after locking the row', async () => {
+    const calls: string[] = [];
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(
+        createRepository({
+          async getDeadlineByIdForUpdate(deadlineId) {
+            calls.push(`lock:${deadlineId}`);
+            return createDeadline({ status: 'active' });
+          },
+          async resumeDeadline() {
+            calls.push('resume');
+            return createDeadline({ status: 'active' });
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      service.resume({
+        currentUser: currentUser(),
+        deadlineId: 'deadline-id',
+        requestId: 'req-resume-invalid',
+        dto: {},
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_INVALID_STATUS_TRANSITION',
+    } satisfies Partial<ApiError>);
+    expect(calls).toEqual(['lock:deadline-id']);
   });
 
   it('delegates cancel through transaction after locked status check', async () => {
