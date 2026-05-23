@@ -236,15 +236,23 @@ export interface DeadlineTargetResolverPort {
   }): Promise<boolean>;
 }
 
+export interface DeadlineNotificationInput {
+  userId: number;
+  level: 'info' | 'warning' | 'error';
+  title: string;
+  message: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  sourceType: 'deadline';
+  sourceId: string;
+  idempotencyKey: string;
+}
+
+export interface DeadlineNotificationResult {
+  created: boolean;
+  notificationId: string | null;
+}
+
 export interface DeadlineNotificationPort {
-  createNotification(input: {
-    userId: number;
-    level: 'info' | 'warning' | 'error';
-    title: string;
-    message: string;
-    entityType?: string | null;
-    entityId?: string | null;
-    sourceType: 'deadline';
-    sourceId: string;
-  }): Promise<void>;
+  createNotification(input: DeadlineNotificationInput): Promise<DeadlineNotificationResult>;
 }

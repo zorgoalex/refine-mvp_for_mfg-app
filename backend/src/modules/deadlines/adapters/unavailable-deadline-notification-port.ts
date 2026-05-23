@@ -1,8 +1,12 @@
 import { deadlineAdapterUnavailableError } from '../errors/deadline.errors';
-import type { DeadlineNotificationPort } from '../application/deadline.types';
+import type {
+  DeadlineNotificationInput,
+  DeadlineNotificationPort,
+  DeadlineNotificationResult,
+} from '../application/deadline.types';
 
 export class UnavailableDeadlineNotificationPort implements DeadlineNotificationPort {
-  async createNotification(): Promise<void> {
+  async createNotification(_input: DeadlineNotificationInput): Promise<DeadlineNotificationResult> {
     throw deadlineAdapterUnavailableError('deadline_notification_port');
   }
 }
