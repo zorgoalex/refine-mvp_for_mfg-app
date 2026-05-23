@@ -20,6 +20,7 @@ import type {
   FindDueDeadlinesCommand,
   ListDeadlinesCommand,
   PauseDeadlineCommand,
+  ResumeDeadlineCommand,
   UpdateDeadlinePolicyCommand,
   UpdateDeadlineSettingsCommand,
 } from '../application/deadline.types';
@@ -540,19 +541,29 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     return deadline;
   }
 
-  async resumeDeadline(command: import('../application/deadline.types').ResumeDeadlineCommand): Promise<DeadlineInstanceDto> {
+  async resumeDeadline(command: ResumeDeadlineCommand): Promise<DeadlineInstanceDto> {
+    const current = await this.requireDeadline(command.deadlineId);
     const result = await this.database.query<DeadlineRow>(
       `
       UPDATE deadline_instances
       SET status = 'active',
           updated_by_user_id = $2,
           updated_at = now()
-      WHERE deadline_id = $1
+      WHERE deadline_id = $1 AND status = 'paused'
       RETURNING ${DEADLINE_COLUMNS}
       `,
       [command.deadlineId, Number(command.currentUser.id)],
     );
-    const deadline = mapDeadline(result.rows[0]);
+    const row = result.rows[0];
+    if (!row) {
+      throw new ApiError(409, 'DEADLINE_INVALID_STATUS_TRANSITION', 'Deadline status transition is not allowed', {
+        deadlineId: command.deadlineId,
+        fromStatus: current.status,
+        toStatus: 'active',
+      });
+    }
+
+    const deadline = mapDeadline(row);
     await this.database.query(
       `
       UPDATE deadline_pauses
@@ -574,7 +585,14 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       clientId: deadline.clientId,
       deadlineAt: deadline.deadlineAt,
       eventAt: new Date().toISOString(),
-      payload: { notes: command.dto.notes ?? null, actorUserId: command.currentUser.id },
+      payload: {
+        notes: command.dto.notes ?? null,
+        actorUserId: command.currentUser.id,
+        requestId: command.requestId ?? 'deadline-command',
+        source: 'backend-deadline-command',
+        beforeStatus: current.status,
+        afterStatus: deadline.status,
+      },
     });
 
     return deadline;
