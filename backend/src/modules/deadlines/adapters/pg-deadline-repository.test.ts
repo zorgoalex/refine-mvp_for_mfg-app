@@ -165,6 +165,101 @@ describe('PgDeadlineRepository', () => {
     )).toHaveLength(1);
   });
 
+  it('overrides deadlines with guarded supersede, replacement deadline, audit and outbox dimensions', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.overrideDeadline({
+        currentUser: currentUser(),
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        requestId: 'req-override-1',
+        dto: {
+          deadlineAt: '2026-05-03T10:00:00.000Z',
+          reason: 'Manual correction',
+          metadata: { overrideBatch: 'manual-1' },
+        },
+      }),
+    ).resolves.toMatchObject({
+      deadlineId: '11111111-1111-4111-8111-111111111111',
+      isManuallyOverridden: true,
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain(
+      "WHERE deadline_id = $1 AND status NOT IN ('expired', 'completed_on_time', 'completed_late', 'cancelled', 'superseded')",
+    );
+    expect(sql).toContain('INSERT INTO deadline_instances');
+    expect(sql).toContain('idempotency_key');
+    expect(sql).toContain('ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE');
+    expect(sql).toContain('INSERT INTO deadline_events');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+
+    const eventInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_events'),
+    );
+    expect(JSON.parse(String(eventInsert?.params[11]))).toMatchObject({
+      previousDeadlineId: '11111111-1111-4111-8111-111111111111',
+      previousDeadlineAt: '2026-05-02T10:00:00.000Z',
+      reason: 'Manual correction',
+      actorUserId: '42',
+      requestId: 'req-override-1',
+      source: 'backend-deadline-command',
+      beforeStatus: 'active',
+      afterStatus: 'active',
+    });
+    expect(eventInsert?.params[12]).toBe(
+      'deadline-command:11111111-1111-4111-8111-111111111111:DEADLINE_UPDATED:req-override-1',
+    );
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params[0]).toBe('deadlines.deadline_updated');
+    expect(audit?.params[4]).toBe('req-override-1');
+    expect(audit?.params[5]).toBe('backend-deadline-command');
+    expect(JSON.parse(String(audit?.params[8]))).toMatchObject({
+      status: 'active',
+      deadlineAt: '2026-05-02T10:00:00.000Z',
+    });
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({
+      status: 'active',
+      deadlineAt: '2026-05-03T10:00:00.000Z',
+    });
+    expect(JSON.parse(String(audit?.params[10]))).toMatchObject({
+      deadlineAt: {
+        from: '2026-05-02T10:00:00.000Z',
+        to: '2026-05-03T10:00:00.000Z',
+      },
+    });
+  });
+
+  it('rejects stale override updates when the row became terminal before supersede', async () => {
+    const database = createDatabase({ emptyOverrideSupersedeUpdate: true });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.overrideDeadline({
+        currentUser: currentUser(),
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        requestId: 'req-override-stale',
+        dto: {
+          deadlineAt: '2026-05-03T10:00:00.000Z',
+          reason: 'Manual correction',
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_INVALID_STATUS_TRANSITION',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).not.toContain('INSERT INTO deadline_events');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+  });
+
   it('cancels deadlines through a row lock with queryable audit and outbox dimensions', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
@@ -776,6 +871,7 @@ function createDatabase(
   options: {
     deadlineStatusByIdSelect?: DeadlineTestRow['status'];
     eventWasInserted?: boolean;
+    emptyOverrideSupersedeUpdate?: boolean;
     emptyPauseUpdate?: boolean;
     emptyResumeUpdate?: boolean;
   } = {},
@@ -818,6 +914,24 @@ function createDatabase(
       }
 
       if (
+        options.emptyOverrideSupersedeUpdate &&
+        text.includes('RETURNING') &&
+        text.includes("SET status = 'superseded'")
+      ) {
+        return { rows: [] };
+      }
+
+      if (text.includes('RETURNING') && text.includes("SET status = 'superseded'")) {
+        return {
+          rows: [
+            deadlineRow({
+              status: 'superseded',
+            }),
+          ],
+        };
+      }
+
+      if (
         options.emptyPauseUpdate &&
         text.includes('RETURNING') &&
         text.includes("SET status = 'paused'")
@@ -842,6 +956,22 @@ function createDatabase(
         text.includes("status = 'paused'")
       ) {
         return { rows: [] };
+      }
+
+      if (
+        text.includes('RETURNING') &&
+        text.includes('INSERT INTO deadline_instances') &&
+        text.includes('is_manually_overridden')
+      ) {
+        return {
+          rows: [
+            deadlineRow({
+              deadline_at: new Date('2026-05-03T10:00:00.000Z'),
+              is_manually_overridden: true,
+              metadata_json: { label: 'Manual', overrideBatch: 'manual-1', overrideReason: 'Manual correction' },
+            }),
+          ],
+        };
       }
 
       if (

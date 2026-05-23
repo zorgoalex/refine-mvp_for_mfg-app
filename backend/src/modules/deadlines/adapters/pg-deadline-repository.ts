@@ -422,31 +422,45 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
   }
 
   async overrideDeadline(command: import('../application/deadline.types').OverrideDeadlineCommand): Promise<DeadlineInstanceDto> {
+    const requestId = command.requestId ?? 'deadline-command';
     const current = await this.requireDeadline(command.deadlineId);
-    await this.database.query(
+    const superseded = await this.database.query<DeadlineRow>(
       `
       UPDATE deadline_instances
       SET status = 'superseded',
           updated_by_user_id = $2,
           updated_at = now()
-      WHERE deadline_id = $1
+      WHERE deadline_id = $1 AND status NOT IN ('expired', 'completed_on_time', 'completed_late', 'cancelled', 'superseded')
+      RETURNING ${DEADLINE_COLUMNS}
       `,
       [command.deadlineId, Number(command.currentUser.id)],
     );
+    if (!superseded.rows[0]) {
+      throw new ApiError(409, 'DEADLINE_INVALID_STATUS_TRANSITION', 'Deadline status transition is not allowed', {
+        deadlineId: command.deadlineId,
+        fromStatus: current.status,
+        toStatus: 'superseded',
+      });
+    }
+
+    const idempotencyKey =
+      command.requestId ? `deadline-override:${command.deadlineId}:${command.requestId}` : null;
     const result = await this.database.query<DeadlineRow>(
       `
       INSERT INTO deadline_instances (
         policy_id, policy_version_id, entity_type, entity_id, parent_entity_type,
         parent_entity_id, order_id, order_workshop_id, client_id, responsible_user_id,
         deadline_at, status, source, is_manually_overridden, policy_snapshot_json,
-        metadata_json, started_at, created_by_user_id, updated_by_user_id
+        metadata_json, started_at, created_by_user_id, updated_by_user_id, idempotency_key
       )
       VALUES (
         $1, $2, $3, $4, $5,
         $6, $7, $8, $9, $10,
         $11::timestamptz, 'active', 'manual', true, $12::jsonb,
-        $13::jsonb, $14, $15, $15
+        $13::jsonb, $14, $15, $15, $16
       )
+      ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE
+      SET idempotency_key = deadline_instances.idempotency_key
       RETURNING ${DEADLINE_COLUMNS}
       `,
       [
@@ -462,9 +476,15 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         current.responsibleUserId ?? null,
         command.dto.deadlineAt,
         JSON.stringify(current.policySnapshot ?? {}),
-        JSON.stringify({ ...(current.metadata ?? {}), ...(command.dto.metadata ?? {}), overrideReason: command.dto.reason }),
+        JSON.stringify({
+          ...(current.metadata ?? {}),
+          ...(command.dto.metadata ?? {}),
+          overrideReason: command.dto.reason,
+          overriddenDeadlineId: current.deadlineId,
+        }),
         current.startedAt ?? null,
         Number(command.currentUser.id),
+        idempotencyKey,
       ],
     );
     const deadline = mapDeadline(result.rows[0]);
@@ -484,7 +504,14 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         previousDeadlineAt: current.deadlineAt,
         reason: command.dto.reason,
         actorUserId: command.currentUser.id,
+        requestId,
+        source: 'backend-deadline-command',
+        beforeStatus: current.status,
+        afterStatus: deadline.status,
+        beforeDeadlineAt: current.deadlineAt,
+        afterDeadlineAt: deadline.deadlineAt,
       },
+      idempotencyKey: `deadline-command:${deadline.deadlineId}:DEADLINE_UPDATED:${requestId}`,
     });
 
     return deadline;
@@ -877,6 +904,8 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     const beforeStatus = typeof payload.beforeStatus === 'string' ? payload.beforeStatus : null;
     const afterStatus = typeof payload.afterStatus === 'string' ? payload.afterStatus : null;
+    const beforeDeadlineAt = typeof payload.beforeDeadlineAt === 'string' ? payload.beforeDeadlineAt : null;
+    const afterDeadlineAt = typeof payload.afterDeadlineAt === 'string' ? payload.afterDeadlineAt : null;
     const reason = typeof payload.reason === 'string' ? payload.reason : null;
     const requestId = typeof payload.requestId === 'string' ? payload.requestId : 'deadline-engine';
     const source = typeof payload.source === 'string'
@@ -892,6 +921,18 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         : null;
     const workerId = typeof payload.workerId === 'string' ? payload.workerId : null;
     const schedulerRunId = typeof payload.schedulerRunId === 'string' ? payload.schedulerRunId : null;
+    const beforeJson = {
+      ...(beforeStatus ? { status: beforeStatus } : {}),
+      ...(beforeDeadlineAt ? { deadlineAt: beforeDeadlineAt } : {}),
+    };
+    const afterJson = {
+      ...(afterStatus ? { status: afterStatus } : {}),
+      ...(afterDeadlineAt ? { deadlineAt: afterDeadlineAt } : {}),
+    };
+    const diffJson = {
+      ...(afterStatus ? { status: { from: beforeStatus, to: afterStatus } } : {}),
+      ...(afterDeadlineAt ? { deadlineAt: { from: beforeDeadlineAt, to: afterDeadlineAt } } : {}),
+    };
 
     await this.database.query(
       `
@@ -915,9 +956,9 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         auditSource,
         event.orderId ?? null,
         event.clientId ?? null,
-        JSON.stringify(beforeStatus ? { status: beforeStatus } : {}),
-        JSON.stringify(afterStatus ? { status: afterStatus } : {}),
-        JSON.stringify(afterStatus ? { status: { from: beforeStatus, to: afterStatus } } : {}),
+        JSON.stringify(beforeJson),
+        JSON.stringify(afterJson),
+        JSON.stringify(diffJson),
         JSON.stringify({
           deadlineEventId: event.deadlineEventId,
           eventType: event.eventType,
