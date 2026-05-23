@@ -49,6 +49,7 @@ export const apiRoutes = {
   deadlines: {
     list: backendApiPath('/deadlines'),
     byId: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}`),
+    override: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}/override`),
     pause: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}/pause`),
     resume: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}/resume`),
     cancel: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}/cancel`),

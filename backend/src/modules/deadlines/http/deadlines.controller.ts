@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -424,6 +424,7 @@ export class DeadlinesController {
     return {
       deadline: await this.commands.create({
         currentUser: this.requireCurrentUser(request),
+        requestId: request.requestId,
         dto: parseCreateDeadlineRequest(body),
       }),
     };
@@ -439,7 +440,8 @@ export class DeadlinesController {
   @ApiResponse({ status: 422, description: 'Invalid deadline payload' })
   @ApiResponse({ status: 503, description: 'Deadlines API is disabled or read-only' })
   @ApiOperation({ operationId: 'overrideDeadline', summary: 'Override a deadline' })
-  @Patch('deadlines/:deadlineId')
+  @Post('deadlines/:deadlineId/override')
+  @HttpCode(200)
   async override(
     @Req() request: RequestWithCurrentUser,
     @Param('deadlineId') deadlineIdParam: string,
@@ -451,6 +453,7 @@ export class DeadlinesController {
       deadline: await this.commands.override({
         currentUser: this.requireCurrentUser(request),
         deadlineId: parseDeadlineId(deadlineIdParam),
+        requestId: request.requestId,
         dto: parseOverrideDeadlineRequest(body),
       }),
     };
@@ -572,7 +575,7 @@ export class DeadlinesController {
   ): void {
     this.assertWriteEnabled();
 
-    const enabledOperations = new Set<typeof operation>(['pause', 'resume', 'cancel']);
+    const enabledOperations = new Set<typeof operation>(['create', 'override', 'pause', 'resume', 'cancel']);
     if (!enabledOperations.has(operation)) {
       throw new ApiError(503, 'DEADLINE_WRITE_OPERATION_DISABLED', 'Deadline write operation is disabled', {
         feature: 'deadlines',

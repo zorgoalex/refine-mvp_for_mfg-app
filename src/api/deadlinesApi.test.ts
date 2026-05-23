@@ -104,6 +104,26 @@ describe('deadlinesApi', () => {
     expect(fetchMock.mock.calls[3][0]).toBe(`/api/v1/deadlines/${deadlineId}/cancel`);
   });
 
+  it('posts deadline override command to the backend-owned override route', async () => {
+    const fetchMock = mockFetch({ deadline: createDeadline({ isManuallyOverridden: true }) });
+
+    await deadlinesApi.override('11111111-1111-4111-8111-111111111111', {
+      deadlineAt: '2026-05-03T10:00:00.000Z',
+      reason: 'Manual correction',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/deadlines/11111111-1111-4111-8111-111111111111/override',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          deadlineAt: '2026-05-03T10:00:00.000Z',
+          reason: 'Manual correction',
+        }),
+      }),
+    );
+  });
+
   it('rejects invalid deadline ids before fetch', async () => {
     const fetchMock = mockFetch({ deadline: createDeadline() });
 

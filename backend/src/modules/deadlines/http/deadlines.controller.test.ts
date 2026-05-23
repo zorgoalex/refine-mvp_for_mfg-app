@@ -156,38 +156,61 @@ describe('DeadlinesController', () => {
     ]);
   });
 
-  it('keeps create and override fail-closed in write mode', async () => {
+  it('allows create and override in write mode and propagates request id', async () => {
+    const calls: string[] = [];
+    const createdDeadline = createDeadline({
+      deadlineId: '22222222-2222-4222-8222-222222222222',
+      deadlineAt: '2026-05-02T10:00:00.000Z',
+    });
+    const overriddenDeadline = createDeadline({
+      deadlineId: '33333333-3333-4333-8333-333333333333',
+      deadlineAt: '2026-05-03T10:00:00.000Z',
+      isManuallyOverridden: true,
+    });
     const controller = createController({
       flags: {
         deadlinesEnabled: true,
         deadlinesReadOnly: false,
       },
+      commands: {
+        async create(command) {
+          calls.push(
+            `create:${command.currentUser.id}:${command.requestId}:${command.dto.entityType}:${command.dto.entityId}:${command.dto.deadlineAt}:${command.dto.source}`,
+          );
+          return createdDeadline;
+        },
+        async override(command) {
+          calls.push(
+            `override:${command.deadlineId}:${command.currentUser.id}:${command.requestId}:${command.dto.deadlineAt}:${command.dto.reason}`,
+          );
+          return overriddenDeadline;
+        },
+      },
     });
 
     await expect(
       controller.create(
-        { user: currentUser('admin-id') },
+        { user: currentUser('admin-id'), requestId: 'req-deadline-create' },
         {
           entityType: 'order',
           entityId: '42',
           deadlineAt: '2026-05-02T10:00:00.000Z',
         },
       ),
-    ).rejects.toMatchObject({
-      statusCode: 503,
-      code: 'DEADLINE_WRITE_OPERATION_DISABLED',
-    } satisfies Partial<ApiError>);
+    ).resolves.toEqual({ deadline: createdDeadline });
 
     await expect(
       controller.override(
-        { user: currentUser('admin-id') },
+        { user: currentUser('admin-id'), requestId: 'req-deadline-override' },
         '11111111-1111-4111-8111-111111111111',
         { deadlineAt: '2026-05-03T10:00:00.000Z', reason: 'Manual correction' },
       ),
-    ).rejects.toMatchObject({
-      statusCode: 503,
-      code: 'DEADLINE_WRITE_OPERATION_DISABLED',
-    } satisfies Partial<ApiError>);
+    ).resolves.toEqual({ deadline: overriddenDeadline });
+
+    expect(calls).toEqual([
+      'create:admin-id:req-deadline-create:order:42:2026-05-02T10:00:00.000Z:manual',
+      'override:11111111-1111-4111-8111-111111111111:admin-id:req-deadline-override:2026-05-03T10:00:00.000Z:Manual correction',
+    ]);
   });
 
   it('keeps pause and resume blocked in read-only mode', async () => {

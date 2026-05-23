@@ -32,8 +32,8 @@ export const deadlinesApi = {
   },
 
   override(deadlineId: string, request: OverrideDeadlineRequest): Promise<DeadlineResponse> {
-    return httpClient.patch<DeadlineResponse>(
-      apiRoutes.deadlines.byId(validateDeadlineId(deadlineId)),
+    return httpClient.post<DeadlineResponse>(
+      apiRoutes.deadlines.override(validateDeadlineId(deadlineId)),
       request,
     );
   },
