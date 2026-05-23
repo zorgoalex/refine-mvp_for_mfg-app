@@ -196,10 +196,6 @@ function selectNotificationRecipientUserId(
     return targetState.responsibleUserIds[0];
   }
 
-  if (actionType === 'notify_department_head') {
-    return targetState.responsibleUserIds[2];
-  }
-
   return targetState.responsibleUserIds[0];
 }
 

@@ -406,6 +406,50 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
+  it('uses current resolver-style manager recipient as department head for notify_department_head', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_department_head' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [42],
+        notificationRecipients: {
+          assigneeUserId: 42,
+          managerUserId: 42,
+          departmentHeadUserId: 42,
+        },
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toMatchObject([
+      {
+        userId: 42,
+        idempotencyKey: 'deadline-notification:event-1:notify_department_head:42',
+      },
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_department_head',
+      status: 'executed',
+      result: {
+        notificationUserId: 42,
+        notificationIdempotencyKey: 'deadline-notification:event-1:notify_department_head:42',
+      },
+    });
+  });
+
   it('falls back to the first responsible user for legacy notify_manager target resolvers', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];
@@ -441,6 +485,45 @@ describe('DeadlineActionDispatcherService', () => {
       result: {
         notificationUserId: 20,
         notificationIdempotencyKey: 'deadline-notification:event-1:notify_manager:20',
+      },
+    });
+  });
+
+  it('falls back to the first responsible user for legacy notify_department_head target resolvers', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_department_head' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [20],
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toMatchObject([
+      {
+        userId: 20,
+        idempotencyKey: 'deadline-notification:event-1:notify_department_head:20',
+      },
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_department_head',
+      status: 'executed',
+      result: {
+        notificationUserId: 20,
+        notificationIdempotencyKey: 'deadline-notification:event-1:notify_department_head:20',
       },
     });
   });

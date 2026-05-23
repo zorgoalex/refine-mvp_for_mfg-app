@@ -98,6 +98,7 @@ export class PgDeadlineTargetResolver implements DeadlineTargetResolverPort {
       notificationRecipients: {
         assigneeUserId: managerUserId,
         managerUserId,
+        departmentHeadUserId: managerUserId,
       },
       auditContext: {
         entityType: 'order',
@@ -139,6 +140,7 @@ export class PgDeadlineTargetResolver implements DeadlineTargetResolverPort {
       notificationRecipients: {
         assigneeUserId,
         managerUserId,
+        departmentHeadUserId: managerUserId,
       },
       auditContext: {
         entityType: 'order_stage',

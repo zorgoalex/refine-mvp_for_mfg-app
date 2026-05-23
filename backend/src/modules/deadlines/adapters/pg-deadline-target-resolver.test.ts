@@ -26,6 +26,7 @@ describe('PgDeadlineTargetResolver', () => {
     expect(state.notificationRecipients).toEqual({
       assigneeUserId: 42,
       managerUserId: 42,
+      departmentHeadUserId: 42,
     });
   });
 
@@ -67,6 +68,7 @@ describe('PgDeadlineTargetResolver', () => {
     expect(state.notificationRecipients).toEqual({
       assigneeUserId: 55,
       managerUserId: 42,
+      departmentHeadUserId: 42,
     });
   });
 
@@ -102,6 +104,7 @@ describe('PgDeadlineTargetResolver', () => {
     expect(state.notificationRecipients).toEqual({
       assigneeUserId: 42,
       managerUserId: 42,
+      departmentHeadUserId: 42,
     });
   });
 
