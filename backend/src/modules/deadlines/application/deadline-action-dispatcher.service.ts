@@ -128,16 +128,25 @@ export class DeadlineActionDispatcherService {
       });
     }
 
+    const notificationText = buildNotificationText(command.event);
+    const notificationIdempotencyKey = buildNotificationIdempotencyKey({
+      deadlineEventId: command.event.deadlineEventId,
+      actionType: rule.actionType,
+      userId,
+    });
+
+    let notification;
     try {
-      await command.notificationPort.createNotification({
+      notification = await command.notificationPort.createNotification({
         userId,
-        level: command.event.severity === 'critical' ? 'error' : 'warning',
-        title: 'Deadline event',
-        message: command.event.eventType,
+        level: notificationText.level,
+        title: notificationText.title,
+        message: notificationText.message,
         entityType: command.event.entityType,
         entityId: command.event.entityId,
         sourceType: 'deadline',
         sourceId: command.event.deadlineEventId,
+        idempotencyKey: notificationIdempotencyKey,
       });
     } catch (error) {
       return command.repository.createActionExecution({
@@ -153,9 +162,46 @@ export class DeadlineActionDispatcherService {
       ...baseExecution,
       status: 'executed',
       executedAt: command.event.eventAt,
-      result: { notificationUserId: userId, actionType: rule.actionType },
+      result: {
+        notificationUserId: userId,
+        notificationId: notification.notificationId,
+        notificationCreated: notification.created,
+        notificationIdempotencyKey,
+        actionType: rule.actionType,
+      },
     });
   }
+}
+
+function buildNotificationIdempotencyKey(input: {
+  deadlineEventId: string;
+  actionType: string;
+  userId: number;
+}): string {
+  return `deadline-notification:${input.deadlineEventId}:${input.actionType}:${input.userId}`;
+}
+
+function buildNotificationText(event: DeadlineEventDto): {
+  title: string;
+  message: string;
+  level: 'info' | 'warning' | 'error';
+} {
+  const entityLabel = event.orderId ? `Order ${event.orderId}` : `${event.entityType} ${event.entityId}`;
+  const deadlineAt = event.deadlineAt ?? 'unknown deadline time';
+
+  if (event.eventType === 'DEADLINE_EXPIRED') {
+    return {
+      title: 'Deadline expired',
+      message: `${entityLabel} deadline expired at ${deadlineAt}`,
+      level: event.severity === 'critical' ? 'error' : 'warning',
+    };
+  }
+
+  return {
+    title: 'Deadline event',
+    message: `${entityLabel} deadline event ${event.eventType} at ${deadlineAt}`,
+    level: event.severity === 'critical' ? 'error' : event.severity === 'warning' ? 'warning' : 'info',
+  };
 }
 
 function createExecutionInput(

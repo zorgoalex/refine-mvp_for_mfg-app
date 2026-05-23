@@ -111,6 +111,7 @@ describe('DeadlineActionDispatcherService', () => {
       notificationPort: {
         async createNotification(input) {
           calls.push(input);
+          return { created: true, notificationId: 'notification-1' };
         },
       },
       config: { actionsEnabled: true, notificationsEnabled: false },
@@ -147,6 +148,89 @@ describe('DeadlineActionDispatcherService', () => {
       'event-1:write_audit:order:42',
       'event-1:notify_manager:order:42',
     ]);
+  });
+
+  it('creates a real idempotent notification when notification actions are enabled', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent({
+        eventType: 'DEADLINE_EXPIRED',
+        severity: 'critical',
+        deadlineAt: '2026-05-23T09:00:00.000Z',
+      }),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_assignee' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10],
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toEqual([
+      {
+        userId: 10,
+        level: 'error',
+        title: 'Deadline expired',
+        message: 'Order 42 deadline expired at 2026-05-23T09:00:00.000Z',
+        entityType: 'order',
+        entityId: '42',
+        sourceType: 'deadline',
+        sourceId: 'event-1',
+        idempotencyKey: 'deadline-notification:event-1:notify_assignee:10',
+      },
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_assignee',
+      status: 'executed',
+      result: {
+        notificationUserId: 10,
+        notificationId: 'notification-1',
+        notificationCreated: true,
+        notificationIdempotencyKey: 'deadline-notification:event-1:notify_assignee:10',
+      },
+    });
+  });
+
+  it('records duplicate notification delivery as executed without creating a second execution shape', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_manager' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10],
+      }),
+      notificationPort: {
+        async createNotification() {
+          return { created: false, notificationId: 'notification-existing' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(executions[0]).toMatchObject({
+      status: 'executed',
+      result: {
+        notificationUserId: 10,
+        notificationId: 'notification-existing',
+        notificationCreated: false,
+      },
+    });
   });
 });
 
@@ -227,12 +311,14 @@ function createRepository(input: {
   };
 }
 
-function createTargetResolver(): DeadlineTargetResolverPort {
+function createTargetResolver(
+  overrides: Partial<{ responsibleUserIds: number[]; isCompleted: boolean }> = {},
+): DeadlineTargetResolverPort {
   return {
     async resolveTargetState() {
       return {
-        isCompleted: false,
-        responsibleUserIds: [10],
+        isCompleted: overrides.isCompleted ?? false,
+        responsibleUserIds: overrides.responsibleUserIds ?? [10],
         auditContext: {},
       };
     },
@@ -244,7 +330,9 @@ function createTargetResolver(): DeadlineTargetResolverPort {
 
 function createNotificationPort(): DeadlineNotificationPort {
   return {
-    async createNotification() {},
+    async createNotification() {
+      return { created: true, notificationId: 'notification-1' };
+    },
   };
 }
 
@@ -262,7 +350,7 @@ function createRule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineAct
   };
 }
 
-function createEvent(): DeadlineEventDto {
+function createEvent(overrides: Partial<DeadlineEventDto> = {}): DeadlineEventDto {
   return {
     deadlineEventId: 'event-1',
     deadlineId: 'deadline-1',
@@ -275,5 +363,6 @@ function createEvent(): DeadlineEventDto {
     eventAt: '2026-05-01T10:00:00.000Z',
     delayMinutes: 60,
     createdAt: '2026-05-01T10:00:00.000Z',
+    ...overrides,
   };
 }
