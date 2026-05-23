@@ -146,6 +146,130 @@ describe('PgDeadlineRepository', () => {
     ]);
   });
 
+  it('pauses deadlines with a guarded status transition, pause row, audit and outbox dimensions', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.pauseDeadline({
+        currentUser: currentUser(),
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        requestId: 'req-pause-1',
+        dto: {
+          pauseMode: 'pause_and_shift_deadline',
+          pauseReason: 'Ожидание клиента',
+          notes: 'Client requested delay',
+        },
+      }),
+    ).resolves.toMatchObject({
+      deadlineId: '11111111-1111-4111-8111-111111111111',
+      status: 'paused',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain("WHERE deadline_id = $1 AND status = 'active'");
+    expect(sql).toContain('INSERT INTO deadline_pauses');
+    expect(sql).toContain('INSERT INTO deadline_events');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+
+    const pauseInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_pauses'),
+    );
+    expect(pauseInsert?.params).toEqual([
+      '11111111-1111-4111-8111-111111111111',
+      'Ожидание клиента',
+      'pause_and_shift_deadline',
+      42,
+      'Client requested delay',
+    ]);
+
+    const eventInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_events'),
+    );
+    expect(JSON.parse(String(eventInsert?.params[11]))).toMatchObject({
+      pauseMode: 'pause_and_shift_deadline',
+      pauseReason: 'Ожидание клиента',
+      notes: 'Client requested delay',
+      actorUserId: '42',
+      requestId: 'req-pause-1',
+      source: 'backend-deadline-command',
+      reason: 'Ожидание клиента',
+      beforeStatus: 'active',
+      afterStatus: 'paused',
+    });
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params).toEqual([
+      'deadlines.deadline_paused',
+      'deadline',
+      '11111111-1111-4111-8111-111111111111',
+      '42',
+      'req-pause-1',
+      'backend-deadline-command',
+      100,
+      5,
+      JSON.stringify({ status: 'active' }),
+      JSON.stringify({ status: 'paused' }),
+      JSON.stringify({ status: { from: 'active', to: 'paused' } }),
+      JSON.stringify({
+        deadlineEventId: '22222222-2222-4222-8222-222222222222',
+        eventType: 'DEADLINE_PAUSED',
+        entityType: 'order',
+        entityId: '100',
+        orderWorkshopId: null,
+        reason: 'Ожидание клиента',
+        trigger: 'manual',
+        workerId: null,
+        schedulerRunId: null,
+      }),
+    ]);
+
+    const outbox = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    expect(JSON.parse(String(outbox?.params[2]))).toMatchObject({
+      deadlineEventId: '22222222-2222-4222-8222-222222222222',
+      eventType: 'DEADLINE_PAUSED',
+      entityType: 'order',
+      entityId: '100',
+      orderId: 100,
+      requestId: 'req-pause-1',
+      actorUserId: '42',
+      reason: 'Ожидание клиента',
+      beforeStatus: 'active',
+      afterStatus: 'paused',
+      trigger: 'manual',
+      workerId: null,
+      schedulerRunId: null,
+      source: 'backend-deadline-command',
+    });
+  });
+
+  it('uses deadline-command request id fallback in pause event payload', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await repository.pauseDeadline({
+      currentUser: currentUser(),
+      deadlineId: '11111111-1111-4111-8111-111111111111',
+      dto: {
+        pauseMode: 'pause_and_shift_deadline',
+        pauseReason: 'Ожидание клиента',
+      },
+    });
+
+    const eventInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_events'),
+    );
+    expect(JSON.parse(String(eventInsert?.params[11]))).toMatchObject({
+      requestId: 'deadline-command',
+      reason: 'Ожидание клиента',
+    });
+  });
+
   it('preserves orders.sync source in audit and outbox rows for sync-created events', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
@@ -402,6 +526,16 @@ function createDatabase(options: { eventWasInserted?: boolean } = {}) {
             deadlineRow({
               status: 'cancelled',
               cancelled_at: new Date('2026-05-01T10:00:00.000Z'),
+            }),
+          ],
+        };
+      }
+
+      if (text.includes('RETURNING') && text.includes("SET status = 'paused'")) {
+        return {
+          rows: [
+            deadlineRow({
+              status: 'paused',
             }),
           ],
         };

@@ -19,6 +19,7 @@ import type {
   DeadlineRepositoryPort,
   FindDueDeadlinesCommand,
   ListDeadlinesCommand,
+  PauseDeadlineCommand,
   UpdateDeadlinePolicyCommand,
   UpdateDeadlineSettingsCommand,
 } from '../application/deadline.types';
@@ -475,18 +476,27 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     return deadline;
   }
 
-  async pauseDeadline(command: import('../application/deadline.types').PauseDeadlineCommand): Promise<DeadlineInstanceDto> {
+  async pauseDeadline(command: PauseDeadlineCommand): Promise<DeadlineInstanceDto> {
+    const current = await this.requireDeadline(command.deadlineId);
     const result = await this.database.query<DeadlineRow>(
       `
       UPDATE deadline_instances
       SET status = 'paused',
           updated_by_user_id = $2,
           updated_at = now()
-      WHERE deadline_id = $1
+      WHERE deadline_id = $1 AND status = 'active'
       RETURNING ${DEADLINE_COLUMNS}
       `,
       [command.deadlineId, Number(command.currentUser.id)],
     );
+    if (!result.rows[0]) {
+      throw new ApiError(409, 'DEADLINE_INVALID_STATUS_TRANSITION', 'Deadline status transition is not allowed', {
+        deadlineId: command.deadlineId,
+        fromStatus: current.status,
+        toStatus: 'paused',
+      });
+    }
+
     const deadline = mapDeadline(result.rows[0]);
     await this.database.query(
       `
@@ -517,7 +527,13 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       payload: {
         pauseMode: command.dto.pauseMode,
         pauseReason: command.dto.pauseReason,
+        notes: command.dto.notes ?? null,
         actorUserId: command.currentUser.id,
+        requestId: command.requestId ?? 'deadline-command',
+        source: 'backend-deadline-command',
+        reason: command.dto.pauseReason,
+        beforeStatus: current.status,
+        afterStatus: deadline.status,
       },
     });
 
