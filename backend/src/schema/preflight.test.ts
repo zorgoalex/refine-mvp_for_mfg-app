@@ -114,6 +114,80 @@ describe('schema preflight', () => {
     );
   });
 
+  it('rejects non-unique notification idempotency index with the expected name', () => {
+    const issues = checkSchemaPreflight(`
+      CREATE TABLE notifications (
+        notification_id UUID PRIMARY KEY,
+        user_id BIGINT,
+        level TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        idempotency_key TEXT
+      );
+      CREATE INDEX uq_notifications_idempotency_key
+        ON notifications(idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+    `);
+
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        code: 'notifications.idempotency_index_missing',
+        severity: 'error',
+      }),
+    );
+  });
+
+  it('rejects notification idempotency index with the expected name on the wrong column', () => {
+    const issues = checkSchemaPreflight(`
+      CREATE TABLE notifications (
+        notification_id UUID PRIMARY KEY,
+        user_id BIGINT,
+        level TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        idempotency_key TEXT
+      );
+      CREATE UNIQUE INDEX uq_notifications_idempotency_key
+        ON notifications(source_id)
+        WHERE idempotency_key IS NOT NULL;
+    `);
+
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        code: 'notifications.idempotency_index_missing',
+        severity: 'error',
+      }),
+    );
+  });
+
+  it('rejects notification idempotency index without the partial null predicate', () => {
+    const issues = checkSchemaPreflight(`
+      CREATE TABLE notifications (
+        notification_id UUID PRIMARY KEY,
+        user_id BIGINT,
+        level TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        idempotency_key TEXT
+      );
+      CREATE UNIQUE INDEX uq_notifications_idempotency_key
+        ON notifications(idempotency_key);
+    `);
+
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        code: 'notifications.idempotency_index_missing',
+        severity: 'error',
+      }),
+    );
+  });
+
   it('accepts notification idempotency schema added by the deadline notification migration', () => {
     const issues = checkSchemaPreflight(`
       CREATE TABLE notifications (

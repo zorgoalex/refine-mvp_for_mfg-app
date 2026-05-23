@@ -81,9 +81,15 @@ function hasUniqueOnColumn(sql: string, tableName: string, columnName: string): 
   return uniqueConstraint || uniqueIndex;
 }
 
-function hasIndex(sql: string, indexName: string): boolean {
+function hasNotificationIdempotencyIndex(sql: string): boolean {
   return new RegExp(
-    `CREATE\\s+(?:UNIQUE\\s+)?INDEX(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+${indexName}\\b`,
+    [
+      'CREATE\\s+UNIQUE\\s+INDEX',
+      '(?:\\s+IF\\s+NOT\\s+EXISTS)?',
+      '\\s+uq_notifications_idempotency_key\\b',
+      '[^;]*?ON\\s+notifications\\s*\\(\\s*idempotency_key\\s*\\)',
+      '[^;]*?WHERE\\s+idempotency_key\\s+IS\\s+NOT\\s+NULL\\b',
+    ].join(''),
     'i',
   ).test(sql);
 }
@@ -257,7 +263,7 @@ export function checkSchemaPreflight(sql: string): SchemaPreflightIssue[] {
   if (
     hasTable(sql, 'notifications') &&
     hasColumn(sql, 'notifications', 'idempotency_key') &&
-    !hasIndex(sql, 'uq_notifications_idempotency_key')
+    !hasNotificationIdempotencyIndex(sql)
   ) {
     addIssue(issues, {
       code: 'notifications.idempotency_index_missing',
