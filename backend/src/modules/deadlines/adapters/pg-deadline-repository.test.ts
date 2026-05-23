@@ -388,6 +388,55 @@ describe('PgDeadlineRepository', () => {
     });
   });
 
+  it('rejects stale pause updates when the row is no longer active', async () => {
+    const database = createDatabase({ emptyPauseUpdate: true });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.pauseDeadline({
+        currentUser: currentUser(),
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        requestId: 'req-pause-stale',
+        dto: {
+          pauseMode: 'pause_without_shift',
+          pauseReason: 'Ожидание клиента',
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_INVALID_STATUS_TRANSITION',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).not.toContain('INSERT INTO deadline_pauses');
+    expect(sql).not.toContain('INSERT INTO deadline_events');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+  });
+
+  it('rejects stale resume updates when the row is no longer paused', async () => {
+    const database = createDatabase({ emptyResumeUpdate: true });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.resumeDeadline({
+        currentUser: currentUser(),
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        requestId: 'req-resume-stale',
+        dto: {},
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_INVALID_STATUS_TRANSITION',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).not.toContain('UPDATE deadline_pauses');
+    expect(sql).not.toContain('INSERT INTO deadline_events');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+  });
+
   it('preserves orders.sync source in audit and outbox rows for sync-created events', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
@@ -620,7 +669,14 @@ describe('PgDeadlineRepository', () => {
   });
 });
 
-function createDatabase(options: { deadlineStatusByIdSelect?: DeadlineTestRow['status']; eventWasInserted?: boolean } = {}) {
+function createDatabase(
+  options: {
+    deadlineStatusByIdSelect?: DeadlineTestRow['status'];
+    eventWasInserted?: boolean;
+    emptyPauseUpdate?: boolean;
+    emptyResumeUpdate?: boolean;
+  } = {},
+) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const client = {
     async query(text: string, params: readonly unknown[] = []) {
@@ -649,6 +705,14 @@ function createDatabase(options: { deadlineStatusByIdSelect?: DeadlineTestRow['s
         };
       }
 
+      if (
+        options.emptyPauseUpdate &&
+        text.includes('RETURNING') &&
+        text.includes("SET status = 'paused'")
+      ) {
+        return { rows: [] };
+      }
+
       if (text.includes('RETURNING') && text.includes("SET status = 'paused'")) {
         return {
           rows: [
@@ -657,6 +721,15 @@ function createDatabase(options: { deadlineStatusByIdSelect?: DeadlineTestRow['s
             }),
           ],
         };
+      }
+
+      if (
+        options.emptyResumeUpdate &&
+        text.includes('RETURNING') &&
+        text.includes("SET status = 'active'") &&
+        text.includes("status = 'paused'")
+      ) {
+        return { rows: [] };
       }
 
       if (
