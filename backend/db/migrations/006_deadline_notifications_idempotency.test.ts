@@ -33,7 +33,11 @@ describe('deadline notification idempotency migration', () => {
     expect(sourceIndexStatement).toMatch(
       /CREATE INDEX IF NOT EXISTS idx_notifications_source\s+ON notifications\s*\(\s*source_type\s*,\s*source_id\s*,\s*created_at DESC\s*\)\s*;/i,
     );
-    expect(migration).not.toMatch(/DROP TABLE/i);
-    expect(migration).not.toMatch(/TRUNCATE/i);
+    expect(migration).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(migration).not.toMatch(/\bDROP\s+INDEX\b/i);
+    expect(migration).not.toMatch(/\bDROP\s+COLUMN\b/i);
+    expect(migration).not.toMatch(/\bDROP\s+CONSTRAINT\b/i);
+    expect(migration).not.toMatch(/\bTRUNCATE\b/i);
+    expect(migration).not.toMatch(/\bDELETE\s+FROM\b/i);
   });
 });
