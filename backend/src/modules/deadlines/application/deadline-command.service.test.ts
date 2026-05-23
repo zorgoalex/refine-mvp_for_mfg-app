@@ -162,6 +162,79 @@ describe('DeadlineCommandService', () => {
     expect(calls).toEqual(['lock:deadline-id']);
   });
 
+  it('delegates override retry when the original deadline is already superseded and request id is present', async () => {
+    const calls: string[] = [];
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(
+        createRepository({
+          async getDeadlineByIdForUpdate(deadlineId) {
+            calls.push(`lock:${deadlineId}`);
+            return createDeadline({ status: 'superseded' });
+          },
+          async overrideDeadline(command) {
+            calls.push(`override:${command.deadlineId}:${command.requestId}`);
+            return createDeadline({
+              deadlineId: 'replacement-deadline-id',
+              deadlineAt: command.dto.deadlineAt,
+              isManuallyOverridden: true,
+            });
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      service.override({
+        currentUser: currentUser(),
+        deadlineId: 'deadline-id',
+        requestId: 'req-override-1',
+        dto: {
+          deadlineAt: '2026-05-03T10:00:00.000Z',
+          reason: 'Manual correction',
+        },
+      }),
+    ).resolves.toMatchObject({
+      deadlineId: 'replacement-deadline-id',
+      isManuallyOverridden: true,
+    });
+
+    expect(calls).toEqual(['lock:deadline-id', 'override:deadline-id:req-override-1']);
+  });
+
+  it('rejects override retry for superseded deadlines without a request id', async () => {
+    const calls: string[] = [];
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(
+        createRepository({
+          async getDeadlineByIdForUpdate(deadlineId) {
+            calls.push(`lock:${deadlineId}`);
+            return createDeadline({ status: 'superseded' });
+          },
+          async overrideDeadline() {
+            calls.push('override');
+            return createDeadline({ isManuallyOverridden: true });
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      service.override({
+        currentUser: currentUser(),
+        deadlineId: 'deadline-id',
+        dto: {
+          deadlineAt: '2026-05-03T10:00:00.000Z',
+          reason: 'Manual correction',
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_INVALID_STATUS_TRANSITION',
+    } satisfies Partial<ApiError>);
+
+    expect(calls).toEqual(['lock:deadline-id']);
+  });
+
   it('rejects pause for non-active deadlines after locking the row', async () => {
     const calls: string[] = [];
     const service = new DeadlineCommandService({

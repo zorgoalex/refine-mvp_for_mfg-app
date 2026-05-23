@@ -19,6 +19,7 @@ import type {
   DeadlineRepositoryPort,
   FindDueDeadlinesCommand,
   ListDeadlinesCommand,
+  OverrideDeadlineCommand,
   PauseDeadlineCommand,
   ResumeDeadlineCommand,
   UpdateDeadlinePolicyCommand,
@@ -421,9 +422,11 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     return deadline;
   }
 
-  async overrideDeadline(command: import('../application/deadline.types').OverrideDeadlineCommand): Promise<DeadlineInstanceDto> {
+  async overrideDeadline(command: OverrideDeadlineCommand): Promise<DeadlineInstanceDto> {
     const requestId = command.requestId ?? 'deadline-command';
     const current = await this.requireDeadline(command.deadlineId);
+    const idempotencyKey =
+      command.requestId ? `deadline-override:${command.deadlineId}:${command.requestId}` : null;
     const superseded = await this.database.query<DeadlineRow>(
       `
       UPDATE deadline_instances
@@ -436,6 +439,13 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       [command.deadlineId, Number(command.currentUser.id)],
     );
     if (!superseded.rows[0]) {
+      const existing = idempotencyKey
+        ? await this.findDeadlineByIdempotencyKey(idempotencyKey)
+        : null;
+      if (existing) {
+        return existing;
+      }
+
       throw new ApiError(409, 'DEADLINE_INVALID_STATUS_TRANSITION', 'Deadline status transition is not allowed', {
         deadlineId: command.deadlineId,
         fromStatus: current.status,
@@ -443,8 +453,6 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       });
     }
 
-    const idempotencyKey =
-      command.requestId ? `deadline-override:${command.deadlineId}:${command.requestId}` : null;
     const result = await this.database.query<DeadlineRow>(
       `
       INSERT INTO deadline_instances (
@@ -842,6 +850,16 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     return deadline;
   }
 
+  private async findDeadlineByIdempotencyKey(idempotencyKey: string): Promise<DeadlineInstanceDto | null> {
+    const result = await this.database.query<DeadlineRow>(
+      `SELECT ${DEADLINE_COLUMNS} FROM deadline_instances WHERE idempotency_key = $1`,
+      [idempotencyKey],
+    );
+    const row = result.rows[0];
+
+    return row ? mapDeadline(row) : null;
+  }
+
   private async createPolicyVersion(
     policyId: string,
     versionNumber: number,
@@ -984,6 +1002,10 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     const reason = typeof payload.reason === 'string' ? payload.reason : null;
     const beforeStatus = typeof payload.beforeStatus === 'string' ? payload.beforeStatus : null;
     const afterStatus = typeof payload.afterStatus === 'string' ? payload.afterStatus : null;
+    const beforeDeadlineAt = typeof payload.beforeDeadlineAt === 'string' ? payload.beforeDeadlineAt : null;
+    const afterDeadlineAt = typeof payload.afterDeadlineAt === 'string' ? payload.afterDeadlineAt : null;
+    const includeDeadlineAt = event.eventType === 'DEADLINE_UPDATED';
+    const deadlineAt = includeDeadlineAt ? afterDeadlineAt ?? event.deadlineAt ?? null : null;
     const workerId = typeof payload.workerId === 'string' ? payload.workerId : null;
     const trigger = payload.trigger === 'scheduler' ? 'scheduler' : 'manual';
     const schedulerRunId = typeof payload.schedulerRunId === 'string' ? payload.schedulerRunId : null;
@@ -1013,6 +1035,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
           requestId,
           actorUserId,
           reason,
+          ...(includeDeadlineAt ? { deadlineAt, beforeDeadlineAt, afterDeadlineAt } : {}),
           beforeStatus,
           afterStatus,
           trigger,

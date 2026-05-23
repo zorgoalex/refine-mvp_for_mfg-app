@@ -181,7 +181,7 @@ describe('PgDeadlineRepository', () => {
         },
       }),
     ).resolves.toMatchObject({
-      deadlineId: '11111111-1111-4111-8111-111111111111',
+      deadlineId: '44444444-4444-4444-8444-444444444444',
       isManuallyOverridden: true,
     });
 
@@ -210,7 +210,7 @@ describe('PgDeadlineRepository', () => {
       afterStatus: 'active',
     });
     expect(eventInsert?.params[12]).toBe(
-      'deadline-command:11111111-1111-4111-8111-111111111111:DEADLINE_UPDATED:req-override-1',
+      'deadline-command:44444444-4444-4444-8444-444444444444:DEADLINE_UPDATED:req-override-1',
     );
 
     const audit = database.queries.find((query) =>
@@ -233,6 +233,65 @@ describe('PgDeadlineRepository', () => {
         to: '2026-05-03T10:00:00.000Z',
       },
     });
+
+    const outbox = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    expect(JSON.parse(String(outbox?.params[2]))).toMatchObject({
+      deadlineEventId: '22222222-2222-4222-8222-222222222222',
+      eventType: 'DEADLINE_UPDATED',
+      beforeDeadlineAt: '2026-05-02T10:00:00.000Z',
+      afterDeadlineAt: '2026-05-03T10:00:00.000Z',
+      deadlineAt: '2026-05-03T10:00:00.000Z',
+    });
+  });
+
+  it('returns the existing override replacement without duplicate side effects for duplicate request ids', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+    const command = {
+      currentUser: currentUser(),
+      deadlineId: '11111111-1111-4111-8111-111111111111',
+      requestId: 'req-override-1',
+      dto: {
+        deadlineAt: '2026-05-03T10:00:00.000Z',
+        reason: 'Manual correction',
+      },
+    };
+
+    const first = await repository.overrideDeadline(command);
+    const second = await repository.overrideDeadline(command);
+
+    expect(first.deadlineId).toBe('44444444-4444-4444-8444-444444444444');
+    expect(second.deadlineId).toBe(first.deadlineId);
+
+    const supersedeUpdates = database.queries.filter((query) =>
+      normalizeSql(query.text).includes("SET status = 'superseded'"),
+    );
+    expect(supersedeUpdates).toHaveLength(2);
+
+    const replacementInserts = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_instances'),
+    );
+    expect(replacementInserts).toHaveLength(1);
+    expect(replacementInserts[0]?.params[15]).toBe(
+      'deadline-override:11111111-1111-4111-8111-111111111111:req-override-1',
+    );
+
+    const eventInserts = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_events'),
+    );
+    expect(eventInserts).toHaveLength(1);
+    expect(eventInserts[0]?.params[12]).toBe(
+      'deadline-command:44444444-4444-4444-8444-444444444444:DEADLINE_UPDATED:req-override-1',
+    );
+
+    expect(database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    )).toHaveLength(1);
+    expect(database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    )).toHaveLength(1);
   });
 
   it('rejects stale override updates when the row became terminal before supersede', async () => {
@@ -878,6 +937,8 @@ function createDatabase(
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const insertedEventIdempotencyKeys = new Set<string>();
+  let overrideReplacementCreated = false;
+  let originalSupersededByOverride = false;
   const client = {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
@@ -922,12 +983,26 @@ function createDatabase(
       }
 
       if (text.includes('RETURNING') && text.includes("SET status = 'superseded'")) {
+        if (originalSupersededByOverride) {
+          return { rows: [] };
+        }
+        originalSupersededByOverride = true;
         return {
           rows: [
             deadlineRow({
               status: 'superseded',
             }),
           ],
+        };
+      }
+
+      if (
+        text.includes('SELECT') &&
+        text.includes('FROM deadline_instances') &&
+        text.includes('idempotency_key = $1')
+      ) {
+        return {
+          rows: overrideReplacementCreated ? [overrideReplacementRow()] : [],
         };
       }
 
@@ -961,16 +1036,11 @@ function createDatabase(
       if (
         text.includes('RETURNING') &&
         text.includes('INSERT INTO deadline_instances') &&
-        text.includes('is_manually_overridden')
+        text.includes("$11::timestamptz, 'active', 'manual', true")
       ) {
+        overrideReplacementCreated = true;
         return {
-          rows: [
-            deadlineRow({
-              deadline_at: new Date('2026-05-03T10:00:00.000Z'),
-              is_manually_overridden: true,
-              metadata_json: { label: 'Manual', overrideBatch: 'manual-1', overrideReason: 'Manual correction' },
-            }),
-          ],
+          rows: [overrideReplacementRow()],
         };
       }
 
@@ -1001,6 +1071,22 @@ function deadlineRow(overrides: Partial<DeadlineTestRow> = {}) {
     ...baseDeadlineRow(),
     ...overrides,
   };
+}
+
+function overrideReplacementRow(overrides: Partial<DeadlineTestRow> = {}) {
+  return deadlineRow({
+    deadline_id: '44444444-4444-4444-8444-444444444444',
+    deadline_at: new Date('2026-05-03T10:00:00.000Z'),
+    is_manually_overridden: true,
+    metadata_json: {
+      label: 'Manual',
+      overrideBatch: 'manual-1',
+      overrideReason: 'Manual correction',
+      overriddenDeadlineId: '11111111-1111-4111-8111-111111111111',
+    },
+    idempotency_key: 'deadline-override:11111111-1111-4111-8111-111111111111:req-override-1',
+    ...overrides,
+  });
 }
 
 function baseDeadlineRow() {

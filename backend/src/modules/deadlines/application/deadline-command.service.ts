@@ -43,6 +43,9 @@ export class DeadlineCommandService {
       if (!deadline) {
         throw new DeadlineNotFoundError(command.deadlineId);
       }
+      if (deadline.status === 'superseded' && command.requestId) {
+        return unitOfWork.deadlines.overrideDeadline(command);
+      }
       assertMutableDeadline(deadline.status, command.deadlineId);
 
       return unitOfWork.deadlines.overrideDeadline(command);
