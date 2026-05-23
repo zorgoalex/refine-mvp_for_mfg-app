@@ -112,6 +112,59 @@ describe('PgDeadlineRepository', () => {
     ]);
   });
 
+  it('creates manual deadlines without duplicate side effects for duplicate request ids', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+    const command = {
+      currentUser: currentUser(),
+      requestId: 'req-create-1',
+      dto: {
+        entityType: 'order' as const,
+        entityId: '100',
+        orderId: 100,
+        clientId: 5,
+        deadlineAt: '2026-05-02T10:00:00.000Z',
+        source: 'manual' as const,
+        metadata: { label: 'Manual' },
+      },
+    };
+
+    const first = await repository.createDeadlineInstance(command);
+    const second = await repository.createDeadlineInstance(command);
+
+    expect(second.deadlineId).toBe(first.deadlineId);
+
+    const createInserts = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_instances'),
+    );
+    expect(createInserts).toHaveLength(2);
+    expect(createInserts.map((query) => query.params.at(-1))).toEqual([
+      'deadline-create:req-create-1',
+      'deadline-create:req-create-1',
+    ]);
+    expect(createInserts.every((query) =>
+      normalizeSql(query.text).includes(
+        'ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE',
+      ),
+    )).toBe(true);
+
+    const eventInserts = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_events'),
+    );
+    expect(eventInserts).toHaveLength(2);
+    expect(eventInserts.map((query) => query.params[12])).toEqual([
+      'deadline-command:11111111-1111-4111-8111-111111111111:DEADLINE_CREATED:req-create-1',
+      'deadline-command:11111111-1111-4111-8111-111111111111:DEADLINE_CREATED:req-create-1',
+    ]);
+
+    expect(database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    )).toHaveLength(1);
+    expect(database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    )).toHaveLength(1);
+  });
+
   it('cancels deadlines through a row lock with queryable audit and outbox dimensions', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
@@ -728,6 +781,7 @@ function createDatabase(
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  const insertedEventIdempotencyKeys = new Set<string>();
   const client = {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
@@ -737,7 +791,15 @@ function createDatabase(
       }
 
       if (text.includes('RETURNING') && text.includes('deadline_events')) {
-        return { rows: [eventRow(params, options.eventWasInserted ?? true)] };
+        const idempotencyKey = typeof params[12] === 'string' ? params[12] : null;
+        const wasInserted = options.eventWasInserted ?? (
+          idempotencyKey === null || !insertedEventIdempotencyKeys.has(idempotencyKey)
+        );
+        if (idempotencyKey !== null) {
+          insertedEventIdempotencyKeys.add(idempotencyKey);
+        }
+
+        return { rows: [eventRow(params, wasInserted)] };
       }
 
       if (text.includes('RETURNING') && text.includes('deadline_action_executions')) {

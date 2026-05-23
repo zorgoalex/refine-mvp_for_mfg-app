@@ -29,5 +29,7 @@ describe('deadline engine DB precheck SQL', () => {
     expect(precheckSql).toContain('deadline_order_workshops_columns');
     expect(precheckSql).toContain('deadline_orders_columns');
     expect(precheckSql).toContain('deadline_audit_log_columns');
+    expect(precheckSql).toContain('deadline_instances_idempotency');
+    expect(precheckSql).toContain('deadline_instances_idempotency_key_uidx');
   });
 });

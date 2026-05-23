@@ -71,3 +71,11 @@ SELECT
 FROM information_schema.columns
 WHERE table_schema = 'public'
   AND table_name = 'audit_log';
+
+SELECT
+  'deadline_instances_idempotency' AS check_name,
+  bool_or(column_name = 'idempotency_key') AS idempotency_key_exists,
+  to_regclass('public.deadline_instances_idempotency_key_uidx') IS NOT NULL AS idempotency_key_index_exists
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'deadline_instances';
