@@ -71,6 +71,78 @@ describe('schema preflight', () => {
     );
   });
 
+  it('detects missing notification idempotency when deadline notifications are enabled', () => {
+    const issues = checkSchemaPreflight(`
+      CREATE TABLE notifications (
+        notification_id UUID PRIMARY KEY,
+        user_id BIGINT,
+        level TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT
+      );
+    `);
+
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        code: 'notifications.idempotency_key_missing',
+        severity: 'error',
+      }),
+    );
+  });
+
+  it('detects missing notification idempotency index when the idempotency column exists', () => {
+    const issues = checkSchemaPreflight(`
+      CREATE TABLE notifications (
+        notification_id UUID PRIMARY KEY,
+        user_id BIGINT,
+        level TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        idempotency_key TEXT
+      );
+    `);
+
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        code: 'notifications.idempotency_index_missing',
+        severity: 'error',
+      }),
+    );
+  });
+
+  it('accepts notification idempotency schema added by the deadline notification migration', () => {
+    const issues = checkSchemaPreflight(`
+      CREATE TABLE notifications (
+        notification_id UUID PRIMARY KEY,
+        user_id BIGINT,
+        level TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        idempotency_key TEXT
+      );
+      CREATE UNIQUE INDEX uq_notifications_idempotency_key
+        ON notifications(idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+    `);
+
+    expect(issues).not.toContainEqual(
+      expect.objectContaining({
+        code: 'notifications.idempotency_key_missing',
+      }),
+    );
+    expect(issues).not.toContainEqual(
+      expect.objectContaining({
+        code: 'notifications.idempotency_index_missing',
+      }),
+    );
+  });
+
   it('detects the known blockers in postgresql_schema_v_14.sql', () => {
     const schema = readFileSync(
       new URL('./fixtures/postgresql_schema_v_14.preflight.sql', import.meta.url),

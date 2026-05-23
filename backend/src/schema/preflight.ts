@@ -1,4 +1,4 @@
-export type SchemaPreflightSeverity = 'blocker' | 'warning';
+export type SchemaPreflightSeverity = 'blocker' | 'error' | 'warning';
 
 export interface SchemaPreflightIssue {
   code: string;
@@ -6,6 +6,8 @@ export interface SchemaPreflightIssue {
   title: string;
   details: string;
   recommendation: string;
+  message?: string;
+  remediation?: string;
 }
 
 function hasCreateTable(sql: string, tableName: string): boolean {
@@ -13,6 +15,10 @@ function hasCreateTable(sql: string, tableName: string): boolean {
     `CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${tableName}\\b`,
     'i',
   ).test(sql);
+}
+
+function hasTable(sql: string, tableName: string): boolean {
+  return hasCreateTable(sql, tableName);
 }
 
 function hasTableReference(sql: string, tableName: string): boolean {
@@ -73,6 +79,13 @@ function hasUniqueOnColumn(sql: string, tableName: string, columnName: string): 
   ).test(sql);
 
   return uniqueConstraint || uniqueIndex;
+}
+
+function hasIndex(sql: string, indexName: string): boolean {
+  return new RegExp(
+    `CREATE\\s+(?:UNIQUE\\s+)?INDEX(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+${indexName}\\b`,
+    'i',
+  ).test(sql);
 }
 
 function getInsertLeadingNumbers(sql: string, tableName: string): number[] {
@@ -222,6 +235,42 @@ export function checkSchemaPreflight(sql: string): SchemaPreflightIssue[] {
         'The Deadline Engine backend reads and writes deadline_events.idempotency_key for idempotent event handling.',
       recommendation:
         'Apply the additive deadline migration that adds deadline_events.idempotency_key and uq_deadline_events_idempotency_key before deploying deadline-enabled backend code.',
+    });
+  }
+
+  if (hasTable(sql, 'notifications') && !hasColumn(sql, 'notifications', 'idempotency_key')) {
+    addIssue(issues, {
+      code: 'notifications.idempotency_key_missing',
+      severity: 'error',
+      title: 'notifications.idempotency_key is missing',
+      details:
+        'Deadline Engine notification delivery writes notifications.idempotency_key to prevent duplicate user-visible notifications.',
+      recommendation:
+        'Apply backend/db/migrations/006_deadline_notifications_idempotency.sql before enabling BACKEND_DEADLINE_NOTIFICATIONS_ENABLED.',
+      message:
+        'Deadline Engine notification delivery writes notifications.idempotency_key to prevent duplicate user-visible notifications.',
+      remediation:
+        'Apply backend/db/migrations/006_deadline_notifications_idempotency.sql before enabling BACKEND_DEADLINE_NOTIFICATIONS_ENABLED.',
+    });
+  }
+
+  if (
+    hasTable(sql, 'notifications') &&
+    hasColumn(sql, 'notifications', 'idempotency_key') &&
+    !hasIndex(sql, 'uq_notifications_idempotency_key')
+  ) {
+    addIssue(issues, {
+      code: 'notifications.idempotency_index_missing',
+      severity: 'error',
+      title: 'uq_notifications_idempotency_key is missing',
+      details:
+        'Deadline Engine notification delivery requires a unique notification idempotency index.',
+      recommendation:
+        'Apply backend/db/migrations/006_deadline_notifications_idempotency.sql before enabling BACKEND_DEADLINE_NOTIFICATIONS_ENABLED.',
+      message:
+        'Deadline Engine notification delivery requires a unique notification idempotency index.',
+      remediation:
+        'Apply backend/db/migrations/006_deadline_notifications_idempotency.sql before enabling BACKEND_DEADLINE_NOTIFICATIONS_ENABLED.',
     });
   }
 
