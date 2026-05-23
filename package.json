@@ -24,6 +24,7 @@
     "test:e2e:client-phones-cutover": "VITE_USE_BACKEND_PRODUCTION_ACTIONS=true VITE_USE_BACKEND_CLIENT_PHONES=true playwright test tests/client-phones-backend-cutover.spec.ts",
     "test:e2e:production-actions-stage-canary": "PRODUCTION_ACTIONS_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/production-actions-stage-canary.spec.ts --project=chromium",
     "test:e2e:deadline-engine-stage-canary": "DEADLINE_ENGINE_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/deadline-engine-stage-canary.spec.ts --project=chromium",
+    "test:e2e:deadline-create-override-stage-canary": "DEADLINE_CREATE_OVERRIDE_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/deadline-engine-create-override-stage-canary.spec.ts --project=chromium",
     "test:e2e:deadline-worker-stage-canary": "DEADLINE_ENGINE_STAGE_WORKER_WRITE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/deadline-engine-worker-stage-canary.spec.ts --project=chromium",
     "test:e2e:payments-stage-canary": "PAYMENTS_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/payments-stage-canary.spec.ts --project=chromium",
     "test:e2e:client-phones-stage-canary": "CLIENT_PHONES_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/client-phones-stage-canary.spec.ts --project=chromium",
