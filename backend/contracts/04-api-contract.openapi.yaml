@@ -1614,7 +1614,11 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
-    patch:
+
+  /api/v1/deadlines/{deadlineId}/override:
+    parameters:
+      - $ref: '#/components/parameters/DeadlineId'
+    post:
       tags:
         - Deadlines
       operationId: overrideDeadline
