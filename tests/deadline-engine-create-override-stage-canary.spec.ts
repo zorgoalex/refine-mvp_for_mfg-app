@@ -24,9 +24,9 @@ const overrideRequestId =
   process.env.DEADLINE_CREATE_OVERRIDE_OVERRIDE_REQUEST_ID ??
   'req-deadline-create-override-canary-override-2026-05-23';
 const createDeadlineAt =
-  process.env.DEADLINE_CREATE_OVERRIDE_CREATE_DEADLINE_AT ?? '2026-06-01T10:00:00.000Z';
+  process.env.DEADLINE_CREATE_OVERRIDE_CREATE_AT ?? '2026-06-01T10:00:00.000Z';
 const overrideDeadlineAt =
-  process.env.DEADLINE_CREATE_OVERRIDE_OVERRIDE_DEADLINE_AT ?? '2026-06-02T10:00:00.000Z';
+  process.env.DEADLINE_CREATE_OVERRIDE_OVERRIDE_AT ?? '2026-06-02T10:00:00.000Z';
 
 test.describe('deadline engine create override stage canary', () => {
   test.skip(
@@ -87,6 +87,7 @@ test.describe('deadline engine create override stage canary', () => {
       source: 'manual',
       metadata: {
         fixtureKey,
+        canary: 'create-override',
         fixtureRole: 'create-override-canary',
         requestId: createRequestId,
       },
@@ -102,8 +103,13 @@ test.describe('deadline engine create override stage canary', () => {
     await expectOk(createResponse);
     const created = await expectDeadlineResponse(createResponse);
     createdDeadlineId = created.deadline.deadlineId;
+    expect(created.deadline.entityType).toBe('order');
+    expect(created.deadline.entityId).toBe(String(orderId));
     expect(created.deadline.orderId).toBe(orderId);
+    expect(created.deadline.source).toBe('manual');
+    expect(created.deadline.status).toBe('active');
     expect(created.deadline.metadata?.fixtureKey).toBe(fixtureKey);
+    expect(created.deadline.metadata?.canary).toBe('create-override');
 
     const repeatCreateResponse = await request.post(`${backendApiUrl}/deadlines`, {
       data: createPayload,
@@ -130,6 +136,7 @@ test.describe('deadline engine create override stage canary', () => {
       reason: 'Deadline create/override stage canary override',
       metadata: {
         fixtureKey,
+        canary: 'create-override',
         fixtureRole: 'create-override-canary-override',
         requestId: overrideRequestId,
       },
@@ -149,8 +156,12 @@ test.describe('deadline engine create override stage canary', () => {
     const overridden = await expectDeadlineResponse(overrideResponse);
     replacementDeadlineId = overridden.deadline.deadlineId;
     expect(replacementDeadlineId).not.toBe(createdDeadlineId);
+    expect(overridden.deadline.status).toBe('active');
     expect(overridden.deadline.isManuallyOverridden).toBe(true);
     expect(overridden.deadline.metadata?.fixtureKey).toBe(fixtureKey);
+    expect(overridden.deadline.metadata?.canary).toBe('create-override');
+    expect(overridden.deadline.metadata?.overrideReason).toBe(overridePayload.reason);
+    expect(overridden.deadline.metadata?.overriddenDeadlineId).toBe(createdDeadlineId);
 
     const repeatOverrideResponse = await request.post(
       `${backendApiUrl}/deadlines/${createdDeadlineId}/override`,
@@ -447,16 +458,16 @@ function restoreFixtureRows(knownDeadlineIds: string[] = []) {
     ),
     deleted_notifications AS (
       DELETE FROM notifications
-      WHERE source_id IN (SELECT deadline_id FROM scoped_deadlines)
+      WHERE source_id IN (SELECT deadline_id FROM scoped_deadline_ids)
          OR source_id IN (SELECT deadline_event_id FROM scoped_events)
-         OR entity_id IN (SELECT deadline_id FROM scoped_deadlines)
+         OR entity_id IN (SELECT deadline_id FROM scoped_deadline_ids)
       RETURNING 1
     ),
     deleted_outbox AS (
       DELETE FROM outbox_events
       WHERE aggregate_type = 'deadline'
         AND (
-          aggregate_id IN (SELECT deadline_id FROM scoped_deadlines)
+          aggregate_id IN (SELECT deadline_id FROM scoped_deadline_ids)
           OR payload_json->>'deadlineEventId' IN (SELECT deadline_event_id FROM scoped_events)
           OR payload_json->>'requestId' IN (
             '${escapeSql(createRequestId)}',
@@ -469,7 +480,7 @@ function restoreFixtureRows(knownDeadlineIds: string[] = []) {
       DELETE FROM audit_log
       WHERE entity_type = 'deadline'
         AND (
-          entity_id IN (SELECT deadline_id FROM scoped_deadlines)
+          entity_id IN (SELECT deadline_id FROM scoped_deadline_ids)
           OR request_id IN (
             '${escapeSql(createRequestId)}',
             '${escapeSql(overrideRequestId)}'
@@ -484,7 +495,7 @@ function restoreFixtureRows(knownDeadlineIds: string[] = []) {
       RETURNING 1
     )
     DELETE FROM deadline_instances
-    WHERE deadline_id::text IN (SELECT deadline_id FROM scoped_deadlines);
+    WHERE deadline_id::text IN (SELECT deadline_id FROM scoped_deadline_ids);
   `);
 }
 
@@ -526,7 +537,7 @@ function loadResidueCounts(knownDeadlineIds: string[] = []): ResidueCounts {
         FROM outbox_events
         WHERE aggregate_type = 'deadline'
           AND (
-            aggregate_id IN (SELECT deadline_id FROM scoped_deadline_ids)
+            aggregate_id IN (SELECT deadline_id FROM scoped_deadlines)
             OR payload_json->>'deadlineEventId' IN (SELECT deadline_event_id FROM scoped_events)
             OR payload_json->>'requestId' IN (
               '${escapeSql(createRequestId)}',
@@ -539,7 +550,7 @@ function loadResidueCounts(knownDeadlineIds: string[] = []): ResidueCounts {
         FROM audit_log
         WHERE entity_type = 'deadline'
           AND (
-            entity_id IN (SELECT deadline_id FROM scoped_deadline_ids)
+            entity_id IN (SELECT deadline_id FROM scoped_deadlines)
             OR request_id IN (
               '${escapeSql(createRequestId)}',
               '${escapeSql(overrideRequestId)}'
@@ -550,15 +561,15 @@ function loadResidueCounts(knownDeadlineIds: string[] = []): ResidueCounts {
       'notifications', (
         SELECT count(*)::int
         FROM notifications
-        WHERE source_id IN (SELECT deadline_id FROM scoped_deadline_ids)
+        WHERE source_id IN (SELECT deadline_id FROM scoped_deadlines)
            OR source_id IN (SELECT deadline_event_id FROM scoped_events)
-           OR entity_id IN (SELECT deadline_id FROM scoped_deadline_ids)
+           OR entity_id IN (SELECT deadline_id FROM scoped_deadlines)
       ),
       'deadlineEvents', (SELECT count(*)::int FROM scoped_events),
       'deadlineInstances', (
         SELECT count(*)::int
         FROM deadline_instances
-        WHERE deadline_id::text IN (SELECT deadline_id FROM scoped_deadline_ids)
+        WHERE deadline_id::text IN (SELECT deadline_id FROM scoped_deadlines)
       )
     )::text;
     `,
@@ -629,6 +640,8 @@ function isString(value: string | null): value is string {
 interface DeadlineResponse {
   deadline: {
     deadlineId: string;
+    entityType: string;
+    entityId: string;
     orderId: number | null;
     deadlineAt: string;
     status: string;
