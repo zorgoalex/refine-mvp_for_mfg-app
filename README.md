@@ -339,7 +339,7 @@ npm run dev:full
 - `npm run test:e2e:production-actions-cutover` — Playwright smoke для backend production actions/calendar moves cutover flag.
 - `npm run test:e2e:production-actions-stage-canary` — opt-in Playwright smoke для stage production actions backend path с audit/outbox/idempotency checks.
 - `npm run test:e2e:deadline-engine-stage-canary` - opt-in read-only smoke for deployed Deadline Engine frontend/API stage acceptance.
-- `DEADLINE_CREATE_OVERRIDE_RESTORE=true npm run test:e2e:deadline-create-override-stage-canary` - opt-in write canary for deployed Deadline Engine create/override command acceptance on stage only.
+- `npm run test:e2e:deadline-create-override-stage-canary` - opt-in write canary for deployed Deadline Engine create/override command acceptance on stage only.
 - `npm run test:e2e:order-ui-full-coverage` — opt-in durable Playwright coverage для заказа: заполняет формы, кликает кнопки, проверяет поля, вкладки, creator history и оставляет созданный заказ.
 - `npm run test:e2e:order-created-by-stage-canary` — opt-in deployed backend canary: проверяет, что stage `/api/v1/orders/:id` отдает `createdBy/editedBy` для order UI.
 - `npm run test:e2e:vlm-cutover` — Playwright smoke для backend VLM cutover flag.
@@ -368,7 +368,7 @@ npm run test:e2e:order-export-cutover
 npm run test:e2e:production-actions-cutover
 npm run test:e2e:production-actions-stage-canary
 npm run test:e2e:deadline-engine-stage-canary
-DEADLINE_CREATE_OVERRIDE_RESTORE=true npm run test:e2e:deadline-create-override-stage-canary
+npm run test:e2e:deadline-create-override-stage-canary
 npm run test:e2e:order-ui-full-coverage
 npm run test:e2e:order-created-by-stage-canary
 npm run test:e2e:payments-stage-canary
@@ -424,7 +424,7 @@ Payments stage canary creates/updates/deletes a standalone payment through the
 stage UI/backend path and verifies DB audit/order recalculation. It uses a
 temporary test user and requires access to the stage `erpdb` Docker Postgres.
 Deadline Engine stage canary is read-only for deadline data. It creates a temporary backend user, verifies runtime `backendDeadlines`, reads `/api/v1/orders/:id/deadline-summary`, `/deadlines`, and `/deadline-events`, then opens the deployed order show page and checks the read-only deadline panel. By default it targets stage order `11166` (`TEST-CODEX-STATUS3-DEBUG-20260516192743`); override with `DEADLINE_ENGINE_STAGE_ORDER_ID` and `DEADLINE_ENGINE_STAGE_ORDER_NAME` when using a different fixture.
-Deadline create/override stage canary writes isolated manual deadline fixture rows through deployed backend endpoints, verifies idempotent create/override side effects in the stage DB, and restores all rows scoped by fixture key/request ids. The package script enables `DEADLINE_CREATE_OVERRIDE_STAGE_CANARY=true`, but restore opt-in remains explicit via `DEADLINE_CREATE_OVERRIDE_RESTORE=true`; it must not be run against production.
+Deadline create/override stage canary writes isolated manual deadline fixture rows through deployed backend endpoints, verifies idempotent create/override side effects in the stage DB, and restores all rows scoped by fixture key/request ids. The package script enables both `DEADLINE_CREATE_OVERRIDE_RESTORE=true` and `DEADLINE_CREATE_OVERRIDE_STAGE_CANARY=true`; it must not be run against production.
 Production cutover plan: [../spec_erp/docs/production-cutover-plan.md](../spec_erp/docs/production-cutover-plan.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 
