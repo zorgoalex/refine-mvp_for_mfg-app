@@ -96,6 +96,7 @@ export class PgDeadlineTargetResolver implements DeadlineTargetResolverPort {
       completedAt: toNullableIso(row.completion_date),
       responsibleUserIds: compactNumbers([managerUserId]),
       notificationRecipients: {
+        assigneeUserId: managerUserId,
         managerUserId,
       },
       auditContext: {

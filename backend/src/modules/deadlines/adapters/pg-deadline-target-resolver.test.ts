@@ -23,7 +23,10 @@ describe('PgDeadlineTargetResolver', () => {
       responsibleUserIds: [42],
       auditContext: { entityType: 'order', orderId: 100, clientId: 5 },
     });
-    expect(state.notificationRecipients).toEqual({ managerUserId: 42 });
+    expect(state.notificationRecipients).toEqual({
+      assigneeUserId: 42,
+      managerUserId: 42,
+    });
   });
 
   it('resolves order stage completion and maps employee to user when available', async () => {
@@ -96,7 +99,10 @@ describe('PgDeadlineTargetResolver', () => {
         clientId: 5,
       },
     });
-    expect(state.notificationRecipients).toEqual({ managerUserId: 42 });
+    expect(state.notificationRecipients).toEqual({
+      assigneeUserId: 42,
+      managerUserId: 42,
+    });
   });
 
   it('rejects dangerous status-changing actions in the first adapter phase', async () => {

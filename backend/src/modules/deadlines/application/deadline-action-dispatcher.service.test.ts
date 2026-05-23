@@ -249,6 +249,49 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
+  it('uses order-style explicit manager recipient as assignee for notify_assignee', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_assignee' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [42],
+        notificationRecipients: {
+          assigneeUserId: 42,
+          managerUserId: 42,
+        },
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toMatchObject([
+      {
+        userId: 42,
+        idempotencyKey: 'deadline-notification:event-1:notify_assignee:42',
+      },
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_assignee',
+      status: 'executed',
+      result: {
+        notificationUserId: 42,
+        notificationIdempotencyKey: 'deadline-notification:event-1:notify_assignee:42',
+      },
+    });
+  });
+
   it('skips notify_manager when explicit manager recipient is missing', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];
