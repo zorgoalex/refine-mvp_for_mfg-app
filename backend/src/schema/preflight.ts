@@ -1,4 +1,4 @@
-export type SchemaPreflightSeverity = 'blocker' | 'error' | 'warning';
+export type SchemaPreflightSeverity = 'blocker' | 'warning';
 
 export interface SchemaPreflightIssue {
   code: string;
@@ -6,8 +6,6 @@ export interface SchemaPreflightIssue {
   title: string;
   details: string;
   recommendation: string;
-  message?: string;
-  remediation?: string;
 }
 
 function hasCreateTable(sql: string, tableName: string): boolean {
@@ -87,13 +85,20 @@ function hasNotificationIdempotencyIndex(sql: string): boolean {
       'CREATE\\s+UNIQUE\\s+INDEX',
       '(?:\\s+IF\\s+NOT\\s+EXISTS)?',
       '\\s+uq_notifications_idempotency_key\\b',
-      '[^;]*?ON\\s+notifications\\s*\\(\\s*idempotency_key\\s*\\)',
+      '[^;]*?ON\\s+notifications\\s*(?:USING\\s+\\w+\\s*)?\\(\\s*idempotency_key\\s*\\)',
       '[^;]*?WHERE\\s+([^;]+?)\\s*(?:;|$)',
     ].join(''),
     'i',
   ).exec(sql);
 
-  return match?.[1]?.replace(/\s+/g, ' ').trim().toUpperCase() === 'IDEMPOTENCY_KEY IS NOT NULL';
+  const predicate = match?.[1]
+    ?.replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\(\s*(.*?)\s*\)$/u, '$1')
+    .trim()
+    .toUpperCase();
+
+  return predicate === 'IDEMPOTENCY_KEY IS NOT NULL';
 }
 
 function getInsertLeadingNumbers(sql: string, tableName: string): number[] {
@@ -249,15 +254,11 @@ export function checkSchemaPreflight(sql: string): SchemaPreflightIssue[] {
   if (hasTable(sql, 'notifications') && !hasColumn(sql, 'notifications', 'idempotency_key')) {
     addIssue(issues, {
       code: 'notifications.idempotency_key_missing',
-      severity: 'error',
+      severity: 'blocker',
       title: 'notifications.idempotency_key is missing',
       details:
         'Deadline Engine notification delivery writes notifications.idempotency_key to prevent duplicate user-visible notifications.',
       recommendation:
-        'Apply backend/db/migrations/006_deadline_notifications_idempotency.sql before enabling BACKEND_DEADLINE_NOTIFICATIONS_ENABLED.',
-      message:
-        'Deadline Engine notification delivery writes notifications.idempotency_key to prevent duplicate user-visible notifications.',
-      remediation:
         'Apply backend/db/migrations/006_deadline_notifications_idempotency.sql before enabling BACKEND_DEADLINE_NOTIFICATIONS_ENABLED.',
     });
   }
@@ -269,15 +270,11 @@ export function checkSchemaPreflight(sql: string): SchemaPreflightIssue[] {
   ) {
     addIssue(issues, {
       code: 'notifications.idempotency_index_missing',
-      severity: 'error',
+      severity: 'blocker',
       title: 'uq_notifications_idempotency_key is missing',
       details:
         'Deadline Engine notification delivery requires a unique notification idempotency index.',
       recommendation:
-        'Apply backend/db/migrations/006_deadline_notifications_idempotency.sql before enabling BACKEND_DEADLINE_NOTIFICATIONS_ENABLED.',
-      message:
-        'Deadline Engine notification delivery requires a unique notification idempotency index.',
-      remediation:
         'Apply backend/db/migrations/006_deadline_notifications_idempotency.sql before enabling BACKEND_DEADLINE_NOTIFICATIONS_ENABLED.',
     });
   }
