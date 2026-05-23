@@ -130,6 +130,32 @@ describe('DeadlineWorkerController', () => {
     ]);
   });
 
+  it('passes enabled action and notification flags to the manual worker batch', async () => {
+    const calls: unknown[] = [];
+    const controller = createController({
+      worker: {
+        async processDueDeadlines(command: unknown) {
+          calls.push(command);
+          return { scanned: 1, processed: 1, expired: 1, completed: 0 };
+        },
+      },
+      flags: flags({
+        deadlineActionsEnabled: true,
+        deadlineNotificationsEnabled: true,
+      }),
+    });
+
+    await controller.processDueNow({ user: currentUser(), requestId: 'req-flags' }, {});
+
+    expect(calls[0]).toMatchObject({
+      requestId: 'req-flags',
+      config: {
+        actionsEnabled: true,
+        notificationsEnabled: true,
+      },
+    });
+  });
+
   it('uses current time and configured batch size when request body is empty', async () => {
     const calls: Array<{ now: string; limit: number }> = [];
     vi.useFakeTimers();

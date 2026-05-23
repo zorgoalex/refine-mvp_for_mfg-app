@@ -183,6 +183,54 @@ describe('DeadlineWorkerService', () => {
     expect(createNotification).not.toHaveBeenCalled();
   });
 
+  it('passes notification-enabled config through worker event dispatch without bypassing action idempotency', async () => {
+    const notifications: unknown[] = [];
+    const executions: unknown[] = [];
+    const repository = createRepository({
+      due: [createDeadline({ deadlineId: 'deadline-1', orderId: 42 })],
+      events: [],
+      executions: executions as DeadlineActionExecutionDto[],
+      rules: [createRule({ actionType: 'notify_assignee' })],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager(repository),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+    });
+
+    await worker.processDueDeadlines({
+      now: '2026-05-23T10:00:00.000Z',
+      limit: 10,
+      workerId: 'worker-notification-test',
+      trigger: 'manual',
+      actorUserId: '42',
+      requestId: 'req-notification-test',
+      config: {
+        actionsEnabled: true,
+        notificationsEnabled: true,
+      },
+    });
+
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        userId: 10,
+        sourceType: 'deadline',
+        idempotencyKey: expect.stringMatching(/^deadline-notification:/),
+      }),
+    ]);
+    expect(executions).toEqual([
+      expect.objectContaining({
+        status: 'executed',
+        actionType: 'notify_assignee',
+      }),
+    ]);
+  });
+
   it('records worker source, worker id, actor, and request id on expired events', async () => {
     const events: DeadlineEventDto[] = [];
     const repository = createRepository({
@@ -381,7 +429,10 @@ function createTargetResolver(input: {
 }
 
 function createNotificationPort(
-  createNotification: DeadlineNotificationPort['createNotification'] = async () => {},
+  createNotification: DeadlineNotificationPort['createNotification'] = async () => ({
+    created: true,
+    notificationId: 'notification-1',
+  }),
 ): DeadlineNotificationPort {
   return {
     createNotification,
