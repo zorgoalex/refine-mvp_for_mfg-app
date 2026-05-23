@@ -150,7 +150,7 @@ describe('DeadlineActionDispatcherService', () => {
     ]);
   });
 
-  it('notifies the first responsible user for notify_assignee', async () => {
+  it('uses explicit assignee recipient for notify_assignee even when responsible user order differs', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];
     const dispatcher = new DeadlineActionDispatcherService();
@@ -166,7 +166,11 @@ describe('DeadlineActionDispatcherService', () => {
         executions,
       }),
       targetResolver: createTargetResolver({
-        responsibleUserIds: [10, 20],
+        responsibleUserIds: [20, 10],
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: 20,
+        },
       }),
       notificationPort: {
         async createNotification(input) {
@@ -202,7 +206,7 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
-  it('notifies the second responsible user for notify_manager', async () => {
+  it('uses explicit manager recipient for notify_manager even when responsible user order differs', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];
     const dispatcher = new DeadlineActionDispatcherService();
@@ -214,7 +218,11 @@ describe('DeadlineActionDispatcherService', () => {
         executions,
       }),
       targetResolver: createTargetResolver({
-        responsibleUserIds: [10, 20],
+        responsibleUserIds: [20, 10],
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: 20,
+        },
       }),
       notificationPort: {
         async createNotification(input) {
@@ -241,7 +249,7 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
-  it('skips notify_manager when only the assignee responsible user is available', async () => {
+  it('skips notify_manager when explicit manager recipient is missing', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];
     const dispatcher = new DeadlineActionDispatcherService();
@@ -254,6 +262,10 @@ describe('DeadlineActionDispatcherService', () => {
       }),
       targetResolver: createTargetResolver({
         responsibleUserIds: [10],
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: null,
+        },
       }),
       notificationPort: {
         async createNotification(input) {
@@ -272,7 +284,7 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
-  it('skips notify_department_head when only assignee and manager responsible users are available', async () => {
+  it('skips notify_department_head when explicit department head recipient is missing', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];
     const dispatcher = new DeadlineActionDispatcherService();
@@ -285,6 +297,10 @@ describe('DeadlineActionDispatcherService', () => {
       }),
       targetResolver: createTargetResolver({
         responsibleUserIds: [10, 20],
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: 20,
+        },
       }),
       notificationPort: {
         async createNotification(input) {
@@ -303,7 +319,7 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
-  it('notifies the third responsible user for notify_department_head', async () => {
+  it('uses explicit department head recipient for notify_department_head', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];
     const dispatcher = new DeadlineActionDispatcherService();
@@ -315,7 +331,12 @@ describe('DeadlineActionDispatcherService', () => {
         executions,
       }),
       targetResolver: createTargetResolver({
-        responsibleUserIds: [10, 20, 30],
+        responsibleUserIds: [30, 10, 20],
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: 20,
+          departmentHeadUserId: 30,
+        },
       }),
       notificationPort: {
         async createNotification(input) {
@@ -338,6 +359,45 @@ describe('DeadlineActionDispatcherService', () => {
       result: {
         notificationUserId: 30,
         notificationIdempotencyKey: 'deadline-notification:event-1:notify_department_head:30',
+      },
+    });
+  });
+
+  it('falls back to the first responsible user for legacy notify_manager target resolvers', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_manager' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [20],
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toMatchObject([
+      {
+        userId: 20,
+        idempotencyKey: 'deadline-notification:event-1:notify_manager:20',
+      },
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_manager',
+      status: 'executed',
+      result: {
+        notificationUserId: 20,
+        notificationIdempotencyKey: 'deadline-notification:event-1:notify_manager:20',
       },
     });
   });
@@ -482,7 +542,15 @@ function createRepository(input: {
 }
 
 function createTargetResolver(
-  overrides: Partial<{ responsibleUserIds: number[]; isCompleted: boolean }> = {},
+  overrides: Partial<{
+    responsibleUserIds: number[];
+    isCompleted: boolean;
+    notificationRecipients: {
+      assigneeUserId?: number | null;
+      managerUserId?: number | null;
+      departmentHeadUserId?: number | null;
+    };
+  }> = {},
 ): DeadlineTargetResolverPort {
   return {
     async resolveTargetState() {
@@ -490,6 +558,9 @@ function createTargetResolver(
         isCompleted: overrides.isCompleted ?? false,
         responsibleUserIds: overrides.responsibleUserIds ?? [10],
         auditContext: {},
+        ...(overrides.notificationRecipients === undefined
+          ? {}
+          : { notificationRecipients: overrides.notificationRecipients }),
       };
     },
     async canApplyAction() {

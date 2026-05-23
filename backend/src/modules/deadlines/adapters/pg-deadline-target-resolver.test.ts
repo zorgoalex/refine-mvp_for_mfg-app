@@ -16,13 +16,14 @@ describe('PgDeadlineTargetResolver', () => {
       }),
     );
 
-    await expect(
-      resolver.resolveTargetState({ entityType: 'order', entityId: '100', orderId: 100 }),
-    ).resolves.toMatchObject({
+    const state = await resolver.resolveTargetState({ entityType: 'order', entityId: '100', orderId: 100 });
+
+    expect(state).toMatchObject({
       isCompleted: true,
       responsibleUserIds: [42],
       auditContext: { entityType: 'order', orderId: 100, clientId: 5 },
     });
+    expect(state.notificationRecipients).toEqual({ managerUserId: 42 });
   });
 
   it('resolves order stage completion and maps employee to user when available', async () => {
@@ -43,14 +44,14 @@ describe('PgDeadlineTargetResolver', () => {
       }),
     );
 
-    await expect(
-      resolver.resolveTargetState({
-        entityType: 'order_stage',
-        entityId: '200',
-        orderId: 100,
-        orderWorkshopId: 200,
-      }),
-    ).resolves.toMatchObject({
+    const state = await resolver.resolveTargetState({
+      entityType: 'order_stage',
+      entityId: '200',
+      orderId: 100,
+      orderWorkshopId: 200,
+    });
+
+    expect(state).toMatchObject({
       isCompleted: false,
       responsibleUserIds: [55, 42],
       auditContext: {
@@ -60,6 +61,42 @@ describe('PgDeadlineTargetResolver', () => {
         workshopName: 'Раскрой',
       },
     });
+    expect(state.notificationRecipients).toEqual({
+      assigneeUserId: 55,
+      managerUserId: 42,
+    });
+  });
+
+  it('resolves client action with inherited order manager recipient and client action audit context', async () => {
+    const resolver = new PgDeadlineTargetResolver(
+      createDatabase({
+        order: {
+          order_id: 100,
+          client_id: 5,
+          manager_id: 42,
+          completion_date: null,
+          delete_flag: false,
+        },
+      }),
+    );
+
+    const state = await resolver.resolveTargetState({
+      entityType: 'client_action',
+      entityId: 'client-action-1',
+      orderId: 100,
+    });
+
+    expect(state).toMatchObject({
+      isCompleted: false,
+      responsibleUserIds: [42],
+      auditContext: {
+        entityType: 'client_action',
+        entityId: 'client-action-1',
+        orderId: 100,
+        clientId: 5,
+      },
+    });
+    expect(state.notificationRecipients).toEqual({ managerUserId: 42 });
   });
 
   it('rejects dangerous status-changing actions in the first adapter phase', async () => {

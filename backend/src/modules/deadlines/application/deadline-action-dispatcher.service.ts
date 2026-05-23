@@ -7,6 +7,7 @@ import type {
   DeadlineNotificationPort,
   DeadlineRepositoryPort,
   DeadlineTargetResolverPort,
+  DeadlineTargetState,
 } from './deadline.types';
 
 export interface DeadlineActionDispatcherConfig {
@@ -111,14 +112,14 @@ export class DeadlineActionDispatcherService {
     rule: DeadlineActionRuleDto,
     baseExecution: CreateActionExecutionInput,
   ) {
-    const responsibleUsers = await command.targetResolver.resolveTargetState({
+    const targetState = await command.targetResolver.resolveTargetState({
       entityType: command.event.entityType,
       entityId: command.event.entityId,
       orderId: command.event.orderId,
       orderWorkshopId: command.event.orderWorkshopId,
       clientId: command.event.clientId,
     });
-    const userId = selectNotificationRecipientUserId(rule.actionType, responsibleUsers.responsibleUserIds);
+    const userId = selectNotificationRecipientUserId(rule.actionType, targetState);
 
     if (!userId) {
       return command.repository.createActionExecution({
@@ -175,17 +176,31 @@ export class DeadlineActionDispatcherService {
 
 function selectNotificationRecipientUserId(
   actionType: string,
-  responsibleUserIds: number[],
+  targetState: DeadlineTargetState,
 ): number | undefined {
+  if (targetState.notificationRecipients !== undefined) {
+    if (actionType === 'notify_assignee') {
+      return targetState.notificationRecipients.assigneeUserId ?? undefined;
+    }
+
+    if (actionType === 'notify_manager') {
+      return targetState.notificationRecipients.managerUserId ?? undefined;
+    }
+
+    if (actionType === 'notify_department_head') {
+      return targetState.notificationRecipients.departmentHeadUserId ?? undefined;
+    }
+  }
+
   if (actionType === 'notify_manager') {
-    return responsibleUserIds[1];
+    return targetState.responsibleUserIds[0];
   }
 
   if (actionType === 'notify_department_head') {
-    return responsibleUserIds[2];
+    return targetState.responsibleUserIds[2];
   }
 
-  return responsibleUserIds[0];
+  return targetState.responsibleUserIds[0];
 }
 
 function buildNotificationIdempotencyKey(input: {

@@ -89,10 +89,15 @@ export class PgDeadlineTargetResolver implements DeadlineTargetResolverPort {
       return unresolved(input);
     }
 
+    const managerUserId = toNullableNumber(row.manager_id);
+
     return {
       isCompleted: row.completion_date !== null,
       completedAt: toNullableIso(row.completion_date),
-      responsibleUserIds: compactNumbers([row.manager_id]),
+      responsibleUserIds: compactNumbers([managerUserId]),
+      notificationRecipients: {
+        managerUserId,
+      },
       auditContext: {
         entityType: 'order',
         orderId: Number(row.order_id),
@@ -123,10 +128,17 @@ export class PgDeadlineTargetResolver implements DeadlineTargetResolverPort {
       return unresolved(input);
     }
 
+    const assigneeUserId = toNullableNumber(row.responsible_user_id);
+    const managerUserId = toNullableNumber(row.manager_id);
+
     return {
       isCompleted: row.completed_date !== null,
       completedAt: toNullableIso(row.completed_date),
-      responsibleUserIds: compactNumbers([row.responsible_user_id, row.manager_id]),
+      responsibleUserIds: compactNumbers([assigneeUserId, managerUserId]),
+      notificationRecipients: {
+        assigneeUserId,
+        managerUserId,
+      },
       auditContext: {
         entityType: 'order_stage',
         orderId: Number(row.order_id),

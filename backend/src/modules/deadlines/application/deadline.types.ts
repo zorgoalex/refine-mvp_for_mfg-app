@@ -144,6 +144,11 @@ export interface DeadlineTargetState {
   isCompleted: boolean;
   completedAt?: string | null;
   responsibleUserIds: number[];
+  notificationRecipients?: {
+    assigneeUserId?: number | null;
+    managerUserId?: number | null;
+    departmentHeadUserId?: number | null;
+  };
   auditContext: Record<string, unknown>;
 }
 
