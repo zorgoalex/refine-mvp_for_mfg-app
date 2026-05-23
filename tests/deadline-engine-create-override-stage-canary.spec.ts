@@ -235,17 +235,20 @@ function assertNonProductionLikeTarget() {
 
 function assertNonProductionLikePostgresTarget() {
   const target = postgresContainer.toLowerCase();
-  const isProductionLike = target.includes('prod') || target.includes('production') || target.includes('live');
   const isExplicitlyNonProduction =
     target.includes('test') ||
     target.includes('stage') ||
     target.includes('staging') ||
     target.includes('dev') ||
-    target.includes('local');
+    target.includes('local') ||
+    target.includes('localhost') ||
+    target.includes('127.0.0.1');
+  const allowUnmarkedTarget = process.env.DEADLINE_CREATE_OVERRIDE_ALLOW_UNMARKED_DB_TARGET === 'true';
 
-  if (isProductionLike && !isExplicitlyNonProduction) {
+  if (!isExplicitlyNonProduction && !allowUnmarkedTarget) {
     throw new Error(
-      `Refusing to run create/override canary against production-like postgres target: ${postgresContainer}`,
+      `Refusing to run create/override canary cleanup against unmarked postgres target: ${postgresContainer}. ` +
+        'Use an explicit test/stage/dev/local target or set DEADLINE_CREATE_OVERRIDE_ALLOW_UNMARKED_DB_TARGET=true.',
     );
   }
 }
