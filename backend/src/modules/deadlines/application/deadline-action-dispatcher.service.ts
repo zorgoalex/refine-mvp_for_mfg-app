@@ -118,7 +118,7 @@ export class DeadlineActionDispatcherService {
       orderWorkshopId: command.event.orderWorkshopId,
       clientId: command.event.clientId,
     });
-    const userId = responsibleUsers.responsibleUserIds[0];
+    const userId = selectNotificationRecipientUserId(rule.actionType, responsibleUsers.responsibleUserIds);
 
     if (!userId) {
       return command.repository.createActionExecution({
@@ -171,6 +171,21 @@ export class DeadlineActionDispatcherService {
       },
     });
   }
+}
+
+function selectNotificationRecipientUserId(
+  actionType: string,
+  responsibleUserIds: number[],
+): number | undefined {
+  if (actionType === 'notify_manager') {
+    return responsibleUserIds[1];
+  }
+
+  if (actionType === 'notify_department_head') {
+    return responsibleUserIds[2];
+  }
+
+  return responsibleUserIds[0];
 }
 
 function buildNotificationIdempotencyKey(input: {

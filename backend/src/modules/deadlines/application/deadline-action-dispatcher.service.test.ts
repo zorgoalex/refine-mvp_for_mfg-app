@@ -150,7 +150,7 @@ describe('DeadlineActionDispatcherService', () => {
     ]);
   });
 
-  it('creates a real idempotent notification when notification actions are enabled', async () => {
+  it('notifies the first responsible user for notify_assignee', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];
     const dispatcher = new DeadlineActionDispatcherService();
@@ -166,7 +166,7 @@ describe('DeadlineActionDispatcherService', () => {
         executions,
       }),
       targetResolver: createTargetResolver({
-        responsibleUserIds: [10],
+        responsibleUserIds: [10, 20],
       }),
       notificationPort: {
         async createNotification(input) {
@@ -202,6 +202,146 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
+  it('notifies the second responsible user for notify_manager', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_manager' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10, 20],
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toMatchObject([
+      {
+        userId: 20,
+        idempotencyKey: 'deadline-notification:event-1:notify_manager:20',
+      },
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_manager',
+      status: 'executed',
+      result: {
+        notificationUserId: 20,
+        notificationIdempotencyKey: 'deadline-notification:event-1:notify_manager:20',
+      },
+    });
+  });
+
+  it('skips notify_manager when only the assignee responsible user is available', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_manager' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10],
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_manager',
+      status: 'skipped',
+      skipReason: 'notification_target_missing',
+    });
+  });
+
+  it('skips notify_department_head when only assignee and manager responsible users are available', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_department_head' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10, 20],
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_department_head',
+      status: 'skipped',
+      skipReason: 'notification_target_missing',
+    });
+  });
+
+  it('notifies the third responsible user for notify_department_head', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_department_head' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10, 20, 30],
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toMatchObject([
+      {
+        userId: 30,
+        idempotencyKey: 'deadline-notification:event-1:notify_department_head:30',
+      },
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_department_head',
+      status: 'executed',
+      result: {
+        notificationUserId: 30,
+        notificationIdempotencyKey: 'deadline-notification:event-1:notify_department_head:30',
+      },
+    });
+  });
+
   it('records duplicate notification delivery as executed without creating a second execution shape', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const dispatcher = new DeadlineActionDispatcherService();
@@ -209,7 +349,7 @@ describe('DeadlineActionDispatcherService', () => {
     await dispatcher.dispatch({
       event: createEvent(),
       repository: createRepository({
-        rules: [createRule({ actionType: 'notify_manager' })],
+        rules: [createRule({ actionType: 'notify_assignee' })],
         executions,
       }),
       targetResolver: createTargetResolver({
@@ -230,6 +370,36 @@ describe('DeadlineActionDispatcherService', () => {
         notificationId: 'notification-existing',
         notificationCreated: false,
       },
+    });
+  });
+
+  it('records unavailable notification port when notification creation fails', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'notify_assignee' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10],
+      }),
+      notificationPort: {
+        async createNotification() {
+          throw new Error('notification service unavailable');
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_assignee',
+      status: 'skipped',
+      skipReason: 'notification_port_unavailable',
+      errorCode: 'Error',
+      errorMessage: 'notification service unavailable',
     });
   });
 });
