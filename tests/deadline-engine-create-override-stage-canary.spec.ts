@@ -42,6 +42,7 @@ test.describe('deadline engine create override stage canary', () => {
   test.beforeAll(() => {
     requireCanaryEnv();
     assertNonProductionLikeTarget();
+    assertNonProductionLikePostgresTarget();
     restoreFixtureRows();
     expectResidueEmpty(loadResidueCounts());
     expectOrderExists(orderId);
@@ -51,6 +52,7 @@ test.describe('deadline engine create override stage canary', () => {
     let restoreError: unknown;
     try {
       if (process.env.DEADLINE_CREATE_OVERRIDE_RESTORE === 'true') {
+        assertNonProductionLikePostgresTarget();
         restoreFixtureRows([createdDeadlineId, replacementDeadlineId].filter(isString));
         expectResidueEmpty(loadResidueCounts([createdDeadlineId, replacementDeadlineId].filter(isString)));
       }
@@ -228,6 +230,23 @@ function assertNonProductionLikeTarget() {
 
   if (!safeHost || !pathname.startsWith('/api/v1')) {
     throw new Error(`Refusing to run create/override canary against production-like target: ${backendApiUrl}`);
+  }
+}
+
+function assertNonProductionLikePostgresTarget() {
+  const target = postgresContainer.toLowerCase();
+  const isProductionLike = target.includes('prod') || target.includes('production') || target.includes('live');
+  const isExplicitlyNonProduction =
+    target.includes('test') ||
+    target.includes('stage') ||
+    target.includes('staging') ||
+    target.includes('dev') ||
+    target.includes('local');
+
+  if (isProductionLike && !isExplicitlyNonProduction) {
+    throw new Error(
+      `Refusing to run create/override canary against production-like postgres target: ${postgresContainer}`,
+    );
   }
 }
 
@@ -458,9 +477,14 @@ function restoreFixtureRows(knownDeadlineIds: string[] = []) {
     ),
     deleted_notifications AS (
       DELETE FROM notifications
-      WHERE source_id IN (SELECT deadline_id FROM scoped_deadline_ids)
-         OR source_id IN (SELECT deadline_event_id FROM scoped_events)
-         OR entity_id IN (SELECT deadline_id FROM scoped_deadline_ids)
+      WHERE (
+          source_type = 'deadline'
+          AND source_id IN (SELECT deadline_event_id FROM scoped_events)
+        )
+         OR (
+          entity_type = 'deadline'
+          AND entity_id IN (SELECT deadline_id FROM scoped_deadline_ids)
+        )
       RETURNING 1
     ),
     deleted_outbox AS (
@@ -469,10 +493,6 @@ function restoreFixtureRows(knownDeadlineIds: string[] = []) {
         AND (
           aggregate_id IN (SELECT deadline_id FROM scoped_deadline_ids)
           OR payload_json->>'deadlineEventId' IN (SELECT deadline_event_id FROM scoped_events)
-          OR payload_json->>'requestId' IN (
-            '${escapeSql(createRequestId)}',
-            '${escapeSql(overrideRequestId)}'
-          )
         )
       RETURNING 1
     ),
@@ -481,10 +501,6 @@ function restoreFixtureRows(knownDeadlineIds: string[] = []) {
       WHERE entity_type = 'deadline'
         AND (
           entity_id IN (SELECT deadline_id FROM scoped_deadline_ids)
-          OR request_id IN (
-            '${escapeSql(createRequestId)}',
-            '${escapeSql(overrideRequestId)}'
-          )
           OR metadata_json->>'deadlineEventId' IN (SELECT deadline_event_id FROM scoped_events)
         )
       RETURNING 1
@@ -539,10 +555,6 @@ function loadResidueCounts(knownDeadlineIds: string[] = []): ResidueCounts {
           AND (
             aggregate_id IN (SELECT deadline_id FROM scoped_deadlines)
             OR payload_json->>'deadlineEventId' IN (SELECT deadline_event_id FROM scoped_events)
-            OR payload_json->>'requestId' IN (
-              '${escapeSql(createRequestId)}',
-              '${escapeSql(overrideRequestId)}'
-            )
           )
       ),
       'auditLog', (
@@ -551,19 +563,20 @@ function loadResidueCounts(knownDeadlineIds: string[] = []): ResidueCounts {
         WHERE entity_type = 'deadline'
           AND (
             entity_id IN (SELECT deadline_id FROM scoped_deadlines)
-            OR request_id IN (
-              '${escapeSql(createRequestId)}',
-              '${escapeSql(overrideRequestId)}'
-            )
             OR metadata_json->>'deadlineEventId' IN (SELECT deadline_event_id FROM scoped_events)
           )
       ),
       'notifications', (
         SELECT count(*)::int
         FROM notifications
-        WHERE source_id IN (SELECT deadline_id FROM scoped_deadlines)
-           OR source_id IN (SELECT deadline_event_id FROM scoped_events)
-           OR entity_id IN (SELECT deadline_id FROM scoped_deadlines)
+        WHERE (
+            source_type = 'deadline'
+            AND source_id IN (SELECT deadline_event_id FROM scoped_events)
+          )
+           OR (
+            entity_type = 'deadline'
+            AND entity_id IN (SELECT deadline_id FROM scoped_deadlines)
+          )
       ),
       'deadlineEvents', (SELECT count(*)::int FROM scoped_events),
       'deadlineInstances', (
