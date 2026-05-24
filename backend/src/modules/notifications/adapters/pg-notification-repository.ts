@@ -16,8 +16,8 @@ interface NotificationRow {
   entity_id: string | null;
   source_type: string | null;
   source_id: string | null;
-  read_at: string | null;
-  created_at: string;
+  read_at: string | Date | null;
+  created_at: string | Date;
   total_count?: string | number | null;
   unread_count?: string | number | null;
 }
@@ -118,9 +118,16 @@ function mapRow(row: NotificationRow): NotificationDto {
     entityId: row.entity_id,
     sourceType: row.source_type,
     sourceId: row.source_id,
-    readAt: row.read_at,
-    createdAt: row.created_at,
+    readAt: timestampToIsoString(row.read_at),
+    createdAt: timestampToIsoString(row.created_at),
   };
+}
+
+function timestampToIsoString(value: string | Date): string;
+function timestampToIsoString(value: string | Date | null): string | null;
+function timestampToIsoString(value: string | Date | null): string | null {
+  if (value === null) return null;
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 function numberFromCount(value: string | number | null | undefined): number {

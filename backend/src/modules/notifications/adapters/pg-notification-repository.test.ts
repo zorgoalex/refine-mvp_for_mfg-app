@@ -74,6 +74,28 @@ describe('PgNotificationRepository', () => {
     );
   });
 
+  it('maps Date timestamp columns to ISO strings', async () => {
+    const database = databaseClient([
+      {
+        rows: [
+          notificationRow({
+            read_at: new Date('2026-05-23T10:00:00.000Z'),
+            created_at: new Date('2026-05-23T09:00:00.000Z'),
+          }),
+        ],
+      },
+    ]);
+    const repository = new PgNotificationRepository(database);
+
+    const result = await repository.markReadForUser({
+      notificationId: '11111111-1111-4111-8111-111111111111',
+      userId: '42',
+    });
+
+    expect(result?.readAt).toBe('2026-05-23T10:00:00.000Z');
+    expect(result?.createdAt).toBe('2026-05-23T09:00:00.000Z');
+  });
+
   it('marks all unread current-user notifications read', async () => {
     const database = databaseClient([{ rows: [{ updated_count: '3' }] }]);
     const repository = new PgNotificationRepository(database);
