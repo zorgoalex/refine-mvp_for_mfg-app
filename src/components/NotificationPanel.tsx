@@ -7,16 +7,14 @@ import {
   DeleteOutlined,
   CheckOutlined,
 } from '@ant-design/icons';
-import { useGetIdentity } from '@refinedev/core';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/ru';
-import {
-  useNotificationStore,
-  type Notification,
-  type NotificationLevel,
-} from '../stores/notificationStore';
-import type { UserIdentity } from '../types/auth';
+import type { NotificationLevel } from '../stores/notificationStore';
+import type {
+  BackendNotificationsState,
+  PanelNotification,
+} from '../hooks/useBackendNotifications';
 
 dayjs.extend(relativeTime);
 dayjs.locale('ru');
@@ -29,24 +27,18 @@ const levelIcons: Record<NotificationLevel, { icon: React.ReactNode; color: stri
   error: { icon: <ExclamationCircleOutlined />, color: '#ff4d4f' },
 };
 
-export const NotificationPanel: React.FC = () => {
-  const { data: user } = useGetIdentity<UserIdentity>();
-
+export const NotificationPanel: React.FC<{
+  notificationsState: BackendNotificationsState;
+}> = ({ notificationsState }) => {
   const {
-    getNotificationsForUser,
+    notifications,
+    loading,
     markAsRead,
     markAllAsRead,
     deleteNotification,
-    deleteAll,
-  } = useNotificationStore();
+  } = notificationsState;
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-
-  // Получаем только уведомления текущего пользователя
-  const notifications = useMemo(
-    () => getNotificationsForUser(user?.id),
-    [getNotificationsForUser, user?.id]
-  );
 
   const allIds = useMemo(() => notifications.map((n) => n.id), [notifications]);
 
@@ -60,21 +52,19 @@ export const NotificationPanel: React.FC = () => {
     }
   };
 
-  const handleMarkAsRead = () => {
+  const handleMarkAsRead = async () => {
     if (selectedIds.length > 0) {
-      markAsRead(selectedIds, user?.id);
+      await markAsRead(selectedIds);
       setSelectedIds([]);
     } else {
-      markAllAsRead(user?.id);
+      await markAllAsRead();
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (selectedIds.length > 0) {
-      deleteNotification(selectedIds, user?.id);
+      await deleteNotification(selectedIds);
       setSelectedIds([]);
-    } else {
-      deleteAll(user?.id);
     }
   };
 
@@ -84,13 +74,13 @@ export const NotificationPanel: React.FC = () => {
     );
   };
 
-  const handleItemClick = (notification: Notification) => {
+  const handleItemClick = async (notification: PanelNotification) => {
     if (!notification.read) {
-      markAsRead(notification.id, user?.id);
+      await markAsRead(notification.id);
     }
   };
 
-  if (notifications.length === 0) {
+  if (!loading && notifications.length === 0) {
     return (
       <div style={{ width: 280, padding: '20px 0', textAlign: 'center' }}>
         <Empty
@@ -132,6 +122,7 @@ export const NotificationPanel: React.FC = () => {
               size="small"
               icon={<DeleteOutlined style={{ fontSize: 11 }} />}
               onClick={handleDelete}
+              disabled={selectedIds.length === 0}
               danger
               style={{ fontSize: 11 }}
             >
@@ -145,6 +136,7 @@ export const NotificationPanel: React.FC = () => {
       <List
         style={{ maxHeight: 500, overflow: 'auto', backgroundColor: '#fff' }}
         dataSource={notifications}
+        loading={loading}
         renderItem={(item) => {
           const { icon, color } = levelIcons[item.level];
           const isSelected = selectedIds.includes(item.id);

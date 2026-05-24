@@ -30,6 +30,8 @@ interface NotificationStore {
 
 const MAX_NOTIFICATIONS = 100;
 
+// This store is intentionally limited to transient frontend-local messages.
+// Backend-persisted user notifications are loaded through useBackendNotifications.
 export const useNotificationStore = create<NotificationStore>()(
   persist(
     (set, get) => ({
