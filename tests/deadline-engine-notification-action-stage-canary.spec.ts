@@ -248,9 +248,10 @@ function loadNotificationActionEvidence(): NotificationActionEvidence {
         AND action_type = 'notify_assignee'
     ),
     fixture_action_executions AS (
-      SELECT *
-      FROM deadline_action_executions
-      WHERE deadline_event_id IN (SELECT deadline_event_id FROM fixture_events)
+      SELECT dae.*
+      FROM deadline_action_executions dae
+      JOIN fixture_action_rules far ON far.action_rule_id = dae.action_rule_id
+      WHERE dae.deadline_event_id IN (SELECT deadline_event_id FROM fixture_events)
     ),
     fixture_notifications AS (
       SELECT n.*
@@ -265,6 +266,10 @@ function loadNotificationActionEvidence(): NotificationActionEvidence {
       'expiredEvents', (SELECT count(*)::int FROM fixture_events),
       'actionRules', (SELECT count(*)::int FROM fixture_action_rules),
       'actionExecutions', (SELECT count(*)::int FROM fixture_action_executions),
+      'actionExecutionRuleCount', (
+        SELECT count(DISTINCT action_rule_id)::int
+        FROM fixture_action_executions
+      ),
       'executedNotificationActions', (
         SELECT count(*)::int
         FROM fixture_action_executions
@@ -314,6 +319,7 @@ function expectNotificationActionEvidence(evidence: NotificationActionEvidence) 
   expect(evidence.expiredEvents).toBe(1);
   expect(evidence.actionRules).toBe(1);
   expect(evidence.actionExecutions).toBe(1);
+  expect(evidence.actionExecutionRuleCount).toBe(1);
   expect(evidence.executedNotificationActions).toBe(1);
   expect(evidence.notifications).toBe(1);
   expect(evidence.notificationCreated).toBe(true);
@@ -396,6 +402,7 @@ interface NotificationActionEvidence {
   expiredEvents: number;
   actionRules: number;
   actionExecutions: number;
+  actionExecutionRuleCount: number;
   executedNotificationActions: number;
   notifications: number;
   notificationCreated: boolean;
