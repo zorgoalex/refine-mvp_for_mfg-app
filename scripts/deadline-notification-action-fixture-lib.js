@@ -13,7 +13,7 @@ const TARGET_ENV_KEYS = [
   'NODE_ENV',
 ];
 const UNKNOWN_COMMAND_MESSAGE =
-  'Unknown or missing deadline notification action fixture command. Usage: npm run deadline-notification-action:fixture -- <snapshot|create|restore>';
+  'Unknown or missing deadline notification action fixture command. Usage: <snapshot|create|restore>';
 
 function sqlString(value) {
   return String(value).replaceAll("'", "''");

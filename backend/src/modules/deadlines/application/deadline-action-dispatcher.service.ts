@@ -32,6 +32,10 @@ export class DeadlineActionDispatcherService {
 
     const executions = [];
     for (const rule of rules) {
+      if (!ruleMatchesEventFixture(rule, command.event)) {
+        continue;
+      }
+
       executions.push(await this.dispatchRule(command, rule));
     }
 
@@ -251,4 +255,16 @@ function createExecutionInput(
     }),
     status: 'skipped',
   };
+}
+
+function ruleMatchesEventFixture(
+  rule: DeadlineActionRuleDto,
+  event: DeadlineEventDto,
+): boolean {
+  const ruleFixtureKey = rule.config?.fixtureKey;
+  if (typeof ruleFixtureKey !== 'string' || ruleFixtureKey.trim() === '') {
+    return true;
+  }
+
+  return event.payload?.fixtureKey === ruleFixtureKey;
 }

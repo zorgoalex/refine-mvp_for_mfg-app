@@ -153,6 +153,7 @@ export class DeadlineWorkerService {
         actorUserId: actorUserId ?? null,
         requestId: requestId ?? null,
         schedulerRunId: schedulerRunId ?? null,
+        ...fixturePayload(deadline),
       },
     };
   }
@@ -206,6 +207,7 @@ export class DeadlineWorkerService {
         actorUserId: actorUserId ?? null,
         requestId: requestId ?? null,
         schedulerRunId: schedulerRunId ?? null,
+        ...fixturePayload(deadline),
       },
     };
   }
@@ -213,4 +215,13 @@ export class DeadlineWorkerService {
 
 function terminalEventIdempotencyKey(deadlineId: string, eventType: string): string {
   return `deadline-terminal:${deadlineId}:${eventType}:deadline-engine`;
+}
+
+function fixturePayload(deadline: DeadlineInstanceDto): { fixtureKey?: string } {
+  const fixtureKey = deadline.metadata?.fixtureKey;
+  if (typeof fixtureKey !== 'string' || fixtureKey.trim() === '') {
+    return {};
+  }
+
+  return { fixtureKey };
 }

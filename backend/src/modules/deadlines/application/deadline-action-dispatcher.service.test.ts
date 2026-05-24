@@ -206,6 +206,102 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
+  it('ignores fixture-scoped rules when the event has no matching fixture key', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    const result = await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionType: 'notify_assignee',
+            config: { fixtureKey: 'fixture-action-rule' },
+          }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(result).toEqual([]);
+    expect(executions).toEqual([]);
+    expect(notifications).toEqual([]);
+  });
+
+  it('ignores fixture-scoped rules when the event fixture key differs', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    const result = await dispatcher.dispatch({
+      event: createEvent({ payload: { fixtureKey: 'other-fixture' } }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionType: 'notify_assignee',
+            config: { fixtureKey: 'fixture-action-rule' },
+          }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(result).toEqual([]);
+    expect(executions).toEqual([]);
+    expect(notifications).toEqual([]);
+  });
+
+  it('executes fixture-scoped rules when the event fixture key matches', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    const result = await dispatcher.dispatch({
+      event: createEvent({ payload: { fixtureKey: 'fixture-action-rule' } }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionType: 'notify_assignee',
+            config: { fixtureKey: 'fixture-action-rule' },
+          }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(result).toHaveLength(1);
+    expect(notifications).toHaveLength(1);
+    expect(executions[0]).toMatchObject({
+      actionType: 'notify_assignee',
+      status: 'executed',
+    });
+  });
+
   it('uses explicit manager recipient for notify_manager even when responsible user order differs', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];

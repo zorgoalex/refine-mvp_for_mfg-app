@@ -130,6 +130,12 @@ describe('deadline notification action fixture helper', () => {
     });
   });
 
+  it('uses a generic unknown command message before a CLI wrapper exists', () => {
+    expect(() => fixtureLib.runFixtureCommand('missing', validEnv)).toThrow(
+      'Unknown or missing deadline notification action fixture command. Usage: <snapshot|create|restore>',
+    );
+  });
+
   it.each([
     ['COMPOSE_PROJECT_NAME', 'erp_prod'],
     ['FRONTEND_ORIGIN', 'https://app-live.example.com'],

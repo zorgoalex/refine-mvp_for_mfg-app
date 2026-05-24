@@ -270,6 +270,40 @@ describe('DeadlineWorkerService', () => {
     });
   });
 
+  it('copies deadline fixture key metadata into expired event payload', async () => {
+    const events: DeadlineEventDto[] = [];
+    const repository = createRepository({
+      due: [
+        createDeadline({
+          metadata: {
+            fixtureKey: 'deadline-notification-action-canary-2026-05-24',
+          },
+        }),
+      ],
+      events,
+      executions: [],
+      rules: [],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager(repository),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+    });
+
+    await worker.processDueDeadlines({
+      now: '2026-05-01T10:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      trigger: 'manual',
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    });
+
+    expect(events[0].payload).toMatchObject({
+      status: 'expired',
+      fixtureKey: 'deadline-notification-action-canary-2026-05-24',
+    });
+  });
+
   it('marks completed target as completed_on_time when completed before deadline', async () => {
     const events: DeadlineEventDto[] = [];
     const repository = createRepository({
