@@ -59,6 +59,7 @@ ai_docs/
 .agents/
 .gemini/
 .factory/
+.worktrees/
 CLAUDE.md
 AGENTS.md
 skills-lock.json
