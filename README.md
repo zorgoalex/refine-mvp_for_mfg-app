@@ -428,7 +428,7 @@ Deadline create/override stage canary writes isolated manual deadline fixture ro
 
 ### Deadline Engine residual scope
 
-Backend-backed notification UI is the next accepted residual slice after backend-test acceptance of read endpoints, cancel, pause/resume, create/override, and worker fixture canaries. The notification bell/panel reads persisted `notifications` rows through `/api/v1/notifications` and the local Zustand notification store remains only for transient frontend messages.
+Stage accepted 2026-05-24: backend-backed notification API/build evidence for current-user persisted notifications. `NotificationBell`/`NotificationPanel` use `/api/v1/notifications`; local Zustand notification store remains transient frontend-only. Stage fixture `deadline-notification-ui-canary-2026-05-23` proved list, mark-read, delete, and zero residue after applying additive backend-test migration `006_deadline_notifications_idempotency.sql`. Manual app-test UI verification was attempted but blocked by Vercel login/SSO before the ERP login form loaded. Next residual slice is isolated notification action-rule stage canary. Evidence: `/home/ovhtest/projects/erp_dev/spec_erp/docs/deadline-engine-residual-notifications-ui-2026-05-23.md`.
 
 Still disabled without separate approval:
 
