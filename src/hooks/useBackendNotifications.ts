@@ -75,6 +75,11 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
     }
   }, []);
 
+  const invalidatePendingRefresh = useCallback(() => {
+    refreshRequestIdRef.current += 1;
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
 
@@ -98,6 +103,7 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
   }, [enabled, refresh]);
 
   const markAsRead = useCallback(async (ids: string | string[]) => {
+    invalidatePendingRefresh();
     const idList = Array.isArray(ids) ? ids : [ids];
 
     for (const id of idList) {
@@ -105,9 +111,10 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
       const next = toPanelNotification(response.notification);
       setSnapshot((current) => replaceNotificationInSnapshot(current, next));
     }
-  }, []);
+  }, [invalidatePendingRefresh]);
 
   const markAllAsRead = useCallback(async () => {
+    invalidatePendingRefresh();
     await notificationsApi.markAllRead();
     setSnapshot((current) => ({
       notifications: current.notifications.map((notification) => ({
@@ -116,16 +123,17 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
       })),
       unreadCount: 0,
     }));
-  }, []);
+  }, [invalidatePendingRefresh]);
 
   const deleteNotification = useCallback(async (ids: string | string[]) => {
+    invalidatePendingRefresh();
     const idList = Array.isArray(ids) ? ids : [ids];
 
     for (const id of idList) {
       await notificationsApi.delete(id);
       setSnapshot((current) => removeNotificationFromSnapshot(current, id));
     }
-  }, []);
+  }, [invalidatePendingRefresh]);
 
   return useMemo(
     () => ({

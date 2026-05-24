@@ -329,6 +329,63 @@ describe('useBackendNotifications hook', () => {
     expect(state.unreadCount).toBe(0);
     expect(state.loading).toBe(false);
   });
+
+  it('ignores stale refresh responses after mark-all-read succeeds', async () => {
+    const unread = createBackendNotification();
+    const staleRefresh = createDeferred<NotificationListResponse>();
+    notificationsApiMock.list
+      .mockResolvedValueOnce(createListResponse([unread], 1))
+      .mockReturnValueOnce(staleRefresh.promise);
+    notificationsApiMock.markAllRead.mockResolvedValueOnce({ updatedCount: 1 });
+
+    renderHook(true);
+    await flushPromises();
+    const loaded = renderHook(true);
+    const refreshPromise = loaded.refresh();
+
+    await loaded.markAllAsRead();
+    let state = renderHook(true);
+
+    expect(state.notifications).toEqual([{ ...toPanelNotification(unread), read: true }]);
+    expect(state.unreadCount).toBe(0);
+
+    staleRefresh.resolve(createListResponse([unread], 1));
+    await refreshPromise;
+    state = renderHook(true);
+
+    expect(state.notifications).toEqual([{ ...toPanelNotification(unread), read: true }]);
+    expect(state.unreadCount).toBe(0);
+  });
+
+  it('ignores stale refresh responses after delete succeeds', async () => {
+    const deleted = createBackendNotification();
+    const staleRefresh = createDeferred<NotificationListResponse>();
+    notificationsApiMock.list
+      .mockResolvedValueOnce(createListResponse([deleted], 1))
+      .mockReturnValueOnce(staleRefresh.promise);
+    notificationsApiMock.delete.mockResolvedValueOnce({
+      notificationId: deleted.notificationId,
+      deleted: true,
+    });
+
+    renderHook(true);
+    await flushPromises();
+    const loaded = renderHook(true);
+    const refreshPromise = loaded.refresh();
+
+    await loaded.deleteNotification(deleted.notificationId);
+    let state = renderHook(true);
+
+    expect(state.notifications).toEqual([]);
+    expect(state.unreadCount).toBe(0);
+
+    staleRefresh.resolve(createListResponse([deleted], 1));
+    await refreshPromise;
+    state = renderHook(true);
+
+    expect(state.notifications).toEqual([]);
+    expect(state.unreadCount).toBe(0);
+  });
 });
 
 function createBackendNotification(
