@@ -12,11 +12,26 @@ const postgresContainer =
 const fixtureKey = process.env.DEADLINE_WORKER_FIXTURE_KEY ?? '';
 const fixtureOrderId = readNumberEnv('DEADLINE_WORKER_FIXTURE_ORDER_ID');
 const externalOwnerWorkerNow = '2000-01-01T00:01:00.000Z';
+const missingCanaryPrerequisites = [
+  fixtureKey.trim() ? null : 'DEADLINE_WORKER_FIXTURE_KEY',
+  fixtureOrderId ? null : 'DEADLINE_WORKER_FIXTURE_ORDER_ID',
+  process.env.DEADLINE_WORKER_FIXTURE_RESTORE === 'true'
+    ? null
+    : 'DEADLINE_WORKER_FIXTURE_RESTORE=true',
+  process.env.BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER === 'external'
+    ? null
+    : 'BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER=external',
+  dockerContainerExists(postgresContainer) ? null : `docker container ${postgresContainer}`,
+].filter((value): value is string => Boolean(value));
 
 test.describe('deadline scheduler external owner stage canary', () => {
   test.skip(
     !CANARY_ENABLED,
     'Set DEADLINE_SCHEDULER_EXTERNAL_OWNER_STAGE_CANARY=true to enable the external-owner stage canary.',
+  );
+  test.skip(
+    CANARY_ENABLED && missingCanaryPrerequisites.length > 0,
+    `Missing Deadline scheduler external-owner canary prerequisites: ${missingCanaryPrerequisites.join(', ')}`,
   );
   test.setTimeout(180000);
 
@@ -319,6 +334,15 @@ function readNumberEnv(name: string): number | null {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function dockerContainerExists(containerName: string): boolean {
+  try {
+    execFileSync('docker', ['container', 'inspect', containerName], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function trimTrailingSlash(value: string): string {

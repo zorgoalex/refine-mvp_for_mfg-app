@@ -74,6 +74,14 @@ test.describe('Calendar frontend', () => {
 
 test.describe('Calendar stage canary', () => {
     test.skip(!stageCanaryEnabled, 'Run with CALENDAR_STAGE_CANARY=true');
+    test.skip(
+        stageCanaryEnabled && !dockerContainerExists(stagePostgresContainer),
+        `Stage postgres container ${stagePostgresContainer} is required for calendar stage canary.`,
+    );
+    test.skip(
+        stageCanaryEnabled && !vercelAutomationBypassSecret,
+        'VERCEL_AUTOMATION_BYPASS_SECRET is required for protected deployed frontend access.',
+    );
     test.setTimeout(90000);
 
     let userId: number | null = null;
@@ -269,6 +277,15 @@ function psql(sql: string): string {
     )
         .toString()
         .trim();
+}
+
+function dockerContainerExists(containerName: string): boolean {
+    try {
+        execFileSync('docker', ['container', 'inspect', containerName], { stdio: 'ignore' });
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function sqlQuote(value: string) {

@@ -14,11 +14,23 @@ const fixtureOrderId = readNumberEnv('DEADLINE_NOTIFICATION_ACTION_ORDER_ID');
 const workerNow =
   process.env.DEADLINE_NOTIFICATION_ACTION_WORKER_NOW?.trim() ||
   '2000-01-04T00:01:00.000Z';
+const missingCanaryPrerequisites = [
+  fixtureKey.trim() ? null : 'DEADLINE_NOTIFICATION_ACTION_FIXTURE_KEY',
+  fixtureOrderId ? null : 'DEADLINE_NOTIFICATION_ACTION_ORDER_ID',
+  process.env.DEADLINE_NOTIFICATION_ACTION_RESTORE === 'true'
+    ? null
+    : 'DEADLINE_NOTIFICATION_ACTION_RESTORE=true',
+  dockerContainerExists(postgresContainer) ? null : `docker container ${postgresContainer}`,
+].filter((value): value is string => Boolean(value));
 
 test.describe('deadline engine notification action stage canary', () => {
   test.skip(
     !CANARY_ENABLED,
     'Set DEADLINE_NOTIFICATION_ACTION_STAGE_CANARY=true to enable the notification action stage canary.',
+  );
+  test.skip(
+    CANARY_ENABLED && missingCanaryPrerequisites.length > 0,
+    `Missing Deadline notification action canary prerequisites: ${missingCanaryPrerequisites.join(', ')}`,
   );
   test.setTimeout(240000);
 
@@ -375,6 +387,15 @@ function readNumberEnv(name: string): number | null {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function dockerContainerExists(containerName: string): boolean {
+  try {
+    execFileSync('docker', ['container', 'inspect', containerName], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function trimTrailingSlash(value: string): string {

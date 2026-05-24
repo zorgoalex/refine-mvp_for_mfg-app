@@ -24,6 +24,14 @@ const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET
 
 test.describe('Payments stage canary', () => {
     test.skip(!canaryEnabled, 'Run with PAYMENTS_STAGE_CANARY=true');
+    test.skip(
+        canaryEnabled && !dockerContainerExists(postgresContainer),
+        `Stage postgres container ${postgresContainer} is required for payments stage canary.`,
+    );
+    test.skip(
+        canaryEnabled && !vercelAutomationBypassSecret,
+        'VERCEL_AUTOMATION_BYPASS_SECRET is required for protected deployed frontend access.',
+    );
     test.setTimeout(180000);
 
     let accessToken: string | null = null;
@@ -521,6 +529,15 @@ function psql(sql: string, options: { json?: boolean } = {}): unknown {
     }
 
     return JSON.parse(output);
+}
+
+function dockerContainerExists(containerName: string): boolean {
+    try {
+        execFileSync('docker', ['container', 'inspect', containerName], { stdio: 'ignore' });
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 interface OrderSnapshot {

@@ -3,17 +3,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { PgDeadlineRepository } from './pg-deadline-repository';
 
-describe('PgDeadlineRepository terminal event idempotency integration', () => {
-  const databaseUrl = process.env.DEADLINE_REPOSITORY_INTEGRATION_DATABASE_URL;
+const databaseUrl = process.env.DEADLINE_REPOSITORY_INTEGRATION_DATABASE_URL;
+const describeIntegration = databaseUrl ? describe : describe.skip;
+
+describeIntegration('PgDeadlineRepository terminal event idempotency integration', () => {
   const schemaName = `deadline_idempotency_${randomUUID().replaceAll('-', '_')}`;
   let pool: Pool;
   let repository: PgDeadlineRepository;
 
   beforeAll(async () => {
-    if (!databaseUrl) {
-      throw new Error('DEADLINE_REPOSITORY_INTEGRATION_DATABASE_URL is required for this integration test');
-    }
-
     pool = new Pool({ connectionString: databaseUrl, max: 1 });
     await pool.query(`CREATE SCHEMA ${schemaName}`);
     await pool.query(`SET search_path TO ${schemaName}`);

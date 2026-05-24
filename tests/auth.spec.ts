@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Authentication', () => {
-    test.beforeEach(async ({ page }) => {
-        // Очищаем localStorage
-        await page.goto('/');
-        await page.evaluate(() => localStorage.clear());
+    test.beforeEach(async ({ page, context }) => {
+        await context.clearCookies();
+        await page.addInitScript(() => {
+            localStorage.clear();
+            sessionStorage.clear();
+        });
 
         // Mock API /api/login
         await page.route(/\/api\/login$/, async (route) => {
@@ -33,6 +35,14 @@ test.describe('Authentication', () => {
                     body: JSON.stringify({ error: 'Invalid credentials' }),
                 });
             }
+        });
+
+        await page.route(/\/api\/refresh$/, async (route) => {
+            await route.fulfill({
+                status: 401,
+                contentType: 'application/json',
+                body: JSON.stringify({ error: 'Unauthenticated' }),
+            });
         });
 
         // Mock GraphQL

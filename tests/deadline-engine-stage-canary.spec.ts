@@ -24,6 +24,14 @@ const mutatingDeadlinePathPrefixes = [
 
 test.describe('Deadline Engine stage canary', () => {
   test.skip(!canaryEnabled, 'Run with DEADLINE_ENGINE_STAGE_CANARY=true');
+  test.skip(
+    canaryEnabled && !dockerContainerExists(postgresContainer),
+    `Stage postgres container ${postgresContainer} is required for Deadline Engine stage canary.`,
+  );
+  test.skip(
+    canaryEnabled && !vercelAutomationBypassSecret,
+    'VERCEL_AUTOMATION_BYPASS_SECRET is required for protected deployed frontend access.',
+  );
   test.setTimeout(180000);
 
   let userId: number | null = null;
@@ -152,6 +160,15 @@ async function expectOk(response: APIResponse) {
 function frontendRequestHeaders(): Record<string, string> {
   if (!vercelAutomationBypassSecret) return {};
   return { 'x-vercel-protection-bypass': vercelAutomationBypassSecret };
+}
+
+function dockerContainerExists(containerName: string): boolean {
+  try {
+    execFileSync('docker', ['container', 'inspect', containerName], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isMutatingDeadlineRequest(method: string, url: string): boolean {

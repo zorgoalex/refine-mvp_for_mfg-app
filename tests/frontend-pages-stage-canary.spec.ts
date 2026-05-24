@@ -30,6 +30,14 @@ const allowedMissingRecordResources = new Set([
 
 test.describe('Frontend pages stage canary', () => {
     test.skip(!canaryEnabled, 'Run with FRONTEND_PAGES_STAGE_CANARY=true');
+    test.skip(
+        canaryEnabled && !dockerContainerExists(stagePostgresContainer),
+        `Stage postgres container ${stagePostgresContainer} is required for frontend pages stage canary.`,
+    );
+    test.skip(
+        canaryEnabled && !vercelAutomationBypassSecret,
+        'VERCEL_AUTOMATION_BYPASS_SECRET is required for protected deployed frontend access.',
+    );
     test.setTimeout(600000);
 
     let userId: number | null = null;
@@ -414,6 +422,15 @@ function psql(sql: string): string {
     )
         .toString()
         .trim();
+}
+
+function dockerContainerExists(containerName: string): boolean {
+    try {
+        execFileSync('docker', ['container', 'inspect', containerName], { stdio: 'ignore' });
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function sqlQuote(value: string) {

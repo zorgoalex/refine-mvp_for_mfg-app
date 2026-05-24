@@ -13,11 +13,23 @@ const fixtureKey = process.env.DEADLINE_WORKER_FIXTURE_KEY ?? '';
 const fixtureOrderId = readNumberEnv('DEADLINE_WORKER_FIXTURE_ORDER_ID');
 const manualWorkerNow = '2000-01-01T00:01:00.000Z';
 const scheduledWorkerNow = '2000-01-02T00:01:00.000Z';
+const missingCanaryPrerequisites = [
+  fixtureKey.trim() ? null : 'DEADLINE_WORKER_FIXTURE_KEY',
+  fixtureOrderId ? null : 'DEADLINE_WORKER_FIXTURE_ORDER_ID',
+  process.env.DEADLINE_WORKER_FIXTURE_RESTORE === 'true'
+    ? null
+    : 'DEADLINE_WORKER_FIXTURE_RESTORE=true',
+  dockerContainerExists(postgresContainer) ? null : `docker container ${postgresContainer}`,
+].filter((value): value is string => Boolean(value));
 
 test.describe('deadline engine worker stage write canary', () => {
   test.skip(
     !CANARY_ENABLED,
     'Set DEADLINE_ENGINE_STAGE_WORKER_WRITE_CANARY=true to enable the stage worker write canary.',
+  );
+  test.skip(
+    CANARY_ENABLED && missingCanaryPrerequisites.length > 0,
+    `Missing Deadline worker stage canary prerequisites: ${missingCanaryPrerequisites.join(', ')}`,
   );
   test.setTimeout(240000);
 
@@ -461,6 +473,15 @@ function readNumberEnv(name: string): number | null {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function dockerContainerExists(containerName: string): boolean {
+  try {
+    execFileSync('docker', ['container', 'inspect', containerName], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function trimTrailingSlash(value: string): string {

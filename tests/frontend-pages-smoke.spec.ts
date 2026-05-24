@@ -65,11 +65,17 @@ test.describe('Frontend pages smoke', () => {
         const graphQLErrors: string[] = [];
         const pageErrors: string[] = [];
         const consoleErrors: string[] = [];
+        const serverErrors: string[] = [];
 
         page.on('pageerror', (error) => pageErrors.push(error.message));
         page.on('console', (message) => {
             if (message.type() === 'error') {
                 consoleErrors.push(message.text());
+            }
+        });
+        page.on('response', (response) => {
+            if (response.status() >= 500) {
+                serverErrors.push(`${response.status()} ${response.url()}`);
             }
         });
 
@@ -84,9 +90,11 @@ test.describe('Frontend pages smoke', () => {
                 graphQLErrors.length = 0;
                 pageErrors.length = 0;
                 consoleErrors.length = 0;
+                serverErrors.length = 0;
 
                 await page.goto(route.path, { waitUntil: 'domcontentloaded' });
                 await assertPageReady(page, route);
+                expect(serverErrors, `${route.label} server errors`).toEqual([]);
                 expect(graphQLErrors, `${route.label} GraphQL errors`).toEqual([]);
                 expect(pageErrors, `${route.label} page errors`).toEqual([]);
                 expect(
@@ -164,6 +172,18 @@ async function setupFrontendPageApiMocks(page: Page) {
                 ok: true,
                 providerConfigured: false,
                 limits: { maxUploadMb: 20, allowedMimeTypes: ['image/jpeg', 'image/png'] },
+            }),
+        });
+    });
+
+    await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                data: [],
+                pagination: { page: 1, pageSize: 50, total: 0, totalPages: 0 },
+                unreadCount: 0,
             }),
         });
     });
