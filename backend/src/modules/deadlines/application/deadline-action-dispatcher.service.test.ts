@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DeadlineActionExecutionDto, DeadlineActionRuleDto } from '../dto/deadline-action-rule.dto';
-import type { DeadlineEventDto } from '../dto/deadline-instance.dto';
+import type { DeadlineEventDto, DeadlineInstanceDto } from '../dto/deadline-instance.dto';
 import { DeadlineActionDispatcherService } from './deadline-action-dispatcher.service';
 import type { DeadlineNotificationPort, DeadlineRepositoryPort, DeadlineTargetResolverPort } from './deadline.types';
 
@@ -93,6 +93,128 @@ describe('DeadlineActionDispatcherService', () => {
     expect(executions[0]).toMatchObject({
       status: 'executed',
       result: { auditEventQueued: true },
+    });
+  });
+
+  it('executes set_overdue_flag by marking the deadline expired and recording the action execution', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const overdueUpdates: Array<{ deadlineId: string; expiredAt: string }> = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent({
+        deadlineEventId: 'event-overdue-1',
+        deadlineId: 'deadline-overdue-1',
+        eventAt: '2026-05-01T10:00:00.000Z',
+      }),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'set_overdue_flag' })],
+        executions,
+        overdueUpdates,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(overdueUpdates).toEqual([
+      {
+        deadlineId: 'deadline-overdue-1',
+        expiredAt: '2026-05-01T10:00:00.000Z',
+      },
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'set_overdue_flag',
+      status: 'executed',
+      executedAt: '2026-05-01T10:00:00.000Z',
+      idempotencyKey: 'event-overdue-1:set_overdue_flag:order:42',
+      result: {
+        overdueFlagSet: true,
+        deadlineId: 'deadline-overdue-1',
+        targetType: 'order',
+        targetId: '42',
+        expiredAt: '2026-05-01T10:00:00.000Z',
+      },
+    });
+  });
+
+  it('skips set_overdue_flag when the target resolver rejects the target', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const overdueUpdates: Array<{ deadlineId: string; expiredAt: string }> = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'set_overdue_flag' })],
+        executions,
+        overdueUpdates,
+      }),
+      targetResolver: createTargetResolver({ canApplyAction: false }),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(overdueUpdates).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'set_overdue_flag',
+      status: 'skipped',
+      skipReason: 'target_rejected_action',
+    });
+  });
+
+  it('skips set_overdue_flag for non-expired deadline events', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const overdueUpdates: Array<{ deadlineId: string; expiredAt: string }> = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent({
+        eventType: 'DEADLINE_COMPLETED_LATE',
+        severity: 'warning',
+      }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionType: 'set_overdue_flag',
+            eventType: 'DEADLINE_COMPLETED_LATE',
+          }),
+        ],
+        executions,
+        overdueUpdates,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(overdueUpdates).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'set_overdue_flag',
+      status: 'skipped',
+      skipReason: 'unsupported_event_type',
+    });
+  });
+
+  it('keeps unavailable non-overdue handlers skipped as action_handler_unavailable', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'create_task' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(executions[0]).toMatchObject({
+      actionType: 'create_task',
+      status: 'skipped',
+      skipReason: 'action_handler_unavailable',
     });
   });
 
@@ -689,6 +811,7 @@ describe('DeadlineActionDispatcherService', () => {
 function createRepository(input: {
   rules: DeadlineActionRuleDto[];
   executions: DeadlineActionExecutionDto[];
+  overdueUpdates?: Array<{ deadlineId: string; expiredAt: string }>;
 }): DeadlineRepositoryPort {
   return {
     async listDeadlines() {
@@ -739,8 +862,12 @@ function createRepository(input: {
     async findDueDeadlinesForUpdate() {
       return [];
     },
-    async markDeadlineExpired() {
-      throw new Error('not implemented');
+    async markDeadlineExpired(markInput) {
+      input.overdueUpdates?.push(markInput);
+      return createDeadline({
+        deadlineId: markInput.deadlineId,
+        expiredAt: markInput.expiredAt,
+      });
     },
     async markDeadlineCompleted() {
       throw new Error('not implemented');
@@ -767,6 +894,7 @@ function createTargetResolver(
   overrides: Partial<{
     responsibleUserIds: number[];
     isCompleted: boolean;
+    canApplyAction: boolean;
     notificationRecipients: {
       assigneeUserId?: number | null;
       managerUserId?: number | null;
@@ -786,7 +914,7 @@ function createTargetResolver(
       };
     },
     async canApplyAction() {
-      return true;
+      return overrides.canApplyAction ?? true;
     },
   };
 }
@@ -826,6 +954,23 @@ function createEvent(overrides: Partial<DeadlineEventDto> = {}): DeadlineEventDt
     eventAt: '2026-05-01T10:00:00.000Z',
     delayMinutes: 60,
     createdAt: '2026-05-01T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function createDeadline(overrides: Partial<DeadlineInstanceDto> = {}): DeadlineInstanceDto {
+  return {
+    deadlineId: 'deadline-overdue-1',
+    entityType: 'order',
+    entityId: '42',
+    orderId: 42,
+    deadlineAt: '2026-05-01T09:00:00.000Z',
+    status: 'expired',
+    source: 'system',
+    isManuallyOverridden: false,
+    expiredAt: '2026-05-01T10:00:00.000Z',
+    createdAt: '2026-05-01T09:00:00.000Z',
+    updatedAt: '2026-05-01T10:00:00.000Z',
     ...overrides,
   };
 }
