@@ -1,5 +1,6 @@
 import { Logger, type LoggerService, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { redactLogFields } from '../../../common/logging/redaction';
 import { DeadlineWorkerService } from './deadline-worker.service';
 import { DeadlinesRuntimeConfigService, type DeadlinesFeatureFlags } from '../http/deadlines-runtime-config.service';
 
@@ -63,7 +64,7 @@ export class DeadlineWorkerSchedulerService implements OnModuleInit, OnModuleDes
         },
       });
 
-      this.logger.log({
+      this.logger.log(redactLogFields({
         event: 'deadline_worker_batch_finished',
         trigger: 'scheduler',
         workerId: flags.deadlineWorkerId,
@@ -78,9 +79,9 @@ export class DeadlineWorkerSchedulerService implements OnModuleInit, OnModuleDes
         completed: result.completed,
         durationMs: Date.now() - startedAt,
         status: 'ok',
-      });
+      }));
     } catch (error) {
-      this.logger.error({
+      this.logger.error(redactLogFields({
         event: 'deadline_worker_scheduler_tick_failed',
         trigger: 'scheduler',
         workerId: flags.deadlineWorkerId,
@@ -92,7 +93,7 @@ export class DeadlineWorkerSchedulerService implements OnModuleInit, OnModuleDes
         durationMs: Date.now() - startedAt,
         status: 'failed',
         errorMessage: error instanceof Error ? error.message : String(error),
-      });
+      }));
     }
   }
 

@@ -1,3 +1,5 @@
+import { redactLogFields, redactLogValue } from '../../backend/src/common/logging/redaction';
+
 type LogLevel = 'info' | 'warn' | 'error';
 
 interface LogEntry {
@@ -10,22 +12,22 @@ interface LogEntry {
 
 function formatError(error: any): any {
     if (error instanceof Error) {
-        return {
+        return redactLogFields({
             name: error.name,
             message: error.message,
             stack: error.stack,
             ...error,
-        };
+        });
     }
-    return error;
+    return redactLogValue(error);
 }
 
 function log(level: LogLevel, message: string, meta?: Record<string, any>, error?: any) {
     const entry: LogEntry = {
         level,
-        message,
+        message: redactLogValue(message) as string,
         timestamp: new Date().toISOString(),
-        meta,
+        meta: meta ? redactLogFields(meta) : undefined,
     };
 
     if (error) {

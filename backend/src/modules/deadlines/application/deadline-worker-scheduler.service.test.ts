@@ -121,6 +121,32 @@ describe('DeadlineWorkerSchedulerService', () => {
     );
   });
 
+  it('redacts sensitive scheduler log payloads before writing to the Nest logger sink', async () => {
+    const logger = createLogger();
+    const scheduler = createScheduler({
+      logger,
+      worker: {
+        processDueDeadlines: vi.fn().mockRejectedValue(
+          new Error('Authorization: Bearer abc.def.ghi access_token=token123'),
+        ),
+      },
+      flags: flags({
+        deadlineWorkerSchedulerOwner: 'in_process',
+        deadlineWorkerId: 'worker-token-secret',
+      }),
+    });
+
+    await scheduler.runTick();
+
+    const loggedPayload = logger.error.mock.calls[0][0];
+    expect(loggedPayload).toMatchObject({
+      workerId: 'worker-token-secret',
+      errorMessage: 'Authorization: Bearer [REDACTED] access_token=[REDACTED]',
+    });
+    expect(JSON.stringify(loggedPayload)).not.toContain('abc.def.ghi');
+    expect(JSON.stringify(loggedPayload)).not.toContain('token123');
+  });
+
   it('clears the interval on module destroy', () => {
     const interval = 12345 as unknown as ReturnType<typeof setInterval>;
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(interval);

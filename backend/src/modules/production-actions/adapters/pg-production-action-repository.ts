@@ -155,7 +155,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      this.assertOrderScope(command.currentUser, order, ['orders.update', 'calendar.view']);
+      await this.assertOrderScope(command.currentUser, order, ['orders.update', 'calendar.view'], requestId);
       assertVersion(order, command.dto.version);
       assertPlannedDateAllowed(order, command.dto.plannedCompletionDate);
 
@@ -281,10 +281,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      this.assertOrderScope(command.currentUser, order, [
+      await this.assertOrderScope(command.currentUser, order, [
         'orders.update',
         'orders.change_status',
-      ]);
+      ], requestId);
       const status = await loadOrderStatus(tx, command.dto.orderStatusId);
       assertVersion(order, command.dto.version);
 
@@ -396,7 +396,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      this.assertOrderScope(command.currentUser, order, ['orders.update', 'payments.update']);
+      await this.assertOrderScope(command.currentUser, order, ['orders.update', 'payments.update'], requestId);
       const status = await loadPaymentStatus(tx, command.dto.paymentStatusId);
       assertVersion(order, command.dto.version);
 
@@ -510,10 +510,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      this.assertOrderScope(command.currentUser, order, [
+      await this.assertOrderScope(command.currentUser, order, [
         'orders.update',
         'orders.change_production_status',
-      ]);
+      ], requestId);
       const status = await loadProductionStatus(tx, command.dto.productionStatusId);
       assertVersion(order, command.dto.version);
 
@@ -680,10 +680,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const detail = await loadOrderDetailForUpdate(tx, command.detailId);
-      this.assertOrderScope(command.currentUser, detail.order, [
+      await this.assertOrderScope(command.currentUser, detail.order, [
         'orders.update',
         'orders.change_production_status',
-      ]);
+      ], requestId);
       const productionStatus = await loadProductionStatus(tx, command.productionStatusId);
 
       const existingEventId = await findDetailProductionEventId(
@@ -832,10 +832,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      this.assertOrderScope(command.currentUser, order, [
+      await this.assertOrderScope(command.currentUser, order, [
         'orders.update',
         'orders.change_production_status',
-      ]);
+      ], requestId);
       const productionStatus = await loadProductionStatus(tx, command.productionStatusId);
       assertVersion(order, command.dto.version);
 
@@ -957,11 +957,12 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
     });
   }
 
-  private assertOrderScope(
+  private async assertOrderScope(
     currentUser: CurrentUser,
     order: LockedOrder,
     requiredPermissions: readonly string[],
-  ): void {
+    requestId: string,
+  ): Promise<void> {
     const allowed = this.orderAccessPolicy.canUpdate(currentUser, {
       orderId: order.orderId,
       createdByUserId: order.createdByUserId,
@@ -969,11 +970,69 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
     });
 
     if (!allowed) {
+      await writeDeniedActionAudit(this.database, {
+        currentUser,
+        requestId,
+        order,
+        requiredPermissions,
+      });
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions,
       });
     }
   }
+}
+
+async function writeDeniedActionAudit(
+  database: DatabaseService,
+  input: {
+    currentUser: CurrentUser;
+    requestId: string;
+    order: LockedOrder;
+    requiredPermissions: readonly string[];
+  },
+): Promise<void> {
+  await database.query(
+    `
+    INSERT INTO audit_log (
+      event, entity_type, entity_id, user_id, request_id, source,
+      related_order_id, related_client_id, related_production_event_id,
+      status_field, status_id, status_name, status_code, stage_code,
+      before_json, after_json, diff_json, metadata_json
+    )
+    VALUES (
+      $1, $2, $3, $4, $5, $6,
+      $7, $8, $9,
+      $10, $11, $12, $13, $14,
+      $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb
+    )
+    `,
+    [
+      'production.action_denied',
+      'order',
+      String(input.order.orderId),
+      input.currentUser.id,
+      input.requestId,
+      SOURCE,
+      input.order.orderId,
+      input.order.clientId,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      JSON.stringify({}),
+      JSON.stringify({}),
+      JSON.stringify({}),
+      JSON.stringify({
+        source: SOURCE,
+        denied: true,
+        reason: 'order_scope_denied',
+        requiredPermissions: input.requiredPermissions,
+      }),
+    ],
+  );
 }
 
 async function setSessionUser(tx: TransactionClient, userId: string): Promise<void> {

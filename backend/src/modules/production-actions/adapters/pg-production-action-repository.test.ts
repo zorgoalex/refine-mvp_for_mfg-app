@@ -166,6 +166,40 @@ describe('PgProductionActionRepository', () => {
     expect(normalizedSql(database.queries)).not.toContain('UPDATE orders SET order_status_id');
   });
 
+  it('audits denied sensitive production actions before mutation', async () => {
+    const database = createDatabase({ orderCreatedByUserId: 1, orderManagerUserId: null });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changeOrderStatus({
+        currentUser: currentUser('manager', '99'),
+        orderId: 15,
+        dto: { orderStatusId: 7, version: 3, idempotencyKey: 'status-key-denied-audit' },
+        requestId: 'request-denied-audit',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    });
+
+    const audit = database.queries.find((query) => query.text.includes('INSERT INTO audit_log'));
+    expect(audit?.params[0]).toBe('production.action_denied');
+    expect(audit?.params[1]).toBe('order');
+    expect(audit?.params[2]).toBe('15');
+    expect(audit?.params[3]).toBe('99');
+    expect(audit?.params[4]).toBe('request-denied-audit');
+    expect(audit?.params[5]).toBe('backend-production-command');
+    expect(audit?.params[17]).toBe(
+      JSON.stringify({
+        source: 'backend-production-command',
+        denied: true,
+        reason: 'order_scope_denied',
+        requiredPermissions: ['orders.update', 'orders.change_status'],
+      }),
+    );
+    expect(normalizedSql(database.queries)).not.toContain('UPDATE orders SET order_status_id');
+  });
+
   it('allows manager order status change inside own order scope', async () => {
     const database = createDatabase({ orderCreatedByUserId: 1, orderManagerUserId: 99 });
     const repository = new PgProductionActionRepository(database.service);
@@ -572,6 +606,7 @@ function createDatabase(options: {
   return {
     queries,
     service: {
+      query: tx.query,
       async transaction<T>(handler: (client: typeof tx) => Promise<T>) {
         return handler(tx);
       },
