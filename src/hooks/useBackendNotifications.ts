@@ -47,6 +47,7 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
     if (!enabledRef.current) {
       setSnapshot(EMPTY_SNAPSHOT);
       setLoading(false);
+      setError(null);
       return;
     }
 
@@ -96,6 +97,7 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
       refreshRequestIdRef.current += 1;
       setSnapshot(EMPTY_SNAPSHOT);
       setLoading(false);
+      setError(null);
       return;
     }
 

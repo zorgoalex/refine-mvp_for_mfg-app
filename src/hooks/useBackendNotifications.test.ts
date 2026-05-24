@@ -191,14 +191,25 @@ describe('useBackendNotifications hook', () => {
     expect(state.error).toBeNull();
   });
 
-  it('clears notifications and skips loading while disabled', async () => {
-    const state = renderHook(false);
-    await flushPromises();
+  it('clears notifications, loading, and errors while disabled', async () => {
+    const error = new Error('network failed');
+    notificationsApiMock.list.mockRejectedValueOnce(error);
 
-    expect(notificationsApiMock.list).not.toHaveBeenCalled();
+    renderHook(true);
+    await flushPromises();
+    let state = renderHook(true);
+
+    expect(state.error).toBe(error);
+
+    renderHook(false);
+    await flushPromises();
+    state = renderHook(false);
+
+    expect(notificationsApiMock.list).toHaveBeenCalledTimes(1);
     expect(state.notifications).toEqual([]);
     expect(state.unreadCount).toBe(0);
     expect(state.loading).toBe(false);
+    expect(state.error).toBeNull();
   });
 
   it('stores refresh errors', async () => {
