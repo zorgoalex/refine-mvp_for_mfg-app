@@ -425,6 +425,21 @@ stage UI/backend path and verifies DB audit/order recalculation. It uses a
 temporary test user and requires access to the stage `erpdb` Docker Postgres.
 Deadline Engine stage canary is read-only for deadline data. It creates a temporary backend user, verifies runtime `backendDeadlines`, reads `/api/v1/orders/:id/deadline-summary`, `/deadlines`, and `/deadline-events`, then opens the deployed order show page and checks the read-only deadline panel. By default it targets stage order `11166` (`TEST-CODEX-STATUS3-DEBUG-20260516192743`); override with `DEADLINE_ENGINE_STAGE_ORDER_ID` and `DEADLINE_ENGINE_STAGE_ORDER_NAME` when using a different fixture.
 Deadline create/override stage canary writes isolated manual deadline fixture rows through deployed backend endpoints, verifies idempotent create/override side effects in the stage DB, and restores all rows scoped by fixture key/request ids. The package script enables both `DEADLINE_CREATE_OVERRIDE_RESTORE=true` and `DEADLINE_CREATE_OVERRIDE_STAGE_CANARY=true`; it must not be run against production.
+
+### Deadline Engine residual scope
+
+Backend-backed notification UI is the next accepted residual slice after backend-test acceptance of read endpoints, cancel, pause/resume, create/override, and worker fixture canaries. The notification bell/panel reads persisted `notifications` rows through `/api/v1/notifications` and the local Zustand notification store remains only for transient frontend messages.
+
+Still disabled without separate approval:
+
+- Production rollout for pause/resume/create/override.
+- Global Deadline Engine action rules.
+- Policy/settings writes.
+- Order-save deadline sync.
+- In-process or external always-on scheduler ownership.
+- Production fixture writes.
+- Non-notification action handlers: `set_overdue_flag`, `change_order_status`, `change_production_status`, `create_task`, `escalate`, and `webhook`.
+
 Production cutover plan: [../spec_erp/docs/production-cutover-plan.md](../spec_erp/docs/production-cutover-plan.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 
