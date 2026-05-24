@@ -426,6 +426,18 @@ temporary test user and requires access to the stage `erpdb` Docker Postgres.
 Deadline Engine stage canary is read-only for deadline data. It creates a temporary backend user, verifies runtime `backendDeadlines`, reads `/api/v1/orders/:id/deadline-summary`, `/deadlines`, and `/deadline-events`, then opens the deployed order show page and checks the read-only deadline panel. By default it targets stage order `11166` (`TEST-CODEX-STATUS3-DEBUG-20260516192743`); override with `DEADLINE_ENGINE_STAGE_ORDER_ID` and `DEADLINE_ENGINE_STAGE_ORDER_NAME` when using a different fixture.
 Deadline create/override stage canary writes isolated manual deadline fixture rows through deployed backend endpoints, verifies idempotent create/override side effects in the stage DB, and restores all rows scoped by fixture key/request ids. The package script enables both `DEADLINE_CREATE_OVERRIDE_RESTORE=true` and `DEADLINE_CREATE_OVERRIDE_STAGE_CANARY=true`; it must not be run against production.
 
+### Deadline notification action-rule stage canary
+
+The notification action-rule stage canary targets `backend-test` / `erp_test` only and uses isolated fixture key `deadline-notification-action-canary-2026-05-24`. Required gates:
+
+```bash
+npm run test:deadline-notification-action-fixture
+DEADLINE_NOTIFICATION_ACTION_FIXTURE_KEY=deadline-notification-action-canary-2026-05-24 DEADLINE_NOTIFICATION_ACTION_ORDER_ID=<eligible-backend-test-order-id> npm run test:e2e:deadline-notification-action-stage-canary
+DEADLINE_NOTIFICATION_ACTION_STAGE_CANARY=true DEADLINE_NOTIFICATION_ACTION_RESTORE=true DEADLINE_NOTIFICATION_ACTION_TARGET_ENV=backend-test DEADLINE_NOTIFICATION_ACTION_FIXTURE_KEY=deadline-notification-action-canary-2026-05-24 DEADLINE_NOTIFICATION_ACTION_ORDER_ID=<eligible-backend-test-order-id> npm run deadline-notification-action:fixture -- snapshot
+```
+
+Accepted restored snapshot has zero fixture deadlines, deadline events, action rules, action executions, and notifications. `BACKEND_DEADLINE_ACTIONS_ENABLED` and `BACKEND_DEADLINE_NOTIFICATIONS_ENABLED` remain default `false`; intentionally enable them only for isolated canary runs, then restore runtime config and rerun smoke. Evidence: `/home/ovhtest/projects/erp_dev/spec_erp/docs/deadline-engine-notification-action-rule-stage-canary-2026-05-24.md`.
+
 ### Deadline Engine residual scope
 
 Stage accepted 2026-05-24: backend-backed notification API/build evidence for current-user persisted notifications. `NotificationBell`/`NotificationPanel` use `/api/v1/notifications`; local Zustand notification store remains transient frontend-only. Stage fixture `deadline-notification-ui-canary-2026-05-23` proved list, mark-read, delete, and zero residue after applying additive backend-test migration `006_deadline_notifications_idempotency.sql`. Manual app-test UI verification was attempted but blocked by Vercel login/SSO before the ERP login form loaded. Next residual slice is isolated notification action-rule stage canary. Evidence: `/home/ovhtest/projects/erp_dev/spec_erp/docs/deadline-engine-residual-notifications-ui-2026-05-23.md`.
