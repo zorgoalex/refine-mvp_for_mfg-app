@@ -85,6 +85,14 @@ export class DeadlineActionDispatcherService {
       });
     }
 
+    if (rule.actionType === 'set_overdue_flag' && command.event.eventType !== 'DEADLINE_EXPIRED') {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'unsupported_event_type',
+      });
+    }
+
     const canApplyAction = await command.targetResolver.canApplyAction({
       actionType: rule.actionType,
       target: {
@@ -104,10 +112,37 @@ export class DeadlineActionDispatcherService {
       });
     }
 
+    if (rule.actionType === 'set_overdue_flag') {
+      return this.dispatchSetOverdueFlag(command, baseExecution);
+    }
+
     return command.repository.createActionExecution({
       ...baseExecution,
       status: 'skipped',
       skipReason: 'action_handler_unavailable',
+    });
+  }
+
+  private async dispatchSetOverdueFlag(
+    command: DispatchDeadlineActionsCommand,
+    baseExecution: CreateActionExecutionInput,
+  ) {
+    const deadline = await command.repository.markDeadlineExpired({
+      deadlineId: command.event.deadlineId,
+      expiredAt: command.event.eventAt,
+    });
+
+    return command.repository.createActionExecution({
+      ...baseExecution,
+      status: 'executed',
+      executedAt: command.event.eventAt,
+      result: {
+        overdueFlagSet: deadline.status === 'expired',
+        deadlineId: command.event.deadlineId,
+        targetType: baseExecution.targetType ?? null,
+        targetId: baseExecution.targetId ?? null,
+        expiredAt: deadline.expiredAt ?? command.event.eventAt,
+      },
     });
   }
 
