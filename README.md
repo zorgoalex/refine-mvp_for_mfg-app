@@ -95,18 +95,18 @@
 ## Конфигурация и авторизация
 
 Project-level secrets for local/stage smoke commands live outside this repo in
-`/home/ovhtest/projects/erp_dev/.env`. In particular,
+`/path/to/project/.env`. In particular,
 `VERCEL_AUTOMATION_BYPASS_SECRET` for protected Vercel stage checks may be present
 there even when it is not exported in the current shell. Load it only in a
 subshell/command context and never print the file or secret values, for example:
 
 ```bash
 set -a
-. /home/ovhtest/projects/erp_dev/.env
+. /path/to/project/.env
 set +a
 curl -fsS \
   -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-  https://app-test.mebelkz.app/runtime-config.json
+  https://<stage-frontend-domain>/runtime-config.json
 ```
 
 Frontend env:
@@ -219,25 +219,25 @@ template, если его ещё нет. После ручного измене�
 искать `data/`, `config/`, `backups/` и `restore/`.
 
 Для текущей VPS-раскладки в этой ветке актуален прямой запуск tracked
-template; root-level `docker-compose.yml` в `~/projects/erp_dev`
+template; root-level `docker-compose.yml` в `~/path/to/project`
 не используется как отдельный source-of-truth.
 
 ```bash
-cd ~/projects/erp_dev
+cd ~/path/to/project
 
 docker compose \
-  --project-directory ~/projects/erp_dev \
-  -p erp_test \
+  --project-directory ~/path/to/project \
+  -p <test-compose-project> \
   --env-file .env \
   -f repo_erp/ops/templates/docker-compose.vps.yml \
   up -d
 ```
 
-Для этой раскладки `.env` лежит в `~/projects/erp_dev/.env`, а
+Для этой раскладки `.env` лежит в `~/path/to/project/.env`, а
 `BACKEND_BUILD_CONTEXT=./repo_erp/backend`, потому что backend находится не в
 runtime-корне, а внутри checkout `repo_erp/`. `--project-directory` обязателен:
 Compose должен искать runtime-директории `data/`, `config/`, `backups/` и
-`restore/` именно в `~/projects/erp_dev`, а не рядом с template.
+`restore/` именно в `~/path/to/project`, а не рядом с template.
 Для обычного checkout, где `backend/`, `ops/`, `.env` и `data/` находятся в
 одном корне, `BACKEND_BUILD_CONTEXT` можно не задавать: default `./backend`.
 
@@ -288,11 +288,11 @@ volumes:
 backend service:
 
 ```bash
-cd ~/projects/erp_dev
+cd ~/path/to/project
 
 docker compose \
-  --project-directory ~/projects/erp_dev \
-  -p erp_test \
+  --project-directory ~/path/to/project \
+  -p <test-compose-project> \
   --env-file .env \
   -f repo_erp/ops/templates/docker-compose.vps.yml \
   up -d --build --no-deps backend
@@ -300,7 +300,7 @@ docker compose \
 
 Для изменения bind порта Postgres в этой раскладке используется
 `PG_TAILSCALE_BIND_IP` в `.env`; текущий compose template публикует
-`postgresdb` как `${PG_TAILSCALE_BIND_IP:-${PG_BIND_IP:-127.0.0.1}}:5432:5432`.
+`<postgres-service>` как `${PG_TAILSCALE_BIND_IP:-${PG_BIND_IP:-127.0.0.1}}:5432:5432`.
 
 Audit:
 
@@ -354,6 +354,8 @@ Unit/API:
 
 ```bash
 npm run test
+cd backend && npm test
+bash -lc 'set -a; . /path/to/project/.env; set +a; npm run test:backend:deadline-integration'
 ```
 
 E2E:
@@ -377,14 +379,147 @@ npm run test:e2e:runtime-config
 npm run test:runtime-config-canary
 ```
 
+### Памятка по полному прогону
+
+Обычный локальный полный Playwright прогон:
+
+```bash
+npx playwright test
+```
+
+Он поднимает `npm run dev:full`, использует `http://localhost:5173` и не должен
+получать весь внешний `/path/to/project/.env` в окружение. Этот
+файл может содержать stage/backend flags, которые меняют локальный runtime
+(`VITE_USE_BACKEND_AUTH`, backend URLs и т.п.) и ломают mocked local E2E.
+
+Stage/canary/integration правила:
+
+- Stage/canary окружение на test-сервере считается доступным. Использовать
+  `<test-postgres-container>`, `<test-backend-container>`, `<test-router-container>`,
+  `<test-graphql-container>`.
+- Stage URLs: `https://<stage-frontend-domain>` и
+  `https://<stage-backend-domain>/api/v1`, если конкретный env override не
+  задан во внешнем `.env`.
+- Внешний `.env` грузить только в subshell/команду. Не печатать `.env`, `env`,
+  `printenv`, `set`, connection strings, passwords, tokens или bypass secrets.
+- Stage UI credentials брать из постоянного пользователя `<stage-test-username>`;
+  password хранится только как `CODEX_PLAYWRIGHT_PASSWORD` во внешнем `.env`.
+- Для stage specs, где нужны `FRONTEND_PAGES_STAGE_USERNAME/PASSWORD`,
+  прокидывать тот же `<stage-test-username>` username/password, не создавая
+  временного пользователя без причины.
+- `DEADLINE_REPOSITORY_INTEGRATION_DATABASE_URL` должен указывать на test DB
+  `erpdb`. Integration сам создает временную schema и удаляет ее. Не
+  использовать production DB.
+- Если canary скипается из-за env, сначала проверить и загрузить внешний `.env`
+  в subshell; не оставлять skipped как итог, пока не проверено, что значения
+  действительно отсутствуют.
+
+Рекомендуемый порядок полного прогона:
+
+```bash
+npm test
+cd backend && npm test
+bash -lc 'set -a; . /path/to/project/.env; set +a; npm run test:backend:deadline-integration'
+npx playwright test
+```
+
+После этого stage/canary Playwright запускать отдельным batch, а не смешивать с
+локальным full run. Причина: для Deadline fixture canary нужны fail-closed
+target guards, а полный внешний `.env` может одновременно включить stage flags
+и backend auth для локальных mocked specs.
+
+```bash
+bash -lc '
+set -a
+. /path/to/project/.env
+set +a
+
+export CODEX_PLAYWRIGHT_USERNAME="${CODEX_PLAYWRIGHT_USERNAME:-<stage-test-username>}"
+export FRONTEND_PAGES_STAGE_USERNAME="${FRONTEND_PAGES_STAGE_USERNAME:-$CODEX_PLAYWRIGHT_USERNAME}"
+export FRONTEND_PAGES_STAGE_PASSWORD="${FRONTEND_PAGES_STAGE_PASSWORD:-$CODEX_PLAYWRIGHT_PASSWORD}"
+
+export CALENDAR_STAGE_CANARY=true
+export CLIENT_PHONES_STAGE_CANARY=true
+export DEADLINE_CREATE_OVERRIDE_STAGE_CANARY=true
+export DEADLINE_CREATE_OVERRIDE_RESTORE=true
+export DEADLINE_ENGINE_STAGE_CANARY=true
+export DEADLINE_ENGINE_STAGE_WORKER_WRITE_CANARY=true
+export DEADLINE_NOTIFICATION_ACTION_STAGE_CANARY=true
+export DEADLINE_NOTIFICATION_ACTION_RESTORE=true
+export DEADLINE_NOTIFICATION_ACTION_TARGET_ENV=<test-target-env>
+export DEADLINE_SCHEDULER_EXTERNAL_OWNER_STAGE_CANARY=true
+export BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER=external
+export FRONTEND_PAGES_STAGE_CANARY=true
+export FRONTEND_PAGES_STAGE_CREATE_USER=true
+export ORDER_CREATED_BY_STAGE_CANARY=true
+export PAYMENTS_STAGE_CANARY=true
+export PRODUCTION_ACTIONS_STAGE_CANARY=true
+
+export DEADLINE_WORKER_TARGET_ENV=<test-target-env>
+export COMPOSE_PROJECT_NAME=<test-compose-project>
+export APP_ENV=<test-target-env>
+export BACKEND_ENV=<test-target-env>
+export BACKEND_NODE_ENV=test
+export NODE_ENV=test
+export BACKEND_FQDN=<stage-backend-domain>
+export FRONTEND_ORIGIN=https://<stage-frontend-domain>
+
+export FRONTEND_PAGES_STAGE_FRONTEND_URL="${FRONTEND_PAGES_STAGE_FRONTEND_URL:-https://<stage-frontend-domain>}"
+export FRONTEND_PAGES_STAGE_BACKEND_API_URL="${FRONTEND_PAGES_STAGE_BACKEND_API_URL:-https://<stage-backend-domain>/api/v1}"
+export CALENDAR_STAGE_FRONTEND_URL="${CALENDAR_STAGE_FRONTEND_URL:-https://<stage-frontend-domain>}"
+export CLIENT_PHONES_STAGE_FRONTEND_URL="${CLIENT_PHONES_STAGE_FRONTEND_URL:-https://<stage-frontend-domain>}"
+export CLIENT_PHONES_STAGE_BACKEND_API_URL="${CLIENT_PHONES_STAGE_BACKEND_API_URL:-https://<stage-backend-domain>/api/v1}"
+export PRODUCTION_ACTIONS_STAGE_FRONTEND_URL="${PRODUCTION_ACTIONS_STAGE_FRONTEND_URL:-https://<stage-frontend-domain>}"
+export PRODUCTION_ACTIONS_STAGE_BACKEND_API_URL="${PRODUCTION_ACTIONS_STAGE_BACKEND_API_URL:-https://<stage-backend-domain>/api/v1}"
+export PAYMENTS_STAGE_FRONTEND_URL="${PAYMENTS_STAGE_FRONTEND_URL:-https://<stage-frontend-domain>}"
+export PAYMENTS_STAGE_BACKEND_API_URL="${PAYMENTS_STAGE_BACKEND_API_URL:-https://<stage-backend-domain>/api/v1}"
+export DEADLINE_ENGINE_STAGE_FRONTEND_URL="${DEADLINE_ENGINE_STAGE_FRONTEND_URL:-https://<stage-frontend-domain>}"
+export DEADLINE_ENGINE_STAGE_BACKEND_API_URL="${DEADLINE_ENGINE_STAGE_BACKEND_API_URL:-https://<stage-backend-domain>/api/v1}"
+export ORDER_CREATED_BY_STAGE_BACKEND_API_URL="${ORDER_CREATED_BY_STAGE_BACKEND_API_URL:-https://<stage-backend-domain>/api/v1}"
+
+export CALENDAR_STAGE_POSTGRES_CONTAINER="${CALENDAR_STAGE_POSTGRES_CONTAINER:-<test-postgres-container>}"
+export CLIENT_PHONES_STAGE_POSTGRES_CONTAINER="${CLIENT_PHONES_STAGE_POSTGRES_CONTAINER:-<test-postgres-container>}"
+export PRODUCTION_ACTIONS_STAGE_POSTGRES_CONTAINER="${PRODUCTION_ACTIONS_STAGE_POSTGRES_CONTAINER:-<test-postgres-container>}"
+export PAYMENTS_STAGE_POSTGRES_CONTAINER="${PAYMENTS_STAGE_POSTGRES_CONTAINER:-<test-postgres-container>}"
+export FRONTEND_PAGES_STAGE_POSTGRES_CONTAINER="${FRONTEND_PAGES_STAGE_POSTGRES_CONTAINER:-<test-postgres-container>}"
+export DEADLINE_ENGINE_STAGE_POSTGRES_CONTAINER="${DEADLINE_ENGINE_STAGE_POSTGRES_CONTAINER:-<test-postgres-container>}"
+
+export PLAYWRIGHT_SKIP_WEB_SERVER=true
+npx playwright test \
+  tests/calendar-frontend.spec.ts \
+  tests/client-phones-stage-canary.spec.ts \
+  tests/deadline-engine-create-override-stage-canary.spec.ts \
+  tests/deadline-engine-notification-action-stage-canary.spec.ts \
+  tests/deadline-engine-stage-canary.spec.ts \
+  tests/deadline-engine-worker-stage-canary.spec.ts \
+  tests/deadline-scheduler-external-owner-stage-canary.spec.ts \
+  tests/frontend-pages-stage-canary.spec.ts \
+  tests/order-created-by-stage-canary.spec.ts \
+  tests/payments-stage-canary.spec.ts \
+  tests/production-actions-stage-canary.spec.ts \
+  --project=chromium
+'
+```
+
+Deadline worker/scheduler/notification fixture canary guards are intentional.
+They fail-closed if `prod`, `production`, or `live` appears in target env keys.
+For `<test-target-env>` runs, set all of these explicitly in the subshell:
+`DEADLINE_WORKER_TARGET_ENV=<test-target-env>`,
+`DEADLINE_NOTIFICATION_ACTION_TARGET_ENV=<test-target-env>`,
+`COMPOSE_PROJECT_NAME=<test-compose-project>`, `APP_ENV=<test-target-env>`,
+`BACKEND_ENV=<test-target-env>`, `BACKEND_NODE_ENV=test`, `NODE_ENV=test`,
+`BACKEND_FQDN=<stage-backend-domain>`,
+`FRONTEND_ORIGIN=https://<stage-frontend-domain>`. Do not use
+`DEADLINE_WORKER_ALLOW_PRODUCTION=true` for stage/test canaries.
+
 ### Обязательное правило для крупных изменений фронта
 
-Любое крупное изменение frontend UI, форм, вкладок, таблиц, кнопок, data-provider/mapping слоя или backend/frontend order flow должно обновлять `tests/order-ui-full-form-coverage.spec.ts`. Тест обязан оставаться полноценным пользовательским E2E: через UI заполнить все затронутые формы и вкладки, прокликать заявленные кнопки, проверить отображение и сохранение всех затронутых полей, снять скриншоты ключевых форм/вкладок и проверить историю создания через постоянного пользователя `codex_playwright`.
+Любое крупное изменение frontend UI, форм, вкладок, таблиц, кнопок, data-provider/mapping слоя или backend/frontend order flow должно обновлять `tests/order-ui-full-form-coverage.spec.ts`. Тест обязан оставаться полноценным пользовательским E2E: через UI заполнить все затронутые формы и вкладки, прокликать заявленные кнопки, проверить отображение и сохранение всех затронутых полей, снять скриншоты ключевых форм/вкладок и проверить историю создания через постоянного пользователя `<stage-test-username>`.
 
 Перед завершением такого изменения нужно запускать:
 
 ```bash
-set -a; . /home/ovhtest/projects/erp_dev/.env; set +a
+set -a; . /path/to/project/.env; set +a
 npm run test:e2e:order-ui-full-coverage
 ```
 
@@ -428,19 +563,19 @@ Deadline create/override stage canary writes isolated manual deadline fixture ro
 
 ### Deadline notification action-rule stage canary
 
-The notification action-rule stage canary targets `backend-test` / `erp_test` only and uses isolated fixture key `deadline-notification-action-canary-2026-05-24`. Required gates:
+The notification action-rule stage canary targets `<test-target-env>` / `<test-compose-project>` only and uses isolated fixture key `deadline-notification-action-canary-2026-05-24`. Required gates:
 
 ```bash
 npm run test:deadline-notification-action-fixture
-DEADLINE_NOTIFICATION_ACTION_FIXTURE_KEY=deadline-notification-action-canary-2026-05-24 DEADLINE_NOTIFICATION_ACTION_ORDER_ID=<eligible-backend-test-order-id> npm run test:e2e:deadline-notification-action-stage-canary
-DEADLINE_NOTIFICATION_ACTION_STAGE_CANARY=true DEADLINE_NOTIFICATION_ACTION_RESTORE=true DEADLINE_NOTIFICATION_ACTION_TARGET_ENV=backend-test DEADLINE_NOTIFICATION_ACTION_FIXTURE_KEY=deadline-notification-action-canary-2026-05-24 DEADLINE_NOTIFICATION_ACTION_ORDER_ID=<eligible-backend-test-order-id> npm run deadline-notification-action:fixture -- snapshot
+DEADLINE_NOTIFICATION_ACTION_FIXTURE_KEY=deadline-notification-action-canary-2026-05-24 DEADLINE_NOTIFICATION_ACTION_ORDER_ID=<eligible-test-order-id> npm run test:e2e:deadline-notification-action-stage-canary
+DEADLINE_NOTIFICATION_ACTION_STAGE_CANARY=true DEADLINE_NOTIFICATION_ACTION_RESTORE=true DEADLINE_NOTIFICATION_ACTION_TARGET_ENV=<test-target-env> DEADLINE_NOTIFICATION_ACTION_FIXTURE_KEY=deadline-notification-action-canary-2026-05-24 DEADLINE_NOTIFICATION_ACTION_ORDER_ID=<eligible-test-order-id> npm run deadline-notification-action:fixture -- snapshot
 ```
 
-Accepted restored snapshot has zero fixture deadlines, deadline events, action rules, action executions, and notifications. `BACKEND_DEADLINE_ACTIONS_ENABLED` and `BACKEND_DEADLINE_NOTIFICATIONS_ENABLED` remain default `false`; intentionally enable them only for isolated canary runs, then restore runtime config and rerun smoke. Evidence: `/home/ovhtest/projects/erp_dev/spec_erp/docs/deadline-engine-notification-action-rule-stage-canary-2026-05-24.md`.
+Accepted restored snapshot has zero fixture deadlines, deadline events, action rules, action executions, and notifications. `BACKEND_DEADLINE_ACTIONS_ENABLED` and `BACKEND_DEADLINE_NOTIFICATIONS_ENABLED` remain default `false`; intentionally enable them only for isolated canary runs, then restore runtime config and rerun smoke. Evidence: `/path/to/spec_erp/docs/deadline-engine-notification-action-rule-stage-canary-2026-05-24.md`.
 
 ### Deadline Engine residual scope
 
-Stage accepted 2026-05-24: backend-backed notification API/build evidence for current-user persisted notifications. `NotificationBell`/`NotificationPanel` use `/api/v1/notifications`; local Zustand notification store remains transient frontend-only. Stage fixture `deadline-notification-ui-canary-2026-05-23` proved list, mark-read, delete, and zero residue after applying additive backend-test migration `006_deadline_notifications_idempotency.sql`. Manual app-test UI verification was attempted but blocked by Vercel login/SSO before the ERP login form loaded. Next residual slice is isolated notification action-rule stage canary. Evidence: `/home/ovhtest/projects/erp_dev/spec_erp/docs/deadline-engine-residual-notifications-ui-2026-05-23.md`.
+Stage accepted 2026-05-24: backend-backed notification API/build evidence for current-user persisted notifications. `NotificationBell`/`NotificationPanel` use `/api/v1/notifications`; local Zustand notification store remains transient frontend-only. Stage fixture `deadline-notification-ui-canary-2026-05-23` proved list, mark-read, delete, and zero residue after applying additive <test-target-env> migration `006_deadline_notifications_idempotency.sql`. Manual <stage-frontend> UI verification was attempted but blocked by Vercel login/SSO before the ERP login form loaded. Next residual slice is isolated notification action-rule stage canary. Evidence: `/path/to/spec_erp/docs/deadline-engine-residual-notifications-ui-2026-05-23.md`.
 
 Still disabled without separate approval:
 

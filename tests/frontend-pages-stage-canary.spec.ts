@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 type StageRoute = {
     path: string;
     label: string;
+    expectedPaths?: string[];
     waitForText?: string | RegExp;
 };
 
@@ -110,7 +111,7 @@ test.describe('Frontend pages stage canary', () => {
 
 function buildStageRoutes(ids: StageIds): StageRoute[] {
     const routes: StageRoute[] = [
-        { path: '/', label: 'home route', waitForText: /Заказы|Orders/i },
+        { path: '/', label: 'home route', expectedPaths: ['/', '/orders'], waitForText: /Заказы|Orders/i },
         { path: '/orders', label: 'orders list', waitForText: /Заказы|Orders/i },
         ...recordRoutes('/orders', 'orders', ids.orders, false),
         { path: '/calendar', label: 'calendar list', waitForText: 'Производственный календарь' },
@@ -206,7 +207,7 @@ function recordRoutes(
 }
 
 async function assertStagePageReady(page: Page, route: StageRoute) {
-    await expect(page).toHaveURL(new RegExp(`${escapeRegex(route.path)}(?:[?#].*)?$`));
+    await expect(page).toHaveURL(buildExpectedUrlPattern(route));
 
     let content = page.locator('body');
     const visibleLayoutContent = page.locator('.ant-layout-content:visible');
@@ -226,6 +227,11 @@ async function assertStagePageReady(page: Page, route: StageRoute) {
             timeout: 10000,
         });
     }
+}
+
+function buildExpectedUrlPattern(route: StageRoute): RegExp {
+    const paths = route.expectedPaths ?? [route.path];
+    return new RegExp(`(?:${paths.map(escapeRegex).join('|')})(?:[?#].*)?$`);
 }
 
 async function loginThroughUi(page: Page, username: string, password: string) {
