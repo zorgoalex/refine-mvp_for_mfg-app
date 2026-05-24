@@ -108,11 +108,13 @@ export interface ListDeadlinePoliciesCommand {
 
 export interface CreateDeadlinePolicyCommand {
   currentUser: CurrentUser;
+  requestId?: string;
   dto: CreateDeadlinePolicyRequestDto;
 }
 
 export interface UpdateDeadlinePolicyCommand {
   currentUser: CurrentUser;
+  requestId?: string;
   policyId: string;
   dto: UpdateDeadlinePolicyRequestDto;
 }
@@ -123,6 +125,7 @@ export interface GetDeadlineSettingsCommand {
 
 export interface UpdateDeadlineSettingsCommand {
   currentUser: CurrentUser;
+  requestId?: string;
   dto: UpdateDeadlineSettingsRequestDto;
 }
 

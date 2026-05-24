@@ -3,6 +3,8 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { DeadlineInstanceDto } from '../dto/deadline-instance.dto';
+import type { DeadlinePolicyDto } from '../dto/deadline-policy.dto';
+import { DEFAULT_DEADLINE_SETTINGS } from '../dto/deadline-settings.dto';
 import { DeadlineCommandService } from './deadline-command.service';
 import type { DeadlineRepositoryPort, DeadlineTransactionManagerPort } from './deadline.types';
 
@@ -428,6 +430,119 @@ describe('DeadlineCommandService', () => {
     } satisfies Partial<ApiError>);
     expect(calls).toEqual(['lock:deadline-id']);
   });
+
+  it('requires deadlines.manage to create and update deadline policies', async () => {
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(createRepository()),
+    });
+
+    await expect(
+      service.createPolicy({
+        currentUser: currentUser(['deadlines.actions.manage']),
+        requestId: 'req-policy-create-denied',
+        dto: {
+          policyCode: 'order.final',
+          policyName: 'Final order deadline',
+          scopeType: 'order',
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['deadlines.manage'] },
+    } satisfies Partial<ApiError>);
+
+    await expect(
+      service.updatePolicy({
+        currentUser: currentUser(['deadlines.actions.manage']),
+        requestId: 'req-policy-update-denied',
+        policyId: 'policy-id',
+        dto: { policyName: 'Updated deadline policy' },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['deadlines.manage'] },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('requires settings.manage to update deadline settings', async () => {
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(createRepository()),
+    });
+
+    await expect(
+      service.updateSettings({
+        currentUser: currentUser(['deadlines.manage']),
+        requestId: 'req-settings-update-denied',
+        dto: { notifyAssigneeEnabled: true },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['settings.manage'] },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('delegates policy and settings writes through transactions with request ids', async () => {
+    const calls: string[] = [];
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(
+        createRepository({
+          async createPolicy(command) {
+            calls.push(`createPolicy:${command.currentUser.id}:${command.requestId}:${command.dto.policyCode}`);
+            return createPolicy();
+          },
+          async updatePolicy(command) {
+            calls.push(`updatePolicy:${command.currentUser.id}:${command.requestId}:${command.policyId}:${command.dto.policyName}`);
+            return createPolicy({ policyName: command.dto.policyName ?? 'Final order deadline' });
+          },
+          async updateSettings(command) {
+            calls.push(`updateSettings:${command.currentUser.id}:${command.requestId}:${command.dto.notifyAssigneeEnabled}`);
+            return {
+              ...DEFAULT_DEADLINE_SETTINGS,
+              notifyAssigneeEnabled: command.dto.notifyAssigneeEnabled ?? false,
+            };
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      service.createPolicy({
+        currentUser: currentUser(),
+        requestId: 'req-policy-create',
+        dto: {
+          policyCode: 'order.final',
+          policyName: 'Final order deadline',
+          scopeType: 'order',
+        },
+      }),
+    ).resolves.toMatchObject({ policyCode: 'order.final' });
+
+    await expect(
+      service.updatePolicy({
+        currentUser: currentUser(),
+        requestId: 'req-policy-update',
+        policyId: 'policy-id',
+        dto: { policyName: 'Updated deadline policy' },
+      }),
+    ).resolves.toMatchObject({ policyName: 'Updated deadline policy' });
+
+    await expect(
+      service.updateSettings({
+        currentUser: currentUser(),
+        requestId: 'req-settings-update',
+        dto: { notifyAssigneeEnabled: true },
+      }),
+    ).resolves.toMatchObject({ notifyAssigneeEnabled: true });
+
+    expect(calls).toEqual([
+      'createPolicy:u1:req-policy-create:order.final',
+      'updatePolicy:u1:req-policy-update:policy-id:Updated deadline policy',
+      'updateSettings:u1:req-settings-update:true',
+    ]);
+  });
 });
 
 function currentUser(permissions = getPermissionsForRole('admin')): CurrentUser {
@@ -531,6 +646,24 @@ function createDeadline(overrides: Partial<DeadlineInstanceDto> = {}): DeadlineI
     status: 'active',
     source: 'manual',
     isManuallyOverridden: false,
+    createdAt: '2026-05-01T10:00:00.000Z',
+    updatedAt: '2026-05-01T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function createPolicy(overrides: Partial<DeadlinePolicyDto> = {}): DeadlinePolicyDto {
+  return {
+    policyId: 'policy-id',
+    policyCode: 'order.final',
+    policyName: 'Final order deadline',
+    scopeType: 'order',
+    targetType: null,
+    targetCode: null,
+    durationValue: null,
+    durationUnit: null,
+    startPoint: null,
+    isEnabled: true,
     createdAt: '2026-05-01T10:00:00.000Z',
     updatedAt: '2026-05-01T10:00:00.000Z',
     ...overrides,

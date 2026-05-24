@@ -165,6 +165,178 @@ describe('PgDeadlineRepository', () => {
     )).toHaveLength(1);
   });
 
+  it('creates policies with an initial version and queryable audit dimensions', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.createPolicy({
+        currentUser: currentUser(),
+        requestId: 'req-policy-create',
+        dto: {
+          policyCode: 'order.final',
+          policyName: 'Final order deadline',
+          scopeType: 'order',
+          durationValue: 10,
+          durationUnit: 'working_day',
+          config: { calendar: 'production' },
+        },
+      }),
+    ).resolves.toMatchObject({
+      policyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      policyCode: 'order.final',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('INSERT INTO deadline_policies');
+    expect(sql).toContain('INSERT INTO deadline_policy_versions');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+
+    const versionInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_policy_versions'),
+    );
+    expect(versionInsert?.params).toEqual([
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      1,
+      JSON.stringify({ calendar: 'production' }),
+      42,
+    ]);
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params.slice(0, 8)).toEqual([
+      'deadlines.policy.created',
+      'deadline_policy',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '42',
+      'req-policy-create',
+      'backend-deadline-command',
+      null,
+      null,
+    ]);
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({
+      policyCode: 'order.final',
+      policyName: 'Final order deadline',
+      scopeType: 'order',
+      durationValue: 10,
+      durationUnit: 'working_day',
+      isEnabled: true,
+    });
+    expect(JSON.parse(String(audit?.params[11]))).toMatchObject({
+      policyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      policyCode: 'order.final',
+      scopeType: 'order',
+      versionNumber: 1,
+    });
+  });
+
+  it('updates policies by appending a version and auditing before/after diff', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.updatePolicy({
+        currentUser: currentUser(),
+        requestId: 'req-policy-update',
+        policyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        dto: {
+          policyName: 'Updated final deadline',
+          durationValue: 15,
+          isEnabled: false,
+          config: { calendar: 'updated' },
+        },
+      }),
+    ).resolves.toMatchObject({
+      policyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      policyName: 'Updated final deadline',
+      durationValue: 15,
+      isEnabled: false,
+    });
+
+    const versionInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_policy_versions'),
+    );
+    expect(versionInsert?.params).toEqual([
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      3,
+      JSON.stringify({ calendar: 'updated' }),
+      42,
+    ]);
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params.slice(0, 8)).toEqual([
+      'deadlines.policy.updated',
+      'deadline_policy',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '42',
+      'req-policy-update',
+      'backend-deadline-command',
+      null,
+      null,
+    ]);
+    expect(JSON.parse(String(audit?.params[8]))).toMatchObject({
+      policyName: 'Final order deadline',
+      durationValue: 10,
+      isEnabled: true,
+    });
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({
+      policyName: 'Updated final deadline',
+      durationValue: 15,
+      isEnabled: false,
+    });
+    expect(JSON.parse(String(audit?.params[10]))).toMatchObject({
+      policyName: { from: 'Final order deadline', to: 'Updated final deadline' },
+      durationValue: { from: 10, to: 15 },
+      isEnabled: { from: true, to: false },
+    });
+  });
+
+  it('updates settings idempotently through action-rule upserts and audits changed settings', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.updateSettings({
+        currentUser: currentUser(),
+        requestId: 'req-settings-update',
+        dto: { notifyAssigneeEnabled: true },
+      }),
+    ).resolves.toMatchObject({ notifyAssigneeEnabled: true });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('SELECT action_rule_id FROM deadline_action_rules');
+    expect(sql).toContain('UPDATE deadline_action_rules SET is_enabled = $2');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params.slice(0, 8)).toEqual([
+      'deadlines.settings.updated',
+      'deadline_settings',
+      'global',
+      '42',
+      'req-settings-update',
+      'backend-deadline-command',
+      null,
+      null,
+    ]);
+    expect(JSON.parse(String(audit?.params[8]))).toMatchObject({
+      notifyAssigneeEnabled: false,
+    });
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({
+      notifyAssigneeEnabled: true,
+    });
+    expect(JSON.parse(String(audit?.params[10]))).toMatchObject({
+      notifyAssigneeEnabled: { from: false, to: true },
+    });
+  });
+
   it('overrides deadlines with guarded supersede, replacement deadline, audit and outbox dimensions', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
@@ -939,12 +1111,75 @@ function createDatabase(
   const insertedEventIdempotencyKeys = new Set<string>();
   let overrideReplacementCreated = false;
   let originalSupersededByOverride = false;
+  let notifyAssigneeEnabled = false;
   const client = {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
 
       if (text.includes('COUNT(*)::int')) {
         return { rows: [{ total: 1 }] };
+      }
+
+      if (text.includes('FROM deadline_action_rules') && text.includes('GROUP BY action_type')) {
+        return {
+          rows: [
+            { action_type: 'notify_assignee', is_enabled: notifyAssigneeEnabled },
+          ],
+        };
+      }
+
+      if (text.includes('SELECT action_rule_id') && text.includes('FROM deadline_action_rules')) {
+        return { rows: [{ action_rule_id: 'rule-notify-assignee' }] };
+      }
+
+      if (text.includes('UPDATE deadline_action_rules')) {
+        if (params[0] === 'rule-notify-assignee') {
+          notifyAssigneeEnabled = Boolean(params[1]);
+        }
+        return { rows: [] };
+      }
+
+      if (text.includes('SELECT') && text.includes('FROM deadline_policies') && text.includes('policy_id = $1')) {
+        return { rows: [policyRow()] };
+      }
+
+      if (text.includes('RETURNING') && text.includes('INSERT INTO deadline_policies')) {
+        return {
+          rows: [
+            policyRow({
+              policy_code: String(params[0]),
+              policy_name: String(params[1]),
+              scope_type: String(params[2]),
+              target_type: (params[3] as string | null | undefined) ?? null,
+              target_code: (params[4] as string | null | undefined) ?? null,
+              duration_value: (params[5] as number | null | undefined) ?? null,
+              duration_unit: (params[6] as string | null | undefined) ?? null,
+              start_point: (params[7] as string | null | undefined) ?? null,
+              is_enabled: Boolean(params[8]),
+            }),
+          ],
+        };
+      }
+
+      if (text.includes('RETURNING') && text.includes('UPDATE deadline_policies')) {
+        return {
+          rows: [
+            policyRow({
+              policy_id: String(params[0]),
+              policy_name: String(params[1]),
+              target_type: (params[2] as string | null | undefined) ?? null,
+              target_code: (params[3] as string | null | undefined) ?? null,
+              duration_value: (params[4] as number | null | undefined) ?? null,
+              duration_unit: (params[5] as string | null | undefined) ?? null,
+              start_point: (params[6] as string | null | undefined) ?? null,
+              is_enabled: Boolean(params[7]),
+            }),
+          ],
+        };
+      }
+
+      if (text.includes('MAX(version_number)')) {
+        return { rows: [{ next_version: 3 }] };
       }
 
       if (text.includes('RETURNING') && text.includes('deadline_events')) {
@@ -1065,10 +1300,18 @@ function createDatabase(
 }
 
 type DeadlineTestRow = ReturnType<typeof baseDeadlineRow>;
+type PolicyTestRow = ReturnType<typeof basePolicyRow>;
 
 function deadlineRow(overrides: Partial<DeadlineTestRow> = {}) {
   return {
     ...baseDeadlineRow(),
+    ...overrides,
+  };
+}
+
+function policyRow(overrides: Partial<PolicyTestRow> = {}) {
+  return {
+    ...basePolicyRow(),
     ...overrides,
   };
 }
@@ -1113,6 +1356,23 @@ function baseDeadlineRow() {
     expired_at: null,
     cancelled_at: null,
     idempotency_key: null,
+    created_at: new Date('2026-05-01T10:00:00.000Z'),
+    updated_at: new Date('2026-05-01T10:00:00.000Z'),
+  };
+}
+
+function basePolicyRow() {
+  return {
+    policy_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    policy_code: 'order.final',
+    policy_name: 'Final order deadline',
+    scope_type: 'order',
+    target_type: null,
+    target_code: null,
+    duration_value: 10,
+    duration_unit: 'working_day',
+    start_point: null,
+    is_enabled: true,
     created_at: new Date('2026-05-01T10:00:00.000Z'),
     updated_at: new Date('2026-05-01T10:00:00.000Z'),
   };
