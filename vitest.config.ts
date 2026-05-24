@@ -12,6 +12,7 @@ export default defineConfig({
             '**/dist/**',
             '.idea',
             '.git',
+            '.worktrees/**',
             '.cache',
             'ai_docs/**',
             'tests/**',
