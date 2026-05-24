@@ -8,6 +8,14 @@ describe('PgNotificationRepository', () => {
       {
         rows: [
           {
+            total_count: '1',
+            unread_count: '1',
+          },
+        ],
+      },
+      {
+        rows: [
+          {
             notification_id: '11111111-1111-4111-8111-111111111111',
             user_id: '42',
             level: 'warning',
@@ -19,8 +27,6 @@ describe('PgNotificationRepository', () => {
             source_id: '22222222-2222-4222-8222-222222222222',
             read_at: null,
             created_at: '2026-05-23T09:00:00.000Z',
-            total_count: '1',
-            unread_count: '1',
           },
         ],
       },
@@ -48,12 +54,33 @@ describe('PgNotificationRepository', () => {
       total: 1,
       unreadCount: 1,
     });
-    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('WHERE user_id = $1'), [
-      '42',
-      true,
-      10,
-      10,
+    expect(database.query).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('count(*) FILTER (WHERE ($2::boolean = false OR is_read = false))'),
+      ['42', true],
+    );
+    expect(database.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('AND ($2::boolean = false OR is_read = false)'),
+      ['42', true, 10, 10],
+    );
+  });
+
+  it('reports counts when the requested notifications page is empty', async () => {
+    const database = databaseClient([
+      { rows: [{ total_count: '12', unread_count: '4' }] },
+      { rows: [] },
     ]);
+    const repository = new PgNotificationRepository(database);
+
+    await expect(
+      repository.listForUser({ userId: '42', unreadOnly: false, page: 3, pageSize: 10 }),
+    ).resolves.toEqual({
+      data: [],
+      total: 12,
+      unreadCount: 4,
+    });
+    expect(database.query).toHaveBeenCalledTimes(2);
   });
 
   it('marks one current-user notification read', async () => {
@@ -68,6 +95,9 @@ describe('PgNotificationRepository', () => {
     });
 
     expect(result?.readAt).toBe('2026-05-23T10:00:00.000Z');
+    const sql = queriedSql(database, 1);
+    expect(sql).toContain('UPDATE notifications');
+    expect(sql).toContain('SET is_read = true, read_at = COALESCE(read_at, now())');
     expect(database.query).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE notifications'),
       ['11111111-1111-4111-8111-111111111111', '42'],
@@ -101,7 +131,10 @@ describe('PgNotificationRepository', () => {
     const repository = new PgNotificationRepository(database);
 
     await expect(repository.markAllReadForUser('42')).resolves.toBe(3);
-    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('read_at IS NULL'), ['42']);
+    const sql = queriedSql(database, 1);
+    expect(sql).toContain('SET is_read = true, read_at = COALESCE(read_at, now())');
+    expect(sql).toContain('AND is_read = false');
+    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('is_read = false'), ['42']);
   });
 
   it('deletes only current-user notification rows', async () => {
@@ -142,4 +175,10 @@ function notificationRow(overrides = {}) {
     created_at: '2026-05-23T09:00:00.000Z',
     ...overrides,
   };
+}
+
+function queriedSql(database: DatabaseClient, callNumber: number): string {
+  const query = vi.mocked(database.query);
+  const sql = query.mock.calls[callNumber - 1]?.[0];
+  return String(sql).replace(/\s+/g, ' ').trim();
 }

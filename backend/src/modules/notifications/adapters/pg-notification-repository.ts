@@ -18,8 +18,11 @@ interface NotificationRow {
   source_id: string | null;
   read_at: string | Date | null;
   created_at: string | Date;
-  total_count?: string | number | null;
-  unread_count?: string | number | null;
+}
+
+interface NotificationCountRow {
+  total_count: string | number | null;
+  unread_count: string | number | null;
 }
 
 export class PgNotificationRepository implements NotificationRepositoryPort {
@@ -32,27 +35,35 @@ export class PgNotificationRepository implements NotificationRepositoryPort {
     pageSize: number;
   }): Promise<NotificationListResult> {
     const offset = (input.page - 1) * input.pageSize;
-    const result = await this.database.query<NotificationRow>(
+    const counts = await this.database.query<NotificationCountRow>(
+      `
+      SELECT
+        count(*) FILTER (WHERE ($2::boolean = false OR is_read = false)) AS total_count,
+        count(*) FILTER (WHERE is_read = false) AS unread_count
+      FROM notifications
+      WHERE user_id = $1
+      `,
+      [input.userId, input.unreadOnly],
+    );
+    const notifications = await this.database.query<NotificationRow>(
       `
       SELECT
         notification_id, user_id::text, level, title, message, entity_type, entity_id,
-        source_type, source_id, read_at, created_at,
-        count(*) OVER() AS total_count,
-        count(*) FILTER (WHERE read_at IS NULL) OVER() AS unread_count
+        source_type, source_id, read_at, created_at
       FROM notifications
       WHERE user_id = $1
-        AND ($2::boolean = false OR read_at IS NULL)
+        AND ($2::boolean = false OR is_read = false)
       ORDER BY created_at DESC, notification_id DESC
       LIMIT $3 OFFSET $4
       `,
       [input.userId, input.unreadOnly, input.pageSize, offset],
     );
 
-    const first = result.rows[0];
+    const countRow = counts.rows[0];
     return {
-      data: result.rows.map(mapRow),
-      total: numberFromCount(first?.total_count),
-      unreadCount: numberFromCount(first?.unread_count),
+      data: notifications.rows.map(mapRow),
+      total: numberFromCount(countRow?.total_count),
+      unreadCount: numberFromCount(countRow?.unread_count),
     };
   }
 
@@ -63,7 +74,8 @@ export class PgNotificationRepository implements NotificationRepositoryPort {
     const result = await this.database.query<NotificationRow>(
       `
       UPDATE notifications
-      SET read_at = COALESCE(read_at, now())
+      SET is_read = true,
+        read_at = COALESCE(read_at, now())
       WHERE notification_id = $1
         AND user_id = $2
       RETURNING notification_id, user_id::text, level, title, message, entity_type, entity_id,
@@ -80,9 +92,10 @@ export class PgNotificationRepository implements NotificationRepositoryPort {
       `
       WITH updated AS (
         UPDATE notifications
-        SET read_at = COALESCE(read_at, now())
+        SET is_read = true,
+          read_at = COALESCE(read_at, now())
         WHERE user_id = $1
-          AND read_at IS NULL
+          AND is_read = false
         RETURNING notification_id
       )
       SELECT count(*) AS updated_count FROM updated
