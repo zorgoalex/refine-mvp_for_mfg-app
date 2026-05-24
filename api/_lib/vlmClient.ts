@@ -6,7 +6,9 @@
  */
 
 import { Buffer } from 'node:buffer';
+import { redactLogFields } from '../../backend/src/common/logging/redaction';
 import { getM2MToken } from './auth0Token';
+import { logger } from './logger';
 
 // Env-переменные
 const VLM_API_URL = process.env.VLM_API_URL || 'https://vlm-api.deno.dev';
@@ -136,6 +138,12 @@ function bufferToBlob(file: Buffer, contentType: string): Blob {
   return new Blob([bytes.buffer], { type: contentType });
 }
 
+function redactProviderErrorData(errorData: any): Record<string, any> {
+  return redactLogFields(
+    errorData && typeof errorData === 'object' ? errorData : { error: errorData },
+  ) as Record<string, any>;
+}
+
 // ============================================================================
 // API Methods
 // ============================================================================
@@ -144,7 +152,7 @@ function bufferToBlob(file: Buffer, contentType: string): Blob {
  * Проверка доступности VLM API
  */
 export async function checkHealth(): Promise<{ healthz: HealthResponse; readyz: HealthResponse }> {
-  console.log('[vlmClient] Checking VLM API health...');
+  logger.info('[vlmClient] Checking VLM API health');
 
   const [healthzRes, readyzRes] = await Promise.all([
     fetchWithTimeout(`${VLM_API_URL}/healthz`, { method: 'GET' }, HEALTH_TIMEOUT),
@@ -159,7 +167,7 @@ export async function checkHealth(): Promise<{ healthz: HealthResponse; readyz: 
     ? await readyzRes.json()
     : { status: 'error' };
 
-  console.log('[vlmClient] Health check result:', { healthz, readyz });
+  logger.info('[vlmClient] Health check result', { healthz, readyz });
 
   return { healthz, readyz };
 }
@@ -176,7 +184,7 @@ export async function uploadImage(
   filename: string,
   contentType: string
 ): Promise<UploadResponse> {
-  console.log('[vlmClient] Uploading image...', { filename, contentType, size: getUploadFileSize(file) });
+  logger.info('[vlmClient] Uploading image', { filename, contentType, size: getUploadFileSize(file) });
 
   const authHeaders = await getAuthHeaders();
 
@@ -196,12 +204,13 @@ export async function uploadImage(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    console.error('[vlmClient] Upload failed:', { status: response.status, error: errorData });
-    throw new Error(errorData.error || `Upload failed: ${response.status}`);
+    const redactedErrorData = redactProviderErrorData(errorData);
+    logger.error('[vlmClient] Upload failed', undefined, { status: response.status, error: redactedErrorData });
+    throw new Error(redactedErrorData.error || `Upload failed: ${response.status}`);
   }
 
   const data: UploadResponse = await response.json();
-  console.log('[vlmClient] Upload successful:', { key: data.key, url: data.url?.substring(0, 50) });
+  logger.info('[vlmClient] Upload successful', { key: data.key, url: data.url?.substring(0, 50) });
 
   return data;
 }
@@ -217,7 +226,7 @@ export async function analyzeImage(
   options: AnalyzeOptions = {}
 ): Promise<AnalyzeResponse> {
   const provider = options.provider || 'zai';
-  console.log('[vlmClient] Analyzing image...', { provider, model: options.model, imageUrl: imageUrl.substring(0, 50) });
+  logger.info('[vlmClient] Analyzing image', { provider, model: options.model, imageUrl: imageUrl.substring(0, 50) });
 
   const authHeaders = await getAuthHeaders();
 
@@ -263,18 +272,19 @@ export async function analyzeImage(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    console.error('[vlmClient] Analyze failed:', { status: response.status, error: errorData, duration: `${duration}ms` });
+    const redactedErrorData = redactProviderErrorData(errorData);
+    logger.error('[vlmClient] Analyze failed', undefined, { status: response.status, error: redactedErrorData, duration: `${duration}ms` });
     const error: VlmError = {
-      error: errorData.error || `Analyze failed: ${response.status}`,
-      code: errorData.code,
-      details: errorData.details,
+      error: redactedErrorData.error || `Analyze failed: ${response.status}`,
+      code: redactedErrorData.code,
+      details: redactedErrorData.details,
       provider,
     };
     throw error;
   }
 
   const data: AnalyzeResponse = await response.json();
-  console.log('[vlmClient] Analyze successful:', {
+  logger.info('[vlmClient] Analyze successful', {
     provider,
     model: data.model,
     duration: `${duration}ms`,
@@ -300,7 +310,7 @@ export async function analyzeWithRetry(
 
   for (const provider of providerOrder) {
     try {
-      console.log(`[vlmClient] Trying provider: ${provider}`);
+      logger.info('[vlmClient] Trying provider', { provider });
       const result = await analyzeImage(imageUrl, { ...options, provider });
       return result;
     } catch (error: any) {
@@ -310,14 +320,14 @@ export async function analyzeWithRetry(
         provider,
       };
       errors.push(vlmError);
-      console.warn(`[vlmClient] Provider ${provider} failed:`, vlmError);
+      logger.warn('[vlmClient] Provider failed', { provider }, vlmError);
 
       // Продолжаем к следующему провайдеру
     }
   }
 
   // Все провайдеры failed
-  console.error('[vlmClient] All providers failed:', errors);
+  logger.error('[vlmClient] All providers failed', errors);
   throw {
     error: 'All VLM providers failed',
     details: errors,
