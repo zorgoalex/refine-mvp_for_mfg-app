@@ -38,6 +38,8 @@ tags:
     description: Экспорт и импорт переносимых snapshot'ов заказа
   - name: Deadlines
     description: Дедлайны, политики дедлайнов и настройки deadline automation
+  - name: Notifications
+    description: Persisted current-user notifications
   - name: Users
     description: Управление пользователями
   - name: VLM
@@ -2054,6 +2056,124 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/notifications:
+    get:
+      tags:
+        - Notifications
+      operationId: listNotifications
+      summary: List current-user notifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: unreadOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Current-user notifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/notifications/read-all:
+    patch:
+      tags:
+        - Notifications
+      operationId: markAllNotificationsRead
+      summary: Mark all current-user notifications as read
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Notifications marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkAllNotificationsReadResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/notifications/{notificationId}:
+    parameters:
+      - $ref: '#/components/parameters/NotificationId'
+    delete:
+      tags:
+        - Notifications
+      operationId: deleteNotification
+      summary: Delete a current-user notification
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Notification deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteNotificationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Notification not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/notifications/{notificationId}/read:
+    parameters:
+      - $ref: '#/components/parameters/NotificationId'
+    patch:
+      tags:
+        - Notifications
+      operationId: markNotificationRead
+      summary: Mark a current-user notification as read
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Notification marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Notification not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/users:
     get:
       tags:
@@ -2577,6 +2697,13 @@ components:
         format: uuid
     PolicyId:
       name: policyId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    NotificationId:
+      name: notificationId
       in: path
       required: true
       schema:
@@ -5098,6 +5225,124 @@ components:
             totalPages:
               type: integer
               minimum: 0
+
+    Notification:
+      type: object
+      required:
+        - notificationId
+        - userId
+        - level
+        - title
+        - message
+        - entityType
+        - entityId
+        - sourceType
+        - sourceId
+        - readAt
+        - createdAt
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+        level:
+          type: string
+          enum:
+            - info
+            - warning
+            - error
+        title:
+          type: string
+          nullable: true
+        message:
+          type: string
+        entityType:
+          type: string
+          nullable: true
+        entityId:
+          type: string
+          nullable: true
+        sourceType:
+          type: string
+          nullable: true
+        sourceId:
+          type: string
+          nullable: true
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    NotificationListResponse:
+      type: object
+      required:
+        - data
+        - pagination
+        - unreadCount
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+        pagination:
+          type: object
+          required:
+            - page
+            - pageSize
+            - total
+            - totalPages
+          properties:
+            page:
+              type: integer
+              minimum: 1
+            pageSize:
+              type: integer
+              minimum: 1
+              maximum: 100
+            total:
+              type: integer
+              minimum: 0
+            totalPages:
+              type: integer
+              minimum: 0
+        unreadCount:
+          type: integer
+          minimum: 0
+
+    NotificationResponse:
+      type: object
+      required:
+        - notification
+      properties:
+        notification:
+          $ref: '#/components/schemas/Notification'
+
+    MarkAllNotificationsReadResponse:
+      type: object
+      required:
+        - updatedCount
+      properties:
+        updatedCount:
+          type: integer
+          minimum: 0
+
+    DeleteNotificationResponse:
+      type: object
+      required:
+        - notificationId
+        - deleted
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+        deleted:
+          type: boolean
+          enum:
+            - true
 
     OrderDeadlineListResponse:
       type: object
