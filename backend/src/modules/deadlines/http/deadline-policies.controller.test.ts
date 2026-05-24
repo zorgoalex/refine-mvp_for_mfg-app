@@ -5,7 +5,11 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { DeadlineCommandService } from '../application/deadline-command.service';
 import type { DeadlineQueryService } from '../application/deadline-query.service';
-import { DeadlinePoliciesController, parseCreateDeadlinePolicyRequest, parsePolicyId } from './deadline-policies.controller';
+import {
+  DeadlinePoliciesController,
+  parseCreateDeadlinePolicyRequest,
+  parsePolicyId,
+} from './deadline-policies.controller';
 import type { DeadlinesRuntimeConfigService } from './deadlines-runtime-config.service';
 
 describe('DeadlinePoliciesController', () => {
@@ -71,35 +75,45 @@ describe('DeadlinePoliciesController', () => {
     ).toThrow(ApiError);
   });
 
-  it('keeps policy writes fail-closed in deadline write mode for cancel-only slice', async () => {
+  it('delegates policy writes in deadline write mode with request id propagation', async () => {
+    const calls: string[] = [];
     const controller = createController({
       flags: { deadlinesEnabled: true, deadlinesReadOnly: false },
+      commands: {
+        async createPolicy(command) {
+          calls.push(`create:${command.currentUser.id}:${command.requestId}:${command.dto.policyCode}`);
+          return policy();
+        },
+        async updatePolicy(command) {
+          calls.push(`update:${command.currentUser.id}:${command.requestId}:${command.policyId}:${command.dto.policyName}`);
+          return policy({ policyName: command.dto.policyName ?? 'Final order deadline' });
+        },
+      },
     });
 
     await expect(
       controller.create(
-        { user: currentUser() },
+        { user: currentUser(), requestId: 'req-policy-create' },
         {
           policyCode: 'order.final',
           policyName: 'Final order deadline',
           scopeType: 'order',
         },
       ),
-    ).rejects.toMatchObject({
-      statusCode: 503,
-      code: 'DEADLINE_WRITE_OPERATION_DISABLED',
-    } satisfies Partial<ApiError>);
+    ).resolves.toEqual({ policy: policy() });
 
     await expect(
       controller.update(
-        { user: currentUser() },
+        { user: currentUser(), requestId: 'req-policy-update' },
         '11111111-1111-4111-8111-111111111111',
         { policyName: 'Updated deadline policy' },
       ),
-    ).rejects.toMatchObject({
-      statusCode: 503,
-      code: 'DEADLINE_WRITE_OPERATION_DISABLED',
-    } satisfies Partial<ApiError>);
+    ).resolves.toEqual({ policy: policy({ policyName: 'Updated deadline policy' }) });
+
+    expect(calls).toEqual([
+      'create:admin-id:req-policy-create:order.final',
+      'update:admin-id:req-policy-update:11111111-1111-4111-8111-111111111111:Updated deadline policy',
+    ]);
   });
 });
 
@@ -147,5 +161,23 @@ function currentUser(): CurrentUser {
     role: 'admin',
     roleId: 1,
     permissions: getPermissionsForRole('admin'),
+  };
+}
+
+function policy(overrides: Record<string, unknown> = {}) {
+  return {
+    policyId: '11111111-1111-4111-8111-111111111111',
+    policyCode: 'order.final',
+    policyName: 'Final order deadline',
+    scopeType: 'order',
+    targetType: null,
+    targetCode: null,
+    durationValue: null,
+    durationUnit: null,
+    startPoint: null,
+    isEnabled: true,
+    createdAt: '2026-05-01T10:00:00.000Z',
+    updatedAt: '2026-05-01T10:00:00.000Z',
+    ...overrides,
   };
 }

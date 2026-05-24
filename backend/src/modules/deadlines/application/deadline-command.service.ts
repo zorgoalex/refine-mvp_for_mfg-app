@@ -107,21 +107,21 @@ export class DeadlineCommandService {
   }
 
   async createPolicy(command: CreateDeadlinePolicyCommand) {
-    this.requirePermission(command, 'deadlines.actions.manage');
+    this.requirePermission(command, 'deadlines.manage');
     return this.ports.transactions.runInTransaction((unitOfWork) =>
       unitOfWork.deadlines.createPolicy(command),
     );
   }
 
   async updatePolicy(command: UpdateDeadlinePolicyCommand) {
-    this.requirePermission(command, 'deadlines.actions.manage');
+    this.requirePermission(command, 'deadlines.manage');
     return this.ports.transactions.runInTransaction((unitOfWork) =>
       unitOfWork.deadlines.updatePolicy(command),
     );
   }
 
   async updateSettings(command: UpdateDeadlineSettingsCommand) {
-    this.requirePermission(command, 'deadlines.actions.manage');
+    this.requirePermission(command, 'settings.manage');
     return this.ports.transactions.runInTransaction((unitOfWork) =>
       unitOfWork.deadlines.updateSettings(command),
     );

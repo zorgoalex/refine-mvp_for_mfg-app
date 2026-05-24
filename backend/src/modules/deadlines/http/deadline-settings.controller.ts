@@ -109,11 +109,12 @@ export class DeadlineSettingsController {
   @ApiOperation({ operationId: 'updateDeadlineSettings', summary: 'Update deadline settings' })
   @Patch()
   async update(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
-    this.assertWriteOperationEnabled('updateSettings');
+    this.assertWriteEnabled();
 
     return {
       settings: await this.commands.updateSettings({
         currentUser: this.requireCurrentUser(request),
+        requestId: request.requestId,
         dto: parseUpdateDeadlineSettingsRequest(body),
       }),
     };
@@ -140,15 +141,6 @@ export class DeadlineSettingsController {
         mode: 'read_only',
       });
     }
-  }
-
-  private assertWriteOperationEnabled(operation: 'updateSettings'): void {
-    this.assertWriteEnabled();
-
-    throw new ApiError(503, 'DEADLINE_WRITE_OPERATION_DISABLED', 'Deadline write operation is disabled', {
-      feature: 'deadlines',
-      operation,
-    });
   }
 
   private requireCurrentUser(request: RequestWithCurrentUser) {

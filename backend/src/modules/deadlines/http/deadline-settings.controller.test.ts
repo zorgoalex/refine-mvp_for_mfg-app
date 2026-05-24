@@ -52,17 +52,33 @@ describe('DeadlineSettingsController', () => {
     );
   });
 
-  it('keeps settings update fail-closed in deadline write mode for cancel-only slice', async () => {
+  it('delegates settings update in deadline write mode with request id propagation', async () => {
+    const calls: string[] = [];
     const controller = createController({
       flags: { deadlinesEnabled: true, deadlinesReadOnly: false },
+      commands: {
+        async updateSettings(command) {
+          calls.push(`update:${command.currentUser.id}:${command.requestId}:${command.dto.notifyAssigneeEnabled}`);
+          return {
+            ...DEFAULT_DEADLINE_SETTINGS,
+            notifyAssigneeEnabled: command.dto.notifyAssigneeEnabled ?? false,
+          };
+        },
+      },
     });
 
     await expect(
-      controller.update({ user: currentUser() }, { notifyAssigneeEnabled: true }),
-    ).rejects.toMatchObject({
-      statusCode: 503,
-      code: 'DEADLINE_WRITE_OPERATION_DISABLED',
-    } satisfies Partial<ApiError>);
+      controller.update(
+        { user: currentUser(), requestId: 'req-settings-update' },
+        { notifyAssigneeEnabled: true },
+      ),
+    ).resolves.toEqual({
+      settings: {
+        ...DEFAULT_DEADLINE_SETTINGS,
+        notifyAssigneeEnabled: true,
+      },
+    });
+    expect(calls).toEqual(['update:admin-id:req-settings-update:true']);
   });
 });
 

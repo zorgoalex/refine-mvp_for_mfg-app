@@ -274,6 +274,22 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     );
     const policy = mapPolicy(result.rows[0]);
     await this.createPolicyVersion(policy.policyId, 1, command.dto.config ?? {}, command.currentUser.id);
+    await this.writeConfigAudit({
+      event: 'deadlines.policy.created',
+      entityType: 'deadline_policy',
+      entityId: policy.policyId,
+      userId: command.currentUser.id,
+      requestId: command.requestId,
+      before: {},
+      after: policyAuditSnapshot(policy),
+      diff: diffRecords({}, policyAuditSnapshot(policy)),
+      metadata: {
+        policyId: policy.policyId,
+        policyCode: policy.policyCode,
+        scopeType: policy.scopeType,
+        versionNumber: 1,
+      },
+    });
 
     return policy;
   }
@@ -289,6 +305,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     }
 
     const row = current.rows[0];
+    const beforePolicy = mapPolicy(row);
     const result = await this.database.query<DeadlinePolicyRow>(
       `
       UPDATE deadline_policies
@@ -305,15 +322,16 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       `,
       [
         command.policyId,
-        command.dto.policyName ?? row.policy_name,
-        command.dto.targetType ?? row.target_type,
-        command.dto.targetCode ?? row.target_code,
-        command.dto.durationValue ?? row.duration_value,
-        command.dto.durationUnit ?? row.duration_unit,
-        command.dto.startPoint ?? row.start_point,
-        command.dto.isEnabled ?? row.is_enabled,
+        hasOwn(command.dto, 'policyName') ? command.dto.policyName : row.policy_name,
+        hasOwn(command.dto, 'targetType') ? command.dto.targetType : row.target_type,
+        hasOwn(command.dto, 'targetCode') ? command.dto.targetCode : row.target_code,
+        hasOwn(command.dto, 'durationValue') ? command.dto.durationValue : row.duration_value,
+        hasOwn(command.dto, 'durationUnit') ? command.dto.durationUnit : row.duration_unit,
+        hasOwn(command.dto, 'startPoint') ? command.dto.startPoint : row.start_point,
+        hasOwn(command.dto, 'isEnabled') ? command.dto.isEnabled : row.is_enabled,
       ],
     );
+    const policy = mapPolicy(result.rows[0]);
     const version = await this.database.query<{ next_version: number }>(
       `
       SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
@@ -328,8 +346,25 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       command.dto.config ?? {},
       command.currentUser.id,
     );
+    const versionNumber = Number(version.rows[0]?.next_version ?? 1);
+    await this.writeConfigAudit({
+      event: 'deadlines.policy.updated',
+      entityType: 'deadline_policy',
+      entityId: policy.policyId,
+      userId: command.currentUser.id,
+      requestId: command.requestId,
+      before: policyAuditSnapshot(beforePolicy),
+      after: policyAuditSnapshot(policy),
+      diff: diffRecords(policyAuditSnapshot(beforePolicy), policyAuditSnapshot(policy)),
+      metadata: {
+        policyId: policy.policyId,
+        policyCode: policy.policyCode,
+        scopeType: policy.scopeType,
+        versionNumber,
+      },
+    });
 
-    return mapPolicy(result.rows[0]);
+    return policy;
   }
 
   async getSettings(): Promise<DeadlineSettingsDto> {
@@ -354,6 +389,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
   }
 
   async updateSettings(command: UpdateDeadlineSettingsCommand): Promise<DeadlineSettingsDto> {
+    const beforeSettings = await this.getSettings();
     for (const [settingKey, actionType] of Object.entries(SETTING_ACTIONS)) {
       const enabled = command.dto[settingKey as keyof DeadlineSettingsDto];
       if (enabled === undefined) {
@@ -365,7 +401,31 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       }
     }
 
-    return this.getSettings();
+    const afterSettings = await this.getSettings();
+    const auditedKeys = Object.keys(command.dto).filter((key) =>
+      Object.prototype.hasOwnProperty.call(SETTING_ACTIONS, key),
+    ) as Array<keyof DeadlineSettingsDto>;
+    const beforeAudit = pickRecord(beforeSettings, auditedKeys);
+    const afterAudit = pickRecord(afterSettings, auditedKeys);
+    const diff = diffRecords(beforeAudit, afterAudit);
+
+    if (Object.keys(diff).length > 0) {
+      await this.writeConfigAudit({
+        event: 'deadlines.settings.updated',
+        entityType: 'deadline_settings',
+        entityId: 'global',
+        userId: command.currentUser.id,
+        requestId: command.requestId,
+        before: beforeAudit,
+        after: afterAudit,
+        diff,
+        metadata: {
+          settingsKeys: Object.keys(diff),
+        },
+      });
+    }
+
+    return afterSettings;
   }
 
   async createDeadlineInstance(command: CreateDeadlineCommand): Promise<DeadlineInstanceDto> {
@@ -918,6 +978,47 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     );
   }
 
+  private async writeConfigAudit(input: {
+    event: string;
+    entityType: string;
+    entityId: string;
+    userId: string;
+    requestId?: string;
+    before: Record<string, unknown>;
+    after: Record<string, unknown>;
+    diff: Record<string, unknown>;
+    metadata: Record<string, unknown>;
+  }): Promise<void> {
+    await this.database.query(
+      `
+      INSERT INTO audit_log (
+        event, entity_type, entity_id, user_id, request_id, source,
+        related_order_id, related_client_id,
+        before_json, after_json, diff_json, metadata_json
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8,
+        $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb
+      )
+      `,
+      [
+        input.event,
+        input.entityType,
+        input.entityId,
+        input.userId,
+        input.requestId ?? 'deadline-command',
+        'backend-deadline-command',
+        null,
+        null,
+        JSON.stringify(input.before),
+        JSON.stringify(input.after),
+        JSON.stringify(input.diff),
+        JSON.stringify(input.metadata),
+      ],
+    );
+  }
+
   private async writeAuditEvent(event: DeadlineEventDto): Promise<void> {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     const beforeStatus = typeof payload.beforeStatus === 'string' ? payload.beforeStatus : null;
@@ -1047,6 +1148,50 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       ],
     );
   }
+}
+
+function hasOwn<T extends object, K extends PropertyKey>(value: T, key: K): value is T & Record<K, unknown> {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function policyAuditSnapshot(policy: DeadlinePolicyDto): Record<string, unknown> {
+  return {
+    policyCode: policy.policyCode,
+    policyName: policy.policyName,
+    scopeType: policy.scopeType,
+    targetType: policy.targetType ?? null,
+    targetCode: policy.targetCode ?? null,
+    durationValue: policy.durationValue ?? null,
+    durationUnit: policy.durationUnit ?? null,
+    startPoint: policy.startPoint ?? null,
+    isEnabled: policy.isEnabled,
+  };
+}
+
+function pickRecord(
+  value: DeadlineSettingsDto,
+  keys: ReadonlyArray<keyof DeadlineSettingsDto>,
+): Record<string, unknown> {
+  return Object.fromEntries(keys.map((key) => [key, value[key]]));
+}
+
+function diffRecords(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): Record<string, { from: unknown; to: unknown }> {
+  const diff: Record<string, { from: unknown; to: unknown }> = {};
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+
+  for (const key of keys) {
+    if (!Object.is(before[key], after[key])) {
+      diff[key] = {
+        from: before[key] ?? null,
+        to: after[key] ?? null,
+      };
+    }
+  }
+
+  return diff;
 }
 
 function buildDeadlineFilter(query: DeadlineListQuery): {
