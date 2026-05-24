@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { notificationsApi } from '../api/notificationsApi';
 import type { BackendNotificationDto } from '../api/types/notificationApi.types';
 import type { NotificationLevel } from '../stores/notificationStore';
@@ -25,81 +25,112 @@ export interface BackendNotificationsState {
   deleteNotification: (ids: string | string[]) => Promise<void>;
 }
 
+interface BackendNotificationsSnapshot {
+  notifications: PanelNotification[];
+  unreadCount: number;
+}
+
+const EMPTY_SNAPSHOT: BackendNotificationsSnapshot = {
+  notifications: [],
+  unreadCount: 0,
+};
+
 export function useBackendNotifications(enabled: boolean): BackendNotificationsState {
-  const [notifications, setNotifications] = useState<PanelNotification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [snapshot, setSnapshot] = useState<BackendNotificationsSnapshot>(EMPTY_SNAPSHOT);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const enabledRef = useRef(enabled);
+  const mountedRef = useRef(true);
+  const refreshRequestIdRef = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!enabled) {
-      setNotifications([]);
-      setUnreadCount(0);
+    if (!enabledRef.current) {
+      setSnapshot(EMPTY_SNAPSHOT);
+      setLoading(false);
       return;
     }
 
+    const requestId = refreshRequestIdRef.current + 1;
+    refreshRequestIdRef.current = requestId;
     setLoading(true);
     setError(null);
     try {
       const response = await notificationsApi.list({ page: 1, pageSize: 50, unreadOnly: false });
-      setNotifications(response.data.map(toPanelNotification));
-      setUnreadCount(response.unreadCount);
+      if (!isCurrentRefresh(requestId, refreshRequestIdRef, enabledRef, mountedRef)) {
+        return;
+      }
+
+      setSnapshot({
+        notifications: response.data.map(toPanelNotification),
+        unreadCount: response.unreadCount,
+      });
     } catch (caught) {
-      setError(caught);
+      if (isCurrentRefresh(requestId, refreshRequestIdRef, enabledRef, mountedRef)) {
+        setError(caught);
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRefresh(requestId, refreshRequestIdRef, enabledRef, mountedRef)) {
+        setLoading(false);
+      }
     }
-  }, [enabled]);
+  }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      refreshRequestIdRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    enabledRef.current = enabled;
+
+    if (!enabled) {
+      refreshRequestIdRef.current += 1;
+      setSnapshot(EMPTY_SNAPSHOT);
+      setLoading(false);
+      return;
+    }
+
     void refresh();
-  }, [refresh]);
+  }, [enabled, refresh]);
 
-  const markAsRead = useCallback(
-    async (ids: string | string[]) => {
-      const idList = Array.isArray(ids) ? ids : [ids];
-      const unreadIds = notifications
-        .filter((notification) => idList.includes(notification.id) && !notification.read)
-        .map((notification) => notification.id);
+  const markAsRead = useCallback(async (ids: string | string[]) => {
+    const idList = Array.isArray(ids) ? ids : [ids];
 
-      for (const id of idList) {
-        const response = await notificationsApi.markRead(id);
-        const next = toPanelNotification(response.notification);
-        setNotifications((current) => replaceNotificationById(current, next));
-      }
-      setUnreadCount((current) => Math.max(0, current - unreadIds.length));
-    },
-    [notifications],
-  );
+    for (const id of idList) {
+      const response = await notificationsApi.markRead(id);
+      const next = toPanelNotification(response.notification);
+      setSnapshot((current) => replaceNotificationInSnapshot(current, next));
+    }
+  }, []);
 
   const markAllAsRead = useCallback(async () => {
     await notificationsApi.markAllRead();
-    setNotifications((current) =>
-      current.map((notification) => ({ ...notification, read: true })),
-    );
-    setUnreadCount(0);
+    setSnapshot((current) => ({
+      notifications: current.notifications.map((notification) => ({
+        ...notification,
+        read: true,
+      })),
+      unreadCount: 0,
+    }));
   }, []);
 
-  const deleteNotification = useCallback(
-    async (ids: string | string[]) => {
-      const idList = Array.isArray(ids) ? ids : [ids];
-      const unreadDeletedCount = notifications.filter(
-        (notification) => idList.includes(notification.id) && !notification.read,
-      ).length;
+  const deleteNotification = useCallback(async (ids: string | string[]) => {
+    const idList = Array.isArray(ids) ? ids : [ids];
 
-      for (const id of idList) {
-        await notificationsApi.delete(id);
-        setNotifications((current) => removeNotificationById(current, id));
-      }
-      setUnreadCount((current) => Math.max(0, current - unreadDeletedCount));
-    },
-    [notifications],
-  );
+    for (const id of idList) {
+      await notificationsApi.delete(id);
+      setSnapshot((current) => removeNotificationFromSnapshot(current, id));
+    }
+  }, []);
 
   return useMemo(
     () => ({
-      notifications,
-      unreadCount,
+      notifications: snapshot.notifications,
+      unreadCount: snapshot.unreadCount,
       loading,
       error,
       refresh,
@@ -113,9 +144,8 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
       loading,
       markAllAsRead,
       markAsRead,
-      notifications,
       refresh,
-      unreadCount,
+      snapshot,
     ],
   );
 }
@@ -147,4 +177,50 @@ export function removeNotificationById(
   notificationId: string,
 ): PanelNotification[] {
   return notifications.filter((notification) => notification.id !== notificationId);
+}
+
+function isCurrentRefresh(
+  requestId: number,
+  refreshRequestIdRef: { current: number },
+  enabledRef: { current: boolean },
+  mountedRef: { current: boolean },
+): boolean {
+  return (
+    mountedRef.current &&
+    enabledRef.current &&
+    refreshRequestIdRef.current === requestId
+  );
+}
+
+function replaceNotificationInSnapshot(
+  current: BackendNotificationsSnapshot,
+  replacement: PanelNotification,
+): BackendNotificationsSnapshot {
+  const existing = current.notifications.find(
+    (notification) => notification.id === replacement.id,
+  );
+  const unreadCount =
+    existing && !existing.read && replacement.read
+      ? Math.max(0, current.unreadCount - 1)
+      : current.unreadCount;
+
+  return {
+    notifications: replaceNotificationById(current.notifications, replacement),
+    unreadCount,
+  };
+}
+
+function removeNotificationFromSnapshot(
+  current: BackendNotificationsSnapshot,
+  notificationId: string,
+): BackendNotificationsSnapshot {
+  const existing = current.notifications.find(
+    (notification) => notification.id === notificationId,
+  );
+
+  return {
+    notifications: removeNotificationById(current.notifications, notificationId),
+    unreadCount:
+      existing && !existing.read ? Math.max(0, current.unreadCount - 1) : current.unreadCount,
+  };
 }
