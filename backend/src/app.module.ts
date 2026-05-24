@@ -4,6 +4,7 @@ import { validateEnvForNest } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DeadlinesModule } from './modules/deadlines/deadlines.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { HealthModule } from './modules/health/health.module';
 import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
 import { OrdersModule } from './modules/orders/orders.module';
@@ -25,6 +26,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     AuthModule,
     ClientPhonesModule,
     DeadlinesModule,
+    NotificationsModule,
     HealthModule,
     OrdersModule,
     PaymentsModule,
