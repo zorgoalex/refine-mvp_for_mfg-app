@@ -25,6 +25,29 @@ node scripts/generate-passwords.js
 - **operator**: `operator123`
 - **top_manager**: `topmanager123`
 - **worker**: `worker123`
+
+## Deadline scheduler external-owner canary
+
+Run only against the isolated stage/test contour after the backend runtime is
+configured with `BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER=external`.
+
+```bash
+DEADLINE_WORKER_FIXTURE_KEY=deadline-scheduler-external-canary-YYYY-MM-DD \
+DEADLINE_WORKER_FIXTURE_ORDER_ID=11192 \
+DEADLINE_WORKER_FIXTURE_RESTORE=true \
+DEADLINE_WORKER_TARGET_ENV=backend-test \
+npm run test:e2e:deadline-scheduler-external-canary
+```
+
+Expected evidence:
+
+- `POST /api/v1/deadline-worker/process-due-scheduled` returns one processed
+  fixture deadline, then zero on repeat.
+- The expired fixture deadline has one `deadline-engine-scheduler` audit row,
+  zero `deadline-engine-manual` audit rows, one outbox row, and no action
+  executions.
+- Fixture restore returns zero deadline/event/audit/outbox/action-execution
+  rows for the fixture key.
 - **viewer**: `viewer123`
 
 ⚠️ **ВНИМАНИЕ:** Эти пароли предназначены ТОЛЬКО для разработки и тестирования! Никогда не используйте их в production!
