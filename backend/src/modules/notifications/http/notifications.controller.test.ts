@@ -57,6 +57,44 @@ describe('NotificationsController', () => {
       notificationId: '11111111-1111-4111-8111-111111111111',
     });
   });
+
+  it('passes current user to markAllRead service', async () => {
+    const service = {
+      list: vi.fn(),
+      markRead: vi.fn(),
+      markAllRead: vi.fn(async () => ({ updatedCount: 3 })),
+      delete: vi.fn(),
+    };
+    const controller = new NotificationsController(service);
+    const request = currentRequest();
+
+    await controller.markAllRead(request);
+
+    expect(service.markAllRead).toHaveBeenCalledWith({
+      currentUser: request.user,
+    });
+  });
+
+  it('passes current user and id to delete service', async () => {
+    const service = {
+      list: vi.fn(),
+      markRead: vi.fn(),
+      markAllRead: vi.fn(),
+      delete: vi.fn(async () => ({
+        notificationId: '11111111-1111-4111-8111-111111111111',
+        deleted: true as const,
+      })),
+    };
+    const controller = new NotificationsController(service);
+    const request = currentRequest();
+
+    await controller.delete(request, '11111111-1111-4111-8111-111111111111');
+
+    expect(service.delete).toHaveBeenCalledWith({
+      currentUser: request.user,
+      notificationId: '11111111-1111-4111-8111-111111111111',
+    });
+  });
 });
 
 function currentRequest(): RequestWithCurrentUser {

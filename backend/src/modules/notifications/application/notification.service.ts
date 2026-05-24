@@ -63,7 +63,10 @@ export class NotificationService {
     return { updatedCount };
   }
 
-  async delete(input: { currentUser: CurrentUser | undefined; notificationId: string }) {
+  async delete(input: {
+    currentUser: CurrentUser | undefined;
+    notificationId: string;
+  }): Promise<{ notificationId: string; deleted: true }> {
     const currentUser = requireCurrentUser(input.currentUser);
     const notificationId = parseNotificationId(input.notificationId);
     const deleted = await this.deps.repository.deleteForUser({
