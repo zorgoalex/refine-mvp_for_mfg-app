@@ -397,6 +397,66 @@ describe('useBackendNotifications hook', () => {
     expect(state.notifications).toEqual([]);
     expect(state.unreadCount).toBe(0);
   });
+
+  it('ignores refresh responses that started during mark-all-read mutation', async () => {
+    const unread = createBackendNotification();
+    const markAllRead = createDeferred<{ updatedCount: number }>();
+    const staleRefresh = createDeferred<NotificationListResponse>();
+    notificationsApiMock.list
+      .mockResolvedValueOnce(createListResponse([unread], 1))
+      .mockReturnValueOnce(staleRefresh.promise);
+    notificationsApiMock.markAllRead.mockReturnValueOnce(markAllRead.promise);
+
+    renderHook(true);
+    await flushPromises();
+    const loaded = renderHook(true);
+    const markAllPromise = loaded.markAllAsRead();
+    const refreshPromise = loaded.refresh();
+
+    markAllRead.resolve({ updatedCount: 1 });
+    await markAllPromise;
+    let state = renderHook(true);
+
+    expect(state.notifications).toEqual([{ ...toPanelNotification(unread), read: true }]);
+    expect(state.unreadCount).toBe(0);
+
+    staleRefresh.resolve(createListResponse([unread], 1));
+    await refreshPromise;
+    state = renderHook(true);
+
+    expect(state.notifications).toEqual([{ ...toPanelNotification(unread), read: true }]);
+    expect(state.unreadCount).toBe(0);
+  });
+
+  it('ignores refresh responses that started during delete mutation', async () => {
+    const deleted = createBackendNotification();
+    const deleteResponse = createDeferred<{ notificationId: string; deleted: true }>();
+    const staleRefresh = createDeferred<NotificationListResponse>();
+    notificationsApiMock.list
+      .mockResolvedValueOnce(createListResponse([deleted], 1))
+      .mockReturnValueOnce(staleRefresh.promise);
+    notificationsApiMock.delete.mockReturnValueOnce(deleteResponse.promise);
+
+    renderHook(true);
+    await flushPromises();
+    const loaded = renderHook(true);
+    const deletePromise = loaded.deleteNotification(deleted.notificationId);
+    const refreshPromise = loaded.refresh();
+
+    deleteResponse.resolve({ notificationId: deleted.notificationId, deleted: true });
+    await deletePromise;
+    let state = renderHook(true);
+
+    expect(state.notifications).toEqual([]);
+    expect(state.unreadCount).toBe(0);
+
+    staleRefresh.resolve(createListResponse([deleted], 1));
+    await refreshPromise;
+    state = renderHook(true);
+
+    expect(state.notifications).toEqual([]);
+    expect(state.unreadCount).toBe(0);
+  });
 });
 
 function createBackendNotification(

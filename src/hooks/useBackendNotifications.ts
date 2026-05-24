@@ -111,6 +111,7 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
     for (const id of idList) {
       const response = await notificationsApi.markRead(id);
       const next = toPanelNotification(response.notification);
+      invalidatePendingRefresh();
       setSnapshot((current) => replaceNotificationInSnapshot(current, next));
     }
   }, [invalidatePendingRefresh]);
@@ -118,6 +119,7 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
   const markAllAsRead = useCallback(async () => {
     invalidatePendingRefresh();
     await notificationsApi.markAllRead();
+    invalidatePendingRefresh();
     setSnapshot((current) => ({
       notifications: current.notifications.map((notification) => ({
         ...notification,
@@ -133,6 +135,7 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
 
     for (const id of idList) {
       await notificationsApi.delete(id);
+      invalidatePendingRefresh();
       setSnapshot((current) => removeNotificationFromSnapshot(current, id));
     }
   }, [invalidatePendingRefresh]);
