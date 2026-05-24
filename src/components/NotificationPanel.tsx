@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { List, Checkbox, Button, Empty, Space, Typography, Divider } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, List, Checkbox, Button, Empty, Space, Typography, Divider } from 'antd';
 import {
   InfoCircleOutlined,
   WarningOutlined,
@@ -33,6 +33,8 @@ export const NotificationPanel: React.FC<{
   const {
     notifications,
     loading,
+    error,
+    refresh,
     markAsRead,
     markAllAsRead,
     deleteNotification,
@@ -41,8 +43,13 @@ export const NotificationPanel: React.FC<{
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const allIds = useMemo(() => notifications.map((n) => n.id), [notifications]);
+  const visibleIds = useMemo(() => new Set(allIds), [allIds]);
 
   const isAllSelected = selectedIds.length === notifications.length && notifications.length > 0;
+
+  useEffect(() => {
+    setSelectedIds((prev) => prev.filter((id) => visibleIds.has(id)));
+  }, [visibleIds]);
 
   const handleSelectAll = () => {
     if (isAllSelected) {
@@ -79,6 +86,27 @@ export const NotificationPanel: React.FC<{
       await markAsRead(notification.id);
     }
   };
+
+  if (!loading && error) {
+    return (
+      <div style={{ width: 315, padding: 12, backgroundColor: '#fff' }}>
+        <Alert
+          type="error"
+          showIcon
+          message="Не удалось загрузить уведомления"
+          action={
+            <Button
+              size="small"
+              danger
+              onClick={() => void refresh()}
+            >
+              Повторить
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
 
   if (!loading && notifications.length === 0) {
     return (
@@ -205,7 +233,7 @@ export const NotificationPanel: React.FC<{
       <Divider style={{ margin: 0 }} />
       <div style={{ padding: '8px 16px', textAlign: 'center', backgroundColor: '#fff' }}>
         <Text type="secondary" style={{ fontSize: 10 }}>
-          Показано {notifications.length} из последних 100 уведомлений
+          Показано {notifications.length} из последних 50 уведомлений
         </Text>
       </div>
     </div>
