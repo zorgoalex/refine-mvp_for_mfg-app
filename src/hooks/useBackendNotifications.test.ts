@@ -24,6 +24,8 @@ const reactHarness = vi.hoisted(() => {
   let refCursor = 0;
   let effectCursor = 0;
   let memoCursor = 0;
+  let mounted = false;
+  let stateUpdatesAfterUnmount = 0;
 
   const depsChanged = (current: unknown[] | undefined, previous: unknown[] | undefined) => {
     if (!current || !previous || current.length !== previous.length) {
@@ -34,6 +36,7 @@ const reactHarness = vi.hoisted(() => {
   };
 
   const beginRender = () => {
+    mounted = true;
     stateCursor = 0;
     refCursor = 0;
     effectCursor = 0;
@@ -56,13 +59,25 @@ const reactHarness = vi.hoisted(() => {
     effectSlots = [];
     memoSlots = [];
     pendingEffects = [];
+    mounted = false;
+    stateUpdatesAfterUnmount = 0;
     beginRender();
+  };
+
+  const unmount = () => {
+    for (const effectSlot of effectSlots) {
+      effectSlot.cleanup?.();
+      effectSlot.cleanup = undefined;
+    }
+    mounted = false;
   };
 
   return {
     beginRender,
     flushEffects,
     reset,
+    unmount,
+    getStateUpdatesAfterUnmount: () => stateUpdatesAfterUnmount,
     module: {
       useCallback<T>(callback: T, deps: unknown[]): T {
         const index = memoCursor++;
@@ -109,6 +124,9 @@ const reactHarness = vi.hoisted(() => {
         }
 
         const setState = (value: T | ((current: T) => T)) => {
+          if (!mounted) {
+            stateUpdatesAfterUnmount += 1;
+          }
           stateSlots[index] =
             typeof value === 'function'
               ? (value as (current: T) => T)(stateSlots[index] as T)
@@ -341,6 +359,19 @@ describe('useBackendNotifications hook', () => {
     expect(state.loading).toBe(false);
   });
 
+  it('ignores stale refresh responses after unmount', async () => {
+    const deferred = createDeferred<NotificationListResponse>();
+    notificationsApiMock.list.mockReturnValueOnce(deferred.promise);
+
+    renderHook(true);
+    reactHarness.unmount();
+
+    deferred.resolve(createListResponse([createBackendNotification()], 1));
+    await flushPromises();
+
+    expect(reactHarness.getStateUpdatesAfterUnmount()).toBe(0);
+  });
+
   it('ignores stale refresh responses after mark-all-read succeeds', async () => {
     const unread = createBackendNotification();
     const staleRefresh = createDeferred<NotificationListResponse>();
@@ -415,6 +446,38 @@ describe('useBackendNotifications hook', () => {
 
     markAllRead.resolve({ updatedCount: 1 });
     await markAllPromise;
+    let state = renderHook(true);
+
+    expect(state.notifications).toEqual([{ ...toPanelNotification(unread), read: true }]);
+    expect(state.unreadCount).toBe(0);
+
+    staleRefresh.resolve(createListResponse([unread], 1));
+    await refreshPromise;
+    state = renderHook(true);
+
+    expect(state.notifications).toEqual([{ ...toPanelNotification(unread), read: true }]);
+    expect(state.unreadCount).toBe(0);
+  });
+
+  it('ignores refresh responses that started during mark-read mutation', async () => {
+    const unread = createBackendNotification();
+    const markRead = createDeferred<{ notification: BackendNotificationDto }>();
+    const staleRefresh = createDeferred<NotificationListResponse>();
+    notificationsApiMock.list
+      .mockResolvedValueOnce(createListResponse([unread], 1))
+      .mockReturnValueOnce(staleRefresh.promise);
+    notificationsApiMock.markRead.mockReturnValueOnce(markRead.promise);
+
+    renderHook(true);
+    await flushPromises();
+    const loaded = renderHook(true);
+    const markReadPromise = loaded.markAsRead(unread.notificationId);
+    const refreshPromise = loaded.refresh();
+
+    markRead.resolve({
+      notification: { ...unread, readAt: '2026-05-23T10:01:00.000Z' },
+    });
+    await markReadPromise;
     let state = renderHook(true);
 
     expect(state.notifications).toEqual([{ ...toPanelNotification(unread), read: true }]);
