@@ -54,6 +54,12 @@ export const apiRoutes = {
     resume: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}/resume`),
     cancel: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}/cancel`),
   },
+  notifications: {
+    list: backendApiPath('/notifications'),
+    byId: (notificationId: string) => backendApiPath(`/notifications/${notificationId}`),
+    read: (notificationId: string) => backendApiPath(`/notifications/${notificationId}/read`),
+    readAll: backendApiPath('/notifications/read-all'),
+  },
   deadlinePolicies: {
     list: backendApiPath('/deadline-policies'),
     byId: (policyId: string) => backendApiPath(`/deadline-policies/${policyId}`),
