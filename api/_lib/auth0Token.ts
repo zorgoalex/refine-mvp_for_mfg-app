@@ -1,3 +1,5 @@
+import { logger } from './logger';
+
 /**
  * Auth0 Machine-to-Machine (M2M) Token Manager
  *
@@ -61,11 +63,11 @@ export async function getM2MToken(): Promise<string> {
   // Валидация конфигурации
   const config = validateAuth0Config();
   if (!config.valid) {
-    console.error('[auth0Token] Missing env variables:', config.missing);
+    logger.error('[auth0Token] Missing env variables', undefined, { missing: config.missing });
     throw new Error(`Auth0 configuration error: missing ${config.missing.join(', ')}`);
   }
 
-  console.log('[auth0Token] Requesting new M2M token from Auth0...');
+  logger.info('[auth0Token] Requesting new M2M token from Auth0');
   const startTime = Date.now();
 
   try {
@@ -85,7 +87,7 @@ export async function getM2MToken(): Promise<string> {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[auth0Token] Auth0 error response:', {
+      logger.error('[auth0Token] Auth0 error response', undefined, {
         status: response.status,
         statusText: response.statusText,
         body: errorText.substring(0, 200),
@@ -102,7 +104,7 @@ export async function getM2MToken(): Promise<string> {
     };
 
     const duration = Date.now() - startTime;
-    console.log('[auth0Token] M2M token obtained successfully', {
+    logger.info('[auth0Token] M2M token obtained successfully', {
       expiresIn: data.expires_in,
       tokenType: data.token_type,
       duration: `${duration}ms`,
@@ -110,7 +112,7 @@ export async function getM2MToken(): Promise<string> {
 
     return cachedToken.token;
   } catch (error) {
-    console.error('[auth0Token] Failed to obtain M2M token:', error);
+    logger.error('[auth0Token] Failed to obtain M2M token', error);
     throw error;
   }
 }
@@ -121,7 +123,7 @@ export async function getM2MToken(): Promise<string> {
  */
 export function clearTokenCache(): void {
   cachedToken = null;
-  console.log('[auth0Token] Token cache cleared');
+  logger.info('[auth0Token] Token cache cleared');
 }
 
 /**
