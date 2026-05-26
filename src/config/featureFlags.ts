@@ -8,6 +8,7 @@ export interface FrontendFeatureFlags {
   useBackendProductionActions: boolean;
   useBackendDeadlines: boolean;
   useBackendOrderExport: boolean;
+  useBackendProjects: boolean;
   useBackendUsers: boolean;
   useBackendVlm: boolean;
   useBackendReferences: boolean;
@@ -26,6 +27,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendProductionActions: string | boolean;
   backendDeadlines: string | boolean;
   backendOrderExport: string | boolean;
+  backendProjects: string | boolean;
   backendUsers: string | boolean;
   backendVlm: string | boolean;
   backendReferences: string | boolean;
@@ -57,6 +59,7 @@ export function getFeatureFlags(
     ),
     useBackendDeadlines: readBooleanFlag(env.VITE_USE_BACKEND_DEADLINES, false),
     useBackendOrderExport: readBooleanFlag(env.VITE_USE_BACKEND_ORDER_EXPORT, false),
+    useBackendProjects: readBooleanFlag(env.VITE_USE_BACKEND_PROJECTS, false),
     useBackendUsers: readBooleanFlag(env.VITE_USE_BACKEND_USERS, false),
     useBackendVlm: readBooleanFlag(env.VITE_USE_BACKEND_VLM, false),
     useBackendReferences: readBooleanFlag(env.VITE_USE_BACKEND_REFERENCES, false),
@@ -97,6 +100,8 @@ export function mergeRuntimeFeatureFlags(
       fallback.useBackendDeadlines,
     useBackendOrderExport:
       readOptionalBooleanFlag(runtimeFeatures.backendOrderExport) ?? fallback.useBackendOrderExport,
+    useBackendProjects:
+      readOptionalBooleanFlag(runtimeFeatures.backendProjects) ?? fallback.useBackendProjects,
     useBackendUsers: readOptionalBooleanFlag(runtimeFeatures.backendUsers) ?? fallback.useBackendUsers,
     useBackendVlm: readOptionalBooleanFlag(runtimeFeatures.backendVlm) ?? fallback.useBackendVlm,
     useBackendReferences:

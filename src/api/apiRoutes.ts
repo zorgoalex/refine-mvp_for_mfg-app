@@ -79,6 +79,11 @@ export const apiRoutes = {
     list: backendApiPath('/deadline-transition-rules'),
     byId: (actionRuleId: string) => backendApiPath(`/deadline-transition-rules/${actionRuleId}`),
   },
+  projects: {
+    list: backendApiPath('/projects'),
+    lookup: backendApiPath('/projects/lookup'),
+    byId: (projectId: string) => backendApiPath(`/projects/${projectId}`),
+  },
   users: {
     list: backendApiPath('/users'),
     byId: (userId: number) => backendApiPath(`/users/${userId}`),

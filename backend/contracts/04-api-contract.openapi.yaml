@@ -35,7 +35,7 @@ tags:
   - name: Production Actions
     description: Точечные производственные действия над заказом
   - name: Projects
-    description: Project foundation read-only API
+    description: Projects API
   - name: Order Snapshots
     description: Экспорт и импорт переносимых snapshot'ов заказа
   - name: Deadlines
@@ -2451,6 +2451,39 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Projects
+      operationId: createProject
+      summary: Create project
+      security:
+        - bearerAuth: []
+      x-permission: projects.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Created project
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project]
+                properties:
+                  project:
+                    $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/projects/lookup:
     get:
@@ -2528,6 +2561,81 @@ paths:
       responses:
         '200':
           description: Project
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project]
+                properties:
+                  project:
+                    $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - Projects
+      operationId: updateProject
+      summary: Update project
+      security:
+        - bearerAuth: []
+      x-permission: projects.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project]
+                properties:
+                  project:
+                    $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Projects
+      operationId: archiveProject
+      summary: Archive project
+      description: Soft archives a project by setting status to archived and archivedAt.
+      security:
+        - bearerAuth: []
+      x-permission: projects.archive
+      responses:
+        '200':
+          description: Archived project
           content:
             application/json:
               schema:
@@ -3554,6 +3662,81 @@ components:
         success:
           type: boolean
           example: true
+
+    CreateProjectRequest:
+      type: object
+      required:
+        - code
+        - name
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 64
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+        status:
+          type: string
+          enum: [draft, active, paused, completed, archived]
+          default: active
+        startsAt:
+          type: string
+          format: date
+          nullable: true
+        endsAt:
+          type: string
+          format: date
+          nullable: true
+        ownerUserId:
+          type: integer
+          minimum: 1
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+
+    UpdateProjectRequest:
+      type: object
+      minProperties: 1
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 64
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+        status:
+          type: string
+          enum: [draft, active, paused, completed, archived]
+        startsAt:
+          type: string
+          format: date
+          nullable: true
+        endsAt:
+          type: string
+          format: date
+          nullable: true
+        ownerUserId:
+          type: integer
+          minimum: 1
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
 
     Project:
       type: object

@@ -65,10 +65,114 @@ describe('PgProjectRepository', () => {
     expect(database.queries[0].text).toContain('WHERE p.id = $1');
     expect(database.queries[0].params).toEqual(['22222222-2222-4222-8222-222222222222']);
   });
+
+  it('creates a project transactionally and writes actor/request audit metadata', async () => {
+    const database = new FakeProjectDatabase([
+      { rows: [projectRow({ id: '33333333-3333-4333-8333-333333333333', code: 'PRJ-004' })] },
+      { rows: [] },
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.createProject({
+        currentUser: currentUser(),
+        dto: {
+          code: 'PRJ-004',
+          name: 'New project',
+          status: 'draft',
+          startsAt: '2026-05-01',
+          endsAt: '2026-05-02',
+          ownerUserId: 9,
+          metadata: { source: 'test' },
+        },
+        requestId: 'req-create-project',
+      }),
+    ).resolves.toMatchObject({ id: '33333333-3333-4333-8333-333333333333', code: 'PRJ-004' });
+
+    expect(database.transactionCalls).toBe(1);
+    expect(database.queries[0].text).toContain('INSERT INTO public.project_projects');
+    expect(database.queries[0].text).toContain('RETURNING');
+    expect(database.queries[0].params).toEqual([
+      'PRJ-004',
+      'New project',
+      null,
+      'draft',
+      '2026-05-01',
+      '2026-05-02',
+      9,
+      JSON.stringify({ source: 'test' }),
+      42,
+    ]);
+    expect(database.queries[1].text).toContain('INSERT INTO audit_log');
+    expect(database.queries[1].params).toEqual([
+      'projects.create',
+      '33333333-3333-4333-8333-333333333333',
+      42,
+      'admin_user',
+      'admin',
+      'req-create-project',
+      null,
+      expect.any(String),
+      expect.any(String),
+    ]);
+  });
+
+  it('updates a project transactionally with before and after audit snapshots', async () => {
+    const before = projectRow({ name: 'Old project' });
+    const after = projectRow({ name: 'Updated project', status: 'paused' });
+    const database = new FakeProjectDatabase([{ rows: [before] }, { rows: [after] }, { rows: [] }]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.updateProject({
+        currentUser: currentUser(),
+        projectId: '00000000-0000-4000-8000-000000000000',
+        dto: { name: 'Updated project', status: 'paused' },
+        requestId: 'req-update-project',
+      }),
+    ).resolves.toMatchObject({ name: 'Updated project', status: 'paused' });
+
+    expect(database.transactionCalls).toBe(1);
+    expect(database.queries[0].text).toContain('FOR UPDATE');
+    expect(database.queries[0].params).toEqual(['00000000-0000-4000-8000-000000000000']);
+    expect(database.queries[1].text).toContain('UPDATE public.project_projects p');
+    expect(database.queries[1].text).toContain('name = $1');
+    expect(database.queries[1].text).toContain('status = $2');
+    expect(database.queries[1].params).toEqual(['Updated project', 'paused', '00000000-0000-4000-8000-000000000000']);
+    expect(database.queries[2].text).toContain('INSERT INTO audit_log');
+    expect(database.queries[2].params[0]).toBe('projects.update');
+    expect(database.queries[2].params[5]).toBe('req-update-project');
+    expect(JSON.parse(database.queries[2].params[6] as string)).toMatchObject({ name: 'Old project' });
+    expect(JSON.parse(database.queries[2].params[7] as string)).toMatchObject({ name: 'Updated project' });
+  });
+
+  it('archives a project as a soft delete and writes audit metadata', async () => {
+    const before = projectRow({ status: 'active', archived_at: null });
+    const after = projectRow({ status: 'archived', archived_at: '2026-05-03T00:00:00.000Z' });
+    const database = new FakeProjectDatabase([{ rows: [before] }, { rows: [after] }, { rows: [] }]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.archiveProject({
+        currentUser: currentUser(),
+        projectId: '00000000-0000-4000-8000-000000000000',
+        requestId: 'req-archive-project',
+      }),
+    ).resolves.toMatchObject({ status: 'archived', archivedAt: '2026-05-03T00:00:00.000Z' });
+
+    expect(database.transactionCalls).toBe(1);
+    expect(database.queries[1].text).toContain("status = 'archived'");
+    expect(database.queries[1].text).toContain('archived_at = COALESCE(p.archived_at, now())');
+    expect(database.queries[1].text).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(database.queries[2].text).toContain('INSERT INTO audit_log');
+    expect(database.queries[2].params[0]).toBe('projects.archive');
+    expect(database.queries[2].params[5]).toBe('req-archive-project');
+  });
 });
 
 class FakeProjectDatabase {
   readonly queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  transactionCalls = 0;
   private readonly queryQueue: Array<QueryResult<QueryResultRow>>;
 
   constructor(queryResults: Array<{ rows: QueryResultRow[] }>) {
@@ -81,6 +185,11 @@ class FakeProjectDatabase {
   ): Promise<QueryResult<T>> {
     this.queries.push({ text, params });
     return (this.queryQueue.shift() ?? toQueryResult([])) as QueryResult<T>;
+  }
+
+  async transaction<T>(handler: (client: FakeProjectDatabase) => Promise<T>): Promise<T> {
+    this.transactionCalls += 1;
+    return handler(this);
   }
 }
 
@@ -110,5 +219,15 @@ function projectRow(overrides: Partial<QueryResultRow> = {}): QueryResultRow {
     archived_at: null,
     created_by: null,
     ...overrides,
+  };
+}
+
+function currentUser() {
+  return {
+    id: '42',
+    username: 'admin_user',
+    role: 'admin' as const,
+    roleId: 1,
+    permissions: ['projects.create', 'projects.update', 'projects.archive', 'projects.view'],
   };
 }

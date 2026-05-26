@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../common/errors/api-error';
 import type { CurrentUser } from '../../permissions/current-user';
 import { getPermissionsForRole } from '../../permissions/permissions';
-import type { ProjectDto, ProjectListResponseDto } from './dto/project.dto';
+import type {
+  CreateProjectRequestDto,
+  ProjectDto,
+  ProjectListResponseDto,
+  UpdateProjectRequestDto,
+} from './dto/project.dto';
 import { ProjectNotFoundError, ProjectsService, type ProjectRepositoryPort } from './projects.service';
 
 describe('ProjectsService', () => {
@@ -64,6 +69,97 @@ describe('ProjectsService', () => {
       }),
     ).rejects.toBeInstanceOf(ProjectNotFoundError);
   });
+
+  it('requires project write permissions before delegating create, update, or archive', async () => {
+    const service = new ProjectsService({ projects: createRepository() });
+    const viewer = currentUser('viewer');
+
+    await expect(
+      service.create({
+        currentUser: viewer,
+        dto: createProjectDto(),
+        requestId: 'req-create-denied',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['projects.create'] },
+    } satisfies Partial<ApiError>);
+
+    await expect(
+      service.update({
+        currentUser: viewer,
+        projectId: '11111111-1111-4111-8111-111111111111',
+        dto: { name: 'Updated project' },
+        requestId: 'req-update-denied',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['projects.update'] },
+    } satisfies Partial<ApiError>);
+
+    await expect(
+      service.archive({
+        currentUser: viewer,
+        projectId: '11111111-1111-4111-8111-111111111111',
+        requestId: 'req-archive-denied',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['projects.archive'] },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('delegates write methods for users with project write permissions', async () => {
+    const project = projectDto();
+    const calls: string[] = [];
+    const service = new ProjectsService({
+      projects: createRepository({
+        async createProject(command) {
+          calls.push(`create:${command.currentUser.id}:${command.dto.code}:${command.requestId}`);
+          return project;
+        },
+        async updateProject(command) {
+          calls.push(`update:${command.projectId}:${command.dto.name}:${command.requestId}`);
+          return { ...project, name: command.dto.name ?? project.name };
+        },
+        async archiveProject(command) {
+          calls.push(`archive:${command.projectId}:${command.requestId}`);
+          return { ...project, status: 'archived', archivedAt: '2026-05-03T00:00:00.000Z' };
+        },
+      }),
+    });
+
+    await expect(
+      service.create({
+        currentUser: currentUser('admin'),
+        dto: createProjectDto(),
+        requestId: 'req-create-1',
+      }),
+    ).resolves.toEqual(project);
+    await expect(
+      service.update({
+        currentUser: currentUser('admin'),
+        projectId: project.id,
+        dto: { name: 'Updated project' } satisfies UpdateProjectRequestDto,
+        requestId: 'req-update-1',
+      }),
+    ).resolves.toMatchObject({ name: 'Updated project' });
+    await expect(
+      service.archive({
+        currentUser: currentUser('admin'),
+        projectId: project.id,
+        requestId: 'req-archive-1',
+      }),
+    ).resolves.toMatchObject({ status: 'archived', archivedAt: '2026-05-03T00:00:00.000Z' });
+    expect(calls).toEqual([
+      'create:admin-id:PRJ-001:req-create-1',
+      `update:${project.id}:Updated project:req-update-1`,
+      `archive:${project.id}:req-archive-1`,
+    ]);
+  });
 });
 
 function createRepository(overrides: Partial<ProjectRepositoryPort> = {}): ProjectRepositoryPort {
@@ -76,6 +172,15 @@ function createRepository(overrides: Partial<ProjectRepositoryPort> = {}): Proje
     },
     async getProjectById() {
       throw new Error('getProjectById should not be called');
+    },
+    async createProject() {
+      throw new Error('createProject should not be called');
+    },
+    async updateProject() {
+      throw new Error('updateProject should not be called');
+    },
+    async archiveProject() {
+      throw new Error('archiveProject should not be called');
     },
     ...overrides,
   };
@@ -106,5 +211,13 @@ function projectDto(): ProjectDto {
     updatedAt: '2026-05-01T00:00:00.000Z',
     archivedAt: null,
     createdBy: null,
+  };
+}
+
+function createProjectDto(): CreateProjectRequestDto {
+  return {
+    code: 'PRJ-001',
+    name: 'Project',
+    status: 'active',
   };
 }

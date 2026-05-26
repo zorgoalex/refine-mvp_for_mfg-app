@@ -20,6 +20,7 @@ describe('featureFlags', () => {
       useBackendProductionActions: false,
       useBackendDeadlines: false,
       useBackendOrderExport: false,
+      useBackendProjects: false,
       useBackendUsers: false,
       useBackendVlm: false,
       useBackendReferences: false,
@@ -61,6 +62,7 @@ describe('featureFlags', () => {
           VITE_USE_BACKEND_ORDERS_READ: 'true',
           VITE_USE_BACKEND_ORDERS_WRITE: 'true',
           VITE_USE_BACKEND_PAYMENTS: 'false',
+          VITE_USE_BACKEND_PROJECTS: 'false',
           VITE_USE_BACKEND_CLIENT_PHONES: 'false',
           VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'false',
           VITE_USE_BACKEND_VLM: 'true',
@@ -69,6 +71,7 @@ describe('featureFlags', () => {
           backendAuth: true,
           backendOrdersWrite: false,
           backendPayments: true,
+          backendProjects: true,
           backendClientPhones: true,
           backendProductionActions: true,
         },
@@ -78,6 +81,7 @@ describe('featureFlags', () => {
       useBackendOrdersRead: true,
       useBackendOrdersWrite: false,
       useBackendPayments: true,
+      useBackendProjects: true,
       useBackendClientPhones: true,
       useBackendProductionActions: true,
       useBackendVlm: true,
@@ -180,6 +184,14 @@ describe('featureFlags', () => {
       useBackendUsers: true,
     });
     expect(readOptionalBooleanFlag('not-a-boolean')).toBeUndefined();
+  });
+
+  it('reads backend projects from env and runtime config with a safe default', () => {
+    expect(getFeatureFlags({}).useBackendProjects).toBe(false);
+    expect(getFeatureFlags({ VITE_USE_BACKEND_PROJECTS: 'true' }).useBackendProjects).toBe(true);
+    expect(
+      getFeatureFlags({ VITE_USE_BACKEND_PROJECTS: 'false' }, { backendProjects: true }).useBackendProjects,
+    ).toBe(true);
   });
 
   it('can update the exported featureFlags object in place', () => {

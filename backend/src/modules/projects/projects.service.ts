@@ -2,10 +2,12 @@ import { ApiError } from '../../common/errors/api-error';
 import type { CurrentUser } from '../../permissions/current-user';
 import { PermissionsService } from '../../permissions/permissions.service';
 import type {
+  CreateProjectRequestDto,
   ProjectDto,
   ProjectListQuery,
   ProjectListResponseDto,
   ProjectLookupResponseDto,
+  UpdateProjectRequestDto,
 } from './dto/project.dto';
 
 export interface ProjectLookupQuery {
@@ -17,6 +19,9 @@ export interface ProjectRepositoryPort {
   listProjects(query: ProjectListQuery): Promise<ProjectListResponseDto>;
   lookupProjects(query: ProjectLookupQuery): Promise<ProjectLookupResponseDto>;
   getProjectById(projectId: string): Promise<ProjectDto | null>;
+  createProject(command: CreateProjectCommand): Promise<ProjectDto>;
+  updateProject(command: UpdateProjectCommand): Promise<ProjectDto>;
+  archiveProject(command: ArchiveProjectCommand): Promise<ProjectDto>;
 }
 
 export interface ProjectsServicePorts {
@@ -37,6 +42,25 @@ export interface LookupProjectsCommand {
 }
 
 export interface GetProjectByIdCommand {
+  currentUser: CurrentUser;
+  projectId: string;
+  requestId?: string;
+}
+
+export interface CreateProjectCommand {
+  currentUser: CurrentUser;
+  dto: CreateProjectRequestDto;
+  requestId?: string;
+}
+
+export interface UpdateProjectCommand {
+  currentUser: CurrentUser;
+  projectId: string;
+  dto: UpdateProjectRequestDto;
+  requestId?: string;
+}
+
+export interface ArchiveProjectCommand {
   currentUser: CurrentUser;
   projectId: string;
   requestId?: string;
@@ -70,10 +94,29 @@ export class ProjectsService {
     return project;
   }
 
+  async create(command: CreateProjectCommand): Promise<ProjectDto> {
+    this.requirePermission(command.currentUser, 'projects.create');
+    return this.ports.projects.createProject(command);
+  }
+
+  async update(command: UpdateProjectCommand): Promise<ProjectDto> {
+    this.requirePermission(command.currentUser, 'projects.update');
+    return this.ports.projects.updateProject(command);
+  }
+
+  async archive(command: ArchiveProjectCommand): Promise<ProjectDto> {
+    this.requirePermission(command.currentUser, 'projects.archive');
+    return this.ports.projects.archiveProject(command);
+  }
+
   private requireView(currentUser: CurrentUser): void {
-    if (!this.permissions.canUser(currentUser, 'projects.view')) {
+    this.requirePermission(currentUser, 'projects.view');
+  }
+
+  private requirePermission(currentUser: CurrentUser, permission: 'projects.view' | 'projects.create' | 'projects.update' | 'projects.archive'): void {
+    if (!this.permissions.canUser(currentUser, permission)) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
-        requiredPermissions: ['projects.view'],
+        requiredPermissions: [permission],
       });
     }
   }

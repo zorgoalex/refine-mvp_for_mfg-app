@@ -37,6 +37,46 @@ describe('projects OpenAPI contract', () => {
     expect(getSection).toContain("'400':");
     expect(getSection).toContain("$ref: '#/components/responses/BadRequest'");
   });
+
+  it('documents project write endpoints, permissions, and request schemas', () => {
+    const contract = readOpenApiContract();
+    const projectsSection = sectionBetween(
+      contract,
+      '  /api/v1/projects:',
+      '  /api/v1/projects/lookup:',
+    );
+    const projectByIdSection = sectionBetween(
+      contract,
+      '  /api/v1/projects/{projectId}:',
+      '  /api/v1/users:',
+    );
+    const createSchema = sectionBetween(
+      contract,
+      '    CreateProjectRequest:',
+      '    UpdateProjectRequest:',
+    );
+    const updateSchema = sectionBetween(
+      contract,
+      '    UpdateProjectRequest:',
+      '    Project:',
+    );
+
+    expect(projectsSection).toContain('post:');
+    expect(projectsSection).toContain('operationId: createProject');
+    expect(projectsSection).toContain('x-permission: projects.create');
+    expect(projectsSection).toContain("$ref: '#/components/schemas/CreateProjectRequest'");
+    expect(projectByIdSection).toContain('patch:');
+    expect(projectByIdSection).toContain('operationId: updateProject');
+    expect(projectByIdSection).toContain('x-permission: projects.update');
+    expect(projectByIdSection).toContain('delete:');
+    expect(projectByIdSection).toContain('operationId: archiveProject');
+    expect(projectByIdSection).toContain('x-permission: projects.archive');
+    expect(createSchema).toContain('- code');
+    expect(createSchema).toContain('pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$');
+    expect(createSchema).toContain('maxLength: 256');
+    expect(updateSchema).toContain('minProperties: 1');
+    expect(updateSchema).toContain('enum: [draft, active, paused, completed, archived]');
+  });
 });
 
 function readOpenApiContract(): string {

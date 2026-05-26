@@ -37,6 +37,9 @@ describe('apiRoutes', () => {
     expect(apiRoutes.deadlineTransitionRules.byId('rule-id')).toBe(
       '/api/v1/deadline-transition-rules/rule-id',
     );
+    expect(apiRoutes.projects.list).toBe('/api/v1/projects');
+    expect(apiRoutes.projects.lookup).toBe('/api/v1/projects/lookup');
+    expect(apiRoutes.projects.byId('project-id')).toBe('/api/v1/projects/project-id');
     expect(apiRoutes.users.changePassword(7)).toBe('/api/v1/users/7/change-password');
     expect(apiRoutes.vlm.analyze).toBe('/api/v1/vlm/analyze');
   });

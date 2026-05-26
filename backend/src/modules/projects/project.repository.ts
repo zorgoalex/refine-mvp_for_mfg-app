@@ -1,6 +1,6 @@
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../common/errors/api-error';
-import type { DatabaseClient } from '../../database/database.types';
+import type { DatabaseClient, TransactionClient } from '../../database/database.types';
 import type {
   ProjectDto,
   ProjectListQuery,
@@ -8,8 +8,15 @@ import type {
   ProjectLookupItemDto,
   ProjectLookupResponseDto,
   ProjectStatus,
+  UpdateProjectRequestDto,
 } from './dto/project.dto';
-import type { ProjectLookupQuery, ProjectRepositoryPort } from './projects.service';
+import type {
+  ArchiveProjectCommand,
+  CreateProjectCommand,
+  ProjectLookupQuery,
+  ProjectRepositoryPort,
+  UpdateProjectCommand,
+} from './projects.service';
 
 interface ProjectRow extends QueryResultRow {
   id: string;
@@ -31,6 +38,10 @@ interface CountRow extends QueryResultRow {
   total: string | number;
 }
 
+type ProjectDatabase = DatabaseClient & {
+  transaction<T>(handler: (client: TransactionClient) => Promise<T>): Promise<T>;
+};
+
 const PROJECT_SELECT = `
   SELECT
     p.id::text, p.code, p.name, p.description, p.status,
@@ -40,7 +51,7 @@ const PROJECT_SELECT = `
 `;
 
 export class PgProjectRepository implements ProjectRepositoryPort {
-  constructor(private readonly database: DatabaseClient) {}
+  constructor(private readonly database: ProjectDatabase) {}
 
   async listProjects(query: ProjectListQuery): Promise<ProjectListResponseDto> {
     const params: unknown[] = [];
@@ -113,6 +124,112 @@ export class PgProjectRepository implements ProjectRepositoryPort {
 
     return result.rows[0] ? mapProjectRow(result.rows[0]) : null;
   }
+
+  async createProject(command: CreateProjectCommand): Promise<ProjectDto> {
+    return this.database.transaction(async (tx) => {
+      const created = await tx.query<ProjectRow>(
+        `
+        INSERT INTO public.project_projects (
+          code, name, description, status, starts_at, ends_at, owner_user_id, metadata, created_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+        RETURNING
+          id::text, code, name, description, status, starts_at, ends_at, owner_user_id,
+          metadata, created_at, updated_at, archived_at, created_by
+        `,
+        [
+          command.dto.code,
+          command.dto.name,
+          normalizeNullableText(command.dto.description),
+          command.dto.status ?? 'active',
+          command.dto.startsAt ?? null,
+          command.dto.endsAt ?? null,
+          command.dto.ownerUserId ?? null,
+          JSON.stringify(command.dto.metadata ?? {}),
+          toNullableUserId(command.currentUser.id),
+        ],
+      );
+      const project = mapProjectRow(created.rows[0]);
+
+      await writeProjectAudit(tx, {
+        command,
+        action: 'projects.create',
+        entityId: project.id,
+        after: projectAuditSnapshot(project),
+        metadata: { source: 'projects-api' },
+      });
+
+      return project;
+    });
+  }
+
+  async updateProject(command: UpdateProjectCommand): Promise<ProjectDto> {
+    return this.database.transaction(async (tx) => {
+      const before = await getProjectForUpdate(tx, command.projectId);
+      const assignments: string[] = [];
+      const params: unknown[] = [];
+
+      appendProjectAssignments(assignments, params, command.dto);
+
+      if (assignments.length === 0) {
+        return before;
+      }
+
+      const projectIdIndex = params.push(command.projectId);
+      const updated = await tx.query<ProjectRow>(
+        `
+        UPDATE public.project_projects p
+        SET ${assignments.join(', ')}
+        WHERE p.id = $${projectIdIndex}
+        RETURNING
+          p.id::text, p.code, p.name, p.description, p.status, p.starts_at, p.ends_at,
+          p.owner_user_id, p.metadata, p.created_at, p.updated_at, p.archived_at, p.created_by
+        `,
+        params,
+      );
+      const project = mapProjectRow(updated.rows[0]);
+
+      await writeProjectAudit(tx, {
+        command,
+        action: 'projects.update',
+        entityId: project.id,
+        before: projectAuditSnapshot(before),
+        after: projectAuditSnapshot(project),
+        metadata: { changedFields: Object.keys(command.dto) },
+      });
+
+      return project;
+    });
+  }
+
+  async archiveProject(command: ArchiveProjectCommand): Promise<ProjectDto> {
+    return this.database.transaction(async (tx) => {
+      const before = await getProjectForUpdate(tx, command.projectId);
+      const updated = await tx.query<ProjectRow>(
+        `
+        UPDATE public.project_projects p
+        SET status = 'archived', archived_at = COALESCE(p.archived_at, now())
+        WHERE p.id = $1
+        RETURNING
+          p.id::text, p.code, p.name, p.description, p.status, p.starts_at, p.ends_at,
+          p.owner_user_id, p.metadata, p.created_at, p.updated_at, p.archived_at, p.created_by
+        `,
+        [command.projectId],
+      );
+      const project = mapProjectRow(updated.rows[0]);
+
+      await writeProjectAudit(tx, {
+        command,
+        action: 'projects.archive',
+        entityId: project.id,
+        before: projectAuditSnapshot(before),
+        after: projectAuditSnapshot(project),
+        metadata: { softDelete: true },
+      });
+
+      return project;
+    });
+  }
 }
 
 export class UnavailableProjectRepository implements ProjectRepositoryPort {
@@ -127,6 +244,97 @@ export class UnavailableProjectRepository implements ProjectRepositoryPort {
   async getProjectById(): Promise<ProjectDto | null> {
     throw databaseUnavailable();
   }
+
+  async createProject(): Promise<ProjectDto> {
+    throw databaseUnavailable();
+  }
+
+  async updateProject(): Promise<ProjectDto> {
+    throw databaseUnavailable();
+  }
+
+  async archiveProject(): Promise<ProjectDto> {
+    throw databaseUnavailable();
+  }
+}
+
+async function getProjectForUpdate(tx: DatabaseClient, projectId: string): Promise<ProjectDto> {
+  const result = await tx.query<ProjectRow>(
+    `
+    ${PROJECT_SELECT}
+    WHERE p.id = $1
+    FOR UPDATE
+    `,
+    [projectId],
+  );
+
+  if (!result.rows[0]) {
+    throw new ProjectNotFoundError(projectId);
+  }
+
+  return mapProjectRow(result.rows[0]);
+}
+
+function appendProjectAssignments(
+  assignments: string[],
+  params: unknown[],
+  dto: UpdateProjectRequestDto,
+): void {
+  if ('code' in dto) assignments.push(`code = $${params.push(dto.code)}`);
+  if ('name' in dto) assignments.push(`name = $${params.push(dto.name)}`);
+  if ('description' in dto) assignments.push(`description = $${params.push(normalizeNullableText(dto.description))}`);
+  if ('status' in dto) assignments.push(`status = $${params.push(dto.status)}`);
+  if ('startsAt' in dto) assignments.push(`starts_at = $${params.push(dto.startsAt ?? null)}`);
+  if ('endsAt' in dto) assignments.push(`ends_at = $${params.push(dto.endsAt ?? null)}`);
+  if ('ownerUserId' in dto) assignments.push(`owner_user_id = $${params.push(dto.ownerUserId ?? null)}`);
+  if ('metadata' in dto) assignments.push(`metadata = $${params.push(JSON.stringify(dto.metadata ?? {}))}::jsonb`);
+}
+
+async function writeProjectAudit(
+  tx: DatabaseClient,
+  input: {
+    command: CreateProjectCommand | UpdateProjectCommand | ArchiveProjectCommand;
+    action: string;
+    entityId: string;
+    before?: Record<string, unknown>;
+    after?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<void> {
+  await tx.query(
+    `
+    INSERT INTO audit_log (
+      event, entity_type, entity_id, user_id, username, role_code, role,
+      request_id, before_json, after_json, metadata_json
+    )
+    VALUES ($1, 'project', $2, $3, $4, $5, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb)
+    `,
+    [
+      input.action,
+      input.entityId,
+      toNullableUserId(input.command.currentUser.id),
+      input.command.currentUser.username,
+      input.command.currentUser.role,
+      input.command.requestId ?? 'projects-command',
+      input.before ? JSON.stringify(input.before) : null,
+      input.after ? JSON.stringify(input.after) : null,
+      input.metadata ? JSON.stringify(input.metadata) : null,
+    ],
+  );
+}
+
+function projectAuditSnapshot(project: ProjectDto): Record<string, unknown> {
+  return {
+    id: project.id,
+    code: project.code,
+    name: project.name,
+    description: project.description,
+    status: project.status,
+    startsAt: project.startsAt,
+    endsAt: project.endsAt,
+    ownerUserId: project.ownerUserId,
+    archivedAt: project.archivedAt,
+  };
 }
 
 function buildListWhere(query: ProjectListQuery, params: unknown[]): string {
@@ -211,6 +419,22 @@ function toNullableDate(value: string | Date | null): string | null {
   if (value === null) return null;
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return value;
+}
+
+function normalizeNullableText(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function toNullableUserId(value: string): number | null {
+  const userId = Number(value);
+  return Number.isInteger(userId) && userId > 0 ? userId : null;
+}
+
+class ProjectNotFoundError extends ApiError {
+  constructor(projectId: string) {
+    super(404, 'PROJECT_NOT_FOUND', 'Project not found', { projectId });
+  }
 }
 
 function databaseUnavailable() {

@@ -10,6 +10,7 @@ export interface FrontendRuntimeConfigResponse {
     backendProductionActions: boolean;
     backendDeadlines: boolean;
     backendOrderExport: boolean;
+    backendProjects: boolean;
     backendUsers: boolean;
     backendVlm: boolean;
     backendReferences: boolean;
@@ -46,6 +47,7 @@ export function buildFrontendRuntimeConfig(
       backendProductionActions,
       backendDeadlines: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_DEADLINES, false),
       backendOrderExport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDER_EXPORT, false),
+      backendProjects: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_PROJECTS, false),
       backendUsers: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_USERS, false),
       backendVlm: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_VLM, false),
       backendReferences: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_REFERENCES, false),

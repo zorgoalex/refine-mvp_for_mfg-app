@@ -17,15 +17,20 @@ export interface ProjectDto {
 }
 
 export interface ProjectListQuery {
-  page: number;
-  pageSize: number;
+  page?: number;
+  pageSize?: number;
   search?: string;
   status?: ProjectStatus;
   ownerUserId?: number;
   includeArchived?: boolean;
 }
 
-export interface ProjectListResponseDto {
+export interface ProjectLookupQuery {
+  search?: string;
+  limit?: number;
+}
+
+export interface ProjectListResponse {
   data: ProjectDto[];
   pagination: {
     page: number;
@@ -35,22 +40,22 @@ export interface ProjectListResponseDto {
   };
 }
 
-export interface ProjectLookupItemDto {
+export interface ProjectLookupItem {
   id: string;
   code: string;
   name: string;
   status: ProjectStatus;
 }
 
-export interface ProjectLookupResponseDto {
-  data: ProjectLookupItemDto[];
+export interface ProjectLookupResponse {
+  data: ProjectLookupItem[];
 }
 
-export interface ProjectResponseDto {
+export interface ProjectResponse {
   project: ProjectDto;
 }
 
-export interface CreateProjectRequestDto {
+export interface CreateProjectRequest {
   code: string;
   name: string;
   description?: string | null;
@@ -61,7 +66,7 @@ export interface CreateProjectRequestDto {
   metadata?: Record<string, unknown>;
 }
 
-export interface UpdateProjectRequestDto {
+export interface UpdateProjectRequest {
   code?: string;
   name?: string;
   description?: string | null;
