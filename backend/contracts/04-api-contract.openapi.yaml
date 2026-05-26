@@ -2399,6 +2399,162 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/projects:
+    get:
+      tags:
+        - Projects
+      operationId: listProjects
+      summary: List projects
+      security:
+        - bearerAuth: []
+      x-permission: projects.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [draft, active, paused, completed, archived]
+        - name: ownerUserId
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Project'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/projects/lookup:
+    get:
+      tags:
+        - Projects
+      operationId: lookupProjects
+      summary: Lookup projects
+      security:
+        - bearerAuth: []
+      x-permission: projects.view
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Project lookup
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, code, name, status]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        code:
+                          type: string
+                        name:
+                          type: string
+                        status:
+                          type: string
+                          enum: [draft, active, paused, completed, archived]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/projects/{projectId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - Projects
+      operationId: getProjectById
+      summary: Get project by ID
+      security:
+        - bearerAuth: []
+      x-permission: projects.view
+      responses:
+        '200':
+          description: Project
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project]
+                properties:
+                  project:
+                    $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/users:
     get:
       tags:
@@ -2979,6 +3135,21 @@ components:
                   details:
                     requiredPermission: orders.update
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    ServiceUnavailable:
+      description: Feature is disabled or service dependency is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            disabled:
+              value:
+                error:
+                  code: SERVICE_UNAVAILABLE
+                  message: Feature is disabled
+                  details:
+                    feature: projects
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
     OrderNotFound:
       description: Заказ не найден
       content:
@@ -3292,6 +3463,12 @@ components:
         - deadlines.audit.view
         - deadlines.worker.manage
         - deadlines.worker.schedule
+        - projects.view
+        - projects.create
+        - projects.update
+        - projects.archive
+        - projects.manage_links
+        - projects.view_history
         - settings.view
         - settings.manage
 
@@ -3381,6 +3558,59 @@ components:
         success:
           type: boolean
           example: true
+
+    Project:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - status
+        - ownerUserId
+        - metadata
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [draft, active, paused, completed, archived]
+        startsAt:
+          type: string
+          format: date
+          nullable: true
+        endsAt:
+          type: string
+          format: date
+          nullable: true
+        ownerUserId:
+          type: integer
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdBy:
+          type: integer
+          nullable: true
 
     Pagination:
       type: object
