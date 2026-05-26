@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS public.project_projects (
   code TEXT NOT NULL,
   name TEXT NOT NULL,
   description TEXT,
-  status TEXT NOT NULL DEFAULT 'draft',
+  status TEXT NOT NULL DEFAULT 'active',
   starts_at DATE,
   ends_at DATE,
   owner_user_id INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
@@ -34,10 +34,10 @@ CREATE TABLE IF NOT EXISTS public.project_projects (
   created_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT chk_project_projects_status
     CHECK (status IN ('draft', 'active', 'paused', 'completed', 'archived')),
-  CONSTRAINT chk_project_projects_code_not_blank
-    CHECK (btrim(code) <> ''),
-  CONSTRAINT chk_project_projects_name_not_blank
-    CHECK (btrim(name) <> ''),
+  CONSTRAINT chk_project_projects_code_format
+    CHECK (code ~ '^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$'),
+  CONSTRAINT chk_project_projects_name_length
+    CHECK (length(btrim(name)) BETWEEN 1 AND 256),
   CONSTRAINT chk_project_projects_dates_order
     CHECK (ends_at IS NULL OR starts_at IS NULL OR ends_at >= starts_at)
 );

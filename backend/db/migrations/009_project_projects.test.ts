@@ -32,11 +32,13 @@ describe('project projects migration', () => {
   });
 
   it('adds project constraints and indexes without destructive operations', () => {
-    expect(migration).toMatch(/status TEXT NOT NULL DEFAULT 'draft'/i);
+    expect(migration).toMatch(/status TEXT NOT NULL DEFAULT 'active'/i);
     expect(migration).toMatch(/CHECK \(status IN \('draft', 'active', 'paused', 'completed', 'archived'\)\)/i);
     expect(migration).toMatch(/metadata JSONB NOT NULL DEFAULT '\{\}'::jsonb/i);
-    expect(migration).toMatch(/CHECK \(btrim\(code\) <> ''\)/i);
-    expect(migration).toMatch(/CHECK \(btrim\(name\) <> ''\)/i);
+    expect(migration).toMatch(
+      /CHECK \(code ~ '\^\[a-zA-Z0-9\]\[a-zA-Z0-9_-\]\{1,63\}\$'\)/i,
+    );
+    expect(migration).toMatch(/CHECK \(length\(btrim\(name\)\) BETWEEN 1 AND 256\)/i);
     expect(migration).toMatch(/CHECK \(ends_at IS NULL OR starts_at IS NULL OR ends_at >= starts_at\)/i);
     expect(migration).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS uq_project_projects_active_code/i);
     expect(migration).toMatch(/ON public\.project_projects \(lower\(btrim\(code\)\)\)/i);

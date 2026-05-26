@@ -22,15 +22,18 @@ describe('project projects DB precheck SQL', () => {
     );
   });
 
-  it('checks project prerequisites, actual key types, and pgcrypto availability', () => {
+  it('checks only P1 prerequisites: users.user_id and pgcrypto availability', () => {
     expect(precheckSql).toContain('project_required_tables');
     expect(precheckSql).toContain('project_pgcrypto_available');
     expect(precheckSql).toContain('project_users_user_id_type');
-    expect(precheckSql).toContain('project_orders_order_id_type');
-    expect(precheckSql).toContain('project_clients_client_id_type');
-    expect(precheckSql).toContain('project_workshops_workshop_id_type');
-    expect(precheckSql).toContain('project_order_workshops_fk_types');
-    expect(precheckSql).toContain('project_core_existing_objects');
     expect(precheckSql).toContain('users_user_id_is_integer');
+    expect(precheckSql).toContain('users_user_id_is_primary_key');
+    expect(precheckSql).not.toMatch(/\borders\b/i);
+    expect(precheckSql).not.toMatch(/\bclients\b/i);
+    expect(precheckSql).not.toMatch(/\bworkshops\b/i);
+    expect(precheckSql).not.toMatch(/\border_workshops\b/i);
+    expect(precheckSql).not.toMatch(/\bproject_members\b/i);
+    expect(precheckSql).not.toMatch(/\bproject_clients\b/i);
+    expect(precheckSql).not.toMatch(/\bproject_workshops\b/i);
   });
 });
