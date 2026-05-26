@@ -123,6 +123,7 @@ import { dataProvider } from "./utils/dataProvider";
 import { authProvider } from "./authProvider";
 import { i18nProvider } from "./utils/i18nProvider";
 import { featureFlags } from "./config/featureFlags";
+import { canUseBackendProjects, getProjectAccessUser } from "./utils/projectAccess";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -135,6 +136,11 @@ const ConfigurationPage = lazy(async () => ({ default: (await import("./pages/co
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 
 const App = () => {
+  const projectsFrontendEnabled = canUseBackendProjects(
+    featureFlags,
+    getProjectAccessUser(featureFlags),
+  );
+
   // Configure notifications globally
   useEffect(() => {
     notification.config({
@@ -178,7 +184,7 @@ const App = () => {
                     label: "Календарь",
                   },
                 },
-                ...(featureFlags.useBackendProjects
+                ...(projectsFrontendEnabled
                   ? [
                       {
                         name: "projects",
@@ -496,7 +502,7 @@ const App = () => {
                   <Route path="/calendar" >
                     <Route index element={<CalendarList />} />
                   </Route>
-                  {featureFlags.useBackendProjects && (
+                  {projectsFrontendEnabled && (
                     <Route path="/projects">
                       <Route index element={<ProjectsPage />} />
                     </Route>
@@ -689,4 +695,3 @@ const App = () => {
 }
 
 export default App;
-

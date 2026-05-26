@@ -178,8 +178,16 @@ describe('ProjectsController', () => {
     expect(() =>
       parseCreateProjectRequest({ code: 'PRJ-001', name: 'Project', startsAt: '2026-05-03', endsAt: '2026-05-02' }),
     ).toThrow(ApiError);
+    expect(() =>
+      parseCreateProjectRequest({ code: 'PRJ-001', name: 'Project', startsAt: '2026-99-99' }),
+    ).toThrow(ApiError);
+    expect(() =>
+      parseUpdateProjectRequest({ endsAt: '2026-02-31' }),
+    ).toThrow(ApiError);
+    expect(() => parseCreateProjectRequest({ code: 'PRJ-001', name: 'Project', status: 'archived' })).toThrow(ApiError);
     expect(() => parseUpdateProjectRequest({})).toThrow(ApiError);
     expect(() => parseUpdateProjectRequest({ status: 'unknown' })).toThrow(ApiError);
+    expect(() => parseUpdateProjectRequest({ status: 'archived' })).toThrow(ApiError);
   });
 });
 

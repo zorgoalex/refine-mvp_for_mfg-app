@@ -75,7 +75,9 @@ describe('projects OpenAPI contract', () => {
     expect(createSchema).toContain('pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$');
     expect(createSchema).toContain('maxLength: 256');
     expect(updateSchema).toContain('minProperties: 1');
-    expect(updateSchema).toContain('enum: [draft, active, paused, completed, archived]');
+    expect(createSchema).toContain('enum: [draft, active, paused, completed]');
+    expect(updateSchema).toContain('enum: [draft, active, paused, completed]');
+    expect(updateSchema).not.toContain('enum: [draft, active, paused, completed, archived]');
   });
 });
 

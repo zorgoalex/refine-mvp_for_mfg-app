@@ -17,18 +17,23 @@ import { ProjectsRuntimeConfigService } from './projects-runtime-config.service'
 import { ProjectsService, type ProjectLookupQuery } from './projects.service';
 
 const PROJECT_STATUSES = ['draft', 'active', 'paused', 'completed', 'archived'] as const;
+const PROJECT_MUTABLE_STATUSES = ['draft', 'active', 'paused', 'completed'] as const;
 const projectStatusSchema = z.enum(PROJECT_STATUSES);
+const projectMutableStatusSchema = z.enum(PROJECT_MUTABLE_STATUSES);
 const uuidSchema = z.string().uuid();
 const projectCodeSchema = z.string().trim().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/);
 const projectNameSchema = z.string().trim().min(1).max(256);
-const projectDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable();
+const projectDateSchema = z
+  .string()
+  .refine(isValidProjectDate, 'Invalid project date')
+  .nullable();
 const projectMetadataSchema = z.record(z.string(), z.unknown());
 const projectPayloadSchema = z
   .object({
     code: projectCodeSchema,
     name: projectNameSchema,
     description: z.string().trim().max(2000).nullable().optional(),
-    status: projectStatusSchema.default('active'),
+    status: projectMutableStatusSchema.default('active'),
     startsAt: projectDateSchema.optional(),
     endsAt: projectDateSchema.optional(),
     ownerUserId: z.number().int().positive().nullable().optional(),
@@ -43,7 +48,7 @@ const updateProjectPayloadSchema = z
     code: projectCodeSchema.optional(),
     name: projectNameSchema.optional(),
     description: z.string().trim().max(2000).nullable().optional(),
-    status: projectStatusSchema.optional(),
+    status: projectMutableStatusSchema.optional(),
     startsAt: projectDateSchema.optional(),
     endsAt: projectDateSchema.optional(),
     ownerUserId: z.number().int().positive().nullable().optional(),
@@ -133,7 +138,7 @@ const createProjectRequestSwaggerSchema = {
     code: { type: 'string', minLength: 2, maxLength: 64, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$' },
     name: { type: 'string', minLength: 1, maxLength: 256 },
     description: { type: 'string', maxLength: 2000, nullable: true },
-    status: { type: 'string', enum: PROJECT_STATUSES, default: 'active' },
+    status: { type: 'string', enum: PROJECT_MUTABLE_STATUSES, default: 'active' },
     startsAt: { type: 'string', format: 'date', nullable: true },
     endsAt: { type: 'string', format: 'date', nullable: true },
     ownerUserId: { type: 'integer', minimum: 1, nullable: true },
@@ -474,4 +479,20 @@ function parseRequestBody<T extends z.ZodType>(schema: T, body: unknown): z.infe
 function hasValidDateRange(value: { startsAt?: string | null; endsAt?: string | null }): boolean {
   if (!value.startsAt || !value.endsAt) return true;
   return value.endsAt >= value.startsAt;
+}
+
+function isValidProjectDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
