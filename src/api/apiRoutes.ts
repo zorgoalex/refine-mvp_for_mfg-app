@@ -33,6 +33,14 @@ export const apiRoutes = {
     deadlines: (orderId: number) => backendApiPath(`/orders/${orderId}/deadlines`),
     deadlineEvents: (orderId: number) => backendApiPath(`/orders/${orderId}/deadline-events`),
     deadlineSummary: (orderId: number) => backendApiPath(`/orders/${orderId}/deadline-summary`),
+    deadlineEffectiveRules: (orderId: number) =>
+      backendApiPath(`/orders/${orderId}/deadline-effective-rules`),
+    deadlineActionPreview: (orderId: number) =>
+      backendApiPath(`/orders/${orderId}/deadline-action-preview`),
+    deadlineOverrides: (orderId: number) =>
+      backendApiPath(`/orders/${orderId}/deadline-overrides`),
+    deadlineOverride: (orderId: number, overrideId: string) =>
+      backendApiPath(`/orders/${orderId}/deadline-overrides/${overrideId}`),
   },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>
@@ -66,6 +74,10 @@ export const apiRoutes = {
   },
   deadlineSettings: {
     root: backendApiPath('/deadline-settings'),
+  },
+  deadlineTransitionRules: {
+    list: backendApiPath('/deadline-transition-rules'),
+    byId: (actionRuleId: string) => backendApiPath(`/deadline-transition-rules/${actionRuleId}`),
   },
   users: {
     list: backendApiPath('/users'),

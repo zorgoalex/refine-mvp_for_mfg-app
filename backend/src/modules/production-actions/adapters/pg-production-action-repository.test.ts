@@ -218,6 +218,156 @@ describe('PgProductionActionRepository', () => {
     expect(normalizedSql(database.queries)).toContain('UPDATE orders SET order_status_id');
   });
 
+  it('changes order status from deadline-engine without client version or user permission path', async () => {
+    const database = createDatabase();
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.changeOrderStatusFromDeadline({
+      source: 'deadline-engine',
+      systemActor: {
+        type: 'system',
+        actorUserId: null,
+        actorLabel: 'deadline-engine',
+      },
+      orderId: 15,
+      targetOrderStatusId: 7,
+      deadlineId: 'deadline-1',
+      deadlineEventId: 'event-1',
+      actionRuleId: 'rule-1',
+      ruleVersionId: null,
+      ruleConfigSnapshot: { snapshotHash: 'sha256:rule-1', actionRuleId: 'rule-1' },
+      idempotencyKey: 'deadline-status-key-1',
+      requestId: 'request-deadline-status',
+      occurredAt: '2026-05-25T10:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      status: 'executed',
+      response: {
+        order: { orderId: 15, orderStatusId: 7, version: 4 },
+        auditId: 'audit-id-1',
+        requestId: 'request-deadline-status',
+      },
+    });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('SELECT set_session_user($1)');
+    expect(sql).not.toContain('VERSION_CONFLICT');
+    expect(sql).toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+    expect(sql).toContain('SELECT order_status_id, order_status_name');
+    expect(sql).toContain('UPDATE orders SET order_status_id');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('orders.status_change');
+    expect(params).toContain('order.status_changed');
+    expect(params).toContain('deadline-engine');
+    expect(params).toContain('deadline-1');
+    expect(params).toContain('event-1');
+    expect(params).toContain('rule-1');
+    expect(params).toContain('sha256:rule-1');
+    expect(params).toContain('deadline-status-key-1');
+
+    const idempotencyInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
+    );
+    expect(idempotencyInsert?.params[2]).toBeNull();
+  });
+
+  it('returns skipped no-op for same status deadline command without mutation side effects', async () => {
+    const database = createDatabase({ orderStatusId: 7 });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changeOrderStatusFromDeadline({
+        source: 'deadline-engine',
+        systemActor: {
+          type: 'system',
+          actorUserId: null,
+          actorLabel: 'deadline-engine',
+        },
+        orderId: 15,
+        targetOrderStatusId: 7,
+        deadlineId: 'deadline-1',
+        deadlineEventId: 'event-1',
+        actionRuleId: 'rule-1',
+        ruleVersionId: null,
+        ruleConfigSnapshot: { snapshotHash: 'sha256:rule-1' },
+        idempotencyKey: 'deadline-status-noop-key-1',
+        requestId: 'request-deadline-status-noop',
+        occurredAt: '2026-05-25T10:00:00.000Z',
+      }),
+    ).resolves.toMatchObject({
+      status: 'skipped',
+      skipReason: 'same_status',
+      response: {
+        order: { orderId: 15, orderStatusId: 7, version: 3 },
+      },
+    });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET order_status_id');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
+
+  it('replays same-status deadline idempotency as skipped instead of executed', async () => {
+    const database = createDatabase({
+      idempotencyExistingRequestHash: hashStable({
+        actorUserId: null,
+        actorLabel: 'deadline-engine',
+        commandName: 'orders.status_change',
+        source: 'deadline-engine',
+        orderId: 15,
+        orderStatusId: 7,
+        deadlineId: 'deadline-1',
+        deadlineEventId: 'event-1',
+        actionRuleId: 'rule-1',
+        ruleVersionId: null,
+        snapshotHash: 'sha256:rule-1',
+      }),
+      idempotencyCompletedResponse: {
+        order: { orderId: 15, orderStatusId: 7, version: 3 },
+        requestId: 'request-deadline-status-noop',
+        deadlineActionStatus: 'skipped',
+        deadlineSkipReason: 'same_status',
+      },
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changeOrderStatusFromDeadline({
+        source: 'deadline-engine',
+        systemActor: {
+          type: 'system',
+          actorUserId: null,
+          actorLabel: 'deadline-engine',
+        },
+        orderId: 15,
+        targetOrderStatusId: 7,
+        deadlineId: 'deadline-1',
+        deadlineEventId: 'event-1',
+        actionRuleId: 'rule-1',
+        ruleVersionId: null,
+        ruleConfigSnapshot: { snapshotHash: 'sha256:rule-1' },
+        idempotencyKey: 'deadline-status-noop-key-1',
+        requestId: 'request-deadline-status-noop',
+        occurredAt: '2026-05-25T10:00:00.000Z',
+      }),
+    ).resolves.toMatchObject({
+      status: 'skipped',
+      skipReason: 'same_status',
+      response: {
+        order: { orderId: 15, orderStatusId: 7, version: 3 },
+      },
+    });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET order_status_id');
+  });
+
   it('changes manual payment status with idempotency, audit, and outbox', async () => {
     const database = createDatabase();
     const repository = new PgProductionActionRepository(database.service);
@@ -436,6 +586,7 @@ describe('PgProductionActionRepository', () => {
 
 function createDatabase(options: {
   orderVersion?: number;
+  orderStatusId?: number;
   orderCreatedByUserId?: number;
   orderManagerUserId?: number | null;
   existingProductionEventId?: number | null;
@@ -494,7 +645,7 @@ function createDatabase(options: {
               client_id: 969,
               order_date: '2026-05-01',
               planned_completion_date: '2026-05-10',
-              order_status_id: 5,
+              order_status_id: options.orderStatusId ?? 5,
               payment_status_id: 1,
               production_status_id: options.orderProductionStatusId ?? 1,
               production_status_from_details_enabled:

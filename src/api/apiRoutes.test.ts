@@ -18,9 +18,25 @@ describe('apiRoutes', () => {
     expect(apiRoutes.payments.byId(42)).toBe('/api/v1/payments/42');
     expect(apiRoutes.clientPhones.byId(42)).toBe('/api/v1/client-phones/42');
     expect(apiRoutes.orders.deadlineSummary(42)).toBe('/api/v1/orders/42/deadline-summary');
+    expect(apiRoutes.orders.deadlineEffectiveRules(42)).toBe(
+      '/api/v1/orders/42/deadline-effective-rules',
+    );
+    expect(apiRoutes.orders.deadlineActionPreview(42)).toBe(
+      '/api/v1/orders/42/deadline-action-preview',
+    );
+    expect(apiRoutes.orders.deadlineOverrides(42)).toBe(
+      '/api/v1/orders/42/deadline-overrides',
+    );
+    expect(apiRoutes.orders.deadlineOverride(42, 'override-id')).toBe(
+      '/api/v1/orders/42/deadline-overrides/override-id',
+    );
     expect(apiRoutes.deadlines.pause('deadline-id')).toBe('/api/v1/deadlines/deadline-id/pause');
     expect(apiRoutes.deadlinePolicies.list).toBe('/api/v1/deadline-policies');
     expect(apiRoutes.deadlineSettings.root).toBe('/api/v1/deadline-settings');
+    expect(apiRoutes.deadlineTransitionRules.list).toBe('/api/v1/deadline-transition-rules');
+    expect(apiRoutes.deadlineTransitionRules.byId('rule-id')).toBe(
+      '/api/v1/deadline-transition-rules/rule-id',
+    );
     expect(apiRoutes.users.changePassword(7)).toBe('/api/v1/users/7/change-password');
     expect(apiRoutes.vlm.analyze).toBe('/api/v1/vlm/analyze');
   });

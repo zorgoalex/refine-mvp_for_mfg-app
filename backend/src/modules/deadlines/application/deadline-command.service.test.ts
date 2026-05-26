@@ -5,6 +5,7 @@ import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { DeadlineInstanceDto } from '../dto/deadline-instance.dto';
 import type { DeadlinePolicyDto } from '../dto/deadline-policy.dto';
 import { DEFAULT_DEADLINE_SETTINGS } from '../dto/deadline-settings.dto';
+import type { DeadlineActionRuleDto, DeadlineOrderOverrideDto } from '../dto/deadline-action-rule.dto';
 import { DeadlineCommandService } from './deadline-command.service';
 import type { DeadlineRepositoryPort, DeadlineTransactionManagerPort } from './deadline.types';
 
@@ -543,6 +544,127 @@ describe('DeadlineCommandService', () => {
       'updateSettings:u1:req-settings-update:true',
     ]);
   });
+
+  it('requires dedicated permission for order override writes', async () => {
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(createRepository()),
+    });
+
+    await expect(
+      service.upsertOrderOverride({
+        currentUser: currentUser(['deadlines.view']),
+        requestId: 'req-override-denied',
+        dto: {
+          orderId: 42,
+          targetType: 'action_rule',
+          actionRuleId: 'rule-1',
+          isDisabled: true,
+          reason: 'Manual exception',
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['deadlines.manage_order_overrides'] },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('delegates order override upsert/remove with audit metadata', async () => {
+    const calls: string[] = [];
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(
+        createRepository({
+          async upsertOrderOverride(command) {
+            calls.push(`${command.audit.event}:${command.dto.orderId}:${command.audit.reason}:${command.requestId}`);
+            return orderOverride({ orderId: command.dto.orderId, reason: command.dto.reason });
+          },
+          async retireOrderOverride(command) {
+            calls.push(`${command.audit.event}:${command.orderId}:${command.overrideId}:${command.audit.reason}:${command.requestId}`);
+            return orderOverride({ overrideId: command.overrideId, reason: command.reason, retiredAt: '2026-05-25T10:00:00.000Z' });
+          },
+        }),
+      ),
+    });
+
+    await service.upsertOrderOverride({
+      currentUser: currentUser(['deadlines.manage_order_overrides']),
+      requestId: 'req-upsert',
+      dto: {
+        orderId: 42,
+        targetType: 'action_rule',
+        actionRuleId: 'rule-1',
+        isDisabled: true,
+        reason: 'Manual exception',
+      },
+    });
+    await service.retireOrderOverride({
+      currentUser: currentUser(['deadlines.manage_order_overrides']),
+      requestId: 'req-retire',
+      orderId: 42,
+      overrideId: 'override-1',
+      reason: 'Exception cleared',
+    });
+
+    expect(calls).toEqual([
+      'deadline.order_override_updated:42:Manual exception:req-upsert',
+      'deadline.order_override_removed:42:override-1:Exception cleared:req-retire',
+    ]);
+  });
+
+  it('allows global transition rule writes with deadline action admin permission', async () => {
+    const calls: string[] = [];
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(
+        createRepository({
+          async updateGlobalTransitionRule(command) {
+            calls.push(`${command.actionRuleId}:${command.dto.priority}:${command.audit.reason}`);
+            return transitionRule({ actionRuleId: command.actionRuleId, priority: command.dto.priority ?? 10 });
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      service.updateGlobalTransitionRule({
+        currentUser: currentUser(['deadlines.actions.manage']),
+        requestId: 'req-rule',
+        actionRuleId: 'rule-1',
+        dto: {
+          priority: 5,
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          reason: 'Escalate expired final deadlines',
+        },
+      }),
+    ).resolves.toMatchObject({
+      rule: { actionRuleId: 'rule-1', priority: 5 },
+    });
+    expect(calls).toEqual(['rule-1:5:Escalate expired final deadlines']);
+  });
+
+  it('rejects global transition rule writes with settings.manage only', async () => {
+    const service = new DeadlineCommandService({
+      transactions: transactionManager(createRepository()),
+    });
+
+    await expect(
+      service.updateGlobalTransitionRule({
+        currentUser: currentUser(['settings.manage']),
+        requestId: 'req-rule',
+        actionRuleId: 'rule-1',
+        dto: {
+          priority: 5,
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          reason: 'Escalate expired final deadlines',
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['deadlines.actions.manage'] },
+    } satisfies Partial<ApiError>);
+  });
 });
 
 function currentUser(permissions = getPermissionsForRole('admin')): CurrentUser {
@@ -632,6 +754,30 @@ function createRepository(overrides: Partial<DeadlineRepositoryPort> = {}): Dead
     async createActionExecution() {
       throw new Error('not implemented');
     },
+    async listOrderOverrides() {
+      return [];
+    },
+    async listOrderActionRuleOverrides() {
+      return [];
+    },
+    async listGlobalTransitionRules() {
+      return [];
+    },
+    async getOrderDeadlineEvaluationContext(orderId) {
+      return { orderId, orderStatusId: 1, isCompleted: false };
+    },
+    async isDeadlineEventCurrentForOrder() {
+      return true;
+    },
+    async upsertOrderOverride() {
+      throw new Error('not implemented');
+    },
+    async retireOrderOverride() {
+      throw new Error('not implemented');
+    },
+    async updateGlobalTransitionRule() {
+      throw new Error('not implemented');
+    },
     ...overrides,
   };
 }
@@ -666,6 +812,46 @@ function createPolicy(overrides: Partial<DeadlinePolicyDto> = {}): DeadlinePolic
     isEnabled: true,
     createdAt: '2026-05-01T10:00:00.000Z',
     updatedAt: '2026-05-01T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function orderOverride(overrides: Partial<DeadlineOrderOverrideDto> = {}): DeadlineOrderOverrideDto {
+  return {
+    overrideId: 'override-1',
+    orderId: 42,
+    targetType: 'action_rule',
+    policyId: null,
+    actionRuleId: 'rule-1',
+    isDisabled: true,
+    overrideConfig: {},
+    reason: 'Manual exception',
+    createdByUserId: 1,
+    updatedByUserId: 1,
+    retiredByUserId: null,
+    retiredAt: null,
+    createdAt: '2026-05-25T10:00:00.000Z',
+    updatedAt: '2026-05-25T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function transitionRule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineActionRuleDto {
+  return {
+    actionRuleId: 'rule-1',
+    policyId: null,
+    scopeType: 'order',
+    eventType: 'DEADLINE_EXPIRED',
+    actionType: 'change_order_status',
+    isEnabled: true,
+    priority: 10,
+    config: {
+      scope: { type: 'global_orders' },
+      conditions: { allowedFromOrderStatusIds: [1] },
+      actionConfig: { targetOrderStatusId: 7 },
+    },
+    createdAt: '2026-05-25T10:00:00.000Z',
+    updatedAt: '2026-05-25T10:00:00.000Z',
     ...overrides,
   };
 }

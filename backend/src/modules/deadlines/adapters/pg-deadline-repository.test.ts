@@ -962,6 +962,93 @@ describe('PgDeadlineRepository', () => {
     expect(sql).toContain('ON CONFLICT (idempotency_key)');
   });
 
+  it('lists action rules in deterministic priority order and maps priority', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.listActionRules({
+        scopeType: 'order',
+        eventType: 'DEADLINE_EXPIRED',
+      }),
+    ).resolves.toMatchObject([
+      {
+        actionRuleId: 'rule-notify-assignee',
+        priority: 50,
+      },
+    ]);
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('priority');
+    expect(sql).toContain('ORDER BY priority ASC, created_at ASC, action_rule_id ASC');
+  });
+
+  it('persists action execution snapshot, order and target status evidence', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.createActionExecution({
+        deadlineEventId: '22222222-2222-4222-8222-222222222222',
+        actionRuleId: 'rule-change-status',
+        actionType: 'change_order_status',
+        targetType: 'order',
+        targetId: '100',
+        status: 'skipped',
+        idempotencyKey: 'event:change_order_status:order:100',
+        skipReason: 'preview_only',
+        ruleConfigSnapshot: {
+          actionRuleId: 'rule-change-status',
+          priority: 10,
+          eventType: 'DEADLINE_EXPIRED',
+          actionType: 'change_order_status',
+          conditions: {
+            excludeCompletedOrders: true,
+            requireCurrentDeadlineEvent: true,
+          },
+          actionConfig: { targetOrderStatusId: 7 },
+          createdAt: '2026-05-01T10:00:00.000Z',
+          updatedAt: '2026-05-01T10:05:00.000Z',
+          snapshotHash: 'sha256:rule-change-status',
+        },
+        ruleVersionId: null,
+        orderId: 100,
+        targetStatusId: 7,
+      }),
+    ).resolves.toMatchObject({
+      ruleConfigSnapshot: {
+        actionRuleId: 'rule-change-status',
+        priority: 10,
+      },
+      orderId: 100,
+      targetStatusId: 7,
+    });
+
+    const insert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_action_executions'),
+    );
+    expect(normalizeSql(insert?.text ?? '')).toContain('rule_config_snapshot_json');
+    expect(normalizeSql(insert?.text ?? '')).toContain('rule_version_id');
+    expect(normalizeSql(insert?.text ?? '')).toContain('order_id');
+    expect(normalizeSql(insert?.text ?? '')).toContain('target_status_id');
+    expect(insert?.params).toContain(JSON.stringify({
+      actionRuleId: 'rule-change-status',
+      priority: 10,
+      eventType: 'DEADLINE_EXPIRED',
+      actionType: 'change_order_status',
+      conditions: {
+        excludeCompletedOrders: true,
+        requireCurrentDeadlineEvent: true,
+      },
+      actionConfig: { targetOrderStatusId: 7 },
+      createdAt: '2026-05-01T10:00:00.000Z',
+      updatedAt: '2026-05-01T10:05:00.000Z',
+      snapshotHash: 'sha256:rule-change-status',
+    }));
+    expect(insert?.params).toContain(100);
+    expect(insert?.params).toContain(7);
+  });
+
   it('writes worker-created event audit and outbox with deadline-engine source and worker context', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
@@ -1080,6 +1167,519 @@ describe('PgDeadlineRepository', () => {
     });
   });
 
+  it('batch-loads active order action-rule overrides by candidate rule ids', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.listOrderActionRuleOverrides(100, [
+        '11111111-1111-4111-8111-111111111111',
+        '22222222-2222-4222-8222-222222222222',
+      ]),
+    ).resolves.toEqual([expect.objectContaining({ orderId: 100 })]);
+
+    const query = database.queries.find((item) =>
+      normalizeSql(item.text).includes('FROM deadline_order_overrides') &&
+      normalizeSql(item.text).includes('action_rule_id = ANY'),
+    );
+    expect(query?.params).toEqual([
+      100,
+      ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'],
+    ]);
+    expect(normalizeSql(query?.text ?? '')).toContain('retired_at IS NULL');
+    expect(normalizeSql(query?.text ?? '')).toContain('policy_id IS NULL');
+  });
+
+  it('creates order overrides with created audit evidence and active uniqueness', async () => {
+    const database = createDatabase({ noExistingOverride: true });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.upsertOrderOverride({
+        currentUser: currentUser(),
+        requestId: 'req-order-override',
+        dto: {
+          orderId: 100,
+          targetType: 'action_rule',
+          actionRuleId: 'rule-change-status',
+          isDisabled: true,
+          reason: 'Customer approved exception',
+        },
+        audit: {
+          event: 'deadline.order_override_updated',
+          source: 'admin-ui',
+          actorUserId: 42,
+          requestId: 'req-order-override',
+          timerRuleId: null,
+          actionRuleId: 'rule-change-status',
+          orderId: 100,
+          before: {},
+          after: { isDisabled: true },
+          diff: { isDisabled: { from: null, to: true } },
+          reason: 'Customer approved exception',
+          comment: null,
+          executionEvidence: null,
+        },
+      }),
+    ).resolves.toMatchObject({
+      orderId: 100,
+      actionRuleId: 'rule-change-status',
+      isDisabled: true,
+      reason: 'Customer approved exception',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('INSERT INTO deadline_order_overrides');
+    expect(sql).toContain('ON CONFLICT (order_id, action_rule_id) WHERE retired_at IS NULL AND action_rule_id IS NOT NULL DO UPDATE');
+    expect(sql).toContain('INSERT INTO audit_log');
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params.slice(0, 8)).toEqual([
+      'deadline.order_override_created',
+      'deadline_order_override',
+      'override-action',
+      '42',
+      'req-order-override',
+      'admin-ui',
+      100,
+      null,
+    ]);
+    expect(JSON.parse(String(audit?.params[8]))).toEqual({});
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({
+      isDisabled: true,
+      reason: 'Customer approved exception',
+      retiredAt: null,
+    });
+    expect(JSON.parse(String(audit?.params[10]))).toMatchObject({
+      isDisabled: { from: null, to: true },
+      reason: { from: null, to: 'Customer approved exception' },
+    });
+    expect(JSON.parse(String(audit?.params[11]))).toMatchObject({
+      reason: 'Customer approved exception',
+      actionRuleId: 'rule-change-status',
+      orderId: 100,
+    });
+  });
+
+  it('updates order overrides with real before after diff audit evidence', async () => {
+    const database = createDatabase({
+      existingOverride: orderOverrideRow({
+        is_disabled: false,
+        reason: 'Initial reason',
+        override_config_json: { timerConfig: { durationValue: 1 } },
+      }),
+    });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await repository.upsertOrderOverride({
+      currentUser: currentUser(),
+      requestId: 'req-order-override-update',
+      dto: {
+        orderId: 100,
+        targetType: 'action_rule',
+        actionRuleId: 'rule-change-status',
+        isDisabled: true,
+        overrideConfig: { timerConfig: { durationValue: 2 } },
+        reason: 'Updated reason',
+      },
+      audit: {
+        event: 'deadline.order_override_updated',
+        source: 'admin-ui',
+        actorUserId: 42,
+        requestId: 'req-order-override-update',
+        timerRuleId: null,
+        actionRuleId: 'rule-change-status',
+        orderId: 100,
+        before: {},
+        after: {},
+        diff: {},
+        reason: 'Updated reason',
+        comment: null,
+        executionEvidence: null,
+      },
+    });
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params[0]).toBe('deadline.order_override_updated');
+    expect(audit?.params[5]).toBe('admin-ui');
+    expect(audit?.params[6]).toBe(100);
+    expect(JSON.parse(String(audit?.params[8]))).toMatchObject({
+      isDisabled: false,
+      reason: 'Initial reason',
+      overrideConfig: { timerConfig: { durationValue: 1 } },
+    });
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({
+      isDisabled: true,
+      reason: 'Updated reason',
+      overrideConfig: { timerConfig: { durationValue: 2 } },
+    });
+    expect(JSON.parse(String(audit?.params[10]))).toMatchObject({
+      isDisabled: { from: false, to: true },
+      reason: { from: 'Initial reason', to: 'Updated reason' },
+      overrideConfig: {
+        from: { timerConfig: { durationValue: 1 } },
+        to: { timerConfig: { durationValue: 2 } },
+      },
+    });
+    expect(JSON.parse(String(audit?.params[11]))).toMatchObject({
+      reason: 'Updated reason',
+      orderId: 100,
+    });
+  });
+
+  it('soft-retires order overrides and writes remove audit evidence', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.retireOrderOverride({
+        currentUser: currentUser(),
+        requestId: 'req-remove-override',
+        orderId: 100,
+        overrideId: 'override-action',
+        reason: 'Exception cleared',
+        audit: {
+          event: 'deadline.order_override_removed',
+          source: 'admin-ui',
+          actorUserId: 42,
+          requestId: 'req-remove-override',
+          timerRuleId: null,
+          actionRuleId: 'rule-change-status',
+          orderId: 100,
+          before: { isDisabled: true },
+          after: { retiredAt: 'now' },
+          diff: { retiredAt: { from: null, to: 'now' } },
+          reason: 'Exception cleared',
+          comment: null,
+          executionEvidence: null,
+        },
+      }),
+    ).resolves.toMatchObject({
+      overrideId: 'override-action',
+      retiredAt: '2026-05-25T10:00:00.000Z',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('UPDATE deadline_order_overrides');
+    expect(sql).toContain('override_id = $1 AND order_id = $2');
+    expect(sql).toContain('retired_at = now()');
+    expect(sql).not.toContain('DELETE FROM deadline_order_overrides');
+    expect(sql).toContain('INSERT INTO audit_log');
+
+    const update = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('UPDATE deadline_order_overrides'),
+    );
+    expect(update?.params).toEqual(['override-action', 100, 42]);
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params[0]).toBe('deadline.order_override_removed');
+    expect(audit?.params[5]).toBe('admin-ui');
+    expect(audit?.params[6]).toBe(100);
+    expect(JSON.parse(String(audit?.params[8]))).toMatchObject({
+      overrideId: 'override-action',
+      retiredAt: null,
+    });
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({
+      overrideId: 'override-action',
+      retiredAt: '2026-05-25T10:00:00.000Z',
+      retiredByUserId: 42,
+    });
+    expect(JSON.parse(String(audit?.params[10]))).toMatchObject({
+      retiredAt: { from: null, to: '2026-05-25T10:00:00.000Z' },
+      retiredByUserId: { from: null, to: 42 },
+    });
+    expect(JSON.parse(String(audit?.params[11]))).toMatchObject({
+      reason: 'Exception cleared',
+    });
+  });
+
+  it('does not retire overrides from a different order', async () => {
+    const database = createDatabase({ emptyRetireUpdate: true });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.retireOrderOverride({
+        currentUser: currentUser(),
+        requestId: 'req-remove-mismatch',
+        orderId: 999,
+        overrideId: 'override-action',
+        reason: 'Wrong order',
+        audit: {
+          event: 'deadline.order_override_removed',
+          source: 'admin-ui',
+          actorUserId: 42,
+          requestId: 'req-remove-mismatch',
+          timerRuleId: null,
+          actionRuleId: 'rule-change-status',
+          orderId: 999,
+          before: {},
+          after: {},
+          diff: {},
+          reason: 'Wrong order',
+          comment: null,
+          executionEvidence: null,
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'DEADLINE_ORDER_OVERRIDE_NOT_FOUND',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('override_id = $1 AND order_id = $2');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+  });
+
+  it('validates current deadline event context for preview without side effects', async () => {
+    const currentDatabase = createDatabase({ currentDeadlineEvent: true });
+    const staleDatabase = createDatabase({ currentDeadlineEvent: false });
+
+    await expect(
+      new PgDeadlineRepository(currentDatabase.client).isDeadlineEventCurrentForOrder({
+        orderId: 100,
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        deadlineEventId: '22222222-2222-4222-8222-222222222222',
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      new PgDeadlineRepository(staleDatabase.client).isDeadlineEventCurrentForOrder({
+        orderId: 100,
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        deadlineEventId: '22222222-2222-4222-8222-222222222222',
+      }),
+    ).resolves.toBe(false);
+
+    const sql = currentDatabase.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('FROM deadline_events e');
+    expect(sql).toContain('JOIN deadline_instances d');
+    expect(sql).toContain("e.event_type = 'DEADLINE_EXPIRED'");
+    expect(sql).toContain('e.deadline_event_id = $2');
+    expect(sql).toContain('d.deadline_id = $3');
+    expect(sql).toContain('ORDER BY latest.event_at DESC, latest.created_at DESC');
+    expect(sql).not.toContain('INSERT INTO deadline_action_executions');
+  });
+
+  it('rejects non-expired or older deadline event contexts for preview as stale', async () => {
+    const database = createDatabase({ currentDeadlineEvent: false });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.isDeadlineEventCurrentForOrder({
+        orderId: 100,
+        deadlineId: '11111111-1111-4111-8111-111111111111',
+        deadlineEventId: 'older-or-non-expired-event',
+      }),
+    ).resolves.toBe(false);
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain("latest.event_type = 'DEADLINE_EXPIRED'");
+    expect(sql).toContain('e.deadline_event_id = ( SELECT latest.deadline_event_id');
+  });
+
+  it('lists and updates global transition rules with config conditions and audit reason', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(repository.listGlobalTransitionRules()).resolves.toMatchObject([
+      {
+        actionRuleId: 'rule-change-status',
+        actionType: 'change_order_status',
+      },
+    ]);
+
+    await expect(
+      repository.updateGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-rule',
+        actionRuleId: 'rule-change-status',
+        dto: {
+          enabled: true,
+          priority: 5,
+          eventType: 'DEADLINE_EXPIRED',
+          actionType: 'change_order_status',
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1, 2],
+          excludeOrderStatusIds: [8],
+          excludeCompletedOrders: true,
+          requireCurrentDeadlineEvent: true,
+          reason: 'Escalate overdue orders',
+        },
+        audit: {
+          event: 'deadline.action_rule_updated',
+          source: 'admin-ui',
+          actorUserId: 42,
+          requestId: 'req-transition-rule',
+          timerRuleId: null,
+          actionRuleId: 'rule-change-status',
+          orderId: null,
+          before: {},
+          after: { priority: 5 },
+          diff: { priority: { from: 50, to: 5 } },
+          reason: 'Escalate overdue orders',
+          comment: null,
+          executionEvidence: null,
+        },
+      }),
+    ).resolves.toMatchObject({
+      actionRuleId: 'rule-change-status',
+      priority: 5,
+      config: {
+        conditions: {
+          allowedFromOrderStatusIds: [1, 2],
+          excludeOrderStatusIds: [8],
+          excludeCompletedOrders: true,
+          requireCurrentDeadlineEvent: true,
+        },
+        actionConfig: { targetOrderStatusId: 7 },
+      },
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain("scope_type = 'order'");
+    expect(sql).toContain("event_type = 'DEADLINE_EXPIRED'");
+    expect(sql).toContain("action_type = 'change_order_status'");
+    expect(sql).toContain("config_json->'scope'->>'type' = 'global_orders'");
+    expect(sql).toContain('UPDATE deadline_action_rules');
+    expect(sql).toContain('config_json = $4::jsonb');
+
+    const update = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('UPDATE deadline_action_rules'),
+    );
+    expect(JSON.parse(String(update?.params[3]))).toMatchObject({
+      scope: { type: 'global_orders' },
+      conditions: {
+        allowedFromOrderStatusIds: [1, 2],
+        excludeOrderStatusIds: [8],
+        excludeCompletedOrders: true,
+        requireCurrentDeadlineEvent: true,
+      },
+      actionConfig: { targetOrderStatusId: 7 },
+    });
+  });
+
+  it('audits global transition rule enable transitions with enabled event', async () => {
+    const database = createDatabase({ actionRuleEnabled: false });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await repository.updateGlobalTransitionRule({
+      currentUser: currentUser(),
+      requestId: 'req-transition-enable',
+      actionRuleId: 'rule-change-status',
+      dto: {
+        enabled: true,
+        reason: 'Enable expired order escalation',
+      },
+      audit: {
+        event: 'deadline.action_rule_updated',
+        source: 'admin-ui',
+        actorUserId: 42,
+        requestId: 'req-transition-enable',
+        timerRuleId: null,
+        actionRuleId: 'rule-change-status',
+        orderId: null,
+        before: {},
+        after: {},
+        diff: {},
+        reason: 'Enable expired order escalation',
+        comment: null,
+        executionEvidence: null,
+      },
+    });
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params[0]).toBe('deadline.action_rule_enabled');
+    expect(JSON.parse(String(audit?.params[8]))).toMatchObject({ isEnabled: false });
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({ isEnabled: true });
+  });
+
+  it('audits global transition rule disable transitions with disabled event', async () => {
+    const database = createDatabase({ actionRuleEnabled: true });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await repository.updateGlobalTransitionRule({
+      currentUser: currentUser(),
+      requestId: 'req-transition-disable',
+      actionRuleId: 'rule-change-status',
+      dto: {
+        enabled: false,
+        reason: 'Disable expired order escalation',
+      },
+      audit: {
+        event: 'deadline.action_rule_updated',
+        source: 'admin-ui',
+        actorUserId: 42,
+        requestId: 'req-transition-disable',
+        timerRuleId: null,
+        actionRuleId: 'rule-change-status',
+        orderId: null,
+        before: {},
+        after: {},
+        diff: {},
+        reason: 'Disable expired order escalation',
+        comment: null,
+        executionEvidence: null,
+      },
+    });
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params[0]).toBe('deadline.action_rule_disabled');
+    expect(JSON.parse(String(audit?.params[8]))).toMatchObject({ isEnabled: true });
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({ isEnabled: false });
+  });
+
+  it('loads order evaluation context without mutating preview side effects', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(repository.getOrderDeadlineEvaluationContext(100)).resolves.toEqual({
+      orderId: 100,
+      orderStatusId: 1,
+      isCompleted: false,
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('SELECT order_id, order_status_id');
+    expect(sql).not.toContain('INSERT INTO deadline_action_executions');
+  });
+
+  it('returns null order evaluation context for missing or soft-deleted orders', async () => {
+    const missingDatabase = createDatabase({ orderEvaluationRows: [] });
+    const deletedDatabase = createDatabase({
+      orderEvaluationRows: [
+        {
+          order_id: 100,
+          order_status_id: 1,
+          completion_date: null,
+          issue_date: null,
+        },
+      ],
+    });
+
+    await expect(
+      new PgDeadlineRepository(missingDatabase.client).getOrderDeadlineEvaluationContext(100),
+    ).resolves.toBeNull();
+    await expect(
+      new PgDeadlineRepository(deletedDatabase.client).getOrderDeadlineEvaluationContext(100),
+    ).resolves.toEqual({
+      orderId: 100,
+      orderStatusId: 1,
+      isCompleted: false,
+    });
+
+    const sql = missingDatabase.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('COALESCE(delete_flag, false) = false');
+  });
+
   it('caps due worker scan with FOR UPDATE SKIP LOCKED and configured limit', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
@@ -1102,9 +1702,20 @@ function createDatabase(
   options: {
     deadlineStatusByIdSelect?: DeadlineTestRow['status'];
     eventWasInserted?: boolean;
+    currentDeadlineEvent?: boolean;
+    actionRuleEnabled?: boolean;
+    emptyRetireUpdate?: boolean;
+    existingOverride?: OrderOverrideTestRow;
+    noExistingOverride?: boolean;
     emptyOverrideSupersedeUpdate?: boolean;
     emptyPauseUpdate?: boolean;
     emptyResumeUpdate?: boolean;
+    orderEvaluationRows?: Array<{
+      order_id: string | number;
+      order_status_id: string | number;
+      completion_date: string | Date | null;
+      issue_date: string | Date | null;
+    }>;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -1132,11 +1743,105 @@ function createDatabase(
         return { rows: [{ action_rule_id: 'rule-notify-assignee' }] };
       }
 
+      if (
+        text.includes('SELECT') &&
+        text.includes('FROM deadline_action_rules') &&
+        text.includes("action_type = 'change_order_status'")
+      ) {
+        return { rows: [actionRuleRow({
+          action_rule_id: 'rule-change-status',
+          action_type: 'change_order_status',
+          is_enabled: options.actionRuleEnabled ?? true,
+          priority: 50,
+          config_json: {
+            scope: { type: 'global_orders' },
+            conditions: { allowedFromOrderStatusIds: [1] },
+            actionConfig: { targetOrderStatusId: 5 },
+          },
+        })] };
+      }
+
+      if (
+        text.includes('SELECT') &&
+        text.includes('FROM deadline_action_rules') &&
+        text.includes('ORDER BY priority ASC')
+      ) {
+        return { rows: [actionRuleRow()] };
+      }
+
       if (text.includes('UPDATE deadline_action_rules')) {
+        if (text.includes('RETURNING')) {
+          return {
+            rows: [
+              actionRuleRow({
+                action_rule_id: String(params[0]),
+                action_type: 'change_order_status',
+                is_enabled: Boolean(params[1]),
+                priority: params[2] as number,
+                config_json:
+                  typeof params[3] === 'string'
+                    ? (JSON.parse(params[3]) as Record<string, unknown>)
+                    : {},
+              }),
+            ],
+          };
+        }
         if (params[0] === 'rule-notify-assignee') {
           notifyAssigneeEnabled = Boolean(params[1]);
         }
         return { rows: [] };
+      }
+
+      if (text.includes('RETURNING') && text.includes('INSERT INTO deadline_order_overrides')) {
+        return { rows: [orderOverrideRow({
+          order_id: params[0] as number,
+          policy_id: null,
+          action_rule_id: String(params[1]),
+          is_disabled: Boolean(params[2]),
+          override_config_json:
+            typeof params[3] === 'string'
+              ? (JSON.parse(params[3]) as Record<string, unknown>)
+              : {},
+          reason: String(params[4]),
+          updated_by_user_id: params[5] as number,
+          created_by_user_id: params[5] as number,
+        })] };
+      }
+
+      if (text.includes('RETURNING') && text.includes('UPDATE deadline_order_overrides')) {
+        if (options.emptyRetireUpdate) {
+          return { rows: [] };
+        }
+        return { rows: [orderOverrideRow({
+          override_id: String(params[0]),
+          order_id: params[1] as number,
+          retired_by_user_id: params[2] as number,
+          retired_at: new Date('2026-05-25T10:00:00.000Z'),
+        })] };
+      }
+
+      if (text.includes('SELECT') && text.includes('FROM deadline_order_overrides')) {
+        if (options.noExistingOverride) {
+          return { rows: [] };
+        }
+        return { rows: [options.existingOverride ?? orderOverrideRow()] };
+      }
+
+      if (text.includes('FROM deadline_events e') && text.includes('JOIN deadline_instances d')) {
+        return { rows: options.currentDeadlineEvent === false ? [] : [{ exists: true }] };
+      }
+
+      if (text.includes('SELECT order_id, order_status_id') && text.includes('FROM orders')) {
+        return {
+          rows: options.orderEvaluationRows ?? [
+            {
+              order_id: params[0],
+              order_status_id: 1,
+              completion_date: null,
+              issue_date: null,
+            },
+          ],
+        };
       }
 
       if (text.includes('SELECT') && text.includes('FROM deadline_policies') && text.includes('policy_id = $1')) {
@@ -1195,7 +1900,7 @@ function createDatabase(
       }
 
       if (text.includes('RETURNING') && text.includes('deadline_action_executions')) {
-        return { rows: [executionRow()] };
+        return { rows: [executionRow(params)] };
       }
 
       if (text.includes('RETURNING') && text.includes("SET status = 'cancelled'")) {
@@ -1301,6 +2006,8 @@ function createDatabase(
 
 type DeadlineTestRow = ReturnType<typeof baseDeadlineRow>;
 type PolicyTestRow = ReturnType<typeof basePolicyRow>;
+type ActionRuleTestRow = ReturnType<typeof baseActionRuleRow>;
+type OrderOverrideTestRow = ReturnType<typeof baseOrderOverrideRow>;
 
 function deadlineRow(overrides: Partial<DeadlineTestRow> = {}) {
   return {
@@ -1312,6 +2019,20 @@ function deadlineRow(overrides: Partial<DeadlineTestRow> = {}) {
 function policyRow(overrides: Partial<PolicyTestRow> = {}) {
   return {
     ...basePolicyRow(),
+    ...overrides,
+  };
+}
+
+function actionRuleRow(overrides: Partial<ActionRuleTestRow> = {}) {
+  return {
+    ...baseActionRuleRow(),
+    ...overrides,
+  };
+}
+
+function orderOverrideRow(overrides: Partial<OrderOverrideTestRow> = {}) {
+  return {
+    ...baseOrderOverrideRow(),
     ...overrides,
   };
 }
@@ -1378,6 +2099,39 @@ function basePolicyRow() {
   };
 }
 
+function baseActionRuleRow() {
+  return {
+    action_rule_id: 'rule-notify-assignee',
+    policy_id: null,
+    scope_type: 'order',
+    event_type: 'DEADLINE_EXPIRED',
+    action_type: 'notify_assignee',
+    is_enabled: true,
+    priority: 50,
+    config_json: {},
+    created_at: new Date('2026-05-01T10:00:00.000Z'),
+    updated_at: new Date('2026-05-01T10:00:00.000Z'),
+  };
+}
+
+function baseOrderOverrideRow() {
+  return {
+    override_id: 'override-action',
+    order_id: 100,
+    policy_id: null,
+    action_rule_id: 'rule-change-status',
+    is_disabled: true,
+    override_config_json: {},
+    reason: 'Customer approved exception',
+    created_by_user_id: 42,
+    updated_by_user_id: 42,
+    retired_by_user_id: null,
+    retired_at: null,
+    created_at: new Date('2026-05-25T10:00:00.000Z'),
+    updated_at: new Date('2026-05-25T10:00:00.000Z'),
+  };
+}
+
 function eventRow(params: readonly unknown[] = [], wasInserted = true) {
   return {
     deadline_event_id: '22222222-2222-4222-8222-222222222222',
@@ -1408,20 +2162,30 @@ function eventRow(params: readonly unknown[] = [], wasInserted = true) {
   };
 }
 
-function executionRow() {
+function executionRow(params: readonly unknown[] = []) {
   return {
     action_execution_id: '33333333-3333-4333-8333-333333333333',
-    deadline_event_id: '22222222-2222-4222-8222-222222222222',
-    action_rule_id: null,
-    action_type: 'write_audit',
-    target_type: 'order',
-    target_id: '100',
-    status: 'executed',
-    idempotency_key: 'event:write_audit:order:100',
-    skip_reason: null,
-    error_code: null,
-    error_message: null,
-    result_json: {},
+    deadline_event_id: String(params[0] ?? '22222222-2222-4222-8222-222222222222'),
+    action_rule_id: (params[1] as string | null | undefined) ?? null,
+    action_type: String(params[2] ?? 'write_audit'),
+    target_type: (params[3] as string | null | undefined) ?? 'order',
+    target_id: (params[4] as string | null | undefined) ?? '100',
+    status: (params[5] as 'executed' | 'skipped' | 'failed' | undefined) ?? 'executed',
+    idempotency_key: String(params[6] ?? 'event:write_audit:order:100'),
+    skip_reason: (params[7] as string | null | undefined) ?? null,
+    error_code: (params[8] as string | null | undefined) ?? null,
+    error_message: (params[9] as string | null | undefined) ?? null,
+    result_json:
+      typeof params[10] === 'string'
+        ? (JSON.parse(params[10]) as Record<string, unknown>)
+        : {},
+    rule_config_snapshot_json:
+      typeof params[11] === 'string'
+        ? (JSON.parse(params[11]) as Record<string, unknown>)
+        : {},
+    rule_version_id: (params[12] as string | null | undefined) ?? null,
+    order_id: (params[13] as number | null | undefined) ?? null,
+    target_status_id: (params[14] as number | null | undefined) ?? null,
     executed_at: new Date('2026-05-02T10:00:00.000Z'),
     created_at: new Date('2026-05-02T10:00:00.000Z'),
   };

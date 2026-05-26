@@ -76,6 +76,112 @@ describe('deadlinesApi', () => {
     expect(fetchMock.mock.calls[1][1]?.method).toBe('GET');
   });
 
+  it('reads effective order rules and dry-run preview through Slice 2 endpoints', async () => {
+    const fetchMock = mockFetch(
+      { orderId: 42, policies: [], actionRules: [], overrides: [] },
+      {
+        orderId: 42,
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineId,
+        deadlineEventId: null,
+        candidateActionRules: [],
+        selectedActionRuleId: null,
+        selectionReason: 'no_candidate_rules',
+      },
+    );
+
+    await deadlinesApi.getOrderEffectiveRules(42);
+    await deadlinesApi.previewOrderActionRules(42, {
+      eventType: 'DEADLINE_EXPIRED',
+      deadlineId,
+      fixtureKey: 'deadline-canary',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/42/deadline-effective-rules');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/42/deadline-action-preview');
+    expect(fetchMock.mock.calls[1][1]).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ eventType: 'DEADLINE_EXPIRED', deadlineId, fixtureKey: 'deadline-canary' }),
+      }),
+    );
+  });
+
+  it('writes and retires order overrides with required audit reason payloads', async () => {
+    const override = createOrderOverride();
+    const fetchMock = mockFetch({ override }, { override: { ...override, retiredAt: '2026-05-04T10:00:00.000Z' } });
+
+    await deadlinesApi.upsertOrderOverride(42, {
+      targetType: 'action_rule',
+      actionRuleId: deadlineId,
+      isDisabled: true,
+      reason: 'Disable status automation for this order',
+    });
+    await deadlinesApi.retireOrderOverride(42, deadlineId, {
+      reason: 'Restore automation',
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/orders/42/deadline-overrides',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          targetType: 'action_rule',
+          actionRuleId: deadlineId,
+          isDisabled: true,
+          reason: 'Disable status automation for this order',
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `/api/v1/orders/42/deadline-overrides/${deadlineId}`,
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ reason: 'Restore automation' }),
+      }),
+    );
+  });
+
+  it('lists and patches global transition rules through Slice 2 endpoints', async () => {
+    const rule = createActionRule();
+    const fetchMock = mockFetch({ data: [rule] }, { rule: { ...rule, isEnabled: false } });
+
+    await deadlinesApi.listDeadlineTransitionRules();
+    await deadlinesApi.updateDeadlineTransitionRule(deadlineId, {
+      isEnabled: false,
+      priority: 25,
+      targetOrderStatusId: 7,
+      allowedFromOrderStatusIds: [1, 2],
+      excludeOrderStatusIds: [9],
+      excludeCompletedOrders: true,
+      reason: 'Narrow expired transition rule',
+      comment: 'Ops request',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/deadline-transition-rules');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `/api/v1/deadline-transition-rules/${deadlineId}`,
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          isEnabled: false,
+          priority: 25,
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1, 2],
+          excludeOrderStatusIds: [9],
+          excludeCompletedOrders: true,
+          reason: 'Narrow expired transition rule',
+          comment: 'Ops request',
+        }),
+      }),
+    );
+  });
+
   it('creates and controls deadlines through versioned endpoints', async () => {
     const deadline = createDeadline();
     const fetchMock = mockFetch(
@@ -160,5 +266,48 @@ function createDeadline(overrides: Partial<DeadlineDto> = {}): DeadlineDto {
     createdAt: '2026-05-01T10:00:00.000Z',
     updatedAt: '2026-05-01T10:00:00.000Z',
     ...overrides,
+  };
+}
+
+function createActionRule() {
+  return {
+    actionRuleId: deadlineId,
+    policyId: null,
+    scopeType: 'order',
+    eventType: 'DEADLINE_EXPIRED',
+    actionType: 'change_order_status',
+    isEnabled: true,
+    priority: 10,
+    config: {
+      scope: { type: 'global_orders' },
+      conditions: {
+        allowedFromOrderStatusIds: [1],
+        excludeOrderStatusIds: [9],
+        excludeCompletedOrders: true,
+        requireCurrentDeadlineEvent: true,
+      },
+      actionConfig: { targetOrderStatusId: 7 },
+    },
+    createdAt: '2026-05-01T10:00:00.000Z',
+    updatedAt: '2026-05-01T10:00:00.000Z',
+  };
+}
+
+function createOrderOverride() {
+  return {
+    overrideId: deadlineId,
+    orderId: 42,
+    targetType: 'action_rule',
+    policyId: null,
+    actionRuleId: deadlineId,
+    isDisabled: true,
+    overrideConfig: {},
+    reason: 'Disable status automation for this order',
+    createdByUserId: 1,
+    updatedByUserId: 1,
+    retiredByUserId: null,
+    retiredAt: null,
+    createdAt: '2026-05-01T10:00:00.000Z',
+    updatedAt: '2026-05-01T10:00:00.000Z',
   };
 }

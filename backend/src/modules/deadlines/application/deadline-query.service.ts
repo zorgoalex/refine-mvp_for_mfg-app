@@ -2,17 +2,28 @@ import { ApiError } from '../../../common/errors/api-error';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type { PermissionName } from '../../../permissions/permissions';
 import { calculateDeadlineTiming } from '../domain/deadline-calculator';
+import type {
+  EffectiveDeadlineActionRuleDto,
+  EffectiveDeadlinePolicyRuleDto,
+} from '../dto/deadline-action-rule.dto';
 import type { DeadlineInstanceDto, OrderDeadlineSummaryDto } from '../dto/deadline-instance.dto';
 import { DeadlineNotFoundError } from '../errors/deadline.errors';
 import type {
   DeadlineRepositoryPort,
   GetDeadlineByIdCommand,
   GetDeadlineSettingsCommand,
+  ListGlobalTransitionRulesCommand,
+  ListOrderEffectiveDeadlineRulesCommand,
   ListDeadlinePoliciesCommand,
   ListDeadlinesCommand,
   ListOrderDeadlineEventsCommand,
   ListOrderDeadlinesCommand,
+  PreviewOrderDeadlineActionRulesCommand,
 } from './deadline.types';
+import {
+  evaluateDeadlineActionRules,
+  filterActionRulesForFixture,
+} from './deadline-action-evaluator';
 
 export interface DeadlineQueryServicePorts {
   repository: DeadlineRepositoryPort;
@@ -82,6 +93,99 @@ export class DeadlineQueryService {
     return { settings: await this.ports.repository.getSettings() };
   }
 
+  async listOrderEffectiveRules(command: ListOrderEffectiveDeadlineRulesCommand) {
+    this.requireAnyPermission(command, ['deadlines.actions.manage', 'deadlines.manage_order_overrides']);
+
+    const [policies, actionRules, overrides] = await Promise.all([
+      this.ports.repository.listPolicies(),
+      this.ports.repository.listGlobalTransitionRules(),
+      this.ports.repository.listOrderOverrides(command.orderId),
+    ]);
+
+    const overrideByPolicyId = new Map(
+      overrides
+        .filter((override) => override.policyId)
+        .map((override) => [override.policyId as string, override]),
+    );
+    const overrideByActionRuleId = new Map(
+      overrides
+        .filter((override) => override.actionRuleId)
+        .map((override) => [override.actionRuleId as string, override]),
+    );
+
+    const effectivePolicies: EffectiveDeadlinePolicyRuleDto[] = policies.map((policy) => ({
+      ...policy,
+      override: overrideByPolicyId.get(policy.policyId) ?? null,
+    }));
+    const effectiveActionRules: EffectiveDeadlineActionRuleDto[] = actionRules.map((rule) => ({
+      ...rule,
+      override: overrideByActionRuleId.get(rule.actionRuleId) ?? null,
+    }));
+
+    return {
+      orderId: command.orderId,
+      policies: effectivePolicies,
+      actionRules: effectiveActionRules,
+      overrides,
+    };
+  }
+
+  async previewOrderActionRules(command: PreviewOrderDeadlineActionRulesCommand) {
+    this.requirePermission(command, 'deadlines.view');
+
+    const [listedRules, overrides, orderContext] = await Promise.all([
+      this.ports.repository.listGlobalTransitionRules(),
+      this.ports.repository.listOrderOverrides(command.orderId),
+      this.ports.repository.getOrderDeadlineEvaluationContext(command.orderId),
+    ]);
+    const rules = filterActionRulesForFixture(listedRules, command.dto.fixtureKey ?? null);
+    const hasStatusTransitionRules = rules.some((rule) => rule.actionType === 'change_order_status');
+    const isCurrentDeadlineEvent = hasStatusTransitionRules
+      ? await this.ports.repository.isDeadlineEventCurrentForOrder({
+          orderId: command.orderId,
+          deadlineId: command.dto.deadlineId ?? null,
+          deadlineEventId: command.dto.deadlineEventId ?? null,
+        })
+      : true;
+
+    const evaluation = evaluateDeadlineActionRules({
+      eventType: command.dto.eventType,
+      deadlineEventId: command.dto.deadlineEventId ?? 'preview-deadline-event',
+      deadlineId: command.dto.deadlineId ?? null,
+      targetType: 'order',
+      targetId: String(command.orderId),
+      orderContext,
+      orderContextUnavailable: orderContext === null,
+      isCurrentDeadlineEvent,
+      rules,
+      overrides,
+    });
+
+    return {
+      orderId: command.orderId,
+      eventType: command.dto.eventType,
+      deadlineId: command.dto.deadlineId ?? null,
+      deadlineEventId: command.dto.deadlineEventId ?? null,
+      candidateActionRules: evaluation.candidates.map((candidate) => ({
+        actionRuleId: candidate.actionRuleId,
+        priority: candidate.priority,
+        actionType: candidate.actionType,
+        wouldRun: candidate.wouldRun,
+        wouldSkipReason: candidate.skipReason,
+        targetOrderStatusId: candidate.targetStatusId,
+        overrideId: candidate.overrideId,
+      })),
+      selectedActionRuleId: evaluation.selectedActionRuleId,
+      selectionReason: evaluation.selectionReason,
+    };
+  }
+
+  async listGlobalTransitionRules(command: ListGlobalTransitionRulesCommand) {
+    this.requirePermission(command, 'deadlines.actions.manage');
+
+    return { data: await this.ports.repository.listGlobalTransitionRules() };
+  }
+
   private requirePermission(
     command: { currentUser: Parameters<PermissionsService['canUser']>[0] },
     permission: PermissionName,
@@ -89,6 +193,17 @@ export class DeadlineQueryService {
     if (!this.permissions.canUser(command.currentUser, permission)) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: [permission],
+      });
+    }
+  }
+
+  private requireAnyPermission(
+    command: { currentUser: Parameters<PermissionsService['canUser']>[0] },
+    permissions: PermissionName[],
+  ): void {
+    if (!permissions.some((permission) => this.permissions.canUser(command.currentUser, permission))) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: permissions,
       });
     }
   }

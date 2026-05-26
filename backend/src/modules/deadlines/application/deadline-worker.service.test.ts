@@ -4,8 +4,10 @@ import type { DeadlineEventDto, DeadlineInstanceDto } from '../dto/deadline-inst
 import { DeadlineWorkerService } from './deadline-worker.service';
 import type {
   CreateDeadlineEventInput,
+  DeadlineChangeOrderStatusCommand,
   DeadlineNotificationPort,
   DeadlineRepositoryPort,
+  DeadlineUnitOfWork,
   DeadlineTargetResolverPort,
   DeadlineTransactionManagerPort,
 } from './deadline.types';
@@ -231,6 +233,63 @@ describe('DeadlineWorkerService', () => {
     ]);
   });
 
+  it('records rule snapshot and order evidence on worker-created action executions', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const repository = createRepository({
+      due: [createDeadline({ deadlineId: 'deadline-1', orderId: 42 })],
+      events: [],
+      executions,
+      rules: [
+        createRule({
+          actionRuleId: 'rule-audit',
+          actionType: 'write_audit',
+          priority: 25,
+          config: {
+            conditions: {
+              requireCurrentDeadlineEvent: true,
+            },
+            actionConfig: {},
+          },
+        }),
+      ],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager(repository),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+    });
+
+    await worker.processDueDeadlines({
+      now: '2026-05-23T10:00:00.000Z',
+      limit: 10,
+      workerId: 'worker-evidence-test',
+      trigger: 'manual',
+      config: {
+        actionsEnabled: true,
+        notificationsEnabled: true,
+      },
+    });
+
+    expect(executions).toEqual([
+      expect.objectContaining({
+        status: 'executed',
+        actionType: 'write_audit',
+        orderId: 42,
+        ruleConfigSnapshot: expect.objectContaining({
+          actionRuleId: 'rule-audit',
+          priority: 25,
+          eventType: 'DEADLINE_EXPIRED',
+          actionType: 'write_audit',
+          conditions: {
+            requireCurrentDeadlineEvent: true,
+          },
+          actionConfig: {},
+          snapshotHash: expect.stringMatching(/^sha256:/),
+        }),
+      }),
+    ]);
+  });
+
   it('records worker source, worker id, actor, and request id on expired events', async () => {
     const events: DeadlineEventDto[] = [];
     const repository = createRepository({
@@ -304,6 +363,67 @@ describe('DeadlineWorkerService', () => {
     });
   });
 
+  it('rolls back same-transaction status mutation evidence when action execution write fails', async () => {
+    const events: DeadlineEventDto[] = [];
+    const executions: DeadlineActionExecutionDto[] = [];
+    const productionMutations: DeadlineChangeOrderStatusCommand[] = [];
+    const repository = createRepository({
+      due: [createDeadline({ deadlineId: 'deadline-status-rollback', orderId: 42 })],
+      events,
+      executions,
+      rules: [
+        createRule({
+          actionRuleId: 'rule-change-status',
+          actionType: 'change_order_status',
+          config: {
+            conditions: { allowedFromOrderStatusIds: [1] },
+            actionConfig: { targetOrderStatusId: 7 },
+          },
+        }),
+      ],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: rollbackAwareTransactionManager({
+        repository: {
+          ...repository,
+          async createActionExecution() {
+            throw new Error('action execution write failed');
+          },
+        },
+        productionMutations,
+      }),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+      statusActionPort: {
+        async changeOrderStatusFromDeadline(command) {
+          productionMutations.push(command);
+          return {
+            status: 'executed',
+            result: {
+              order: {
+                orderId: command.orderId,
+                orderStatusId: command.targetOrderStatusId,
+                version: 4,
+              },
+            },
+          };
+        },
+      },
+    });
+
+    await expect(
+      worker.processDueDeadlines({
+        now: '2026-05-01T10:00:00.000Z',
+        limit: 100,
+        workerId: 'worker-a',
+        trigger: 'manual',
+        config: { actionsEnabled: true, notificationsEnabled: true },
+      }),
+    ).rejects.toThrow('action execution write failed');
+
+    expect(productionMutations).toEqual([]);
+  });
+
   it('marks completed target as completed_on_time when completed before deadline', async () => {
     const events: DeadlineEventDto[] = [];
     const repository = createRepository({
@@ -354,6 +474,46 @@ function transactionManager(repository: DeadlineRepositoryPort): DeadlineTransac
   return {
     async runInTransaction(handler) {
       return handler({ deadlines: repository });
+    },
+  };
+}
+
+function rollbackAwareTransactionManager(input: {
+  repository: DeadlineRepositoryPort;
+  productionMutations: DeadlineChangeOrderStatusCommand[];
+}): DeadlineTransactionManagerPort {
+  return {
+    async runInTransaction(handler) {
+      const beforeProductionMutations = [...input.productionMutations];
+      const unitOfWork: DeadlineUnitOfWork = {
+        deadlines: input.repository,
+        statusActionPort: {
+          async changeOrderStatusFromDeadline(command) {
+            input.productionMutations.push(command);
+            return {
+              status: 'executed',
+              result: {
+                order: {
+                  orderId: command.orderId,
+                  orderStatusId: command.targetOrderStatusId,
+                  version: 4,
+                },
+              },
+            };
+          },
+        },
+      };
+
+      try {
+        return await handler(unitOfWork);
+      } catch (error) {
+        input.productionMutations.splice(
+          0,
+          input.productionMutations.length,
+          ...beforeProductionMutations,
+        );
+        throw error;
+      }
     },
   };
 }
@@ -440,6 +600,30 @@ function createRepository(input: {
       input.executions.push(dto);
       return dto;
     },
+    async listOrderOverrides() {
+      return [];
+    },
+    async listOrderActionRuleOverrides() {
+      return [];
+    },
+    async upsertOrderOverride() {
+      throw new Error('not implemented');
+    },
+    async retireOrderOverride() {
+      throw new Error('not implemented');
+    },
+    async listGlobalTransitionRules() {
+      return input.rules;
+    },
+    async updateGlobalTransitionRule() {
+      throw new Error('not implemented');
+    },
+    async getOrderDeadlineEvaluationContext(orderId: number) {
+      return { orderId, orderStatusId: 1, isCompleted: false };
+    },
+    async isDeadlineEventCurrentForOrder() {
+      return true;
+    },
   };
 }
 
@@ -499,6 +683,7 @@ function createRule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineAct
     eventType: 'DEADLINE_EXPIRED',
     actionType: 'write_audit',
     isEnabled: true,
+    priority: 100,
     createdAt: '2026-05-01T10:00:00.000Z',
     updatedAt: '2026-05-01T10:00:00.000Z',
     ...overrides,

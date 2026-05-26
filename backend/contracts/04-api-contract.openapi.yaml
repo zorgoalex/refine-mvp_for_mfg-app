@@ -1457,6 +1457,231 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/deadline-effective-rules:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Deadlines
+      operationId: listOrderEffectiveDeadlineRules
+      summary: Эффективные deadline-правила заказа
+      description: Возвращает глобальные timer/action правила вместе с активными order-level overrides.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - deadlines.actions.manage
+        - deadlines.manage_order_overrides
+      responses:
+        '200':
+          description: Эффективные правила дедлайнов заказа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderEffectiveDeadlineRulesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/deadline-action-preview:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Deadlines
+      operationId: previewOrderDeadlineActionRules
+      summary: Dry-run preview deadline action rules
+      description: Возвращает ordered candidates и выбранное status-transition правило без мутаций и action execution rows.
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.view
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewOrderDeadlineActionRulesRequest'
+      responses:
+        '200':
+          description: Preview результата выбора action rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewOrderDeadlineActionRulesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/deadline-overrides:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Deadlines
+      operationId: upsertDeadlineOrderOverride
+      summary: Создать или обновить order-level deadline override
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.manage_order_overrides
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertDeadlineOrderOverrideRequest'
+      responses:
+        '200':
+          description: Order override создан или обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineOrderOverrideResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/deadline-overrides/{overrideId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+      - name: overrideId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags:
+        - Deadlines
+      operationId: retireDeadlineOrderOverride
+      summary: Soft-retire order-level deadline override
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.manage_order_overrides
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetireDeadlineOrderOverrideRequest'
+      responses:
+        '200':
+          description: Order override soft-retired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineOrderOverrideResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Order override не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadline-transition-rules:
+    get:
+      tags:
+        - Deadlines
+      operationId: listGlobalDeadlineTransitionRules
+      summary: Список глобальных status-transition deadline rules
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.actions.manage
+      responses:
+        '200':
+          description: Глобальные transition rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineActionRuleListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/deadline-transition-rules/{actionRuleId}:
+    parameters:
+      - name: actionRuleId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags:
+        - Deadlines
+      operationId: updateGlobalDeadlineTransitionRule
+      summary: Обновить глобальное status-transition deadline rule
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.actions.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGlobalTransitionRuleRequest'
+      responses:
+        '200':
+          description: Transition rule обновлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineActionRuleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Transition rule не найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/deadlines:
     get:
       tags:
@@ -3063,6 +3288,7 @@ components:
         - deadlines.pause
         - deadlines.cancel
         - deadlines.actions.manage
+        - deadlines.manage_order_overrides
         - deadlines.audit.view
         - deadlines.worker.manage
         - deadlines.worker.schedule
@@ -5505,6 +5731,415 @@ components:
             completedOnTime:
               type: integer
               minimum: 0
+
+    DeadlineActionType:
+      type: string
+      enum:
+        - notify_assignee
+        - notify_manager
+        - notify_department_head
+        - set_overdue_flag
+        - change_order_status
+        - change_production_status
+        - create_task
+        - escalate
+        - write_audit
+        - webhook
+
+    DeadlineActionRuleConditions:
+      type: object
+      properties:
+        allowedFromOrderStatusIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+        excludeOrderStatusIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+        excludeCompletedOrders:
+          type: boolean
+        requireCurrentDeadlineEvent:
+          type: boolean
+
+    DeadlineActionRuleActionConfig:
+      type: object
+      properties:
+        targetOrderStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+
+    DeadlineActionRuleConfig:
+      type: object
+      properties:
+        scope:
+          type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - global_orders
+        conditions:
+          $ref: '#/components/schemas/DeadlineActionRuleConditions'
+        actionConfig:
+          $ref: '#/components/schemas/DeadlineActionRuleActionConfig'
+
+    DeadlineActionRule:
+      type: object
+      required:
+        - actionRuleId
+        - scopeType
+        - eventType
+        - actionType
+        - isEnabled
+        - priority
+        - createdAt
+        - updatedAt
+      properties:
+        actionRuleId:
+          type: string
+          format: uuid
+        policyId:
+          type: string
+          format: uuid
+          nullable: true
+        scopeType:
+          $ref: '#/components/schemas/DeadlineEntityType'
+        eventType:
+          type: string
+          enum:
+            - DEADLINE_EXPIRED
+        actionType:
+          $ref: '#/components/schemas/DeadlineActionType'
+        isEnabled:
+          type: boolean
+        priority:
+          type: integer
+        config:
+          allOf:
+            - $ref: '#/components/schemas/DeadlineActionRuleConfig'
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DeadlineActionRuleListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineActionRule'
+
+    DeadlineActionRuleResponse:
+      type: object
+      required:
+        - rule
+      properties:
+        rule:
+          $ref: '#/components/schemas/DeadlineActionRule'
+
+    DeadlineOrderOverride:
+      type: object
+      required:
+        - overrideId
+        - orderId
+        - targetType
+        - isDisabled
+        - overrideConfig
+        - reason
+        - createdByUserId
+        - updatedByUserId
+        - createdAt
+        - updatedAt
+      properties:
+        overrideId:
+          type: string
+          format: uuid
+        orderId:
+          type: integer
+          format: int64
+        targetType:
+          type: string
+          enum:
+            - policy
+            - action_rule
+        policyId:
+          type: string
+          format: uuid
+          nullable: true
+        actionRuleId:
+          type: string
+          format: uuid
+          nullable: true
+        isDisabled:
+          type: boolean
+        overrideConfig:
+          type: object
+          additionalProperties: true
+        reason:
+          type: string
+        createdByUserId:
+          type: integer
+          format: int64
+        updatedByUserId:
+          type: integer
+          format: int64
+        retiredByUserId:
+          type: integer
+          format: int64
+          nullable: true
+        retiredAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DeadlineOrderOverrideResponse:
+      type: object
+      required:
+        - override
+      properties:
+        override:
+          $ref: '#/components/schemas/DeadlineOrderOverride'
+
+    UpsertDeadlineOrderOverrideRequest:
+      type: object
+      required:
+        - targetType
+        - reason
+      properties:
+        targetType:
+          type: string
+          enum:
+            - policy
+            - action_rule
+        policyId:
+          type: string
+          format: uuid
+        actionRuleId:
+          type: string
+          format: uuid
+        isDisabled:
+          type: boolean
+        overrideConfig:
+          type: object
+          additionalProperties: true
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+      description: Exactly one of policyId or actionRuleId is required and must match targetType.
+
+    RetireDeadlineOrderOverrideRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+
+    EffectiveDeadlinePolicyRule:
+      allOf:
+        - $ref: '#/components/schemas/DeadlinePolicy'
+        - type: object
+          required:
+            - override
+          properties:
+            override:
+              allOf:
+                - $ref: '#/components/schemas/DeadlineOrderOverride'
+              nullable: true
+
+    EffectiveDeadlineActionRule:
+      allOf:
+        - $ref: '#/components/schemas/DeadlineActionRule'
+        - type: object
+          required:
+            - override
+          properties:
+            override:
+              allOf:
+                - $ref: '#/components/schemas/DeadlineOrderOverride'
+              nullable: true
+
+    OrderEffectiveDeadlineRulesResponse:
+      type: object
+      required:
+        - orderId
+        - policies
+        - actionRules
+        - overrides
+      properties:
+        orderId:
+          type: integer
+          format: int64
+        policies:
+          type: array
+          items:
+            $ref: '#/components/schemas/EffectiveDeadlinePolicyRule'
+        actionRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/EffectiveDeadlineActionRule'
+        overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineOrderOverride'
+
+    PreviewOrderDeadlineActionRulesRequest:
+      type: object
+      properties:
+        eventType:
+          type: string
+          enum:
+            - DEADLINE_EXPIRED
+          default: DEADLINE_EXPIRED
+        deadlineId:
+          type: string
+          format: uuid
+          nullable: true
+        deadlineEventId:
+          type: string
+          format: uuid
+          nullable: true
+        fixtureKey:
+          type: string
+          nullable: true
+
+    PreviewDeadlineActionRuleCandidate:
+      type: object
+      required:
+        - actionRuleId
+        - priority
+        - actionType
+        - wouldRun
+        - wouldSkipReason
+        - targetOrderStatusId
+        - overrideId
+      properties:
+        actionRuleId:
+          type: string
+          format: uuid
+        priority:
+          type: integer
+        actionType:
+          $ref: '#/components/schemas/DeadlineActionType'
+        wouldRun:
+          type: boolean
+        wouldSkipReason:
+          type: string
+          nullable: true
+        targetOrderStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        overrideId:
+          type: string
+          format: uuid
+          nullable: true
+
+    PreviewOrderDeadlineActionRulesResponse:
+      type: object
+      required:
+        - orderId
+        - eventType
+        - candidateActionRules
+        - selectedActionRuleId
+        - selectionReason
+      properties:
+        orderId:
+          type: integer
+          format: int64
+        eventType:
+          type: string
+          enum:
+            - DEADLINE_EXPIRED
+        deadlineId:
+          type: string
+          format: uuid
+          nullable: true
+        deadlineEventId:
+          type: string
+          format: uuid
+          nullable: true
+        candidateActionRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreviewDeadlineActionRuleCandidate'
+        selectedActionRuleId:
+          type: string
+          format: uuid
+          nullable: true
+        selectionReason:
+          type: string
+
+    UpdateGlobalTransitionRuleRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        enabled:
+          type: boolean
+        isEnabled:
+          type: boolean
+        priority:
+          type: integer
+          minimum: 0
+        eventType:
+          type: string
+          enum:
+            - DEADLINE_EXPIRED
+        actionType:
+          type: string
+          enum:
+            - change_order_status
+        targetOrderStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+        allowedFromOrderStatusIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+        excludeOrderStatusIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+        excludeCompletedOrders:
+          type: boolean
+        requireCurrentDeadlineEvent:
+          type: boolean
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        comment:
+          type: string
+          maxLength: 2000
+          nullable: true
 
     DeadlinePolicyDurationUnit:
       type: string

@@ -3,6 +3,7 @@ import type {
   ActivateProductionStageCommand,
   ActivateDetailProductionStageCommand,
   ChangeOrderStatusCommand,
+  ChangeOrderStatusFromDeadlineCommand,
   ChangePaymentStatusCommand,
   ChangeProductionStatusCommand,
   DeactivateProductionStageCommand,
@@ -16,6 +17,10 @@ export class UnavailableProductionActionRepository implements ProductionActionRe
   }
 
   changeOrderStatus(_command: ChangeOrderStatusCommand) {
+    return Promise.reject(databaseUnavailable());
+  }
+
+  changeOrderStatusFromDeadline(_command: ChangeOrderStatusFromDeadlineCommand) {
     return Promise.reject(databaseUnavailable());
   }
 

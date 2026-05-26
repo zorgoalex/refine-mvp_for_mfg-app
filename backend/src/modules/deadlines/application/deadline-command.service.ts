@@ -2,6 +2,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
+import { getDeadlineOrderOverrideTarget } from '../dto/deadline-action-rule.dto';
 import { isTerminalDeadlineStatus } from '../domain/deadline-status';
 import { DeadlineInvalidStatusTransitionError, DeadlineNotFoundError } from '../errors/deadline.errors';
 import type {
@@ -12,8 +13,11 @@ import type {
   OverrideDeadlineCommand,
   PauseDeadlineCommand,
   ResumeDeadlineCommand,
+  RetireDeadlineOrderOverrideCommand,
   UpdateDeadlinePolicyCommand,
+  UpdateGlobalTransitionRuleCommand,
   UpdateDeadlineSettingsCommand,
+  UpsertDeadlineOrderOverrideCommand,
 } from './deadline.types';
 
 export interface DeadlineCommandServicePorts {
@@ -127,10 +131,102 @@ export class DeadlineCommandService {
     );
   }
 
+  async upsertOrderOverride(command: Omit<UpsertDeadlineOrderOverrideCommand, 'audit'>) {
+    this.requirePermission(command, 'deadlines.manage_order_overrides');
+    const target = getDeadlineOrderOverrideTarget(command.dto);
+
+    return this.ports.transactions.runInTransaction(async (unitOfWork) => ({
+      override: await unitOfWork.deadlines.upsertOrderOverride({
+        ...command,
+        audit: {
+          event: 'deadline.order_override_updated',
+          source: 'admin-ui',
+          actorUserId: command.currentUser.id,
+          requestId: command.requestId ?? null,
+          timerRuleId: target.targetType === 'policy' ? target.targetId : null,
+          actionRuleId: target.targetType === 'action_rule' ? target.targetId : null,
+          orderId: command.dto.orderId,
+          before: {},
+          after: {
+            targetType: target.targetType,
+            targetId: target.targetId,
+            isDisabled: command.dto.isDisabled ?? false,
+            overrideConfig: command.dto.overrideConfig ?? {},
+          },
+          diff: {},
+          reason: command.dto.reason,
+          comment: null,
+          executionEvidence: null,
+        },
+      }),
+    }));
+  }
+
+  async retireOrderOverride(command: Omit<RetireDeadlineOrderOverrideCommand, 'audit'>) {
+    this.requirePermission(command, 'deadlines.manage_order_overrides');
+
+    return this.ports.transactions.runInTransaction(async (unitOfWork) => ({
+      override: await unitOfWork.deadlines.retireOrderOverride({
+        ...command,
+        audit: {
+          event: 'deadline.order_override_removed',
+          source: 'admin-ui',
+          actorUserId: command.currentUser.id,
+          requestId: command.requestId ?? null,
+          timerRuleId: null,
+          actionRuleId: null,
+          orderId: command.orderId,
+          before: {},
+          after: { retired: true },
+          diff: { retiredAt: { from: null, to: 'now' } },
+          reason: command.reason,
+          comment: null,
+          executionEvidence: null,
+        },
+      }),
+    }));
+  }
+
+  async updateGlobalTransitionRule(command: Omit<UpdateGlobalTransitionRuleCommand, 'audit'>) {
+    this.requirePermission(command, 'deadlines.actions.manage');
+
+    return this.ports.transactions.runInTransaction(async (unitOfWork) => ({
+      rule: await unitOfWork.deadlines.updateGlobalTransitionRule({
+        ...command,
+        audit: {
+          event: 'deadline.action_rule_updated',
+          source: 'admin-ui',
+          actorUserId: command.currentUser.id,
+          requestId: command.requestId ?? null,
+          timerRuleId: null,
+          actionRuleId: command.actionRuleId,
+          orderId: null,
+          before: {},
+          after: command.dto as unknown as Record<string, unknown>,
+          diff: {},
+          reason: command.dto.reason,
+          comment: command.dto.comment ?? null,
+          executionEvidence: null,
+        },
+      }),
+    }));
+  }
+
   private requirePermission(command: { currentUser: CurrentUser }, permission: PermissionName): void {
     if (!this.permissions.canUser(command.currentUser, permission)) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: [permission],
+      });
+    }
+  }
+
+  private requireAnyPermission(
+    command: { currentUser: CurrentUser },
+    permissions: PermissionName[],
+  ): void {
+    if (!permissions.some((permission) => this.permissions.canUser(command.currentUser, permission))) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: permissions,
       });
     }
   }

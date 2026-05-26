@@ -108,6 +108,46 @@ describe('ProductionActionService', () => {
     ]);
   });
 
+  it('delegates deadline-engine order status command without user permission checks', async () => {
+    const calls: string[] = [];
+    const service = new ProductionActionService({
+      productionActions: createRepository({
+        async changeOrderStatusFromDeadline(command) {
+          calls.push(`${command.source}:${command.systemActor.actorLabel}:${command.orderId}:${command.targetOrderStatusId}`);
+          return {
+            status: 'executed',
+            response: response(),
+          };
+        },
+      }),
+    });
+
+    await expect(
+      service.changeOrderStatusFromDeadline({
+        source: 'deadline-engine',
+        systemActor: {
+          type: 'system',
+          actorUserId: null,
+          actorLabel: 'deadline-engine',
+        },
+        orderId: 15,
+        targetOrderStatusId: 7,
+        deadlineId: 'deadline-1',
+        deadlineEventId: 'event-1',
+        actionRuleId: 'rule-1',
+        ruleVersionId: null,
+        ruleConfigSnapshot: { snapshotHash: 'sha256:rule-1' },
+        idempotencyKey: 'deadline-status-key-1',
+        requestId: 'request-deadline-status',
+        occurredAt: '2026-05-25T10:00:00.000Z',
+      }),
+    ).resolves.toMatchObject({
+      status: 'executed',
+      response: { order: { orderId: 15 } },
+    });
+    expect(calls).toEqual(['deadline-engine:deadline-engine:15:7']);
+  });
+
   it('requires order production status permissions for detail production events', async () => {
     const service = new ProductionActionService({ productionActions: createRepository() });
     const viewer = currentUser('viewer');
@@ -157,6 +197,9 @@ function createRepository(
     },
     async changeOrderStatus() {
       throw new Error('changeOrderStatus should not be called');
+    },
+    async changeOrderStatusFromDeadline() {
+      throw new Error('changeOrderStatusFromDeadline should not be called');
     },
     async changePaymentStatus() {
       throw new Error('changePaymentStatus should not be called');

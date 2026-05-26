@@ -9,6 +9,8 @@ import type {
   ActivateProductionStageCommand,
   ActivateDetailProductionStageCommand,
   ChangeOrderStatusCommand,
+  ChangeOrderStatusFromDeadlineCommand,
+  ChangeOrderStatusFromDeadlineResult,
   ChangePaymentStatusCommand,
   ChangeProductionStatusCommand,
   DeactivateProductionStageCommand,
@@ -370,6 +372,12 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       await completeIdempotency(tx, command.dto.idempotencyKey, response);
       return response;
     });
+  }
+
+  changeOrderStatusFromDeadline(
+    command: ChangeOrderStatusFromDeadlineCommand,
+  ): Promise<ChangeOrderStatusFromDeadlineResult> {
+    return this.database.transaction((tx) => changeOrderStatusFromDeadlineInTransaction(tx, command));
   }
 
   changePaymentStatus(command: ChangePaymentStatusCommand): Promise<ProductionActionResponseDto> {
@@ -1035,6 +1043,151 @@ async function writeDeniedActionAudit(
   );
 }
 
+export async function changeOrderStatusFromDeadlineInTransaction(
+  tx: TransactionClient,
+  command: ChangeOrderStatusFromDeadlineCommand,
+): Promise<ChangeOrderStatusFromDeadlineResult> {
+  const requestId = requestIdOrFallback(command.requestId);
+  const ruleConfigSnapshot = command.ruleConfigSnapshot as { snapshotHash?: unknown };
+  const snapshotHash =
+    typeof ruleConfigSnapshot.snapshotHash === 'string' ? ruleConfigSnapshot.snapshotHash : null;
+  const idempotency = await reconcileIdempotency(tx, {
+    idempotencyKey: command.idempotencyKey,
+    commandName: 'orders.status_change',
+    actorUserId: null,
+    entityType: 'order',
+    entityId: String(command.orderId),
+    requestShape: {
+      actorUserId: null,
+      actorLabel: command.systemActor.actorLabel,
+      commandName: 'orders.status_change',
+      source: command.source,
+      orderId: command.orderId,
+      orderStatusId: command.targetOrderStatusId,
+      deadlineId: command.deadlineId,
+      deadlineEventId: command.deadlineEventId,
+      actionRuleId: command.actionRuleId,
+      ruleVersionId: command.ruleVersionId ?? null,
+      snapshotHash,
+    },
+  });
+  if (idempotency.completedResponse) {
+    return mapDeadlineStoredResponse(idempotency.completedResponse);
+  }
+
+  const order = await loadOrderForUpdate(tx, command.orderId);
+  const status = await loadOrderStatus(tx, command.targetOrderStatusId);
+
+  const deadlineMetadata = {
+    source: command.source,
+    systemActor: command.systemActor,
+    orderId: order.orderId,
+    clientId: order.clientId,
+    deadlineId: command.deadlineId,
+    deadlineEventId: command.deadlineEventId,
+    actionRuleId: command.actionRuleId,
+    ruleVersionId: command.ruleVersionId ?? null,
+    snapshotHash,
+    ruleConfigSnapshot: command.ruleConfigSnapshot,
+    idempotencyKey: command.idempotencyKey,
+    requestId,
+    occurredAt: command.occurredAt,
+  };
+
+  if (order.orderStatusId === status.orderStatusId) {
+    const response = {
+      order: {
+        orderId: order.orderId,
+        orderStatusId: order.orderStatusId,
+        version: order.version,
+      },
+      requestId,
+    };
+    await completeDeadlineIdempotency(tx, command.idempotencyKey, {
+      status: 'skipped',
+      skipReason: 'same_status',
+      response,
+    });
+    return { status: 'skipped', skipReason: 'same_status', response };
+  }
+
+  const nextVersion = await updateOrderStatus(tx, order.orderId, status.orderStatusId);
+  const auditId = await writeAudit(tx, {
+    event: 'orders.status_change',
+    actorUserId: null,
+    requestId,
+    order,
+    source: command.source,
+    statusField: 'orderStatus',
+    statusId: status.orderStatusId,
+    statusName: status.orderStatusName,
+    beforeJson: {
+      orderStatusId: order.orderStatusId,
+      version: order.version,
+      deadlineId: command.deadlineId,
+      deadlineEventId: command.deadlineEventId,
+      actionRuleId: command.actionRuleId,
+      snapshotHash,
+    },
+    afterJson: {
+      orderStatusId: status.orderStatusId,
+      orderStatusName: status.orderStatusName,
+      version: nextVersion,
+      deadlineId: command.deadlineId,
+      deadlineEventId: command.deadlineEventId,
+      actionRuleId: command.actionRuleId,
+      snapshotHash,
+    },
+    diffJson: {
+      orderStatusId: {
+        before: order.orderStatusId,
+        after: status.orderStatusId,
+      },
+    },
+    metadataJson: {
+      ...deadlineMetadata,
+      orderStatusId: status.orderStatusId,
+      orderStatusName: status.orderStatusName,
+      previousOrderStatusId: order.orderStatusId,
+      action: 'order_status_change',
+      statusField: 'orderStatus',
+    },
+  });
+
+  await enqueueOutbox(tx, {
+    eventType: 'order.status_changed',
+    aggregateType: 'order',
+    aggregateId: String(order.orderId),
+    idempotencyKey: command.idempotencyKey,
+    payload: {
+      ...deadlineMetadata,
+      eventType: 'order.status_changed',
+      actorUserId: null,
+      entityType: 'order',
+      entityId: String(order.orderId),
+      orderStatusId: status.orderStatusId,
+      previousOrderStatusId: order.orderStatusId,
+      action: 'order_status_change',
+      scope: { source: command.source },
+    },
+  });
+
+  const response = {
+    order: {
+      orderId: order.orderId,
+      orderStatusId: status.orderStatusId,
+      version: nextVersion,
+    },
+    auditId,
+    requestId,
+  };
+  await completeDeadlineIdempotency(tx, command.idempotencyKey, {
+    status: 'executed',
+    response,
+  });
+  return { status: 'executed', response };
+}
+
 async function setSessionUser(tx: TransactionClient, userId: string): Promise<void> {
   await tx.query('SELECT set_session_user($1)', [userId]);
 }
@@ -1044,7 +1197,8 @@ async function reconcileIdempotency(
   input: {
     idempotencyKey: string;
     commandName: CommandName;
-    currentUser: CurrentUser;
+    currentUser?: CurrentUser;
+    actorUserId?: number | null;
     entityType: string;
     entityId: string;
     requestShape: Record<string, unknown>;
@@ -1063,7 +1217,7 @@ async function reconcileIdempotency(
     [
       input.idempotencyKey,
       input.commandName,
-      Number(input.currentUser.id),
+      input.actorUserId ?? (input.currentUser ? Number(input.currentUser.id) : null),
       input.entityType,
       input.entityId,
       requestHash,
@@ -1115,6 +1269,46 @@ async function completeIdempotency(
     `,
     [idempotencyKey, JSON.stringify(response)],
   );
+}
+
+async function completeDeadlineIdempotency(
+  tx: TransactionClient,
+  idempotencyKey: string,
+  result: ChangeOrderStatusFromDeadlineResult,
+): Promise<void> {
+  await completeIdempotency(tx, idempotencyKey, {
+    ...result.response,
+    deadlineActionStatus: result.status,
+    deadlineSkipReason: result.skipReason ?? null,
+  } as ProductionActionResponseDto);
+}
+
+function mapDeadlineStoredResponse(
+  response: ProductionActionResponseDto,
+): ChangeOrderStatusFromDeadlineResult {
+  const stored = response as ProductionActionResponseDto & {
+    deadlineActionStatus?: unknown;
+    deadlineSkipReason?: unknown;
+  };
+  const {
+    deadlineActionStatus: _deadlineActionStatus,
+    deadlineSkipReason: _deadlineSkipReason,
+    ...productionResponse
+  } = stored;
+
+  if (stored.deadlineActionStatus === 'skipped') {
+    return {
+      status: 'skipped',
+      skipReason:
+        typeof stored.deadlineSkipReason === 'string' ? stored.deadlineSkipReason : 'same_status',
+      response: productionResponse,
+    };
+  }
+
+  return {
+    status: 'executed',
+    response: productionResponse,
+  };
 }
 
 async function loadOrderForUpdate(tx: TransactionClient, orderId: number): Promise<LockedOrder> {
@@ -1525,7 +1719,8 @@ async function writeAudit(
   tx: TransactionClient,
   input: {
     event: CommandName;
-    currentUser: CurrentUser;
+    currentUser?: CurrentUser;
+    actorUserId?: string | number | null;
     requestId: string;
     order: LockedOrder;
     entityType?: string;
@@ -1563,7 +1758,7 @@ async function writeAudit(
       input.event,
       input.entityType ?? 'order',
       input.entityId ?? String(input.order.orderId),
-      input.currentUser.id,
+      input.actorUserId ?? input.currentUser?.id ?? null,
       input.requestId,
       input.source,
       input.order.orderId,

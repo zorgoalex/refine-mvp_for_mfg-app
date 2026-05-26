@@ -10,6 +10,17 @@ export type DeadlineStatus =
 export type DeadlineSource = 'policy' | 'manual' | 'imported' | 'recalculated' | 'system';
 export type DeadlineSeverity = 'info' | 'warning' | 'critical';
 export type DeadlinePauseMode = 'pause_without_shift' | 'pause_and_shift_deadline';
+export type DeadlineEventType = 'DEADLINE_EXPIRED' | string;
+export type DeadlineActionType =
+  | 'notify_assignee'
+  | 'notify_manager'
+  | 'notify_department_head'
+  | 'set_overdue_flag'
+  | 'change_order_status'
+  | 'change_production_status'
+  | 'escalate'
+  | string;
+export type DeadlineOrderOverrideTargetType = 'policy' | 'action_rule';
 
 export interface DeadlineDto {
   deadlineId: string;
@@ -139,6 +150,11 @@ export interface DeadlinePolicyDto {
   policyCode: string;
   policyName: string;
   scopeType: DeadlineEntityType;
+  targetType?: string | null;
+  targetCode?: string | null;
+  durationValue?: number | null;
+  durationUnit?: 'minute' | 'hour' | 'day' | 'working_hour' | 'working_day' | null;
+  startPoint?: string | null;
   isEnabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -165,3 +181,153 @@ export interface DeadlineSettingsResponse {
 }
 
 export type UpdateDeadlineSettingsRequest = Partial<DeadlineSettingsDto>;
+
+export interface DeadlineActionRuleConditionsDto {
+  allowedFromOrderStatusIds?: number[];
+  excludeOrderStatusIds?: number[];
+  excludeCompletedOrders?: boolean;
+  requireCurrentDeadlineEvent?: boolean;
+}
+
+export interface DeadlineActionRuleActionConfigDto {
+  targetOrderStatusId?: number;
+}
+
+export interface DeadlineActionRuleConfigDto {
+  scope?: {
+    type: 'global_orders';
+  };
+  conditions?: DeadlineActionRuleConditionsDto;
+  actionConfig?: DeadlineActionRuleActionConfigDto;
+  fixtureKey?: string;
+}
+
+export interface DeadlineActionRuleDto {
+  actionRuleId: string;
+  policyId?: string | null;
+  scopeType: DeadlineEntityType;
+  eventType: DeadlineEventType;
+  actionType: DeadlineActionType;
+  isEnabled: boolean;
+  priority: number;
+  config?: DeadlineActionRuleConfigDto | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeadlineOrderOverrideConfigDto {
+  conditions?: Partial<DeadlineActionRuleConditionsDto>;
+  actionConfig?: Partial<DeadlineActionRuleActionConfigDto>;
+  timerConfig?: {
+    durationValue?: number;
+    durationUnit?: 'minute' | 'hour' | 'day' | 'working_hour' | 'working_day';
+  };
+}
+
+export interface DeadlineOrderOverrideDto {
+  overrideId: string;
+  orderId: number;
+  targetType: DeadlineOrderOverrideTargetType;
+  policyId?: string | null;
+  actionRuleId?: string | null;
+  isDisabled: boolean;
+  overrideConfig: DeadlineOrderOverrideConfigDto;
+  reason: string;
+  createdByUserId: number;
+  updatedByUserId: number;
+  retiredByUserId?: number | null;
+  retiredAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EffectiveDeadlinePolicyRuleDto extends DeadlinePolicyDto {
+  override: DeadlineOrderOverrideDto | null;
+}
+
+export interface EffectiveDeadlineActionRuleDto extends DeadlineActionRuleDto {
+  override: DeadlineOrderOverrideDto | null;
+}
+
+export interface OrderEffectiveDeadlineRulesResponse {
+  orderId: number;
+  policies: EffectiveDeadlinePolicyRuleDto[];
+  actionRules: EffectiveDeadlineActionRuleDto[];
+  overrides: DeadlineOrderOverrideDto[];
+}
+
+export interface PreviewDeadlineActionRuleCandidateDto {
+  actionRuleId: string;
+  priority: number;
+  actionType: DeadlineActionType;
+  wouldRun: boolean;
+  wouldSkipReason: string | null;
+  targetOrderStatusId: number | null;
+  overrideId: string | null;
+}
+
+export interface PreviewOrderDeadlineActionRulesRequest {
+  eventType?: 'DEADLINE_EXPIRED';
+  deadlineId?: string | null;
+  deadlineEventId?: string | null;
+  fixtureKey?: string | null;
+}
+
+export interface PreviewOrderDeadlineActionRulesResponse {
+  orderId: number;
+  eventType: 'DEADLINE_EXPIRED';
+  deadlineId?: string | null;
+  deadlineEventId?: string | null;
+  candidateActionRules: PreviewDeadlineActionRuleCandidateDto[];
+  selectedActionRuleId: string | null;
+  selectionReason: string;
+}
+
+export type UpsertDeadlineOrderOverrideRequest =
+  | {
+      targetType: 'policy';
+      policyId: string;
+      actionRuleId?: never;
+      isDisabled?: boolean;
+      overrideConfig?: DeadlineOrderOverrideConfigDto;
+      reason: string;
+    }
+  | {
+      targetType: 'action_rule';
+      actionRuleId: string;
+      policyId?: never;
+      isDisabled?: boolean;
+      overrideConfig?: DeadlineOrderOverrideConfigDto;
+      reason: string;
+    };
+
+export interface RetireDeadlineOrderOverrideRequest {
+  reason: string;
+}
+
+export interface DeadlineOrderOverrideResponse {
+  override: DeadlineOrderOverrideDto;
+}
+
+export interface DeadlineActionRuleListResponse {
+  data: DeadlineActionRuleDto[];
+}
+
+export interface DeadlineActionRuleResponse {
+  rule: DeadlineActionRuleDto;
+}
+
+export interface UpdateGlobalTransitionRuleRequest {
+  enabled?: boolean;
+  isEnabled?: boolean;
+  priority?: number;
+  eventType?: 'DEADLINE_EXPIRED';
+  actionType?: 'change_order_status';
+  targetOrderStatusId?: number;
+  allowedFromOrderStatusIds?: number[];
+  excludeOrderStatusIds?: number[];
+  excludeCompletedOrders?: boolean;
+  requireCurrentDeadlineEvent?: boolean;
+  reason: string;
+  comment?: string | null;
+}

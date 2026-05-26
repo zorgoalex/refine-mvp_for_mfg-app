@@ -4,18 +4,27 @@ import { validateOrderId, withQuery } from './ordersApi';
 import type {
   CancelDeadlineRequest,
   CreateDeadlineRequest,
+  DeadlineActionRuleListResponse,
+  DeadlineActionRuleResponse,
   DeadlineEventsResponse,
   DeadlineListQuery,
   DeadlineListResponse,
+  DeadlineOrderOverrideResponse,
   DeadlinePolicyListResponse,
   DeadlineResponse,
   DeadlineSettingsResponse,
   OrderDeadlinesResponse,
   OrderDeadlineSummary,
+  OrderEffectiveDeadlineRulesResponse,
   OverrideDeadlineRequest,
   PauseDeadlineRequest,
+  PreviewOrderDeadlineActionRulesRequest,
+  PreviewOrderDeadlineActionRulesResponse,
+  RetireDeadlineOrderOverrideRequest,
   ResumeDeadlineRequest,
   UpdateDeadlineSettingsRequest,
+  UpdateGlobalTransitionRuleRequest,
+  UpsertDeadlineOrderOverrideRequest,
 } from './types/deadlineApi.types';
 
 export const deadlinesApi = {
@@ -77,6 +86,46 @@ export const deadlinesApi = {
     );
   },
 
+  getOrderEffectiveRules(orderId: number): Promise<OrderEffectiveDeadlineRulesResponse> {
+    return httpClient.get<OrderEffectiveDeadlineRulesResponse>(
+      apiRoutes.orders.deadlineEffectiveRules(validateOrderId(orderId)),
+    );
+  },
+
+  previewOrderActionRules(
+    orderId: number,
+    request: PreviewOrderDeadlineActionRulesRequest = { eventType: 'DEADLINE_EXPIRED' },
+  ): Promise<PreviewOrderDeadlineActionRulesResponse> {
+    return httpClient.post<PreviewOrderDeadlineActionRulesResponse>(
+      apiRoutes.orders.deadlineActionPreview(validateOrderId(orderId)),
+      request,
+    );
+  },
+
+  upsertOrderOverride(
+    orderId: number,
+    request: UpsertDeadlineOrderOverrideRequest,
+  ): Promise<DeadlineOrderOverrideResponse> {
+    return httpClient.post<DeadlineOrderOverrideResponse>(
+      apiRoutes.orders.deadlineOverrides(validateOrderId(orderId)),
+      request,
+    );
+  },
+
+  retireOrderOverride(
+    orderId: number,
+    overrideId: string,
+    request: RetireDeadlineOrderOverrideRequest,
+  ): Promise<DeadlineOrderOverrideResponse> {
+    return httpClient.request<DeadlineOrderOverrideResponse>(
+      apiRoutes.orders.deadlineOverride(validateOrderId(orderId), validateDeadlineId(overrideId)),
+      {
+        method: 'DELETE',
+        body: JSON.stringify(request),
+      },
+    );
+  },
+
   listPolicies(): Promise<DeadlinePolicyListResponse> {
     return httpClient.get<DeadlinePolicyListResponse>(apiRoutes.deadlinePolicies.list);
   },
@@ -87,6 +136,20 @@ export const deadlinesApi = {
 
   updateSettings(request: UpdateDeadlineSettingsRequest): Promise<DeadlineSettingsResponse> {
     return httpClient.patch<DeadlineSettingsResponse>(apiRoutes.deadlineSettings.root, request);
+  },
+
+  listDeadlineTransitionRules(): Promise<DeadlineActionRuleListResponse> {
+    return httpClient.get<DeadlineActionRuleListResponse>(apiRoutes.deadlineTransitionRules.list);
+  },
+
+  updateDeadlineTransitionRule(
+    actionRuleId: string,
+    request: UpdateGlobalTransitionRuleRequest,
+  ): Promise<DeadlineActionRuleResponse> {
+    return httpClient.patch<DeadlineActionRuleResponse>(
+      apiRoutes.deadlineTransitionRules.byId(validateDeadlineId(actionRuleId)),
+      request,
+    );
   },
 };
 

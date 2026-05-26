@@ -1,5 +1,19 @@
 import type { CurrentUser } from '../../../permissions/current-user';
-import type { DeadlineActionExecutionDto, DeadlineActionRuleDto } from '../dto/deadline-action-rule.dto';
+import type {
+  DeadlineActionExecutionDto,
+  DeadlineActionRuleDto,
+  DeadlineOrderOverrideDto,
+  OrderEffectiveDeadlineRulesDto,
+  PreviewOrderDeadlineActionRulesDto,
+  PreviewOrderDeadlineActionRulesRequestDto,
+  DeadlineRuleConfigSnapshotDto,
+  UpdateGlobalTransitionRuleRequestDto,
+  UpsertDeadlineOrderOverrideInput,
+} from '../dto/deadline-action-rule.dto';
+import type {
+  DeadlineAuditContract,
+  DeadlineOrderOverrideAuditContract,
+} from '../domain/deadline-actions';
 import type {
   CancelDeadlineRequestDto,
   CreateDeadlineRequestDto,
@@ -129,6 +143,57 @@ export interface UpdateDeadlineSettingsCommand {
   dto: UpdateDeadlineSettingsRequestDto;
 }
 
+export interface UpsertDeadlineOrderOverrideCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+  dto: UpsertDeadlineOrderOverrideInput;
+  audit: DeadlineOrderOverrideAuditContract;
+}
+
+export interface RetireDeadlineOrderOverrideCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+  orderId: number;
+  overrideId: string;
+  reason: string;
+  audit: DeadlineOrderOverrideAuditContract;
+}
+
+export interface ListOrderEffectiveDeadlineRulesCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+}
+
+export interface PreviewOrderDeadlineActionRulesCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  dto: PreviewOrderDeadlineActionRulesRequestDto;
+}
+
+export interface ListGlobalTransitionRulesCommand {
+  currentUser: CurrentUser;
+}
+
+export interface UpdateGlobalTransitionRuleCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+  actionRuleId: string;
+  dto: UpdateGlobalTransitionRuleRequestDto;
+  audit: DeadlineAuditContract;
+}
+
+export interface OrderDeadlineEvaluationContext {
+  orderId: number;
+  orderStatusId: number;
+  isCompleted: boolean;
+}
+
+export interface DeadlineEventCurrentForOrderQuery {
+  orderId: number;
+  deadlineId?: string | null;
+  deadlineEventId?: string | null;
+}
+
 export interface FindDueDeadlinesCommand {
   now: string;
   limit: number;
@@ -188,6 +253,10 @@ export interface CreateActionExecutionInput {
   errorCode?: string | null;
   errorMessage?: string | null;
   result?: Record<string, unknown> | null;
+  ruleConfigSnapshot?: DeadlineRuleConfigSnapshotDto;
+  ruleVersionId?: string | null;
+  orderId?: number | null;
+  targetStatusId?: number | null;
   executedAt?: string | null;
 }
 
@@ -226,10 +295,19 @@ export interface DeadlineRepositoryPort {
     eventType: DeadlineEventType;
   }): Promise<DeadlineActionRuleDto[]>;
   createActionExecution(input: CreateActionExecutionInput): Promise<DeadlineActionExecutionDto>;
+  listOrderOverrides(orderId: number): Promise<DeadlineOrderOverrideDto[]>;
+  listOrderActionRuleOverrides(orderId: number, actionRuleIds: string[]): Promise<DeadlineOrderOverrideDto[]>;
+  upsertOrderOverride(command: UpsertDeadlineOrderOverrideCommand): Promise<DeadlineOrderOverrideDto>;
+  retireOrderOverride(command: RetireDeadlineOrderOverrideCommand): Promise<DeadlineOrderOverrideDto>;
+  listGlobalTransitionRules(): Promise<DeadlineActionRuleDto[]>;
+  updateGlobalTransitionRule(command: UpdateGlobalTransitionRuleCommand): Promise<DeadlineActionRuleDto>;
+  getOrderDeadlineEvaluationContext(orderId: number): Promise<OrderDeadlineEvaluationContext | null>;
+  isDeadlineEventCurrentForOrder(query: DeadlineEventCurrentForOrderQuery): Promise<boolean>;
 }
 
 export interface DeadlineUnitOfWork {
   deadlines: DeadlineRepositoryPort;
+  statusActionPort?: DeadlineOrderStatusActionPort;
 }
 
 export interface DeadlineTransactionManagerPort {
@@ -263,4 +341,35 @@ export interface DeadlineNotificationResult {
 
 export interface DeadlineNotificationPort {
   createNotification(input: DeadlineNotificationInput): Promise<DeadlineNotificationResult>;
+}
+
+export interface DeadlineChangeOrderStatusCommand {
+  source: 'deadline-engine';
+  systemActor: {
+    type: 'system';
+    actorUserId: null;
+    actorLabel: 'deadline-engine';
+  };
+  orderId: number;
+  targetOrderStatusId: number;
+  deadlineId: string;
+  deadlineEventId: string;
+  actionRuleId: string;
+  ruleVersionId?: string | null;
+  ruleConfigSnapshot: DeadlineRuleConfigSnapshotDto;
+  idempotencyKey: string;
+  requestId?: string;
+  occurredAt: string;
+}
+
+export interface DeadlineChangeOrderStatusResult {
+  status: 'executed' | 'skipped';
+  skipReason?: string | null;
+  result?: Record<string, unknown> | null;
+}
+
+export interface DeadlineOrderStatusActionPort {
+  changeOrderStatusFromDeadline(
+    command: DeadlineChangeOrderStatusCommand,
+  ): Promise<DeadlineChangeOrderStatusResult>;
 }

@@ -52,18 +52,25 @@ describe('permissions foundation', () => {
   it('assigns deadline permissions by role without giving worker controls to service admin', () => {
     expect(can('superadmin', 'deadlines.worker.manage')).toBe(true);
     expect(can('superadmin', 'deadlines.worker.schedule')).toBe(true);
+    expect(can('superadmin', 'deadlines.manage_order_overrides')).toBe(true);
     expect(can('admin', 'deadlines.manage')).toBe(true);
     expect(can('admin', 'deadlines.actions.manage')).toBe(true);
+    expect(can('admin', 'deadlines.manage_order_overrides')).toBe(true);
     expect(can('admin', 'deadlines.worker.manage')).toBe(false);
     expect(can('admin', 'deadlines.worker.schedule')).toBe(false);
 
     expect(can('top_manager', 'deadlines.audit.view')).toBe(true);
+    expect(can('top_manager', 'deadlines.manage_order_overrides')).toBe(false);
     expect(can('manager', 'deadlines.override')).toBe(true);
+    expect(can('manager', 'deadlines.manage_order_overrides')).toBe(false);
     expect(can('operator', 'deadlines.pause')).toBe(true);
     expect(can('operator', 'deadlines.override')).toBe(false);
+    expect(can('operator', 'deadlines.manage_order_overrides')).toBe(false);
     expect(can('worker', 'deadlines.view')).toBe(true);
     expect(can('worker', 'deadlines.pause')).toBe(false);
+    expect(can('worker', 'deadlines.manage_order_overrides')).toBe(false);
     expect(can('viewer', 'deadlines.view')).toBe(true);
+    expect(can('viewer', 'deadlines.manage_order_overrides')).toBe(false);
   });
 
   it('sets legacy Hasura allowed roles with superadmin at the top', () => {
@@ -87,6 +94,14 @@ describe('permissions foundation', () => {
     );
 
     expect(contractPermissions).toEqual(expect.arrayContaining(deadlineWorkerPermissions));
+  });
+
+  it('keeps order override management permission in static OpenAPI after API slice', () => {
+    const contract = readOpenApiContract();
+    const contractPermissions = readPermissionNameEnum(contract);
+
+    expect(PERMISSIONS).toContain('deadlines.manage_order_overrides');
+    expect(contractPermissions).toContain('deadlines.manage_order_overrides');
   });
 });
 

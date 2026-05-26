@@ -1,4 +1,8 @@
-import type { DeadlineActionExecutionDto } from '../dto/deadline-action-rule.dto';
+import type {
+  DeadlineActionExecutionDto,
+  DeadlineActionRuleDto,
+  DeadlineOrderOverrideDto,
+} from '../dto/deadline-action-rule.dto';
 import type { DeadlineEventDto, DeadlineInstanceDto } from '../dto/deadline-instance.dto';
 import type { DeadlinePolicyDto } from '../dto/deadline-policy.dto';
 import type { DeadlineSettingsDto } from '../dto/deadline-settings.dto';
@@ -13,8 +17,12 @@ import type {
   DeadlineRepositoryPort,
   FindDueDeadlinesCommand,
   ListDeadlinesCommand,
+  OrderDeadlineEvaluationContext,
+  RetireDeadlineOrderOverrideCommand,
   UpdateDeadlinePolicyCommand,
+  UpdateGlobalTransitionRuleCommand,
   UpdateDeadlineSettingsCommand,
+  UpsertDeadlineOrderOverrideCommand,
 } from '../application/deadline.types';
 
 export class UnavailableDeadlineRepository implements DeadlineRepositoryPort {
@@ -106,6 +114,49 @@ export class UnavailableDeadlineRepository implements DeadlineRepositoryPort {
   async createActionExecution(
     _input: CreateActionExecutionInput,
   ): Promise<DeadlineActionExecutionDto> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
+  async listOrderOverrides(_orderId: number): Promise<DeadlineOrderOverrideDto[]> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
+  async listOrderActionRuleOverrides(
+    _orderId: number,
+    _actionRuleIds: string[],
+  ): Promise<DeadlineOrderOverrideDto[]> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
+  async upsertOrderOverride(
+    _command: UpsertDeadlineOrderOverrideCommand,
+  ): Promise<DeadlineOrderOverrideDto> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
+  async retireOrderOverride(
+    _command: RetireDeadlineOrderOverrideCommand,
+  ): Promise<DeadlineOrderOverrideDto> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
+  async listGlobalTransitionRules(): Promise<DeadlineActionRuleDto[]> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
+  async updateGlobalTransitionRule(
+    _command: UpdateGlobalTransitionRuleCommand,
+  ): Promise<DeadlineActionRuleDto> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
+  async getOrderDeadlineEvaluationContext(
+    orderId: number,
+  ): Promise<OrderDeadlineEvaluationContext | null> {
+    throw deadlineAdapterUnavailableError(`deadline_repository:${orderId}`);
+  }
+
+  async isDeadlineEventCurrentForOrder(): Promise<boolean> {
     throw deadlineAdapterUnavailableError('deadline_repository');
   }
 }

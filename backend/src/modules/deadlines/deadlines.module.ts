@@ -14,7 +14,10 @@ import { DeadlineCommandService } from './application/deadline-command.service';
 import { DeadlineQueryService } from './application/deadline-query.service';
 import { DeadlineWorkerSchedulerService } from './application/deadline-worker-scheduler.service';
 import { DeadlineWorkerService } from './application/deadline-worker.service';
+import { PgProductionActionRepository } from '../production-actions/adapters/pg-production-action-repository';
+import { UnavailableProductionActionRepository } from '../production-actions/adapters/unavailable-production-action-repository';
 import { DeadlinePoliciesController } from './http/deadline-policies.controller';
+import { DeadlineRulesController } from './http/deadline-rules.controller';
 import { DeadlineSettingsController } from './http/deadline-settings.controller';
 import { DeadlineWorkerController } from './http/deadline-worker.controller';
 import { DeadlinesController } from './http/deadlines.controller';
@@ -25,6 +28,7 @@ import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.s
   controllers: [
     DeadlinesController,
     DeadlinePoliciesController,
+    DeadlineRulesController,
     DeadlineSettingsController,
     DeadlineWorkerController,
   ],
@@ -64,6 +68,19 @@ import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.s
           notificationPort: database.isConfigured
             ? new PgDeadlineNotificationPort(database)
             : new UnavailableDeadlineNotificationPort(),
+          statusActionPort: {
+            async changeOrderStatusFromDeadline(command) {
+              const result = await (database.isConfigured
+                ? new PgProductionActionRepository(database)
+                : new UnavailableProductionActionRepository()
+              ).changeOrderStatusFromDeadline(command);
+              return {
+                status: result.status,
+                skipReason: result.skipReason ?? null,
+                result: { ...result.response },
+              };
+            },
+          },
         }),
       inject: [DatabaseService],
     },

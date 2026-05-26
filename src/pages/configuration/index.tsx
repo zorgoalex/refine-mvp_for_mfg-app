@@ -9,10 +9,12 @@ import {
   CloseOutlined,
   CameraOutlined,
   BuildOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { VlmConfigTab } from './VlmConfigTab';
 import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
+import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
 
 const { Text } = Typography;
 
@@ -388,6 +390,16 @@ export const ConfigurationPage: React.FC = () => {
         </span>
       ),
       children: <ProductionWorkflowTab />,
+    },
+    {
+      key: 'deadline-rules',
+      label: (
+        <span>
+          <ClockCircleOutlined />
+          Дедлайн-правила
+        </span>
+      ),
+      children: <DeadlineTransitionRulesConfig />,
     },
     {
       key: 'finance',

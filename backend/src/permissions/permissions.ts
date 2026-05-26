@@ -116,6 +116,7 @@ export const PERMISSIONS = [
   'deadlines.pause',
   'deadlines.cancel',
   'deadlines.actions.manage',
+  'deadlines.manage_order_overrides',
   'deadlines.audit.view',
   'deadlines.worker.manage',
   'deadlines.worker.schedule',

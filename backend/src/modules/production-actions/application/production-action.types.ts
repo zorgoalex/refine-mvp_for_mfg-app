@@ -23,6 +23,31 @@ export interface ChangeOrderStatusCommand {
   requestId?: string;
 }
 
+export interface ChangeOrderStatusFromDeadlineCommand {
+  source: 'deadline-engine';
+  systemActor: {
+    type: 'system';
+    actorUserId: null;
+    actorLabel: 'deadline-engine';
+  };
+  orderId: number;
+  targetOrderStatusId: number;
+  deadlineId: string;
+  deadlineEventId: string;
+  actionRuleId: string;
+  ruleVersionId?: string | null;
+  ruleConfigSnapshot: object;
+  idempotencyKey: string;
+  requestId?: string;
+  occurredAt: string;
+}
+
+export interface ChangeOrderStatusFromDeadlineResult {
+  status: 'executed' | 'skipped';
+  skipReason?: string | null;
+  response: ProductionActionResponseDto;
+}
+
 export interface ChangePaymentStatusCommand {
   currentUser: CurrentUser;
   orderId: number;
@@ -64,6 +89,9 @@ export interface ActivateDetailProductionStageCommand {
 export interface ProductionActionRepositoryPort {
   moveCalendarDate(command: MoveCalendarDateCommand): Promise<ProductionActionResponseDto>;
   changeOrderStatus(command: ChangeOrderStatusCommand): Promise<ProductionActionResponseDto>;
+  changeOrderStatusFromDeadline(
+    command: ChangeOrderStatusFromDeadlineCommand,
+  ): Promise<ChangeOrderStatusFromDeadlineResult>;
   changePaymentStatus(command: ChangePaymentStatusCommand): Promise<ProductionActionResponseDto>;
   changeProductionStatus(
     command: ChangeProductionStatusCommand,

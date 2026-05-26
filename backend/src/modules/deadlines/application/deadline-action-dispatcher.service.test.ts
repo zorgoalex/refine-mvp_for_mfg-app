@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { DeadlineActionExecutionDto, DeadlineActionRuleDto } from '../dto/deadline-action-rule.dto';
+import type {
+  DeadlineActionExecutionDto,
+  DeadlineActionRuleDto,
+  DeadlineOrderOverrideDto,
+} from '../dto/deadline-action-rule.dto';
 import type { DeadlineEventDto, DeadlineInstanceDto } from '../dto/deadline-instance.dto';
 import { DeadlineActionDispatcherService } from './deadline-action-dispatcher.service';
 import type { DeadlineNotificationPort, DeadlineRepositoryPort, DeadlineTargetResolverPort } from './deadline.types';
@@ -25,7 +29,7 @@ describe('DeadlineActionDispatcherService', () => {
         actionType: 'write_audit',
         status: 'skipped',
         skipReason: 'action_disabled',
-        idempotencyKey: 'event-1:write_audit:order:42',
+        idempotencyKey: expect.stringContaining('event-1:write_audit:order:42:order:42:rule-1:'),
       },
     ]);
   });
@@ -127,7 +131,7 @@ describe('DeadlineActionDispatcherService', () => {
       actionType: 'set_overdue_flag',
       status: 'executed',
       executedAt: '2026-05-01T10:00:00.000Z',
-      idempotencyKey: 'event-overdue-1:set_overdue_flag:order:42',
+      idempotencyKey: expect.stringContaining('event-overdue-1:set_overdue_flag:order:42:order:42:rule-1:'),
       result: {
         overdueFlagSet: true,
         deadlineId: 'deadline-overdue-1',
@@ -218,6 +222,391 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
+  it('records one selected change_order_status candidate as unavailable and does not loop status handlers', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const canApplyActions: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'status-lower-priority',
+            actionType: 'change_order_status',
+            priority: 20,
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 8 },
+            },
+          }),
+          createRule({
+            actionRuleId: 'status-selected',
+            actionType: 'change_order_status',
+            priority: 10,
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 7 },
+            },
+          }),
+        ],
+        executions,
+        orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+        isCurrentDeadlineEvent: true,
+      }),
+      targetResolver: createTargetResolver({
+        onCanApplyAction(input) {
+          canApplyActions.push(input);
+        },
+      }),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(canApplyActions).toEqual([]);
+    expect(executions).toMatchObject([
+      {
+        actionRuleId: 'status-selected',
+        actionType: 'change_order_status',
+        status: 'skipped',
+        skipReason: 'action_handler_unavailable',
+        targetStatusId: 7,
+      },
+      {
+        actionRuleId: 'status-lower-priority',
+        actionType: 'change_order_status',
+        status: 'skipped',
+        skipReason: 'lower_priority_rule_not_selected',
+        targetStatusId: 8,
+      },
+    ]);
+  });
+
+  it('executes selected change_order_status through internal status action port once', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const statusCommands: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService({
+      statusActionPort: {
+        async changeOrderStatusFromDeadline(command) {
+          statusCommands.push(command);
+          return {
+            status: 'executed',
+            result: { order: { orderId: command.orderId, orderStatusId: command.targetOrderStatusId, version: 4 } },
+          };
+        },
+      },
+    });
+
+    await dispatcher.dispatch({
+      event: createEvent({
+        deadlineId: 'deadline-status-1',
+        deadlineEventId: 'event-status-1',
+        eventAt: '2026-05-25T10:00:00.000Z',
+      }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'status-selected',
+            actionType: 'change_order_status',
+            priority: 10,
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 7 },
+            },
+          }),
+          createRule({
+            actionRuleId: 'status-lower',
+            actionType: 'change_order_status',
+            priority: 20,
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 8 },
+            },
+          }),
+        ],
+        executions,
+        orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(statusCommands).toEqual([
+      expect.objectContaining({
+        source: 'deadline-engine',
+        systemActor: {
+          type: 'system',
+          actorUserId: null,
+          actorLabel: 'deadline-engine',
+        },
+        orderId: 42,
+        targetOrderStatusId: 7,
+        deadlineId: 'deadline-status-1',
+        deadlineEventId: 'event-status-1',
+        actionRuleId: 'status-selected',
+        occurredAt: '2026-05-25T10:00:00.000Z',
+      }),
+    ]);
+    expect(executions).toMatchObject([
+      {
+        actionRuleId: 'status-selected',
+        status: 'executed',
+        skipReason: null,
+        result: { order: { orderId: 42, orderStatusId: 7, version: 4 } },
+      },
+      {
+        actionRuleId: 'status-lower',
+        status: 'skipped',
+        skipReason: 'lower_priority_rule_not_selected',
+      },
+    ]);
+  });
+
+  it('records selected change_order_status as skipped when internal command returns no-op', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService({
+      statusActionPort: {
+        async changeOrderStatusFromDeadline(command) {
+          return {
+            status: 'skipped',
+            skipReason: 'same_status',
+            result: { order: { orderId: command.orderId, orderStatusId: command.targetOrderStatusId, version: 3 } },
+          };
+        },
+      },
+    });
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'status-selected',
+            actionType: 'change_order_status',
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 1 },
+            },
+          }),
+        ],
+        executions,
+        orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(executions[0]).toMatchObject({
+      actionRuleId: 'status-selected',
+      status: 'skipped',
+      skipReason: 'same_status',
+      result: { order: { orderId: 42, orderStatusId: 1, version: 3 } },
+    });
+  });
+
+  it('executes stale change_order_status events when rule config opts out of current-event enforcement', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const currentEventChecks: unknown[] = [];
+    const statusCommands: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService({
+      statusActionPort: {
+        async changeOrderStatusFromDeadline(command) {
+          statusCommands.push(command);
+          return { status: 'executed', result: {} };
+        },
+      },
+    });
+
+    await dispatcher.dispatch({
+      event: createEvent({
+        deadlineId: 'deadline-stale-default',
+        deadlineEventId: 'event-stale-default',
+      }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'status-stale-default',
+            actionType: 'change_order_status',
+            config: {
+              conditions: {
+                allowedFromOrderStatusIds: [1],
+                requireCurrentDeadlineEvent: false,
+              },
+              actionConfig: { targetOrderStatusId: 7 },
+            },
+          }),
+        ],
+        executions,
+        orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+        isCurrentDeadlineEvent: false,
+        currentEventChecks,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(currentEventChecks).toEqual([
+      {
+        orderId: 42,
+        deadlineId: 'deadline-stale-default',
+        deadlineEventId: 'event-stale-default',
+      },
+    ]);
+    expect(statusCommands).toEqual([
+      expect.objectContaining({
+        orderId: 42,
+        targetOrderStatusId: 7,
+        deadlineId: 'deadline-stale-default',
+        deadlineEventId: 'event-stale-default',
+        actionRuleId: 'status-stale-default',
+      }),
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionRuleId: 'status-stale-default',
+      status: 'executed',
+      skipReason: null,
+    });
+  });
+
+  it('skips order-backed status transitions when order evaluation context is unavailable', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const statusCommands: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService({
+      statusActionPort: {
+        async changeOrderStatusFromDeadline(command) {
+          statusCommands.push(command);
+          return { status: 'executed', result: {} };
+        },
+      },
+    });
+
+    await dispatcher.dispatch({
+      event: createEvent({ orderId: 42 }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'status-missing-order',
+            actionType: 'change_order_status',
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 7 },
+            },
+          }),
+        ],
+        executions,
+        orderContext: null,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(statusCommands).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionRuleId: 'status-missing-order',
+      status: 'skipped',
+      skipReason: 'stale_deadline_event',
+    });
+  });
+
+  it('records invalid target status from internal command as skipped guard outcome', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService({
+      statusActionPort: {
+        async changeOrderStatusFromDeadline() {
+          const error = new Error('Status not found or inactive') as Error & { code: string };
+          error.code = 'VALIDATION_ERROR';
+          throw error;
+        },
+      },
+    });
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'status-invalid-target',
+            actionType: 'change_order_status',
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 777 },
+            },
+          }),
+        ],
+        executions,
+        orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(executions[0]).toMatchObject({
+      actionRuleId: 'status-invalid-target',
+      status: 'skipped',
+      skipReason: 'invalid_target_status',
+      errorCode: 'invalid_target_status',
+      errorMessage: 'Status not found or inactive',
+    });
+  });
+
+  it('keeps notification actions multi-dispatchable alongside status first-wins evaluation', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'status-selected',
+            actionType: 'change_order_status',
+            priority: 1,
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 7 },
+            },
+          }),
+          createRule({ actionRuleId: 'notify-assignee', actionType: 'notify_assignee', priority: 2 }),
+          createRule({ actionRuleId: 'notify-manager', actionType: 'notify_manager', priority: 3 }),
+        ],
+        executions,
+        orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10, 20],
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: 20,
+        },
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: `notification-${notifications.length}` };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toHaveLength(2);
+    expect(executions.map((execution) => [
+      execution.actionRuleId,
+      execution.actionType,
+      execution.status,
+      execution.skipReason ?? null,
+    ])).toEqual([
+      ['status-selected', 'change_order_status', 'skipped', 'action_handler_unavailable'],
+      ['notify-assignee', 'notify_assignee', 'executed', null],
+      ['notify-manager', 'notify_manager', 'executed', null],
+    ]);
+  });
+
   it('does not call notification port when notifications are disabled', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const calls: unknown[] = [];
@@ -244,7 +633,7 @@ describe('DeadlineActionDispatcherService', () => {
       actionType: 'notify_assignee',
       status: 'skipped',
       skipReason: 'notifications_disabled',
-      idempotencyKey: 'event-1:notify_assignee:order:42',
+      idempotencyKey: expect.stringContaining('event-1:notify_assignee:order:42:order:42:rule-1:'),
     });
   });
 
@@ -267,9 +656,191 @@ describe('DeadlineActionDispatcherService', () => {
     });
 
     expect(executions.map((execution) => execution.idempotencyKey)).toEqual([
-      'event-1:write_audit:order:42',
-      'event-1:notify_manager:order:42',
+      expect.stringContaining('event-1:write_audit:order:42:order:42:rule-a:'),
+      expect.stringContaining('event-1:notify_manager:order:42:order:42:rule-b:'),
     ]);
+  });
+
+  it('builds rule-specific action execution idempotency keys for same action type candidates', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({ actionRuleId: 'rule-audit-a', actionType: 'write_audit', priority: 1 }),
+          createRule({ actionRuleId: 'rule-audit-b', actionType: 'write_audit', priority: 2 }),
+          createRule({
+            actionRuleId: 'rule-status-a',
+            actionType: 'change_order_status',
+            priority: 3,
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 7 },
+            },
+          }),
+          createRule({
+            actionRuleId: 'rule-status-b',
+            actionType: 'change_order_status',
+            priority: 4,
+            config: {
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 8 },
+            },
+          }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(new Set(executions.map((execution) => execution.idempotencyKey)).size).toBe(4);
+    expect(executions.map((execution) => execution.idempotencyKey)).toEqual([
+      expect.stringContaining('event-1:write_audit:order:42:order:42:rule-audit-a:'),
+      expect.stringContaining('event-1:write_audit:order:42:order:42:rule-audit-b:'),
+      expect.stringContaining('event-1:change_order_status:order:42:order:42:rule-status-a:7:'),
+      expect.stringContaining('event-1:change_order_status:order:42:order:42:rule-status-b:8:'),
+    ]);
+  });
+
+  it('builds rule-specific action execution idempotency keys for repeated notification action types', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({ actionRuleId: 'notify-a', actionType: 'notify_assignee', priority: 1 }),
+          createRule({ actionRuleId: 'notify-b', actionType: 'notify_assignee', priority: 2 }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: false },
+    });
+
+    expect(executions.map((execution) => execution.idempotencyKey)).toEqual([
+      expect.stringContaining('event-1:notify_assignee:order:42:order:42:notify-a:'),
+      expect.stringContaining('event-1:notify_assignee:order:42:order:42:notify-b:'),
+    ]);
+  });
+
+  it('records rule snapshot and order evidence on dispatcher-created executions', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent({ orderId: 42 }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'rule-change-status',
+            actionType: 'change_order_status',
+            priority: 10,
+            config: {
+              conditions: {
+                allowedFromOrderStatusIds: [1, 2],
+                excludeCompletedOrders: true,
+                requireCurrentDeadlineEvent: true,
+              },
+              actionConfig: {
+                targetOrderStatusId: 7,
+              },
+            },
+            createdAt: '2026-05-01T09:00:00.000Z',
+            updatedAt: '2026-05-01T09:30:00.000Z',
+          }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver({ canApplyAction: false }),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(executions[0]).toMatchObject({
+      actionRuleId: 'rule-change-status',
+      orderId: 42,
+      targetStatusId: 7,
+      ruleConfigSnapshot: {
+        actionRuleId: 'rule-change-status',
+        priority: 10,
+        eventType: 'DEADLINE_EXPIRED',
+        actionType: 'change_order_status',
+        conditions: {
+          allowedFromOrderStatusIds: [1, 2],
+          excludeCompletedOrders: true,
+          requireCurrentDeadlineEvent: true,
+        },
+        actionConfig: {
+          targetOrderStatusId: 7,
+        },
+        createdAt: '2026-05-01T09:00:00.000Z',
+        updatedAt: '2026-05-01T09:30:00.000Z',
+        snapshotHash: expect.stringMatching(/^sha256:/),
+      },
+    });
+  });
+
+  it('builds deterministic snapshot hashes for equivalent configs with different key order', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+    const baseRule = {
+      actionRuleId: 'rule-deterministic-hash',
+      actionType: 'change_order_status' as const,
+      priority: 10,
+      createdAt: '2026-05-01T09:00:00.000Z',
+      updatedAt: '2026-05-01T09:30:00.000Z',
+    };
+
+    await dispatcher.dispatch({
+      event: createEvent({ orderId: 42 }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            ...baseRule,
+            config: {
+              conditions: {
+                allowedFromOrderStatusIds: [1, 2],
+                excludeCompletedOrders: true,
+                requireCurrentDeadlineEvent: true,
+              },
+              actionConfig: {
+                targetOrderStatusId: 7,
+              },
+            },
+          }),
+          createRule({
+            ...baseRule,
+            config: {
+              actionConfig: {
+                targetOrderStatusId: 7,
+              },
+              conditions: {
+                requireCurrentDeadlineEvent: true,
+                excludeCompletedOrders: true,
+                allowedFromOrderStatusIds: [1, 2],
+              },
+            },
+          }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver({ canApplyAction: false }),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(executions).toHaveLength(2);
+    expect(executions[0].ruleConfigSnapshot?.snapshotHash).toMatch(/^sha256:/);
+    expect(executions[0].ruleConfigSnapshot?.snapshotHash).toBe(
+      executions[1].ruleConfigSnapshot?.snapshotHash,
+    );
   });
 
   it('uses explicit assignee recipient for notify_assignee even when responsible user order differs', async () => {
@@ -812,6 +1383,10 @@ function createRepository(input: {
   rules: DeadlineActionRuleDto[];
   executions: DeadlineActionExecutionDto[];
   overdueUpdates?: Array<{ deadlineId: string; expiredAt: string }>;
+  overrides?: DeadlineOrderOverrideDto[];
+  orderContext?: { orderId: number; orderStatusId: number; isCompleted: boolean } | null;
+  isCurrentDeadlineEvent?: boolean;
+  currentEventChecks?: unknown[];
 }): DeadlineRepositoryPort {
   return {
     async listDeadlines() {
@@ -887,6 +1462,34 @@ function createRepository(input: {
       input.executions.push(dto);
       return dto;
     },
+    async listOrderOverrides() {
+      return input.overrides ?? [];
+    },
+    async listOrderActionRuleOverrides() {
+      return input.overrides ?? [];
+    },
+    async upsertOrderOverride() {
+      throw new Error('not implemented');
+    },
+    async retireOrderOverride() {
+      throw new Error('not implemented');
+    },
+    async listGlobalTransitionRules() {
+      return input.rules;
+    },
+    async updateGlobalTransitionRule() {
+      throw new Error('not implemented');
+    },
+    async getOrderDeadlineEvaluationContext(orderId: number) {
+      if (input.orderContext === null) {
+        return null;
+      }
+      return input.orderContext ?? { orderId, orderStatusId: 1, isCompleted: false };
+    },
+    async isDeadlineEventCurrentForOrder(query) {
+      input.currentEventChecks?.push(query);
+      return input.isCurrentDeadlineEvent ?? true;
+    },
   };
 }
 
@@ -895,6 +1498,7 @@ function createTargetResolver(
     responsibleUserIds: number[];
     isCompleted: boolean;
     canApplyAction: boolean;
+    onCanApplyAction: (input: Parameters<DeadlineTargetResolverPort['canApplyAction']>[0]) => void;
     notificationRecipients: {
       assigneeUserId?: number | null;
       managerUserId?: number | null;
@@ -913,7 +1517,8 @@ function createTargetResolver(
           : { notificationRecipients: overrides.notificationRecipients }),
       };
     },
-    async canApplyAction() {
+    async canApplyAction(input) {
+      overrides.onCanApplyAction?.(input);
       return overrides.canApplyAction ?? true;
     },
   };
@@ -934,6 +1539,7 @@ function createRule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineAct
     eventType: 'DEADLINE_EXPIRED',
     actionType: 'write_audit',
     isEnabled: true,
+    priority: 100,
     config: {},
     createdAt: '2026-05-01T10:00:00.000Z',
     updatedAt: '2026-05-01T10:00:00.000Z',

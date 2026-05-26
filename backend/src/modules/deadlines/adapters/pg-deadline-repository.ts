@@ -1,6 +1,12 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
-import type { DeadlineActionExecutionDto, DeadlineActionRuleDto } from '../dto/deadline-action-rule.dto';
+import type {
+  DeadlineActionExecutionDto,
+  DeadlineActionRuleConfigDto,
+  DeadlineActionRuleDto,
+  DeadlineOrderOverrideDto,
+  DeadlineRuleConfigSnapshotDto,
+} from '../dto/deadline-action-rule.dto';
 import type { DeadlineEventDto, DeadlineInstanceDto } from '../dto/deadline-instance.dto';
 import type { DeadlinePolicyDto } from '../dto/deadline-policy.dto';
 import { DEFAULT_DEADLINE_SETTINGS, type DeadlineSettingsDto } from '../dto/deadline-settings.dto';
@@ -23,7 +29,11 @@ import type {
   PauseDeadlineCommand,
   ResumeDeadlineCommand,
   UpdateDeadlinePolicyCommand,
+  UpdateGlobalTransitionRuleCommand,
   UpdateDeadlineSettingsCommand,
+  DeadlineEventCurrentForOrderQuery,
+  RetireDeadlineOrderOverrideCommand,
+  UpsertDeadlineOrderOverrideCommand,
 } from '../application/deadline.types';
 
 export interface DeadlineRow {
@@ -94,6 +104,7 @@ interface DeadlineActionRuleRow {
   event_type: string;
   action_type: string;
   is_enabled: boolean;
+  priority: string | number;
   config_json: Record<string, unknown> | null;
   created_at: string | Date;
   updated_at: string | Date;
@@ -112,8 +123,35 @@ interface DeadlineActionExecutionRow {
   error_code: string | null;
   error_message: string | null;
   result_json: Record<string, unknown> | null;
+  rule_config_snapshot_json: Record<string, unknown>;
+  rule_version_id: string | null;
+  order_id: string | number | null;
+  target_status_id: string | number | null;
   executed_at: string | Date | null;
   created_at: string | Date;
+}
+
+interface DeadlineOrderOverrideRow {
+  override_id: string;
+  order_id: string | number;
+  policy_id: string | null;
+  action_rule_id: string | null;
+  is_disabled: boolean;
+  override_config_json: Record<string, unknown>;
+  reason: string;
+  created_by_user_id: string | number;
+  updated_by_user_id: string | number;
+  retired_by_user_id: string | number | null;
+  retired_at: string | Date | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+interface OrderDeadlineEvaluationContextRow {
+  order_id: string | number;
+  order_status_id: string | number;
+  completion_date: string | Date | null;
+  issue_date: string | Date | null;
 }
 
 const DEADLINE_COLUMNS = `
@@ -137,13 +175,20 @@ const POLICY_COLUMNS = `
 
 const ACTION_RULE_COLUMNS = `
   action_rule_id, policy_id, scope_type, event_type, action_type, is_enabled,
-  config_json, created_at, updated_at
+  priority, config_json, created_at, updated_at
 `;
 
 const ACTION_EXECUTION_COLUMNS = `
   action_execution_id, deadline_event_id, action_rule_id, action_type, target_type,
   target_id, status, idempotency_key, skip_reason, error_code, error_message,
-  result_json, executed_at, created_at
+  result_json, rule_config_snapshot_json, rule_version_id, order_id, target_status_id,
+  executed_at, created_at
+`;
+
+const ORDER_OVERRIDE_COLUMNS = `
+  override_id, order_id, policy_id, action_rule_id, is_disabled,
+  override_config_json, reason, created_by_user_id, updated_by_user_id,
+  retired_by_user_id, retired_at, created_at, updated_at
 `;
 
 const SETTING_ACTIONS = {
@@ -861,7 +906,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       FROM deadline_action_rules
       WHERE scope_type = $1
         AND event_type = $2
-      ORDER BY created_at ASC
+      ORDER BY priority ASC, created_at ASC, action_rule_id ASC
       `,
       [input.scopeType, input.eventType],
     );
@@ -875,9 +920,13 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       INSERT INTO deadline_action_executions (
         deadline_event_id, action_rule_id, action_type, target_type, target_id,
         status, idempotency_key, skip_reason, error_code, error_message,
-        result_json, executed_at
+        result_json, rule_config_snapshot_json, rule_version_id, order_id,
+        target_status_id, executed_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::timestamptz)
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+        $11::jsonb, $12::jsonb, $13, $14, $15, $16::timestamptz
+      )
       ON CONFLICT (idempotency_key) DO UPDATE
       SET status = deadline_action_executions.status
       RETURNING ${ACTION_EXECUTION_COLUMNS}
@@ -894,11 +943,329 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         input.errorCode ?? null,
         input.errorMessage ?? null,
         JSON.stringify(input.result ?? {}),
+        JSON.stringify(input.ruleConfigSnapshot ?? {}),
+        input.ruleVersionId ?? null,
+        input.orderId ?? null,
+        input.targetStatusId ?? null,
         input.executedAt ?? null,
       ],
     );
 
     return mapActionExecution(result.rows[0]);
+  }
+
+  async listOrderOverrides(orderId: number): Promise<DeadlineOrderOverrideDto[]> {
+    const result = await this.database.query<DeadlineOrderOverrideRow>(
+      `
+      SELECT ${ORDER_OVERRIDE_COLUMNS}
+      FROM deadline_order_overrides
+      WHERE order_id = $1
+        AND retired_at IS NULL
+      ORDER BY updated_at DESC, override_id ASC
+      `,
+      [orderId],
+    );
+
+    return result.rows.map(mapOrderOverride);
+  }
+
+  async listOrderActionRuleOverrides(
+    orderId: number,
+    actionRuleIds: string[],
+  ): Promise<DeadlineOrderOverrideDto[]> {
+    if (actionRuleIds.length === 0) {
+      return [];
+    }
+
+    const result = await this.database.query<DeadlineOrderOverrideRow>(
+      `
+      SELECT ${ORDER_OVERRIDE_COLUMNS}
+      FROM deadline_order_overrides
+      WHERE order_id = $1
+        AND retired_at IS NULL
+        AND policy_id IS NULL
+        AND action_rule_id = ANY($2::uuid[])
+      ORDER BY updated_at DESC, override_id ASC
+      `,
+      [orderId, actionRuleIds],
+    );
+
+    return result.rows.map(mapOrderOverride);
+  }
+
+  async upsertOrderOverride(
+    command: UpsertDeadlineOrderOverrideCommand,
+  ): Promise<DeadlineOrderOverrideDto> {
+    const isPolicy = command.dto.targetType === 'policy';
+    const beforeOverride = await this.findActiveOrderOverride({
+      orderId: command.dto.orderId,
+      policyId: isPolicy ? command.dto.policyId : null,
+      actionRuleId: isPolicy ? null : command.dto.actionRuleId,
+    });
+    const result = await this.database.query<DeadlineOrderOverrideRow>(
+      isPolicy
+        ? `
+        INSERT INTO deadline_order_overrides (
+          order_id, policy_id, action_rule_id, is_disabled, override_config_json,
+          reason, created_by_user_id, updated_by_user_id
+        )
+        VALUES ($1, $2, NULL, $3, $4::jsonb, $5, $6, $6)
+        ON CONFLICT (order_id, policy_id) WHERE retired_at IS NULL AND policy_id IS NOT NULL DO UPDATE
+        SET is_disabled = EXCLUDED.is_disabled,
+            override_config_json = EXCLUDED.override_config_json,
+            reason = EXCLUDED.reason,
+            updated_by_user_id = EXCLUDED.updated_by_user_id,
+            updated_at = now()
+        RETURNING ${ORDER_OVERRIDE_COLUMNS}
+        `
+        : `
+        INSERT INTO deadline_order_overrides (
+          order_id, policy_id, action_rule_id, is_disabled, override_config_json,
+          reason, created_by_user_id, updated_by_user_id
+        )
+        VALUES ($1, NULL, $2, $3, $4::jsonb, $5, $6, $6)
+        ON CONFLICT (order_id, action_rule_id) WHERE retired_at IS NULL AND action_rule_id IS NOT NULL DO UPDATE
+        SET is_disabled = EXCLUDED.is_disabled,
+            override_config_json = EXCLUDED.override_config_json,
+            reason = EXCLUDED.reason,
+            updated_by_user_id = EXCLUDED.updated_by_user_id,
+            updated_at = now()
+        RETURNING ${ORDER_OVERRIDE_COLUMNS}
+        `,
+      [
+        command.dto.orderId,
+        isPolicy ? command.dto.policyId : command.dto.actionRuleId,
+        command.dto.isDisabled ?? false,
+        JSON.stringify(command.dto.overrideConfig ?? {}),
+        command.dto.reason,
+        Number(command.currentUser.id),
+      ],
+    );
+    const override = mapOrderOverride(result.rows[0]);
+    const beforeAudit = beforeOverride ? orderOverrideAuditSnapshot(beforeOverride) : {};
+    const afterAudit = orderOverrideAuditSnapshot(override);
+    await this.writeConfigAudit({
+      event: beforeOverride ? 'deadline.order_override_updated' : 'deadline.order_override_created',
+      entityType: 'deadline_order_override',
+      entityId: override.overrideId,
+      userId: String(command.currentUser.id),
+      requestId: command.requestId,
+      source: command.audit.source,
+      relatedOrderId: override.orderId,
+      before: beforeAudit,
+      after: afterAudit,
+      diff: diffRecords(beforeAudit, afterAudit),
+      metadata: {
+        orderId: override.orderId,
+        policyId: override.policyId ?? null,
+        actionRuleId: override.actionRuleId ?? null,
+        reason: command.dto.reason,
+        comment: command.audit.comment ?? null,
+      },
+    });
+
+    return override;
+  }
+
+  async retireOrderOverride(
+    command: RetireDeadlineOrderOverrideCommand,
+  ): Promise<DeadlineOrderOverrideDto> {
+    const beforeOverride = await this.findActiveOrderOverrideById(command.overrideId, command.orderId);
+    if (!beforeOverride) {
+      throw new ApiError(404, 'DEADLINE_ORDER_OVERRIDE_NOT_FOUND', 'Deadline order override not found', {
+        overrideId: command.overrideId,
+        orderId: command.orderId,
+      });
+    }
+
+    const result = await this.database.query<DeadlineOrderOverrideRow>(
+      `
+      UPDATE deadline_order_overrides
+      SET retired_at = now(),
+          retired_by_user_id = $3,
+          updated_by_user_id = $3,
+          updated_at = now()
+      WHERE override_id = $1 AND order_id = $2
+        AND retired_at IS NULL
+      RETURNING ${ORDER_OVERRIDE_COLUMNS}
+      `,
+      [command.overrideId, command.orderId, Number(command.currentUser.id)],
+    );
+    if (!result.rows[0]) {
+      throw new ApiError(404, 'DEADLINE_ORDER_OVERRIDE_NOT_FOUND', 'Deadline order override not found', {
+        overrideId: command.overrideId,
+      });
+    }
+
+    const override = mapOrderOverride(result.rows[0]);
+    const beforeAudit = orderOverrideAuditSnapshot(beforeOverride);
+    const afterAudit = orderOverrideAuditSnapshot(override);
+    await this.writeConfigAudit({
+      event: command.audit.event,
+      entityType: 'deadline_order_override',
+      entityId: override.overrideId,
+      userId: String(command.currentUser.id),
+      requestId: command.requestId,
+      source: command.audit.source,
+      relatedOrderId: override.orderId,
+      before: beforeAudit,
+      after: afterAudit,
+      diff: diffRecords(beforeAudit, afterAudit),
+      metadata: {
+        orderId: override.orderId,
+        policyId: override.policyId ?? null,
+        actionRuleId: override.actionRuleId ?? null,
+        reason: command.reason,
+        comment: command.audit.comment ?? null,
+      },
+    });
+
+    return override;
+  }
+
+  async listGlobalTransitionRules(): Promise<DeadlineActionRuleDto[]> {
+    const result = await this.database.query<DeadlineActionRuleRow>(
+      `
+      SELECT ${ACTION_RULE_COLUMNS}
+      FROM deadline_action_rules
+      WHERE scope_type = 'order'
+        AND event_type = 'DEADLINE_EXPIRED'
+        AND action_type = 'change_order_status'
+        AND config_json->'scope'->>'type' = 'global_orders'
+      ORDER BY priority ASC, created_at ASC, action_rule_id ASC
+      `,
+    );
+
+    return result.rows.map(mapActionRule);
+  }
+
+  async updateGlobalTransitionRule(
+    command: UpdateGlobalTransitionRuleCommand,
+  ): Promise<DeadlineActionRuleDto> {
+    const current = await this.database.query<DeadlineActionRuleRow>(
+      `
+      SELECT ${ACTION_RULE_COLUMNS}
+      FROM deadline_action_rules
+      WHERE action_rule_id = $1
+        AND scope_type = 'order'
+        AND event_type = 'DEADLINE_EXPIRED'
+        AND action_type = 'change_order_status'
+        AND config_json->'scope'->>'type' = 'global_orders'
+      `,
+      [command.actionRuleId],
+    );
+    if (!current.rows[0]) {
+      throw new ApiError(404, 'DEADLINE_ACTION_RULE_NOT_FOUND', 'Deadline action rule not found', {
+        actionRuleId: command.actionRuleId,
+      });
+    }
+
+    const before = mapActionRule(current.rows[0]);
+    const config = buildTransitionRuleConfig(before.config, command.dto);
+    const result = await this.database.query<DeadlineActionRuleRow>(
+      `
+      UPDATE deadline_action_rules
+      SET is_enabled = $2,
+          priority = $3,
+          config_json = $4::jsonb,
+          updated_at = now()
+      WHERE action_rule_id = $1
+        AND scope_type = 'order'
+        AND event_type = 'DEADLINE_EXPIRED'
+        AND action_type = 'change_order_status'
+        AND config_json->'scope'->>'type' = 'global_orders'
+      RETURNING ${ACTION_RULE_COLUMNS}
+      `,
+      [
+        command.actionRuleId,
+        command.dto.isEnabled ?? command.dto.enabled ?? before.isEnabled,
+        command.dto.priority ?? before.priority,
+        JSON.stringify(config),
+      ],
+    );
+    const rule = mapActionRule(result.rows[0] ?? {
+      ...current.rows[0],
+      is_enabled: command.dto.isEnabled ?? command.dto.enabled ?? before.isEnabled,
+      priority: command.dto.priority ?? before.priority,
+      config_json: config,
+      updated_at: new Date(),
+    });
+    const beforeAudit = actionRuleAuditSnapshot(before);
+    const afterAudit = actionRuleAuditSnapshot(rule);
+    await this.writeConfigAudit({
+      event: selectActionRuleAuditEvent(before, rule),
+      entityType: 'deadline_action_rule',
+      entityId: rule.actionRuleId,
+      userId: String(command.currentUser.id),
+      requestId: command.requestId,
+      source: command.audit.source,
+      relatedOrderId: null,
+      before: beforeAudit,
+      after: afterAudit,
+      diff: diffRecords(beforeAudit, afterAudit),
+      metadata: {
+        actionRuleId: rule.actionRuleId,
+        reason: command.dto.reason,
+        comment: command.dto.comment ?? null,
+      },
+    });
+
+    return rule;
+  }
+
+  async getOrderDeadlineEvaluationContext(orderId: number) {
+    const result = await this.database.query<OrderDeadlineEvaluationContextRow>(
+      `
+      SELECT order_id, order_status_id, completion_date, issue_date
+      FROM orders
+      WHERE order_id = $1
+        AND COALESCE(delete_flag, false) = false
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      orderId: toNumber(row.order_id),
+      orderStatusId: toNumber(row.order_status_id),
+      isCompleted: row.completion_date !== null || row.issue_date !== null,
+    };
+  }
+
+  async isDeadlineEventCurrentForOrder(query: DeadlineEventCurrentForOrderQuery): Promise<boolean> {
+    if (!query.deadlineId || !query.deadlineEventId) {
+      return false;
+    }
+
+    const result = await this.database.query<{ exists: boolean }>(
+      `
+      SELECT true AS exists
+      FROM deadline_events e
+      JOIN deadline_instances d ON d.deadline_id = e.deadline_id
+      WHERE e.order_id = $1
+        AND e.deadline_event_id = $2
+        AND e.event_type = 'DEADLINE_EXPIRED'
+        AND d.deadline_id = $3
+        AND d.order_id = $1
+        AND d.status NOT IN ('cancelled', 'superseded')
+        AND e.deadline_event_id = (
+          SELECT latest.deadline_event_id
+          FROM deadline_events latest
+          WHERE latest.deadline_id = d.deadline_id
+            AND latest.order_id = $1
+            AND latest.event_type = 'DEADLINE_EXPIRED'
+          ORDER BY latest.event_at DESC, latest.created_at DESC
+          LIMIT 1
+        )
+      LIMIT 1
+      `,
+      [query.orderId, query.deadlineEventId, query.deadlineId],
+    );
+
+    return result.rows.length > 0;
   }
 
   private async requireDeadline(deadlineId: string): Promise<DeadlineInstanceDto> {
@@ -935,6 +1302,48 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       `,
       [policyId, versionNumber, JSON.stringify(config), Number(actorUserId)],
     );
+  }
+
+  private async findActiveOrderOverride(input: {
+    orderId: number;
+    policyId?: string | null;
+    actionRuleId?: string | null;
+  }): Promise<DeadlineOrderOverrideDto | null> {
+    const result = await this.database.query<DeadlineOrderOverrideRow>(
+      `
+      SELECT ${ORDER_OVERRIDE_COLUMNS}
+      FROM deadline_order_overrides
+      WHERE order_id = $1
+        AND retired_at IS NULL
+        AND (($2::uuid IS NOT NULL AND policy_id = $2::uuid)
+          OR ($3::uuid IS NOT NULL AND action_rule_id = $3::uuid))
+      LIMIT 1
+      `,
+      [input.orderId, input.policyId ?? null, input.actionRuleId ?? null],
+    );
+    const row = result.rows[0];
+
+    return row ? mapOrderOverride(row) : null;
+  }
+
+  private async findActiveOrderOverrideById(
+    overrideId: string,
+    orderId: number,
+  ): Promise<DeadlineOrderOverrideDto | null> {
+    const result = await this.database.query<DeadlineOrderOverrideRow>(
+      `
+      SELECT ${ORDER_OVERRIDE_COLUMNS}
+      FROM deadline_order_overrides
+      WHERE override_id = $1
+        AND order_id = $2
+        AND retired_at IS NULL
+      LIMIT 1
+      `,
+      [overrideId, orderId],
+    );
+    const row = result.rows[0];
+
+    return row ? mapOrderOverride(row) : null;
   }
 
   private async upsertSettingActionRule(
@@ -984,6 +1393,9 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     entityId: string;
     userId: string;
     requestId?: string;
+    source?: string;
+    relatedOrderId?: number | null;
+    relatedClientId?: number | null;
     before: Record<string, unknown>;
     after: Record<string, unknown>;
     diff: Record<string, unknown>;
@@ -1008,9 +1420,9 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         input.entityId,
         input.userId,
         input.requestId ?? 'deadline-command',
-        'backend-deadline-command',
-        null,
-        null,
+        input.source ?? 'backend-deadline-command',
+        input.relatedOrderId ?? null,
+        input.relatedClientId ?? null,
         JSON.stringify(input.before),
         JSON.stringify(input.after),
         JSON.stringify(input.diff),
@@ -1168,6 +1580,78 @@ function policyAuditSnapshot(policy: DeadlinePolicyDto): Record<string, unknown>
   };
 }
 
+function actionRuleAuditSnapshot(rule: DeadlineActionRuleDto): Record<string, unknown> {
+  return {
+    actionRuleId: rule.actionRuleId,
+    scopeType: rule.scopeType,
+    eventType: rule.eventType,
+    actionType: rule.actionType,
+    isEnabled: rule.isEnabled,
+    priority: rule.priority,
+    config: rule.config ?? {},
+  };
+}
+
+function selectActionRuleAuditEvent(
+  before: DeadlineActionRuleDto,
+  after: DeadlineActionRuleDto,
+): string {
+  if (!before.isEnabled && after.isEnabled) {
+    return 'deadline.action_rule_enabled';
+  }
+  if (before.isEnabled && !after.isEnabled) {
+    return 'deadline.action_rule_disabled';
+  }
+
+  return 'deadline.action_rule_updated';
+}
+
+function orderOverrideAuditSnapshot(override: DeadlineOrderOverrideDto): Record<string, unknown> {
+  return {
+    overrideId: override.overrideId,
+    orderId: override.orderId,
+    targetType: override.targetType,
+    policyId: override.policyId ?? null,
+    actionRuleId: override.actionRuleId ?? null,
+    isDisabled: override.isDisabled,
+    overrideConfig: override.overrideConfig,
+    reason: override.reason,
+    retiredByUserId: override.retiredByUserId ?? null,
+    retiredAt: override.retiredAt ?? null,
+  };
+}
+
+function buildTransitionRuleConfig(
+  current: DeadlineActionRuleConfigDto | null | undefined,
+  dto: UpdateGlobalTransitionRuleCommand['dto'],
+): DeadlineActionRuleConfigDto {
+  return {
+    ...(current ?? {}),
+    scope: { type: 'global_orders' },
+    conditions: {
+      ...(current?.conditions ?? {}),
+      ...(hasOwn(dto, 'allowedFromOrderStatusIds')
+        ? { allowedFromOrderStatusIds: dto.allowedFromOrderStatusIds }
+        : {}),
+      ...(hasOwn(dto, 'excludeOrderStatusIds')
+        ? { excludeOrderStatusIds: dto.excludeOrderStatusIds }
+        : {}),
+      ...(hasOwn(dto, 'excludeCompletedOrders')
+        ? { excludeCompletedOrders: dto.excludeCompletedOrders }
+        : {}),
+      ...(hasOwn(dto, 'requireCurrentDeadlineEvent')
+        ? { requireCurrentDeadlineEvent: dto.requireCurrentDeadlineEvent }
+        : {}),
+    },
+    actionConfig: {
+      ...(current?.actionConfig ?? {}),
+      ...(hasOwn(dto, 'targetOrderStatusId')
+        ? { targetOrderStatusId: dto.targetOrderStatusId }
+        : {}),
+    },
+  };
+}
+
 function pickRecord(
   value: DeadlineSettingsDto,
   keys: ReadonlyArray<keyof DeadlineSettingsDto>,
@@ -1306,7 +1790,8 @@ function mapActionRule(row: DeadlineActionRuleRow): DeadlineActionRuleDto {
     eventType: row.event_type as DeadlineEventType,
     actionType: row.action_type as DeadlineActionType,
     isEnabled: row.is_enabled,
-    config: row.config_json,
+    priority: toNumber(row.priority),
+    config: row.config_json as DeadlineActionRuleConfigDto | null,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -1326,15 +1811,42 @@ function mapActionExecution(row: DeadlineActionExecutionRow): DeadlineActionExec
     errorCode: row.error_code,
     errorMessage: row.error_message,
     result: row.result_json,
+    ruleConfigSnapshot: row.rule_config_snapshot_json as unknown as DeadlineRuleConfigSnapshotDto,
+    ruleVersionId: row.rule_version_id,
+    orderId: toNullableNumber(row.order_id),
+    targetStatusId: toNullableNumber(row.target_status_id),
     executedAt: toNullableIso(row.executed_at),
     createdAt: toIso(row.created_at),
   };
 }
 
+function mapOrderOverride(row: DeadlineOrderOverrideRow): DeadlineOrderOverrideDto {
+  return {
+    overrideId: row.override_id,
+    orderId: toNumber(row.order_id),
+    targetType: row.policy_id ? 'policy' : 'action_rule',
+    policyId: row.policy_id,
+    actionRuleId: row.action_rule_id,
+    isDisabled: row.is_disabled,
+    overrideConfig: row.override_config_json,
+    reason: row.reason,
+    createdByUserId: toNumber(row.created_by_user_id),
+    updatedByUserId: toNumber(row.updated_by_user_id),
+    retiredByUserId: toNullableNumber(row.retired_by_user_id),
+    retiredAt: toNullableIso(row.retired_at),
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
 function toNullableNumber(value: string | number | null): number | null {
   if (value === null || value === undefined) return null;
+  return toNumber(value);
+}
+
+function toNumber(value: string | number): number {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function toIso(value: string | Date): string {

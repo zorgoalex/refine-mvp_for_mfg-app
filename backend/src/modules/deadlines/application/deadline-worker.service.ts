@@ -7,6 +7,7 @@ import type {
   CreateDeadlineEventInput,
   DeadlineRepositoryPort,
   DeadlineNotificationPort,
+  DeadlineOrderStatusActionPort,
   DeadlineTargetResolverPort,
   DeadlineTransactionManagerPort,
 } from './deadline.types';
@@ -15,6 +16,7 @@ export interface DeadlineWorkerServicePorts {
   transactions: DeadlineTransactionManagerPort;
   targetResolver: DeadlineTargetResolverPort;
   notificationPort: DeadlineNotificationPort;
+  statusActionPort?: DeadlineOrderStatusActionPort;
   dispatcher?: DeadlineActionDispatcherService;
 }
 
@@ -37,14 +39,13 @@ export interface ProcessDueDeadlinesResult {
 }
 
 export class DeadlineWorkerService {
-  private readonly dispatcher: DeadlineActionDispatcherService;
-
-  constructor(private readonly ports: DeadlineWorkerServicePorts) {
-    this.dispatcher = ports.dispatcher ?? new DeadlineActionDispatcherService();
-  }
+  constructor(private readonly ports: DeadlineWorkerServicePorts) {}
 
   async processDueDeadlines(command: ProcessDueDeadlinesCommand): Promise<ProcessDueDeadlinesResult> {
-    return this.ports.transactions.runInTransaction(async (unitOfWork) => {
+    const dispatchEvents: Array<{
+      event: Awaited<ReturnType<DeadlineRepositoryPort['createDeadlineEvent']>>['event'];
+    }> = [];
+    const result = await this.ports.transactions.runInTransaction(async (unitOfWork) => {
       const dueDeadlines = await unitOfWork.deadlines.findDueDeadlinesForUpdate({
         now: command.now,
         limit: command.limit,
@@ -96,13 +97,7 @@ export class DeadlineWorkerService {
         const { event } = eventResult;
 
         if (eventResult.created) {
-          await this.dispatcher.dispatch({
-            event,
-            repository: unitOfWork.deadlines,
-            targetResolver: this.ports.targetResolver,
-            notificationPort: this.ports.notificationPort,
-            config: command.config,
-          });
+          dispatchEvents.push({ event });
         }
 
         result.processed += 1;
@@ -114,6 +109,30 @@ export class DeadlineWorkerService {
       }
 
       return result;
+    });
+
+    for (const { event } of dispatchEvents) {
+      await this.ports.transactions.runInTransaction(async (unitOfWork) => {
+        await this.createDispatcher(unitOfWork).dispatch({
+          event,
+          repository: unitOfWork.deadlines,
+          targetResolver: this.ports.targetResolver,
+          notificationPort: this.ports.notificationPort,
+          config: command.config,
+        });
+      });
+    }
+
+    return result;
+  }
+
+  private createDispatcher(unitOfWork: { statusActionPort?: DeadlineOrderStatusActionPort }) {
+    if (this.ports.dispatcher) {
+      return this.ports.dispatcher;
+    }
+
+    return new DeadlineActionDispatcherService({
+      statusActionPort: unitOfWork.statusActionPort ?? this.ports.statusActionPort,
     });
   }
 
