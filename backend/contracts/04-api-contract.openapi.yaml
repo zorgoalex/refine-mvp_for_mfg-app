@@ -34,6 +34,8 @@ tags:
     description: Телефоны клиентов
   - name: Production Actions
     description: Точечные производственные действия над заказом
+  - name: Projects
+    description: Project foundation read-only API
   - name: Order Snapshots
     description: Экспорт и импорт переносимых snapshot'ов заказа
   - name: Deadlines
@@ -2440,15 +2442,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [data, pagination]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Project'
-                  pagination:
-                    $ref: '#/components/schemas/Pagination'
+                $ref: '#/components/schemas/ProjectListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2542,6 +2536,8 @@ paths:
                 properties:
                   project:
                     $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3611,6 +3607,37 @@ components:
         createdBy:
           type: integer
           nullable: true
+
+    ProjectListResponse:
+      type: object
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        pagination:
+          type: object
+          required:
+            - page
+            - pageSize
+            - total
+            - totalPages
+          properties:
+            page:
+              type: integer
+              minimum: 1
+            pageSize:
+              type: integer
+              minimum: 1
+            total:
+              type: integer
+              minimum: 0
+            totalPages:
+              type: integer
+              minimum: 1
 
     Pagination:
       type: object
