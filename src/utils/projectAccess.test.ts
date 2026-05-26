@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { canUseBackendProjects } from './projectAccess';
+import { canViewProjectsPage } from './projectAccess';
 
 describe('project frontend access', () => {
   it('requires the backend projects flag before enabling route and resource wiring', () => {
     expect(
-      canUseBackendProjects(
+      canViewProjectsPage(
         { useBackendProjects: false, useBackendPermissions: false },
         { permissions: ['projects.view'] },
       ),
@@ -13,13 +13,13 @@ describe('project frontend access', () => {
 
   it('requires projects.view when backend permissions are enforced', () => {
     expect(
-      canUseBackendProjects(
+      canViewProjectsPage(
         { useBackendProjects: true, useBackendPermissions: true },
         { permissions: ['orders.view'] },
       ),
     ).toBe(false);
     expect(
-      canUseBackendProjects(
+      canViewProjectsPage(
         { useBackendProjects: true, useBackendPermissions: true },
         { permissions: ['projects.view'] },
       ),
@@ -28,7 +28,7 @@ describe('project frontend access', () => {
 
   it('keeps legacy permission behavior when backend permissions are disabled', () => {
     expect(
-      canUseBackendProjects(
+      canViewProjectsPage(
         { useBackendProjects: true, useBackendPermissions: false },
         null,
       ),

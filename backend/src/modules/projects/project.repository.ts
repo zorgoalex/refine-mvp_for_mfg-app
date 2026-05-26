@@ -127,28 +127,33 @@ export class PgProjectRepository implements ProjectRepositoryPort {
 
   async createProject(command: CreateProjectCommand): Promise<ProjectDto> {
     return this.database.transaction(async (tx) => {
-      const created = await tx.query<ProjectRow>(
-        `
-        INSERT INTO public.project_projects (
-          code, name, description, status, starts_at, ends_at, owner_user_id, metadata, created_by
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
-        RETURNING
-          id::text, code, name, description, status, starts_at, ends_at, owner_user_id,
-          metadata, created_at, updated_at, archived_at, created_by
-        `,
-        [
-          command.dto.code,
-          command.dto.name,
-          normalizeNullableText(command.dto.description),
-          command.dto.status ?? 'active',
-          command.dto.startsAt ?? null,
-          command.dto.endsAt ?? null,
-          command.dto.ownerUserId ?? null,
-          JSON.stringify(command.dto.metadata ?? {}),
-          toNullableUserId(command.currentUser.id),
-        ],
-      );
+      let created;
+      try {
+        created = await tx.query<ProjectRow>(
+          `
+          INSERT INTO public.project_projects (
+            code, name, description, status, starts_at, ends_at, owner_user_id, metadata, created_by
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+          RETURNING
+            id::text, code, name, description, status, starts_at, ends_at, owner_user_id,
+            metadata, created_at, updated_at, archived_at, created_by
+          `,
+          [
+            command.dto.code,
+            command.dto.name,
+            normalizeNullableText(command.dto.description),
+            command.dto.status ?? 'active',
+            command.dto.startsAt ?? null,
+            command.dto.endsAt ?? null,
+            command.dto.ownerUserId ?? null,
+            JSON.stringify(command.dto.metadata ?? {}),
+            toNullableUserId(command.currentUser.id),
+          ],
+        );
+      } catch (error) {
+        throw mapProjectDatabaseError(error);
+      }
       const project = mapProjectRow(created.rows[0]);
 
       await writeProjectAudit(tx, {
@@ -166,6 +171,8 @@ export class PgProjectRepository implements ProjectRepositoryPort {
   async updateProject(command: UpdateProjectCommand): Promise<ProjectDto> {
     return this.database.transaction(async (tx) => {
       const before = await getProjectForUpdate(tx, command.projectId);
+      assertProjectCanBeUpdated(before);
+      assertEffectiveProjectDates(before, command.dto);
       const assignments: string[] = [];
       const params: unknown[] = [];
 
@@ -176,17 +183,22 @@ export class PgProjectRepository implements ProjectRepositoryPort {
       }
 
       const projectIdIndex = params.push(command.projectId);
-      const updated = await tx.query<ProjectRow>(
-        `
-        UPDATE public.project_projects p
-        SET ${assignments.join(', ')}
-        WHERE p.id = $${projectIdIndex}
-        RETURNING
-          p.id::text, p.code, p.name, p.description, p.status, p.starts_at, p.ends_at,
-          p.owner_user_id, p.metadata, p.created_at, p.updated_at, p.archived_at, p.created_by
-        `,
-        params,
-      );
+      let updated;
+      try {
+        updated = await tx.query<ProjectRow>(
+          `
+          UPDATE public.project_projects p
+          SET ${assignments.join(', ')}
+          WHERE p.id = $${projectIdIndex}
+          RETURNING
+            p.id::text, p.code, p.name, p.description, p.status, p.starts_at, p.ends_at,
+            p.owner_user_id, p.metadata, p.created_at, p.updated_at, p.archived_at, p.created_by
+          `,
+          params,
+        );
+      } catch (error) {
+        throw mapProjectDatabaseError(error);
+      }
       const project = mapProjectRow(updated.rows[0]);
 
       await writeProjectAudit(tx, {
@@ -205,17 +217,22 @@ export class PgProjectRepository implements ProjectRepositoryPort {
   async archiveProject(command: ArchiveProjectCommand): Promise<ProjectDto> {
     return this.database.transaction(async (tx) => {
       const before = await getProjectForUpdate(tx, command.projectId);
-      const updated = await tx.query<ProjectRow>(
-        `
-        UPDATE public.project_projects p
-        SET status = 'archived', archived_at = COALESCE(p.archived_at, now())
-        WHERE p.id = $1
-        RETURNING
-          p.id::text, p.code, p.name, p.description, p.status, p.starts_at, p.ends_at,
-          p.owner_user_id, p.metadata, p.created_at, p.updated_at, p.archived_at, p.created_by
-        `,
-        [command.projectId],
-      );
+      let updated;
+      try {
+        updated = await tx.query<ProjectRow>(
+          `
+          UPDATE public.project_projects p
+          SET status = 'archived', archived_at = COALESCE(p.archived_at, now())
+          WHERE p.id = $1
+          RETURNING
+            p.id::text, p.code, p.name, p.description, p.status, p.starts_at, p.ends_at,
+            p.owner_user_id, p.metadata, p.created_at, p.updated_at, p.archived_at, p.created_by
+          `,
+          [command.projectId],
+        );
+      } catch (error) {
+        throw mapProjectDatabaseError(error);
+      }
       const project = mapProjectRow(updated.rows[0]);
 
       await writeProjectAudit(tx, {
@@ -288,6 +305,23 @@ function appendProjectAssignments(
   if ('endsAt' in dto) assignments.push(`ends_at = $${params.push(dto.endsAt ?? null)}`);
   if ('ownerUserId' in dto) assignments.push(`owner_user_id = $${params.push(dto.ownerUserId ?? null)}`);
   if ('metadata' in dto) assignments.push(`metadata = $${params.push(JSON.stringify(dto.metadata ?? {}))}::jsonb`);
+}
+
+function assertProjectCanBeUpdated(project: ProjectDto): void {
+  if (project.archivedAt !== null || project.status === 'archived') {
+    throw new ApiError(409, 'PROJECT_ARCHIVED', 'Archived projects cannot be updated', {
+      projectId: project.id,
+    });
+  }
+}
+
+function assertEffectiveProjectDates(project: ProjectDto, dto: UpdateProjectRequestDto): void {
+  const startsAt = 'startsAt' in dto ? dto.startsAt ?? null : project.startsAt;
+  const endsAt = 'endsAt' in dto ? dto.endsAt ?? null : project.endsAt;
+
+  if (startsAt && endsAt && endsAt < startsAt) {
+    throw projectDateValidationError();
+  }
 }
 
 async function writeProjectAudit(
@@ -435,6 +469,46 @@ class ProjectNotFoundError extends ApiError {
   constructor(projectId: string) {
     super(404, 'PROJECT_NOT_FOUND', 'Project not found', { projectId });
   }
+}
+
+function mapProjectDatabaseError(error: unknown): never {
+  if (isPgError(error)) {
+    const constraint = String(error.constraint ?? '');
+    if (error.code === '23505' && isProjectCodeConstraint(constraint)) {
+      throw new ApiError(409, 'PROJECT_CODE_CONFLICT', 'Project code already exists', {
+        field: 'code',
+      });
+    }
+
+    if (error.code === '23514' && isProjectDateConstraint(constraint)) {
+      throw projectDateValidationError();
+    }
+  }
+
+  throw error;
+}
+
+function isPgError(error: unknown): error is { code: string; constraint?: string } {
+  return typeof error === 'object' && error !== null && 'code' in error;
+}
+
+function isProjectCodeConstraint(constraint: string): boolean {
+  return constraint === 'ux_projects_code_active' ||
+    constraint === 'uq_project_projects_active_code' ||
+    constraint.includes('project') && constraint.includes('code');
+}
+
+function isProjectDateConstraint(constraint: string): boolean {
+  return constraint === 'chk_projects_dates' ||
+    constraint === 'chk_project_projects_dates_order' ||
+    constraint.includes('project') && constraint.includes('date');
+}
+
+function projectDateValidationError(): ApiError {
+  return new ApiError(422, 'VALIDATION_ERROR', 'Project date range is invalid', {
+    field: 'dates',
+    errors: [{ field: 'endsAt', message: 'endsAt must be on or after startsAt' }],
+  });
 }
 
 function databaseUnavailable() {

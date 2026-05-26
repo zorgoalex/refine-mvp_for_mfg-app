@@ -146,6 +146,90 @@ describe('PgProjectRepository', () => {
     expect(JSON.parse(database.queries[2].params[7] as string)).toMatchObject({ name: 'Updated project' });
   });
 
+  it('rejects updates to archived projects before issuing UPDATE', async () => {
+    const database = new FakeProjectDatabase([
+      { rows: [projectRow({ status: 'archived', archived_at: '2026-05-03T00:00:00.000Z' })] },
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.updateProject({
+        currentUser: currentUser(),
+        projectId: '00000000-0000-4000-8000-000000000000',
+        dto: { name: 'Updated project' },
+        requestId: 'req-update-archived',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'PROJECT_ARCHIVED',
+    });
+
+    expect(database.queries).toHaveLength(1);
+    expect(database.queries[0].text).toContain('FOR UPDATE');
+  });
+
+  it('validates partial date updates against the locked existing row', async () => {
+    const database = new FakeProjectDatabase([
+      { rows: [projectRow({ starts_at: '2026-05-10', ends_at: '2026-05-20' })] },
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.updateProject({
+        currentUser: currentUser(),
+        projectId: '00000000-0000-4000-8000-000000000000',
+        dto: { endsAt: '2026-05-09' },
+        requestId: 'req-update-dates',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    });
+
+    expect(database.queries).toHaveLength(1);
+    expect(database.queries[0].text).toContain('FOR UPDATE');
+  });
+
+  it('maps duplicate active project code database errors to conflict responses', async () => {
+    const database = new FakeProjectDatabase([
+      pgError('23505', 'ux_projects_code_active'),
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.createProject({
+        currentUser: currentUser(),
+        dto: { code: 'PRJ-001', name: 'Project' },
+        requestId: 'req-duplicate',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'PROJECT_CODE_CONFLICT',
+      details: { field: 'code' },
+    });
+  });
+
+  it('maps project date check database errors to validation responses', async () => {
+    const database = new FakeProjectDatabase([
+      { rows: [projectRow({ starts_at: '2026-05-10', ends_at: '2026-05-20' })] },
+      pgError('23514', 'chk_projects_dates'),
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.updateProject({
+        currentUser: currentUser(),
+        projectId: '00000000-0000-4000-8000-000000000000',
+        dto: { startsAt: '2026-05-11' },
+        requestId: 'req-date-check',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: { field: 'dates' },
+    });
+  });
+
   it('archives a project as a soft delete and writes audit metadata', async () => {
     const before = projectRow({ status: 'active', archived_at: null });
     const after = projectRow({ status: 'archived', archived_at: '2026-05-03T00:00:00.000Z' });
@@ -173,10 +257,10 @@ describe('PgProjectRepository', () => {
 class FakeProjectDatabase {
   readonly queries: Array<{ text: string; params: readonly unknown[] }> = [];
   transactionCalls = 0;
-  private readonly queryQueue: Array<QueryResult<QueryResultRow>>;
+  private readonly queryQueue: Array<QueryResult<QueryResultRow> | Error>;
 
-  constructor(queryResults: Array<{ rows: QueryResultRow[] }>) {
-    this.queryQueue = queryResults.map((result) => toQueryResult(result.rows));
+  constructor(queryResults: Array<{ rows: QueryResultRow[] } | Error>) {
+    this.queryQueue = queryResults.map((result) => result instanceof Error ? result : toQueryResult(result.rows));
   }
 
   async query<T extends QueryResultRow = QueryResultRow>(
@@ -184,7 +268,11 @@ class FakeProjectDatabase {
     params: readonly unknown[] = [],
   ): Promise<QueryResult<T>> {
     this.queries.push({ text, params });
-    return (this.queryQueue.shift() ?? toQueryResult([])) as QueryResult<T>;
+    const result = this.queryQueue.shift() ?? toQueryResult([]);
+    if (result instanceof Error) {
+      throw result;
+    }
+    return result as QueryResult<T>;
   }
 
   async transaction<T>(handler: (client: FakeProjectDatabase) => Promise<T>): Promise<T> {
@@ -230,4 +318,8 @@ function currentUser() {
     roleId: 1,
     permissions: ['projects.create', 'projects.update', 'projects.archive', 'projects.view'],
   };
+}
+
+function pgError(code: string, constraint: string): Error & { code: string; constraint: string } {
+  return Object.assign(new Error(`Postgres ${code}`), { code, constraint });
 }

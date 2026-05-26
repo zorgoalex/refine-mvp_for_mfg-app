@@ -1,10 +1,21 @@
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { applyFeatureFlags, getFeatureFlags } from '../../config/featureFlags';
 import { ProjectsPage } from './ProjectsPage';
+
+vi.mock('@refinedev/core', () => ({
+  useGetIdentity: () => ({ data: { id: '1', username: 'admin', role: 'admin', permissions: ['projects.view', 'projects.create', 'projects.archive'] } }),
+}));
 
 describe('ProjectsPage', () => {
   it('renders a minimal project list with create and archive controls', () => {
+    applyFeatureFlags({
+      ...getFeatureFlags({}),
+      useBackendProjects: true,
+      useBackendPermissions: false,
+    });
+
     const html = renderToString(
       <ProjectsPage
         initialProjects={[
@@ -32,5 +43,6 @@ describe('ProjectsPage', () => {
     expect(html).toContain('Название');
     expect(html).toContain('Создать');
     expect(html).toContain('Архивировать');
+    expect(html).not.toContain('Архив</span>');
   });
 });

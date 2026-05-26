@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useGetIdentity } from '@refinedev/core';
 import {
+  Alert,
   Button,
   DatePicker,
   Form,
@@ -18,19 +20,26 @@ import type {
   ProjectDto,
   ProjectStatus,
 } from '../../api/types/projectApi.types';
-import { authSession } from '../../api/authSession';
 import { featureFlags } from '../../config/featureFlags';
-import { authStorage } from '../../utils/auth';
 import { can } from '../../utils/permissions';
+import type { UserIdentity } from '../../types/auth';
+import { canViewProjectsPage } from '../../utils/projectAccess';
 
 const { Title } = Typography;
 
-const STATUS_OPTIONS: Array<{ label: string; value: ProjectStatus }> = [
+const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  draft: 'Черновик',
+  active: 'Активен',
+  paused: 'Пауза',
+  completed: 'Завершен',
+  archived: 'Архив',
+};
+
+const MUTABLE_STATUS_OPTIONS: Array<{ label: string; value: ProjectStatus }> = [
   { label: 'Черновик', value: 'draft' },
   { label: 'Активен', value: 'active' },
   { label: 'Пауза', value: 'paused' },
   { label: 'Завершен', value: 'completed' },
-  { label: 'Архив', value: 'archived' },
 ];
 
 interface ProjectFormValues {
@@ -48,16 +57,20 @@ interface ProjectsPageProps {
 
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = [] }) => {
   const [form] = Form.useForm<ProjectFormValues>();
+  const { data: identity } = useGetIdentity<UserIdentity>();
   const [projects, setProjects] = useState<ProjectDto[]>(initialProjects);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
 
-  const currentUser = getCurrentProjectUser();
+  const currentUser = identity ?? null;
+  const canView = canViewProjectsPage(featureFlags, currentUser);
   const canCreate = !featureFlags.useBackendPermissions || can('projects.create', currentUser);
   const canArchive = !featureFlags.useBackendPermissions || can('projects.archive', currentUser);
 
   const loadProjects = useCallback(async () => {
+    if (!canView) return;
+
     setLoading(true);
     try {
       const response = await projectsApi.listProjects({ page: 1, pageSize: 50, includeArchived: true });
@@ -67,7 +80,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = []
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canView]);
 
   useEffect(() => {
     void loadProjects();
@@ -118,7 +131,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = []
         dataIndex: 'status',
         key: 'status',
         width: 130,
-        render: (status: ProjectStatus) => <Tag>{STATUS_OPTIONS.find((item) => item.value === status)?.label ?? status}</Tag>,
+        render: (status: ProjectStatus) => <Tag>{PROJECT_STATUS_LABELS[status] ?? status}</Tag>,
       },
       {
         title: 'Даты',
@@ -145,6 +158,18 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = []
     [archivingId, canArchive],
   );
 
+  if (!canView) {
+    return (
+      <div style={{ padding: 24 }}>
+        <Alert
+          type="warning"
+          showIcon
+          message="Нет доступа к проектам"
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: 24 }}>
       <Title level={3}>Проекты</Title>
@@ -165,7 +190,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = []
           <Input disabled={!canCreate} style={{ width: 220 }} />
         </Form.Item>
         <Form.Item name="status" initialValue="active">
-          <Select disabled={!canCreate} options={STATUS_OPTIONS} style={{ width: 140 }} />
+          <Select disabled={!canCreate} options={MUTABLE_STATUS_OPTIONS} style={{ width: 140 }} />
         </Form.Item>
         <Form.Item name="startsAt">
           <DatePicker disabled={!canCreate} placeholder="Начало" />
@@ -204,16 +229,4 @@ function mapCreateRequest(values: ProjectFormValues): CreateProjectRequest {
     startsAt: values.startsAt?.format('YYYY-MM-DD') ?? null,
     endsAt: values.endsAt?.format('YYYY-MM-DD') ?? null,
   };
-}
-
-function getCurrentProjectUser() {
-  if (featureFlags.useBackendPermissions) {
-    return authSession.getUser();
-  }
-
-  if (typeof localStorage === 'undefined') {
-    return null;
-  }
-
-  return authStorage.getUser();
 }
