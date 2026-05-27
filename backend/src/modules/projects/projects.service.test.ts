@@ -4,6 +4,7 @@ import type { CurrentUser } from '../../permissions/current-user';
 import { getPermissionsForRole } from '../../permissions/permissions';
 import type {
   CreateProjectRequestDto,
+  ProjectMembersResponseDto,
   ProjectDto,
   ProjectListResponseDto,
   UpdateProjectRequestDto,
@@ -160,6 +161,99 @@ describe('ProjectsService', () => {
       `archive:${project.id}:req-archive-1`,
     ]);
   });
+
+  it('requires projects.members.view before listing current project members', async () => {
+    const service = new ProjectsService({ projects: createRepository() });
+
+    await expect(
+      service.listMembers({
+        currentUser: currentUser('manager'),
+        projectId: '11111111-1111-4111-8111-111111111111',
+        requestId: 'req-members-denied',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['projects.members.view'] },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('requires projects.members.manage before replacing current project members', async () => {
+    const service = new ProjectsService({ projects: createRepository() });
+
+    await expect(
+      service.replaceMembers({
+        currentUser: currentUser('top_manager'),
+        projectId: '11111111-1111-4111-8111-111111111111',
+        dto: {
+          idempotencyKey: 'members-denied-key',
+          members: [{ userId: 7, role: 'manager' }],
+          reason: 'staffing',
+        },
+        requestId: 'req-members-replace-denied',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['projects.members.manage'] },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('delegates project member read and replace commands with request context', async () => {
+    const projectMembers: ProjectMembersResponseDto = {
+      projectId: '11111111-1111-4111-8111-111111111111',
+      members: [
+        {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          userId: 7,
+          username: 'member_user',
+          employeeId: 11,
+          displayName: 'Member User',
+          role: 'manager',
+          validFrom: '2026-05-27T00:00:00.000Z',
+          metadata: {},
+        },
+      ],
+      requestId: 'req-members-view',
+    };
+    const calls: string[] = [];
+    const service = new ProjectsService({
+      projects: createRepository({
+        async listProjectMembers(command) {
+          calls.push(`listMembers:${command.projectId}:${command.requestId}`);
+          return projectMembers;
+        },
+        async replaceProjectMembers(command) {
+          calls.push(`replaceMembers:${command.projectId}:${command.dto.members[0]?.userId}:${command.requestId}`);
+          return { ...projectMembers, changed: true, auditId: 'audit-1', requestId: command.requestId ?? 'fallback' };
+        },
+      }),
+    });
+
+    await expect(
+      service.listMembers({
+        currentUser: currentUser('top_manager'),
+        projectId: projectMembers.projectId,
+        requestId: 'req-members-view',
+      }),
+    ).resolves.toEqual(projectMembers);
+    await expect(
+      service.replaceMembers({
+        currentUser: currentUser('admin'),
+        projectId: projectMembers.projectId,
+        dto: {
+          idempotencyKey: 'members-key-1',
+          members: [{ userId: 7, role: 'manager' }],
+          reason: 'staffing',
+        },
+        requestId: 'req-members-replace',
+      }),
+    ).resolves.toMatchObject({ changed: true, auditId: 'audit-1' });
+    expect(calls).toEqual([
+      `listMembers:${projectMembers.projectId}:req-members-view`,
+      `replaceMembers:${projectMembers.projectId}:7:req-members-replace`,
+    ]);
+  });
 });
 
 function createRepository(overrides: Partial<ProjectRepositoryPort> = {}): ProjectRepositoryPort {
@@ -181,6 +275,12 @@ function createRepository(overrides: Partial<ProjectRepositoryPort> = {}): Proje
     },
     async archiveProject() {
       throw new Error('archiveProject should not be called');
+    },
+    async listProjectMembers() {
+      throw new Error('listProjectMembers should not be called');
+    },
+    async replaceProjectMembers() {
+      throw new Error('replaceProjectMembers should not be called');
     },
     ...overrides,
   };

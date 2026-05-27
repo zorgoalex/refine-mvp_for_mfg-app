@@ -298,6 +298,149 @@ describe('PgProjectRepository', () => {
     expect(database.queries[2].params[0]).toBe('projects.archive');
     expect(database.queries[2].params[5]).toBe('req-archive-project');
   });
+
+  it('lists current project members through user and employee read-model joins', async () => {
+    const database = new FakeProjectDatabase([
+      {
+        rows: [
+          projectMemberRow({
+            id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            user_id: 7,
+            username: 'member_user',
+            employee_id: 11,
+            display_name: 'Member User',
+            role: 'manager',
+            metadata: { allocation: 'lead' },
+          }),
+        ],
+      },
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.listProjectMembers({
+        currentUser: currentUser(),
+        projectId: '11111111-1111-4111-8111-111111111111',
+        requestId: 'req-members-list',
+      }),
+    ).resolves.toEqual({
+      projectId: '11111111-1111-4111-8111-111111111111',
+      members: [
+        {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          userId: 7,
+          username: 'member_user',
+          employeeId: 11,
+          displayName: 'Member User',
+          role: 'manager',
+          validFrom: '2026-05-27T00:00:00.000Z',
+          metadata: { allocation: 'lead' },
+        },
+      ],
+      requestId: 'req-members-list',
+    });
+
+    expect(database.queries[0].text).toContain('FROM public.project_members pm');
+    expect(database.queries[0].text).toContain('INNER JOIN users u ON u.user_id = pm.user_id');
+    expect(database.queries[0].text).toContain('LEFT JOIN employees e ON e.employee_id = u.employee_id');
+    expect(database.queries[0].text).toContain('pm.valid_to IS NULL');
+    expect(database.queries[0].params).toEqual(['11111111-1111-4111-8111-111111111111']);
+  });
+
+  it('replaces current members by closing removed rows and inserting new rows with audit outbox and idempotency', async () => {
+    const database = new FakeProjectDatabase([
+      { rows: [{ idempotency_key: 'members-key-1', request_hash: 'hash', status: 'processing', response_json: null }] },
+      { rows: [projectRow({ id: '11111111-1111-4111-8111-111111111111' })] },
+      { rows: [projectMemberRow({ id: 'old-member-id', user_id: 5, role: 'manager' })] },
+      { rows: [{ user_id: 7 }] },
+      { rows: [] },
+      { rows: [projectMemberRow({ id: 'new-member-id', user_id: 7, role: 'manager' })] },
+      { rows: [{ audit_id: 'audit-1' }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.replaceProjectMembers({
+        currentUser: currentUser(),
+        projectId: '11111111-1111-4111-8111-111111111111',
+        dto: {
+          idempotencyKey: 'members-key-1',
+          members: [{ userId: 7, role: 'manager' }],
+          reason: 'staffing',
+        },
+        requestId: 'req-members-replace',
+      }),
+    ).resolves.toMatchObject({
+      projectId: '11111111-1111-4111-8111-111111111111',
+      changed: true,
+      auditId: 'audit-1',
+      members: [{ userId: 7, role: 'manager' }],
+      requestId: 'req-members-replace',
+    });
+
+    expect(database.transactionCalls).toBe(1);
+    expect(database.queries[0].text).toContain("command_name, actor_user_id, entity_type, entity_id, request_hash, status");
+    expect(database.queries[0].text).toContain("'projects.members.replace'");
+    expect(database.queries[1].text).toContain('FROM public.project_projects p');
+    expect(database.queries[1].text).toContain('FOR UPDATE');
+    expect(database.queries[2].text).toContain('FROM public.project_members pm');
+    expect(database.queries[2].text).toContain('pm.valid_to IS NULL');
+    expect(database.queries[3].text).toContain('FROM users');
+    expect(database.queries[3].text).toContain('WHERE user_id = ANY($1::int[])');
+    expect(database.queries[4].text).toContain('UPDATE public.project_members');
+    expect(database.queries[4].text).toContain('valid_to = now()');
+    expect(database.queries[4].text).toContain('ended_by = $2');
+    expect(database.queries[4].text).toContain('end_reason = $3');
+    expect(database.queries[5].text).toContain('INSERT INTO public.project_members');
+    expect(database.queries[5].params).toEqual(['11111111-1111-4111-8111-111111111111', 7, 'manager', '{}', 42]);
+    expect(database.queries[6].text).toContain('INSERT INTO audit_log');
+    expect(database.queries[6].params[0]).toBe('projects.members_changed');
+    expect(database.queries[7].text).toContain('INSERT INTO outbox_events');
+    expect(database.queries[8].text).toContain('UPDATE command_idempotency_keys');
+  });
+
+  it('treats member metadata changes as temporal replacement instead of in-place rewrite', async () => {
+    const database = new FakeProjectDatabase([
+      { rows: [{ idempotency_key: 'members-metadata-key', request_hash: 'hash', status: 'processing', response_json: null }] },
+      { rows: [projectRow({ id: '11111111-1111-4111-8111-111111111111' })] },
+      { rows: [projectMemberRow({ id: 'old-member-id', user_id: 7, role: 'manager', metadata: { allocation: 'old' } })] },
+      { rows: [{ user_id: 7 }] },
+      { rows: [] },
+      { rows: [projectMemberRow({ id: 'new-member-id', user_id: 7, role: 'manager', metadata: { allocation: 'lead' } })] },
+      { rows: [{ audit_id: 'audit-1' }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.replaceProjectMembers({
+        currentUser: currentUser(),
+        projectId: '11111111-1111-4111-8111-111111111111',
+        dto: {
+          idempotencyKey: 'members-metadata-key',
+          members: [{ userId: 7, role: 'manager', metadata: { allocation: 'lead' } }],
+          reason: 'allocation change',
+        },
+        requestId: 'req-members-metadata',
+      }),
+    ).resolves.toMatchObject({
+      changed: true,
+      members: [{ userId: 7, role: 'manager', metadata: { allocation: 'lead' } }],
+    });
+
+    expect(database.queries[4].text).toContain('UPDATE public.project_members');
+    expect(database.queries[5].text).toContain('INSERT INTO public.project_members');
+    expect(database.queries[5].params).toEqual([
+      '11111111-1111-4111-8111-111111111111',
+      7,
+      'manager',
+      JSON.stringify({ allocation: 'lead' }),
+      42,
+    ]);
+  });
 });
 
 class FakeProjectDatabase {
@@ -352,6 +495,20 @@ function projectRow(overrides: Partial<QueryResultRow> = {}): QueryResultRow {
     updated_at: '2026-05-01T00:00:00.000Z',
     archived_at: null,
     created_by: null,
+    ...overrides,
+  };
+}
+
+function projectMemberRow(overrides: Partial<QueryResultRow> = {}): QueryResultRow {
+  return {
+    id: '00000000-0000-4000-8000-000000000001',
+    user_id: 7,
+    username: 'member_user',
+    employee_id: null,
+    display_name: null,
+    role: 'participant',
+    valid_from: '2026-05-27T00:00:00.000Z',
+    metadata: {},
     ...overrides,
   };
 }

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../database/database.types';
@@ -7,14 +8,19 @@ import type {
   ProjectListResponseDto,
   ProjectLookupItemDto,
   ProjectLookupResponseDto,
+  ProjectMemberDto,
+  ProjectMembersResponseDto,
+  ReplaceProjectMemberDto,
   ProjectStatus,
   UpdateProjectRequestDto,
 } from './dto/project.dto';
 import type {
   ArchiveProjectCommand,
   CreateProjectCommand,
+  ListProjectMembersCommand,
   ProjectLookupQuery,
   ProjectRepositoryPort,
+  ReplaceProjectMembersCommand,
   UpdateProjectCommand,
 } from './projects.service';
 
@@ -38,6 +44,32 @@ interface CountRow extends QueryResultRow {
   total: string | number;
 }
 
+interface ProjectMemberRow extends QueryResultRow {
+  id: string;
+  user_id: string | number;
+  username: string;
+  employee_id: string | number | null;
+  display_name: string | null;
+  role: string;
+  valid_from: string | Date;
+  metadata: Record<string, unknown> | string | null;
+}
+
+interface UserValidationRow extends QueryResultRow {
+  user_id: string | number;
+}
+
+interface AuditRow extends QueryResultRow {
+  audit_id: string;
+}
+
+interface IdempotencyRow extends QueryResultRow {
+  idempotency_key: string;
+  request_hash: string;
+  response_json: unknown;
+  status: 'processing' | 'completed' | 'failed';
+}
+
 type ProjectDatabase = DatabaseClient & {
   transaction<T>(handler: (client: TransactionClient) => Promise<T>): Promise<T>;
 };
@@ -49,6 +81,8 @@ const PROJECT_SELECT = `
     p.created_at, p.updated_at, p.archived_at, p.created_by
   FROM public.project_projects p
 `;
+
+const PROJECT_MEMBERS_SOURCE = 'projects-members';
 
 export class PgProjectRepository implements ProjectRepositoryPort {
   constructor(private readonly database: ProjectDatabase) {}
@@ -247,6 +281,92 @@ export class PgProjectRepository implements ProjectRepositoryPort {
       return project;
     });
   }
+
+  async listProjectMembers(command: ListProjectMembersCommand): Promise<ProjectMembersResponseDto> {
+    const members = await loadCurrentProjectMembers(this.database, command.projectId);
+
+    return buildProjectMembersResponse({
+      projectId: command.projectId,
+      members,
+      requestId: requestIdOrFallback(command.requestId),
+    });
+  }
+
+  async replaceProjectMembers(command: ReplaceProjectMembersCommand): Promise<ProjectMembersResponseDto> {
+    const normalizedMembers = normalizeProjectMemberInputs(command.dto.members);
+
+    return this.database.transaction(async (tx) => {
+      const requestId = requestIdOrFallback(command.requestId);
+      const idempotency = await reconcileProjectMembersIdempotency(tx, command, normalizedMembers);
+      const project = await getProjectForUpdate(tx, command.projectId);
+
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse;
+      }
+
+      const currentRows = await loadCurrentProjectMembers(tx, command.projectId);
+      await validateSubmittedUsers(tx, normalizedMembers.map((member) => member.userId));
+      const currentByKey = new Map(currentRows.map((member) => [projectMemberKey(member), member]));
+      const nextByKey = new Map(normalizedMembers.map((member) => [projectMemberInputKey(member), member]));
+      const removed = currentRows.filter((member) => {
+        const next = nextByKey.get(projectMemberKey(member));
+        return !next || !projectMemberMetadataEqual(parseMetadata(member.metadata), next.metadata ?? {});
+      });
+      const added = normalizedMembers.filter((member) => {
+        const current = currentByKey.get(projectMemberInputKey(member));
+        return !current || !projectMemberMetadataEqual(parseMetadata(current.metadata), member.metadata ?? {});
+      });
+      const changed = removed.length > 0 || added.length > 0;
+      let members = currentRows;
+      let auditId: string | undefined;
+
+      if (changed) {
+        if (removed.length > 0) {
+          await closeProjectMembers(tx, {
+            memberIds: removed.map((member) => member.id),
+            currentUserId: toNullableUserId(command.currentUser.id),
+            reason: normalizeReason(command.dto.reason),
+          });
+        }
+
+        const inserted: ProjectMemberRow[] = [];
+        for (const member of added) {
+          inserted.push(await insertProjectMember(tx, command.projectId, command.currentUser.id, member));
+        }
+
+        const removedKeys = new Set(removed.map(projectMemberKey));
+        members = [...currentRows.filter((member) => nextByKey.has(projectMemberKey(member)) && !removedKeys.has(projectMemberKey(member))), ...inserted]
+          .sort(compareProjectMembers);
+        auditId = await writeProjectMembersAudit(tx, {
+          command,
+          requestId,
+          before: currentRows.map(mapProjectMemberRow),
+          after: members.map(mapProjectMemberRow),
+          reason: normalizeReason(command.dto.reason),
+        });
+        await enqueueProjectMembersOutbox(tx, {
+          command,
+          requestId,
+          auditId,
+          project,
+          members: members.map(mapProjectMemberRow),
+        });
+      }
+
+      const response = {
+        ...buildProjectMembersResponse({
+          projectId: command.projectId,
+          members,
+          requestId,
+        }),
+        changed,
+        ...(auditId ? { auditId } : {}),
+      };
+
+      await completeProjectMembersIdempotency(tx, command.dto.idempotencyKey, response);
+      return response;
+    });
+  }
 }
 
 export class UnavailableProjectRepository implements ProjectRepositoryPort {
@@ -273,6 +393,39 @@ export class UnavailableProjectRepository implements ProjectRepositoryPort {
   async archiveProject(): Promise<ProjectDto> {
     throw databaseUnavailable();
   }
+
+  async listProjectMembers(): Promise<ProjectMembersResponseDto> {
+    throw databaseUnavailable();
+  }
+
+  async replaceProjectMembers(): Promise<ProjectMembersResponseDto> {
+    throw databaseUnavailable();
+  }
+}
+
+async function loadCurrentProjectMembers(database: DatabaseClient, projectId: string): Promise<ProjectMemberRow[]> {
+  const result = await database.query<ProjectMemberRow>(
+    `
+    SELECT
+      pm.id::text,
+      pm.user_id,
+      u.username,
+      u.employee_id,
+      COALESCE(e.full_name, u.full_name, u.username) AS display_name,
+      pm.role,
+      pm.valid_from,
+      pm.metadata
+    FROM public.project_members pm
+    INNER JOIN users u ON u.user_id = pm.user_id
+    LEFT JOIN employees e ON e.employee_id = u.employee_id
+    WHERE pm.project_id = $1
+      AND pm.valid_to IS NULL
+    ORDER BY pm.role ASC, display_name ASC, u.username ASC, pm.id ASC
+    `,
+    [projectId],
+  );
+
+  return result.rows;
 }
 
 async function getProjectForUpdate(tx: DatabaseClient, projectId: string): Promise<ProjectDto> {
@@ -290,6 +443,241 @@ async function getProjectForUpdate(tx: DatabaseClient, projectId: string): Promi
   }
 
   return mapProjectRow(result.rows[0]);
+}
+
+async function validateSubmittedUsers(tx: DatabaseClient, userIds: number[]): Promise<void> {
+  const uniqueUserIds = [...new Set(userIds)];
+  if (uniqueUserIds.length === 0) return;
+
+  const result = await tx.query<UserValidationRow>(
+    `
+    SELECT user_id
+    FROM users
+    WHERE user_id = ANY($1::int[])
+    FOR KEY SHARE
+    `,
+    [uniqueUserIds],
+  );
+  const found = new Set(result.rows.map((row) => toNumber(row.user_id)));
+  const missingUserId = uniqueUserIds.find((userId) => !found.has(userId));
+  if (missingUserId !== undefined) {
+    throw new ProjectMemberUserNotFoundError(missingUserId);
+  }
+}
+
+async function closeProjectMembers(
+  tx: DatabaseClient,
+  input: { memberIds: string[]; currentUserId: number | null; reason: string | null },
+): Promise<void> {
+  await tx.query(
+    `
+    UPDATE public.project_members
+    SET valid_to = now(),
+        ended_by = $2,
+        end_reason = $3
+    WHERE id = ANY($1::uuid[])
+      AND valid_to IS NULL
+    `,
+    [input.memberIds, input.currentUserId, input.reason],
+  );
+}
+
+async function insertProjectMember(
+  tx: DatabaseClient,
+  projectId: string,
+  currentUserId: string,
+  member: ReplaceProjectMemberDto,
+): Promise<ProjectMemberRow> {
+  const result = await tx.query<ProjectMemberRow>(
+    `
+    INSERT INTO public.project_members (
+      project_id, user_id, role, metadata, created_by
+    )
+    VALUES ($1::uuid, $2, $3, $4::jsonb, $5)
+    RETURNING
+      id::text,
+      user_id,
+      (SELECT username FROM users WHERE user_id = project_members.user_id) AS username,
+      (SELECT employee_id FROM users WHERE user_id = project_members.user_id) AS employee_id,
+      (
+        SELECT COALESCE(e.full_name, u.full_name, u.username)
+        FROM users u
+        LEFT JOIN employees e ON e.employee_id = u.employee_id
+        WHERE u.user_id = project_members.user_id
+      ) AS display_name,
+      role,
+      valid_from,
+      metadata
+    `,
+    [
+      projectId,
+      member.userId,
+      member.role,
+      JSON.stringify(member.metadata ?? {}),
+      toNullableUserId(currentUserId),
+    ],
+  );
+  return result.rows[0];
+}
+
+async function writeProjectMembersAudit(
+  tx: DatabaseClient,
+  input: {
+    command: ReplaceProjectMembersCommand;
+    requestId: string;
+    before: ProjectMemberDto[];
+    after: ProjectMemberDto[];
+    reason: string | null;
+  },
+): Promise<string> {
+  const result = await tx.query<AuditRow>(
+    `
+    INSERT INTO audit_log (
+      event, entity_type, entity_id, user_id, username, role_code, role,
+      request_id, source, before_json, after_json, diff_json, metadata_json
+    )
+    VALUES (
+      $1, 'project', $2, $3, $4, $5, $5,
+      $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb
+    )
+    RETURNING audit_id
+    `,
+    [
+      'projects.members_changed',
+      input.command.projectId,
+      toNullableUserId(input.command.currentUser.id),
+      input.command.currentUser.username,
+      input.command.currentUser.role,
+      input.requestId,
+      PROJECT_MEMBERS_SOURCE,
+      JSON.stringify({ members: input.before }),
+      JSON.stringify({ members: input.after }),
+      JSON.stringify({
+        memberCount: { from: input.before.length, to: input.after.length },
+      }),
+      JSON.stringify({
+        source: PROJECT_MEMBERS_SOURCE,
+        idempotencyKey: input.command.dto.idempotencyKey,
+        reason: input.reason,
+      }),
+    ],
+  );
+  return result.rows[0]?.audit_id ?? '';
+}
+
+async function enqueueProjectMembersOutbox(
+  tx: DatabaseClient,
+  input: {
+    command: ReplaceProjectMembersCommand;
+    requestId: string;
+    auditId: string;
+    project: ProjectDto;
+    members: ProjectMemberDto[];
+  },
+): Promise<void> {
+  await tx.query(
+    `
+    INSERT INTO outbox_events (
+      event_type, aggregate_type, aggregate_id, payload_json, idempotency_key
+    )
+    VALUES ($1, 'project', $2, $3::jsonb, $4)
+    ON CONFLICT (idempotency_key) DO NOTHING
+    `,
+    [
+      'PROJECT_MEMBERS_CHANGED',
+      input.command.projectId,
+      JSON.stringify({
+        source: PROJECT_MEMBERS_SOURCE,
+        eventType: 'PROJECT_MEMBERS_CHANGED',
+        idempotencyKey: input.command.dto.idempotencyKey,
+        actorUserId: input.command.currentUser.id,
+        requestId: input.requestId,
+        auditId: input.auditId,
+        projectId: input.command.projectId,
+        projectCode: input.project.code,
+        members: input.members,
+      }),
+      `${input.command.dto.idempotencyKey}:project_members_changed`,
+    ],
+  );
+}
+
+async function reconcileProjectMembersIdempotency(
+  tx: DatabaseClient,
+  command: ReplaceProjectMembersCommand,
+  normalizedMembers: ReplaceProjectMemberDto[],
+): Promise<{ completedResponse?: ProjectMembersResponseDto }> {
+  const requestHash = hashRequest({
+    actorUserId: command.currentUser.id,
+    projectId: command.projectId,
+    members: normalizedMembers.map((member) => ({
+      userId: member.userId,
+      role: member.role,
+      metadata: member.metadata ?? {},
+    })),
+    reason: normalizeReason(command.dto.reason),
+  });
+  const inserted = await tx.query<IdempotencyRow>(
+    `
+    INSERT INTO command_idempotency_keys (
+      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
+    )
+    VALUES ($1, 'projects.members.replace', $2, 'project', $3, $4, 'processing')
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING idempotency_key, request_hash, response_json, status
+    `,
+    [
+      command.dto.idempotencyKey,
+      toNullableUserId(command.currentUser.id),
+      command.projectId,
+      requestHash,
+    ],
+  );
+
+  if (inserted.rows[0]) {
+    return {};
+  }
+
+  const existing = await tx.query<IdempotencyRow>(
+    `
+    SELECT idempotency_key, request_hash, response_json, status
+    FROM command_idempotency_keys
+    WHERE idempotency_key = $1
+    FOR UPDATE
+    `,
+    [command.dto.idempotencyKey],
+  );
+  const row = existing.rows[0];
+  if (!row) {
+    throw new ProjectMemberIdempotencyInProgressError(command.dto.idempotencyKey);
+  }
+  if (row.request_hash !== requestHash) {
+    throw new ProjectMemberIdempotencyKeyReusedError(command.dto.idempotencyKey);
+  }
+  if (row.status === 'completed' && row.response_json) {
+    return { completedResponse: parseStoredMembersResponse(row.response_json) };
+  }
+  if (row.status === 'failed') {
+    throw new ProjectMemberIdempotencyFailedError(command.dto.idempotencyKey);
+  }
+  throw new ProjectMemberIdempotencyInProgressError(command.dto.idempotencyKey);
+}
+
+async function completeProjectMembersIdempotency(
+  tx: DatabaseClient,
+  idempotencyKey: string,
+  response: ProjectMembersResponseDto,
+): Promise<void> {
+  await tx.query(
+    `
+    UPDATE command_idempotency_keys
+    SET status = 'completed',
+        response_json = $2::jsonb,
+        completed_at = now()
+    WHERE idempotency_key = $1
+    `,
+    [idempotencyKey, JSON.stringify(response)],
+  );
 }
 
 function appendProjectAssignments(
@@ -421,6 +809,73 @@ function mapLookupRow(row: ProjectRow): ProjectLookupItemDto {
   };
 }
 
+function buildProjectMembersResponse(input: {
+  projectId: string;
+  members: ProjectMemberRow[];
+  requestId: string;
+}): ProjectMembersResponseDto {
+  return {
+    projectId: input.projectId,
+    members: input.members.map(mapProjectMemberRow),
+    requestId: input.requestId,
+  };
+}
+
+function mapProjectMemberRow(row: ProjectMemberRow): ProjectMemberDto {
+  return {
+    id: row.id,
+    userId: toNumber(row.user_id),
+    username: row.username,
+    employeeId: toNullableNumber(row.employee_id),
+    displayName: row.display_name,
+    role: row.role,
+    validFrom: toIsoString(row.valid_from),
+    metadata: parseMetadata(row.metadata),
+  };
+}
+
+function normalizeProjectMemberInputs(members: ReplaceProjectMemberDto[]): ReplaceProjectMemberDto[] {
+  const seen = new Set<string>();
+  const normalized = members.map((member) => ({
+    userId: member.userId,
+    role: member.role.trim(),
+    metadata: member.metadata ?? {},
+  }));
+
+  for (const member of normalized) {
+    const key = projectMemberInputKey(member);
+    if (seen.has(key)) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Duplicate project member role', {
+        errors: [{ field: 'members', message: 'Duplicate user/role member' }],
+      });
+    }
+    seen.add(key);
+  }
+
+  return normalized.sort((left, right) => projectMemberInputKey(left).localeCompare(projectMemberInputKey(right)));
+}
+
+function projectMemberKey(row: ProjectMemberRow): string {
+  return `${toNumber(row.user_id)}:${row.role}`;
+}
+
+function projectMemberInputKey(row: ReplaceProjectMemberDto): string {
+  return `${row.userId}:${row.role}`;
+}
+
+function compareProjectMembers(left: ProjectMemberRow, right: ProjectMemberRow): number {
+  return left.role.localeCompare(right.role) ||
+    (left.display_name ?? '').localeCompare(right.display_name ?? '') ||
+    left.username.localeCompare(right.username);
+}
+
+function projectMemberMetadataEqual(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): boolean {
+  return JSON.stringify(sortForHash(left)) === JSON.stringify(sortForHash(right));
+}
+
 function parseMetadata(value: ProjectRow['metadata']): Record<string, unknown> {
   if (!value) return {};
   if (typeof value === 'string') {
@@ -431,6 +886,38 @@ function parseMetadata(value: ProjectRow['metadata']): Record<string, unknown> {
   }
 
   return value;
+}
+
+function parseStoredMembersResponse(value: unknown): ProjectMembersResponseDto {
+  if (typeof value === 'string') {
+    return JSON.parse(value) as ProjectMembersResponseDto;
+  }
+  return value as ProjectMembersResponseDto;
+}
+
+function hashRequest(value: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(sortForHash(value))).digest('hex');
+}
+
+function sortForHash(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortForHash);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, sortForHash(nested)]),
+    );
+  }
+  return value;
+}
+
+function requestIdOrFallback(value: string | undefined): string {
+  return value ?? PROJECT_MEMBERS_SOURCE;
+}
+
+function normalizeReason(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
 }
 
 function toNumber(value: string | number): number {
@@ -468,6 +955,36 @@ function toNullableUserId(value: string): number | null {
 class ProjectNotFoundError extends ApiError {
   constructor(projectId: string) {
     super(404, 'PROJECT_NOT_FOUND', 'Project not found', { projectId });
+  }
+}
+
+class ProjectMemberUserNotFoundError extends ApiError {
+  constructor(userId: number) {
+    super(404, 'USER_NOT_FOUND', 'Project member user not found', { userId });
+  }
+}
+
+class ProjectMemberIdempotencyKeyReusedError extends ApiError {
+  constructor(idempotencyKey: string) {
+    super(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request', {
+      idempotencyKey,
+    });
+  }
+}
+
+class ProjectMemberIdempotencyInProgressError extends ApiError {
+  constructor(idempotencyKey: string) {
+    super(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing', {
+      idempotencyKey,
+    });
+  }
+}
+
+class ProjectMemberIdempotencyFailedError extends ApiError {
+  constructor(idempotencyKey: string) {
+    super(409, 'IDEMPOTENCY_FAILED', 'Idempotent command previously failed', {
+      idempotencyKey,
+    });
   }
 }
 

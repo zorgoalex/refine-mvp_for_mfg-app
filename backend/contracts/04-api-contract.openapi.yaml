@@ -2740,6 +2740,75 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/projects/{projectId}/members:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - Projects
+      operationId: listProjectMembers
+      summary: List current project members
+      security:
+        - bearerAuth: []
+      x-permission: projects.members.view
+      responses:
+        '200':
+          description: Current project members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMembersResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Projects
+      operationId: replaceProjectMembers
+      summary: Replace current project members
+      description: |
+        Replaces current project members by closing removed current rows and inserting new rows.
+        Historical rows are preserved with [valid_from, valid_to) semantics.
+      security:
+        - bearerAuth: []
+      x-permission: projects.members.manage
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceProjectMembersRequest'
+      responses:
+        '200':
+          description: Replaced current project members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMembersResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/users:
     get:
       tags:
@@ -3654,6 +3723,8 @@ components:
         - projects.archive
         - projects.manage_links
         - projects.view_history
+        - projects.members.view
+        - projects.members.manage
         - settings.view
         - settings.manage
 
@@ -3818,6 +3889,96 @@ components:
         metadata:
           type: object
           additionalProperties: true
+
+    ReplaceProjectMembersRequest:
+      type: object
+      required:
+        - idempotencyKey
+        - members
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+        members:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required:
+              - userId
+              - role
+            properties:
+              userId:
+                type: integer
+                minimum: 1
+              role:
+                type: string
+                minLength: 1
+                maxLength: 100
+              metadata:
+                type: object
+                additionalProperties: true
+        reason:
+          type: string
+          maxLength: 500
+          nullable: true
+
+    ProjectMember:
+      type: object
+      required:
+        - id
+        - userId
+        - username
+        - employeeId
+        - displayName
+        - role
+        - validFrom
+        - metadata
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: integer
+          minimum: 1
+        username:
+          type: string
+        employeeId:
+          type: integer
+          nullable: true
+        displayName:
+          type: string
+          nullable: true
+        role:
+          type: string
+        validFrom:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+
+    ProjectMembersResponse:
+      type: object
+      required:
+        - projectId
+        - members
+        - requestId
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectMember'
+        requestId:
+          type: string
+        changed:
+          type: boolean
+        auditId:
+          type: string
 
     Project:
       type: object

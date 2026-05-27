@@ -50,6 +50,37 @@ export interface ProjectResponseDto {
   project: ProjectDto;
 }
 
+export interface ProjectMemberDto {
+  id: string;
+  userId: number;
+  username: string;
+  employeeId: number | null;
+  displayName: string | null;
+  role: string;
+  validFrom: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ReplaceProjectMemberDto {
+  userId: number;
+  role: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReplaceProjectMembersRequestDto {
+  idempotencyKey: string;
+  members: ReplaceProjectMemberDto[];
+  reason?: string | null;
+}
+
+export interface ProjectMembersResponseDto {
+  projectId: string;
+  members: ProjectMemberDto[];
+  requestId: string;
+  changed?: boolean;
+  auditId?: string;
+}
+
 export interface CreateProjectRequestDto {
   code: string;
   name: string;
