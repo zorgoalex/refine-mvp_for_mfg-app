@@ -5,6 +5,7 @@ const enabled = process.env.ORDER_UI_FULL_COVERAGE === 'true';
 const frontendUrl = process.env.ORDER_UI_FULL_COVERAGE_FRONTEND_URL ?? process.env.FRONTEND_URL ?? 'http://localhost:5173';
 const username = process.env.CODEX_PLAYWRIGHT_USERNAME ?? '';
 const password = process.env.CODEX_PLAYWRIGHT_PASSWORD ?? '';
+const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
 
 test.describe('Order UI full form coverage', () => {
     test.skip(!enabled, 'Run with ORDER_UI_FULL_COVERAGE=true; this spec creates durable orders.');
@@ -19,6 +20,8 @@ test.describe('Order UI full form coverage', () => {
         const paymentNote = `E2E payment note ${runId}`;
         const paymentRef = uuidFromRunId(runId);
 
+        await prepareRuntimeForBackendUi(page);
+        await expectBackendRuntimeConfig(page);
         await loginThroughUi(page);
         await page.goto(`${frontendUrl}/orders`, { waitUntil: 'domcontentloaded' });
         await expect(page.getByRole('button', { name: 'Создать заказ' })).toBeVisible({ timeout: 30000 });
@@ -67,10 +70,10 @@ test.describe('Order UI full form coverage', () => {
         await detailDialog.locator('#height').fill('610');
         await detailDialog.locator('#width').fill('410');
         await detailDialog.locator('#quantity').fill('2');
-        await selectAntdOption(page, formItem(detailDialog, 'Материал'));
+        await selectAntdOption(page, formItem(detailDialog, 'Материал'), 'МДФ 16мм');
         await selectAntdOption(page, formItem(detailDialog, 'Пленка'));
-        await selectAntdOption(page, formItem(detailDialog, 'Тип фрезеровки'));
-        await selectAntdOption(page, formItem(detailDialog, 'Тип обката'));
+        await selectAntdOption(page, formItem(detailDialog, 'Тип фрезеровки'), 'модерн');
+        await selectAntdOption(page, formItem(detailDialog, 'Тип обката'), 'р-1');
         await detailDialog.locator('#milling_cost_per_sqm').fill('9000');
         await detailDialog.locator('#detail_name').fill(detailName);
         await detailDialog.locator('#priority').fill('11');
@@ -103,8 +106,8 @@ test.describe('Order UI full form coverage', () => {
 
         await clickOrderTab(orderDialog, 'Дополнительно');
         await orderDialog.getByText('Legacy поля (для совместимости)').click();
-        await selectAntdOption(page, formItem(orderDialog, 'Материал'));
-        await selectAntdOption(page, formItem(orderDialog, 'Тип фрезеровки'));
+        await selectAntdOption(page, formItem(orderDialog, 'Материал'), 'МДФ 16мм');
+        await selectAntdOption(page, formItem(orderDialog, 'Тип фрезеровки'), 'модерн');
         await selectAntdOption(page, formItem(orderDialog, 'Тип кромки'));
         await selectAntdOption(page, formItem(orderDialog, 'Пленка'));
         await orderDialog.getByText('Ссылки на файлы').click();
@@ -114,11 +117,23 @@ test.describe('Order UI full form coverage', () => {
         await fillInputInFormItem(formItem(orderDialog, 'Ссылка на PDF файл'), `https://example.invalid/${runId}/order.pdf`);
         await screenshot(page, testInfo, 'create-additional');
 
+        const saveResponsePromise = page.waitForResponse(
+            (response) =>
+                response.url().includes('/api/v1/orders') &&
+                response.request().method() === 'POST',
+            { timeout: 60000 },
+        );
         await orderDialog.getByRole('button', { name: /Сохранить/ }).first().click();
-        await page.waitForURL(/\/orders\/edit\/\d+/, { timeout: 60000 });
-        await expect(orderDialog).toBeHidden({ timeout: 30000 });
-        const orderId = Number(new URL(page.url()).pathname.split('/').pop());
+        const saveResponse = await saveResponsePromise;
+        const saveBody = await saveResponse.json().catch(() => null);
+        expect(
+            saveResponse.ok(),
+            `order create failed with HTTP ${saveResponse.status()} ${saveResponse.statusText()}: ${summarizeApiBody(saveBody)}`,
+        ).toBe(true);
+        const orderId = readOrderIdFromCreateResponse(saveBody);
         expect(Number.isFinite(orderId)).toBe(true);
+        await page.goto(`${frontendUrl}/orders/edit/${orderId}`, { waitUntil: 'domcontentloaded' });
+        await expect(orderDialog).toBeHidden({ timeout: 30000 });
 
         await expect(page.getByText(orderName, { exact: true }).first()).toBeVisible({ timeout: 30000 });
         await verifyEditTabs(page, testInfo, orderName, detailName, paymentNote);
@@ -137,6 +152,13 @@ test.describe('Order UI full form coverage', () => {
 });
 
 async function loginThroughUi(page: Page) {
+    const authRequests: string[] = [];
+    page.on('request', (request) => {
+        const url = request.url();
+        if (url.includes('/api/v1/auth/login') || url.includes('/api/login')) {
+            authRequests.push(`${request.method()} ${url}`);
+        }
+    });
     await page.goto(`${frontendUrl}/login`, { waitUntil: 'domcontentloaded' });
     const loginResponsePromise = page.waitForResponse(
         (response) =>
@@ -146,9 +168,96 @@ async function loginThroughUi(page: Page) {
     await page.locator('input[autocomplete="username"], input#username').fill(username);
     await page.locator('input[autocomplete="current-password"], input#password').fill(password);
     await page.getByRole('button', { name: 'Войти' }).click();
-    const loginResponse = await loginResponsePromise;
-    expect(loginResponse.ok()).toBe(true);
+    const loginResponse = await loginResponsePromise.catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`${message}; auth requests: ${authRequests.join(', ') || 'none'}`);
+    });
+    expect(
+        loginResponse.ok(),
+        `backend login failed with HTTP ${loginResponse.status()} ${loginResponse.statusText()}`,
+    ).toBe(true);
     await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 30000 });
+}
+
+async function prepareRuntimeForBackendUi(page: Page) {
+    if (vercelAutomationBypassSecret) {
+        await page.context().setExtraHTTPHeaders({
+            'x-vercel-protection-bypass': vercelAutomationBypassSecret,
+        });
+    }
+
+    if (!isLocalFrontendUrl(frontendUrl)) return;
+
+    await page.route(/\/runtime-config\.json$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                apiUrl: new URL(frontendUrl).origin,
+                features: {
+                    backendAuth: true,
+                    backendPermissions: true,
+                    backendOrdersRead: true,
+                    backendOrdersWrite: true,
+                    backendPayments: true,
+                    backendClientPhones: true,
+                    backendProductionActions: true,
+                    backendDeadlines: true,
+                    backendOrderExport: true,
+                    backendProjects: true,
+                    backendUsers: true,
+                    backendVlm: true,
+                    backendReferences: false,
+                    enableLegacyHasura: true,
+                },
+            }),
+        });
+    });
+}
+
+async function expectBackendRuntimeConfig(page: Page) {
+    const response = await page.goto(`${frontendUrl}/runtime-config.json`, {
+        waitUntil: 'domcontentloaded',
+    });
+    expect(response.ok()).toBe(true);
+    const runtimeConfig = JSON.parse((await page.locator('body').textContent()) || '{}');
+    expect(runtimeConfig.features?.backendAuth).toBe(true);
+    expect(runtimeConfig.features?.backendOrdersRead).toBe(true);
+    expect(runtimeConfig.features?.backendOrdersWrite).toBe(true);
+}
+
+function isLocalFrontendUrl(value: string) {
+    try {
+        const parsed = new URL(value);
+        return parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+    } catch {
+        return false;
+    }
+}
+
+function readOrderIdFromCreateResponse(body: unknown): number {
+    if (!body || typeof body !== 'object') return NaN;
+
+    const record = body as {
+        order?: { header?: { orderId?: unknown } };
+        header?: { orderId?: unknown };
+        orderId?: unknown;
+    };
+    const value = record.order?.header?.orderId ?? record.header?.orderId ?? record.orderId;
+    return Number(value);
+}
+
+function summarizeApiBody(body: unknown): string {
+    if (!body || typeof body !== 'object') return String(body);
+
+    const record = body as Record<string, unknown>;
+    const summary = {
+        error: record.error,
+        code: record.code,
+        message: record.message,
+        details: record.details,
+    };
+    return JSON.stringify(summary);
 }
 
 async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string, detailName: string, paymentNote: string) {
