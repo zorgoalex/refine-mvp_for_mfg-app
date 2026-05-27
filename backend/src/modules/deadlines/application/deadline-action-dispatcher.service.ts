@@ -258,10 +258,95 @@ export class DeadlineActionDispatcherService {
       return this.dispatchChangeProductionStatus(command, rule, baseExecution);
     }
 
+    if (rule.actionType === 'escalate') {
+      return this.dispatchEscalate(command, baseExecution);
+    }
+
     return command.repository.createActionExecution({
       ...baseExecution,
       status: 'skipped',
       skipReason: 'action_handler_unavailable',
+    });
+  }
+
+  private async dispatchEscalate(
+    command: DispatchDeadlineActionsCommand,
+    baseExecution: CreateActionExecutionInput,
+  ) {
+    if (!command.config.notificationsEnabled) {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'notifications_disabled',
+      });
+    }
+
+    if (command.event.eventType !== 'DEADLINE_EXPIRED') {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'unsupported_event_type',
+      });
+    }
+
+    const targetState = await command.targetResolver.resolveTargetState({
+      entityType: command.event.entityType,
+      entityId: command.event.entityId,
+      orderId: command.event.orderId,
+      orderWorkshopId: command.event.orderWorkshopId,
+      clientId: command.event.clientId,
+    });
+    const userId = targetState.notificationRecipients?.managerUserId ?? null;
+
+    if (!userId) {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'escalation_target_missing',
+      });
+    }
+
+    const notificationText = buildEscalationNotificationText(command.event);
+    const notificationIdempotencyKey = buildNotificationIdempotencyKey({
+      deadlineEventId: command.event.deadlineEventId,
+      actionType: 'escalate',
+      userId,
+    });
+
+    let notification;
+    try {
+      notification = await command.notificationPort.createNotification({
+        userId,
+        level: notificationText.level,
+        title: notificationText.title,
+        message: notificationText.message,
+        entityType: command.event.entityType,
+        entityId: command.event.entityId,
+        sourceType: 'deadline',
+        sourceId: command.event.deadlineEventId,
+        idempotencyKey: notificationIdempotencyKey,
+      });
+    } catch (error) {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'notification_port_unavailable',
+        errorCode: error instanceof Error ? error.name : 'notification_error',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return command.repository.createActionExecution({
+      ...baseExecution,
+      status: 'executed',
+      skipReason: null,
+      executedAt: command.event.eventAt,
+      result: {
+        escalatedUserId: userId,
+        notificationId: notification.notificationId,
+        notificationCreated: notification.created,
+        notificationIdempotencyKey,
+      },
     });
   }
 
@@ -495,6 +580,21 @@ function buildNotificationText(event: DeadlineEventDto): {
     title: 'Deadline event',
     message: `${entityLabel} deadline event ${event.eventType} at ${deadlineAt}`,
     level: event.severity === 'critical' ? 'error' : event.severity === 'warning' ? 'warning' : 'info',
+  };
+}
+
+function buildEscalationNotificationText(event: DeadlineEventDto): {
+  title: string;
+  message: string;
+  level: 'info' | 'warning' | 'error';
+} {
+  const entityLabel = event.orderId ? `Order ${event.orderId}` : `${event.entityType} ${event.entityId}`;
+  const deadlineAt = event.deadlineAt ?? 'unknown deadline time';
+
+  return {
+    title: 'Deadline escalation',
+    message: `${entityLabel} deadline escalated after missing ${deadlineAt}`,
+    level: event.severity === 'critical' ? 'error' : 'warning',
   };
 }
 

@@ -93,6 +93,21 @@ export const CHANGE_PRODUCTION_STATUS_ACTION_CONFIG_CONTRACT = {
   ],
 } as const;
 
+export const ESCALATE_ACTION_CONFIG_CONTRACT = {
+  actionType: 'escalate',
+  supportedEventTypes: ['DEADLINE_EXPIRED'],
+  requiredActionConfig: [],
+  recipient: 'managerUserId',
+  idempotencyMaterial: [
+    'deadlineEventId',
+    'actionType',
+    'actionRuleId',
+    'orderId',
+    'managerUserId',
+    'snapshotHash',
+  ],
+} as const;
+
 export function isDeadlineActionType(value: unknown): value is DeadlineActionType {
   return typeof value === 'string' && DEADLINE_ACTION_TYPES.includes(value as DeadlineActionType);
 }
