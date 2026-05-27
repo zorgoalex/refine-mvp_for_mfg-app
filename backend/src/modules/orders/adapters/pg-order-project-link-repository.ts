@@ -32,6 +32,12 @@ interface ProjectLinkRow extends QueryResultRow {
   valid_from: string | Date;
 }
 
+interface ProjectValidationRow extends QueryResultRow {
+  id: string;
+  status: string;
+  archived_at: string | Date | null;
+}
+
 interface VersionRow extends QueryResultRow {
   version: string | number;
 }
@@ -83,6 +89,8 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
       if (currentVersion !== command.dto.version) {
         throw new OrderVersionConflictError(currentVersion, command.dto.version);
       }
+
+      await validateSubmittedProjects(tx, normalizedProjects.map((project) => project.projectId));
 
       const currentRows = await loadCurrentLinks(tx, command.orderId);
       const currentKeys = new Set(currentRows.map(linkKey));
@@ -209,6 +217,35 @@ async function loadCurrentLinks(database: DatabaseClient, orderId: number): Prom
     [orderId],
   );
   return result.rows;
+}
+
+async function validateSubmittedProjects(tx: DatabaseClient, projectIds: string[]): Promise<void> {
+  const uniqueProjectIds = [...new Set(projectIds)];
+  if (uniqueProjectIds.length === 0) return;
+
+  const result = await tx.query<ProjectValidationRow>(
+    `
+    SELECT id::text AS id, status, archived_at
+    FROM public.project_projects
+    WHERE id = ANY($1::uuid[])
+    FOR KEY SHARE
+    `,
+    [uniqueProjectIds],
+  );
+  const rowsById = new Map(result.rows.map((row) => [row.id, row]));
+
+  const missingProjectId = uniqueProjectIds.find((projectId) => !rowsById.has(projectId));
+  if (missingProjectId) {
+    throw new OrderProjectLinkProjectNotFoundError(missingProjectId);
+  }
+
+  const archivedProjectId = uniqueProjectIds.find((projectId) => {
+    const row = rowsById.get(projectId);
+    return row?.status === 'archived' || row?.archived_at != null;
+  });
+  if (archivedProjectId) {
+    throw new OrderProjectLinkProjectArchivedError(archivedProjectId);
+  }
 }
 
 async function closeLinks(
@@ -592,5 +629,17 @@ class OrderProjectLinkIdempotencyFailedError extends ApiError {
     super(409, 'IDEMPOTENCY_FAILED', 'Idempotent command previously failed', {
       idempotencyKey,
     });
+  }
+}
+
+class OrderProjectLinkProjectNotFoundError extends ApiError {
+  constructor(projectId: string) {
+    super(404, 'PROJECT_NOT_FOUND', 'Project not found', { projectId });
+  }
+}
+
+class OrderProjectLinkProjectArchivedError extends ApiError {
+  constructor(projectId: string) {
+    super(422, 'PROJECT_ARCHIVED', 'Archived projects cannot be linked to orders', { projectId });
   }
 }

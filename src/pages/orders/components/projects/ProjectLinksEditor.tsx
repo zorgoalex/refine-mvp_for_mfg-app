@@ -122,10 +122,10 @@ export const ProjectLinksEditor: React.FC<ProjectLinksEditorProps> = ({
       >
         <Form form={form} layout="vertical">
           <Form.Item name="projectIds" label="Проекты">
-            <ProjectSelect mode="multiple" />
+            <ProjectSelect mode="multiple" selectedProjects={projects} />
           </Form.Item>
           <Form.Item name="primaryProjectId" label="Главный проект">
-            <ProjectSelect />
+            <ProjectSelect selectedProjects={projects} />
           </Form.Item>
         </Form>
         <ProjectHistoryTable links={projects} />

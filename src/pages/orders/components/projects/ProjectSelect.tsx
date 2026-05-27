@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Select } from 'antd';
 import type { SelectProps } from 'antd';
 import { projectsApi } from '../../../../api/projectsApi';
-import type { ProjectLookupItem } from '../../../../api/types/projectApi.types';
+import type { ProjectLookupItem, ProjectRef } from '../../../../api/types/projectApi.types';
 
 interface ProjectSelectProps extends Omit<SelectProps<string | string[]>, 'options' | 'onSearch'> {
   mode?: 'multiple';
+  selectedProjects?: ProjectRef[];
 }
 
-export const ProjectSelect: React.FC<ProjectSelectProps> = ({ value, mode, ...props }) => {
+export const ProjectSelect: React.FC<ProjectSelectProps> = ({ value, mode, selectedProjects = [], ...props }) => {
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<ProjectLookupItem[]>([]);
 
@@ -24,10 +25,16 @@ export const ProjectSelect: React.FC<ProjectSelectProps> = ({ value, mode, ...pr
     };
   }, [search]);
 
-  const options = useMemo(() => items.map((project) => ({
-    value: project.id,
-    label: `${project.code} · ${project.name}`,
-  })), [items]);
+  const options = useMemo(() => {
+    const merged = new Map<string, { value: string; label: string }>();
+    for (const project of selectedProjects) {
+      merged.set(project.id, { value: project.id, label: `${project.code} · ${project.name}` });
+    }
+    for (const project of items) {
+      merged.set(project.id, { value: project.id, label: `${project.code} · ${project.name}` });
+    }
+    return [...merged.values()];
+  }, [items, selectedProjects]);
 
   return (
     <Select

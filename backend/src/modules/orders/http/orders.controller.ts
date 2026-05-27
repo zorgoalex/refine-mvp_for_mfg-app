@@ -1142,7 +1142,7 @@ function parseProjectIds(value: string | string[] | undefined): string[] | undef
     throw validationError('projectIds', 'projectIds must be comma-separated UUIDs');
   }
 
-  return values;
+  return [...new Set(values)];
 }
 
 function parseProjectMode(value: string | string[] | undefined): OrderListQuery['projectMode'] {
