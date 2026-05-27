@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS public.project_order_projects (
   valid_to TIMESTAMPTZ,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
-  ended_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+  created_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
+  ended_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
   end_reason TEXT,
   CONSTRAINT chk_project_order_projects_relation_type
     CHECK (relation_type IN ('main', 'secondary', 'reporting', 'billing', 'derived')),

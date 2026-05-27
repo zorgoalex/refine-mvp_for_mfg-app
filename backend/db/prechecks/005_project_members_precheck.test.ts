@@ -26,7 +26,7 @@ describe('project members DB precheck SQL', () => {
     expect(precheckSql).toContain('project_members_required_tables');
     expect(precheckSql).toContain('project_members_btree_gist_available');
     expect(precheckSql).toContain('project_members_users_user_id_type');
-    expect(precheckSql).toContain('users_user_id_is_integer');
+    expect(precheckSql).toContain('users_user_id_is_bigint');
     expect(precheckSql).toContain('project_members_project_id_type');
     expect(precheckSql).toContain('project_members_adjacency_semantics');
     expect(precheckSql).toContain('[valid_from, valid_to)');

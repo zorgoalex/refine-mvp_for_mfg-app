@@ -53,6 +53,30 @@ WHERE c.table_schema = 'public'
   AND c.column_name = 'order_id';
 
 SELECT
+  'project_order_users_user_id_type' AS check_name,
+  c.data_type,
+  c.udt_name,
+  c.is_nullable,
+  (c.data_type = 'bigint') AS users_user_id_is_bigint,
+  EXISTS (
+    SELECT 1
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON kcu.constraint_schema = tc.constraint_schema
+     AND kcu.constraint_name = tc.constraint_name
+     AND kcu.table_schema = tc.table_schema
+     AND kcu.table_name = tc.table_name
+    WHERE tc.table_schema = 'public'
+      AND tc.table_name = 'users'
+      AND tc.constraint_type = 'PRIMARY KEY'
+      AND kcu.column_name = 'user_id'
+  ) AS users_user_id_is_primary_key
+FROM information_schema.columns c
+WHERE c.table_schema = 'public'
+  AND c.table_name = 'users'
+  AND c.column_name = 'user_id';
+
+SELECT
   'project_order_adjacency_semantics' AS check_name,
   '[valid_from, valid_to)' AS interval_bounds,
   NOT tstzrange(

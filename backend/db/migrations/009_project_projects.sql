@@ -26,12 +26,12 @@ CREATE TABLE IF NOT EXISTS public.project_projects (
   status TEXT NOT NULL DEFAULT 'active',
   starts_at DATE,
   ends_at DATE,
-  owner_user_id INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+  owner_user_id BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   archived_at TIMESTAMPTZ,
-  created_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+  created_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT chk_project_projects_status
     CHECK (status IN ('draft', 'active', 'paused', 'completed', 'archived')),
   CONSTRAINT chk_project_projects_code_format

@@ -26,7 +26,7 @@ describe('project projects DB precheck SQL', () => {
     expect(precheckSql).toContain('project_required_tables');
     expect(precheckSql).toContain('project_pgcrypto_available');
     expect(precheckSql).toContain('project_users_user_id_type');
-    expect(precheckSql).toContain('users_user_id_is_integer');
+    expect(precheckSql).toContain('users_user_id_is_bigint');
     expect(precheckSql).toContain('users_user_id_is_primary_key');
     expect(precheckSql).not.toMatch(/\borders\b/i);
     expect(precheckSql).not.toMatch(/\bclients\b/i);

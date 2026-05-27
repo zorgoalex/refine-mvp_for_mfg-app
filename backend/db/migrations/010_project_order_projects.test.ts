@@ -16,6 +16,14 @@ describe('project order projects migration', () => {
     expect(migration).not.toMatch(/order_id BIGINT/i);
   });
 
+  it('locks project audit user foreign keys to the real users.user_id bigint type', () => {
+    expect(schemaFixture).toMatch(/CREATE TABLE users\s*\([\s\S]*user_id BIGINT PRIMARY KEY/i);
+    expect(migration).toMatch(/created_by BIGINT REFERENCES users\(user_id\) ON DELETE SET NULL/i);
+    expect(migration).toMatch(/ended_by BIGINT REFERENCES users\(user_id\) ON DELETE SET NULL/i);
+    expect(migration).not.toMatch(/created_by INTEGER/i);
+    expect(migration).not.toMatch(/ended_by INTEGER/i);
+  });
+
   it('creates temporal project order links with relation and range constraints', () => {
     expect(migration).toMatch(/CREATE EXTENSION IF NOT EXISTS btree_gist/i);
     expect(migration).toMatch(/CREATE TABLE IF NOT EXISTS public\.project_order_projects/i);
@@ -72,7 +80,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 CREATE TEMP TABLE users (
-  user_id INTEGER PRIMARY KEY
+  user_id BIGINT PRIMARY KEY
 );
 
 CREATE TEMP TABLE orders (
@@ -97,8 +105,8 @@ CREATE TEMP TABLE project_order_projects (
   valid_to TIMESTAMPTZ,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
-  ended_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+  created_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
+  ended_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
   end_reason TEXT,
   CONSTRAINT chk_project_order_projects_relation_type
     CHECK (relation_type IN ('main', 'secondary', 'reporting', 'billing', 'derived')),
