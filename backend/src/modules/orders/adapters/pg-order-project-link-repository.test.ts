@@ -144,7 +144,37 @@ describe('PgOrderProjectLinkRepository', () => {
     expect(database.state.outboxRows).toHaveLength(0);
     expect(writesAfterFirst).toEqual(['complete-idempotency']);
     expect(database.state.writes).toEqual(writesAfterFirst);
-    expect(normalizedSql(database.queries.slice(queryCountAfterFirst))).not.toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+    expect(normalizedSql(database.queries.slice(queryCountAfterFirst))).toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+  });
+
+  it('denies completed idempotency replay when the order is no longer in update scope', async () => {
+    const database = createDatabase();
+    database.state.order.managerUserId = 99;
+    const repository = new PgOrderProjectLinkRepository(database.service);
+    const command = replaceCommand({
+      currentUser: scopedUser({
+        id: '99',
+        role: 'manager',
+        permissions: ['orders.view', 'orders.update', 'projects.manage_links'],
+      }),
+      dto: {
+        idempotencyKey: 'replay-scope-key',
+        projects: [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }],
+        primaryProjectId: PROJECT_1,
+      },
+    });
+
+    await repository.replaceOrderProjects(command);
+    const writesAfterCompletion = [...database.state.writes];
+    database.state.order.managerUserId = 7;
+
+    await expect(repository.replaceOrderProjects(command)).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.update'] },
+    });
+
+    expect(database.state.writes).toEqual(writesAfterCompletion);
   });
 
   it('returns conflict when an idempotency key is reused with a different payload', async () => {

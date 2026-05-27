@@ -88,12 +88,13 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
       const requestId = requestIdOrFallback(command.requestId);
       const idempotency = await reconcileIdempotency(tx, command, normalizedProjects);
 
+      const order = await loadOrderForUpdate(tx, command.orderId);
+      this.assertOrderWritable(command.currentUser, order);
+
       if (idempotency.completedResponse) {
         return idempotency.completedResponse;
       }
 
-      const order = await loadOrderForUpdate(tx, command.orderId);
-      this.assertOrderWritable(command.currentUser, order);
       const currentVersion = toNumber(order.version);
       if (currentVersion !== command.dto.version) {
         throw new OrderVersionConflictError(currentVersion, command.dto.version);
