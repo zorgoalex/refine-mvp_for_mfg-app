@@ -525,29 +525,10 @@ paths:
         - Orders
       operationId: getOrderProjects
       summary: Получить текущие проекты заказа
-      description: Возвращает только текущие Project ↔ Order links. asOf/overlap/factTime не поддерживаются в P1-P3.
+      description: Возвращает только текущие Project ↔ Order links.
       security:
         - bearerAuth: []
       x-permission: orders.view or projects.view
-      parameters:
-        - name: asOf
-          in: query
-          required: false
-          schema:
-            type: string
-          deprecated: true
-        - name: overlap
-          in: query
-          required: false
-          schema:
-            type: string
-          deprecated: true
-        - name: factTime
-          in: query
-          required: false
-          schema:
-            type: string
-          deprecated: true
       responses:
         '200':
           description: Текущие проекты заказа

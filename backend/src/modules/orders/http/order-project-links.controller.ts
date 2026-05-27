@@ -1,5 +1,5 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Put, Query, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, Inject, Param, Put, Req } from '@nestjs/common';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
@@ -113,9 +113,6 @@ export class OrderProjectLinksController {
   ) {}
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
-  @ApiQuery({ name: 'asOf', required: false, type: String, description: 'Unsupported in P1-P3' })
-  @ApiQuery({ name: 'overlap', required: false, type: String, description: 'Unsupported in P1-P3' })
-  @ApiQuery({ name: 'factTime', required: false, type: String, description: 'Unsupported in P1-P3' })
   @ApiResponse({ status: 200, description: 'Current order project links', schema: swaggerSchema(orderProjectsResponseSwaggerSchema) })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -127,10 +124,8 @@ export class OrderProjectLinksController {
   async get(
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderIdParam: string,
-    @Query() query: Record<string, string | string[] | undefined>,
   ): Promise<OrderProjectsResponseDto> {
     this.assertOrdersReadEnabled();
-    rejectTemporalQuery(query);
     return this.links.get({
       currentUser: this.requireCurrentUser(request),
       orderId: parseOrderId(orderIdParam),
@@ -207,14 +202,4 @@ export function parseReplaceOrderProjectsRequest(body: unknown): ReplaceOrderPro
     });
   }
   return parsed.data;
-}
-
-export function rejectTemporalQuery(query: Record<string, string | string[] | undefined>): void {
-  for (const field of ['asOf', 'overlap', 'factTime']) {
-    if (query[field] !== undefined) {
-      throw new ApiError(422, 'VALIDATION_ERROR', 'Temporal project link queries are not supported', {
-        errors: [{ field, message: `${field} is not supported for P1-P3 current links` }],
-      });
-    }
-  }
 }

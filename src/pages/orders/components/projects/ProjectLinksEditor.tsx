@@ -22,6 +22,7 @@ export const ProjectLinksEditor: React.FC<ProjectLinksEditorProps> = ({
   initialProjects = [],
 }) => {
   const [projects, setProjects] = useState<EntityProjectLink[]>(initialProjects);
+  const [linkVersion, setLinkVersion] = useState(version);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<{ projectIds: string[]; primaryProjectId?: string | null }>();
@@ -32,10 +33,17 @@ export const ProjectLinksEditor: React.FC<ProjectLinksEditorProps> = ({
   }, [initialProjects]);
 
   useEffect(() => {
+    setLinkVersion(version);
+  }, [version]);
+
+  useEffect(() => {
     if (!featureFlags.useBackendProjects || !orderId) return;
     let cancelled = false;
     void projectsApi.getOrderProjects(orderId).then((response) => {
-      if (!cancelled) setProjects(response.projects);
+      if (!cancelled) {
+        setProjects(response.projects);
+        setLinkVersion(response.version);
+      }
     }).catch(() => undefined);
     return () => {
       cancelled = true;
@@ -64,7 +72,7 @@ export const ProjectLinksEditor: React.FC<ProjectLinksEditorProps> = ({
     try {
       const response = await projectsApi.replaceOrderProjects(orderId, {
         idempotencyKey: createIdempotencyKey(orderId),
-        version,
+        version: linkVersion,
         primaryProjectId: values.primaryProjectId ?? null,
         projects: ids.map((projectId) => {
           const existing = projects.find((project) => project.id === projectId);
@@ -77,6 +85,7 @@ export const ProjectLinksEditor: React.FC<ProjectLinksEditorProps> = ({
         reason: 'frontend-order-project-links-editor',
       });
       setProjects(response.projects);
+      setLinkVersion(response.version);
       setOpen(false);
       message.success('Проекты заказа обновлены');
     } finally {

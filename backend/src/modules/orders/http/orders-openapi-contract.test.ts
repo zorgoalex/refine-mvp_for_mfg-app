@@ -78,7 +78,9 @@ describe('orders OpenAPI contract', () => {
     expect(projectLinksSection).toContain('operationId: replaceOrderProjects');
     expect(projectLinksSection).toContain('projects.manage_links');
     expect(projectLinksSection).toContain('projects.order_links.replace');
-    expect(projectLinksSection).toContain('asOf/overlap/factTime');
+    expect(projectLinksSection).not.toContain('asOf');
+    expect(projectLinksSection).not.toContain('overlap');
+    expect(projectLinksSection).not.toContain('factTime');
     expect(contract).toContain('    ReplaceOrderProjectsRequest:');
     expect(contract).toContain('    OrderProjectSummaryDto:');
     expect(contract).not.toContain('/api/v1/orders/{orderId}/project:');
