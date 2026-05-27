@@ -10,6 +10,8 @@ const PROJECT_2 = '22222222-2222-4222-8222-222222222222';
 const PROJECT_OLD = '33333333-3333-4333-8333-333333333333';
 const PROJECT_ARCHIVED = '44444444-4444-4444-8444-444444444444';
 const PROJECT_MISSING = '55555555-5555-4555-8555-555555555555';
+const PROJECT_ALPHA = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+const PROJECT_ALPHA_UPPERCASE = PROJECT_ALPHA.toUpperCase();
 
 describe('PgOrderProjectLinkRepository', () => {
   it('rejects stale versions before project validation or domain writes', async () => {
@@ -58,6 +60,31 @@ describe('PgOrderProjectLinkRepository', () => {
 
     expect(database.state.order.version).toBe(3);
     expect(database.domainWrites()).toEqual([]);
+  });
+
+  it('canonicalizes uppercase submitted project ids before validation and insertion', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderProjectLinkRepository(database.service);
+
+    const response = await repository.replaceOrderProjects(replaceCommand({
+      dto: {
+        idempotencyKey: 'uppercase-project-key',
+        projects: [{ projectId: PROJECT_ALPHA_UPPERCASE, relationType: 'main', isPrimary: true }],
+        primaryProjectId: PROJECT_ALPHA_UPPERCASE,
+      },
+    }));
+
+    expect(response).toMatchObject({
+      version: 4,
+      changed: true,
+      primaryProject: { id: PROJECT_ALPHA },
+      projects: [{ id: PROJECT_ALPHA, relationType: 'main', isPrimary: true }],
+    });
+    expect(database.state.links.filter((link) => link.validTo === null)).toMatchObject([
+      { projectId: PROJECT_ALPHA, relationType: 'main', isPrimary: true },
+    ]);
+    expect(database.queries.find((query) => normalizeSql(query.text).includes('FROM public.project_projects'))?.params[0])
+      .toEqual([PROJECT_ALPHA]);
   });
 
   it('completes and replays a no-op replace without duplicate rows, version bump, audit, or outbox', async () => {
@@ -281,6 +308,7 @@ function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'f
       [PROJECT_2, project(PROJECT_2, 'P2', 'Project 2')],
       [PROJECT_OLD, project(PROJECT_OLD, 'OLD', 'Old Project')],
       [PROJECT_ARCHIVED, project(PROJECT_ARCHIVED, 'ARC', 'Archived Project', 'archived', '2026-05-02T00:00:00.000Z')],
+      [PROJECT_ALPHA, project(PROJECT_ALPHA, 'ALPHA', 'Alpha Project')],
     ]),
     links: [],
     idempotency: new Map(),
@@ -334,7 +362,7 @@ function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'f
       if (normalized.includes('FROM public.project_projects') && normalized.includes('WHERE id = ANY($1::uuid[])')) {
         const ids = params[0] as string[];
         return rows<T>(ids.flatMap((id) => {
-          const row = state.projects.get(id);
+          const row = state.projects.get(id.toLowerCase());
           return row ? [{
             id: row.id,
             status: row.status,

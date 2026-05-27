@@ -209,11 +209,11 @@ describe('OrdersController read endpoints', () => {
     });
   });
 
-  it('deduplicates projectIds before applying all-mode project filters', () => {
-    const projectId = '11111111-1111-4111-8111-111111111111';
+  it('lowercases and deduplicates projectIds before applying all-mode project filters', () => {
+    const projectId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 
     expect(parseOrderListQuery({
-      projectIds: `${projectId},${projectId}`,
+      projectIds: `${projectId.toUpperCase()},${projectId}`,
       projectMode: 'all',
     })).toMatchObject({
       projectIds: [projectId],

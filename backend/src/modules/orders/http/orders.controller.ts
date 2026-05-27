@@ -1131,7 +1131,7 @@ function parseProjectIds(value: string | string[] | undefined): string[] | undef
   const raw = singleValue(value)?.trim();
   if (!raw) return undefined;
 
-  const values = raw.split(',').map((item) => item.trim()).filter(Boolean);
+  const values = raw.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
   if (values.length === 0) return undefined;
   if (values.length > 50) {
     throw validationError('projectIds', 'projectIds supports at most 50 IDs');

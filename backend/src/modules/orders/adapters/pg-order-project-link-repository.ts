@@ -220,7 +220,7 @@ async function loadCurrentLinks(database: DatabaseClient, orderId: number): Prom
 }
 
 async function validateSubmittedProjects(tx: DatabaseClient, projectIds: string[]): Promise<void> {
-  const uniqueProjectIds = [...new Set(projectIds)];
+  const uniqueProjectIds = [...new Set(projectIds.map(canonicalizeUuid))];
   if (uniqueProjectIds.length === 0) return;
 
   const result = await tx.query<ProjectValidationRow>(
@@ -232,7 +232,7 @@ async function validateSubmittedProjects(tx: DatabaseClient, projectIds: string[
     `,
     [uniqueProjectIds],
   );
-  const rowsById = new Map(result.rows.map((row) => [row.id, row]));
+  const rowsById = new Map(result.rows.map((row) => [canonicalizeUuid(row.id), row]));
 
   const missingProjectId = uniqueProjectIds.find((projectId) => !rowsById.has(projectId));
   if (missingProjectId) {
@@ -478,14 +478,15 @@ function normalizeProjectLinks(
   primaryProjectId: string | null,
 ): ReplaceOrderProjectLinkDto[] {
   const seen = new Set<string>();
+  const canonicalPrimaryProjectId = primaryProjectId ? canonicalizeUuid(primaryProjectId) : null;
   const normalized = projects.map((project) => ({
-    projectId: project.projectId,
+    projectId: canonicalizeUuid(project.projectId),
     relationType: project.relationType,
-    isPrimary: project.isPrimary || project.projectId === primaryProjectId,
+    isPrimary: project.isPrimary || canonicalizeUuid(project.projectId) === canonicalPrimaryProjectId,
   }));
   const primaryCount = normalized.filter((project) => project.isPrimary).length;
 
-  if (primaryProjectId && !normalized.some((project) => project.projectId === primaryProjectId)) {
+  if (canonicalPrimaryProjectId && !normalized.some((project) => project.projectId === canonicalPrimaryProjectId)) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Primary project must be included in projects', {
       errors: [{ field: 'primaryProjectId', message: 'primaryProjectId must reference one of the submitted projects' }],
     });
@@ -582,6 +583,10 @@ function requestIdOrFallback(value: string | undefined): string {
 function normalizeReason(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function canonicalizeUuid(value: string): string {
+  return value.toLowerCase();
 }
 
 function toNumber(value: string | number): number {
