@@ -5,6 +5,7 @@ import { DeadlineWorkerService } from './deadline-worker.service';
 import type {
   CreateDeadlineEventInput,
   DeadlineChangeOrderStatusCommand,
+  DeadlineChangeProductionStatusCommand,
   DeadlineNotificationPort,
   DeadlineRepositoryPort,
   DeadlineUnitOfWork,
@@ -422,6 +423,86 @@ describe('DeadlineWorkerService', () => {
     ).rejects.toThrow('action execution write failed');
 
     expect(productionMutations).toEqual([]);
+  });
+
+  it('dispatches change_production_status through the transaction-scoped production action port', async () => {
+    const events: DeadlineEventDto[] = [];
+    const executions: DeadlineActionExecutionDto[] = [];
+    const productionCommands: DeadlineChangeProductionStatusCommand[] = [];
+    const repository = createRepository({
+      due: [createDeadline({ deadlineId: 'deadline-production-status', orderId: 42 })],
+      events,
+      executions,
+      rules: [
+        createRule({
+          actionRuleId: 'rule-change-production-status',
+          actionType: 'change_production_status',
+          config: {
+            actionConfig: {
+              targetProductionStatusId: 6,
+              productionStatusScope: 'order',
+            },
+          },
+        }),
+      ],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: {
+        async runInTransaction(handler) {
+          return handler({
+            deadlines: repository,
+            productionStatusActionPort: {
+              async changeProductionStatusFromDeadline(command) {
+                productionCommands.push(command);
+                return {
+                  status: 'executed',
+                  result: {
+                    order: {
+                      orderId: command.orderId,
+                      productionStatusId: command.targetProductionStatusId,
+                      version: 8,
+                    },
+                  },
+                };
+              },
+            },
+          });
+        },
+      },
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+    });
+
+    await worker.processDueDeadlines({
+      now: '2026-05-27T10:00:00.000Z',
+      limit: 10,
+      workerId: 'worker-production-status-test',
+      trigger: 'manual',
+      requestId: 'req-worker-production-status',
+      config: {
+        actionsEnabled: true,
+        notificationsEnabled: true,
+      },
+    });
+
+    expect(productionCommands).toEqual([
+      expect.objectContaining({
+        orderId: 42,
+        targetProductionStatusId: 6,
+        productionStatusScope: 'order',
+        deadlineId: 'deadline-production-status',
+        actionRuleId: 'rule-change-production-status',
+        requestId: 'req-worker-production-status',
+      }),
+    ]);
+    expect(executions).toEqual([
+      expect.objectContaining({
+        actionType: 'change_production_status',
+        status: 'executed',
+        targetStatusId: 6,
+        result: { order: { orderId: 42, productionStatusId: 6, version: 8 } },
+      }),
+    ]);
   });
 
   it('marks completed target as completed_on_time when completed before deadline', async () => {

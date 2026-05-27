@@ -8,6 +8,7 @@ import type {
   DeadlineRepositoryPort,
   DeadlineNotificationPort,
   DeadlineOrderStatusActionPort,
+  DeadlineProductionStatusActionPort,
   DeadlineTargetResolverPort,
   DeadlineTransactionManagerPort,
 } from './deadline.types';
@@ -17,6 +18,7 @@ export interface DeadlineWorkerServicePorts {
   targetResolver: DeadlineTargetResolverPort;
   notificationPort: DeadlineNotificationPort;
   statusActionPort?: DeadlineOrderStatusActionPort;
+  productionStatusActionPort?: DeadlineProductionStatusActionPort;
   dispatcher?: DeadlineActionDispatcherService;
 }
 
@@ -126,13 +128,18 @@ export class DeadlineWorkerService {
     return result;
   }
 
-  private createDispatcher(unitOfWork: { statusActionPort?: DeadlineOrderStatusActionPort }) {
+  private createDispatcher(unitOfWork: {
+    statusActionPort?: DeadlineOrderStatusActionPort;
+    productionStatusActionPort?: DeadlineProductionStatusActionPort;
+  }) {
     if (this.ports.dispatcher) {
       return this.ports.dispatcher;
     }
 
     return new DeadlineActionDispatcherService({
       statusActionPort: unitOfWork.statusActionPort ?? this.ports.statusActionPort,
+      productionStatusActionPort:
+        unitOfWork.productionStatusActionPort ?? this.ports.productionStatusActionPort,
     });
   }
 

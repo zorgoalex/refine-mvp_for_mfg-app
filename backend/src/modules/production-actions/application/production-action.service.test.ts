@@ -201,6 +201,9 @@ function createRepository(
     async changeOrderStatusFromDeadline() {
       throw new Error('changeOrderStatusFromDeadline should not be called');
     },
+    async changeProductionStatusFromDeadline() {
+      throw new Error('changeProductionStatusFromDeadline should not be called');
+    },
     async changePaymentStatus() {
       throw new Error('changePaymentStatus should not be called');
     },

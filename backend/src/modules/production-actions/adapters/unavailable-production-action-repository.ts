@@ -6,6 +6,7 @@ import type {
   ChangeOrderStatusFromDeadlineCommand,
   ChangePaymentStatusCommand,
   ChangeProductionStatusCommand,
+  ChangeProductionStatusFromDeadlineCommand,
   DeactivateProductionStageCommand,
   MoveCalendarDateCommand,
   ProductionActionRepositoryPort,
@@ -21,6 +22,10 @@ export class UnavailableProductionActionRepository implements ProductionActionRe
   }
 
   changeOrderStatusFromDeadline(_command: ChangeOrderStatusFromDeadlineCommand) {
+    return Promise.reject(databaseUnavailable());
+  }
+
+  changeProductionStatusFromDeadline(_command: ChangeProductionStatusFromDeadlineCommand) {
     return Promise.reject(databaseUnavailable());
   }
 

@@ -6,6 +6,7 @@ import type {
   ActivateDetailProductionStageCommand,
   ChangeOrderStatusCommand,
   ChangeOrderStatusFromDeadlineCommand,
+  ChangeProductionStatusFromDeadlineCommand,
   ChangePaymentStatusCommand,
   ChangeProductionStatusCommand,
   DeactivateProductionStageCommand,
@@ -37,6 +38,10 @@ export class ProductionActionService {
 
   async changeOrderStatusFromDeadline(command: ChangeOrderStatusFromDeadlineCommand) {
     return this.ports.productionActions.changeOrderStatusFromDeadline(command);
+  }
+
+  async changeProductionStatusFromDeadline(command: ChangeProductionStatusFromDeadlineCommand) {
+    return this.ports.productionActions.changeProductionStatusFromDeadline(command);
   }
 
   async changePaymentStatus(command: ChangePaymentStatusCommand) {

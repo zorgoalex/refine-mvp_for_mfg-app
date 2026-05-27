@@ -13,6 +13,8 @@ import type {
   ChangeOrderStatusFromDeadlineResult,
   ChangePaymentStatusCommand,
   ChangeProductionStatusCommand,
+  ChangeProductionStatusFromDeadlineCommand,
+  ChangeProductionStatusFromDeadlineResult,
   DeactivateProductionStageCommand,
   MoveCalendarDateCommand,
   ProductionActionRepositoryPort,
@@ -378,6 +380,12 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
     command: ChangeOrderStatusFromDeadlineCommand,
   ): Promise<ChangeOrderStatusFromDeadlineResult> {
     return this.database.transaction((tx) => changeOrderStatusFromDeadlineInTransaction(tx, command));
+  }
+
+  changeProductionStatusFromDeadline(
+    command: ChangeProductionStatusFromDeadlineCommand,
+  ): Promise<ChangeProductionStatusFromDeadlineResult> {
+    return this.database.transaction((tx) => changeProductionStatusFromDeadlineInTransaction(tx, command));
   }
 
   changePaymentStatus(command: ChangePaymentStatusCommand): Promise<ProductionActionResponseDto> {
@@ -1072,7 +1080,7 @@ export async function changeOrderStatusFromDeadlineInTransaction(
     },
   });
   if (idempotency.completedResponse) {
-    return mapDeadlineStoredResponse(idempotency.completedResponse);
+    return mapDeadlineStoredResponse(idempotency.completedResponse) as ChangeOrderStatusFromDeadlineResult;
   }
 
   const order = await loadOrderForUpdate(tx, command.orderId);
@@ -1188,6 +1196,195 @@ export async function changeOrderStatusFromDeadlineInTransaction(
   return { status: 'executed', response };
 }
 
+export async function changeProductionStatusFromDeadlineInTransaction(
+  tx: TransactionClient,
+  command: ChangeProductionStatusFromDeadlineCommand,
+): Promise<ChangeProductionStatusFromDeadlineResult> {
+  const requestId = requestIdOrFallback(command.requestId);
+  const ruleConfigSnapshot = command.ruleConfigSnapshot as { snapshotHash?: unknown };
+  const snapshotHash =
+    typeof ruleConfigSnapshot.snapshotHash === 'string' ? ruleConfigSnapshot.snapshotHash : null;
+  const idempotency = await reconcileIdempotency(tx, {
+    idempotencyKey: command.idempotencyKey,
+    commandName: 'orders.production_status_change',
+    actorUserId: null,
+    entityType: 'order',
+    entityId: String(command.orderId),
+    requestShape: {
+      actorUserId: null,
+      actorLabel: command.systemActor.actorLabel,
+      commandName: 'orders.production_status_change',
+      source: command.source,
+      orderId: command.orderId,
+      productionStatusId: command.targetProductionStatusId,
+      productionStatusScope: command.productionStatusScope,
+      deadlineId: command.deadlineId,
+      deadlineEventId: command.deadlineEventId,
+      actionRuleId: command.actionRuleId,
+      ruleVersionId: command.ruleVersionId ?? null,
+      snapshotHash,
+    },
+  });
+  if (idempotency.completedResponse) {
+    return mapDeadlineStoredResponse(
+      idempotency.completedResponse,
+      'same_production_status',
+    ) as ChangeProductionStatusFromDeadlineResult;
+  }
+
+  const order = await loadOrderForUpdate(tx, command.orderId);
+  const status = await loadProductionStatus(tx, command.targetProductionStatusId);
+
+  const deadlineMetadata = {
+    source: command.source,
+    systemActor: command.systemActor,
+    orderId: order.orderId,
+    clientId: order.clientId,
+    deadlineId: command.deadlineId,
+    deadlineEventId: command.deadlineEventId,
+    actionRuleId: command.actionRuleId,
+    ruleVersionId: command.ruleVersionId ?? null,
+    snapshotHash,
+    ruleConfigSnapshot: command.ruleConfigSnapshot,
+    idempotencyKey: command.idempotencyKey,
+    requestId,
+    occurredAt: command.occurredAt,
+    productionStatusScope: command.productionStatusScope,
+  };
+
+  if (
+    order.productionStatusId === status.productionStatusId &&
+    !order.productionStatusFromDetailsEnabled
+  ) {
+    const response = {
+      order: {
+        orderId: order.orderId,
+        productionStatusId: order.productionStatusId ?? undefined,
+        version: order.version,
+      },
+      requestId,
+    };
+    await completeDeadlineIdempotency(tx, command.idempotencyKey, {
+      status: 'skipped',
+      skipReason: 'same_production_status',
+      response,
+    });
+    return { status: 'skipped', skipReason: 'same_production_status', response };
+  }
+
+  const beforeDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
+  const nextVersion = await updateProductionStatus(
+    tx,
+    order.orderId,
+    status.productionStatusId,
+  );
+  const afterDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
+  const affectedDetailIds = beforeDetails.detailIds.filter((detailId) =>
+    afterDetails.detailIds.includes(detailId),
+  );
+  const nextProductionStatusFromDetailsEnabled = false;
+
+  const auditId = await writeAudit(tx, {
+    event: 'orders.production_status_change',
+    actorUserId: null,
+    requestId,
+    order,
+    source: command.source,
+    statusField: 'productionCurrentStatus',
+    statusId: status.productionStatusId,
+    statusName: status.productionStatusName,
+    statusCode: status.productionStatusCode,
+    beforeJson: {
+      productionStatusId: order.productionStatusId,
+      productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+      version: order.version,
+      detailStatusDistribution: beforeDetails.statusDistribution,
+      deadlineId: command.deadlineId,
+      deadlineEventId: command.deadlineEventId,
+      actionRuleId: command.actionRuleId,
+      snapshotHash,
+    },
+    afterJson: {
+      productionStatusId: status.productionStatusId,
+      productionStatusName: status.productionStatusName,
+      productionStatusCode: status.productionStatusCode,
+      productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
+      version: nextVersion,
+      detailStatusDistribution: afterDetails.statusDistribution,
+      deadlineId: command.deadlineId,
+      deadlineEventId: command.deadlineEventId,
+      actionRuleId: command.actionRuleId,
+      snapshotHash,
+    },
+    diffJson: {
+      productionStatusId: {
+        before: order.productionStatusId,
+        after: status.productionStatusId,
+      },
+      productionStatusFromDetailsEnabled: {
+        before: order.productionStatusFromDetailsEnabled,
+        after: nextProductionStatusFromDetailsEnabled,
+      },
+      affectedDetailIds,
+      affectedDetailCount: affectedDetailIds.length,
+      beforeStatusDistribution: beforeDetails.statusDistribution,
+      afterStatusDistribution: afterDetails.statusDistribution,
+    },
+    metadataJson: {
+      ...deadlineMetadata,
+      productionStatusId: status.productionStatusId,
+      productionStatusCode: status.productionStatusCode,
+      productionStatusName: status.productionStatusName,
+      previousProductionStatusId: order.productionStatusId,
+      productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
+      previousProductionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+      affectedDetailIds,
+      affectedDetailCount: affectedDetailIds.length,
+      beforeStatusDistribution: beforeDetails.statusDistribution,
+      afterStatusDistribution: afterDetails.statusDistribution,
+      action: 'production_status_change',
+      statusField: 'productionCurrentStatus',
+    },
+  });
+
+  await enqueueOutbox(tx, {
+    eventType: 'order.production_status_changed',
+    aggregateType: 'order',
+    aggregateId: String(order.orderId),
+    idempotencyKey: command.idempotencyKey,
+    payload: {
+      ...deadlineMetadata,
+      eventType: 'order.production_status_changed',
+      actorUserId: null,
+      entityType: 'order',
+      entityId: String(order.orderId),
+      productionStatusId: status.productionStatusId,
+      previousProductionStatusId: order.productionStatusId,
+      productionStatusCode: status.productionStatusCode,
+      productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
+      affectedDetailIds,
+      affectedDetailCount: affectedDetailIds.length,
+      action: 'production_status_change',
+      scope: { source: command.source, productionStatusScope: command.productionStatusScope },
+    },
+  });
+
+  const response = {
+    order: {
+      orderId: order.orderId,
+      productionStatusId: status.productionStatusId,
+      version: nextVersion,
+    },
+    auditId,
+    requestId,
+  };
+  await completeDeadlineIdempotency(tx, command.idempotencyKey, {
+    status: 'executed',
+    response,
+  });
+  return { status: 'executed', response };
+}
+
 async function setSessionUser(tx: TransactionClient, userId: string): Promise<void> {
   await tx.query('SELECT set_session_user($1)', [userId]);
 }
@@ -1274,7 +1471,7 @@ async function completeIdempotency(
 async function completeDeadlineIdempotency(
   tx: TransactionClient,
   idempotencyKey: string,
-  result: ChangeOrderStatusFromDeadlineResult,
+  result: ChangeOrderStatusFromDeadlineResult | ChangeProductionStatusFromDeadlineResult,
 ): Promise<void> {
   await completeIdempotency(tx, idempotencyKey, {
     ...result.response,
@@ -1285,7 +1482,8 @@ async function completeDeadlineIdempotency(
 
 function mapDeadlineStoredResponse(
   response: ProductionActionResponseDto,
-): ChangeOrderStatusFromDeadlineResult {
+  defaultSkipReason = 'same_status',
+): ChangeOrderStatusFromDeadlineResult | ChangeProductionStatusFromDeadlineResult {
   const stored = response as ProductionActionResponseDto & {
     deadlineActionStatus?: unknown;
     deadlineSkipReason?: unknown;
@@ -1300,7 +1498,7 @@ function mapDeadlineStoredResponse(
     return {
       status: 'skipped',
       skipReason:
-        typeof stored.deadlineSkipReason === 'string' ? stored.deadlineSkipReason : 'same_status',
+        typeof stored.deadlineSkipReason === 'string' ? stored.deadlineSkipReason : defaultSkipReason,
       response: productionResponse,
     };
   }

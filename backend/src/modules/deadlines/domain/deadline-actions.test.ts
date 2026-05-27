@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CHANGE_PRODUCTION_STATUS_ACTION_CONFIG_CONTRACT,
   DEADLINE_AUDIT_EVENTS,
   DEADLINE_AUDIT_SOURCES,
   DEADLINE_ORDER_OVERRIDE_TARGET_TYPES,
@@ -84,5 +85,22 @@ describe('deadline action domain contracts', () => {
     expect(isDeadlineOrderOverrideTargetType('policy')).toBe(true);
     expect(isDeadlineOrderOverrideTargetType('action_rule')).toBe(true);
     expect(isDeadlineOrderOverrideTargetType('project')).toBe(false);
+  });
+
+  it('declares the accepted change_production_status action config contract', () => {
+    expect(CHANGE_PRODUCTION_STATUS_ACTION_CONFIG_CONTRACT).toEqual({
+      actionType: 'change_production_status',
+      supportedEventTypes: ['DEADLINE_EXPIRED'],
+      requiredActionConfig: ['targetProductionStatusId', 'productionStatusScope'],
+      supportedProductionStatusScopes: ['order'],
+      idempotencyMaterial: [
+        'deadlineEventId',
+        'actionType',
+        'actionRuleId',
+        'orderId',
+        'targetProductionStatusId',
+        'snapshotHash',
+      ],
+    });
   });
 });

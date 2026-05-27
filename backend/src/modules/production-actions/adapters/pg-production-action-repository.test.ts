@@ -368,6 +368,77 @@ describe('PgProductionActionRepository', () => {
     expect(sql).not.toContain('UPDATE orders SET order_status_id');
   });
 
+  it('changes production status from deadline-engine through production command audit and outbox boundary', async () => {
+    const database = createDatabase({
+      orderProductionStatusId: 1,
+      productionStatusFromDetailsEnabled: true,
+      detailStatusRowsBefore: [
+        { detail_id: 101, production_status_id: 1 },
+        { detail_id: 102, production_status_id: 3 },
+      ],
+      detailStatusRowsAfter: [
+        { detail_id: 101, production_status_id: 6 },
+        { detail_id: 102, production_status_id: 6 },
+      ],
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.changeProductionStatusFromDeadline({
+      source: 'deadline-engine',
+      systemActor: {
+        type: 'system',
+        actorUserId: null,
+        actorLabel: 'deadline-engine',
+      },
+      orderId: 15,
+      targetProductionStatusId: 6,
+      productionStatusScope: 'order',
+      deadlineId: 'deadline-production-1',
+      deadlineEventId: 'event-production-1',
+      actionRuleId: 'rule-production-1',
+      ruleVersionId: null,
+      ruleConfigSnapshot: {
+        snapshotHash: 'sha256:rule-production-1',
+        actionRuleId: 'rule-production-1',
+      },
+      idempotencyKey: 'deadline-production-status-key-1',
+      requestId: 'request-deadline-production-status',
+      occurredAt: '2026-05-27T10:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      status: 'executed',
+      response: {
+        order: { orderId: 15, productionStatusId: 6, version: 4 },
+        auditId: 'audit-id-1',
+        requestId: 'request-deadline-production-status',
+      },
+    });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('SELECT set_session_user($1)');
+    expect(sql).toContain('SELECT production_status_id, production_status_name, production_status_code');
+    expect(sql).toContain('SELECT detail_id, production_status_id FROM order_details');
+    expect(sql).toContain('UPDATE orders SET production_status_id');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('orders.production_status_change');
+    expect(params).toContain('order.production_status_changed');
+    expect(params).toContain('deadline-engine');
+    expect(params).toContain('deadline-production-1');
+    expect(params).toContain('event-production-1');
+    expect(params).toContain('rule-production-1');
+    expect(params).toContain('sha256:rule-production-1');
+    expect(params).toContain('deadline-production-status-key-1');
+
+    const idempotencyInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
+    );
+    expect(idempotencyInsert?.params[2]).toBeNull();
+  });
+
   it('changes manual payment status with idempotency, audit, and outbox', async () => {
     const database = createDatabase();
     const repository = new PgProductionActionRepository(database.service);

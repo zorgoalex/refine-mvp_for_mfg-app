@@ -81,6 +81,19 @@ import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.s
               };
             },
           },
+          productionStatusActionPort: {
+            async changeProductionStatusFromDeadline(command) {
+              const result = await (database.isConfigured
+                ? new PgProductionActionRepository(database)
+                : new UnavailableProductionActionRepository()
+              ).changeProductionStatusFromDeadline(command);
+              return {
+                status: result.status,
+                skipReason: result.skipReason ?? null,
+                result: { ...result.response },
+              };
+            },
+          },
         }),
       inject: [DatabaseService],
     },
