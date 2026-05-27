@@ -6,7 +6,12 @@ import type {
 } from '../dto/deadline-action-rule.dto';
 import type { DeadlineEventDto, DeadlineInstanceDto } from '../dto/deadline-instance.dto';
 import { DeadlineActionDispatcherService } from './deadline-action-dispatcher.service';
-import type { DeadlineNotificationPort, DeadlineRepositoryPort, DeadlineTargetResolverPort } from './deadline.types';
+import type {
+  DeadlineChangeProductionStatusCommand,
+  DeadlineNotificationPort,
+  DeadlineRepositoryPort,
+  DeadlineTargetResolverPort,
+} from './deadline.types';
 
 describe('DeadlineActionDispatcherService', () => {
   it('creates skipped execution when action rule is disabled', async () => {
@@ -219,6 +224,189 @@ describe('DeadlineActionDispatcherService', () => {
       actionType: 'create_task',
       status: 'skipped',
       skipReason: 'action_handler_unavailable',
+    });
+  });
+
+  it('executes change_production_status through the production status action port with target resolver approval', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const productionCommands: DeadlineChangeProductionStatusCommand[] = [];
+    const canApplyActions: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService({
+      productionStatusActionPort: {
+        async changeProductionStatusFromDeadline(command) {
+          productionCommands.push(command);
+          return {
+            status: 'executed',
+            result: {
+              order: {
+                orderId: command.orderId,
+                productionStatusId: command.targetProductionStatusId,
+                version: 5,
+              },
+            },
+          };
+        },
+      },
+    });
+
+    await dispatcher.dispatch({
+      event: createEvent({
+        deadlineId: 'deadline-production-1',
+        deadlineEventId: 'event-production-1',
+        eventAt: '2026-05-27T10:00:00.000Z',
+        payload: { requestId: 'req-production-status-1' },
+      }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'production-status-rule',
+            actionType: 'change_production_status',
+            config: {
+              actionConfig: {
+                targetProductionStatusId: 6,
+                productionStatusScope: 'order',
+              },
+            },
+          }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        onCanApplyAction(input) {
+          canApplyActions.push(input);
+        },
+      }),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(canApplyActions).toEqual([
+      {
+        actionType: 'change_production_status',
+        target: {
+          entityType: 'order',
+          entityId: '42',
+          orderId: 42,
+          orderWorkshopId: undefined,
+          clientId: undefined,
+        },
+      },
+    ]);
+    expect(productionCommands).toEqual([
+      expect.objectContaining({
+        source: 'deadline-engine',
+        systemActor: {
+          type: 'system',
+          actorUserId: null,
+          actorLabel: 'deadline-engine',
+        },
+        orderId: 42,
+        targetProductionStatusId: 6,
+        productionStatusScope: 'order',
+        deadlineId: 'deadline-production-1',
+        deadlineEventId: 'event-production-1',
+        actionRuleId: 'production-status-rule',
+        occurredAt: '2026-05-27T10:00:00.000Z',
+        requestId: 'req-production-status-1',
+      }),
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionRuleId: 'production-status-rule',
+      actionType: 'change_production_status',
+      status: 'executed',
+      skipReason: null,
+      orderId: 42,
+      targetStatusId: 6,
+      result: { order: { orderId: 42, productionStatusId: 6, version: 5 } },
+      ruleConfigSnapshot: {
+        actionType: 'change_production_status',
+        actionConfig: {
+          targetProductionStatusId: 6,
+          productionStatusScope: 'order',
+        },
+      },
+    });
+    expect(executions[0].idempotencyKey).toContain(
+      'event-production-1:change_production_status:order:42:order:42:production-status-rule:6:',
+    );
+  });
+
+  it('skips change_production_status when target resolver rejects the target', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const productionCommands: DeadlineChangeProductionStatusCommand[] = [];
+    const dispatcher = new DeadlineActionDispatcherService({
+      productionStatusActionPort: {
+        async changeProductionStatusFromDeadline(command) {
+          productionCommands.push(command);
+          return { status: 'executed', result: {} };
+        },
+      },
+    });
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionType: 'change_production_status',
+            config: {
+              actionConfig: {
+                targetProductionStatusId: 6,
+                productionStatusScope: 'order',
+              },
+            },
+          }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver({ canApplyAction: false }),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(productionCommands).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'change_production_status',
+      status: 'skipped',
+      skipReason: 'target_rejected_action',
+      targetStatusId: 6,
+    });
+  });
+
+  it('skips change_production_status when target production status is missing', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService({
+      productionStatusActionPort: {
+        async changeProductionStatusFromDeadline() {
+          throw new Error('production status action should not run');
+        },
+      },
+    });
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionType: 'change_production_status',
+            config: {
+              actionConfig: {
+                productionStatusScope: 'order',
+              },
+            },
+          }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(executions[0]).toMatchObject({
+      actionType: 'change_production_status',
+      status: 'skipped',
+      skipReason: 'missing_target_production_status',
     });
   });
 

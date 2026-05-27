@@ -4,7 +4,10 @@ import type {
   DeadlineTransactionManagerPort,
   DeadlineUnitOfWork,
 } from '../application/deadline.types';
-import { changeOrderStatusFromDeadlineInTransaction } from '../../production-actions/adapters/pg-production-action-repository';
+import {
+  changeOrderStatusFromDeadlineInTransaction,
+  changeProductionStatusFromDeadlineInTransaction,
+} from '../../production-actions/adapters/pg-production-action-repository';
 import { PgDeadlineRepository } from './pg-deadline-repository';
 
 export class PgDeadlineTransactionManager implements DeadlineTransactionManagerPort {
@@ -18,12 +21,23 @@ export class PgDeadlineTransactionManager implements DeadlineTransactionManagerP
 class PgDeadlineUnitOfWork implements DeadlineUnitOfWork {
   readonly deadlines: PgDeadlineRepository;
   readonly statusActionPort: DeadlineUnitOfWork['statusActionPort'];
+  readonly productionStatusActionPort: DeadlineUnitOfWork['productionStatusActionPort'];
 
   constructor(tx: TransactionClient) {
     this.deadlines = new PgDeadlineRepository(tx);
     this.statusActionPort = {
       async changeOrderStatusFromDeadline(command) {
         const result = await changeOrderStatusFromDeadlineInTransaction(tx, command);
+        return {
+          status: result.status,
+          skipReason: result.skipReason ?? null,
+          result: { ...result.response },
+        };
+      },
+    };
+    this.productionStatusActionPort = {
+      async changeProductionStatusFromDeadline(command) {
+        const result = await changeProductionStatusFromDeadlineInTransaction(tx, command);
         return {
           status: result.status,
           skipReason: result.skipReason ?? null,

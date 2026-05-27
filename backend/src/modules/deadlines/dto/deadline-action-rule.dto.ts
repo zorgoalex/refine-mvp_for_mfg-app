@@ -16,6 +16,8 @@ export interface DeadlineActionRuleConditionsDto {
 
 export interface DeadlineActionRuleActionConfigDto {
   targetOrderStatusId?: number;
+  targetProductionStatusId?: number;
+  productionStatusScope?: 'order';
 }
 
 export interface DeadlineActionRuleConfigDto {

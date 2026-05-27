@@ -308,6 +308,7 @@ export interface DeadlineRepositoryPort {
 export interface DeadlineUnitOfWork {
   deadlines: DeadlineRepositoryPort;
   statusActionPort?: DeadlineOrderStatusActionPort;
+  productionStatusActionPort?: DeadlineProductionStatusActionPort;
 }
 
 export interface DeadlineTransactionManagerPort {
@@ -372,4 +373,38 @@ export interface DeadlineOrderStatusActionPort {
   changeOrderStatusFromDeadline(
     command: DeadlineChangeOrderStatusCommand,
   ): Promise<DeadlineChangeOrderStatusResult>;
+}
+
+export type DeadlineProductionStatusScope = 'order';
+
+export interface DeadlineChangeProductionStatusCommand {
+  source: 'deadline-engine';
+  systemActor: {
+    type: 'system';
+    actorUserId: null;
+    actorLabel: 'deadline-engine';
+  };
+  orderId: number;
+  targetProductionStatusId: number;
+  productionStatusScope: DeadlineProductionStatusScope;
+  deadlineId: string;
+  deadlineEventId: string;
+  actionRuleId: string;
+  ruleVersionId?: string | null;
+  ruleConfigSnapshot: DeadlineRuleConfigSnapshotDto;
+  idempotencyKey: string;
+  requestId?: string;
+  occurredAt: string;
+}
+
+export interface DeadlineChangeProductionStatusResult {
+  status: 'executed' | 'skipped';
+  skipReason?: string | null;
+  result?: Record<string, unknown> | null;
+}
+
+export interface DeadlineProductionStatusActionPort {
+  changeProductionStatusFromDeadline(
+    command: DeadlineChangeProductionStatusCommand,
+  ): Promise<DeadlineChangeProductionStatusResult>;
 }

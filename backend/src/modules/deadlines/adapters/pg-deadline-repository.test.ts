@@ -1049,6 +1049,64 @@ describe('PgDeadlineRepository', () => {
     expect(insert?.params).toContain(7);
   });
 
+  it('persists change_production_status execution evidence with production target status', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.createActionExecution({
+        deadlineEventId: '22222222-2222-4222-8222-222222222222',
+        actionRuleId: 'rule-change-production-status',
+        actionType: 'change_production_status',
+        targetType: 'order',
+        targetId: '100',
+        status: 'executed',
+        idempotencyKey: 'event:change_production_status:order:100:production:6',
+        result: {
+          order: {
+            orderId: 100,
+            productionStatusId: 6,
+            version: 9,
+          },
+        },
+        ruleConfigSnapshot: {
+          actionRuleId: 'rule-change-production-status',
+          priority: 20,
+          eventType: 'DEADLINE_EXPIRED',
+          actionType: 'change_production_status',
+          conditions: {},
+          actionConfig: {
+            targetProductionStatusId: 6,
+            productionStatusScope: 'order',
+          },
+          createdAt: '2026-05-27T10:00:00.000Z',
+          updatedAt: '2026-05-27T10:00:00.000Z',
+          snapshotHash: 'sha256:rule-change-production-status',
+        },
+        orderId: 100,
+        targetStatusId: 6,
+        executedAt: '2026-05-27T10:01:00.000Z',
+      }),
+    ).resolves.toMatchObject({
+      actionType: 'change_production_status',
+      orderId: 100,
+      targetStatusId: 6,
+      ruleConfigSnapshot: {
+        actionConfig: {
+          targetProductionStatusId: 6,
+          productionStatusScope: 'order',
+        },
+      },
+    });
+
+    const insert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_action_executions'),
+    );
+    expect(insert?.params).toContain(100);
+    expect(insert?.params).toContain(6);
+    expect(insert?.params).toContain('2026-05-27T10:01:00.000Z');
+  });
+
   it('writes worker-created event audit and outbox with deadline-engine source and worker context', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);

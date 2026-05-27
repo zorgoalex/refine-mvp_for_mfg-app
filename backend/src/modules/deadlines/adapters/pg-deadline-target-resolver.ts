@@ -27,11 +27,6 @@ interface WorkshopTargetRow {
   delete_flag: boolean;
 }
 
-const DANGEROUS_ACTIONS = new Set<DeadlineActionType>([
-  'change_order_status',
-  'change_production_status',
-]);
-
 export class PgDeadlineTargetResolver implements DeadlineTargetResolverPort {
   constructor(private readonly database: DatabaseClient) {}
 
@@ -64,11 +59,15 @@ export class PgDeadlineTargetResolver implements DeadlineTargetResolverPort {
     actionType: DeadlineActionType;
     target: DeadlineTargetRef;
   }): Promise<boolean> {
-    if (DANGEROUS_ACTIONS.has(input.actionType)) {
+    if (input.actionType === 'change_order_status') {
       return false;
     }
 
     const target = await this.resolveTargetState(input.target);
+    if (input.actionType === 'change_production_status') {
+      return !target.auditContext.unresolved && Boolean(target.auditContext.orderId ?? input.target.orderId);
+    }
+
     return !target.auditContext.unresolved;
   }
 

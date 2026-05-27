@@ -78,6 +78,21 @@ export const DEADLINE_ORDER_OVERRIDE_TARGET_TYPES = ['policy', 'action_rule'] as
 
 export type DeadlineOrderOverrideTargetType = (typeof DEADLINE_ORDER_OVERRIDE_TARGET_TYPES)[number];
 
+export const CHANGE_PRODUCTION_STATUS_ACTION_CONFIG_CONTRACT = {
+  actionType: 'change_production_status',
+  supportedEventTypes: ['DEADLINE_EXPIRED'],
+  requiredActionConfig: ['targetProductionStatusId', 'productionStatusScope'],
+  supportedProductionStatusScopes: ['order'],
+  idempotencyMaterial: [
+    'deadlineEventId',
+    'actionType',
+    'actionRuleId',
+    'orderId',
+    'targetProductionStatusId',
+    'snapshotHash',
+  ],
+} as const;
+
 export function isDeadlineActionType(value: unknown): value is DeadlineActionType {
   return typeof value === 'string' && DEADLINE_ACTION_TYPES.includes(value as DeadlineActionType);
 }

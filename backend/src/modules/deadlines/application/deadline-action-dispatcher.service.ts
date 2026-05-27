@@ -13,6 +13,7 @@ import type {
   CreateActionExecutionInput,
   DeadlineNotificationPort,
   DeadlineOrderStatusActionPort,
+  DeadlineProductionStatusActionPort,
   DeadlineRepositoryPort,
   DeadlineTargetResolverPort,
   DeadlineTargetState,
@@ -33,6 +34,7 @@ export interface DispatchDeadlineActionsCommand {
 
 export interface DeadlineActionDispatcherPorts {
   statusActionPort?: DeadlineOrderStatusActionPort;
+  productionStatusActionPort?: DeadlineProductionStatusActionPort;
 }
 
 export class DeadlineActionDispatcherService {
@@ -252,6 +254,10 @@ export class DeadlineActionDispatcherService {
       return this.dispatchSetOverdueFlag(command, baseExecution);
     }
 
+    if (rule.actionType === 'change_production_status') {
+      return this.dispatchChangeProductionStatus(command, rule, baseExecution);
+    }
+
     return command.repository.createActionExecution({
       ...baseExecution,
       status: 'skipped',
@@ -280,6 +286,93 @@ export class DeadlineActionDispatcherService {
         expiredAt: deadline.expiredAt ?? command.event.eventAt,
       },
     });
+  }
+
+  private async dispatchChangeProductionStatus(
+    command: DispatchDeadlineActionsCommand,
+    rule: DeadlineActionRuleDto,
+    baseExecution: CreateActionExecutionInput,
+  ) {
+    if (!this.ports.productionStatusActionPort) {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'action_handler_unavailable',
+      });
+    }
+    if (command.event.eventType !== 'DEADLINE_EXPIRED') {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'unsupported_event_type',
+      });
+    }
+
+    const orderId = resolveEventOrderId(command.event);
+    if (!orderId) {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'missing_order_id',
+      });
+    }
+
+    const targetProductionStatusId = rule.config?.actionConfig?.targetProductionStatusId ?? null;
+    if (!targetProductionStatusId) {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'missing_target_production_status',
+      });
+    }
+
+    const productionStatusScope = rule.config?.actionConfig?.productionStatusScope;
+    if (productionStatusScope !== 'order') {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'unsupported_production_status_scope',
+      });
+    }
+
+    try {
+      const result = await this.ports.productionStatusActionPort.changeProductionStatusFromDeadline({
+        source: 'deadline-engine',
+        systemActor: {
+          type: 'system',
+          actorUserId: null,
+          actorLabel: 'deadline-engine',
+        },
+        orderId,
+        targetProductionStatusId,
+        productionStatusScope,
+        deadlineId: command.event.deadlineId,
+        deadlineEventId: command.event.deadlineEventId,
+        actionRuleId: rule.actionRuleId,
+        ruleVersionId: baseExecution.ruleVersionId ?? null,
+        ruleConfigSnapshot: baseExecution.ruleConfigSnapshot ?? buildRuleConfigSnapshot(rule),
+        idempotencyKey: baseExecution.idempotencyKey,
+        occurredAt: command.event.eventAt,
+        requestId: getEventRequestId(command.event),
+      });
+
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: result.status,
+        skipReason: result.status === 'skipped' ? result.skipReason ?? 'same_production_status' : null,
+        result: result.result ?? null,
+        executedAt: result.status === 'executed' ? command.event.eventAt : null,
+      });
+    } catch (error) {
+      const mapped = mapProductionStatusActionError(error);
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: mapped.status,
+        skipReason: mapped.skipReason,
+        errorCode: mapped.errorCode,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async dispatchNotification(
@@ -412,6 +505,7 @@ function createExecutionInput(
 ): CreateActionExecutionInput {
   const targetType = event.entityType;
   const targetId = event.entityId;
+  const targetStatusId = getActionTargetStatusId(rule);
 
   return {
     deadlineEventId: event.deadlineEventId,
@@ -421,7 +515,7 @@ function createExecutionInput(
     targetId,
     ruleConfigSnapshot,
     orderId: event.orderId ?? null,
-    targetStatusId: rule.config?.actionConfig?.targetOrderStatusId ?? null,
+    targetStatusId,
     idempotencyKey: buildDeadlineActionIdempotencyKey({
       deadlineEventId: event.deadlineEventId,
       actionType: rule.actionType,
@@ -429,11 +523,32 @@ function createExecutionInput(
       targetId,
       orderId: event.orderId ?? null,
       actionRuleId: rule.actionRuleId,
-      targetStatusId: rule.config?.actionConfig?.targetOrderStatusId ?? null,
+      targetStatusId,
       snapshotHash: ruleConfigSnapshot.snapshotHash,
     }),
     status: 'skipped',
   };
+}
+
+function getActionTargetStatusId(rule: DeadlineActionRuleDto): number | null {
+  if (rule.actionType === 'change_production_status') {
+    return rule.config?.actionConfig?.targetProductionStatusId ?? null;
+  }
+
+  return rule.config?.actionConfig?.targetOrderStatusId ?? null;
+}
+
+function resolveEventOrderId(event: DeadlineEventDto): number | null {
+  if (event.orderId) {
+    return event.orderId;
+  }
+
+  if (event.entityType !== 'order') {
+    return null;
+  }
+
+  const parsed = Number(event.entityId);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function getEventFixtureKey(event: DeadlineEventDto): string | null {
@@ -463,6 +578,31 @@ function mapStatusActionError(error: unknown): {
       status: 'skipped',
       skipReason: 'invalid_target_status',
       errorCode: 'invalid_target_status',
+    };
+  }
+
+  return {
+    status: 'failed',
+    skipReason: null,
+    errorCode: error instanceof Error ? error.name : 'unexpected_error',
+  };
+}
+
+function mapProductionStatusActionError(error: unknown): {
+  status: 'skipped' | 'failed';
+  skipReason?: string | null;
+  errorCode?: string | null;
+} {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'VALIDATION_ERROR'
+  ) {
+    return {
+      status: 'skipped',
+      skipReason: 'invalid_target_production_status',
+      errorCode: 'invalid_target_production_status',
     };
   }
 
