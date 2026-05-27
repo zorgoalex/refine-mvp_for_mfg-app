@@ -33,6 +33,7 @@ import {
   AimOutlined,
   BarChartOutlined,
   WalletOutlined,
+  ProjectOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -63,6 +64,7 @@ const CATEGORY_ORDER = [
 const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
   calendar: <CalendarOutlined />,
+  projects: <ProjectOutlined />,
   clients: <UserOutlined />,
   clients_analytics_view: <BarChartOutlined />,
   suppliers: <ShopOutlined />,
@@ -108,6 +110,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 const RESOURCE_LABELS: Record<string, string> = {
   orders_view: "Заказы",
   calendar: "Календарь",
+  projects: "Проекты",
   clients: "Клиенты",
   clients_analytics_view: "+Клиенты",
   suppliers: "Поставщики",
@@ -149,6 +152,7 @@ const CATEGORY_MAP: Record<string, string> = {
   film_vendors: "Контрагенты",
   payments: "Финансы",
   payments_view: "Финансы",
+  projects: "Производство",
   order_workshops: "Производство",
   workshops: "Производство",
   work_centers: "Производство",

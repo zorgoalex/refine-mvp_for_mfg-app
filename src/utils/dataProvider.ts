@@ -1135,6 +1135,17 @@ function mapOrdersViewQueryToBackend(
           break;
         }
         return null;
+      case 'project_ids': {
+        const projectIds = Array.isArray(value) ? value.map(String) : String(value).split(',');
+        query.projectIds = projectIds.map((item) => item.trim()).filter(Boolean);
+        break;
+      }
+      case 'project_mode':
+        if (value === 'any' || value === 'all' || value === 'primary' || value === 'none') {
+          query.projectMode = value;
+          break;
+        }
+        return null;
       default:
         return null;
     }

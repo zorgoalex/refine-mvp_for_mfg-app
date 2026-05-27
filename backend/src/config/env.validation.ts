@@ -108,7 +108,9 @@ const envSchema = z
     BACKEND_ENABLE_USERS: booleanFromEnv.default(false),
     BACKEND_ENABLE_VLM: booleanFromEnv.default(false),
     BACKEND_ENABLE_DEADLINES: booleanFromEnv.default(false),
+    BACKEND_ENABLE_PROJECTS: booleanFromEnv.default(false),
     BACKEND_ORDERS_READ_ONLY: booleanFromEnv.default(true),
+    BACKEND_PROJECTS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_EXPORT_DISABLED: booleanFromEnv.default(true),
     BACKEND_VLM_DISABLED: booleanFromEnv.default(true),
     BACKEND_DEADLINES_READ_ONLY: booleanFromEnv.default(true),
@@ -273,6 +275,14 @@ const envSchema = z
       ctx.addIssue({
         code: 'custom',
         message: 'DATABASE_URL is required when BACKEND_ENABLE_PRODUCTION_ACTIONS is true',
+        path: ['DATABASE_URL'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_PROJECTS && !env.DATABASE_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'DATABASE_URL is required when BACKEND_ENABLE_PROJECTS is true',
         path: ['DATABASE_URL'],
       });
     }

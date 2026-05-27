@@ -209,6 +209,18 @@ describe('OrdersController read endpoints', () => {
     });
   });
 
+  it('lowercases and deduplicates projectIds before applying all-mode project filters', () => {
+    const projectId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+
+    expect(parseOrderListQuery({
+      projectIds: `${projectId.toUpperCase()},${projectId}`,
+      projectMode: 'all',
+    })).toMatchObject({
+      projectIds: [projectId],
+      projectMode: 'all',
+    });
+  });
+
   it('rejects unsupported sort fields as validation errors', () => {
     expect(() => parseOrderListQuery({ sortBy: 'raw_sql_injection' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ pageSize: '201' })).toThrow(ApiError);

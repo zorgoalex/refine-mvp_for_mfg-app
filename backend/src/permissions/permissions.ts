@@ -121,6 +121,13 @@ export const PERMISSIONS = [
   'deadlines.worker.manage',
   'deadlines.worker.schedule',
 
+  'projects.view',
+  'projects.create',
+  'projects.update',
+  'projects.archive',
+  'projects.manage_links',
+  'projects.view_history',
+
   'settings.view',
   'settings.manage',
   'audit.view',
@@ -219,6 +226,10 @@ export const ROLE_PERMISSIONS = {
     'deadlines.pause',
     'deadlines.audit.view',
 
+    'projects.view',
+    'projects.manage_links',
+    'projects.view_history',
+
     'vlm.use',
   ],
 
@@ -273,6 +284,8 @@ export const ROLE_PERMISSIONS = {
     'deadlines.view',
     'deadlines.override',
     'deadlines.pause',
+
+    'projects.view',
 
     'vlm.use',
   ],
@@ -375,6 +388,7 @@ export const ROLE_PERMISSIONS = {
     'employees.view',
 
     'deadlines.view',
+    'projects.view',
   ],
 } as const satisfies Record<UserRole, readonly PermissionName[]>;
 

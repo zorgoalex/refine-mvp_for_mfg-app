@@ -10,6 +10,7 @@ import { ClientPhonesModule } from './modules/client-phones/client-phones.module
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProductionActionsModule } from './modules/production-actions/production-actions.module';
+import { ProjectsModule } from './modules/projects/projects.module';
 import { UsersModule } from './modules/users/users.module';
 import { VlmModule } from './modules/vlm/vlm.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -31,6 +32,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     OrdersModule,
     PaymentsModule,
     ProductionActionsModule,
+    ProjectsModule,
     UsersModule,
     VlmModule,
     PermissionsModule,

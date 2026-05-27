@@ -122,10 +122,12 @@ import { LoginPage } from "./pages/login";
 import { dataProvider } from "./utils/dataProvider";
 import { authProvider } from "./authProvider";
 import { i18nProvider } from "./utils/i18nProvider";
+import { featureFlags } from "./config/featureFlags";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
+const ProjectsPage = lazy(async () => ({ default: (await import("./pages/projects/ProjectsPage")).ProjectsPage }));
 const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/doweling_orders/edit")).DowelOrderEdit }));
 const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
 const ConfigurationPage = lazy(async () => ({ default: (await import("./pages/configuration")).ConfigurationPage }));
@@ -176,6 +178,18 @@ const App = () => {
                     label: "Календарь",
                   },
                 },
+                ...(featureFlags.useBackendProjects
+                  ? [
+                      {
+                        name: "projects",
+                        list: "/projects",
+                        meta: {
+                          idColumnName: "id",
+                          label: "Проекты",
+                        },
+                      },
+                    ]
+                  : []),
                 {
                   name: "materials",
                   list: "/materials",
@@ -482,6 +496,11 @@ const App = () => {
                   <Route path="/calendar" >
                     <Route index element={<CalendarList />} />
                   </Route>
+                  {featureFlags.useBackendProjects && (
+                    <Route path="/projects">
+                      <Route index element={<ProjectsPage />} />
+                    </Route>
+                  )}
                   <Route path="/doweling-orders" >
                     <Route index element={<DowelOrderList />} />
                     <Route path="edit/:id" element={<DowelOrderEdit />} />
@@ -670,5 +689,3 @@ const App = () => {
 }
 
 export default App;
-
-

@@ -58,3 +58,25 @@ CREATE TABLE roles (
   role_id INTEGER PRIMARY KEY,
   role_code TEXT
 );
+
+CREATE TABLE users (
+  user_id INTEGER PRIMARY KEY,
+  username TEXT,
+  role_id INTEGER REFERENCES roles(role_id)
+);
+
+CREATE TABLE clients (
+  client_id INTEGER PRIMARY KEY,
+  client_name TEXT
+);
+
+CREATE TABLE workshops (
+  workshop_id INTEGER PRIMARY KEY,
+  workshop_name TEXT
+);
+
+CREATE TABLE order_workshops (
+  order_workshop_id INTEGER PRIMARY KEY,
+  order_id INTEGER REFERENCES orders(order_id),
+  workshop_id INTEGER REFERENCES workshops(workshop_id)
+);

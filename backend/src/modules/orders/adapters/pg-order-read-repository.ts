@@ -8,6 +8,7 @@ import type {
   OrderListItemDto,
   OrderListResponseDto,
 } from '../dto/order.dto';
+import type { OrderProjectRelationType, OrderProjectSummaryDto } from '../dto/order-project-link.dto';
 import type {
   GetOrderFormDataCommand,
   GetOrderAuditCommand,
@@ -96,6 +97,7 @@ interface OrderHeaderRow extends QueryResultRow {
   latest_doweling_order_name: string | null;
   latest_design_engineer_id: string | number | null;
   passed_production_status_codes: unknown[] | null;
+  project_links_json: unknown;
 }
 
 interface OrderDetailRow extends QueryResultRow {
@@ -179,6 +181,15 @@ interface OrderDowelingLinkRow extends QueryResultRow {
   doweling_order_name: string | null;
   design_engineer_id: string | number | null;
   ref_key_1c: string | null;
+}
+
+interface OrderProjectLinkRow extends QueryResultRow {
+  project_id: string;
+  code: string;
+  name: string;
+  relation_type: OrderProjectRelationType;
+  is_primary: boolean;
+  valid_from: string | Date;
 }
 
 interface CountRow extends QueryResultRow {
@@ -286,7 +297,8 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         latest_doweling.doweling_order_id AS latest_doweling_order_id,
         latest_doweling.doweling_order_name AS latest_doweling_order_name,
         latest_doweling.design_engineer_id AS latest_design_engineer_id,
-        production_projection.passed_production_status_codes
+        production_projection.passed_production_status_codes,
+        project_projection.project_links_json
       FROM page_orders o
       LEFT JOIN LATERAL (
         SELECT
@@ -335,6 +347,26 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           GROUP BY ps.production_status_code
         ) events
       ) production_projection ON true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'id', p.id::text,
+              'code', p.code,
+              'name', p.name,
+              'relationType', pop.relation_type,
+              'isPrimary', pop.is_primary,
+              'validFrom', pop.valid_from
+            )
+            ORDER BY pop.is_primary DESC, pop.relation_type ASC, p.name ASC, p.code ASC
+          ),
+          '[]'::jsonb
+        ) AS project_links_json
+        FROM public.project_order_projects pop
+        INNER JOIN public.project_projects p ON p.id = pop.project_id
+        WHERE pop.order_id = o.order_id
+          AND pop.valid_to IS NULL
+      ) project_projection ON true
       ORDER BY ${PAGE_SORT_COLUMNS[command.query.sortBy]} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
       `,
       params,
@@ -428,6 +460,23 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       `,
       [command.orderId],
     );
+    const projectLinks = await this.database.query<OrderProjectLinkRow>(
+      `
+      SELECT
+        p.id::text AS project_id,
+        p.code,
+        p.name,
+        pop.relation_type,
+        pop.is_primary,
+        pop.valid_from
+      FROM public.project_order_projects pop
+      INNER JOIN public.project_projects p ON p.id = pop.project_id
+      WHERE pop.order_id = $1
+        AND pop.valid_to IS NULL
+      ORDER BY pop.is_primary DESC, pop.relation_type ASC, p.name ASC, p.code ASC, pop.id ASC
+      `,
+      [command.orderId],
+    );
 
     return mapOrderDto(
       header,
@@ -436,6 +485,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       workshops.rows,
       requirements.rows,
       dowelingLinks.rows,
+      projectLinks.rows.map(mapProjectLinkRow),
     );
   }
 
@@ -641,6 +691,51 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       clauses.push(`o.manager_id = $${params.push(Number(command.currentUser.id))}`);
     }
 
+    if (command.query.projectMode === 'none') {
+      clauses.push(`
+        NOT EXISTS (
+          SELECT 1
+          FROM public.project_order_projects pop_filter
+          WHERE pop_filter.order_id = o.order_id
+            AND pop_filter.valid_to IS NULL
+        )
+      `);
+    } else if (command.query.projectIds?.length) {
+      const projectIdsIndex = params.push(command.query.projectIds);
+      if (command.query.projectMode === 'all') {
+        clauses.push(`
+          (
+            SELECT COUNT(DISTINCT pop_filter.project_id)::int
+            FROM public.project_order_projects pop_filter
+            WHERE pop_filter.order_id = o.order_id
+              AND pop_filter.valid_to IS NULL
+              AND pop_filter.project_id = ANY($${projectIdsIndex}::uuid[])
+          ) = ${command.query.projectIds.length}
+        `);
+      } else if (command.query.projectMode === 'primary') {
+        clauses.push(`
+          EXISTS (
+            SELECT 1
+            FROM public.project_order_projects pop_filter
+            WHERE pop_filter.order_id = o.order_id
+              AND pop_filter.valid_to IS NULL
+              AND pop_filter.is_primary
+              AND pop_filter.project_id = ANY($${projectIdsIndex}::uuid[])
+          )
+        `);
+      } else {
+        clauses.push(`
+          EXISTS (
+            SELECT 1
+            FROM public.project_order_projects pop_filter
+            WHERE pop_filter.order_id = o.order_id
+              AND pop_filter.valid_to IS NULL
+              AND pop_filter.project_id = ANY($${projectIdsIndex}::uuid[])
+          )
+        `);
+      }
+    }
+
     return `WHERE ${clauses.join(' AND ')}`;
   }
 }
@@ -719,6 +814,7 @@ function mapOrderDto(
   workshops: OrderWorkshopRow[],
   requirements: OrderRequirementRow[],
   dowelingLinks: OrderDowelingLinkRow[],
+  projects: OrderProjectSummaryDto[],
 ): OrderDto {
   return {
     header: {
@@ -761,6 +857,8 @@ function mapOrderDto(
     workshops: workshops.map(mapWorkshop),
     requirements: requirements.map(mapRequirement),
     dowelingLinks: dowelingLinks.map(mapDowelingLink),
+    primaryProject: projects.find((project) => project.isPrimary) ?? null,
+    projects,
     totals: {
       totalAmount: toNumber(row.total_amount),
       finalAmount: toNumber(row.final_amount),
@@ -778,6 +876,7 @@ function mapOrderDto(
 }
 
 function mapListItem(row: OrderHeaderRow): OrderListItemDto {
+  const projects = mapProjectSummaryArray(row.project_links_json);
   return {
     orderId: toNumber(row.order_id),
     orderName: row.order_name,
@@ -813,6 +912,8 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
     dowelingOrderName: row.latest_doweling_order_name,
     designEngineerId: toNullableNumber(row.latest_design_engineer_id),
     passedProductionStatusCodes: toStringArray(row.passed_production_status_codes),
+    primaryProject: projects.find((project) => project.isPrimary) ?? null,
+    projects,
     createdBy: toNullableNumber(row.created_by),
     editedBy: toNullableNumber(row.edited_by),
     updatedAt: toIsoString(row.updated_at),
@@ -921,6 +1022,59 @@ function mapDowelingLink(row: OrderDowelingLinkRow) {
       designEngineerId,
     },
   };
+}
+
+function mapProjectLinkRow(row: OrderProjectLinkRow): OrderProjectSummaryDto {
+  return {
+    id: row.project_id,
+    code: row.code,
+    name: row.name,
+    relationType: row.relation_type,
+    isPrimary: row.is_primary,
+    validFrom: toIsoString(row.valid_from),
+  };
+}
+
+function mapProjectSummaryArray(value: unknown): OrderProjectSummaryDto[] {
+  const parsed = typeof value === 'string' ? parseJsonArray(value) : value;
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      if (
+        typeof record.id !== 'string' ||
+        typeof record.code !== 'string' ||
+        typeof record.name !== 'string' ||
+        typeof record.relationType !== 'string'
+      ) {
+        return null;
+      }
+      return {
+        id: record.id,
+        code: record.code,
+        name: record.name,
+        relationType: record.relationType as OrderProjectRelationType,
+        isPrimary: Boolean(record.isPrimary),
+        validFrom:
+          record.validFrom instanceof Date
+            ? record.validFrom.toISOString()
+            : String(record.validFrom ?? ''),
+      };
+    })
+    .filter((item): item is OrderProjectSummaryDto => item !== null);
+}
+
+function parseJsonArray(value: string): unknown[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function toNumber(value: string | number | null | undefined): number {

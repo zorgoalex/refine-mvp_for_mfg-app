@@ -73,6 +73,24 @@ describe('permissions foundation', () => {
     expect(can('viewer', 'deadlines.manage_order_overrides')).toBe(false);
   });
 
+  it('assigns project permissions by role for the read-only P1 shell', () => {
+    expect(can('superadmin', 'projects.manage_links')).toBe(true);
+    expect(can('admin', 'projects.archive')).toBe(true);
+    expect(can('admin', 'projects.view_history')).toBe(true);
+
+    expect(can('top_manager', 'projects.view')).toBe(true);
+    expect(can('top_manager', 'projects.view_history')).toBe(true);
+    expect(can('top_manager', 'projects.manage_links')).toBe(true);
+    expect(can('top_manager', 'projects.create')).toBe(false);
+
+    expect(can('manager', 'projects.view')).toBe(true);
+    expect(can('manager', 'projects.view_history')).toBe(false);
+    expect(can('viewer', 'projects.view')).toBe(true);
+
+    expect(can('operator', 'projects.view')).toBe(false);
+    expect(can('worker', 'projects.view')).toBe(false);
+  });
+
   it('sets legacy Hasura allowed roles with superadmin at the top', () => {
     expect(HASURA_ALLOWED_ROLES.superadmin).toEqual([
       'superadmin',
@@ -102,6 +120,22 @@ describe('permissions foundation', () => {
 
     expect(PERMISSIONS).toContain('deadlines.manage_order_overrides');
     expect(contractPermissions).toContain('deadlines.manage_order_overrides');
+  });
+
+  it('keeps project permissions in the static OpenAPI PermissionName enum', () => {
+    const contract = readOpenApiContract();
+    const contractPermissions = readPermissionNameEnum(contract);
+    const projectPermissions = PERMISSIONS.filter((permission) => permission.startsWith('projects.'));
+
+    expect(projectPermissions).toEqual([
+      'projects.view',
+      'projects.create',
+      'projects.update',
+      'projects.archive',
+      'projects.manage_links',
+      'projects.view_history',
+    ]);
+    expect(contractPermissions).toEqual(expect.arrayContaining(projectPermissions));
   });
 });
 
