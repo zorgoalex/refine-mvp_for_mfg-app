@@ -75,8 +75,9 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
   }
 
   async replaceOrderProjects(command: ReplaceOrderProjectsCommand): Promise<ReplaceOrderProjectsResponseDto> {
+    const normalizedProjects = normalizeProjectLinks(command.dto.projects, command.dto.primaryProjectId ?? null);
+
     return this.database.transaction(async (tx) => {
-      const normalizedProjects = normalizeProjectLinks(command.dto.projects, command.dto.primaryProjectId ?? null);
       const requestId = requestIdOrFallback(command.requestId);
       const idempotency = await reconcileIdempotency(tx, command, normalizedProjects);
 

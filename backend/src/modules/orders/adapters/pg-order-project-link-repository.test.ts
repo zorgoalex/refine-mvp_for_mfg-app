@@ -109,6 +109,7 @@ describe('PgOrderProjectLinkRepository', () => {
     });
 
     expect(database.queries).toHaveLength(0);
+    expect(database.state.transactions).toBe(0);
   });
 
   it('completes and replays a no-op replace without duplicate rows, version bump, audit, or outbox', async () => {
@@ -321,6 +322,7 @@ interface FakeState {
   outboxRows: Array<{ eventType: string; aggregateId: string; payload: unknown; idempotencyKey: string }>;
   writes: string[];
   nextLink: number;
+  transactions: number;
 }
 
 function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'failed' } = {}) {
@@ -340,10 +342,14 @@ function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'f
     outboxRows: [],
     writes: [],
     nextLink: 1,
+    transactions: 0,
   };
 
   const service = {
-    transaction: async <T>(handler: (client: typeof service) => Promise<T>) => handler(service),
+    transaction: async <T>(handler: (client: typeof service) => Promise<T>) => {
+      state.transactions += 1;
+      return handler(service);
+    },
     query: async <T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) => {
       queries.push({ text, params });
       const normalized = normalizeSql(text);
