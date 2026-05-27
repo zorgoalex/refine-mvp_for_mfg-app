@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type {
   OrderProjectRelationType,
   OrderProjectSummaryDto,
@@ -20,6 +22,8 @@ interface LockedOrderRow extends QueryResultRow {
   order_id: string | number;
   version: string | number;
   client_id: string | number | null;
+  created_by: string | number | null;
+  manager_id: string | number | null;
 }
 
 interface ProjectLinkRow extends QueryResultRow {
@@ -60,10 +64,13 @@ type OrderProjectDatabase = DatabaseClient & {
 const SOURCE = 'projects-order-links';
 
 export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryPort {
+  private readonly orderAccessPolicy = new OrderAccessPolicy();
+
   constructor(private readonly database: OrderProjectDatabase) {}
 
   async getOrderProjects(command: GetOrderProjectsCommand): Promise<OrderProjectsResponseDto> {
     const order = await loadOrder(command.orderId, this.database);
+    this.assertOrderReadable(command.currentUser, order);
     const projects = await loadCurrentLinks(this.database, command.orderId);
 
     return buildOrderProjectsResponse({
@@ -86,6 +93,7 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
+      this.assertOrderWritable(command.currentUser, order);
       const currentVersion = toNumber(order.version);
       if (currentVersion !== command.dto.version) {
         throw new OrderVersionConflictError(currentVersion, command.dto.version);
@@ -157,6 +165,18 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
       return response;
     });
   }
+
+  private assertOrderReadable(currentUser: CurrentUser, order: LockedOrderRow): void {
+    if (!this.orderAccessPolicy.canView(currentUser, orderPolicySubject(order))) {
+      throw orderScopeDenied(['orders.view']);
+    }
+  }
+
+  private assertOrderWritable(currentUser: CurrentUser, order: LockedOrderRow): void {
+    if (!this.orderAccessPolicy.canUpdate(currentUser, orderPolicySubject(order))) {
+      throw orderScopeDenied(['orders.update']);
+    }
+  }
 }
 
 export class UnavailableOrderProjectLinkRepository implements OrderProjectLinkRepositoryPort {
@@ -172,7 +192,7 @@ export class UnavailableOrderProjectLinkRepository implements OrderProjectLinkRe
 async function loadOrder(orderId: number, database: DatabaseClient): Promise<LockedOrderRow> {
   const result = await database.query<LockedOrderRow>(
     `
-    SELECT order_id, version, client_id
+    SELECT order_id, version, client_id, created_by, manager_id
     FROM orders
     WHERE order_id = $1 AND delete_flag = false
     `,
@@ -187,7 +207,7 @@ async function loadOrder(orderId: number, database: DatabaseClient): Promise<Loc
 async function loadOrderForUpdate(tx: DatabaseClient, orderId: number): Promise<LockedOrderRow> {
   const result = await tx.query<LockedOrderRow>(
     `
-    SELECT order_id, version, client_id
+    SELECT order_id, version, client_id, created_by, manager_id
     FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE
     `,
     [orderId],
@@ -602,6 +622,10 @@ function toNullableNumber(value: string | number | null): number | null {
   return value === null ? null : toNumber(value);
 }
 
+function toNullableString(value: string | number | null): string | null {
+  return value === null ? null : String(value);
+}
+
 function toNullableUserId(value: string): number | null {
   const numberValue = Number(value);
   return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : null;
@@ -615,6 +639,20 @@ function databaseUnavailable() {
   return new ApiError(503, 'SERVICE_UNAVAILABLE', 'Order project links adapter is not configured', {
     feature: 'projects',
     adapter: 'order_project_link_repository',
+  });
+}
+
+function orderPolicySubject(order: LockedOrderRow) {
+  return {
+    orderId: order.order_id,
+    createdByUserId: toNullableString(order.created_by),
+    managerUserId: toNullableString(order.manager_id),
+  };
+}
+
+function orderScopeDenied(requiredPermissions: string[]): ApiError {
+  return new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+    requiredPermissions,
   });
 }
 

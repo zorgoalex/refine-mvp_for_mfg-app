@@ -230,6 +230,52 @@ describe('PgProjectRepository', () => {
     });
   });
 
+  it('maps missing owner FK errors on create to validation responses', async () => {
+    const database = new FakeProjectDatabase([
+      pgError('23503', 'project_projects_owner_user_id_fkey'),
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.createProject({
+        currentUser: currentUser(),
+        dto: { code: 'PRJ-005', name: 'Project', ownerUserId: 999 },
+        requestId: 'req-owner-create',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: {
+        field: 'ownerUserId',
+        errors: [{ field: 'ownerUserId', message: 'ownerUserId must reference an existing user' }],
+      },
+    });
+  });
+
+  it('maps missing owner FK errors on update to validation responses', async () => {
+    const database = new FakeProjectDatabase([
+      { rows: [projectRow()] },
+      pgError('23503', 'project_projects_owner_user_id_fkey'),
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await expect(
+      repository.updateProject({
+        currentUser: currentUser(),
+        projectId: '00000000-0000-4000-8000-000000000000',
+        dto: { ownerUserId: 999 },
+        requestId: 'req-owner-update',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: {
+        field: 'ownerUserId',
+        errors: [{ field: 'ownerUserId', message: 'ownerUserId must reference an existing user' }],
+      },
+    });
+  });
+
   it('archives a project as a soft delete and writes audit metadata', async () => {
     const before = projectRow({ status: 'active', archived_at: null });
     const after = projectRow({ status: 'archived', archived_at: '2026-05-03T00:00:00.000Z' });

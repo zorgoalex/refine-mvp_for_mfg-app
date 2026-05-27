@@ -280,6 +280,59 @@ describe('PgOrderProjectLinkRepository', () => {
       },
     ]);
   });
+
+  it('denies GET when the order is outside the user view scope before returning links', async () => {
+    const database = createDatabase();
+    database.state.order.createdByUserId = 7;
+    database.state.order.managerUserId = 7;
+    database.state.links = [currentLink({
+      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      projectId: PROJECT_1,
+      relationType: 'main',
+      isPrimary: true,
+    })];
+    const repository = new PgOrderProjectLinkRepository(database.service);
+
+    await expect(repository.getOrderProjects({
+      currentUser: scopedUser({ id: '99', role: 'manager', permissions: ['orders.view'] }),
+      orderId: 15,
+      requestId: 'request-denied-get',
+    })).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.view'] },
+    });
+
+    expect(database.queries).toHaveLength(1);
+    expect(normalizeSql(database.queries[0].text)).toContain('FROM orders');
+  });
+
+  it('denies PUT when the order is outside the user update scope before writing links', async () => {
+    const database = createDatabase();
+    database.state.order.createdByUserId = 7;
+    database.state.order.managerUserId = 7;
+    const repository = new PgOrderProjectLinkRepository(database.service);
+
+    await expect(repository.replaceOrderProjects(replaceCommand({
+      currentUser: scopedUser({
+        id: '99',
+        role: 'manager',
+        permissions: ['orders.view', 'orders.update', 'projects.manage_links'],
+      }),
+      dto: {
+        idempotencyKey: 'denied-put-key',
+        projects: [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }],
+        primaryProjectId: PROJECT_1,
+      },
+    }))).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.update'] },
+    });
+
+    expect(database.domainWrites()).toEqual([]);
+    expect(database.state.links).toHaveLength(0);
+  });
 });
 
 interface QueryRecord {
@@ -314,7 +367,7 @@ interface IdempotencyState {
 }
 
 interface FakeState {
-  order: { orderId: number; version: number; clientId: number };
+  order: { orderId: number; version: number; clientId: number; createdByUserId: number | null; managerUserId: number | null };
   projects: Map<string, ProjectState>;
   links: LinkState[];
   idempotency: Map<string, IdempotencyState>;
@@ -328,7 +381,7 @@ interface FakeState {
 function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'failed' } = {}) {
   const queries: QueryRecord[] = [];
   const state: FakeState = {
-    order: { orderId: 15, version: 3, clientId: 7 },
+    order: { orderId: 15, version: 3, clientId: 7, createdByUserId: 1, managerUserId: 1 },
     projects: new Map([
       [PROJECT_1, project(PROJECT_1, 'P1', 'Project 1')],
       [PROJECT_2, project(PROJECT_2, 'P2', 'Project 2')],
@@ -386,6 +439,18 @@ function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'f
           order_id: state.order.orderId,
           version: state.order.version,
           client_id: state.order.clientId,
+          created_by: state.order.createdByUserId,
+          manager_id: state.order.managerUserId,
+        }]);
+      }
+
+      if (normalized.includes('FROM orders') && normalized.includes('WHERE order_id = $1 AND delete_flag = false')) {
+        return rows<T>([{
+          order_id: state.order.orderId,
+          version: state.order.version,
+          client_id: state.order.clientId,
+          created_by: state.order.createdByUserId,
+          manager_id: state.order.managerUserId,
         }]);
       }
 
@@ -487,6 +552,7 @@ function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'f
 }
 
 function replaceCommand(overrides: {
+  currentUser?: CurrentUser;
   dto?: {
     idempotencyKey?: string;
     version?: number;
@@ -497,7 +563,7 @@ function replaceCommand(overrides: {
 } = {}) {
   const dto = overrides.dto ?? {};
   return {
-    currentUser: currentUser(),
+    currentUser: overrides.currentUser ?? currentUser(),
     orderId: 15,
     dto: {
       idempotencyKey: dto.idempotencyKey ?? 'order-projects-key-1',
@@ -507,6 +573,20 @@ function replaceCommand(overrides: {
       reason: dto.reason ?? 'rebalance',
     },
     requestId: 'request-1',
+  };
+}
+
+function scopedUser(input: {
+  id: string;
+  role: CurrentUser['role'];
+  permissions: CurrentUser['permissions'];
+}): CurrentUser {
+  return {
+    id: input.id,
+    username: `${input.role}-${input.id}`,
+    role: input.role,
+    roleId: 0,
+    permissions: input.permissions,
   };
 }
 

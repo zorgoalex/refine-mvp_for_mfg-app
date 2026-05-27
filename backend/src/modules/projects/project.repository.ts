@@ -483,6 +483,10 @@ function mapProjectDatabaseError(error: unknown): never {
     if (error.code === '23514' && isProjectDateConstraint(constraint)) {
       throw projectDateValidationError();
     }
+
+    if (error.code === '23503' && isProjectOwnerConstraint(constraint)) {
+      throw projectOwnerValidationError();
+    }
   }
 
   throw error;
@@ -504,10 +508,22 @@ function isProjectDateConstraint(constraint: string): boolean {
     constraint.includes('project') && constraint.includes('date');
 }
 
+function isProjectOwnerConstraint(constraint: string): boolean {
+  return constraint.includes('project') &&
+    (constraint.includes('owner_user_id') || constraint.includes('owner'));
+}
+
 function projectDateValidationError(): ApiError {
   return new ApiError(422, 'VALIDATION_ERROR', 'Project date range is invalid', {
     field: 'dates',
     errors: [{ field: 'endsAt', message: 'endsAt must be on or after startsAt' }],
+  });
+}
+
+function projectOwnerValidationError(): ApiError {
+  return new ApiError(422, 'VALIDATION_ERROR', 'Project owner does not exist', {
+    field: 'ownerUserId',
+    errors: [{ field: 'ownerUserId', message: 'ownerUserId must reference an existing user' }],
   });
 }
 
