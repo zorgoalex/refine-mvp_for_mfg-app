@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHANGE_PRODUCTION_STATUS_ACTION_CONFIG_CONTRACT,
+  ESCALATE_ACTION_CONFIG_CONTRACT,
   DEADLINE_AUDIT_EVENTS,
   DEADLINE_AUDIT_SOURCES,
   DEADLINE_ORDER_OVERRIDE_TARGET_TYPES,
@@ -99,6 +100,23 @@ describe('deadline action domain contracts', () => {
         'actionRuleId',
         'orderId',
         'targetProductionStatusId',
+        'snapshotHash',
+      ],
+    });
+  });
+
+  it('declares the accepted escalate action config contract', () => {
+    expect(ESCALATE_ACTION_CONFIG_CONTRACT).toEqual({
+      actionType: 'escalate',
+      supportedEventTypes: ['DEADLINE_EXPIRED'],
+      requiredActionConfig: [],
+      recipient: 'managerUserId',
+      idempotencyMaterial: [
+        'deadlineEventId',
+        'actionType',
+        'actionRuleId',
+        'orderId',
+        'managerUserId',
         'snapshotHash',
       ],
     });

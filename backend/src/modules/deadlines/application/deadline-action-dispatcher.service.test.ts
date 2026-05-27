@@ -1226,6 +1226,149 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
+  it('executes escalate by notifying the explicit manager recipient after target approval', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const canApplyActions: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent({
+        eventType: 'DEADLINE_EXPIRED',
+        severity: 'critical',
+        deadlineAt: '2026-05-23T09:00:00.000Z',
+      }),
+      repository: createRepository({
+        rules: [createRule({ actionRuleId: 'escalate-rule', actionType: 'escalate' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10, 20],
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: 20,
+        },
+        onCanApplyAction(input) {
+          canApplyActions.push(input);
+        },
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-escalation-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(canApplyActions).toEqual([
+      {
+        actionType: 'escalate',
+        target: {
+          entityType: 'order',
+          entityId: '42',
+          orderId: 42,
+          orderWorkshopId: undefined,
+          clientId: undefined,
+        },
+      },
+    ]);
+    expect(notifications).toEqual([
+      {
+        userId: 20,
+        level: 'error',
+        title: 'Deadline escalation',
+        message: 'Order 42 deadline escalated after missing 2026-05-23T09:00:00.000Z',
+        entityType: 'order',
+        entityId: '42',
+        sourceType: 'deadline',
+        sourceId: 'event-1',
+        idempotencyKey: 'deadline-notification:event-1:escalate:20',
+      },
+    ]);
+    expect(executions[0]).toMatchObject({
+      actionRuleId: 'escalate-rule',
+      actionType: 'escalate',
+      status: 'executed',
+      skipReason: null,
+      result: {
+        escalatedUserId: 20,
+        notificationId: 'notification-escalation-1',
+        notificationCreated: true,
+        notificationIdempotencyKey: 'deadline-notification:event-1:escalate:20',
+      },
+    });
+  });
+
+  it('skips escalate without notification mutation when notifications are disabled', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'escalate' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: 20,
+        },
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-escalation-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: false },
+    });
+
+    expect(notifications).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'escalate',
+      status: 'skipped',
+      skipReason: 'notifications_disabled',
+    });
+  });
+
+  it('skips escalate when explicit manager recipient is missing', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'escalate' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        responsibleUserIds: [10],
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: null,
+        },
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'notification-escalation-1' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(notifications).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'escalate',
+      status: 'skipped',
+      skipReason: 'escalation_target_missing',
+    });
+  });
+
   it('uses order-style explicit manager recipient as assignee for notify_assignee', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const notifications: unknown[] = [];
