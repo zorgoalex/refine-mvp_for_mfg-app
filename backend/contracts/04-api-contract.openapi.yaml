@@ -265,6 +265,20 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: projectIds
+          in: query
+          required: false
+          description: Comma-separated current project UUID filters.
+          schema:
+            type: string
+        - name: projectMode
+          in: query
+          required: false
+          description: Current project filter mode.
+          schema:
+            type: string
+            enum: [any, all, primary, none]
+            default: any
       responses:
         '200':
           description: Список заказов
@@ -500,6 +514,92 @@ paths:
                       requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
         '400':
           $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/projects:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: getOrderProjects
+      summary: Получить текущие проекты заказа
+      description: Возвращает только текущие Project ↔ Order links. asOf/overlap/factTime не поддерживаются в P1-P3.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view or projects.view
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          schema:
+            type: string
+          deprecated: true
+        - name: overlap
+          in: query
+          required: false
+          schema:
+            type: string
+          deprecated: true
+        - name: factTime
+          in: query
+          required: false
+          schema:
+            type: string
+          deprecated: true
+      responses:
+        '200':
+          description: Текущие проекты заказа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderProjectsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags:
+        - Orders
+      operationId: replaceOrderProjects
+      summary: Заменить текущие проекты заказа
+      description: |
+        Stale-safe и retry-safe replace текущих связей заказа с проектами.
+        Использует command_idempotency_keys с command_name=projects.order_links.replace.
+      security:
+        - bearerAuth: []
+      x-permission: projects.manage_links
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceOrderProjectsRequest'
+      responses:
+        '200':
+          description: Проекты заказа заменены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplaceOrderProjectsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -3855,6 +3955,115 @@ components:
         pagination:
           $ref: '#/components/schemas/Pagination'
 
+    OrderProjectSummaryDto:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - relationType
+        - isPrimary
+        - validFrom
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        relationType:
+          type: string
+          enum: [main, secondary, reporting, billing, derived]
+        isPrimary:
+          type: boolean
+        validFrom:
+          type: string
+          format: date-time
+
+    OrderProjectSummaryDtoNullable:
+      allOf:
+        - $ref: '#/components/schemas/OrderProjectSummaryDto'
+      nullable: true
+
+    OrderProjectsResponse:
+      type: object
+      required:
+        - orderId
+        - version
+        - primaryProject
+        - projects
+        - requestId
+      properties:
+        orderId:
+          type: integer
+          format: int64
+        version:
+          type: integer
+          minimum: 1
+        primaryProject:
+          $ref: '#/components/schemas/OrderProjectSummaryDtoNullable'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderProjectSummaryDto'
+        requestId:
+          type: string
+
+    ReplaceOrderProjectsRequest:
+      type: object
+      required:
+        - idempotencyKey
+        - version
+        - projects
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+        version:
+          type: integer
+          minimum: 0
+        primaryProjectId:
+          type: string
+          format: uuid
+          nullable: true
+        projects:
+          type: array
+          items:
+            type: object
+            required:
+              - projectId
+              - relationType
+              - isPrimary
+            properties:
+              projectId:
+                type: string
+                format: uuid
+              relationType:
+                type: string
+                enum: [main, secondary, reporting, billing, derived]
+                default: main
+              isPrimary:
+                type: boolean
+                default: false
+        reason:
+          type: string
+          maxLength: 1000
+          nullable: true
+
+    ReplaceOrderProjectsResponse:
+      allOf:
+        - $ref: '#/components/schemas/OrderProjectsResponse'
+        - type: object
+          required:
+            - changed
+          properties:
+            changed:
+              type: boolean
+            auditId:
+              type: string
+
     OrderListItemDto:
       type: object
       required:
@@ -3873,6 +4082,8 @@ components:
         - debtAmount
         - partsCount
         - totalArea
+        - primaryProject
+        - projects
         - updatedAt
         - version
       properties:
@@ -3937,6 +4148,12 @@ components:
           type: integer
           format: int64
           nullable: true
+        primaryProject:
+          $ref: '#/components/schemas/OrderProjectSummaryDtoNullable'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderProjectSummaryDto'
         updatedAt:
           type: string
           format: date-time
@@ -3969,6 +4186,8 @@ components:
         - workshops
         - requirements
         - dowelingLinks
+        - primaryProject
+        - projects
         - totals
         - version
       properties:
@@ -3994,6 +4213,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrderDowelingLinkDto'
+        primaryProject:
+          $ref: '#/components/schemas/OrderProjectSummaryDtoNullable'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderProjectSummaryDto'
         totals:
           $ref: '#/components/schemas/OrderTotalsDto'
         version:

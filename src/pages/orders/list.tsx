@@ -43,6 +43,7 @@ import type { ProductionStatusRef, ProductionWorkflowConfig } from "../../types/
 import { featureFlags } from "../../config/featureFlags";
 import { ordersApi } from "../../api/ordersApi";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
+import { ProjectFilter } from "./components/projects/ProjectFilter";
 import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -53,6 +54,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [showResultCount, setShowResultCount] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
+  const [projectMode, setProjectMode] = useState<'any' | 'all' | 'primary' | 'none'>('any');
   const [snapshotBatchOpen, setSnapshotBatchOpen] = useState(false);
   const [snapshotBatchRange, setSnapshotBatchRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [snapshotBatchExporting, setSnapshotBatchExporting] = useState(false);
@@ -89,6 +91,15 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
     setShowMyOrders(!!isMyOrdersFilter);
   }, [filters, currentUser?.id]);
+
+  useEffect(() => {
+    const modeFilter = (filters || []).find((f: any) => f.field === "project_mode");
+    const mode = modeFilter?.value;
+    if (mode === "any" || mode === "all" || mode === "primary" || mode === "none") {
+      setProjectMode(mode);
+      form.setFieldValue("project_mode", mode);
+    }
+  }, [filters, form]);
 
   // Автоскролл к найденной строке после загрузки данных
   useEffect(() => {
@@ -392,6 +403,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       newFilters.push({ field: "doweling_order_name", operator: "eq", value: values.doweling_order_name });
     }
 
+    if (useBackendOrdersRead && values.project_mode === "none") {
+      newFilters.push({ field: "project_mode", operator: "eq", value: "none" });
+    } else if (useBackendOrdersRead && Array.isArray(values.project_ids) && values.project_ids.length > 0) {
+      newFilters.push({ field: "project_ids", operator: "in", value: values.project_ids });
+      newFilters.push({ field: "project_mode", operator: "eq", value: values.project_mode ?? "any" });
+    }
+
     setFilters(newFilters, "replace");
     setCurrent(1); // Сброс на первую страницу при фильтрации
     setShowResultCount(true);
@@ -404,6 +422,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     setCurrent(1); // Сброс на первую страницу
     setShowResultCount(false);
     setShowMyOrders(false); // Также сбрасываем быстрый фильтр
+    setProjectMode("any");
   };
 
   // Обработчик переключения фильтра "Мои заказы"
@@ -1006,6 +1025,20 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                     />
                   </Form.Item>
                 </Col>
+                {useBackendOrdersRead && featureFlags.useBackendProjects && (
+                  <Col xs={24} sm={12} md={8} lg={5}>
+                    <Form.Item name="project_ids" label="Проект">
+                      <ProjectFilter
+                        projectMode={projectMode}
+                        onProjectModeChange={(mode) => {
+                          setProjectMode(mode);
+                          form.setFieldValue("project_mode", mode);
+                        }}
+                      />
+                    </Form.Item>
+                    <Form.Item name="project_mode" hidden initialValue="any" />
+                  </Col>
+                )}
                 <Col xs={24} sm={24} md={24} lg={8} style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
                   <Form.Item label=" " colon={false}>
                     <Space size="middle">
@@ -1076,6 +1109,22 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               ) : null;
             }}
           />
+          {useBackendOrdersRead && featureFlags.useBackendProjects && (
+            <Table.Column
+              dataIndex="projects"
+              title="Проект"
+              width={150}
+              className="orders-col"
+              render={(projects: any[]) => {
+                const primary = projects?.find((project) => project.isPrimary) ?? projects?.[0];
+                return primary ? (
+                  <span>{primary.code} · {primary.name}</span>
+                ) : (
+                  <span style={{ color: '#8c8c8c' }}>Проект не указан</span>
+                );
+              }}
+            />
+          )}
           <Table.Column
             dataIndex="order_date"
             title="Дата заказа"

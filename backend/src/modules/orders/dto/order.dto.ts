@@ -7,6 +7,7 @@ import type {
   NormalizedSaveOrderWorkshopDto,
   OrderTotalsDto,
 } from './save-order.dto';
+import type { OrderProjectSummaryDto } from './order-project-link.dto';
 
 export interface OrderDto {
   header: OrderHeaderDto;
@@ -15,6 +16,8 @@ export interface OrderDto {
   workshops: OrderWorkshopDto[];
   requirements: OrderRequirementDto[];
   dowelingLinks: OrderDowelingLinkDto[];
+  primaryProject: OrderProjectSummaryDto | null;
+  projects: OrderProjectSummaryDto[];
   totals: Pick<
     OrderTotalsDto,
     'totalAmount' | 'finalAmount' | 'paidAmount' | 'debtAmount' | 'partsCount' | 'totalArea'
@@ -107,6 +110,8 @@ export interface OrderListItemDto {
   dowelingOrderName: string | null;
   designEngineerId: number | null;
   passedProductionStatusCodes: string[];
+  primaryProject: OrderProjectSummaryDto | null;
+  projects: OrderProjectSummaryDto[];
   createdBy: number | null;
   editedBy: number | null;
   updatedAt: string;

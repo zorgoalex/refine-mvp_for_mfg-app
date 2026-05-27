@@ -71,6 +71,34 @@ describe('projectsApi', () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('gets and replaces order project links through order-scoped v1 endpoints', async () => {
+    const fetchMock = mockFetch(
+      { orderId: 15, version: 3, primaryProject: null, projects: [], requestId: 'request-1' },
+      { orderId: 15, version: 4, primaryProject: null, projects: [], requestId: 'request-2', changed: true },
+    );
+
+    await projectsApi.getOrderProjects(15);
+    await projectsApi.replaceOrderProjects(15, {
+      idempotencyKey: 'order-projects-key-1',
+      version: 3,
+      primaryProjectId: null,
+      projects: [],
+      reason: 'test',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15/projects');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/15/projects');
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('PUT');
+    expect(fetchMock.mock.calls[1][1]?.body).toBe(JSON.stringify({
+      idempotencyKey: 'order-projects-key-1',
+      version: 3,
+      primaryProjectId: null,
+      projects: [],
+      reason: 'test',
+    }));
+  });
 });
 
 function mockFetch(...bodies: unknown[]) {

@@ -66,6 +66,24 @@ describe('orders OpenAPI contract', () => {
     expect(contract).toContain('operationId: deactivateProductionStage');
   });
 
+  it('documents current order project links without legacy PATCH singular project route', () => {
+    const contract = readOpenApiContract();
+    const projectLinksSection = sectionBetween(
+      contract,
+      '  /api/v1/orders/{orderId}/projects:',
+      '  /api/v1/orders/{orderId}/status:',
+    );
+
+    expect(projectLinksSection).toContain('operationId: getOrderProjects');
+    expect(projectLinksSection).toContain('operationId: replaceOrderProjects');
+    expect(projectLinksSection).toContain('projects.manage_links');
+    expect(projectLinksSection).toContain('projects.order_links.replace');
+    expect(projectLinksSection).toContain('asOf/overlap/factTime');
+    expect(contract).toContain('    ReplaceOrderProjectsRequest:');
+    expect(contract).toContain('    OrderProjectSummaryDto:');
+    expect(contract).not.toContain('/api/v1/orders/{orderId}/project:');
+  });
+
   it('documents order snapshot export and import endpoints without raw content schemas', () => {
     const contract = readOpenApiContract();
 

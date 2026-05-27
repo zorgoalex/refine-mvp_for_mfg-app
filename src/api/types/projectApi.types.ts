@@ -76,3 +76,44 @@ export interface UpdateProjectRequest {
   ownerUserId?: number | null;
   metadata?: Record<string, unknown>;
 }
+
+export type OrderProjectRelationType = 'main' | 'secondary' | 'reporting' | 'billing' | 'derived';
+
+export interface ProjectRef {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface EntityProjectLink extends ProjectRef {
+  relationType: OrderProjectRelationType;
+  isPrimary: boolean;
+  validFrom: string;
+}
+
+export interface OrderProjectsResponse {
+  orderId: number;
+  version: number;
+  primaryProject: EntityProjectLink | null;
+  projects: EntityProjectLink[];
+  requestId: string;
+}
+
+export interface ReplaceOrderProjectLink {
+  projectId: string;
+  relationType: OrderProjectRelationType;
+  isPrimary: boolean;
+}
+
+export interface ReplaceOrderProjectsRequest {
+  idempotencyKey: string;
+  version: number;
+  primaryProjectId?: string | null;
+  projects: ReplaceOrderProjectLink[];
+  reason?: string | null;
+}
+
+export interface ReplaceOrderProjectsResponse extends OrderProjectsResponse {
+  changed: boolean;
+  auditId?: string;
+}

@@ -1,14 +1,17 @@
 import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
-import { withQuery } from './ordersApi';
+import { validateOrderId, withQuery } from './ordersApi';
 import type {
   CreateProjectRequest,
+  OrderProjectsResponse,
   ProjectDto,
   ProjectListQuery,
   ProjectListResponse,
   ProjectLookupQuery,
   ProjectLookupResponse,
   ProjectResponse,
+  ReplaceOrderProjectsRequest,
+  ReplaceOrderProjectsResponse,
   UpdateProjectRequest,
 } from './types/projectApi.types';
 
@@ -43,6 +46,20 @@ export const projectsApi = {
 
   archiveProject(projectId: string): Promise<ProjectResponse> {
     return httpClient.delete<ProjectResponse>(apiRoutes.projects.byId(validateProjectId(projectId)));
+  },
+
+  getOrderProjects(orderId: number): Promise<OrderProjectsResponse> {
+    return httpClient.get<OrderProjectsResponse>(apiRoutes.orders.projects(validateOrderId(orderId)));
+  },
+
+  replaceOrderProjects(
+    orderId: number,
+    request: ReplaceOrderProjectsRequest,
+  ): Promise<ReplaceOrderProjectsResponse> {
+    return httpClient.put<ReplaceOrderProjectsResponse>(
+      apiRoutes.orders.projects(validateOrderId(orderId)),
+      request,
+    );
   },
 };
 

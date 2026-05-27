@@ -20,6 +20,7 @@ describe('dataProvider backend orders read routing', () => {
         useBackendClientPhones: false,
         useBackendProductionActions: false,
         useBackendOrderExport: false,
+        useBackendProjects: true,
         useBackendUsers: false,
         useBackendVlm: false,
         useBackendReferences: false,
@@ -82,6 +83,24 @@ describe('dataProvider backend orders read routing', () => {
           dowelingOrderName: '1368',
           designEngineerId: 40,
           passedProductionStatusCodes: ['cut', 'paint'],
+          primaryProject: {
+            id: '11111111-1111-4111-8111-111111111111',
+            code: 'PRJ-001',
+            name: 'Project',
+            relationType: 'main',
+            isPrimary: true,
+            validFrom: '2026-05-01T00:00:00.000Z',
+          },
+          projects: [
+            {
+              id: '11111111-1111-4111-8111-111111111111',
+              code: 'PRJ-001',
+              name: 'Project',
+              relationType: 'main',
+              isPrimary: true,
+              validFrom: '2026-05-01T00:00:00.000Z',
+            },
+          ],
           updatedAt: '2026-05-01T00:00:00.000Z',
           version: 4,
         },
@@ -98,6 +117,8 @@ describe('dataProvider backend orders read routing', () => {
         { field: 'order_name', operator: 'contains', value: 'Order A' },
         { field: 'client_id', operator: 'eq', value: 12 },
         { field: 'created_by', operator: 'eq', value: 7 },
+        { field: 'project_ids', operator: 'in', value: ['11111111-1111-4111-8111-111111111111'] },
+        { field: 'project_mode', operator: 'eq', value: 'primary' },
       ],
     });
 
@@ -109,6 +130,8 @@ describe('dataProvider backend orders read routing', () => {
       search: 'Order A',
       clientId: 12,
       onlyMyOrders: true,
+      projectIds: ['11111111-1111-4111-8111-111111111111'],
+      projectMode: 'primary',
     });
     expect(result).toMatchObject({
       total: 1,
@@ -129,6 +152,14 @@ describe('dataProvider backend orders read routing', () => {
           doweling_order_name: '1368',
           design_engineer_id: 40,
           passed_production_status_codes: ['cut', 'paint'],
+          primary_project: {
+            id: '11111111-1111-4111-8111-111111111111',
+            code: 'PRJ-001',
+            name: 'Project',
+            relationType: 'main',
+            isPrimary: true,
+            validFrom: '2026-05-01T00:00:00.000Z',
+          },
           version: 4,
         },
       ],

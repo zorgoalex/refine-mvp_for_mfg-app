@@ -41,6 +41,7 @@ export const apiRoutes = {
       backendApiPath(`/orders/${orderId}/deadline-overrides`),
     deadlineOverride: (orderId: number, overrideId: string) =>
       backendApiPath(`/orders/${orderId}/deadline-overrides/${overrideId}`),
+    projects: (orderId: number) => backendApiPath(`/orders/${orderId}/projects`),
   },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>
