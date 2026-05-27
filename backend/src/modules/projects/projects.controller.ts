@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
@@ -9,8 +9,10 @@ import type {
   ProjectListQuery,
   ProjectListResponseDto,
   ProjectLookupResponseDto,
+  ProjectMembersResponseDto,
   ProjectResponseDto,
   ProjectStatus,
+  ReplaceProjectMembersRequestDto,
   UpdateProjectRequestDto,
 } from './dto/project.dto';
 import { ProjectsRuntimeConfigService } from './projects-runtime-config.service';
@@ -28,6 +30,32 @@ const projectDateSchema = z
   .refine(isValidProjectDate, 'Invalid project date')
   .nullable();
 const projectMetadataSchema = z.record(z.string(), z.unknown());
+const projectMemberRoleSchema = z.string().trim().min(1).max(100);
+const projectMemberInputSchema = z.object({
+  userId: z.number().int().positive(),
+  role: projectMemberRoleSchema,
+  metadata: projectMetadataSchema.optional(),
+});
+const replaceProjectMembersPayloadSchema = z
+  .object({
+    idempotencyKey: z.string().trim().min(1).max(200),
+    members: z.array(projectMemberInputSchema).max(500),
+    reason: z.string().trim().max(500).nullable().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, member] of value.members.entries()) {
+      const key = `${member.userId}:${member.role}`;
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['members', index],
+          message: 'Duplicate user/role member',
+        });
+      }
+      seen.add(key);
+    }
+  });
 const projectPayloadSchema = z
   .object({
     code: projectCodeSchema,
@@ -123,6 +151,33 @@ const projectLookupResponseSwaggerSchema = {
   },
 } as const;
 
+const projectMemberSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'userId', 'username', 'employeeId', 'displayName', 'role', 'validFrom', 'metadata'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    userId: { type: 'integer', minimum: 1 },
+    username: { type: 'string' },
+    employeeId: { type: 'integer', nullable: true },
+    displayName: { type: 'string', nullable: true },
+    role: { type: 'string' },
+    validFrom: { type: 'string', format: 'date-time' },
+    metadata: { type: 'object', additionalProperties: true },
+  },
+} as const;
+
+const projectMembersResponseSwaggerSchema = {
+  type: 'object',
+  required: ['projectId', 'members', 'requestId'],
+  properties: {
+    projectId: { type: 'string', format: 'uuid' },
+    members: { type: 'array', items: projectMemberSwaggerSchema },
+    requestId: { type: 'string' },
+    changed: { type: 'boolean' },
+    auditId: { type: 'string' },
+  },
+} as const;
+
 const projectResponseSwaggerSchema = {
   type: 'object',
   required: ['project'],
@@ -150,6 +205,28 @@ const updateProjectRequestSwaggerSchema = {
   type: 'object',
   minProperties: 1,
   properties: createProjectRequestSwaggerSchema.properties,
+} as const;
+
+const replaceProjectMembersRequestSwaggerSchema = {
+  type: 'object',
+  required: ['idempotencyKey', 'members'],
+  properties: {
+    idempotencyKey: { type: 'string', minLength: 1, maxLength: 200 },
+    members: {
+      type: 'array',
+      maxItems: 500,
+      items: {
+        type: 'object',
+        required: ['userId', 'role'],
+        properties: {
+          userId: { type: 'integer', minimum: 1 },
+          role: { type: 'string', minLength: 1, maxLength: 100 },
+          metadata: { type: 'object', additionalProperties: true },
+        },
+      },
+    },
+    reason: { type: 'string', maxLength: 500, nullable: true },
+  },
 } as const;
 
 @ApiTags('Projects')
@@ -310,6 +387,54 @@ export class ProjectsController {
     return { project };
   }
 
+  @ApiParam({ name: 'projectId', type: String, description: 'Project UUID' })
+  @ApiResponse({ status: 200, description: 'Current project members', schema: swaggerSchema(projectMembersResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid project id' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 503, description: 'Projects API is disabled' })
+  @ApiOperation({ operationId: 'listProjectMembers', summary: 'List current project members' })
+  @Get(':projectId/members')
+  async listMembers(
+    @Req() request: RequestWithCurrentUser,
+    @Param('projectId') projectIdParam: string,
+  ): Promise<ProjectMembersResponseDto> {
+    this.assertProjectsEnabled();
+
+    return this.projects.listMembers({
+      currentUser: this.requireCurrentUser(request),
+      projectId: parseProjectId(projectIdParam),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiParam({ name: 'projectId', type: String, description: 'Project UUID' })
+  @ApiBody({ schema: swaggerSchema(replaceProjectMembersRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Replaced current project members', schema: swaggerSchema(projectMembersResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid project id' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid project members payload' })
+  @ApiResponse({ status: 503, description: 'Projects API is disabled or read-only' })
+  @ApiOperation({ operationId: 'replaceProjectMembers', summary: 'Replace current project members' })
+  @Put(':projectId/members')
+  @HttpCode(200)
+  async replaceMembers(
+    @Req() request: RequestWithCurrentUser,
+    @Param('projectId') projectIdParam: string,
+    @Body() body: unknown,
+  ): Promise<ProjectMembersResponseDto> {
+    this.assertProjectWritesEnabled();
+
+    return this.projects.replaceMembers({
+      currentUser: this.requireCurrentUser(request),
+      projectId: parseProjectId(projectIdParam),
+      dto: parseReplaceProjectMembersRequest(body),
+      requestId: request.requestId,
+    });
+  }
+
   private assertProjectsEnabled(): void {
     if (!this.runtimeConfig.getFeatureFlags().projectsEnabled) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Projects API is disabled', {
@@ -375,6 +500,10 @@ export function parseCreateProjectRequest(body: unknown): CreateProjectRequestDt
 
 export function parseUpdateProjectRequest(body: unknown): UpdateProjectRequestDto {
   return parseRequestBody(updateProjectPayloadSchema, body) as UpdateProjectRequestDto;
+}
+
+export function parseReplaceProjectMembersRequest(body: unknown): ReplaceProjectMembersRequestDto {
+  return parseRequestBody(replaceProjectMembersPayloadSchema, body) as ReplaceProjectMembersRequestDto;
 }
 
 function parseSearch(value: string | string[] | undefined): string | undefined {

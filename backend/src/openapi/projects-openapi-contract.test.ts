@@ -11,6 +11,7 @@ describe('projects OpenAPI contract', () => {
     expect(contract).toContain('  /api/v1/projects:');
     expect(contract).toContain('  /api/v1/projects/lookup:');
     expect(contract).toContain('  /api/v1/projects/{projectId}:');
+    expect(contract).toContain('  /api/v1/projects/{projectId}/members:');
   });
 
   it('documents get project bad request and list pagination totalPages', () => {
@@ -78,6 +79,47 @@ describe('projects OpenAPI contract', () => {
     expect(createSchema).toContain('enum: [draft, active, paused, completed]');
     expect(updateSchema).toContain('enum: [draft, active, paused, completed]');
     expect(updateSchema).not.toContain('enum: [draft, active, paused, completed, archived]');
+  });
+
+  it('documents project members GET and PUT endpoints with explicit members permissions', () => {
+    const contract = readOpenApiContract();
+    const membersSection = sectionBetween(
+      contract,
+      '  /api/v1/projects/{projectId}/members:',
+      '  /api/v1/users:',
+    );
+    const replaceMembersSchema = sectionBetween(
+      contract,
+      '    ReplaceProjectMembersRequest:',
+      '    ProjectMember:',
+    );
+    const memberSchema = sectionBetween(
+      contract,
+      '    ProjectMember:',
+      '    ProjectMembersResponse:',
+    );
+    const responseSchema = sectionBetween(
+      contract,
+      '    ProjectMembersResponse:',
+      '    ProjectListResponse:',
+    );
+
+    expect(membersSection).toContain('get:');
+    expect(membersSection).toContain('operationId: listProjectMembers');
+    expect(membersSection).toContain('x-permission: projects.members.view');
+    expect(membersSection).toContain('put:');
+    expect(membersSection).toContain('operationId: replaceProjectMembers');
+    expect(membersSection).toContain('x-permission: projects.members.manage');
+    expect(membersSection).toContain("$ref: '#/components/schemas/ReplaceProjectMembersRequest'");
+    expect(membersSection).toContain("$ref: '#/components/schemas/ProjectMembersResponse'");
+    expect(replaceMembersSchema).toContain('- idempotencyKey');
+    expect(replaceMembersSchema).toContain('- members');
+    expect(replaceMembersSchema).toContain('userId:');
+    expect(replaceMembersSchema).toContain('role:');
+    expect(memberSchema).toContain('employeeId:');
+    expect(memberSchema).toContain('displayName:');
+    expect(responseSchema).toContain('changed:');
+    expect(responseSchema).toContain('auditId:');
   });
 });
 

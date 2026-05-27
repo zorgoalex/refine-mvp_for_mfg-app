@@ -5,6 +5,7 @@ import { getPermissionsForRole } from '../../permissions/permissions';
 import type { ProjectDto, ProjectListResponseDto } from './dto/project.dto';
 import {
   parseCreateProjectRequest,
+  parseReplaceProjectMembersRequest,
   parseProjectId,
   parseProjectListQuery,
   parseProjectLookupQuery,
@@ -155,6 +156,86 @@ describe('ProjectsController', () => {
     ]);
   });
 
+  it('normalizes project member GET and PUT requests with request id metadata', async () => {
+    const calls: string[] = [];
+    const response = {
+      projectId: '11111111-1111-4111-8111-111111111111',
+      members: [
+        {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          userId: 7,
+          username: 'member_user',
+          employeeId: 11,
+          displayName: 'Member User',
+          role: 'manager',
+          validFrom: '2026-05-27T00:00:00.000Z',
+          metadata: {},
+        },
+      ],
+      requestId: 'req-members-get',
+    };
+    const controller = createController({
+      flags: { projectsEnabled: true, projectsReadOnly: false },
+      service: {
+        async listMembers(command) {
+          calls.push(`listMembers:${command.projectId}:${command.requestId}`);
+          return response;
+        },
+        async replaceMembers(command) {
+          calls.push(`replaceMembers:${command.projectId}:${command.dto.members[0]?.userId}:${command.dto.reason}:${command.requestId}`);
+          return { ...response, changed: true, auditId: 'audit-1', requestId: command.requestId ?? 'fallback' };
+        },
+      },
+    });
+
+    await expect(
+      controller.listMembers(
+        { user: currentUser('top_manager'), requestId: 'req-members-get' },
+        response.projectId,
+      ),
+    ).resolves.toEqual(response);
+    await expect(
+      controller.replaceMembers(
+        { user: currentUser('admin'), requestId: 'req-members-put' },
+        response.projectId,
+        {
+          idempotencyKey: ' member-key-1 ',
+          members: [{ userId: 7, role: ' manager ', metadata: { allocation: 'lead' } }],
+          reason: ' staffing ',
+        },
+      ),
+    ).resolves.toMatchObject({ changed: true, auditId: 'audit-1' });
+    expect(calls).toEqual([
+      `listMembers:${response.projectId}:req-members-get`,
+      `replaceMembers:${response.projectId}:7:staffing:req-members-put`,
+    ]);
+  });
+
+  it('fails project member writes closed when projects are disabled or read-only', async () => {
+    await expect(
+      createController({ flags: { projectsEnabled: false, projectsReadOnly: false } }).listMembers(
+        { user: currentUser('top_manager'), requestId: 'req-disabled' },
+        '11111111-1111-4111-8111-111111111111',
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      details: { feature: 'projects' },
+    } satisfies Partial<ApiError>);
+
+    await expect(
+      createController({ flags: { projectsEnabled: true, projectsReadOnly: true } }).replaceMembers(
+        { user: currentUser('admin'), requestId: 'req-read-only' },
+        '11111111-1111-4111-8111-111111111111',
+        { idempotencyKey: 'members-read-only', members: [] },
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      details: { feature: 'projects', readOnly: true },
+    } satisfies Partial<ApiError>);
+  });
+
   it('validates project query values and UUID path params', () => {
     expect(parseProjectId('11111111-1111-4111-8111-111111111111')).toBe(
       '11111111-1111-4111-8111-111111111111',
@@ -189,6 +270,35 @@ describe('ProjectsController', () => {
     expect(() => parseUpdateProjectRequest({ status: 'unknown' })).toThrow(ApiError);
     expect(() => parseUpdateProjectRequest({ status: 'archived' })).toThrow(ApiError);
   });
+
+  it('validates project member replace bodies against temporal member table constraints', () => {
+    expect(parseReplaceProjectMembersRequest({
+      idempotencyKey: ' members-key ',
+      members: [
+        { userId: 7, role: ' manager ', metadata: { allocation: 'lead' } },
+        { userId: 8, role: 'observer' },
+      ],
+      reason: ' staffing ',
+    })).toEqual({
+      idempotencyKey: 'members-key',
+      members: [
+        { userId: 7, role: 'manager', metadata: { allocation: 'lead' } },
+        { userId: 8, role: 'observer' },
+      ],
+      reason: 'staffing',
+    });
+
+    expect(() => parseReplaceProjectMembersRequest({ idempotencyKey: '', members: [] })).toThrow(ApiError);
+    expect(() => parseReplaceProjectMembersRequest({ idempotencyKey: 'members', members: [{ userId: 0, role: 'manager' }] })).toThrow(ApiError);
+    expect(() => parseReplaceProjectMembersRequest({ idempotencyKey: 'members', members: [{ userId: 7, role: '' }] })).toThrow(ApiError);
+    expect(() => parseReplaceProjectMembersRequest({
+      idempotencyKey: 'members',
+      members: [
+        { userId: 7, role: 'manager' },
+        { userId: 7, role: 'manager' },
+      ],
+    })).toThrow(ApiError);
+  });
 });
 
 function createController(options: {
@@ -213,6 +323,12 @@ function createController(options: {
     },
     async archive() {
       throw new Error('archive should not be called');
+    },
+    async listMembers() {
+      throw new Error('listMembers should not be called');
+    },
+    async replaceMembers() {
+      throw new Error('replaceMembers should not be called');
     },
     ...options.service,
   } as unknown as ProjectsService;

@@ -73,22 +73,32 @@ describe('permissions foundation', () => {
     expect(can('viewer', 'deadlines.manage_order_overrides')).toBe(false);
   });
 
-  it('assigns project permissions by role for the read-only P1 shell', () => {
+  it('assigns project permissions by role including P4 members foundation', () => {
     expect(can('superadmin', 'projects.manage_links')).toBe(true);
+    expect(can('superadmin', 'projects.members.manage')).toBe(true);
+    expect(can('admin', 'projects.members.manage')).toBe(true);
+    expect(can('admin', 'projects.members.view')).toBe(true);
     expect(can('admin', 'projects.archive')).toBe(true);
     expect(can('admin', 'projects.view_history')).toBe(true);
 
     expect(can('top_manager', 'projects.view')).toBe(true);
     expect(can('top_manager', 'projects.view_history')).toBe(true);
     expect(can('top_manager', 'projects.manage_links')).toBe(true);
+    expect(can('top_manager', 'projects.members.view')).toBe(true);
+    expect(can('top_manager', 'projects.members.manage')).toBe(false);
     expect(can('top_manager', 'projects.create')).toBe(false);
 
     expect(can('manager', 'projects.view')).toBe(true);
     expect(can('manager', 'projects.view_history')).toBe(false);
+    expect(can('manager', 'projects.members.view')).toBe(false);
+    expect(can('manager', 'projects.members.manage')).toBe(false);
     expect(can('viewer', 'projects.view')).toBe(true);
+    expect(can('viewer', 'projects.members.view')).toBe(false);
 
     expect(can('operator', 'projects.view')).toBe(false);
+    expect(can('operator', 'projects.members.view')).toBe(false);
     expect(can('worker', 'projects.view')).toBe(false);
+    expect(can('worker', 'projects.members.view')).toBe(false);
   });
 
   it('sets legacy Hasura allowed roles with superadmin at the top', () => {
@@ -134,6 +144,8 @@ describe('permissions foundation', () => {
       'projects.archive',
       'projects.manage_links',
       'projects.view_history',
+      'projects.members.view',
+      'projects.members.manage',
     ]);
     expect(contractPermissions).toEqual(expect.arrayContaining(projectPermissions));
   });

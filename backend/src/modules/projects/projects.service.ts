@@ -3,12 +3,15 @@ import type { CurrentUser } from '../../permissions/current-user';
 import { PermissionsService } from '../../permissions/permissions.service';
 import type {
   CreateProjectRequestDto,
+  ProjectMembersResponseDto,
   ProjectDto,
   ProjectListQuery,
   ProjectListResponseDto,
   ProjectLookupResponseDto,
+  ReplaceProjectMembersRequestDto,
   UpdateProjectRequestDto,
 } from './dto/project.dto';
+import type { PermissionName } from '../../permissions/permissions';
 
 export interface ProjectLookupQuery {
   search?: string;
@@ -22,6 +25,8 @@ export interface ProjectRepositoryPort {
   createProject(command: CreateProjectCommand): Promise<ProjectDto>;
   updateProject(command: UpdateProjectCommand): Promise<ProjectDto>;
   archiveProject(command: ArchiveProjectCommand): Promise<ProjectDto>;
+  listProjectMembers(command: ListProjectMembersCommand): Promise<ProjectMembersResponseDto>;
+  replaceProjectMembers(command: ReplaceProjectMembersCommand): Promise<ProjectMembersResponseDto>;
 }
 
 export interface ProjectsServicePorts {
@@ -63,6 +68,19 @@ export interface UpdateProjectCommand {
 export interface ArchiveProjectCommand {
   currentUser: CurrentUser;
   projectId: string;
+  requestId?: string;
+}
+
+export interface ListProjectMembersCommand {
+  currentUser: CurrentUser;
+  projectId: string;
+  requestId?: string;
+}
+
+export interface ReplaceProjectMembersCommand {
+  currentUser: CurrentUser;
+  projectId: string;
+  dto: ReplaceProjectMembersRequestDto;
   requestId?: string;
 }
 
@@ -109,11 +127,21 @@ export class ProjectsService {
     return this.ports.projects.archiveProject(command);
   }
 
+  async listMembers(command: ListProjectMembersCommand): Promise<ProjectMembersResponseDto> {
+    this.requirePermission(command.currentUser, 'projects.members.view');
+    return this.ports.projects.listProjectMembers(command);
+  }
+
+  async replaceMembers(command: ReplaceProjectMembersCommand): Promise<ProjectMembersResponseDto> {
+    this.requirePermission(command.currentUser, 'projects.members.manage');
+    return this.ports.projects.replaceProjectMembers(command);
+  }
+
   private requireView(currentUser: CurrentUser): void {
     this.requirePermission(currentUser, 'projects.view');
   }
 
-  private requirePermission(currentUser: CurrentUser, permission: 'projects.view' | 'projects.create' | 'projects.update' | 'projects.archive'): void {
+  private requirePermission(currentUser: CurrentUser, permission: PermissionName): void {
     if (!this.permissions.canUser(currentUser, permission)) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: [permission],
