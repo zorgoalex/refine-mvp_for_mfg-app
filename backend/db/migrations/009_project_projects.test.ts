@@ -8,12 +8,12 @@ const schemaFixture = readFileSync(
 );
 
 describe('project projects migration', () => {
-  it('locks project user foreign keys to the real users.user_id integer type', () => {
-    expect(schemaFixture).toMatch(/CREATE TABLE users\s*\([\s\S]*user_id INTEGER PRIMARY KEY/i);
-    expect(migration).toMatch(/owner_user_id INTEGER REFERENCES users\(user_id\) ON DELETE SET NULL/i);
-    expect(migration).toMatch(/created_by INTEGER REFERENCES users\(user_id\) ON DELETE SET NULL/i);
-    expect(migration).not.toMatch(/owner_user_id BIGINT/i);
-    expect(migration).not.toMatch(/created_by BIGINT/i);
+  it('locks project user foreign keys to the real users.user_id bigint type', () => {
+    expect(schemaFixture).toMatch(/CREATE TABLE users\s*\([\s\S]*user_id BIGINT PRIMARY KEY/i);
+    expect(migration).toMatch(/owner_user_id BIGINT REFERENCES users\(user_id\) ON DELETE SET NULL/i);
+    expect(migration).toMatch(/created_by BIGINT REFERENCES users\(user_id\) ON DELETE SET NULL/i);
+    expect(migration).not.toMatch(/owner_user_id INTEGER/i);
+    expect(migration).not.toMatch(/created_by INTEGER/i);
   });
 
   it('creates only the public project_projects table for P1', () => {

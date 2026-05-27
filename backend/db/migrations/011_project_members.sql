@@ -22,14 +22,14 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE TABLE IF NOT EXISTS public.project_members (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID NOT NULL REFERENCES public.project_projects(id) ON DELETE RESTRICT,
-  user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
+  user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
   role TEXT NOT NULL,
   valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
   valid_to TIMESTAMPTZ,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
-  ended_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+  created_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
+  ended_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
   end_reason TEXT,
   CONSTRAINT chk_project_members_role_not_blank
     CHECK (length(btrim(role)) BETWEEN 1 AND 100),

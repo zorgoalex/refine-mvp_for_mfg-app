@@ -60,7 +60,7 @@ CREATE TABLE roles (
 );
 
 CREATE TABLE users (
-  user_id INTEGER PRIMARY KEY,
+  user_id BIGINT PRIMARY KEY,
   username TEXT,
   role_id INTEGER REFERENCES roles(role_id)
 );

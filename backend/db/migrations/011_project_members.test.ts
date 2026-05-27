@@ -10,8 +10,8 @@ const schemaFixture = readFileSync(
 
 describe('project members migration', () => {
   it('uses users.user_id as the canonical member identity', () => {
-    expect(schemaFixture).toMatch(/CREATE TABLE users\s*\([\s\S]*user_id INTEGER PRIMARY KEY/i);
-    expect(migration).toMatch(/user_id INTEGER NOT NULL REFERENCES users\(user_id\) ON DELETE RESTRICT/i);
+    expect(schemaFixture).toMatch(/CREATE TABLE users\s*\([\s\S]*user_id BIGINT PRIMARY KEY/i);
+    expect(migration).toMatch(/user_id BIGINT NOT NULL REFERENCES users\(user_id\) ON DELETE RESTRICT/i);
     expect(migration).not.toMatch(/\bemployee_id\b[\s\S]*REFERENCES employees/i);
     expect(migration).not.toMatch(/project_clients/i);
     expect(migration).not.toMatch(/project_workshops/i);
@@ -75,7 +75,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 CREATE TEMP TABLE users (
-  user_id INTEGER PRIMARY KEY
+  user_id BIGINT PRIMARY KEY
 );
 
 CREATE TEMP TABLE project_projects (
@@ -87,14 +87,14 @@ CREATE TEMP TABLE project_projects (
 CREATE TEMP TABLE project_members (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES project_projects(id) ON DELETE RESTRICT,
-  user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
+  user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
   role TEXT NOT NULL,
   valid_from TIMESTAMPTZ NOT NULL,
   valid_to TIMESTAMPTZ,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
-  ended_by INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+  created_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
+  ended_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
   end_reason TEXT,
   CONSTRAINT chk_project_members_valid_range
     CHECK (valid_to IS NULL OR valid_to > valid_from),
