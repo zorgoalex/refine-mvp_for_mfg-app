@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Put, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Put, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
+import { ProjectsRuntimeConfigService } from '../../projects/projects-runtime-config.service';
 import { OrderProjectLinkService } from '../application/order-project-link.service';
 import type {
   OrderProjectsResponseDto,
@@ -11,7 +12,7 @@ import type {
   ReplaceOrderProjectsResponseDto,
 } from '../dto/order-project-link.dto';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
-import { parseOrderId } from './orders.controller';
+import { parseOrderId, rejectUnsupportedProjectTemporalQuery } from './orders.controller';
 
 const relationTypes = ['main', 'secondary', 'reporting', 'billing', 'derived'] as const;
 const uuidSchema = z.string().uuid();
@@ -26,6 +27,21 @@ const replaceOrderProjectsSchema = z
       isPrimary: z.boolean().default(false),
     })).max(100),
     reason: z.string().trim().max(1000).nullable().optional(),
+  })
+  .transform((value) => {
+    const primaryProjectId = value.primaryProjectId ? canonicalizeUuid(value.primaryProjectId) : value.primaryProjectId;
+    return {
+      ...value,
+      primaryProjectId,
+      projects: value.projects.map((project) => {
+        const projectId = canonicalizeUuid(project.projectId);
+        return {
+          ...project,
+          projectId,
+          isPrimary: project.isPrimary || (!!primaryProjectId && projectId === primaryProjectId),
+        };
+      }),
+    };
   })
   .refine((value) => {
     const primaryCount = value.projects.filter((project) =>
@@ -110,6 +126,8 @@ export class OrderProjectLinksController {
     private readonly links: OrderProjectLinkService,
     @Inject(OrdersRuntimeConfigService)
     private readonly runtimeConfig: OrdersRuntimeConfigService,
+    @Inject(ProjectsRuntimeConfigService)
+    private readonly projectsRuntimeConfig: ProjectsRuntimeConfigService,
   ) {}
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
@@ -124,8 +142,11 @@ export class OrderProjectLinksController {
   async get(
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderIdParam: string,
+    @Query() query: Record<string, string | string[] | undefined> = {},
   ): Promise<OrderProjectsResponseDto> {
     this.assertOrdersReadEnabled();
+    this.assertProjectsEnabled();
+    rejectUnsupportedProjectTemporalQuery(query);
     return this.links.get({
       currentUser: this.requireCurrentUser(request),
       orderId: parseOrderId(orderIdParam),
@@ -151,6 +172,7 @@ export class OrderProjectLinksController {
     @Body() body: unknown,
   ): Promise<ReplaceOrderProjectsResponseDto> {
     this.assertOrdersWriteEnabled();
+    this.assertProjectWritesEnabled();
     return this.links.replace({
       currentUser: this.requireCurrentUser(request),
       orderId: parseOrderId(orderIdParam),
@@ -183,12 +205,35 @@ export class OrderProjectLinksController {
     }
   }
 
+  private assertProjectsEnabled(): void {
+    if (!this.projectsRuntimeConfig.getFeatureFlags().projectsEnabled) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Projects API is disabled', {
+        feature: 'projects',
+      });
+    }
+  }
+
+  private assertProjectWritesEnabled(): void {
+    this.assertProjectsEnabled();
+
+    if (this.projectsRuntimeConfig.getFeatureFlags().projectsReadOnly) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Projects API is read-only', {
+        feature: 'projects',
+        readOnly: true,
+      });
+    }
+  }
+
   private requireCurrentUser(request: RequestWithCurrentUser) {
     if (!request.user) {
       throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required');
     }
     return request.user;
   }
+}
+
+function canonicalizeUuid(value: string): string {
+  return value.toLowerCase();
 }
 
 export function parseReplaceOrderProjectsRequest(body: unknown): ReplaceOrderProjectsRequestDto {

@@ -87,6 +87,30 @@ describe('PgOrderProjectLinkRepository', () => {
       .toEqual([PROJECT_ALPHA]);
   });
 
+  it('rejects duplicate project relation links regardless of primary flag', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderProjectLinkRepository(database.service);
+
+    await expect(repository.replaceOrderProjects(replaceCommand({
+      dto: {
+        idempotencyKey: 'duplicate-primary-key',
+        projects: [
+          { projectId: PROJECT_1, relationType: 'main', isPrimary: true },
+          { projectId: PROJECT_1.toUpperCase(), relationType: 'main', isPrimary: false },
+        ],
+        primaryProjectId: null,
+      },
+    }))).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: {
+        errors: [{ field: 'projects', message: 'Duplicate project/relation link' }],
+      },
+    });
+
+    expect(database.queries).toHaveLength(0);
+  });
+
   it('completes and replays a no-op replace without duplicate rows, version bump, audit, or outbox', async () => {
     const database = createDatabase();
     database.state.links = [currentLink({
@@ -472,7 +496,7 @@ function replaceCommand(overrides: {
     dto: {
       idempotencyKey: dto.idempotencyKey ?? 'order-projects-key-1',
       version: dto.version ?? 3,
-      primaryProjectId: dto.primaryProjectId ?? PROJECT_1,
+      primaryProjectId: 'primaryProjectId' in dto ? dto.primaryProjectId : PROJECT_1,
       projects: dto.projects ?? [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }],
       reason: dto.reason ?? 'rebalance',
     },

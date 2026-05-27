@@ -4,6 +4,7 @@ import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import type { BackendEnv } from '../../config/env.validation';
 import { PgOrderDeadlineSync } from '../deadlines/adapters/pg-order-deadline-sync';
+import { ProjectsRuntimeConfigService } from '../projects/projects-runtime-config.service';
 import { PgOrderExporter } from './adapters/pg-order-exporter';
 import { PgOrderReadRepository } from './adapters/pg-order-read-repository';
 import { PgOrderSnapshot } from './adapters/pg-order-snapshot';
@@ -45,6 +46,7 @@ export function shouldEnableOrderDeadlineSync(input: {
   controllers: [OrdersController, OrderExportController, OrderSnapshotController, OrderProjectLinksController],
   providers: [
     OrdersRuntimeConfigService,
+    ProjectsRuntimeConfigService,
     {
       provide: OrderTransactionService,
       useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>

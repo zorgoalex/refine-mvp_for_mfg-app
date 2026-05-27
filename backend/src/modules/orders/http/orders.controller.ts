@@ -966,7 +966,7 @@ export function parseOrderListQuery(
   };
 }
 
-function rejectUnsupportedProjectTemporalQuery(
+export function rejectUnsupportedProjectTemporalQuery(
   query: Record<string, string | string[] | undefined>,
 ): void {
   for (const field of ['asOf', 'overlap', 'factTime']) {

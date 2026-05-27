@@ -484,7 +484,6 @@ function normalizeProjectLinks(
     relationType: project.relationType,
     isPrimary: project.isPrimary || canonicalizeUuid(project.projectId) === canonicalPrimaryProjectId,
   }));
-  const primaryCount = normalized.filter((project) => project.isPrimary).length;
 
   if (canonicalPrimaryProjectId && !normalized.some((project) => project.projectId === canonicalPrimaryProjectId)) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Primary project must be included in projects', {
@@ -492,20 +491,21 @@ function normalizeProjectLinks(
     });
   }
 
-  if (primaryCount > 1) {
-    throw new ApiError(422, 'VALIDATION_ERROR', 'Only one primary project link is allowed', {
-      errors: [{ field: 'projects', message: 'Only one project can be primary' }],
-    });
-  }
-
   for (const project of normalized) {
-    const key = linkInputKey(project);
+    const key = duplicateLinkInputKey(project);
     if (seen.has(key)) {
       throw new ApiError(422, 'VALIDATION_ERROR', 'Duplicate project relation link', {
         errors: [{ field: 'projects', message: 'Duplicate project/relation link' }],
       });
     }
     seen.add(key);
+  }
+
+  const primaryCount = normalized.filter((project) => project.isPrimary).length;
+  if (primaryCount > 1) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Only one primary project link is allowed', {
+      errors: [{ field: 'projects', message: 'Only one project can be primary' }],
+    });
   }
 
   return normalized.sort((left, right) => linkInputKey(left).localeCompare(linkInputKey(right)));
@@ -544,6 +544,10 @@ function linkKey(row: ProjectLinkRow): string {
 
 function linkInputKey(row: ReplaceOrderProjectLinkDto): string {
   return `${row.projectId}:${row.relationType}:${row.isPrimary ? '1' : '0'}`;
+}
+
+function duplicateLinkInputKey(row: ReplaceOrderProjectLinkDto): string {
+  return `${row.projectId}:${row.relationType}`;
 }
 
 function compareProjectLinks(left: ProjectLinkRow, right: ProjectLinkRow): number {
