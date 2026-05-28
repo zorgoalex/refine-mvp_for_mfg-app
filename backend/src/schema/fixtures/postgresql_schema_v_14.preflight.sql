@@ -1,7 +1,7 @@
 CREATE UNIQUE INDEX idx_film_vendors_ref_key ON film_vendors(ref_key_1c);
 
 CREATE TABLE orders (
-  order_id INTEGER PRIMARY KEY,
+  order_id BIGINT PRIMARY KEY,
   final_amount NUMERIC,
   total_amount NUMERIC,
   discount NUMERIC,
@@ -40,7 +40,7 @@ CREATE TABLE suppliers (
 );
 
 CREATE TABLE order_resource_requirements (
-  order_id INTEGER NOT NULL,
+  order_id BIGINT NOT NULL,
   resource_type TEXT NOT NULL,
   material_id INTEGER,
   film_id INTEGER,
@@ -77,6 +77,6 @@ CREATE TABLE workshops (
 
 CREATE TABLE order_workshops (
   order_workshop_id INTEGER PRIMARY KEY,
-  order_id INTEGER REFERENCES orders(order_id),
+  order_id BIGINT REFERENCES orders(order_id),
   workshop_id INTEGER REFERENCES workshops(workshop_id)
 );
