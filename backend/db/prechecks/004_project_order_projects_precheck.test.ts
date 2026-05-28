@@ -26,7 +26,7 @@ describe('project order projects DB precheck SQL', () => {
     expect(precheckSql).toContain('project_order_required_tables');
     expect(precheckSql).toContain('project_order_btree_gist_available');
     expect(precheckSql).toContain('project_order_orders_order_id_type');
-    expect(precheckSql).toContain('orders_order_id_is_integer');
+    expect(precheckSql).toContain('orders_order_id_is_bigint');
     expect(precheckSql).toContain('project_order_users_user_id_type');
     expect(precheckSql).toContain('users_user_id_is_bigint');
     expect(precheckSql).toContain('project_order_adjacency_semantics');

@@ -33,7 +33,7 @@ SELECT
   c.data_type,
   c.udt_name,
   c.is_nullable,
-  (c.data_type = 'integer') AS orders_order_id_is_integer,
+  (c.data_type = 'bigint') AS orders_order_id_is_bigint,
   EXISTS (
     SELECT 1
     FROM information_schema.table_constraints tc

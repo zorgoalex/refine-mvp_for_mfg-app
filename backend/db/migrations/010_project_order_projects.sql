@@ -21,7 +21,7 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 CREATE TABLE IF NOT EXISTS public.project_order_projects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id INTEGER NOT NULL REFERENCES orders(order_id) ON DELETE CASCADE,
+  order_id BIGINT NOT NULL REFERENCES orders(order_id) ON DELETE CASCADE,
   project_id UUID NOT NULL REFERENCES public.project_projects(id) ON DELETE RESTRICT,
   is_primary BOOLEAN NOT NULL DEFAULT false,
   relation_type TEXT NOT NULL DEFAULT 'main',

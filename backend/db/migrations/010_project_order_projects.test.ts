@@ -9,11 +9,11 @@ const schemaFixture = readFileSync(
 );
 
 describe('project order projects migration', () => {
-  it('uses the real integer orders.order_id type', () => {
-    expect(schemaFixture).toMatch(/CREATE TABLE orders\s*\([\s\S]*order_id INTEGER PRIMARY KEY/i);
-    expect(migration).toMatch(/order_id INTEGER NOT NULL REFERENCES orders\(order_id\) ON DELETE CASCADE/i);
+  it('uses the real bigint orders.order_id type', () => {
+    expect(schemaFixture).toMatch(/CREATE TABLE orders\s*\([\s\S]*order_id BIGINT PRIMARY KEY/i);
+    expect(migration).toMatch(/order_id BIGINT NOT NULL REFERENCES orders\(order_id\) ON DELETE CASCADE/i);
     expect(migration).not.toMatch(/order_id UUID/i);
-    expect(migration).not.toMatch(/order_id BIGINT/i);
+    expect(migration).not.toMatch(/order_id INTEGER/i);
   });
 
   it('locks project audit user foreign keys to the real users.user_id bigint type', () => {
@@ -84,7 +84,7 @@ CREATE TEMP TABLE users (
 );
 
 CREATE TEMP TABLE orders (
-  order_id INTEGER PRIMARY KEY,
+  order_id BIGINT PRIMARY KEY,
   delete_flag BOOLEAN NOT NULL DEFAULT false,
   version INTEGER NOT NULL DEFAULT 1
 );
@@ -97,7 +97,7 @@ CREATE TEMP TABLE project_projects (
 
 CREATE TEMP TABLE project_order_projects (
   id UUID PRIMARY KEY,
-  order_id INTEGER NOT NULL REFERENCES orders(order_id) ON DELETE CASCADE,
+  order_id BIGINT NOT NULL REFERENCES orders(order_id) ON DELETE CASCADE,
   project_id UUID NOT NULL REFERENCES project_projects(id) ON DELETE RESTRICT,
   is_primary BOOLEAN NOT NULL DEFAULT false,
   relation_type TEXT NOT NULL DEFAULT 'main',
