@@ -40,11 +40,6 @@ interface PaymentRow extends QueryResultRow {
   updated_at: string | Date | null;
 }
 
-interface LockedPaymentRow extends QueryResultRow {
-  payment_id: string | number;
-  order_id: string | number;
-}
-
 interface LockedOrderRow extends QueryResultRow {
   order_id: string | number;
   final_amount: string | number | null;
@@ -148,6 +143,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
         previousOrderId,
         currentUser: command.currentUser,
         requestId: command.requestId,
+        before: { ...mapPaymentRow(existing) },
         after: { ...payment },
       });
 
@@ -175,7 +171,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
         orderId,
         currentUser: command.currentUser,
         requestId: command.requestId,
-        before: { paymentId: command.paymentId, orderId },
+        before: { ...mapPaymentRow(existing) },
       });
 
       return { paymentId: command.paymentId, order: orderSummary, deleted: true };
@@ -250,10 +246,12 @@ async function setSessionUser(tx: TransactionClient, userId: string): Promise<vo
 async function loadPaymentForUpdate(
   tx: TransactionClient,
   paymentId: number,
-): Promise<LockedPaymentRow | null> {
-  const result = await tx.query<LockedPaymentRow>(
+): Promise<PaymentRow | null> {
+  const result = await tx.query<PaymentRow>(
     `
-    SELECT payment_id, order_id
+    SELECT
+      payment_id, order_id, type_paid_id, amount, payment_date, notes, ref_key_1c,
+      created_by, edited_by, created_at, updated_at
     FROM payments
     WHERE payment_id = $1
     FOR UPDATE

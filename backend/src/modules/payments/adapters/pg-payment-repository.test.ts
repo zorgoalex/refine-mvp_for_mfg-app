@@ -131,6 +131,31 @@ describe('PgPaymentRepository', () => {
     expect(auditInsert!.params).toContain(15);
   });
 
+  it('captures a before snapshot for payments.update', async () => {
+    const database = createDatabase({
+      paymentOrderId: 15,
+    });
+    const repository = new PgPaymentRepository(database.service);
+
+    await repository.updatePayment({
+      currentUser: currentUser(),
+      requestId: 'req_pu',
+      paymentId: 30,
+      dto: { amount: 200 },
+    });
+
+    const audit = database.queries.find(
+      (c) => /INSERT INTO audit_log/i.test(c.text) && JSON.stringify(c.params).includes('payments.update'),
+    );
+    expect(audit).toBeDefined();
+    // params[18] is before_json — a JSON-stringified snapshot of the prior row
+    const beforeJson = audit!.params[18] as string;
+    expect(beforeJson).toBeDefined();
+    expect(beforeJson).not.toBeNull();
+    const before = JSON.parse(beforeJson);
+    expect(before).toHaveProperty('amount'); // before snapshot carries prior payment fields
+  });
+
   it('deletes a payment and recalculates the parent order', async () => {
     const database = createDatabase({
       paymentOrderId: 15,
@@ -178,9 +203,9 @@ function createDatabase(options: {
       queries.push({ text, params });
       const normalized = normalizeSql(text);
 
-      if (normalized.startsWith('SELECT payment_id, order_id FROM payments')) {
+      if (normalized.startsWith('SELECT payment_id, order_id, type_paid_id, amount, payment_date')) {
         return {
-          rows: [{ payment_id: 30, order_id: options.paymentOrderId ?? 15 }],
+          rows: [paymentRow({ order_id: options.paymentOrderId ?? 15 })],
           rowCount: 1,
         };
       }
