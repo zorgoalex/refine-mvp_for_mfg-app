@@ -7588,33 +7588,73 @@ components:
       type: object
       required:
         - auditId
-        - entityType
-        - entityId
-        - action
-        - userId
+        - event
         - requestId
         - createdAt
       properties:
         auditId:
           type: string
+        event:
+          type: string
+          example: orders.update
         entityType:
           type: string
+          nullable: true
           example: order
         entityId:
           type: string
+          nullable: true
           example: '123'
-        action:
-          type: string
-          example: orders.update
         userId:
           type: integer
-          format: int64
           nullable: true
         username:
           type: string
           nullable: true
         role:
-          $ref: '#/components/schemas/UserRole'
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        relatedOrderId:
+          type: integer
+          nullable: true
+        relatedClientId:
+          type: integer
+          nullable: true
+        relatedPaymentId:
+          type: integer
+          nullable: true
+        relatedDeadlineId:
+          type: integer
+          nullable: true
+        relatedProductionEventId:
+          type: integer
+          nullable: true
+        statusField:
+          type: string
+          nullable: true
+        statusId:
+          type: integer
+          nullable: true
+        statusName:
+          type: string
+          nullable: true
+        statusCode:
+          type: string
+          nullable: true
+        stageCode:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+        ip:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
         before:
           type: object
           nullable: true
@@ -7627,14 +7667,10 @@ components:
           type: object
           nullable: true
           additionalProperties: true
-        requestId:
-          type: string
-        ip:
-          type: string
+        metadata:
+          type: object
           nullable: true
-        userAgent:
-          type: string
-          nullable: true
+          additionalProperties: true
         createdAt:
           type: string
           format: date-time
