@@ -202,8 +202,10 @@ async function assertPageReady(page: Page, route: SmokeRoute) {
     await expect(page.getByText('Произошла ошибка')).toHaveCount(0);
     await expect(page.getByText(/GraphQL запрос:/)).toHaveCount(0);
     await expect(page.getByText(/field 'version' not found in type: 'orders_view'/)).toHaveCount(0);
-    await expect(page.locator('.ant-spin-spinning')).toHaveCount(0, { timeout: 30000 });
-    expect((await content.innerText()).trim().length, `${route.label} rendered content`).toBeGreaterThan(0);
+    await expect(async () => {
+        await expect(page.locator('.ant-spin-spinning')).toHaveCount(0);
+        expect((await content.innerText()).trim().length, `${route.label} rendered content`).toBeGreaterThan(0);
+    }).toPass({ timeout: 30000 });
 
     if (route.waitForText) {
         await expect(page.getByText(route.waitForText).first()).toBeVisible({ timeout: 30000 });

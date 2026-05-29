@@ -10,114 +10,6 @@ import "@refinedev/antd/dist/reset.css";
 import "./styles/app.css";
 import { createNotificationProvider } from "./providers/notificationProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { OrderList } from "./pages/orders/list";
-import { DowelOrderList } from "./pages/doweling_orders/list";
-import { MaterialList } from "./pages/materials/list";
-import { MaterialCreate } from "./pages/materials/create";
-import { MaterialEdit } from "./pages/materials/edit";
-import { MaterialShow } from "./pages/materials/show";
-import { MillingTypeList } from "./pages/milling_types/list";
-import { MillingTypeCreate } from "./pages/milling_types/create";
-import { MillingTypeEdit } from "./pages/milling_types/edit";
-import { MillingTypeShow } from "./pages/milling_types/show";
-import { FilmList } from "./pages/films/list";
-import { FilmCreate } from "./pages/films/create";
-import { FilmEdit } from "./pages/films/edit";
-import { FilmShow } from "./pages/films/show";
-import { ClientList } from "./pages/clients/list";
-import { ClientCreate } from "./pages/clients/create";
-import { ClientEdit } from "./pages/clients/edit";
-import { ClientShow } from "./pages/clients/show";
-import { EdgeTypeList } from "./pages/edge_types/list";
-import { EdgeTypeCreate } from "./pages/edge_types/create";
-import { EdgeTypeEdit } from "./pages/edge_types/edit";
-import { EdgeTypeShow } from "./pages/edge_types/show";
-import { VendorList } from "./pages/vendors/list";
-import { VendorCreate } from "./pages/vendors/create";
-import { VendorEdit } from "./pages/vendors/edit";
-import { VendorShow } from "./pages/vendors/show";
-import { SupplierList } from "./pages/suppliers/list";
-import { SupplierCreate } from "./pages/suppliers/create";
-import { SupplierEdit } from "./pages/suppliers/edit";
-import { SupplierShow } from "./pages/suppliers/show";
-import { FilmTypeList } from "./pages/film_types/list";
-import { FilmTypeCreate } from "./pages/film_types/create";
-import { FilmTypeEdit } from "./pages/film_types/edit";
-import { FilmTypeShow } from "./pages/film_types/show";
-import { MaterialTypeList } from "./pages/material_types/list";
-import { MaterialTypeCreate } from "./pages/material_types/create";
-import { MaterialTypeEdit } from "./pages/material_types/edit";
-import { MaterialTypeShow } from "./pages/material_types/show";
-import { OrderStatusList } from "./pages/order_statuses/list";
-import { OrderStatusCreate } from "./pages/order_statuses/create";
-import { OrderStatusEdit } from "./pages/order_statuses/edit";
-import { OrderStatusShow } from "./pages/order_statuses/show";
-import { PaymentStatusList } from "./pages/payment_statuses/list";
-import { PaymentStatusCreate } from "./pages/payment_statuses/create";
-import { PaymentStatusEdit } from "./pages/payment_statuses/edit";
-import { PaymentStatusShow } from "./pages/payment_statuses/show";
-import { PaymentTypeList } from "./pages/payment_types/list";
-import { PaymentTypeCreate } from "./pages/payment_types/create";
-import { PaymentTypeEdit } from "./pages/payment_types/edit";
-import { PaymentTypeShow } from "./pages/payment_types/show";
-import { PaymentList } from "./pages/payments/list";
-import { PaymentCreate } from "./pages/payments/create";
-import { PaymentEdit } from "./pages/payments/edit";
-import { PaymentShow } from "./pages/payments/show";
-import { UnitList } from "./pages/units/list";
-import { UnitCreate } from "./pages/units/create";
-import { UnitEdit } from "./pages/units/edit";
-import { UnitShow } from "./pages/units/show";
-import { RequisitionStatusList } from "./pages/requisition_statuses/list";
-import { RequisitionStatusCreate } from "./pages/requisition_statuses/create";
-import { RequisitionStatusEdit } from "./pages/requisition_statuses/edit";
-import { RequisitionStatusShow } from "./pages/requisition_statuses/show";
-import { MovementStatusList } from "./pages/movements_statuses/list";
-import { MovementStatusCreate } from "./pages/movements_statuses/create";
-import { MovementStatusEdit } from "./pages/movements_statuses/edit";
-import { MovementStatusShow } from "./pages/movements_statuses/show";
-import { MaterialTransactionTypeList } from "./pages/material_transaction_types/list";
-import { MaterialTransactionTypeCreate } from "./pages/material_transaction_types/create";
-import { MaterialTransactionTypeEdit } from "./pages/material_transaction_types/edit";
-import { MaterialTransactionTypeShow } from "./pages/material_transaction_types/show";
-import { TransactionDirectionList } from "./pages/transaction_direction/list";
-import { TransactionDirectionCreate } from "./pages/transaction_direction/create";
-import { TransactionDirectionEdit } from "./pages/transaction_direction/edit";
-import { TransactionDirectionShow } from "./pages/transaction_direction/show";
-import { ProductionStatusList } from "./pages/production_statuses/list";
-import { ProductionStatusCreate } from "./pages/production_statuses/create";
-import { ProductionStatusEdit } from "./pages/production_statuses/edit";
-import { ProductionStatusShow } from "./pages/production_statuses/show";
-import { ResourceRequirementStatusList } from "./pages/resource_requirements_statuses/list";
-import { ResourceRequirementStatusCreate } from "./pages/resource_requirements_statuses/create";
-import { ResourceRequirementStatusEdit } from "./pages/resource_requirements_statuses/edit";
-import { ResourceRequirementStatusShow } from "./pages/resource_requirements_statuses/show";
-import { EmployeeList } from "./pages/employees/list";
-import { EmployeeCreate } from "./pages/employees/create";
-import { EmployeeEdit } from "./pages/employees/edit";
-import { EmployeeShow } from "./pages/employees/show";
-import { UserList } from "./pages/users/list";
-import { UserCreate } from "./pages/users/create";
-import { UserEdit } from "./pages/users/edit";
-import { UserShow } from "./pages/users/show";
-import { WorkshopList } from "./pages/workshops/list";
-import { WorkshopCreate } from "./pages/workshops/create";
-import { WorkshopEdit } from "./pages/workshops/edit";
-import { WorkshopShow } from "./pages/workshops/show";
-import { WorkCenterList } from "./pages/work_centers/list";
-import { WorkCenterCreate } from "./pages/work_centers/create";
-import { WorkCenterEdit } from "./pages/work_centers/edit";
-import { WorkCenterShow } from "./pages/work_centers/show";
-import { OrderWorkshopList } from "./pages/order_workshops/list";
-import { OrderWorkshopCreate } from "./pages/order_workshops/create";
-import { OrderWorkshopEdit } from "./pages/order_workshops/edit";
-import { OrderWorkshopShow } from "./pages/order_workshops/show";
-import { OrderResourceRequirementList } from "./pages/order_resource_requirements/list";
-import { OrderResourceRequirementCreate } from "./pages/order_resource_requirements/create";
-import { OrderResourceRequirementEdit } from "./pages/order_resource_requirements/edit";
-import { OrderResourceRequirementShow } from "./pages/order_resource_requirements/show";
-import { ClientsAnalyticsList, ClientsAnalyticsShow } from "./pages/clients_analytics";
-import { PaymentsAnalyticsList, PaymentsAnalyticsShow } from "./pages/payments_analytics";
 import { LoginPage } from "./pages/login";
 import { dataProvider } from "./utils/dataProvider";
 import { authProvider } from "./authProvider";
@@ -131,6 +23,149 @@ const ProjectsPage = lazy(async () => ({ default: (await import("./pages/project
 const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/doweling_orders/edit")).DowelOrderEdit }));
 const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
 const ConfigurationPage = lazy(async () => ({ default: (await import("./pages/configuration")).ConfigurationPage }));
+
+// Route-level code splitting: every page component is lazy-loaded so the root
+// bundle ships only shell/providers/login. The existing <Suspense> around
+// <Routes> covers all of these. Pages are named exports, so each lazy() adapts
+// the named export to the default export React.lazy requires.
+const OrderList = lazy(async () => ({ default: (await import("./pages/orders/list")).OrderList }));
+const DowelOrderList = lazy(async () => ({ default: (await import("./pages/doweling_orders/list")).DowelOrderList }));
+
+const MaterialList = lazy(async () => ({ default: (await import("./pages/materials/list")).MaterialList }));
+const MaterialCreate = lazy(async () => ({ default: (await import("./pages/materials/create")).MaterialCreate }));
+const MaterialEdit = lazy(async () => ({ default: (await import("./pages/materials/edit")).MaterialEdit }));
+const MaterialShow = lazy(async () => ({ default: (await import("./pages/materials/show")).MaterialShow }));
+
+const MillingTypeList = lazy(async () => ({ default: (await import("./pages/milling_types/list")).MillingTypeList }));
+const MillingTypeCreate = lazy(async () => ({ default: (await import("./pages/milling_types/create")).MillingTypeCreate }));
+const MillingTypeEdit = lazy(async () => ({ default: (await import("./pages/milling_types/edit")).MillingTypeEdit }));
+const MillingTypeShow = lazy(async () => ({ default: (await import("./pages/milling_types/show")).MillingTypeShow }));
+
+const FilmList = lazy(async () => ({ default: (await import("./pages/films/list")).FilmList }));
+const FilmCreate = lazy(async () => ({ default: (await import("./pages/films/create")).FilmCreate }));
+const FilmEdit = lazy(async () => ({ default: (await import("./pages/films/edit")).FilmEdit }));
+const FilmShow = lazy(async () => ({ default: (await import("./pages/films/show")).FilmShow }));
+
+const ClientList = lazy(async () => ({ default: (await import("./pages/clients/list")).ClientList }));
+const ClientCreate = lazy(async () => ({ default: (await import("./pages/clients/create")).ClientCreate }));
+const ClientEdit = lazy(async () => ({ default: (await import("./pages/clients/edit")).ClientEdit }));
+const ClientShow = lazy(async () => ({ default: (await import("./pages/clients/show")).ClientShow }));
+
+const EdgeTypeList = lazy(async () => ({ default: (await import("./pages/edge_types/list")).EdgeTypeList }));
+const EdgeTypeCreate = lazy(async () => ({ default: (await import("./pages/edge_types/create")).EdgeTypeCreate }));
+const EdgeTypeEdit = lazy(async () => ({ default: (await import("./pages/edge_types/edit")).EdgeTypeEdit }));
+const EdgeTypeShow = lazy(async () => ({ default: (await import("./pages/edge_types/show")).EdgeTypeShow }));
+
+const VendorList = lazy(async () => ({ default: (await import("./pages/vendors/list")).VendorList }));
+const VendorCreate = lazy(async () => ({ default: (await import("./pages/vendors/create")).VendorCreate }));
+const VendorEdit = lazy(async () => ({ default: (await import("./pages/vendors/edit")).VendorEdit }));
+const VendorShow = lazy(async () => ({ default: (await import("./pages/vendors/show")).VendorShow }));
+
+const SupplierList = lazy(async () => ({ default: (await import("./pages/suppliers/list")).SupplierList }));
+const SupplierCreate = lazy(async () => ({ default: (await import("./pages/suppliers/create")).SupplierCreate }));
+const SupplierEdit = lazy(async () => ({ default: (await import("./pages/suppliers/edit")).SupplierEdit }));
+const SupplierShow = lazy(async () => ({ default: (await import("./pages/suppliers/show")).SupplierShow }));
+
+const FilmTypeList = lazy(async () => ({ default: (await import("./pages/film_types/list")).FilmTypeList }));
+const FilmTypeCreate = lazy(async () => ({ default: (await import("./pages/film_types/create")).FilmTypeCreate }));
+const FilmTypeEdit = lazy(async () => ({ default: (await import("./pages/film_types/edit")).FilmTypeEdit }));
+const FilmTypeShow = lazy(async () => ({ default: (await import("./pages/film_types/show")).FilmTypeShow }));
+
+const MaterialTypeList = lazy(async () => ({ default: (await import("./pages/material_types/list")).MaterialTypeList }));
+const MaterialTypeCreate = lazy(async () => ({ default: (await import("./pages/material_types/create")).MaterialTypeCreate }));
+const MaterialTypeEdit = lazy(async () => ({ default: (await import("./pages/material_types/edit")).MaterialTypeEdit }));
+const MaterialTypeShow = lazy(async () => ({ default: (await import("./pages/material_types/show")).MaterialTypeShow }));
+
+const OrderStatusList = lazy(async () => ({ default: (await import("./pages/order_statuses/list")).OrderStatusList }));
+const OrderStatusCreate = lazy(async () => ({ default: (await import("./pages/order_statuses/create")).OrderStatusCreate }));
+const OrderStatusEdit = lazy(async () => ({ default: (await import("./pages/order_statuses/edit")).OrderStatusEdit }));
+const OrderStatusShow = lazy(async () => ({ default: (await import("./pages/order_statuses/show")).OrderStatusShow }));
+
+const PaymentStatusList = lazy(async () => ({ default: (await import("./pages/payment_statuses/list")).PaymentStatusList }));
+const PaymentStatusCreate = lazy(async () => ({ default: (await import("./pages/payment_statuses/create")).PaymentStatusCreate }));
+const PaymentStatusEdit = lazy(async () => ({ default: (await import("./pages/payment_statuses/edit")).PaymentStatusEdit }));
+const PaymentStatusShow = lazy(async () => ({ default: (await import("./pages/payment_statuses/show")).PaymentStatusShow }));
+
+const PaymentTypeList = lazy(async () => ({ default: (await import("./pages/payment_types/list")).PaymentTypeList }));
+const PaymentTypeCreate = lazy(async () => ({ default: (await import("./pages/payment_types/create")).PaymentTypeCreate }));
+const PaymentTypeEdit = lazy(async () => ({ default: (await import("./pages/payment_types/edit")).PaymentTypeEdit }));
+const PaymentTypeShow = lazy(async () => ({ default: (await import("./pages/payment_types/show")).PaymentTypeShow }));
+
+const PaymentList = lazy(async () => ({ default: (await import("./pages/payments/list")).PaymentList }));
+const PaymentCreate = lazy(async () => ({ default: (await import("./pages/payments/create")).PaymentCreate }));
+const PaymentEdit = lazy(async () => ({ default: (await import("./pages/payments/edit")).PaymentEdit }));
+const PaymentShow = lazy(async () => ({ default: (await import("./pages/payments/show")).PaymentShow }));
+
+const UnitList = lazy(async () => ({ default: (await import("./pages/units/list")).UnitList }));
+const UnitCreate = lazy(async () => ({ default: (await import("./pages/units/create")).UnitCreate }));
+const UnitEdit = lazy(async () => ({ default: (await import("./pages/units/edit")).UnitEdit }));
+const UnitShow = lazy(async () => ({ default: (await import("./pages/units/show")).UnitShow }));
+
+const RequisitionStatusList = lazy(async () => ({ default: (await import("./pages/requisition_statuses/list")).RequisitionStatusList }));
+const RequisitionStatusCreate = lazy(async () => ({ default: (await import("./pages/requisition_statuses/create")).RequisitionStatusCreate }));
+const RequisitionStatusEdit = lazy(async () => ({ default: (await import("./pages/requisition_statuses/edit")).RequisitionStatusEdit }));
+const RequisitionStatusShow = lazy(async () => ({ default: (await import("./pages/requisition_statuses/show")).RequisitionStatusShow }));
+
+const MovementStatusList = lazy(async () => ({ default: (await import("./pages/movements_statuses/list")).MovementStatusList }));
+const MovementStatusCreate = lazy(async () => ({ default: (await import("./pages/movements_statuses/create")).MovementStatusCreate }));
+const MovementStatusEdit = lazy(async () => ({ default: (await import("./pages/movements_statuses/edit")).MovementStatusEdit }));
+const MovementStatusShow = lazy(async () => ({ default: (await import("./pages/movements_statuses/show")).MovementStatusShow }));
+
+const MaterialTransactionTypeList = lazy(async () => ({ default: (await import("./pages/material_transaction_types/list")).MaterialTransactionTypeList }));
+const MaterialTransactionTypeCreate = lazy(async () => ({ default: (await import("./pages/material_transaction_types/create")).MaterialTransactionTypeCreate }));
+const MaterialTransactionTypeEdit = lazy(async () => ({ default: (await import("./pages/material_transaction_types/edit")).MaterialTransactionTypeEdit }));
+const MaterialTransactionTypeShow = lazy(async () => ({ default: (await import("./pages/material_transaction_types/show")).MaterialTransactionTypeShow }));
+
+const TransactionDirectionList = lazy(async () => ({ default: (await import("./pages/transaction_direction/list")).TransactionDirectionList }));
+const TransactionDirectionCreate = lazy(async () => ({ default: (await import("./pages/transaction_direction/create")).TransactionDirectionCreate }));
+const TransactionDirectionEdit = lazy(async () => ({ default: (await import("./pages/transaction_direction/edit")).TransactionDirectionEdit }));
+const TransactionDirectionShow = lazy(async () => ({ default: (await import("./pages/transaction_direction/show")).TransactionDirectionShow }));
+
+const ProductionStatusList = lazy(async () => ({ default: (await import("./pages/production_statuses/list")).ProductionStatusList }));
+const ProductionStatusCreate = lazy(async () => ({ default: (await import("./pages/production_statuses/create")).ProductionStatusCreate }));
+const ProductionStatusEdit = lazy(async () => ({ default: (await import("./pages/production_statuses/edit")).ProductionStatusEdit }));
+const ProductionStatusShow = lazy(async () => ({ default: (await import("./pages/production_statuses/show")).ProductionStatusShow }));
+
+const ResourceRequirementStatusList = lazy(async () => ({ default: (await import("./pages/resource_requirements_statuses/list")).ResourceRequirementStatusList }));
+const ResourceRequirementStatusCreate = lazy(async () => ({ default: (await import("./pages/resource_requirements_statuses/create")).ResourceRequirementStatusCreate }));
+const ResourceRequirementStatusEdit = lazy(async () => ({ default: (await import("./pages/resource_requirements_statuses/edit")).ResourceRequirementStatusEdit }));
+const ResourceRequirementStatusShow = lazy(async () => ({ default: (await import("./pages/resource_requirements_statuses/show")).ResourceRequirementStatusShow }));
+
+const EmployeeList = lazy(async () => ({ default: (await import("./pages/employees/list")).EmployeeList }));
+const EmployeeCreate = lazy(async () => ({ default: (await import("./pages/employees/create")).EmployeeCreate }));
+const EmployeeEdit = lazy(async () => ({ default: (await import("./pages/employees/edit")).EmployeeEdit }));
+const EmployeeShow = lazy(async () => ({ default: (await import("./pages/employees/show")).EmployeeShow }));
+
+const UserList = lazy(async () => ({ default: (await import("./pages/users/list")).UserList }));
+const UserCreate = lazy(async () => ({ default: (await import("./pages/users/create")).UserCreate }));
+const UserEdit = lazy(async () => ({ default: (await import("./pages/users/edit")).UserEdit }));
+const UserShow = lazy(async () => ({ default: (await import("./pages/users/show")).UserShow }));
+
+const WorkshopList = lazy(async () => ({ default: (await import("./pages/workshops/list")).WorkshopList }));
+const WorkshopCreate = lazy(async () => ({ default: (await import("./pages/workshops/create")).WorkshopCreate }));
+const WorkshopEdit = lazy(async () => ({ default: (await import("./pages/workshops/edit")).WorkshopEdit }));
+const WorkshopShow = lazy(async () => ({ default: (await import("./pages/workshops/show")).WorkshopShow }));
+
+const WorkCenterList = lazy(async () => ({ default: (await import("./pages/work_centers/list")).WorkCenterList }));
+const WorkCenterCreate = lazy(async () => ({ default: (await import("./pages/work_centers/create")).WorkCenterCreate }));
+const WorkCenterEdit = lazy(async () => ({ default: (await import("./pages/work_centers/edit")).WorkCenterEdit }));
+const WorkCenterShow = lazy(async () => ({ default: (await import("./pages/work_centers/show")).WorkCenterShow }));
+
+const OrderWorkshopList = lazy(async () => ({ default: (await import("./pages/order_workshops/list")).OrderWorkshopList }));
+const OrderWorkshopCreate = lazy(async () => ({ default: (await import("./pages/order_workshops/create")).OrderWorkshopCreate }));
+const OrderWorkshopEdit = lazy(async () => ({ default: (await import("./pages/order_workshops/edit")).OrderWorkshopEdit }));
+const OrderWorkshopShow = lazy(async () => ({ default: (await import("./pages/order_workshops/show")).OrderWorkshopShow }));
+
+const OrderResourceRequirementList = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/list")).OrderResourceRequirementList }));
+const OrderResourceRequirementCreate = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/create")).OrderResourceRequirementCreate }));
+const OrderResourceRequirementEdit = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/edit")).OrderResourceRequirementEdit }));
+const OrderResourceRequirementShow = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/show")).OrderResourceRequirementShow }));
+
+// clients_analytics and payments_analytics each export two named components from one module.
+const ClientsAnalyticsList = lazy(async () => ({ default: (await import("./pages/clients_analytics")).ClientsAnalyticsList }));
+const ClientsAnalyticsShow = lazy(async () => ({ default: (await import("./pages/clients_analytics")).ClientsAnalyticsShow }));
+const PaymentsAnalyticsList = lazy(async () => ({ default: (await import("./pages/payments_analytics")).PaymentsAnalyticsList }));
+const PaymentsAnalyticsShow = lazy(async () => ({ default: (await import("./pages/payments_analytics")).PaymentsAnalyticsShow }));
 
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 
