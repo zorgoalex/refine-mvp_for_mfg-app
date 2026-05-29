@@ -20,6 +20,7 @@ import { formatNumber, currencySmartFormatter, numberParser } from '../../../../
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
+import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
 import {
   validateMaterialDimensions,
   MaterialInfo
@@ -827,8 +828,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         ) : (
           <MillingTypeCell
             millingTypeId={millingTypeId}
-            useBackendReferences={useBackendReferences}
-            namesById={orderFormData.references.millingTypeNameById}
+            namesById={millingNameById}
+            loading={referencesLoading}
           />
         ),
     },
@@ -853,8 +854,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         ) : (
           <EdgeTypeCell
             edgeTypeId={edgeTypeId}
-            useBackendReferences={useBackendReferences}
-            namesById={orderFormData.references.edgeTypeNameById}
+            namesById={edgeNameById}
+            loading={referencesLoading}
           />
         ),
     },
@@ -881,8 +882,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         ) : (
           <MaterialCell
             materialId={materialId}
-            useBackendReferences={useBackendReferences}
-            namesById={orderFormData.references.materialNameById}
+            namesById={materialNameById}
+            loading={referencesLoading}
           />
         ),
     },
@@ -1078,8 +1079,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             {filmId ? (
               <FilmCell
                 filmId={filmId}
-                useBackendReferences={useBackendReferences}
-                namesById={orderFormData.references.filmNameById}
+                namesById={filmNameById}
+                loading={referencesLoading}
               />
             ) : '—'}
           </span>
@@ -1130,8 +1131,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           statusId ? (
             <ProductionStatusCell
               statusId={statusId}
-              useBackendReferences={useBackendReferences}
-              namesById={orderFormData.references.productionStatusNameById}
+              namesById={productionStatusNameById}
+              loading={referencesLoading}
             />
           ) : <Tag>Не назначен</Tag>
         ),
@@ -1224,16 +1225,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     );
   }, [truncateText]);
 
-  const getOptionsMap = useCallback((options?: any[]) => {
-    const map = new Map<number, string>();
-    for (const option of options || []) {
-      const value = option?.value;
-      const label = option?.label;
-      if (value === null || value === undefined) continue;
-      map.set(Number(value), String(label ?? value));
-    }
-    return map;
-  }, []);
+  const getOptionsMap = useCallback(
+    (options?: any[]) => buildNameByIdMap(options as any[] | undefined),
+    [],
+  );
 
   const materialNameById = useMemo(
     () =>
@@ -1283,6 +1278,26 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       useBackendReferences,
     ]
   );
+
+  const productionStatusNameById = useMemo(
+    () =>
+      useBackendReferences
+        ? orderFormData.references.productionStatusNameById
+        : getOptionsMap(productionStatusSelectProps.options as any[] | undefined),
+    [
+      getOptionsMap,
+      orderFormData.references.productionStatusNameById,
+      productionStatusSelectProps.options,
+      useBackendReferences,
+    ]
+  );
+
+  // One readiness flag: backend mode uses useOrderFormData; legacy mode uses the
+  // already-loaded select queries. While loading, an unresolved id shows a
+  // neutral placeholder instead of "Не найден".
+  const referencesLoading = useBackendReferences
+    ? orderFormData.isLoading
+    : !materialSelectProps.options;
 
   const selectRows = useCallback((predicate: (detail: OrderDetail) => boolean) => {
     if (!onSelectChange) return;
@@ -1809,28 +1824,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   );
 });
 
-// Helper components for loading reference data
+// Pure reference cells: labels resolve from already-loaded name maps, so there
+// is no per-row network request. `loading` only governs the placeholder shown
+// before the batched reference list has arrived.
 const MaterialCell: React.FC<{
   materialId: number;
-  useBackendReferences: boolean;
   namesById: Map<number, string>;
-}> = ({ materialId, useBackendReferences, namesById }) => {
-  const { data, isLoading } = useOne({
-    resource: 'materials',
-    id: materialId,
-    queryOptions: {
-      enabled: !useBackendReferences && materialId !== null && materialId !== undefined,
-    },
-  });
-
+  loading: boolean;
+}> = ({ materialId, namesById, loading }) => {
   if (materialId === null || materialId === undefined) return <span style={{ color: '#999' }}>—</span>;
-
-  const materialName = useBackendReferences
-    ? namesById.get(Number(materialId))
-    : data?.data?.material_name;
-  if (!useBackendReferences && isLoading) return <span style={{ color: '#999' }}>Загрузка...</span>;
+  const materialName = resolveReferenceLabel(materialId, namesById);
+  if (!materialName && loading) return <span style={{ color: '#999' }}>Загрузка...</span>;
   const color = getMaterialColor(materialName || '');
-
   return materialName ? (
     <span style={{ color }}>{materialName}</span>
   ) : (
@@ -1840,25 +1845,13 @@ const MaterialCell: React.FC<{
 
 const MillingTypeCell: React.FC<{
   millingTypeId: number;
-  useBackendReferences: boolean;
   namesById: Map<number, string>;
-}> = ({ millingTypeId, useBackendReferences, namesById }) => {
-  const { data, isLoading } = useOne({
-    resource: 'milling_types',
-    id: millingTypeId,
-    queryOptions: {
-      enabled: !useBackendReferences && millingTypeId !== null && millingTypeId !== undefined,
-    },
-  });
-
+  loading: boolean;
+}> = ({ millingTypeId, namesById, loading }) => {
   if (millingTypeId === null || millingTypeId === undefined) return <span style={{ color: '#999' }}>—</span>;
-
-  const millingTypeName = useBackendReferences
-    ? namesById.get(Number(millingTypeId))
-    : data?.data?.milling_type_name;
-  if (!useBackendReferences && isLoading) return <span style={{ color: '#999' }}>Загрузка...</span>;
+  const millingTypeName = resolveReferenceLabel(millingTypeId, namesById);
+  if (!millingTypeName && loading) return <span style={{ color: '#999' }}>Загрузка...</span>;
   const bgColor = getMillingBgColor(millingTypeName || '');
-
   return millingTypeName ? (
     <span style={{ backgroundColor: bgColor, padding: '2px 6px', borderRadius: '3px', display: 'inline-block' }}>
       {millingTypeName}
@@ -1870,60 +1863,32 @@ const MillingTypeCell: React.FC<{
 
 const EdgeTypeCell: React.FC<{
   edgeTypeId: number;
-  useBackendReferences: boolean;
   namesById: Map<number, string>;
-}> = ({ edgeTypeId, useBackendReferences, namesById }) => {
-  const { data, isLoading } = useOne({
-    resource: 'edge_types',
-    id: edgeTypeId,
-    queryOptions: {
-      enabled: !useBackendReferences && edgeTypeId !== null && edgeTypeId !== undefined,
-    },
-  });
-
+  loading: boolean;
+}> = ({ edgeTypeId, namesById, loading }) => {
   if (edgeTypeId === null || edgeTypeId === undefined) return <span style={{ color: '#999' }}>—</span>;
-  if (!useBackendReferences && isLoading) return <span style={{ color: '#999' }}>Загрузка...</span>;
-
-  const edgeTypeName = useBackendReferences
-    ? namesById.get(Number(edgeTypeId))
-    : data?.data?.edge_type_name;
+  const edgeTypeName = resolveReferenceLabel(edgeTypeId, namesById);
+  if (!edgeTypeName && loading) return <span style={{ color: '#999' }}>Загрузка...</span>;
   return <span>{edgeTypeName || <span style={{ color: '#ff4d4f' }}>Не найден (ID: {edgeTypeId})</span>}</span>;
 };
 
 const FilmCell: React.FC<{
   filmId: number;
-  useBackendReferences: boolean;
   namesById: Map<number, string>;
-}> = ({ filmId, useBackendReferences, namesById }) => {
-  const { data, isLoading } = useOne({
-    resource: 'films',
-    id: filmId,
-    queryOptions: {
-      enabled: !useBackendReferences && filmId !== null && filmId !== undefined,
-    },
-  });
-
+  loading: boolean;
+}> = ({ filmId, namesById, loading }) => {
   if (filmId === null || filmId === undefined) return <span style={{ color: '#999' }}>—</span>;
-  if (!useBackendReferences && isLoading) return <span style={{ color: '#999' }}>Загрузка...</span>;
-
-  const filmName = useBackendReferences
-    ? namesById.get(Number(filmId))
-    : data?.data?.film_name;
+  const filmName = resolveReferenceLabel(filmId, namesById);
+  if (!filmName && loading) return <span style={{ color: '#999' }}>Загрузка...</span>;
   return <span>{filmName || <span style={{ color: '#ff4d4f' }}>Не найден (ID: {filmId})</span>}</span>;
 };
 
 const ProductionStatusCell: React.FC<{
   statusId: number;
-  useBackendReferences: boolean;
   namesById: Map<number, string>;
-}> = ({ statusId, useBackendReferences, namesById }) => {
-  const { data } = useOne({
-    resource: 'production_statuses',
-    id: statusId,
-    queryOptions: { enabled: !useBackendReferences && !!statusId },
-  });
-  const statusName = useBackendReferences
-    ? namesById.get(Number(statusId))
-    : data?.data?.production_status_name;
+  loading: boolean;
+}> = ({ statusId, namesById, loading }) => {
+  const statusName = resolveReferenceLabel(statusId, namesById);
+  if (!statusName && loading) return <Tag color="blue">…</Tag>;
   return <Tag color="blue">{statusName || `ID: ${statusId}`}</Tag>;
 };
