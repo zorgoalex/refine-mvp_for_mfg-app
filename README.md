@@ -19,7 +19,7 @@
 - Frontend: React + Vite + Refine + Ant Design.
 - Backend data API: Hasura GraphQL.
 - Serverless API: Vercel Functions в каталоге `api/`.
-- Stage-1 NestJS backend: versioned `/api/v1/*` endpoints for auth/orders/deadlines behind feature flags.
+- Stage-1 NestJS backend: versioned `/api/v1/*` endpoints for auth/session, users, orders (read/write, export, JSON snapshot), payments, production actions/calendar moves, client phones, VLM, deadlines, projects and notifications, behind feature flags.
 - Локальный dev server: `http://localhost:5173`.
 - Локальный Hasura GraphQL по умолчанию: `http://localhost:8585/v1/graphql`.
 - Актуальная схема БД: v14.
@@ -38,6 +38,8 @@
 - Экспорт заказов в Google Drive через защищённый Vercel API proxy к Google Apps Script.
 - JWT-аутентификация с refresh token rotation и Hasura role-based permissions.
 - Управление пользователями, ролями и ключевыми справочниками.
+- Уведомления: backend-backed колокол и панель уведомлений в шапке через `/api/v1/notifications` (список, отметка прочитанным, удаление).
+- Проекты (за feature flag): страница `/projects`, привязка заказов к проектам, фильтр и колонка проектов в списке заказов, редактор связей на карточке заказа.
 
 ## Стек
 
@@ -70,7 +72,7 @@
 - `src/types/` — типы доменных сущностей.
 - `src/utils/excel/` — подготовка и отправка данных для Excel/Google Drive.
 - `api/` — Vercel Functions: auth, users, refresh, VLM, export.
-- `backend/` — NestJS backend stage-1: `/api/v1/*`, health, auth/session, orders, deadlines.
+- `backend/` — NestJS backend stage-1: `/api/v1/*` + `/health/live`/`/health/ready`; модули auth/session, users, orders (read/write, export, JSON snapshot), payments, production actions, client phones, VLM, deadlines, projects, notifications.
 - `ops/` — VPS bootstrap/deploy scripts and tracked Docker Compose templates.
 - `public/templates/order_template.xlsx` — шаблон Excel.
 - `vercel.json` — rewrites, headers и настройки функций.
@@ -121,9 +123,14 @@ VITE_USE_BACKEND_ORDERS_READ=false
 VITE_USE_BACKEND_ORDERS_WRITE=false
 VITE_USE_BACKEND_PAYMENTS=false
 VITE_USE_BACKEND_PRODUCTION_ACTIONS=false
+VITE_USE_BACKEND_CLIENT_PHONES=false
 VITE_USE_BACKEND_USERS=false
 VITE_USE_BACKEND_ORDER_EXPORT=false
 VITE_USE_BACKEND_VLM=false
+VITE_USE_BACKEND_DEADLINES=false
+VITE_USE_BACKEND_PROJECTS=false
+VITE_USE_BACKEND_REFERENCES=false
+VITE_ENABLE_LEGACY_HASURA=true
 VITE_RUNTIME_CONFIG_URL=/runtime-config.json
 ```
 
@@ -164,6 +171,23 @@ Backend users/export/VLM cutover mode за `VITE_USE_BACKEND_USERS=true`,
 `/api/v1/users`, `/api/v1/orders/:id/export/google-drive` и `/api/v1/vlm/*`.
 Legacy Vercel Functions остаются rollback path, пока соответствующие backend flags и
 external provider env не включены на runtime.
+
+Backend payments/production/client-phones cutover mode за `VITE_USE_BACKEND_PAYMENTS=true`,
+`VITE_USE_BACKEND_PRODUCTION_ACTIONS=true` и `VITE_USE_BACKEND_CLIENT_PHONES=true`
+(client phones требует включённого production actions) использует `/api/v1/payments`,
+order-scoped production/calendar/status/payment-status actions на `/api/v1/orders/:id/*`
+и `/api/v1/client-phones`.
+
+Backend projects mode за `VITE_USE_BACKEND_PROJECTS=true` (требует
+`VITE_USE_BACKEND_ORDERS_READ=true`) включает страницу `/projects` и привязку заказов к
+проектам через `/api/v1/projects` и `GET/PUT /api/v1/orders/:id/projects`. На backend
+нужны `BACKEND_ENABLE_PROJECTS=true` и (для записи) `BACKEND_PROJECTS_READ_ONLY=false`.
+Назначение проекта не входит в order-save payload — связи меняются только отдельной
+project-link командой.
+
+Backend deadlines read mode за `VITE_USE_BACKEND_DEADLINES=true` (требует backend auth и
+orders read) показывает read-only deadline-панель заказа через `/api/v1/orders/:id/deadline-summary`,
+`/deadlines` и `/deadline-events`.
 
 Order JSON snapshot transfer работает через NestJS backend, когда
 `BACKEND_ENABLE_ORDERS=true`. Экспорт доступен при `orders.export`, импорт —
