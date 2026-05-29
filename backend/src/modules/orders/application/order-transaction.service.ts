@@ -54,6 +54,9 @@ export class OrderTransactionService {
         action: 'orders.create',
         orderId,
         actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        clientId: prepared.order.header.clientId ?? null,
       });
 
       return this.readAndAssertVersion(unitOfWork, orderId, version);
@@ -110,6 +113,9 @@ export class OrderTransactionService {
         action: 'orders.update',
         orderId: command.orderId,
         actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        clientId: prepared.order.header.clientId ?? null,
       });
 
       return this.readAndAssertVersion(unitOfWork, command.orderId, version);

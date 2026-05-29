@@ -317,6 +317,30 @@ describe('PgOrderTransactionManager', () => {
 
     expect(normalizedSql(database.queries)).not.toContain('FROM orders WHERE order_id');
   });
+
+  it('writes a query-ready orders.create audit row via AuditService', async () => {
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+    await manager.runInTransaction(async (uow) => {
+      await uow.writeAuditEvent({
+        action: 'orders.create',
+        orderId: 77,
+        actorUserId: '9',
+        actorUsername: 'manager1',
+        actorRole: 'manager',
+        clientId: 555,
+        requestId: 'req_oc',
+      });
+    });
+    const audit = queries.find((q) => /INSERT INTO audit_log/i.test(q.text));
+    expect(audit).toBeDefined();
+    expect(audit!.text).toMatch(/related_order_id/i);
+    expect(audit!.text).toMatch(/source/i);
+    expect(audit!.params).toContain('orders.create');
+    expect(audit!.params).toContain('backend-orders-command');
+    expect(audit!.params).toContain(77);
+    expect(audit!.params).toContain(555);
+  });
 });
 
 function createDatabase(
