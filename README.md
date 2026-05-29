@@ -330,6 +330,15 @@ Audit:
 
 - `created_by`, `edited_by`, `created_at`, `updated_at` управляются серверной стороной.
 - Клиентские create/update payload очищаются от audit-полей в `dataProvider`.
+- Backend command-модули (orders, payments, production actions, users) пишут
+  системный журнал в таблицу `audit_log` в одной транзакции с командой.
+  Записи содержат нормализованные измерения для выборки/отчётов: actor
+  (user/role), entity type/id, request id, source, связи
+  `related_order_id`/`related_client_id`/`related_payment_id`/`related_deadline_id`/`related_production_event_id`,
+  status/stage коды и before/after/diff/metadata. Чувствительные поля
+  (пароли, токены, секреты) редактируются перед сохранением. Permission-denied
+  попытки логируются отдельными записями. Перед использованием применить
+  миграции `audit_log`, включая `backend/db/migrations/012_audit_log_payment_deadline_dimensions.sql`.
 
 ## Установка и запуск
 
