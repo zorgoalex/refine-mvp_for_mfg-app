@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -1008,47 +1009,20 @@ async function writeDeniedActionAudit(
     requiredPermissions: readonly string[];
   },
 ): Promise<void> {
-  await database.query(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, request_id, source,
-      related_order_id, related_client_id, related_production_event_id,
-      status_field, status_id, status_name, status_code, stage_code,
-      before_json, after_json, diff_json, metadata_json
-    )
-    VALUES (
-      $1, $2, $3, $4, $5, $6,
-      $7, $8, $9,
-      $10, $11, $12, $13, $14,
-      $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb
-    )
-    `,
-    [
-      'production.action_denied',
-      'order',
-      String(input.order.orderId),
-      input.currentUser.id,
-      input.requestId,
-      SOURCE,
-      input.order.orderId,
-      input.order.clientId,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      JSON.stringify({}),
-      JSON.stringify({}),
-      JSON.stringify({}),
-      JSON.stringify({
-        source: SOURCE,
-        denied: true,
-        reason: 'order_scope_denied',
-        requiredPermissions: input.requiredPermissions,
-      }),
-    ],
-  );
+  await auditService.recordDenied(database, {
+    event: 'production.action_denied',
+    entityType: 'order',
+    entityId: input.order.orderId,
+    actorUserId: input.currentUser.id,
+    actorUsername: input.currentUser.username,
+    actorRole: input.currentUser.role,
+    requestId: input.requestId,
+    source: SOURCE,
+    relatedOrderId: input.order.orderId,
+    relatedClientId: input.order.clientId,
+    reason: 'order_scope_denied',
+    requiredPermissions: input.requiredPermissions,
+  });
 }
 
 export async function changeOrderStatusFromDeadlineInTransaction(
