@@ -74,6 +74,15 @@ describe('PgPaymentRepository', () => {
       normalizeSql(query.text).startsWith('UPDATE orders SET paid_amount'),
     );
     expect(orderUpdates).toHaveLength(2);
+
+    const auditInsert = database.queries.find(
+      (q) => /INSERT INTO audit_log/i.test(q.text) && /related_payment_id/i.test(q.text),
+    );
+    expect(auditInsert).toBeDefined();
+    expect(auditInsert!.params[0]).toBe('payments.update');
+    expect(auditInsert!.params[1]).toBe('payment');
+    expect(auditInsert!.params[8]).toBe(16);
+    expect(auditInsert!.params[10]).toBe(30);
   });
 
   it('rejects manager payment updates outside their own order scope before mutation', async () => {
@@ -96,6 +105,30 @@ describe('PgPaymentRepository', () => {
     });
 
     expect(normalizedSql(database.queries)).not.toContain('UPDATE payments');
+  });
+
+  it('createPayment writes a query-ready audit row with related_payment_id and event', async () => {
+    const database = createDatabase();
+    const repository = new PgPaymentRepository(database.service);
+
+    await repository.createPayment({
+      currentUser: currentUser(),
+      dto: {
+        orderId: 15,
+        typePaidId: 1,
+        amount: 250,
+        paymentDate: '2026-05-01',
+      },
+      requestId: 'request-audit',
+    });
+
+    const auditInsert = database.queries.find(
+      (q) =>
+        /INSERT INTO audit_log/i.test(q.text) && /related_payment_id/i.test(q.text),
+    );
+    expect(auditInsert).toBeDefined();
+    expect(auditInsert!.params).toContain('payments.create');
+    expect(auditInsert!.params).toContain(15);
   });
 
   it('deletes a payment and recalculates the parent order', async () => {
@@ -122,6 +155,14 @@ describe('PgPaymentRepository', () => {
       },
     });
     expect(normalizedSql(database.queries)).toContain('DELETE FROM payments WHERE payment_id = $1');
+
+    const auditInsert = database.queries.find(
+      (q) => /INSERT INTO audit_log/i.test(q.text) && /related_payment_id/i.test(q.text),
+    );
+    expect(auditInsert).toBeDefined();
+    expect(auditInsert!.params[0]).toBe('payments.delete');
+    expect(auditInsert!.params[1]).toBe('payment');
+    expect(auditInsert!.params[10]).toBe(30);
   });
 });
 

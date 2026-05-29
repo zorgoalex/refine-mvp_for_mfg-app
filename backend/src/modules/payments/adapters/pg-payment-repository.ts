@@ -1,5 +1,6 @@
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -92,8 +93,9 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
         action: 'payments.create',
         paymentId: payment.paymentId,
         orderId: payment.orderId,
-        actorUserId: command.currentUser.id,
+        currentUser: command.currentUser,
         requestId: command.requestId,
+        after: { ...payment },
       });
 
       return { payment, order: orderSummary };
@@ -144,8 +146,9 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
         paymentId: payment.paymentId,
         orderId: payment.orderId,
         previousOrderId,
-        actorUserId: command.currentUser.id,
+        currentUser: command.currentUser,
         requestId: command.requestId,
+        after: { ...payment },
       });
 
       return { payment, order: orderSummary ?? (await recalculateOrderPaymentState(tx, nextOrder)) };
@@ -170,8 +173,9 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
         action: 'payments.delete',
         paymentId: command.paymentId,
         orderId,
-        actorUserId: command.currentUser.id,
+        currentUser: command.currentUser,
         requestId: command.requestId,
+        before: { paymentId: command.paymentId, orderId },
       });
 
       return { paymentId: command.paymentId, order: orderSummary, deleted: true };
@@ -331,27 +335,27 @@ async function writeAudit(
     paymentId: number;
     orderId: number;
     previousOrderId?: number;
-    actorUserId: string;
+    currentUser: CurrentUser;
     requestId?: string;
+    before?: Record<string, unknown> | null;
+    after?: Record<string, unknown> | null;
   },
 ): Promise<void> {
-  await tx.query(
-    `
-    INSERT INTO audit_log (event, entity_type, entity_id, user_id, request_id, metadata_json)
-    VALUES ($1, 'payment', $2, $3, $4, $5::jsonb)
-    `,
-    [
-      event.action,
-      String(event.paymentId),
-      event.actorUserId,
-      event.requestId ?? 'payment-command',
-      JSON.stringify({
-        source: 'backend-payments-command',
-        orderId: event.orderId,
-        previousOrderId: event.previousOrderId ?? null,
-      }),
-    ],
-  );
+  await auditService.record(tx, {
+    event: event.action,
+    entityType: 'payment',
+    entityId: event.paymentId,
+    actorUserId: event.currentUser.id,
+    actorUsername: event.currentUser.username,
+    actorRole: event.currentUser.role,
+    requestId: event.requestId ?? 'payment-command',
+    source: 'backend-payments-command',
+    relatedOrderId: event.orderId,
+    relatedPaymentId: event.paymentId,
+    before: event.before ?? null,
+    after: event.after ?? null,
+    metadata: { previousOrderId: event.previousOrderId ?? null },
+  });
 }
 
 interface LockedOrder {

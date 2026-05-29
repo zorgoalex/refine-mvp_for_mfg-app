@@ -81,16 +81,16 @@ describe('PgUserRepository', () => {
     expect(String(insert?.params[2])).toMatch(/^\$2[aby]\$/);
 
     const audit = database.queries.find((query) => query.text.includes('INSERT INTO audit_log'));
-    expect(audit?.params).toEqual([
-      'users.create',
-      '20',
-      1,
-      'admin',
-      'admin',
-      'req_users_create',
-      expect.stringContaining('"username":"new_manager"'),
-      null,
-    ]);
+    // AuditService contract: 22 params in canonical order
+    expect(audit?.params[0]).toBe('users.create');         // $1 event
+    expect(audit?.params[1]).toBe('user');                 // $2 entity_type
+    expect(audit?.params[2]).toBe('20');                   // $3 entity_id
+    expect(audit?.params[3]).toBe(1);                      // $4 user_id (actorUserId)
+    expect(audit?.params[4]).toBe('admin');                // $5 username
+    expect(audit?.params[5]).toBe('admin');                // $6 role_code / role
+    expect(audit?.params[6]).toBe('req_users_create');     // $7 request_id
+    expect(audit?.params[7]).toBe('backend-users-command'); // $8 source
+    expect(audit?.params[19]).toContain('"username":"new_manager"'); // $20 after_json
   });
 
   it('maps duplicate username/email violations to UserAlreadyExistsError', async () => {
@@ -145,6 +145,35 @@ describe('PgUserRepository', () => {
     expect(database.queries[2].params).toContain('users.change_password');
   });
 
+  it('routes createUser audit through AuditService contract with source column', async () => {
+    const database = new FakeUserDatabase([], [
+      {
+        match: 'INSERT INTO users',
+        rows: [userRow({ user_id: 42, username: 'E2E-Тест-user', role_id: 10, role_code: 'manager' })],
+      },
+      { match: 'INSERT INTO audit_log', rows: [] },
+    ]);
+    const repository = new PgUserRepository(database);
+
+    await repository.createUser({
+      currentUser: currentUser('admin', '1'),
+      requestId: 'req_audit_contract',
+      dto: {
+        username: 'E2E-Тест-user',
+        email: 'e2e-test-user@example.test',
+        password: 'secure-password',
+        role: 'manager',
+        fullName: 'E2E Test User',
+      },
+    });
+
+    const audit = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
+    expect(audit).toBeDefined();
+    expect(audit?.text).toContain('source');
+    expect(audit?.params).toContain('backend-users-command');
+    expect(audit?.params).toContain('users.create');
+  });
+
   it('deactivates a user, revokes sessions, and writes audit metadata', async () => {
     const database = new FakeUserDatabase([], [
       { match: 'UPDATE users u', rows: [userRow({ user_id: 10, is_active: false })] },
@@ -163,7 +192,8 @@ describe('PgUserRepository', () => {
 
     const audit = database.queries.find((query) => query.text.includes('INSERT INTO audit_log'));
     expect(audit?.params[0]).toBe('users.deactivate');
-    expect(audit?.params[7]).toBe(JSON.stringify({ revokedSessions: 1 }));
+    expect(audit?.params[7]).toBe('backend-users-command'); // $8 source
+    expect(audit?.params[21]).toBe(JSON.stringify({ revokedSessions: 1 })); // $22 metadata_json
   });
 });
 
