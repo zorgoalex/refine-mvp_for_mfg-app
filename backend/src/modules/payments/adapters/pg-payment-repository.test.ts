@@ -98,6 +98,30 @@ describe('PgPaymentRepository', () => {
     expect(normalizedSql(database.queries)).not.toContain('UPDATE payments');
   });
 
+  it('createPayment writes a query-ready audit row with related_payment_id and event', async () => {
+    const database = createDatabase();
+    const repository = new PgPaymentRepository(database.service);
+
+    await repository.createPayment({
+      currentUser: currentUser(),
+      dto: {
+        orderId: 15,
+        typePaidId: 1,
+        amount: 250,
+        paymentDate: '2026-05-01',
+      },
+      requestId: 'request-audit',
+    });
+
+    const auditInsert = database.queries.find(
+      (q) =>
+        /INSERT INTO audit_log/i.test(q.text) && /related_payment_id/i.test(q.text),
+    );
+    expect(auditInsert).toBeDefined();
+    expect(auditInsert!.params).toContain('payments.create');
+    expect(auditInsert!.params).toContain(15);
+  });
+
   it('deletes a payment and recalculates the parent order', async () => {
     const database = createDatabase({
       paymentOrderId: 15,
