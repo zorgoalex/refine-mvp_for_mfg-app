@@ -24,6 +24,7 @@ interface OrderExportHeaderRow extends QueryResultRow {
   order_id: string | number;
   order_name: string;
   order_date: string | Date;
+  client_id: string | number | null;
   client_name: string | null;
   client_phone: string | null;
   total_area: string | number | null;
@@ -83,10 +84,10 @@ export class PgOrderExporter implements OrderExportPort {
   }
 
   async exportToGoogleDrive(command: ExportOrderCommand): Promise<ExportOrderResponseDto> {
-    const payload = await this.database.transaction(async (tx) => {
-      const payload = await this.buildPayload(tx, command);
+    const { payload, clientId } = await this.database.transaction(async (tx) => {
+      const { payload, clientId } = await this.buildPayload(tx, command);
       await this.writeAuditStart(tx, command);
-      return payload;
+      return { payload, clientId };
     });
     const gasResponse = await this.callGas(payload);
 
@@ -100,6 +101,7 @@ export class PgOrderExporter implements OrderExportPort {
       requestId: command.requestId ?? DEFAULT_REQUEST_ID,
       source: SOURCE,
       relatedOrderId: command.orderId,
+      relatedClientId: clientId ?? null,
       metadata: {
         target: 'google-drive',
         fileName: gasResponse.fileName ?? command.request.fileName ?? payload.fileName,
@@ -138,8 +140,9 @@ export class PgOrderExporter implements OrderExportPort {
     const doweling = await readDoweling(tx, command.orderId);
     const orderDate = parseDate(header.order_date);
     const fileName = command.request.fileName ?? generateExportFileName(header);
+    const clientId = header.client_id != null ? Number(header.client_id) : null;
 
-    return {
+    const payload = {
       apiKey: this.options.gasApiKey,
       fileName,
       orderName: header.order_name,
@@ -178,6 +181,8 @@ export class PgOrderExporter implements OrderExportPort {
       issueDate: formatDateForPayload(header.issue_date),
       productionStatusName: header.production_status_name ?? '',
     };
+
+    return { payload, clientId };
   }
 
   private async callGas(payload: Record<string, unknown>): Promise<GasExportResponse> {
@@ -245,7 +250,7 @@ async function readHeader(
   const result = await database.query<OrderExportHeaderRow>(
     `
     SELECT
-      o.order_id, o.order_name, o.order_date, c.client_name,
+      o.order_id, o.order_name, o.order_date, o.client_id, c.client_name,
       phone.client_phone,
       o.total_area, o.planned_completion_date,
       os.order_status_name, ps.payment_status_name,

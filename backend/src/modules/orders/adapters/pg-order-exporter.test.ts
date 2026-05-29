@@ -85,9 +85,18 @@ describe('PgOrderExporter', () => {
     );
     expect(successAudit).toBeDefined();
     expect(successAudit!.text).toMatch(/related_order_id/i);
-    expect(successAudit!.params).toContain('orders.export');
-    expect(successAudit!.params).toContain('backend-orders-command');
-    expect(successAudit!.params).toContain(42);
+    // Param indices per AUDIT_INSERT: [0]=event [1]=entity_type [2]=entity_id [3]=user_id
+    // [4]=username [5]=role_code [6]=request_id [7]=source [8]=related_order_id
+    // [9]=related_client_id ... [21]=metadata_json
+    expect(successAudit!.params[0]).toBe('orders.export');
+    expect(successAudit!.params[4]).toBe('manager');       // actorUsername
+    expect(successAudit!.params[5]).toBe('manager');       // actorRole / role_code
+    expect(successAudit!.params[6]).toBe('req_export');    // requestId
+    expect(successAudit!.params[7]).toBe('backend-orders-command'); // source
+    expect(successAudit!.params[8]).toBe(42);              // related_order_id
+    expect(successAudit!.params[9]).toBe(7);               // related_client_id (from headerRow client_id=7)
+    const metadata = JSON.parse(successAudit!.params[21] as string);
+    expect(metadata).toMatchObject({ target: 'google-drive' });
   });
 
   it('rejects unknown orders before calling GAS', async () => {
@@ -223,6 +232,7 @@ function headerRow(overrides: Partial<QueryResultRow> = {}): QueryResultRow {
     order_id: 42,
     order_name: 'ORD-42',
     order_date: '2026-05-02',
+    client_id: 7,
     client_name: 'Client A',
     client_phone: '+77000000000',
     total_area: 1.5,
