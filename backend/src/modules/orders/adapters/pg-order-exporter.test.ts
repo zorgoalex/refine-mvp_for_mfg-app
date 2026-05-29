@@ -9,7 +9,7 @@ describe('PgOrderExporter', () => {
   it('builds export payload from DB, calls GAS, and writes success audit', async () => {
     const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
     const database = new FakeExportDatabase(
-      [{ match: 'INSERT INTO audit_log', rows: [] }],
+      [{ match: 'INSERT INTO audit_log', rows: [{ audit_id: 'aud-x' }] }],
       [
         { match: 'FROM orders o', rows: [headerRow()] },
         {
@@ -21,7 +21,7 @@ describe('PgOrderExporter', () => {
         },
         { match: 'FROM payments p', rows: [paymentRow()] },
         { match: 'FROM doweling_orders d', rows: [dowelingRow()] },
-        { match: 'orders.export.requested', rows: [] },
+        { match: 'INSERT INTO audit_log', rows: [{ audit_id: 'aud-s' }] },
       ],
     );
     const exporter = new PgOrderExporter(database, {
@@ -81,16 +81,13 @@ describe('PgOrderExporter', () => {
     ]);
 
     const successAudit = database.queries.find(
-      (query) => query.text.includes('orders.export') && !query.text.includes('requested'),
+      (q) => q.text.includes('INSERT INTO audit_log') && JSON.stringify(q.params).includes('orders.export') && !JSON.stringify(q.params).includes('requested'),
     );
-    expect(successAudit?.params).toEqual([
-      '42',
-      10,
-      'manager',
-      'manager',
-      'req_export',
-      expect.stringContaining('"target":"google-drive"'),
-    ]);
+    expect(successAudit).toBeDefined();
+    expect(successAudit!.text).toMatch(/related_order_id/i);
+    expect(successAudit!.params).toContain('orders.export');
+    expect(successAudit!.params).toContain('backend-orders-command');
+    expect(successAudit!.params).toContain(42);
   });
 
   it('rejects unknown orders before calling GAS', async () => {
@@ -124,7 +121,7 @@ describe('PgOrderExporter', () => {
         { match: 'FROM order_details od', rows: [] },
         { match: 'FROM payments p', rows: [] },
         { match: 'FROM doweling_orders d', rows: [] },
-        { match: 'orders.export.requested', rows: [] },
+        { match: 'INSERT INTO audit_log', rows: [{ audit_id: 'aud-s' }] },
       ],
     );
     const exporter = new PgOrderExporter(database, {

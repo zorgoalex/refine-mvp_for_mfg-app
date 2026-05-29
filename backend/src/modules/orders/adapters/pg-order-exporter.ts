@@ -1,5 +1,6 @@
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
@@ -8,6 +9,7 @@ import type { ExportOrderCommand, OrderExportPort } from '../application/order-e
 import type { ExportOrderResponseDto } from '../dto/export-order.dto';
 
 const DEFAULT_REQUEST_ID = 'order-export';
+const SOURCE = 'backend-orders-command';
 
 type FetchLike = typeof fetch;
 
@@ -88,24 +90,22 @@ export class PgOrderExporter implements OrderExportPort {
     });
     const gasResponse = await this.callGas(payload);
 
-    await this.database.query(
-      `
-      INSERT INTO audit_log (event, entity_type, entity_id, user_id, username, role_code, role, request_id, metadata_json)
-      VALUES ('orders.export', 'order', $1, $2, $3, $4, $4, $5, $6::jsonb)
-      `,
-      [
-        String(command.orderId),
-        toNullableUserId(command.currentUser.id),
-        command.currentUser.username,
-        command.currentUser.role,
-        command.requestId ?? DEFAULT_REQUEST_ID,
-        JSON.stringify({
-          target: 'google-drive',
-          fileName: gasResponse.fileName ?? command.request.fileName ?? payload.fileName,
-          xlsxUrlPresent: Boolean(gasResponse.xlsxUrl),
-        }),
-      ],
-    );
+    await auditService.record(this.database, {
+      event: 'orders.export',
+      entityType: 'order',
+      entityId: command.orderId,
+      actorUserId: toNullableUserId(command.currentUser.id),
+      actorUsername: command.currentUser.username,
+      actorRole: command.currentUser.role,
+      requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+      source: SOURCE,
+      relatedOrderId: command.orderId,
+      metadata: {
+        target: 'google-drive',
+        fileName: gasResponse.fileName ?? command.request.fileName ?? payload.fileName,
+        xlsxUrlPresent: Boolean(gasResponse.xlsxUrl),
+      },
+    });
 
     return {
       success: true,
@@ -223,20 +223,18 @@ export class PgOrderExporter implements OrderExportPort {
   }
 
   private async writeAuditStart(tx: TransactionClient, command: ExportOrderCommand): Promise<void> {
-    await tx.query(
-      `
-      INSERT INTO audit_log (event, entity_type, entity_id, user_id, username, role_code, role, request_id, metadata_json)
-      VALUES ('orders.export.requested', 'order', $1, $2, $3, $4, $4, $5, $6::jsonb)
-      `,
-      [
-        String(command.orderId),
-        toNullableUserId(command.currentUser.id),
-        command.currentUser.username,
-        command.currentUser.role,
-        command.requestId ?? DEFAULT_REQUEST_ID,
-        JSON.stringify({ target: 'google-drive' }),
-      ],
-    );
+    await auditService.record(tx, {
+      event: 'orders.export.requested',
+      entityType: 'order',
+      entityId: command.orderId,
+      actorUserId: toNullableUserId(command.currentUser.id),
+      actorUsername: command.currentUser.username,
+      actorRole: command.currentUser.role,
+      requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+      source: SOURCE,
+      relatedOrderId: command.orderId,
+      metadata: { target: 'google-drive' },
+    });
   }
 }
 
