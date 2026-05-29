@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Query, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -51,6 +51,7 @@ export function parseAuditListQuery(
 export class AuditController {
   constructor(@Inject(AuditQueryService) private readonly audit: Pick<AuditQueryService, 'list'>) {}
 
+  @ApiOperation({ summary: 'Список audit events', description: 'Возвращает постраничный список audit log событий с фильтрами по actor, entity, related ids, action и времени. Требует право audit.view.' })
   @Get()
   async list(
     @Req() request: RequestWithCurrentUser,

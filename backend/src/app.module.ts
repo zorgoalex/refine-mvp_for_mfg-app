@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { validateEnvForNest } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
+import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DeadlinesModule } from './modules/deadlines/deadlines.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -24,6 +25,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     }),
     RateLimitModule,
     DatabaseModule,
+    AuditModule,
     AuthModule,
     ClientPhonesModule,
     DeadlinesModule,
