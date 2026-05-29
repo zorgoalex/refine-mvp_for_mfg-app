@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import {
@@ -428,25 +429,18 @@ async function writeUserAudit(
     metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
-  await tx.query(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, username, role_code, role,
-      request_id, after_json, metadata_json
-    )
-    VALUES ($1, 'user', $2, $3, $4, $5, $5, $6, $7::jsonb, $8::jsonb)
-    `,
-    [
-      input.action,
-      String(input.entityId),
-      toNullableUserId(input.command.currentUser.id),
-      input.command.currentUser.username,
-      input.command.currentUser.role,
-      input.command.requestId ?? DEFAULT_REQUEST_ID,
-      input.after ? JSON.stringify(input.after) : null,
-      input.metadata ? JSON.stringify(input.metadata) : null,
-    ],
-  );
+  await auditService.record(tx, {
+    event: input.action,
+    entityType: 'user',
+    entityId: input.entityId,
+    actorUserId: toNullableUserId(input.command.currentUser.id),
+    actorUsername: input.command.currentUser.username,
+    actorRole: input.command.currentUser.role,
+    requestId: input.command.requestId ?? DEFAULT_REQUEST_ID,
+    source: 'backend-users-command',
+    after: input.after ?? null,
+    metadata: input.metadata ?? null,
+  });
 }
 
 function sanitizeUserForAudit(user: UserDto): Record<string, unknown> {
