@@ -14,6 +14,7 @@ import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../
 import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
+import { RowSeparator } from './RowSeparator';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -215,11 +216,6 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
 
     return [];
   }, [productionEventsData, record?.production_status_name, productionStatusIdToCode]);
-
-  // Row separator line
-  const RowSeparator = () => (
-    <div style={{ height: 1, background: '#E5E7EB', margin: 0 }} />
-  );
 
   return (
     <div
