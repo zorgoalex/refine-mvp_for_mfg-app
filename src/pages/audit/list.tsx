@@ -81,11 +81,7 @@ function RelatedIds({ record }: { record: AuditLogEventDto }) {
   if (record.relatedPaymentId != null)
     parts.push(<Tag key="payment" color="green">Платёж #{record.relatedPaymentId}</Tag>);
   if (record.relatedDeadlineId != null)
-    parts.push(
-      <Tooltip key="deadline" title={record.relatedDeadlineId}>
-        <Tag color="orange">Дедлайн</Tag>
-      </Tooltip>,
-    );
+    parts.push(<Tag key="deadline" color="orange">Дедлайн #{record.relatedDeadlineId}</Tag>);
   if (record.relatedProductionEventId != null)
     parts.push(<Tag key="prod" color="purple">Произв. #{record.relatedProductionEventId}</Tag>);
   if (parts.length === 0) return <span style={{ color: '#bfbfbf' }}>—</span>;
@@ -436,7 +432,7 @@ export const AuditList: React.FC = () => {
           title="Request ID"
           width={130}
           ellipsis
-          render={(value: string | null) =>
+          render={(value: string) =>
             value ? (
               <Tooltip title={value}>
                 <Text code style={{ fontSize: 11 }}>
