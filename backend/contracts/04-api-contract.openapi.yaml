@@ -22,6 +22,8 @@ servers:
     description: Production backend placeholder
 
 tags:
+  - name: Audit
+    description: Журнал аудита событий системы
   - name: Auth
     description: Авторизация, refresh-сессии и текущий пользователь
   - name: Orders
@@ -50,6 +52,115 @@ tags:
     description: Liveness/readiness проверки backend-сервиса
 
 paths:
+  /api/v1/audit:
+    get:
+      tags:
+        - Audit
+      operationId: listAuditLog
+      summary: Список audit events
+      description: Возвращает постраничный список audit log событий с фильтрами по actor, entity, related ids, action и времени. Требует право audit.view.
+      security:
+        - bearerAuth: []
+      x-permission: audit.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: event
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Фильтр по типу события
+        - name: entityType
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Фильтр по типу сущности
+        - name: entityId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Фильтр по ID сущности
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Фильтр по ID пользователя
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Фильтр по источнику
+        - name: relatedOrderId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Фильтр по связанному заказу
+        - name: relatedClientId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Фильтр по связанному клиенту
+        - name: relatedPaymentId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Фильтр по связанному платежу
+        - name: relatedDeadlineId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Фильтр по связанному дедлайну
+        - name: relatedProductionEventId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Фильтр по связанному производственному событию
+        - name: requestId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Фильтр по request/correlation ID
+        - name: createdFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Фильтр по дате создания (от)
+        - name: createdTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Фильтр по дате создания (до)
+      responses:
+        '200':
+          description: Список audit events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/auth/login:
     post:
       tags:
@@ -7477,33 +7588,73 @@ components:
       type: object
       required:
         - auditId
-        - entityType
-        - entityId
-        - action
-        - userId
+        - event
         - requestId
         - createdAt
       properties:
         auditId:
           type: string
+        event:
+          type: string
+          example: orders.update
         entityType:
           type: string
+          nullable: true
           example: order
         entityId:
           type: string
+          nullable: true
           example: '123'
-        action:
-          type: string
-          example: orders.update
         userId:
           type: integer
-          format: int64
           nullable: true
         username:
           type: string
           nullable: true
         role:
-          $ref: '#/components/schemas/UserRole'
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        relatedOrderId:
+          type: integer
+          nullable: true
+        relatedClientId:
+          type: integer
+          nullable: true
+        relatedPaymentId:
+          type: integer
+          nullable: true
+        relatedDeadlineId:
+          type: integer
+          nullable: true
+        relatedProductionEventId:
+          type: integer
+          nullable: true
+        statusField:
+          type: string
+          nullable: true
+        statusId:
+          type: integer
+          nullable: true
+        statusName:
+          type: string
+          nullable: true
+        statusCode:
+          type: string
+          nullable: true
+        stageCode:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+        ip:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
         before:
           type: object
           nullable: true
@@ -7516,14 +7667,10 @@ components:
           type: object
           nullable: true
           additionalProperties: true
-        requestId:
-          type: string
-        ip:
-          type: string
+        metadata:
+          type: object
           nullable: true
-        userAgent:
-          type: string
-          nullable: true
+          additionalProperties: true
         createdAt:
           type: string
           format: date-time
