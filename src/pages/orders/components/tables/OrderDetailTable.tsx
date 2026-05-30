@@ -222,6 +222,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
   const [currentFilmId, setCurrentFilmId] = useState<number | null>(null);
   const [isSumEditable, setIsSumEditable] = useState(false);
+  const [sumContextMenu, setSumContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(50);
@@ -618,6 +619,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     setSelectedMaterialId(null);
     setDimensionValidationError(null);
     setIsSumEditable(false);
+    setSumContextMenu(null);
     setDetailEditing(false);
     form.resetFields();
 
@@ -952,58 +954,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                 if (!isSumEditable) {
                   e.preventDefault();
                   e.stopPropagation();
-
-                  // Remove any existing context menus first
-                  const existingMenus = document.querySelectorAll('.sum-field-context-menu');
-                  existingMenus.forEach(menu => menu.remove());
-
-                  // Create context menu
-                  const menu = document.createElement('div');
-                  menu.className = 'ant-dropdown sum-field-context-menu';
-                  menu.style.position = 'fixed';
-                  menu.style.left = `${e.clientX}px`;
-                  menu.style.top = `${e.clientY}px`;
-                  menu.style.zIndex = '9999';
-
-                  const menuContent = `
-                    <ul class="ant-dropdown-menu" style="background: white; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;">
-                      <li class="ant-dropdown-menu-item" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                        <span role="img" aria-label="edit" style="color: #1890ff;">
-                          <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
-                            <path d="M257.7 752c2 0 4-.2 6-.5L431.9 722c2-.4 3.9-1.3 5.3-2.8l423.9-423.9a9.96 9.96 0 000-14.1L694.9 114.9c-1.9-1.9-4.4-2.9-7.1-2.9s-5.2 1-7.1 2.9L256.8 538.8c-1.5 1.5-2.4 3.3-2.8 5.3l-29.5 168.2a33.5 33.5 0 009.4 29.8c6.6 6.4 14.9 9.9 23.8 9.9zm67.4-174.4L687.8 215l73.3 73.3-362.7 362.6-88.9 15.7 15.6-89zM880 836H144c-17.7 0-32 14.3-32 32v36c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-36c0-17.7-14.3-32-32-32z"></path>
-                          </svg>
-                        </span>
-                        <span style="color: #1890ff;">Изменить значение в ячейке</span>
-                      </li>
-                    </ul>
-                  `;
-                  menu.innerHTML = menuContent;
-                  document.body.appendChild(menu);
-
-                  const menuItem = menu.querySelector('.ant-dropdown-menu-item');
-                  menuItem?.addEventListener('click', () => {
-                    setIsSumEditable(true);
-                    menu.remove();
-                  });
-
-                  menuItem?.addEventListener('mouseenter', () => {
-                    (menuItem as HTMLElement).style.backgroundColor = '#e6f7ff';
-                  });
-
-                  menuItem?.addEventListener('mouseleave', () => {
-                    (menuItem as HTMLElement).style.backgroundColor = 'white';
-                  });
-
-                  const closeMenu = (event: MouseEvent) => {
-                    if (!menu.contains(event.target as Node)) {
-                      menu.remove();
-                      document.removeEventListener('click', closeMenu);
-                    }
-                  };
-
-                  setTimeout(() => {
-                    document.addEventListener('click', closeMenu);
-                  }, 0);
+                  setSumContextMenu({ x: e.clientX, y: e.clientY });
                 }
               }}
               onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
@@ -1808,6 +1759,43 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               position: 'fixed',
               left: rowContextMenu?.x ?? -9999,
               top: rowContextMenu?.y ?? -9999,
+              width: 1,
+              height: 1,
+            }}
+          />
+        </Dropdown>
+
+        <Dropdown
+          open={!!sumContextMenu}
+          placement="bottomLeft"
+          destroyPopupOnHide={false}
+          menu={{
+            items: [
+              {
+                key: 'edit-sum',
+                icon: <EditOutlined style={{ color: '#1890ff' }} />,
+                label: <span style={{ color: '#1890ff' }}>Изменить значение в ячейке</span>,
+              },
+            ],
+            onClick: () => {
+              setIsSumEditable(true);
+              setSumContextMenu(null);
+            },
+          }}
+          getPopupContainer={() => document.body}
+          overlayClassName="order-details-sum-context-dropdown"
+          trigger={['contextMenu']}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) {
+              setSumContextMenu(null);
+            }
+          }}
+        >
+          <span
+            style={{
+              position: 'fixed',
+              left: sumContextMenu?.x ?? -9999,
+              top: sumContextMenu?.y ?? -9999,
               width: 1,
               height: 1,
             }}

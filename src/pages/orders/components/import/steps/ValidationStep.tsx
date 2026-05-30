@@ -1,12 +1,62 @@
 // Step 4: Validation with inline editing and statistics
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { Table, InputNumber, Input, Select, Typography, Card, Row, Col, Statistic, Tag, Tooltip, Button, Popconfirm, Alert, Space } from 'antd';
 import { DeleteOutlined, CheckCircleOutlined, ExclamationCircleOutlined, WarningOutlined, SwapOutlined } from '@ant-design/icons';
 import type { ValidatedRow, ReferenceData } from '../types/importTypes';
 import type { ImportStats, UnresolvedReferences } from '../hooks/useImportValidation';
 
 const { Text } = Typography;
+
+const NumberEditor: React.FC<{ value: number | null | undefined; onChange: (val: number | null) => void; min?: number }> = ({
+  value,
+  onChange,
+  min = 0,
+}) => (
+  <InputNumber value={value ?? undefined} onChange={(val) => onChange(val)} min={min} size="small" style={{ width: '100%' }} />
+);
+
+const TextEditor: React.FC<{ value: string | null | undefined; onChange: (val: string | null) => void }> = ({ value, onChange }) => (
+  <Input value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} size="small" style={{ width: '100%' }} />
+);
+
+const RefSelectEditor: React.FC<{
+  value: number | null | undefined;
+  items: { id: number; name: string }[];
+  onChange: (val: number | null) => void;
+}> = ({ value, items, onChange }) => (
+  <Select
+    value={value ?? undefined}
+    onChange={(val) => onChange(val ?? null)}
+    options={items.map(item => ({ label: item.name, value: item.id }))}
+    size="small"
+    style={{ width: '100%' }}
+    allowClear
+    placeholder="Выбрать..."
+    showSearch
+    filterOption={(input, option) =>
+      (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
+    }
+  />
+);
+
+const StatusIcon: React.FC<{ row: ValidatedRow }> = ({ row }) => {
+  if (row.isValid && row.warnings.length === 0) {
+    return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
+  }
+  if (!row.isValid) {
+    return (
+      <Tooltip title={row.errors.map(e => e.message).join('; ')}>
+        <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip title={row.warnings.map(w => w.message).join('; ')}>
+      <WarningOutlined style={{ color: '#faad14' }} />
+    </Tooltip>
+  );
+};
 
 interface ValidationStepProps {
   validatedRows: ValidatedRow[];
@@ -27,71 +77,6 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
   onRemoveRow,
   onBatchReplace,
 }) => {
-  // Inline number editor
-  const NumberEditor = useCallback(({ value, onChange, min = 0 }: { value: number | null | undefined; onChange: (val: number | null) => void; min?: number }) => (
-    <InputNumber
-      value={value ?? undefined}
-      onChange={(val) => onChange(val)}
-      min={min}
-      size="small"
-      style={{ width: '100%' }}
-    />
-  ), []);
-
-  // Inline text editor
-  const TextEditor = useCallback(({ value, onChange }: { value: string | null | undefined; onChange: (val: string | null) => void }) => (
-    <Input
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value || null)}
-      size="small"
-      style={{ width: '100%' }}
-    />
-  ), []);
-
-  // Reference select editor
-  const RefSelectEditor = useCallback(({
-    value,
-    items,
-    onChange,
-  }: {
-    value: number | null | undefined;
-    items: { id: number; name: string }[];
-    onChange: (val: number | null) => void;
-  }) => (
-    <Select
-      value={value ?? undefined}
-      onChange={(val) => onChange(val ?? null)}
-      options={items.map(item => ({ label: item.name, value: item.id }))}
-      size="small"
-      style={{ width: '100%' }}
-      allowClear
-      placeholder="Выбрать..."
-      showSearch
-      filterOption={(input, option) =>
-        (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
-      }
-    />
-  ), []);
-
-  // Status icon
-  const StatusIcon = useCallback(({ row }: { row: ValidatedRow }) => {
-    if (row.isValid && row.warnings.length === 0) {
-      return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
-    }
-    if (!row.isValid) {
-      return (
-        <Tooltip title={row.errors.map(e => e.message).join('; ')}>
-          <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
-        </Tooltip>
-      );
-    }
-    return (
-      <Tooltip title={row.warnings.map(w => w.message).join('; ')}>
-        <WarningOutlined style={{ color: '#faad14' }} />
-      </Tooltip>
-    );
-  }, []);
-
   const columns = useMemo(() => [
     {
       title: '',
@@ -242,7 +227,7 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
         </Popconfirm>
       ),
     },
-  ], [referenceData, onUpdateRow, onRemoveRow, NumberEditor, TextEditor, RefSelectEditor, StatusIcon]);
+  ], [referenceData, onUpdateRow, onRemoveRow]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

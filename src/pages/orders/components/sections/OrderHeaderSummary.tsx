@@ -15,6 +15,7 @@ import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
+import { RowSeparator } from './RowSeparator';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -313,11 +314,6 @@ export const OrderHeaderSummary: React.FC = () => {
       filmName,
     };
   }, [details, millingTypesMap, edgeTypesMap, filmsMap]);
-
-  // Row separator line
-  const RowSeparator = () => (
-    <div style={{ height: 1, background: '#E5E7EB', margin: 0 }} />
-  );
 
   return (
     <>
