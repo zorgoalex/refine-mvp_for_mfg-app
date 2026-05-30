@@ -389,6 +389,23 @@ npm run dev:full
 
 ## Тесты
 
+### Регрессионный набор фронтенда
+
+```bash
+npm run test:e2e:regression
+```
+
+Запускает полный локальный mocked регрессионный набор через Playwright (Chromium):
+
+- Рендер всех зарегистрированных frontend-страниц и runtime-config smoke.
+- CRUD-покрытие справочников: все ресурсы из `reference-workflows.spec.ts`, включая четыре ранее непокрытых (`payments`, `users`, `order_workshops`, `order_resource_requirements`).
+- Полный order+payment finance flow: добавление деталей, кнопки "Пересчитать суммы" / "Групповые действия" / "Удалить выбранные", инлайн-редактирование деталей и платежей, частичная и полная оплата, итого/оплачено/остаток, статус оплаты.
+- Покрытие кнопок страницы заказов: "Выгрузка JSON", "Загрузка JSON", "Фильтры", "Применить".
+
+Скриншоты артефактов сохраняются в `spec_erp/logs/regression/order/` и `spec_erp/logs/regression/reference/` (автоматически создаются при запуске).
+
+Набор не требует поднятого stage/backend/PostgreSQL: все API-вызовы перехватываются Playwright route-моками. Рекомендуется запускать после значимых изменений frontend UI, форм, таблиц, вкладок или data-provider/mapping слоя.
+
 Unit/API:
 
 ```bash

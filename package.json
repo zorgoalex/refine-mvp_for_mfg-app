@@ -43,7 +43,8 @@
     "test:runtime-config-canary": "node scripts/check-runtime-config-canary.js",
     "smoke:runtime-config": "node scripts/smoke-runtime-config.js",
     "smoke:staging-gates": "node scripts/smoke-staging-gates.js",
-    "smoke:stage-cutover": "node scripts/stage-cutover-smoke.js"
+    "smoke:stage-cutover": "node scripts/stage-cutover-smoke.js",
+    "test:e2e:regression": "playwright test tests/regression tests/frontend-pages-smoke.spec.ts tests/frontend-runtime-config.spec.ts tests/order-workflows.spec.ts tests/reference-workflows.spec.ts --project=chromium"
   },
   "keywords": [],
   "author": "",
