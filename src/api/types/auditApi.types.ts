@@ -1,7 +1,7 @@
 export interface AuditLogEventDto {
   auditId: string;
   event: string;
-  entityType: string;
+  entityType: string | null;
   entityId: string | null;
   userId: number | null;
   username: string | null;
@@ -10,14 +10,14 @@ export interface AuditLogEventDto {
   relatedOrderId: number | null;
   relatedClientId: number | null;
   relatedPaymentId: number | null;
-  relatedDeadlineId: string | null;
+  relatedDeadlineId: number | null;
   relatedProductionEventId: number | null;
   statusField: string | null;
   statusId: number | null;
   statusName: string | null;
   statusCode: string | null;
   stageCode: string | null;
-  requestId: string | null;
+  requestId: string;
   ip: string | null;
   userAgent: string | null;
   before: unknown;
@@ -51,7 +51,7 @@ export interface AuditLogListQuery {
   relatedOrderId?: number;
   relatedClientId?: number;
   relatedPaymentId?: number;
-  relatedDeadlineId?: string;
+  relatedDeadlineId?: number;
   relatedProductionEventId?: number;
   requestId?: string;
   createdFrom?: string;

@@ -81,13 +81,13 @@ describe('auditApi', () => {
     expect(typeof result.requestId).toBe('string');
   });
 
-  it('passes relatedDeadlineId as a string query param', async () => {
+  it('passes relatedDeadlineId as a numeric query param', async () => {
     const fetchMock = mockFetch(createListResponse([]));
 
-    await auditApi.list({ relatedDeadlineId: 'dl-uuid-123' });
+    await auditApi.list({ relatedDeadlineId: 42 });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/audit?relatedDeadlineId=dl-uuid-123',
+      '/api/v1/audit?relatedDeadlineId=42',
       expect.objectContaining({ method: 'GET' }),
     );
   });

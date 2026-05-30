@@ -39,7 +39,7 @@ interface FilterValues {
   relatedOrderId?: number;
   relatedClientId?: number;
   relatedPaymentId?: number;
-  relatedDeadlineId?: string;
+  relatedDeadlineId?: number;
   relatedProductionEventId?: number;
   requestId?: string;
   createdFrom?: string;
@@ -158,7 +158,7 @@ export const AuditList: React.FC = () => {
     if (values.relatedOrderId != null) next.relatedOrderId = values.relatedOrderId;
     if (values.relatedClientId != null) next.relatedClientId = values.relatedClientId;
     if (values.relatedPaymentId != null) next.relatedPaymentId = values.relatedPaymentId;
-    if (values.relatedDeadlineId) next.relatedDeadlineId = values.relatedDeadlineId;
+    if (values.relatedDeadlineId != null) next.relatedDeadlineId = values.relatedDeadlineId;
     if (values.relatedProductionEventId != null)
       next.relatedProductionEventId = values.relatedProductionEventId;
     if (values.requestId) next.requestId = values.requestId;
@@ -309,8 +309,8 @@ export const AuditList: React.FC = () => {
                 </Form.Item>
               </div>
               <div className="aff-item">
-                <Form.Item name="relatedDeadlineId" label="Дедлайн UUID">
-                  <Input allowClear placeholder="uuid" size="small" style={{ width: 130 }} />
+                <Form.Item name="relatedDeadlineId" label="Дедлайн #">
+                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 80 }} />
                 </Form.Item>
               </div>
               <div className="aff-item">
@@ -411,7 +411,7 @@ export const AuditList: React.FC = () => {
           width={130}
           render={(_, record) => (
             <div>
-              <Text style={{ fontSize: 12 }}>{record.entityType}</Text>
+              <Text style={{ fontSize: 12 }}>{record.entityType ?? <span style={{ color: '#bfbfbf' }}>—</span>}</Text>
               {record.entityId && (
                 <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
                   #{record.entityId}
