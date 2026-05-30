@@ -65,6 +65,10 @@ export interface OrderSaveAuditEvent {
   action: 'orders.create' | 'orders.update';
   orderId: number;
   actorUserId: string;
+  actorUsername?: string | null;
+  actorRole?: string | null;
+  clientId?: number | null;
+  requestId?: string;
 }
 
 export interface OrderDeleteAuditInput {

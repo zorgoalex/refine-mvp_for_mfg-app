@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto';
 import JSZip from 'jszip';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type {
   ExportedOrderSnapshotBatchFile,
@@ -47,6 +49,8 @@ import { OrderNotFoundError } from '../errors/order.errors';
 
 type AnyRow = QueryResultRow & Record<string, unknown>;
 type ImportStatus = 'created' | 'updated' | 'noop';
+
+const SOURCE = 'backend-orders-command';
 
 const SNAPSHOT_ENTITY_TYPES = {
   order: 'order',
@@ -94,7 +98,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
     const snapshot = await this.database.transaction(async (tx) => {
       await this.assertCanExport(tx, command);
       const built = await buildSnapshot(tx, command.orderId);
-      await writeAudit(tx, 'orders.snapshot_export', command.currentUser.id, command.orderId, {
+      await writeAudit(tx, 'orders.snapshot_export', command.currentUser, command.orderId, built.data.order.clientId, {
         requestId: command.requestId,
         formatVersion: ORDER_SNAPSHOT_FORMAT_VERSION,
         serviceVersion: ORDER_SNAPSHOT_SERVICE_VERSION,
@@ -154,8 +158,9 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
         await writeAudit(
           tx,
           result.status === 'noop' ? 'orders.snapshot_import.noop' : 'orders.snapshot_import',
-          command.currentUser.id,
+          command.currentUser,
           result.orderId,
+          null, // relatedClientId unavailable before payload build; local clientId not returned from importSnapshotInTransaction
           {
             requestId: command.requestId,
             payloadHash,
@@ -2045,20 +2050,27 @@ async function setSessionUser(tx: TransactionClient, userId: string): Promise<vo
   await tx.query('SELECT set_session_user($1)', [userId]);
 }
 
-async function writeAudit(
+export async function writeAudit(
   tx: TransactionClient,
   event: string,
-  userId: string,
+  currentUser: CurrentUser,
   orderId: number,
+  clientId: number | null,
   metadata: Record<string, unknown>,
 ): Promise<void> {
-  await tx.query(
-    `
-    INSERT INTO audit_log (event, entity_type, entity_id, user_id, request_id, metadata_json)
-    VALUES ($1, 'order', $2, $3, $4, $5::jsonb)
-    `,
-    [event, String(orderId), toNullableUserId(userId), metadata.requestId ?? 'order-snapshot', JSON.stringify(metadata)],
-  );
+  await auditService.record(tx, {
+    event,
+    entityType: 'order',
+    entityId: orderId,
+    actorUserId: toNullableUserId(currentUser.id),
+    actorUsername: currentUser.username,
+    actorRole: currentUser.role,
+    requestId: (metadata.requestId as string | undefined) ?? 'order-snapshot',
+    source: SOURCE,
+    relatedOrderId: orderId,
+    relatedClientId: clientId ?? null,
+    metadata,
+  });
 }
 
 function validateDateOnly(value: string, field: string): void {

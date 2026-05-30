@@ -1,5 +1,6 @@
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
@@ -8,6 +9,7 @@ import type { ExportOrderCommand, OrderExportPort } from '../application/order-e
 import type { ExportOrderResponseDto } from '../dto/export-order.dto';
 
 const DEFAULT_REQUEST_ID = 'order-export';
+const SOURCE = 'backend-orders-command';
 
 type FetchLike = typeof fetch;
 
@@ -22,6 +24,7 @@ interface OrderExportHeaderRow extends QueryResultRow {
   order_id: string | number;
   order_name: string;
   order_date: string | Date;
+  client_id: string | number | null;
   client_name: string | null;
   client_phone: string | null;
   total_area: string | number | null;
@@ -81,31 +84,30 @@ export class PgOrderExporter implements OrderExportPort {
   }
 
   async exportToGoogleDrive(command: ExportOrderCommand): Promise<ExportOrderResponseDto> {
-    const payload = await this.database.transaction(async (tx) => {
-      const payload = await this.buildPayload(tx, command);
+    const { payload, clientId } = await this.database.transaction(async (tx) => {
+      const { payload, clientId } = await this.buildPayload(tx, command);
       await this.writeAuditStart(tx, command);
-      return payload;
+      return { payload, clientId };
     });
     const gasResponse = await this.callGas(payload);
 
-    await this.database.query(
-      `
-      INSERT INTO audit_log (event, entity_type, entity_id, user_id, username, role_code, role, request_id, metadata_json)
-      VALUES ('orders.export', 'order', $1, $2, $3, $4, $4, $5, $6::jsonb)
-      `,
-      [
-        String(command.orderId),
-        toNullableUserId(command.currentUser.id),
-        command.currentUser.username,
-        command.currentUser.role,
-        command.requestId ?? DEFAULT_REQUEST_ID,
-        JSON.stringify({
-          target: 'google-drive',
-          fileName: gasResponse.fileName ?? command.request.fileName ?? payload.fileName,
-          xlsxUrlPresent: Boolean(gasResponse.xlsxUrl),
-        }),
-      ],
-    );
+    await auditService.record(this.database, {
+      event: 'orders.export',
+      entityType: 'order',
+      entityId: command.orderId,
+      actorUserId: toNullableUserId(command.currentUser.id),
+      actorUsername: command.currentUser.username,
+      actorRole: command.currentUser.role,
+      requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+      source: SOURCE,
+      relatedOrderId: command.orderId,
+      relatedClientId: clientId ?? null,
+      metadata: {
+        target: 'google-drive',
+        fileName: gasResponse.fileName ?? command.request.fileName ?? payload.fileName,
+        xlsxUrlPresent: Boolean(gasResponse.xlsxUrl),
+      },
+    });
 
     return {
       success: true,
@@ -138,8 +140,9 @@ export class PgOrderExporter implements OrderExportPort {
     const doweling = await readDoweling(tx, command.orderId);
     const orderDate = parseDate(header.order_date);
     const fileName = command.request.fileName ?? generateExportFileName(header);
+    const clientId = header.client_id != null ? Number(header.client_id) : null;
 
-    return {
+    const payload = {
       apiKey: this.options.gasApiKey,
       fileName,
       orderName: header.order_name,
@@ -178,6 +181,8 @@ export class PgOrderExporter implements OrderExportPort {
       issueDate: formatDateForPayload(header.issue_date),
       productionStatusName: header.production_status_name ?? '',
     };
+
+    return { payload, clientId };
   }
 
   private async callGas(payload: Record<string, unknown>): Promise<GasExportResponse> {
@@ -223,20 +228,18 @@ export class PgOrderExporter implements OrderExportPort {
   }
 
   private async writeAuditStart(tx: TransactionClient, command: ExportOrderCommand): Promise<void> {
-    await tx.query(
-      `
-      INSERT INTO audit_log (event, entity_type, entity_id, user_id, username, role_code, role, request_id, metadata_json)
-      VALUES ('orders.export.requested', 'order', $1, $2, $3, $4, $4, $5, $6::jsonb)
-      `,
-      [
-        String(command.orderId),
-        toNullableUserId(command.currentUser.id),
-        command.currentUser.username,
-        command.currentUser.role,
-        command.requestId ?? DEFAULT_REQUEST_ID,
-        JSON.stringify({ target: 'google-drive' }),
-      ],
-    );
+    await auditService.record(tx, {
+      event: 'orders.export.requested',
+      entityType: 'order',
+      entityId: command.orderId,
+      actorUserId: toNullableUserId(command.currentUser.id),
+      actorUsername: command.currentUser.username,
+      actorRole: command.currentUser.role,
+      requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+      source: SOURCE,
+      relatedOrderId: command.orderId,
+      metadata: { target: 'google-drive' },
+    });
   }
 }
 
@@ -247,7 +250,7 @@ async function readHeader(
   const result = await database.query<OrderExportHeaderRow>(
     `
     SELECT
-      o.order_id, o.order_name, o.order_date, c.client_name,
+      o.order_id, o.order_name, o.order_date, o.client_id, c.client_name,
       phone.client_phone,
       o.total_area, o.planned_completion_date,
       os.order_status_name, ps.payment_status_name,

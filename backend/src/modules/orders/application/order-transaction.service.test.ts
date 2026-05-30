@@ -385,7 +385,7 @@ describe('OrderTransactionService', () => {
     });
     expect(result.version).toBe(1);
     expect(transactions.state.auditEvents).toEqual([
-      { action: 'orders.create', orderId: 100, actorUserId: 'user_manager' },
+      { action: 'orders.create', orderId: 100, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 },
     ]);
     expect(transactions.calls).toEqual([
       'begin',
@@ -493,7 +493,7 @@ describe('OrderTransactionService', () => {
     expect(result.payments).toHaveLength(0);
     expect(result.totals.totalAmount).toBe(10000);
     expect(transactions.state.auditEvents).toEqual([
-      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager' },
+      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 },
     ]);
     expect(transactions.calls.slice(0, 6)).toEqual([
       'begin',
@@ -635,7 +635,7 @@ describe('OrderTransactionService', () => {
       transactions.calls.indexOf('upsertDowelingLinks'),
     );
     expect(transactions.state.auditEvents).toEqual([
-      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager' },
+      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 },
     ]);
   });
 
@@ -680,7 +680,7 @@ describe('OrderTransactionService', () => {
     expect(result.version).toBe(1);
     expect(result.details[0].quantity).toBe(3);
     expect(transactions.state.auditEvents).toEqual([
-      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager' },
+      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 },
     ]);
   });
 

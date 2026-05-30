@@ -3,6 +3,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { auditService } from '../../../common/audit/audit.service';
 import { PgOrderReadRepository } from './pg-order-read-repository';
 import type {
   DeleteOrderCommand,
@@ -624,18 +625,19 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   async writeAuditEvent(event: OrderSaveAuditEvent): Promise<void> {
-    await this.tx.query(
-      `
-      INSERT INTO audit_log (event, entity_type, entity_id, user_id, request_id, metadata_json)
-      VALUES ($1, 'order', $2, $3, 'order-transaction', $4::jsonb)
-      `,
-      [
-        event.action,
-        String(event.orderId),
-        event.actorUserId,
-        JSON.stringify({ source: 'backend-orders-transaction' }),
-      ],
-    );
+    await auditService.record(this.tx, {
+      event: event.action,
+      entityType: 'order',
+      entityId: event.orderId,
+      actorUserId: event.actorUserId,
+      actorUsername: event.actorUsername ?? null,
+      actorRole: event.actorRole ?? null,
+      requestId: event.requestId ?? 'order-transaction',
+      source: SOURCE,
+      relatedOrderId: event.orderId,
+      relatedClientId: event.clientId ?? null,
+      metadata: { commandName: event.action },
+    });
   }
 
   async writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string> {
