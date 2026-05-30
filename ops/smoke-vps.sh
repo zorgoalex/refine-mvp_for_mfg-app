@@ -189,6 +189,57 @@ check_live_schema() {
   log "OK live DB deadline_events idempotency schema"
 }
 
+# Audit log normalized dimensions are required whenever the backend runs:
+# AuditService writes them on every command and GET /api/v1/audit selects them.
+# Migrations 004 (source/related_order_id/.../stage_code) and 012
+# (related_payment_id/related_deadline_id) must be applied to the target DB or
+# the audit write/read paths fail at first request. Checked unconditionally.
+check_audit_schema() {
+  local query
+  local result
+  local cols="ARRAY['source','related_order_id','related_client_id','related_payment_id','related_deadline_id','related_production_event_id','status_field','status_id','status_name','status_code','stage_code']"
+
+  query="
+    SELECT json_build_object(
+      'auditLogDimensions',
+      (SELECT bool_and(
+         EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name = 'audit_log'
+             AND column_name = t.col
+         ))
+       FROM unnest($cols) AS t(col)),
+      'missing',
+      COALESCE((
+        SELECT string_agg(t.col, ',')
+        FROM unnest($cols) AS t(col)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'audit_log'
+            AND column_name = t.col
+        )
+      ), '')
+    )::text;
+  "
+
+  result="$(
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgresdb \
+      psql -U "$PG_USER" -d "$PG_DB" -tA -v ON_ERROR_STOP=1 -c "$query"
+  )"
+
+  case "$result" in
+    *'"auditLogDimensions" : true'*|*'"auditLogDimensions":true'*)
+      ;;
+    *)
+      fail "Live DB schema drift: audit_log normalized dimension columns are missing (apply migrations 004 and 012). Result: $result"
+      ;;
+  esac
+
+  log "OK live DB audit_log dimension schema"
+}
+
 check_url "https://${HASURA_FQDN}/healthz" "200"
 check_url "https://${BACKEND_FQDN}/health/live" "200"
 check_hasura_cors
@@ -197,6 +248,7 @@ if [[ "$SKIP_DOCKER" == "0" && -f "$COMPOSE_FILE" ]] && command -v docker >/dev/
   cd "$PROJECT_DIR"
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
   check_live_schema
+  check_audit_schema
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T hasura printenv HASURA_GRAPHQL_CORS_DOMAIN | grep -F "$FRONTEND_ORIGIN" >/dev/null \
     || fail "Running Hasura container does not contain FRONTEND_ORIGIN in HASURA_GRAPHQL_CORS_DOMAIN"
 fi
