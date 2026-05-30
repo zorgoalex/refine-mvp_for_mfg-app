@@ -337,7 +337,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   const isOrderDataLoading =
     backendOrderLoading ||
-    (!useBackendOrderRead && (orderLoading || detailsLoading));
+    (mode === 'edit' && !useBackendOrderRead && (orderLoading || detailsLoading));
 
   // Ensure legacy details always have a calculated sum
   useEffect(() => {

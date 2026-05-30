@@ -183,7 +183,7 @@ test.describe('Order finance buttons regression', () => {
         }
 
         // ================================================================
-        // 3. PAYMENT FINANCE: Go to Финансы, add first payment (partial 2000)
+        // 3. PAYMENT FINANCE: Go to Финансы, read final amount, add payments
         // ================================================================
         await orderDialog.getByRole('tab', { name: 'Финансы' }).click();
         // Wait for the tab panel to be active/visible
@@ -196,7 +196,47 @@ test.describe('Order finance buttons regression', () => {
             orderDialog.getByRole('button', { name: /Удалить выбранные/ }),
         ).toBeDisabled({ timeout: 5_000 });
 
-        // ---- Add first payment: 2000 (partial) ----
+        // The Финансы tab panel is the active pane — scope assertions to it.
+        const financeTabPanel = orderDialog.locator('.ant-tabs-tabpane-active');
+
+        // ----------------------------------------------------------------
+        // Read «Финальная сумма (₸)» to derive dynamic payment amounts.
+        // This ensures the test stays self-consistent even if detail prices change.
+        // Fall back to «Сумма заказа» if Финальная сумма is empty/zero.
+        // ----------------------------------------------------------------
+        const finalAmountFormItem = financeTabPanel
+            .locator('.ant-form-item')
+            .filter({ hasText: 'Финальная сумма' })
+            .first();
+        await expect(finalAmountFormItem).toBeVisible({ timeout: 10_000 });
+
+        const rawFinalValue = await finalAmountFormItem.locator('input').first().getAttribute('value');
+        // Russian locale: space = thousands sep, comma = decimal sep. Convert to plain float.
+        const parsedFinal = rawFinalValue
+            ? parseFloat(rawFinalValue.replace(/\s/g, '').replace(',', '.'))
+            : NaN;
+
+        let final: number;
+        if (!isNaN(parsedFinal) && parsedFinal > 0) {
+            final = parsedFinal;
+        } else {
+            // Fallback: try «Сумма заказа»
+            const totalAmountFormItem = financeTabPanel
+                .locator('.ant-form-item')
+                .filter({ hasText: 'Сумма заказа' })
+                .first();
+            const rawTotalValue = await totalAmountFormItem.locator('input').first().getAttribute('value');
+            // Russian locale: space = thousands sep, comma = decimal sep
+            final = rawTotalValue
+                ? parseFloat(rawTotalValue.replace(/\s/g, '').replace(',', '.'))
+                : 5000;
+        }
+
+        // Derive the two payment amounts from the final total
+        const payment1 = Math.round(final / 2);
+        const payment2 = final - payment1;
+
+        // ---- Add first payment: payment1 (partial) ----
         await orderDialog.getByRole('button', { name: 'Добавить (форма)' }).click();
         const paymentDialog1 = page.getByRole('dialog', { name: 'Создать оплату' });
         await expect(paymentDialog1).toBeVisible({ timeout: 10_000 });
@@ -210,9 +250,9 @@ test.describe('Order finance buttons regression', () => {
         // Fill amount field (#amount id or spinbutton)
         const amountInput1 = paymentDialog1.locator('#amount');
         if ((await amountInput1.count()) > 0) {
-            await amountInput1.fill('2000');
+            await amountInput1.fill(String(payment1));
         } else {
-            await paymentDialog1.locator('input[role="spinbutton"]').first().fill('2000');
+            await paymentDialog1.locator('input[role="spinbutton"]').first().fill(String(payment1));
         }
         await paymentDialog1.getByRole('button', { name: 'Создать' }).click();
         await expect(paymentDialog1).toBeHidden({ timeout: 10_000 });
@@ -221,45 +261,57 @@ test.describe('Order finance buttons regression', () => {
         await expect(orderDialog.getByText('Всего платежей: 1')).toBeVisible({ timeout: 10_000 });
 
         // ----------------------------------------------------------------
-        // Assert finance section after first (partial) payment.
-        //
-        // The payment was added via the modal (addPayment → zustand store).
-        // The OrderPaymentsTab shows the running total from the store.
-        // The header.paid_amount auto-update depends on a React effect in
-        // OrderForm.tsx; in the mocked harness this effect may not fire
-        // reliably before the assertion (the mock does not have a real
-        // backend response to trigger re-render).
-        //
-        // We assert on what IS reliably observable:
-        //   1. Payment count shows 1 (already checked above)
-        //   2. The payments table "Итого" row shows 2,000
-        //   3. The Статус оплаты select shows a status (any non-loading state)
+        // STRICT assertions after first (partial) payment.
+        // The paid_amount recalc useEffect in OrderForm must run (bug: it was
+        // gated behind isOrderDataLoading which was always true in create mode).
         // ----------------------------------------------------------------
 
-        // The Финансы tab panel is the active pane — scope assertions to it.
-        const financeTabPanel = orderDialog.locator('.ant-tabs-tabpane-active');
+        // «Оплачено (₸)» InputNumber input.value must equal payment1
+        const paidAmountFormItem1 = financeTabPanel
+            .locator('.ant-form-item')
+            .filter({ hasText: 'Оплачено' })
+            .first();
+        await expect.poll(
+            async () => {
+                const val = await paidAmountFormItem1.locator('input').first().getAttribute('value');
+                return val ? parseFloat(val.replace(/\s/g, '').replace(',', '.')) : -1;
+            },
+            { timeout: 10_000, message: `Оплачено should equal payment1 (${payment1}) after first payment` },
+        ).toBe(payment1);
 
-        // Payment table "Итого" row should show the accumulated sum.
-        const paymentTable = financeTabPanel.locator('.ant-table').last();
-        await expect(paymentTable.getByText(/Итого/i)).toBeVisible({ timeout: 10_000 });
+        // «Осталось (₸)» appears when paid > 0; its InputNumber must show final - payment1
+        const remaining1 = final - payment1;
+        const remainingFormItem1 = financeTabPanel
+            .locator('.ant-form-item')
+            .filter({ hasText: 'Осталось' })
+            .first();
+        await expect.poll(
+            async () => {
+                if ((await remainingFormItem1.count()) === 0) return -1;
+                const val = await remainingFormItem1.locator('input').first().getAttribute('value');
+                return val ? parseFloat(val.replace(/\s/g, '').replace(',', '.')) : -1;
+            },
+            { timeout: 10_000, message: `Остаток should equal ${remaining1} after first payment` },
+        ).toBe(remaining1);
 
-        // "Статус оплаты" select is in OrderFinanceSection (in the active panel)
+        // «Статус оплаты» select must show «Частично оплачено»
         const paymentStatusFormItem = financeTabPanel
             .locator('.ant-form-item')
             .filter({ hasText: 'Статус оплаты' })
             .first();
-        await expect(paymentStatusFormItem).toBeVisible({ timeout: 10_000 });
-
-        // Soft check: status text is rendered (not broken).
-        // In this mock the paid_amount effect does not propagate reliably;
-        // the exact status value is noted in notCovered.
-        const statusText = await paymentStatusFormItem.textContent();
-        expect(statusText).toBeTruthy();
+        await expect.poll(
+            async () => {
+                const item = paymentStatusFormItem.locator('.ant-select-selection-item');
+                if ((await item.count()) === 0) return '';
+                return (await item.textContent())?.trim() ?? '';
+            },
+            { timeout: 10_000, message: 'Статус оплаты should show «Частично оплачено» after first payment' },
+        ).toBe('Частично оплачено');
 
         await screenshot(page, '06-partial-paid');
 
         // ================================================================
-        // 3b. Add second payment: 3000 (completes the total ~5000)
+        // 3b. Add second payment: payment2 (completes the total = final)
         // ================================================================
         await orderDialog.getByRole('button', { name: 'Добавить (форма)' }).click();
         const paymentDialog2 = page.getByRole('dialog', { name: 'Создать оплату' });
@@ -272,29 +324,50 @@ test.describe('Order finance buttons regression', () => {
         );
         const amountInput2 = paymentDialog2.locator('#amount');
         if ((await amountInput2.count()) > 0) {
-            await amountInput2.fill('3000');
+            await amountInput2.fill(String(payment2));
         } else {
-            await paymentDialog2.locator('input[role="spinbutton"]').first().fill('3000');
+            await paymentDialog2.locator('input[role="spinbutton"]').first().fill(String(payment2));
         }
         await paymentDialog2.getByRole('button', { name: 'Создать' }).click();
         await expect(paymentDialog2).toBeHidden({ timeout: 10_000 });
 
         await expect(orderDialog.getByText('Всего платежей: 2')).toBeVisible({ timeout: 10_000 });
 
-        // Verify both payments are tracked
-        // The payments table "Итого" should show the sum of both payments
-        await expect(financeTabPanel.locator('.ant-table').last().getByText(/Итого/i)).toBeVisible({ timeout: 10_000 });
+        // ----------------------------------------------------------------
+        // STRICT assertions after second (full) payment.
+        // «Оплачено» === final, «Остаток» === 0 (or hidden), «Статус» === «Оплачено»
+        // ----------------------------------------------------------------
 
-        // Assert the payment status select is visible (payment status auto-update
-        // is noted as not reliably observable in the mock — see notCovered notes)
-        const paymentStatusFull = financeTabPanel
-            .locator('.ant-form-item')
-            .filter({ hasText: 'Статус оплаты' })
-            .first();
-        await expect(paymentStatusFull).toBeVisible({ timeout: 5_000 });
+        // «Оплачено» must equal final
+        await expect.poll(
+            async () => {
+                const val = await paidAmountFormItem1.locator('input').first().getAttribute('value');
+                return val ? parseFloat(val.replace(/\s/g, '').replace(',', '.')) : -1;
+            },
+            { timeout: 10_000, message: `Оплачено should equal final (${final}) after second payment` },
+        ).toBe(final);
 
-        // The "Осталось" field either shows 0 or disappears when remaining == 0.
-        // Just confirm payment status is "Оплачено" — sufficient to prove the flip.
+        // «Осталось» must be 0 (or the field disappears when remaining reaches 0)
+        await expect.poll(
+            async () => {
+                const count = await remainingFormItem1.count();
+                if (count === 0) return 0; // field hidden means remaining is 0
+                const val = await remainingFormItem1.locator('input').first().getAttribute('value');
+                return val ? parseFloat(val.replace(/\s/g, '').replace(',', '.')) : -1;
+            },
+            { timeout: 10_000, message: 'Остаток should be 0 after full payment' },
+        ).toBe(0);
+
+        // «Статус оплаты» must show «Оплачено»
+        await expect.poll(
+            async () => {
+                const item = paymentStatusFormItem.locator('.ant-select-selection-item');
+                if ((await item.count()) === 0) return '';
+                return (await item.textContent())?.trim() ?? '';
+            },
+            { timeout: 10_000, message: 'Статус оплаты should show «Оплачено» after full payment' },
+        ).toBe('Оплачено');
+
         await screenshot(page, '07-fully-paid');
 
         // ================================================================
@@ -370,7 +443,8 @@ test.describe('Order finance buttons regression', () => {
             (sum, p) => sum + (p.amount ?? 0),
             0,
         );
-        expect(totalPaid).toBe(5000);
+        // payment1 + payment2 === final (derived from «Финальная сумма» above)
+        expect(totalPaid).toBe(final);
 
         await screenshot(page, '10-order-saved');
 
