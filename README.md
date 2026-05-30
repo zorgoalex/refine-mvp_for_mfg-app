@@ -616,6 +616,14 @@ stage UI/backend path and verifies DB audit/order recalculation. It uses a
 temporary test user and requires access to the stage `erpdb` Docker Postgres.
 Deadline Engine stage canary is read-only for deadline data. It creates a temporary backend user, verifies runtime `backendDeadlines`, reads `/api/v1/orders/:id/deadline-summary`, `/deadlines`, and `/deadline-events`, then opens the deployed order show page and checks the read-only deadline panel. By default it targets stage order `11166` (`TEST-CODEX-STATUS3-DEBUG-20260516192743`); override with `DEADLINE_ENGINE_STAGE_ORDER_ID` and `DEADLINE_ENGINE_STAGE_ORDER_NAME` when using a different fixture.
 Deadline create/override stage canary writes isolated manual deadline fixture rows through deployed backend endpoints, verifies idempotent create/override side effects in the stage DB, and restores all rows scoped by fixture key/request ids. The package script enables both `DEADLINE_CREATE_OVERRIDE_RESTORE=true` and `DEADLINE_CREATE_OVERRIDE_STAGE_CANARY=true`; it must not be run against production.
+Deadline policy/settings stage canary writes one temporary policy and flips one
+deadline settings-backed action-rule group through deployed backend endpoints.
+It verifies denied policy/settings writes, config audit rows, no outbox writes,
+and restores the temporary policy/audit rows plus the previous action-rule
+snapshot. The package script enables `DEADLINE_POLICY_SETTINGS_RESTORE=true`,
+`DEADLINE_POLICY_SETTINGS_STAGE_CANARY=true`, and
+`DEADLINE_POLICY_SETTINGS_TARGET_ENV=backend-test`; it must not be run against
+production or concurrently with another stage fixture mutation stream.
 
 Deadline status transition stage canary creates fixture-scoped `change_order_status`
 action rules and one temporary deadline, previews an order-level disabled
