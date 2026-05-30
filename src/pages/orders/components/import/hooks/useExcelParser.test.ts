@@ -6,9 +6,9 @@ import { describe, it, expect } from 'vitest';
 import type { ParsedSheet } from '../types/importTypes';
 import { getColumnLetter } from '../types/importTypes';
 
-// Import the parse helper that will be exported from the refactored hook.
-// After refactor, parseWorksheet will accept (ws, utils) so it can be tested
-// without top-level XLSX reference.
+// Import the pure parse helper exported from the hook.
+// parseWorksheet accepts (ws, utils) so it can be tested without a top-level
+// XLSX import — the test obtains the module via its own dynamic import below.
 import { parseWorksheet } from './useExcelParser';
 
 describe('parseWorksheet (dynamic xlsx)', () => {

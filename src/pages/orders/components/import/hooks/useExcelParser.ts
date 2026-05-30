@@ -2,10 +2,17 @@
 // xlsx is loaded dynamically on first parse so it becomes a separate async chunk
 // and does NOT land in the entry bundle.
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import type { WorkBook, WorkSheet, Utils } from 'xlsx';
 import type { ParsedSheet, CellValue } from '../types/importTypes';
 import { getColumnLetter } from '../types/importTypes';
+
+// Module-level promise singleton — guards against concurrent parseFile calls
+// racing to issue two separate dynamic imports before the first one resolves.
+let xlsxPromise: Promise<typeof import('xlsx')> | null = null;
+// Resolved module reference used by the synchronous selectSheet.
+// Set once after the first await; never cleared (module stays cached).
+let xlsxModule: typeof import('xlsx') | null = null;
 
 export interface UseExcelParserReturn {
   workbook: WorkBook | null;
@@ -72,10 +79,6 @@ export const useExcelParser = (): UseExcelParserReturn => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Cache the loaded xlsx module after first parseFile so selectSheet (which is
-  // synchronous) can reuse it without an additional dynamic import.
-  const xlsxRef = useRef<typeof import('xlsx') | null>(null);
-
   const parseFile = useCallback(async (file: File): Promise<void> => {
     setIsLoading(true);
     setError(null);
@@ -91,11 +94,13 @@ export const useExcelParser = (): UseExcelParserReturn => {
         throw new Error(`Файл слишком большой. Максимальный размер: ${MAX_FILE_SIZE / 1024 / 1024} МБ`);
       }
 
-      // Dynamic import — xlsx becomes a separate async chunk, not in the entry bundle.
-      if (!xlsxRef.current) {
-        xlsxRef.current = await import('xlsx');
-      }
-      const XLSX = xlsxRef.current;
+      // Module-level promise singleton prevents concurrent parseFile calls from
+      // issuing two separate dynamic imports before the first one resolves.
+      // xlsx becomes a separate async chunk — NOT in the entry bundle.
+      if (!xlsxPromise) xlsxPromise = import('xlsx');
+      const XLSX = await xlsxPromise;
+      // Persist the resolved module so synchronous selectSheet can use it.
+      xlsxModule = XLSX;
 
       const arrayBuffer = await file.arrayBuffer();
       const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true, cellNF: false, cellText: true });
@@ -123,16 +128,19 @@ export const useExcelParser = (): UseExcelParserReturn => {
     }
   }, []);
 
-  // selectSheet remains synchronous (API unchanged). The xlsx module is
-  // available in xlsxRef after the first parseFile call, which always precedes
-  // any sheet selection.
+  // selectSheet is intentionally synchronous (public API unchanged).
+  // The module-level xlsxModule is populated by parseFile before any sheet
+  // selection can occur, so the guard below is only a safety net.
+  // Note: selectSheet is not independently unit-tested here because it
+  // requires renderHook from @testing-library/react (not used in this suite);
+  // its parse logic is fully covered via the exported parseWorksheet tests.
   const selectSheet = useCallback((sheetName: string): void => {
     if (!workbook || !workbook.SheetNames.includes(sheetName)) return;
-    if (!xlsxRef.current) return; // module not yet loaded; parseFile hasn't run
+    if (!xlsxModule) return; // safety net: parseFile must run before selectSheet
 
     setSelectedSheet(sheetName);
     const ws = workbook.Sheets[sheetName];
-    const parsed = parseWorksheet(ws, xlsxRef.current.utils);
+    const parsed = parseWorksheet(ws, xlsxModule.utils);
     parsed.name = sheetName;
     setSheetData(parsed);
   }, [workbook]);
@@ -144,8 +152,9 @@ export const useExcelParser = (): UseExcelParserReturn => {
     setSheetData(null);
     setIsLoading(false);
     setError(null);
-    // Note: xlsxRef is intentionally NOT cleared — keeping the loaded module
-    // cached avoids a re-download on subsequent use within the same session.
+    // Note: xlsxPromise/xlsxModule are intentionally NOT cleared — keeping the
+    // loaded module cached avoids a re-download on subsequent use within the
+    // same session.
   }, []);
 
   return { workbook, sheets, selectedSheet, sheetData, isLoading, error, parseFile, selectSheet, reset };
