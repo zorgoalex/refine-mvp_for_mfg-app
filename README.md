@@ -339,6 +339,11 @@ Audit:
   (пароли, токены, секреты) редактируются перед сохранением. Permission-denied
   попытки логируются отдельными записями. Перед использованием применить
   миграции `audit_log`, включая `backend/db/migrations/012_audit_log_payment_deadline_dimensions.sql`.
+- Чтение журнала: per-order `GET /api/v1/orders/:id/audit` и общий межсущностный
+  `GET /api/v1/audit` с фильтрами по actor, entity type/id, связанным
+  order/client/payment/deadline/production-event, event, source, request id и
+  диапазону дат, пагинацией и маскированием чувствительных полей. Доступ к
+  общему эндпоинту требует права `audit.view`.
 
 ## Установка и запуск
 
