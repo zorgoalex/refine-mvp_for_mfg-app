@@ -483,6 +483,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     setCurrentFilmId(record.film_id ?? null);
     setSelectedMaterialId(record.material_id || null);
     setDimensionValidationError(null);
+    // Each edit session starts with the sum field locked; unlocking it is an
+    // explicit per-row action via the context menu. Without this reset, a row
+    // unlocked earlier would leak the editable state into the next edited row.
+    setIsSumEditable(false);
+    setSumContextMenu(null);
     setDetailEditing(true); // Mark form as dirty when editing starts
 
     // FIX: Инициализируем ref значениями из записи
