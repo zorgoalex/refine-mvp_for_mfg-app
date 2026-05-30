@@ -33,6 +33,7 @@ export type PermissionName =
   | 'vlm.configure'
   | 'settings.view'
   | 'settings.manage'
+  | 'audit.view'
   | string;
 
 export interface BackendUserIdentity {

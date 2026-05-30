@@ -167,6 +167,8 @@ const ClientsAnalyticsShow = lazy(async () => ({ default: (await import("./pages
 const PaymentsAnalyticsList = lazy(async () => ({ default: (await import("./pages/payments_analytics")).PaymentsAnalyticsList }));
 const PaymentsAnalyticsShow = lazy(async () => ({ default: (await import("./pages/payments_analytics")).PaymentsAnalyticsShow }));
 
+const AuditList = lazy(async () => ({ default: (await import("./pages/audit/list")).AuditList }));
+
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 
 const App = () => {
@@ -492,6 +494,11 @@ const App = () => {
                   list: "/configuration",
                   meta: { label: "Конфигурация" },
                 },
+                {
+                  name: "audit",
+                  list: "/audit",
+                  meta: { label: "Аудит" },
+                },
               ]}
               options={{
                 syncWithLocation: true,
@@ -682,6 +689,9 @@ const App = () => {
                     <Route path="show/:id" element={<UserShow />} />
                   </Route>
                   <Route path="/configuration" element={<ConfigurationPage />} />
+                  <Route path="/audit">
+                    <Route index element={<AuditList />} />
+                  </Route>
                   <Route path="/workshops" >
                     <Route index element={<WorkshopList />} />
                     <Route path="create" element={<WorkshopCreate />} />

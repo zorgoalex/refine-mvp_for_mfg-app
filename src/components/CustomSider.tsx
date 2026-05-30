@@ -34,6 +34,7 @@ import {
   BarChartOutlined,
   WalletOutlined,
   ProjectOutlined,
+  AuditOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -96,6 +97,7 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   order_workshops: <EnvironmentOutlined />,
   doweling_orders_view: <AimOutlined />,
   configuration: <SettingOutlined />,
+  audit: <AuditOutlined />,
 };
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -142,6 +144,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   order_workshops: "Цеха заказа",
   doweling_orders_view: "Присадка",
   configuration: "Конфигурация",
+  audit: "Аудит",
 };
 
 const CATEGORY_MAP: Record<string, string> = {
@@ -162,6 +165,7 @@ const CATEGORY_MAP: Record<string, string> = {
   employees: "Настройки",
   users: "Настройки",
   configuration: "Настройки",
+  audit: "Настройки",
 };
 
 export const CustomSider: React.FC = () => {
