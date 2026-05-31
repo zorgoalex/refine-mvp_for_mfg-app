@@ -1,10 +1,18 @@
 // Hook for parsing Excel files using SheetJS (xlsx)
+// xlsx is loaded dynamically on first parse so it becomes a separate async chunk
+// and does NOT land in the entry bundle.
 
 import { useState, useCallback } from 'react';
-import * as XLSX from 'xlsx';
-import type { WorkBook } from 'xlsx';
+import type { WorkBook, WorkSheet, Utils } from 'xlsx';
 import type { ParsedSheet, CellValue } from '../types/importTypes';
 import { getColumnLetter } from '../types/importTypes';
+
+// Module-level promise singleton — guards against concurrent parseFile calls
+// racing to issue two separate dynamic imports before the first one resolves.
+let xlsxPromise: Promise<typeof import('xlsx')> | null = null;
+// Resolved module reference used by the synchronous selectSheet.
+// Set once after the first await; never cleared (module stays cached).
+let xlsxModule: typeof import('xlsx') | null = null;
 
 export interface UseExcelParserReturn {
   workbook: WorkBook | null;
@@ -21,8 +29,13 @@ export interface UseExcelParserReturn {
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = ['.xlsx', '.xls', '.xlsm', '.xlsb'];
 
-const parseWorksheet = (ws: XLSX.WorkSheet): ParsedSheet => {
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+/**
+ * Pure worksheet parser. Exported for unit testing.
+ * Receives the xlsx utils object so there is NO top-level runtime reference to
+ * the xlsx package — the caller obtains it via dynamic import.
+ */
+export const parseWorksheet = (ws: WorkSheet, utils: Utils): ParsedSheet => {
+  const range = utils.decode_range(ws['!ref'] || 'A1');
   const rowCount = range.e.r - range.s.r + 1;
   const colCount = range.e.c - range.s.c + 1;
 
@@ -35,7 +48,7 @@ const parseWorksheet = (ws: XLSX.WorkSheet): ParsedSheet => {
   for (let r = range.s.r; r <= range.e.r; r++) {
     const row: CellValue[] = [];
     for (let c = range.s.c; c <= range.e.c; c++) {
-      const cellAddress = XLSX.utils.encode_cell({ r, c });
+      const cellAddress = utils.encode_cell({ r, c });
       const cell = ws[cellAddress];
 
       if (!cell) {
@@ -81,6 +94,14 @@ export const useExcelParser = (): UseExcelParserReturn => {
         throw new Error(`Файл слишком большой. Максимальный размер: ${MAX_FILE_SIZE / 1024 / 1024} МБ`);
       }
 
+      // Module-level promise singleton prevents concurrent parseFile calls from
+      // issuing two separate dynamic imports before the first one resolves.
+      // xlsx becomes a separate async chunk — NOT in the entry bundle.
+      if (!xlsxPromise) xlsxPromise = import('xlsx');
+      const XLSX = await xlsxPromise;
+      // Persist the resolved module so synchronous selectSheet can use it.
+      xlsxModule = XLSX;
+
       const arrayBuffer = await file.arrayBuffer();
       const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true, cellNF: false, cellText: true });
 
@@ -91,7 +112,7 @@ export const useExcelParser = (): UseExcelParserReturn => {
         const firstSheet = wb.SheetNames[0];
         setSelectedSheet(firstSheet);
         const ws = wb.Sheets[firstSheet];
-        const parsed = parseWorksheet(ws);
+        const parsed = parseWorksheet(ws, XLSX.utils);
         parsed.name = firstSheet;
         setSheetData(parsed);
       }
@@ -107,12 +128,19 @@ export const useExcelParser = (): UseExcelParserReturn => {
     }
   }, []);
 
+  // selectSheet is intentionally synchronous (public API unchanged).
+  // The module-level xlsxModule is populated by parseFile before any sheet
+  // selection can occur, so the guard below is only a safety net.
+  // Note: selectSheet is not independently unit-tested here because it
+  // requires renderHook from @testing-library/react (not used in this suite);
+  // its parse logic is fully covered via the exported parseWorksheet tests.
   const selectSheet = useCallback((sheetName: string): void => {
     if (!workbook || !workbook.SheetNames.includes(sheetName)) return;
+    if (!xlsxModule) return; // safety net: parseFile must run before selectSheet
 
     setSelectedSheet(sheetName);
     const ws = workbook.Sheets[sheetName];
-    const parsed = parseWorksheet(ws);
+    const parsed = parseWorksheet(ws, xlsxModule.utils);
     parsed.name = sheetName;
     setSheetData(parsed);
   }, [workbook]);
@@ -124,6 +152,9 @@ export const useExcelParser = (): UseExcelParserReturn => {
     setSheetData(null);
     setIsLoading(false);
     setError(null);
+    // Note: xlsxPromise/xlsxModule are intentionally NOT cleared — keeping the
+    // loaded module cached avoids a re-download on subsequent use within the
+    // same session.
   }, []);
 
   return { workbook, sheets, selectedSheet, sheetData, isLoading, error, parseFile, selectSheet, reset };
