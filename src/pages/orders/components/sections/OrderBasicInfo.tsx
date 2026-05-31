@@ -45,6 +45,8 @@ export const OrderBasicInfo: React.FC = () => {
   const [dowelingSearchValue, setDowelingSearchValue] = useState<string>('');
   const [productionStatusPending, setProductionStatusPending] = useState(false);
   const productionStatusPendingRef = useRef(false);
+  const [autoStatusModePending, setAutoStatusModePending] = useState(false);
+  const autoStatusModePendingRef = useRef(false);
   const dataProvider = useDataProvider();
   const invalidate = useInvalidate();
   const orderFormData = useOrderFormData();
@@ -239,6 +241,94 @@ export const OrderBasicInfo: React.FC = () => {
     header.order_id,
     header.version,
     header.production_status_from_details_enabled,
+    updateHeaderField,
+    syncDetailsProductionStatus,
+    invalidate,
+    refreshHeaderFromOrder,
+    refreshFullOrderFromBackend,
+  ]);
+
+  const handleAutoStatusToggle = useCallback(async (next: boolean) => {
+    if (!featureFlags.useBackendProductionActions) {
+      updateHeaderField('production_status_from_details_enabled', next);
+      return;
+    }
+
+    if (!(header.order_id && Number.isInteger(header.version))) {
+      notification.warning({
+        message: 'Обновите заказ',
+        description: 'Для изменения режима статуса нужны актуальные данные заказа',
+        duration: 2,
+      });
+      await refreshHeaderFromOrder();
+      await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+      return;
+    }
+
+    if (autoStatusModePendingRef.current) return;
+    autoStatusModePendingRef.current = true;
+    setAutoStatusModePending(true);
+    const commandVersion = header.version;
+    updateHeaderField('version', commandVersion + 1);
+    try {
+      const response = next
+        ? await productionActionsApi.restoreAutoProductionStatus(header.order_id, {
+            version: commandVersion,
+            idempotencyKey: createProductionActionIdempotencyKey('order-header-auto-status-restore'),
+          })
+        : await productionActionsApi.enterManualProductionStatus(header.order_id, {
+            version: commandVersion,
+            idempotencyKey: createProductionActionIdempotencyKey('order-header-auto-status-manual'),
+          });
+      updateHeaderField('production_status_from_details_enabled', response.order.productionStatusFromDetailsEnabled ?? next);
+      if (response.order.productionStatusId !== undefined) {
+        updateHeaderField('production_status_id', response.order.productionStatusId);
+        // enter-manual cascades the order status DOWN to active details (backend trigger) → mirror locally.
+        // restore-auto derives the order status FROM details; details are authoritative/unchanged → no push-back.
+        if (!next) {
+          syncDetailsProductionStatus(response.order.productionStatusId);
+        }
+      }
+      updateHeaderField('version', response.order.version);
+      await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+      notification.success({
+        message: next ? 'Автообновление статусов включено' : 'Ручной режим статуса включён',
+        duration: 2,
+      });
+    } catch (error) {
+      updateHeaderField('version', commandVersion);
+      if (isProductionActionVersionConflict(error)) {
+        const refreshed = await refreshFullOrderFromBackend();
+        if (!refreshed) {
+          notification.error({
+            message: 'Данные заказа изменились',
+            description: 'Не удалось обновить позиции заказа. Перезагрузите страницу перед сохранением.',
+            duration: 0,
+          });
+          return;
+        }
+        await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+        notification.warning({
+          message: 'Данные заказа изменились',
+          description: 'Заказ обновлён. Повторите действие.',
+          duration: 2,
+        });
+        return;
+      }
+      notification.error({
+        message: 'Ошибка переключения режима статуса',
+        description: isProductionActionPermissionDenied(error)
+          ? formatProductionActionPermissionDeniedMessage('production_stage')
+          : 'Не удалось переключить режим',
+      });
+    } finally {
+      autoStatusModePendingRef.current = false;
+      setAutoStatusModePending(false);
+    }
+  }, [
+    header.order_id,
+    header.version,
+    featureFlags.useBackendProductionActions,
     updateHeaderField,
     syncDetailsProductionStatus,
     invalidate,
@@ -445,10 +535,7 @@ export const OrderBasicInfo: React.FC = () => {
             >
               <Tooltip title="При включении статус производства заказа рассчитывается автоматически из статусов деталей">
                 <span
-                  onClick={() => updateHeaderField(
-                    'production_status_from_details_enabled',
-                    !(header.production_status_from_details_enabled ?? true),
-                  )}
+                  onClick={() => { void handleAutoStatusToggle(!(header.production_status_from_details_enabled ?? true)); }}
                   style={{ cursor: 'pointer' }}
                 >
                   Автообновление статусов производства
@@ -456,9 +543,10 @@ export const OrderBasicInfo: React.FC = () => {
               </Tooltip>
               <Switch
                 checked={header.production_status_from_details_enabled ?? true}
-                onChange={(checked) => updateHeaderField('production_status_from_details_enabled', checked)}
+                onChange={(checked) => { void handleAutoStatusToggle(checked); }}
                 checkedChildren="Вкл"
                 unCheckedChildren="Выкл"
+                disabled={autoStatusModePending}
               />
             </div>
           </Form.Item>

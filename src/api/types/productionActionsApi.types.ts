@@ -34,12 +34,18 @@ export interface DetailProductionStageEventRequest {
   note?: string | null;
 }
 
+export interface ProductionStatusModeRequest {
+  version: number;
+  idempotencyKey: string;
+}
+
 export interface ProductionActionOrderResponse {
   orderId: number;
   plannedCompletionDate?: DateOnlyString | null;
   orderStatusId?: number;
   paymentStatusId?: number;
   productionStatusId?: number;
+  productionStatusFromDetailsEnabled?: boolean;
   version: number;
 }
 

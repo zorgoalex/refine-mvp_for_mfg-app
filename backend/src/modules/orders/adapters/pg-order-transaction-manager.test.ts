@@ -217,12 +217,64 @@ describe('PgOrderTransactionManager', () => {
       normalizeSql(query.text).startsWith('UPDATE orders SET order_name'),
     );
 
+    // After removing the flag from UPDATE, discount shifts from $13 to $12
     expect(normalizeSql(updateQuery?.text ?? '')).toContain(
-      'discount = $13, surcharge = $14, total_amount = $15, final_amount = $16',
+      'discount = $12, surcharge = $13, total_amount = $14, final_amount = $15',
     );
-    expect(updateQuery?.params[12]).toBe(20);
-    expect(updateQuery?.params[14]).toBe(120);
-    expect(updateQuery?.params[15]).toBe(100);
+    expect(updateQuery?.params[11]).toBe(20);  // discount at bind index 11 ($12)
+    expect(updateQuery?.params[13]).toBe(120); // totalAmount at bind index 13 ($14)
+    expect(updateQuery?.params[14]).toBe(100); // finalAmount at bind index 14 ($15)
+  });
+
+  it('updateOrderHeader does not include production_status_from_details_enabled in UPDATE SQL', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+    // Pass productionStatusFromDetailsEnabled: false — must NOT appear in the UPDATE params or SQL
+    const headerWithFlagFalse = { ...header(), productionStatusFromDetailsEnabled: false };
+
+    await manager.runInTransaction((uow) =>
+      uow.updateOrderHeader({
+        orderId: 100,
+        header: headerWithFlagFalse,
+        totals: totals(),
+        currentUser: currentUser(),
+      }),
+    );
+
+    const updateQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('UPDATE orders SET order_name'),
+    );
+
+    expect(updateQuery).toBeDefined();
+    // Flag must NOT appear in the SQL
+    expect(normalizeSql(updateQuery!.text)).not.toContain('production_status_from_details_enabled');
+    // Params: $1=orderId + 24 SET fields = 25 total; highest placeholder is $25
+    expect(updateQuery!.params).toHaveLength(25);
+    expect(normalizeSql(updateQuery!.text)).toContain('ref_key_1c = $25');
+    // Flag value (false) must not appear in bind params (boolean false could be ambiguous, check no flag column)
+  });
+
+  it('createOrderHeader INSERT still includes production_status_from_details_enabled', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+    const headerWithFlag = { ...header(), productionStatusFromDetailsEnabled: true };
+
+    await manager.runInTransaction((uow) =>
+      uow.createOrderHeader({
+        header: headerWithFlag,
+        totals: totals(),
+        currentUser: currentUser(),
+      }),
+    );
+
+    const insertQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO orders'),
+    );
+
+    expect(insertQuery).toBeDefined();
+    expect(normalizeSql(insertQuery!.text)).toContain('production_status_from_details_enabled');
+    // Flag is at $9 in the INSERT, bind index 8
+    expect(insertQuery!.params[8]).toBe(true);
   });
 
   it('soft-deletes orders with idempotency, queryable audit, outbox and completion', async () => {

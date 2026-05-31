@@ -633,6 +633,329 @@ describe('PgProductionActionRepository', () => {
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
   });
 
+  // ─── restore-auto tests ──────────────────────────────────────────────────
+
+  it('restore-auto happy path: sets flag=true, recalculates status, version bumps, audit+outbox emitted', async () => {
+    // detail before: status 1 and 3; after recalc the order production_status_id becomes 5 (≠ pre-flip 1)
+    const database = createDatabase({
+      orderProductionStatusId: 1,
+      productionStatusFromDetailsEnabled: false,
+      detailStatusRowsBefore: [
+        { detail_id: 101, production_status_id: 1 },
+        { detail_id: 102, production_status_id: 3 },
+      ],
+      detailStatusRowsAfter: [
+        { detail_id: 101, production_status_id: 1 },
+        { detail_id: 102, production_status_id: 3 },
+      ],
+      recalcOrderProductionStatusId: 5,
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.restoreAutoProductionStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { version: 3, idempotencyKey: 'restore-auto-key-1' },
+      requestId: 'request-restore-auto',
+    });
+
+    expect(result).toMatchObject({
+      order: {
+        orderId: 15,
+        productionStatusId: 5,
+        productionStatusFromDetailsEnabled: true,
+        version: 4,
+      },
+      auditId: 'audit-id-1',
+      requestId: 'request-restore-auto',
+    });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('SELECT set_session_user($1)');
+    expect(sql).toContain('INSERT INTO command_idempotency_keys');
+    expect(sql).toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+    expect(sql).toContain('UPDATE orders SET production_status_from_details_enabled = true, version = version + 1');
+    expect(sql).toContain('SELECT recalc_order_production_status($1)');
+    expect(sql).toContain('SELECT production_status_id FROM orders WHERE order_id = $1');
+    expect(sql).toContain('SELECT detail_id, production_status_id FROM order_details');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('orders.production_status_mode_restore');
+    expect(params).toContain('order.production_status_mode_restored');
+    // post-recalc statusId = 5 in audit afterJson
+    expect(params).toContain('"productionStatusId":5');
+    expect(params).toContain('"productionStatusFromDetailsEnabled":true');
+    expect(params).toContain('"mode":"auto"');
+    expect(params).toContain('"action":"production_status_mode_restore"');
+  });
+
+  it('restore-auto with null recalculated status: response productionStatusId undefined, no crash', async () => {
+    const database = createDatabase({
+      orderProductionStatusId: null,
+      productionStatusFromDetailsEnabled: false,
+      detailStatusRowsBefore: [],
+      detailStatusRowsAfter: [],
+      recalcOrderProductionStatusId: null,
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.restoreAutoProductionStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { version: 3, idempotencyKey: 'restore-auto-null-key-1' },
+      requestId: 'request-restore-auto-null',
+    });
+
+    expect(result.order.productionStatusId).toBeUndefined();
+    expect(result.order.productionStatusFromDetailsEnabled).toBe(true);
+    expect(result.order.version).toBe(4);
+    // audit and outbox still emitted
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+  });
+
+  it('restore-auto no-op (order already enabled=true): no version bump, no audit, no outbox', async () => {
+    const database = createDatabase({
+      orderProductionStatusId: 2,
+      productionStatusFromDetailsEnabled: true,
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.restoreAutoProductionStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { version: 3, idempotencyKey: 'restore-auto-noop-key-1' },
+      requestId: 'request-restore-auto-noop',
+    });
+
+    expect(result).toMatchObject({
+      order: {
+        orderId: 15,
+        productionStatusId: 2,
+        productionStatusFromDetailsEnabled: true,
+        version: 3,
+      },
+      requestId: 'request-restore-auto-noop',
+    });
+    expect(result.auditId).toBeUndefined();
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET production_status_from_details_enabled = true');
+    expect(sql).not.toContain('SELECT recalc_order_production_status');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
+
+  // ─── enter-manual tests ──────────────────────────────────────────────────
+
+  it('enter-manual happy path: sets flag=false, version bumps, detail diff in audit+outbox', async () => {
+    const database = createDatabase({
+      orderProductionStatusId: 3,
+      productionStatusFromDetailsEnabled: true,
+      detailStatusRowsBefore: [
+        { detail_id: 101, production_status_id: 1 },
+        { detail_id: 102, production_status_id: 3 },
+      ],
+      detailStatusRowsAfter: [
+        { detail_id: 101, production_status_id: 3 },
+        { detail_id: 102, production_status_id: 3 },
+      ],
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.enterManualProductionStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { version: 3, idempotencyKey: 'enter-manual-key-1' },
+      requestId: 'request-enter-manual',
+    });
+
+    expect(result).toMatchObject({
+      order: {
+        orderId: 15,
+        productionStatusId: 3,
+        productionStatusFromDetailsEnabled: false,
+        version: 4,
+      },
+      auditId: 'audit-id-1',
+      requestId: 'request-enter-manual',
+    });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('UPDATE orders SET production_status_from_details_enabled = false, version = version + 1');
+    expect(sql).not.toContain('SELECT recalc_order_production_status');
+    expect(sql).toContain('SELECT detail_id, production_status_id FROM order_details');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('orders.production_status_mode_manual');
+    expect(params).toContain('order.production_status_mode_set_manual');
+    expect(params).toContain('"productionStatusFromDetailsEnabled":false');
+    expect(params).toContain('"mode":"manual"');
+    expect(params).toContain('"action":"production_status_mode_manual"');
+    // detail 101 changed from 1 to 3 → affectedDetailIds=[101]
+    expect(params).toContain('"affectedDetailIds":[101]');
+    expect(params).toContain('"affectedDetailCount":1');
+  });
+
+  it('enter-manual no-op (already false): no version bump, no audit, no outbox', async () => {
+    const database = createDatabase({
+      orderProductionStatusId: 3,
+      productionStatusFromDetailsEnabled: false,
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.enterManualProductionStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { version: 3, idempotencyKey: 'enter-manual-noop-key-1' },
+      requestId: 'request-enter-manual-noop',
+    });
+
+    expect(result).toMatchObject({
+      order: {
+        orderId: 15,
+        productionStatusId: 3,
+        productionStatusFromDetailsEnabled: false,
+        version: 3,
+      },
+      requestId: 'request-enter-manual-noop',
+    });
+    expect(result.auditId).toBeUndefined();
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET production_status_from_details_enabled = false');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+    expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
+
+  // ─── shared: version conflict, idempotency, scope denied ─────────────────
+
+  it('restore-auto: version conflict → VERSION_CONFLICT 409', async () => {
+    const database = createDatabase({ orderVersion: 5, productionStatusFromDetailsEnabled: false });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.restoreAutoProductionStatus({
+        currentUser: currentUser(),
+        orderId: 15,
+        dto: { version: 3, idempotencyKey: 'restore-auto-vc-key-1' },
+        requestId: 'request-restore-auto-vc',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'VERSION_CONFLICT' });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET production_status_from_details_enabled = true');
+  });
+
+  it('enter-manual: version conflict → VERSION_CONFLICT 409', async () => {
+    const database = createDatabase({ orderVersion: 5, productionStatusFromDetailsEnabled: true });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.enterManualProductionStatus({
+        currentUser: currentUser(),
+        orderId: 15,
+        dto: { version: 3, idempotencyKey: 'enter-manual-vc-key-1' },
+        requestId: 'request-enter-manual-vc',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'VERSION_CONFLICT' });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET production_status_from_details_enabled = false');
+  });
+
+  it('restore-auto: idempotency replay returns stored response', async () => {
+    const database = createDatabase({
+      productionStatusFromDetailsEnabled: false,
+      idempotencyExistingRequestHash: hashStable({
+        actorUserId: '1',
+        commandName: 'orders.production_status_mode_restore',
+        orderId: 15,
+        version: 3,
+      }),
+      idempotencyCompletedResponse: {
+        order: {
+          orderId: 15,
+          productionStatusId: 5,
+          productionStatusFromDetailsEnabled: true,
+          version: 4,
+        },
+        requestId: 'request-restore-auto-replay',
+      },
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    const result = await repository.restoreAutoProductionStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { version: 3, idempotencyKey: 'restore-auto-replay-key' },
+      requestId: 'request-restore-auto-replay',
+    });
+
+    expect(result.order.productionStatusId).toBe(5);
+    expect(result.order.version).toBe(4);
+    expect(normalizedSql(database.queries)).not.toContain('FROM orders WHERE order_id');
+  });
+
+  it('restore-auto: reused idempotency key with different version → IDEMPOTENCY_KEY_REUSED', async () => {
+    const database = createDatabase({
+      productionStatusFromDetailsEnabled: false,
+      idempotencyExistingRequestHash: hashStable({
+        actorUserId: '1',
+        commandName: 'orders.production_status_mode_restore',
+        orderId: 15,
+        version: 3,
+      }),
+      idempotencyCompletedResponse: {
+        order: { orderId: 15, version: 4 },
+        requestId: 'request-restore-auto-replay',
+      },
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.restoreAutoProductionStatus({
+        currentUser: currentUser(),
+        orderId: 15,
+        dto: { version: 999, idempotencyKey: 'restore-auto-reused-key' },
+        requestId: 'request-restore-auto-reused',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
+  it('restore-auto: scope denied → writeDeniedActionAudit + 403', async () => {
+    const database = createDatabase({
+      orderCreatedByUserId: 1,
+      orderManagerUserId: null,
+      productionStatusFromDetailsEnabled: false,
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.restoreAutoProductionStatus({
+        currentUser: currentUser('manager', '99'),
+        orderId: 15,
+        dto: { version: 3, idempotencyKey: 'restore-auto-denied-key' },
+        requestId: 'request-restore-auto-denied',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+
+    const audit = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
+    expect(audit?.params[0]).toBe('production.action_denied');
+    expect(normalizedSql(database.queries)).not.toContain(
+      'UPDATE orders SET production_status_from_details_enabled = true',
+    );
+  });
+
   it('completes duplicate detail production stage commands without duplicate outbox', async () => {
     const database = createDatabase({ existingDetailProductionEventId: 77 });
     const repository = new PgProductionActionRepository(database.service);
@@ -671,6 +994,7 @@ function createDatabase(options: {
   productionStatusFromDetailsEnabled?: boolean;
   detailStatusRowsBefore?: Array<{ detail_id: number; production_status_id: number | null }>;
   detailStatusRowsAfter?: Array<{ detail_id: number; production_status_id: number | null }>;
+  recalcOrderProductionStatusId?: number | null;
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
@@ -744,6 +1068,17 @@ function createDatabase(options: {
         };
       }
 
+      if (normalized.startsWith('SELECT production_status_id FROM orders')) {
+        // Re-select after recalc_order_production_status
+        const statusId = options.recalcOrderProductionStatusId !== undefined
+          ? options.recalcOrderProductionStatusId
+          : (options.orderProductionStatusId ?? 1);
+        return {
+          rows: statusId === null ? [] : [{ production_status_id: statusId }],
+          rowCount: statusId === null ? 0 : 1,
+        };
+      }
+
       if (normalized.startsWith('SELECT production_status_id')) {
         return {
           rows: [
@@ -755,6 +1090,10 @@ function createDatabase(options: {
           ],
           rowCount: 1,
         };
+      }
+
+      if (normalized.startsWith('SELECT recalc_order_production_status')) {
+        return { rows: [], rowCount: 0 };
       }
 
       if (normalized.startsWith('SELECT event_id FROM production_status_events WHERE detail_id')) {
@@ -801,9 +1140,13 @@ function createDatabase(options: {
       }
 
       if (normalized.startsWith('SELECT detail_id, production_status_id FROM order_details')) {
-        const updateAlreadyRan = queries.some((query) =>
-          normalizeSql(query.text).startsWith('UPDATE orders SET production_status_id'),
-        );
+        const updateAlreadyRan = queries.some((query) => {
+          const n = normalizeSql(query.text);
+          return (
+            n.startsWith('UPDATE orders SET production_status_id') ||
+            n.startsWith('UPDATE orders SET production_status_from_details_enabled')
+          );
+        });
         const rows = updateAlreadyRan
           ? (options.detailStatusRowsAfter ?? [])
           : (options.detailStatusRowsBefore ?? []);
@@ -815,6 +1158,7 @@ function createDatabase(options: {
         normalized.startsWith('UPDATE orders SET order_status_id') ||
         normalized.startsWith('UPDATE orders SET payment_status_id') ||
         normalized.startsWith('UPDATE orders SET production_status_id') ||
+        normalized.startsWith('UPDATE orders SET production_status_from_details_enabled') ||
         normalized.startsWith('UPDATE orders SET version = version + 1')
       ) {
         return { rows: [{ version: 4 }], rowCount: 1 };

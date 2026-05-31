@@ -14,6 +14,7 @@ import {
   parseProductionStatusId,
   parseDetailStageEventRequest,
   parseStageEventRequest,
+  parseProductionStatusModeRequest,
   ProductionActionsController,
 } from './production-actions.controller';
 import { OrderDetailProductionActionsController } from './order-detail-production-actions.controller';
@@ -72,6 +73,12 @@ describe('ProductionActionsController', () => {
       },
       async activateDetailProductionStage(command) {
         calls.push(`detail-activate:${command.detailId}:${command.productionStatusId}:${command.dto.note}`);
+        return response();
+      },
+      async restoreAutoProductionStatus() {
+        return response();
+      },
+      async enterManualProductionStatus() {
         return response();
       },
     };
@@ -159,6 +166,74 @@ describe('ProductionActionsController', () => {
     expect(() => parseStageEventRequest({ version: 1, idempotencyKey: 'short' })).toThrow(ApiError);
     expect(parseDetailStageEventRequest(detailStageBody())).toEqual(detailStageBody());
     expect(() => parseDetailStageEventRequest({ ...detailStageBody(), note: 5 })).toThrow(ApiError);
+    expect(parseProductionStatusModeRequest(productionStatusModeBody())).toEqual(productionStatusModeBody());
+    expect(() => parseProductionStatusModeRequest({ ...productionStatusModeBody(), version: -1 })).toThrow(ApiError);
+    expect(() => parseProductionStatusModeRequest({ ...productionStatusModeBody(), idempotencyKey: 'short' })).toThrow(ApiError);
+  });
+
+  it('delegates restore-auto and enter-manual endpoints to ProductionActionService', async () => {
+    const calls: string[] = [];
+    const service = {
+      async restoreAutoProductionStatus(command) {
+        calls.push(`restore-auto:${command.orderId}:${command.dto.version}`);
+        return response();
+      },
+      async enterManualProductionStatus(command) {
+        calls.push(`enter-manual:${command.orderId}:${command.dto.version}`);
+        return response();
+      },
+    };
+    const controller = createController({
+      flags: { productionActionsEnabled: true },
+      service,
+    });
+    const user = { user: currentUser(), requestId: 'req-mode' };
+
+    await controller.restoreAutoProductionStatus(user, '15', productionStatusModeBody());
+    await controller.enterManualProductionStatus(user, '15', productionStatusModeBody());
+
+    expect(calls).toEqual([
+      'restore-auto:15:3',
+      'enter-manual:15:3',
+    ]);
+  });
+
+  it('returns 503 on restore-auto when production actions flag is disabled', async () => {
+    const controller = createController({ flags: { productionActionsEnabled: false } });
+
+    await expect(
+      controller.restoreAutoProductionStatus({ user: currentUser() }, '15', productionStatusModeBody()),
+    ).rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_UNAVAILABLE' });
+  });
+
+  it('returns 503 on enter-manual when production actions flag is disabled', async () => {
+    const controller = createController({ flags: { productionActionsEnabled: false } });
+
+    await expect(
+      controller.enterManualProductionStatus({ user: currentUser() }, '15', productionStatusModeBody()),
+    ).rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_UNAVAILABLE' });
+  });
+
+  it('returns 401 on restore-auto when user is not authenticated', async () => {
+    const controller = createController({ flags: { productionActionsEnabled: true } });
+
+    await expect(
+      controller.restoreAutoProductionStatus({}, '15', productionStatusModeBody()),
+    ).rejects.toMatchObject({ statusCode: 401, code: 'AUTH_REQUIRED' });
+  });
+
+  it('returns 401 on enter-manual when user is not authenticated', async () => {
+    const controller = createController({ flags: { productionActionsEnabled: true } });
+
+    await expect(
+      controller.enterManualProductionStatus({}, '15', productionStatusModeBody()),
+    ).rejects.toMatchObject({ statusCode: 401, code: 'AUTH_REQUIRED' });
+  });
+
+  it('returns 422 on restore-auto with invalid payload', async () => {
+    expect(() =>
+      parseProductionStatusModeRequest({ version: 'not-a-number', idempotencyKey: 'valid-key-123' }),
+    ).toThrow(ApiError);
   });
 });
 
@@ -204,6 +279,12 @@ function createService(overrides: Partial<ProductionActionService> = {}): Produc
     },
     async activateDetailProductionStage() {
       throw new Error('activateDetailProductionStage should not be called');
+    },
+    async restoreAutoProductionStatus() {
+      throw new Error('restoreAutoProductionStatus should not be called');
+    },
+    async enterManualProductionStatus() {
+      throw new Error('enterManualProductionStatus should not be called');
     },
     ...overrides,
   } as unknown as ProductionActionService;
@@ -251,6 +332,10 @@ function stageBody() {
 
 function detailStageBody() {
   return { idempotencyKey: 'detail-stage-key-1', note: 'started cutting' };
+}
+
+function productionStatusModeBody() {
+  return { version: 3, idempotencyKey: 'mode-key-12345678' };
 }
 
 function response() {

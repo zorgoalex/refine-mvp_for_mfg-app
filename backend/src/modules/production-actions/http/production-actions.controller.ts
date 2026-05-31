@@ -17,9 +17,11 @@ import type {
   ChangePaymentStatusRequestDto,
   ChangeProductionStatusRequestDto,
   DetailProductionStageEventRequestDto,
+  EnterManualProductionStatusRequestDto,
   MoveCalendarDateRequestDto,
   ProductionActionResponseDto,
   ProductionStageEventRequestDto,
+  RestoreAutoProductionStatusRequestDto,
 } from '../dto/production-action.dto';
 import { ProductionActionsRuntimeConfigService } from './production-actions-runtime-config.service';
 
@@ -65,9 +67,20 @@ const detailStageEventRequestSchema = z.object({
   note: z.string().trim().max(1000).nullable().optional(),
 });
 
+const productionStatusModeRequestSchema = z.object({
+  version: versionSchema,
+  idempotencyKey: idempotencyKeySchema,
+});
+
 const actionVersionFieldsSwaggerSchema = {
   version: { type: 'integer', minimum: 0 },
   idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
+} as const;
+
+const productionStatusModeRequestSwaggerSchema = {
+  type: 'object',
+  required: ['version', 'idempotencyKey'],
+  properties: actionVersionFieldsSwaggerSchema,
 } as const;
 
 const moveCalendarDateRequestSwaggerSchema = {
@@ -125,6 +138,7 @@ const productionActionResponseSwaggerSchema = {
         orderStatusId: { type: 'integer' },
         paymentStatusId: { type: 'integer' },
         productionStatusId: { type: 'integer' },
+        productionStatusFromDetailsEnabled: { type: 'boolean' },
         version: { type: 'integer' },
       },
     },
@@ -335,6 +349,60 @@ export class ProductionActionsController {
     });
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ schema: swaggerSchema(productionStatusModeRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Restored auto production status mode', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid production action payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'restoreAutoProductionStatus', summary: 'Restore auto production status mode (derive from details)' })
+  @Patch('production-status-mode/auto')
+  async restoreAutoProductionStatus(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Body() body: unknown,
+  ): Promise<ProductionActionResponseDto> {
+    this.assertProductionActionsEnabled();
+
+    return this.productionActions.restoreAutoProductionStatus({
+      currentUser: this.requireCurrentUser(request),
+      orderId: parseOrderId(orderIdParam),
+      dto: parseProductionStatusModeRequest(body),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ schema: swaggerSchema(productionStatusModeRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Entered manual production status mode', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid production action payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'enterManualProductionStatus', summary: 'Enter manual production status mode' })
+  @Patch('production-status-mode/manual')
+  async enterManualProductionStatus(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Body() body: unknown,
+  ): Promise<ProductionActionResponseDto> {
+    this.assertProductionActionsEnabled();
+
+    return this.productionActions.enterManualProductionStatus({
+      currentUser: this.requireCurrentUser(request),
+      orderId: parseOrderId(orderIdParam),
+      dto: parseProductionStatusModeRequest(body),
+      requestId: request.requestId,
+    });
+  }
+
   private assertProductionActionsEnabled(): void {
     if (!this.runtimeConfig.getFeatureFlags().productionActionsEnabled) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Production actions API is disabled', {
@@ -450,6 +518,17 @@ export function parseStageEventRequest(body: unknown): ProductionStageEventReque
 
 export function parseDetailStageEventRequest(body: unknown): DetailProductionStageEventRequestDto {
   const parsed = detailStageEventRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw productionActionValidationError(parsed.error);
+  }
+
+  return parsed.data;
+}
+
+export function parseProductionStatusModeRequest(
+  body: unknown,
+): RestoreAutoProductionStatusRequestDto | EnterManualProductionStatusRequestDto {
+  const parsed = productionStatusModeRequestSchema.safeParse(body);
   if (!parsed.success) {
     throw productionActionValidationError(parsed.error);
   }

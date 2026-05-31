@@ -72,3 +72,6 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# worktree symlink to the backend package node_modules (never commit)
+backend/node_modules

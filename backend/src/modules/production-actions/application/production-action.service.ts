@@ -10,8 +10,10 @@ import type {
   ChangePaymentStatusCommand,
   ChangeProductionStatusCommand,
   DeactivateProductionStageCommand,
+  EnterManualProductionStatusCommand,
   MoveCalendarDateCommand,
   ProductionActionRepositoryPort,
+  RestoreAutoProductionStatusCommand,
 } from './production-action.types';
 
 export interface ProductionActionServicePorts {
@@ -79,6 +81,22 @@ export class ProductionActionService {
       'orders.update',
     ]);
     return this.ports.productionActions.activateDetailProductionStage(command);
+  }
+
+  async restoreAutoProductionStatus(command: RestoreAutoProductionStatusCommand) {
+    this.requirePermissions(command.currentUser, [
+      'orders.change_production_status',
+      'orders.update',
+    ]);
+    return this.ports.productionActions.restoreAutoProductionStatus(command);
+  }
+
+  async enterManualProductionStatus(command: EnterManualProductionStatusCommand) {
+    this.requirePermissions(command.currentUser, [
+      'orders.change_production_status',
+      'orders.update',
+    ]);
+    return this.ports.productionActions.enterManualProductionStatus(command);
   }
 
   private requirePermissions(

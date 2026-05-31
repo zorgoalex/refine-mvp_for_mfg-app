@@ -836,6 +836,100 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/production-status-mode/auto:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    patch:
+      tags:
+        - Production Actions
+      operationId: restoreAutoProductionStatus
+      summary: Restore auto production status mode (derive from details)
+      description: Restores auto production status mode for an order, deriving production status from detail stages.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.change_production_status
+        - orders.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductionStatusModeRequest'
+      responses:
+        '200':
+          description: Restored auto production status mode
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/production-status-mode/manual:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    patch:
+      tags:
+        - Production Actions
+      operationId: enterManualProductionStatus
+      summary: Enter manual production status mode
+      description: Enters manual production status mode for an order, disabling auto-derivation from detail stages.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.change_production_status
+        - orders.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductionStatusModeRequest'
+      responses:
+        '200':
+          description: Entered manual production status mode
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductionActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/orders/{orderId}/calendar-date:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -5375,6 +5469,20 @@ components:
           minLength: 8
           maxLength: 200
 
+    ProductionStatusModeRequest:
+      type: object
+      required:
+        - version
+        - idempotencyKey
+      properties:
+        version:
+          type: integer
+          minimum: 0
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+
     DetailProductionStageEventRequest:
       type: object
       required:
@@ -5417,6 +5525,8 @@ components:
             productionStatusId:
               type: integer
               format: int64
+            productionStatusFromDetailsEnabled:
+              type: boolean
             version:
               type: integer
               minimum: 0
