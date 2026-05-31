@@ -45,6 +45,7 @@ export const OrderBasicInfo: React.FC = () => {
   const [dowelingSearchValue, setDowelingSearchValue] = useState<string>('');
   const [productionStatusPending, setProductionStatusPending] = useState(false);
   const productionStatusPendingRef = useRef(false);
+  const [autoStatusModePending, setAutoStatusModePending] = useState(false);
   const autoStatusModePendingRef = useRef(false);
   const dataProvider = useDataProvider();
   const invalidate = useInvalidate();
@@ -266,6 +267,7 @@ export const OrderBasicInfo: React.FC = () => {
 
     if (autoStatusModePendingRef.current) return;
     autoStatusModePendingRef.current = true;
+    setAutoStatusModePending(true);
     const commandVersion = header.version;
     updateHeaderField('version', commandVersion + 1);
     try {
@@ -319,6 +321,7 @@ export const OrderBasicInfo: React.FC = () => {
       });
     } finally {
       autoStatusModePendingRef.current = false;
+      setAutoStatusModePending(false);
     }
   }, [
     header.order_id,
@@ -541,7 +544,7 @@ export const OrderBasicInfo: React.FC = () => {
                 onChange={(checked) => { void handleAutoStatusToggle(checked); }}
                 checkedChildren="Вкл"
                 unCheckedChildren="Выкл"
-                disabled={autoStatusModePendingRef.current}
+                disabled={autoStatusModePending}
               />
             </div>
           </Form.Item>
