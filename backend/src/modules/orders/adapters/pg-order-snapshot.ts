@@ -863,6 +863,8 @@ async function insertOrderHeader(
   return Number(result.rows[0].id);
 }
 
+// production_status_from_details_enabled is intentionally NOT updated here — it is owned by the
+// production-status-mode backend commands (audit/outbox/version). Creation still sets it (insertOrderHeader).
 async function updateOrderHeader(
   tx: TransactionClient,
   orderId: number,
@@ -880,35 +882,35 @@ async function updateOrderHeader(
         order_status_id = $7,
         payment_status_id = $8,
         production_status_id = $9,
-        production_status_from_details_enabled = $10,
-        planned_completion_date = $11,
-        completion_date = $12,
-        issue_date = $13,
-        payment_date = $14,
-        discount = $15,
-        surcharge = $16,
-        total_amount = $17,
-        final_amount = $18,
-        paid_amount = $19,
-        parts_count = $20,
-        total_area = $21,
-        link_cutting_file = $22,
-        link_cutting_image_file = $23,
-        link_cad_file = $24,
-        link_pdf_file = $25,
-        notes = $26,
-        material_id = $27,
-        milling_type_id = $28,
-        edge_type_id = $29,
-        film_id = $30,
-        ref_key_1c = $31
+        planned_completion_date = $10,
+        completion_date = $11,
+        issue_date = $12,
+        payment_date = $13,
+        discount = $14,
+        surcharge = $15,
+        total_amount = $16,
+        final_amount = $17,
+        paid_amount = $18,
+        parts_count = $19,
+        total_area = $20,
+        link_cutting_file = $21,
+        link_cutting_image_file = $22,
+        link_cad_file = $23,
+        link_pdf_file = $24,
+        notes = $25,
+        material_id = $26,
+        milling_type_id = $27,
+        edge_type_id = $28,
+        film_id = $29,
+        ref_key_1c = $30
     WHERE order_id = $1 AND delete_flag = false
     `,
-    [orderId, ...orderHeaderParams(header, totals)],
+    [orderId, ...orderHeaderUpdateParams(header, totals)],
   );
   return orderId;
 }
 
+/** Params for INSERT — includes production_status_from_details_enabled ($9). */
 function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTotalsDto) {
   return [
     header.orderName,
@@ -920,6 +922,44 @@ function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTo
     totals.paymentStatusId,
     header.productionStatusId,
     header.productionStatusFromDetailsEnabled,
+    header.plannedCompletionDate,
+    header.completionDate,
+    header.issueDate,
+    totals.paymentDate,
+    totals.discount,
+    totals.surcharge,
+    totals.totalAmount,
+    totals.finalAmount,
+    totals.paidAmount,
+    totals.partsCount,
+    totals.totalArea,
+    header.linkCuttingFile,
+    header.linkCuttingImageFile,
+    header.linkCadFile,
+    header.linkPdfFile,
+    header.notes,
+    header.materialId,
+    header.millingTypeId,
+    header.edgeTypeId,
+    header.filmId,
+    header.refKey1c,
+  ];
+}
+
+/**
+ * Params for UPDATE — same as orderHeaderParams but WITHOUT production_status_from_details_enabled.
+ * The flag is owned exclusively by the production-status-mode backend commands (audit/outbox/version).
+ */
+function orderHeaderUpdateParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTotalsDto) {
+  return [
+    header.orderName,
+    header.clientId,
+    header.orderDate,
+    header.priority,
+    header.managerId,
+    header.orderStatusId,
+    totals.paymentStatusId,
+    header.productionStatusId,
     header.plannedCompletionDate,
     header.completionDate,
     header.issueDate,
@@ -2160,3 +2200,11 @@ function jsonOrNull(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   return JSON.stringify(value);
 }
+
+// ---------------------------------------------------------------------------
+// Test-only exports — do not use outside tests
+// ---------------------------------------------------------------------------
+export {
+  orderHeaderParams as _testOnlyOrderHeaderInsertParams,
+  orderHeaderUpdateParams as _testOnlyOrderHeaderUpdateParams,
+};

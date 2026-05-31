@@ -228,6 +228,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     totals: OrderTotalsDto;
     currentUser: CurrentUser;
   }): Promise<void> {
+    // production_status_from_details_enabled is intentionally NOT updated here — it is owned by the
+    // production-status-mode backend commands (audit/outbox/version). Creation still sets it (createOrderHeader).
     await this.tx.query(
       `
       UPDATE orders
@@ -238,24 +240,23 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           manager_id = $6,
           order_status_id = $7,
           production_status_id = $8,
-          production_status_from_details_enabled = $9,
-          planned_completion_date = $10,
-          completion_date = $11,
-          issue_date = $12,
-          discount = $13,
-          surcharge = $14,
-          total_amount = $15,
-          final_amount = $16,
-          link_cutting_file = $17,
-          link_cutting_image_file = $18,
-          link_cad_file = $19,
-          link_pdf_file = $20,
-          notes = $21,
-          material_id = $22,
-          milling_type_id = $23,
-          edge_type_id = $24,
-          film_id = $25,
-          ref_key_1c = $26
+          planned_completion_date = $9,
+          completion_date = $10,
+          issue_date = $11,
+          discount = $12,
+          surcharge = $13,
+          total_amount = $14,
+          final_amount = $15,
+          link_cutting_file = $16,
+          link_cutting_image_file = $17,
+          link_cad_file = $18,
+          link_pdf_file = $19,
+          notes = $20,
+          material_id = $21,
+          milling_type_id = $22,
+          edge_type_id = $23,
+          film_id = $24,
+          ref_key_1c = $25
       WHERE order_id = $1 AND delete_flag = false
       `,
       [
@@ -267,7 +268,6 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.managerId ?? Number(input.currentUser.id),
         input.header.orderStatusId,
         input.header.productionStatusId ?? null,
-        input.header.productionStatusFromDetailsEnabled,
         input.header.plannedCompletionDate ?? null,
         input.header.completionDate ?? null,
         input.header.issueDate ?? null,
