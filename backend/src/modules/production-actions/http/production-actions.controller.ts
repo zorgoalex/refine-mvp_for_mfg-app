@@ -138,6 +138,7 @@ const productionActionResponseSwaggerSchema = {
         orderStatusId: { type: 'integer' },
         paymentStatusId: { type: 'integer' },
         productionStatusId: { type: 'integer' },
+        productionStatusFromDetailsEnabled: { type: 'boolean' },
         version: { type: 'integer' },
       },
     },
