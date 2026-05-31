@@ -949,6 +949,8 @@ function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTo
 /**
  * Params for UPDATE — same as orderHeaderParams but WITHOUT production_status_from_details_enabled.
  * The flag is owned exclusively by the production-status-mode backend commands (audit/outbox/version).
+ * NOTE: pg-order-transaction-manager.ts has its own equivalent inline order UPDATE (different column
+ * subset) that also omits this flag — keep both in sync if order header columns change.
  */
 function orderHeaderUpdateParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTotalsDto) {
   return [

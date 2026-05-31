@@ -68,7 +68,7 @@ describe('pg-order-snapshot orderHeaderInsertParams', () => {
     expect(params[8]).toBe(false);
   });
 
-  it('returns 30 elements matching INSERT columns ($1..$30, version hardcoded)', () => {
+  it('returns 30 elements matching INSERT columns ($1..$30)', () => {
     const params = insertParams(header(), totals());
     expect(params).toHaveLength(30);
   });
@@ -108,7 +108,8 @@ describe('pg-order-snapshot orderHeaderUpdateParams', () => {
   });
 
   it('correctly positions discount (index 12, placeholder $14 with orderId as $1)', () => {
-    // In UPDATE: [orderId, ...updateParams] so $14 = index 13 overall = updateParams[12]
+    // updateParams is tested in isolation: index 12 = discount (maps to $14 in the UPDATE SQL,
+    // where $1=orderId, $2=orderName, …, since updateOrderHeader binds [orderId, ...updateParams])
     const params = updateParams(header(), totals({ discount: 15 }));
     expect(params[12]).toBe(15); // discount
   });
