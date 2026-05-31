@@ -89,6 +89,38 @@ describe('productionActionsApi', () => {
     );
   });
 
+  it('routes auto and manual production status mode commands to backend endpoints', async () => {
+    const fetchMock = mockFetch(
+      responseBody({ productionStatusFromDetailsEnabled: true, productionStatusId: 3 }),
+      responseBody({ productionStatusFromDetailsEnabled: false, productionStatusId: 3 }),
+    );
+
+    const autoResponse = await productionActionsApi.restoreAutoProductionStatus(15, {
+      version: 7,
+      idempotencyKey: 'auto-mode-key-1',
+    });
+    const manualResponse = await productionActionsApi.enterManualProductionStatus(15, {
+      version: 8,
+      idempotencyKey: 'manual-mode-key-1',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15/production-status-mode/auto');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ version: 7, idempotencyKey: 'auto-mode-key-1' }),
+    );
+    expect(autoResponse.order.productionStatusFromDetailsEnabled).toBe(true);
+    expect(autoResponse.order.productionStatusId).toBe(3);
+
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/15/production-status-mode/manual');
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('PATCH');
+    expect(fetchMock.mock.calls[1][1]?.body).toBe(
+      JSON.stringify({ version: 8, idempotencyKey: 'manual-mode-key-1' }),
+    );
+    expect(manualResponse.order.productionStatusFromDetailsEnabled).toBe(false);
+    expect(manualResponse.order.productionStatusId).toBe(3);
+  });
+
   it('rejects invalid production detail and status ids before fetch', async () => {
     const fetchMock = mockFetch(responseBody());
 

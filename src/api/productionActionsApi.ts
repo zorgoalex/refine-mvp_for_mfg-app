@@ -9,6 +9,7 @@ import type {
   MoveCalendarDateRequest,
   ProductionActionResponse,
   ProductionStageEventRequest,
+  ProductionStatusModeRequest,
 } from './types/productionActionsApi.types';
 import { validateOrderId } from './ordersApi';
 
@@ -97,6 +98,26 @@ export const productionActionsApi = {
         validateOrderDetailId(detailId),
         validateProductionStatusId(productionStatusId),
       ),
+      request,
+    );
+  },
+
+  restoreAutoProductionStatus(
+    orderId: number,
+    request: ProductionStatusModeRequest,
+  ): Promise<ProductionActionResponse> {
+    return httpClient.patch<ProductionActionResponse>(
+      apiRoutes.orders.autoProductionStatusMode(validateOrderId(orderId)),
+      request,
+    );
+  },
+
+  enterManualProductionStatus(
+    orderId: number,
+    request: ProductionStatusModeRequest,
+  ): Promise<ProductionActionResponse> {
+    return httpClient.patch<ProductionActionResponse>(
+      apiRoutes.orders.manualProductionStatusMode(validateOrderId(orderId)),
       request,
     );
   },
