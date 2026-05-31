@@ -23,6 +23,7 @@
     "test:e2e:production-actions-cutover": "VITE_USE_BACKEND_PRODUCTION_ACTIONS=true playwright test tests/production-actions-backend-cutover.spec.ts",
     "test:e2e:client-phones-cutover": "VITE_USE_BACKEND_PRODUCTION_ACTIONS=true VITE_USE_BACKEND_CLIENT_PHONES=true playwright test tests/client-phones-backend-cutover.spec.ts",
     "test:e2e:production-actions-stage-canary": "PRODUCTION_ACTIONS_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/production-actions-stage-canary.spec.ts --project=chromium",
+    "test:e2e:production-actions-mode-stage-canary": "PRODUCTION_ACTIONS_MODE_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/production-actions-mode-stage-canary.spec.ts --project=chromium",
     "test:e2e:deadline-engine-stage-canary": "DEADLINE_ENGINE_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/deadline-engine-stage-canary.spec.ts --project=chromium",
     "test:e2e:deadline-create-override-stage-canary": "DEADLINE_CREATE_OVERRIDE_RESTORE=true DEADLINE_CREATE_OVERRIDE_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/deadline-engine-create-override-stage-canary.spec.ts --project=chromium",
     "test:e2e:deadline-policy-settings-stage-canary": "DEADLINE_POLICY_SETTINGS_STAGE_CANARY=true DEADLINE_POLICY_SETTINGS_RESTORE=true DEADLINE_POLICY_SETTINGS_TARGET_ENV=backend-test PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/deadline-policy-settings-stage-canary.spec.ts --project=chromium",

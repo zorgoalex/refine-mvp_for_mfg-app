@@ -282,12 +282,10 @@ export const OrderBasicInfo: React.FC = () => {
           });
       updateHeaderField('production_status_from_details_enabled', response.order.productionStatusFromDetailsEnabled ?? next);
       if (response.order.productionStatusId !== undefined) {
+        // Mode toggle never rewrites detail statuses server-side: enter-manual just freezes the
+        // current order status, and restore-auto derives the order status FROM the (unchanged)
+        // details. So only sync the header value — do NOT touch local detail statuses.
         updateHeaderField('production_status_id', response.order.productionStatusId);
-        // enter-manual cascades the order status DOWN to active details (backend trigger) → mirror locally.
-        // restore-auto derives the order status FROM details; details are authoritative/unchanged → no push-back.
-        if (!next) {
-          syncDetailsProductionStatus(response.order.productionStatusId);
-        }
       }
       updateHeaderField('version', response.order.version);
       await invalidate({ resource: 'orders_view', invalidates: ['list'] });
@@ -330,7 +328,6 @@ export const OrderBasicInfo: React.FC = () => {
     header.version,
     featureFlags.useBackendProductionActions,
     updateHeaderField,
-    syncDetailsProductionStatus,
     invalidate,
     refreshHeaderFromOrder,
     refreshFullOrderFromBackend,
