@@ -54,6 +54,14 @@ describe('ProductionActionService', () => {
           calls.push(`detail-activate:${command.detailId}:${command.productionStatusId}`);
           return response();
         },
+        async restoreAutoProductionStatus(command) {
+          calls.push(`restore-auto:${command.orderId}`);
+          return response();
+        },
+        async enterManualProductionStatus(command) {
+          calls.push(`enter-manual:${command.orderId}`);
+          return response();
+        },
       }),
     });
     const admin = currentUser('admin');
@@ -96,6 +104,16 @@ describe('ProductionActionService', () => {
       productionStatusId: 4,
       dto: { idempotencyKey: 'detail-stage-key-1', note: 'started cutting' },
     });
+    await service.restoreAutoProductionStatus({
+      currentUser: admin,
+      orderId: 15,
+      dto: { version: 3, idempotencyKey: 'restore-auto-key-1' },
+    });
+    await service.enterManualProductionStatus({
+      currentUser: admin,
+      orderId: 15,
+      dto: { version: 3, idempotencyKey: 'enter-manual-key-1' },
+    });
 
     expect(calls).toEqual([
       'move:15',
@@ -105,6 +123,8 @@ describe('ProductionActionService', () => {
       'activate:4',
       'deactivate:4',
       'detail-activate:99:4',
+      'restore-auto:15',
+      'enter-manual:15',
     ]);
   });
 

@@ -1024,7 +1024,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const beforeDetails = await loadDetailProductionStatusMap(tx, command.orderId);
-      const nextVersion = await enterManualProductionStatus(tx, command.orderId);
+      const nextVersion = await disableAutoProductionStatus(tx, command.orderId);
       const afterDetails = await loadDetailProductionStatusMap(tx, command.orderId);
 
       const affectedDetailIds = computeAffectedDetailIds(beforeDetails, afterDetails);
@@ -1066,6 +1066,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
             before: order.productionStatusFromDetailsEnabled,
             after: false,
           },
+          // productionStatusId is unchanged by enter-manual (flag-only transition); kept for audit symmetry
           productionStatusId: {
             before: order.productionStatusId,
             after: order.productionStatusId,
@@ -2088,7 +2089,7 @@ async function enableAutoProductionStatus(tx: TransactionClient, orderId: number
   return toNumber(result.rows[0].version);
 }
 
-async function enterManualProductionStatus(tx: TransactionClient, orderId: number): Promise<number> {
+async function disableAutoProductionStatus(tx: TransactionClient, orderId: number): Promise<number> {
   const result = await tx.query<VersionRow>(
     `
     UPDATE orders
@@ -2112,7 +2113,7 @@ async function loadOrderProductionStatusId(
   orderId: number,
 ): Promise<number | null> {
   const result = await tx.query<{ production_status_id: string | number | null }>(
-    'SELECT production_status_id FROM orders WHERE order_id = $1',
+    'SELECT production_status_id FROM orders WHERE order_id = $1 AND delete_flag = false',
     [orderId],
   );
   const row = result.rows[0];

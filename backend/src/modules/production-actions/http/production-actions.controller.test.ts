@@ -222,6 +222,14 @@ describe('ProductionActionsController', () => {
     ).rejects.toMatchObject({ statusCode: 401, code: 'AUTH_REQUIRED' });
   });
 
+  it('returns 401 on enter-manual when user is not authenticated', async () => {
+    const controller = createController({ flags: { productionActionsEnabled: true } });
+
+    await expect(
+      controller.enterManualProductionStatus({}, '15', productionStatusModeBody()),
+    ).rejects.toMatchObject({ statusCode: 401, code: 'AUTH_REQUIRED' });
+  });
+
   it('returns 422 on restore-auto with invalid payload', async () => {
     expect(() =>
       parseProductionStatusModeRequest({ version: 'not-a-number', idempotencyKey: 'valid-key-123' }),
