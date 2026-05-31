@@ -8,8 +8,10 @@ import type {
   ChangeProductionStatusCommand,
   ChangeProductionStatusFromDeadlineCommand,
   DeactivateProductionStageCommand,
+  EnterManualProductionStatusCommand,
   MoveCalendarDateCommand,
   ProductionActionRepositoryPort,
+  RestoreAutoProductionStatusCommand,
 } from '../application/production-action.types';
 
 export class UnavailableProductionActionRepository implements ProductionActionRepositoryPort {
@@ -46,6 +48,14 @@ export class UnavailableProductionActionRepository implements ProductionActionRe
   }
 
   activateDetailProductionStage(_command: ActivateDetailProductionStageCommand) {
+    return Promise.reject(databaseUnavailable());
+  }
+
+  restoreAutoProductionStatus(_command: RestoreAutoProductionStatusCommand) {
+    return Promise.reject(databaseUnavailable());
+  }
+
+  enterManualProductionStatus(_command: EnterManualProductionStatusCommand) {
     return Promise.reject(databaseUnavailable());
   }
 }

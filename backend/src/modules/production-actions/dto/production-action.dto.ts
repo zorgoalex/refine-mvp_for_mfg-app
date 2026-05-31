@@ -34,12 +34,23 @@ export interface DetailProductionStageEventRequestDto {
   note?: string | null;
 }
 
+export interface RestoreAutoProductionStatusRequestDto {
+  version: number;
+  idempotencyKey: string;
+}
+
+export interface EnterManualProductionStatusRequestDto {
+  version: number;
+  idempotencyKey: string;
+}
+
 export interface ProductionActionOrderResponseDto {
   orderId: number;
   plannedCompletionDate?: DateOnlyString | null;
   orderStatusId?: number;
   paymentStatusId?: number;
   productionStatusId?: number;
+  productionStatusFromDetailsEnabled?: boolean;
   version: number;
 }
 

@@ -4,9 +4,11 @@ import type {
   ChangePaymentStatusRequestDto,
   ChangeProductionStatusRequestDto,
   DetailProductionStageEventRequestDto,
+  EnterManualProductionStatusRequestDto,
   MoveCalendarDateRequestDto,
   ProductionActionResponseDto,
   ProductionStageEventRequestDto,
+  RestoreAutoProductionStatusRequestDto,
 } from '../dto/production-action.dto';
 
 export interface MoveCalendarDateCommand {
@@ -112,6 +114,20 @@ export interface ActivateDetailProductionStageCommand {
   requestId?: string;
 }
 
+export interface RestoreAutoProductionStatusCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  dto: RestoreAutoProductionStatusRequestDto;
+  requestId?: string;
+}
+
+export interface EnterManualProductionStatusCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  dto: EnterManualProductionStatusRequestDto;
+  requestId?: string;
+}
+
 export interface ProductionActionRepositoryPort {
   moveCalendarDate(command: MoveCalendarDateCommand): Promise<ProductionActionResponseDto>;
   changeOrderStatus(command: ChangeOrderStatusCommand): Promise<ProductionActionResponseDto>;
@@ -133,5 +149,11 @@ export interface ProductionActionRepositoryPort {
   ): Promise<ProductionActionResponseDto>;
   activateDetailProductionStage(
     command: ActivateDetailProductionStageCommand,
+  ): Promise<ProductionActionResponseDto>;
+  restoreAutoProductionStatus(
+    command: RestoreAutoProductionStatusCommand,
+  ): Promise<ProductionActionResponseDto>;
+  enterManualProductionStatus(
+    command: EnterManualProductionStatusCommand,
   ): Promise<ProductionActionResponseDto>;
 }

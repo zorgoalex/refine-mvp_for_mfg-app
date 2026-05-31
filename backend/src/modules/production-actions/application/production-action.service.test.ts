@@ -186,6 +186,44 @@ describe('ProductionActionService', () => {
       },
     } satisfies Partial<ApiError>);
   });
+
+  it('requires order production status permissions for restore-auto mode', async () => {
+    const service = new ProductionActionService({ productionActions: createRepository() });
+    const viewer = currentUser('viewer');
+
+    await expect(
+      service.restoreAutoProductionStatus({
+        currentUser: viewer,
+        orderId: 15,
+        dto: { version: 3, idempotencyKey: 'restore-auto-key-1' },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: {
+        requiredPermissions: ['orders.change_production_status', 'orders.update'],
+      },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('requires order production status permissions for enter-manual mode', async () => {
+    const service = new ProductionActionService({ productionActions: createRepository() });
+    const viewer = currentUser('viewer');
+
+    await expect(
+      service.enterManualProductionStatus({
+        currentUser: viewer,
+        orderId: 15,
+        dto: { version: 3, idempotencyKey: 'enter-manual-key-1' },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: {
+        requiredPermissions: ['orders.change_production_status', 'orders.update'],
+      },
+    } satisfies Partial<ApiError>);
+  });
 });
 
 function createRepository(
@@ -218,6 +256,12 @@ function createRepository(
     },
     async activateDetailProductionStage() {
       throw new Error('activateDetailProductionStage should not be called');
+    },
+    async restoreAutoProductionStatus() {
+      throw new Error('restoreAutoProductionStatus should not be called');
+    },
+    async enterManualProductionStatus() {
+      throw new Error('enterManualProductionStatus should not be called');
     },
     ...overrides,
   };
