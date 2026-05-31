@@ -402,7 +402,7 @@ npm run test:e2e:regression
 - Полный order+payment finance flow: добавление деталей, кнопки "Пересчитать суммы" / "Групповые действия" / "Удалить выбранные", инлайн-редактирование деталей и платежей, частичная и полная оплата, итого/оплачено/остаток, статус оплаты.
 - Покрытие кнопок страницы заказов: "Выгрузка JSON", "Загрузка JSON", "Фильтры", "Применить".
 
-Скриншоты артефактов сохраняются в `spec_erp/logs/regression/order/` и `spec_erp/logs/regression/reference/` (автоматически создаются при запуске).
+Скриншоты артефактов сохраняются в каталог логов регрессии (`order/` и `reference/`, создаются автоматически при запуске); конкретный путь задаётся константой `SCREENSHOT_DIR` в `tests/regression/*.regression.spec.ts`.
 
 Набор не требует поднятого stage/backend/PostgreSQL: все API-вызовы перехватываются Playwright route-моками. Рекомендуется запускать после значимых изменений frontend UI, форм, таблиц, вкладок или data-provider/mapping слоя.
 
@@ -642,11 +642,11 @@ DEADLINE_NOTIFICATION_ACTION_FIXTURE_KEY=deadline-notification-action-canary-202
 DEADLINE_NOTIFICATION_ACTION_STAGE_CANARY=true DEADLINE_NOTIFICATION_ACTION_RESTORE=true DEADLINE_NOTIFICATION_ACTION_TARGET_ENV=<test-target-env> DEADLINE_NOTIFICATION_ACTION_FIXTURE_KEY=deadline-notification-action-canary-2026-05-24 DEADLINE_NOTIFICATION_ACTION_ORDER_ID=<eligible-test-order-id> npm run deadline-notification-action:fixture -- snapshot
 ```
 
-Accepted restored snapshot has zero fixture deadlines, deadline events, action rules, action executions, and notifications. `BACKEND_DEADLINE_ACTIONS_ENABLED` and `BACKEND_DEADLINE_NOTIFICATIONS_ENABLED` remain default `false`; intentionally enable them only for isolated canary runs, then restore runtime config and rerun smoke. Evidence: `/path/to/spec_erp/docs/deadline-engine-notification-action-rule-stage-canary-2026-05-24.md`.
+Accepted restored snapshot has zero fixture deadlines, deadline events, action rules, action executions, and notifications. `BACKEND_DEADLINE_ACTIONS_ENABLED` and `BACKEND_DEADLINE_NOTIFICATIONS_ENABLED` remain default `false`; intentionally enable them only for isolated canary runs, then restore runtime config and rerun smoke.
 
 ### Deadline Engine residual scope
 
-Stage accepted 2026-05-24: backend-backed notification API/build evidence for current-user persisted notifications. `NotificationBell`/`NotificationPanel` use `/api/v1/notifications`; local Zustand notification store remains transient frontend-only. Stage fixture `deadline-notification-ui-canary-2026-05-23` proved list, mark-read, delete, and zero residue after applying additive <test-target-env> migration `006_deadline_notifications_idempotency.sql`. Manual <stage-frontend> UI verification was attempted but blocked by Vercel login/SSO before the ERP login form loaded. Next residual slice is isolated notification action-rule stage canary. Evidence: `/path/to/spec_erp/docs/deadline-engine-residual-notifications-ui-2026-05-23.md`.
+Stage accepted 2026-05-24: backend-backed notification API/build evidence for current-user persisted notifications. `NotificationBell`/`NotificationPanel` use `/api/v1/notifications`; local Zustand notification store remains transient frontend-only. Stage fixture `deadline-notification-ui-canary-2026-05-23` proved list, mark-read, delete, and zero residue after applying additive <test-target-env> migration `006_deadline_notifications_idempotency.sql`. Manual <stage-frontend> UI verification was attempted but blocked by Vercel login/SSO before the ERP login form loaded. Next residual slice is isolated notification action-rule stage canary.
 
 Still disabled without separate approval:
 
@@ -658,7 +658,6 @@ Still disabled without separate approval:
 - Production fixture writes.
 - Non-notification action handlers: `set_overdue_flag`, `change_order_status`, `change_production_status`, `create_task`, `escalate`, and `webhook`.
 
-Production cutover plan: [../spec_erp/docs/production-cutover-plan.md](../spec_erp/docs/production-cutover-plan.md).
 Браузерный runtime проверяется через `npx playwright install chromium`.
 
 Acceptance check 2026-05-02: `npm test`, `npm run build` и
