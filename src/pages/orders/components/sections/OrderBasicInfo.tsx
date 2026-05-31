@@ -274,15 +274,17 @@ export const OrderBasicInfo: React.FC = () => {
       const response = next
         ? await productionActionsApi.restoreAutoProductionStatus(header.order_id, {
             version: commandVersion,
-            idempotencyKey: createProductionActionIdempotencyKey('order-header-auto-status-mode'),
+            idempotencyKey: createProductionActionIdempotencyKey('order-header-auto-status-restore'),
           })
         : await productionActionsApi.enterManualProductionStatus(header.order_id, {
             version: commandVersion,
-            idempotencyKey: createProductionActionIdempotencyKey('order-header-auto-status-mode'),
+            idempotencyKey: createProductionActionIdempotencyKey('order-header-auto-status-manual'),
           });
       updateHeaderField('production_status_from_details_enabled', response.order.productionStatusFromDetailsEnabled ?? next);
       if (response.order.productionStatusId !== undefined) {
         updateHeaderField('production_status_id', response.order.productionStatusId);
+        // enter-manual cascades the order status DOWN to active details (backend trigger) → mirror locally.
+        // restore-auto derives the order status FROM details; details are authoritative/unchanged → no push-back.
         if (!next) {
           syncDetailsProductionStatus(response.order.productionStatusId);
         }
