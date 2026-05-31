@@ -41,6 +41,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   users: ['users.view'],
   employees: ['users.view'],
   configuration: ['settings.view', 'settings.manage'],
+  audit: ['audit.view'],
 };
 
 export interface LegacyPermissionCarrier extends PermissionCarrier {

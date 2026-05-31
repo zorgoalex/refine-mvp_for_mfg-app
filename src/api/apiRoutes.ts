@@ -97,4 +97,7 @@ export const apiRoutes = {
     upload: backendApiPath('/vlm/upload'),
     analyze: backendApiPath('/vlm/analyze'),
   },
+  audit: {
+    list: backendApiPath('/audit'),
+  },
 } as const;
