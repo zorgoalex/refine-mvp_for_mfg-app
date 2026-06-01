@@ -1,11 +1,13 @@
 import { ApiError } from '../../../common/errors/api-error';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
   CreateOrderCommand,
   DeleteOrderCommand,
   OrderDeadlineSyncPort,
   OrderChildReference,
+  LockedOrderRow,
   OrderPermissionCheckerPort,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
@@ -36,6 +38,8 @@ export class OrderTransactionService {
     const order = await this.ports.transactions.runInTransaction(async (unitOfWork) => {
       await unitOfWork.setSessionUser(command.currentUser.id);
       this.requirePermission(command, 'orders.create');
+      this.requirePermission(command, 'orders.view_financials');
+      this.requireFinancePermissionForPaymentMutations(command, prepared.order);
 
       const orderId = await unitOfWork.createOrderHeader({
         header: prepared.order.header,
@@ -59,7 +63,7 @@ export class OrderTransactionService {
         clientId: prepared.order.header.clientId ?? null,
       });
 
-      return this.readAndAssertVersion(unitOfWork, orderId, version);
+      return this.readAndAssertVersion(unitOfWork, orderId, version, command);
     });
 
     await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
@@ -75,12 +79,15 @@ export class OrderTransactionService {
     const order = await this.ports.transactions.runInTransaction(async (unitOfWork) => {
       await unitOfWork.setSessionUser(command.currentUser.id);
       this.requirePermission(command, 'orders.update');
+      this.requirePermission(command, 'orders.view_financials');
 
       const lockedOrder = await unitOfWork.loadOrderForUpdate(command.orderId);
 
       if (!lockedOrder) {
         throw new OrderNotFoundError(command.orderId);
       }
+
+      this.requireUpdateScope(command, lockedOrder);
 
       const clientVersion = this.extractClientVersion(command.dto.version, lockedOrder.version);
 
@@ -92,6 +99,7 @@ export class OrderTransactionService {
         mode: 'update',
         pathOrderId: command.orderId,
       });
+      this.requireFinancePermissionForPaymentMutations(command, prepared.order);
       await unitOfWork.assertChildOwnership(
         command.orderId,
         collectChildReferences(prepared.order),
@@ -118,7 +126,7 @@ export class OrderTransactionService {
         clientId: prepared.order.header.clientId ?? null,
       });
 
-      return this.readAndAssertVersion(unitOfWork, command.orderId, version);
+      return this.readAndAssertVersion(unitOfWork, command.orderId, version, command);
     });
 
     await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
@@ -204,6 +212,7 @@ export class OrderTransactionService {
     unitOfWork: OrderWriteUnitOfWork,
     orderId: number,
     version: number,
+    command: Pick<CreateOrderCommand | UpdateOrderCommand, 'currentUser'>,
   ): Promise<OrderDto> {
     const order = await unitOfWork.readOrder(orderId);
 
@@ -211,7 +220,14 @@ export class OrderTransactionService {
       throw new ApiError(500, 'ORDER_SAVE_FAILED', 'Не удалось сохранить заказ');
     }
 
-    return order;
+    if (this.permissions.canUser(command.currentUser, 'payments.view')) {
+      return order;
+    }
+
+    return {
+      ...order,
+      payments: [],
+    };
   }
 
   private extractClientVersion(version: unknown, lockedVersion: number): number {
@@ -230,11 +246,52 @@ export class OrderTransactionService {
 
   private requirePermission(
     command: Pick<CreateOrderCommand | UpdateOrderCommand, 'currentUser'>,
-    permission: 'orders.create' | 'orders.update',
+    permission: PermissionName,
   ): void {
     if (!this.permissions.canUser(command.currentUser, permission)) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: [permission],
+      });
+    }
+  }
+
+  private requireFinancePermissionForPaymentMutations(
+    command: Pick<CreateOrderCommand | UpdateOrderCommand, 'currentUser'>,
+    order: NormalizedSaveOrderDto,
+  ): void {
+    const createsPayment = order.payments.some((payment) => payment.id === undefined);
+    const updatesPayment = order.payments.some((payment) => payment.id !== undefined);
+    const deletesPayment = (order.deleted.paymentIds?.length ?? 0) > 0;
+    const updatesPaymentStatus = order.header.paymentStatusId !== undefined;
+    const carriesFinancialFields = orderCarriesFinancialFields(order);
+
+    if (!createsPayment && !updatesPayment && !deletesPayment && !carriesFinancialFields) {
+      return;
+    }
+
+    this.requirePermission(command, 'orders.view_financials');
+
+    if (createsPayment) {
+      this.requirePermission(command, 'payments.create');
+    }
+    if (updatesPayment || updatesPaymentStatus) {
+      this.requirePermission(command, 'payments.update');
+    }
+    if (deletesPayment) {
+      this.requirePermission(command, 'payments.delete');
+    }
+  }
+
+  private requireUpdateScope(command: Pick<UpdateOrderCommand, 'currentUser'>, order: LockedOrderRow): void {
+    if (
+      !this.orderAccessPolicy.canUpdate(command.currentUser, {
+        orderId: order.orderId,
+        createdByUserId: order.createdByUserId,
+        managerUserId: order.managerUserId,
+      })
+    ) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['orders.update'],
       });
     }
   }
@@ -259,6 +316,17 @@ export class OrderTransactionService {
       });
     }
   }
+}
+
+function orderCarriesFinancialFields(order: NormalizedSaveOrderDto): boolean {
+  return (
+    order.header.discount !== 0 ||
+    order.header.surcharge !== 0 ||
+    order.header.paymentStatusId !== undefined ||
+    order.header.paymentDate !== undefined ||
+    order.details.some((detail) => detail.millingCostPerSqm !== null || detail.detailCost !== null) ||
+    order.requirements.some((requirement) => requirement.purchasePrice !== null)
+  );
 }
 
 export function collectChildReferences(order: NormalizedSaveOrderDto): OrderChildReference[] {

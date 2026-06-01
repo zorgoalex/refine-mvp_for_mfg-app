@@ -43,7 +43,9 @@ describe('orders OpenAPI contract', () => {
     );
 
     expect(auditSection).toContain('operationId: getOrderAudit');
-    expect(auditSection).toContain('x-permission: orders.view_audit');
+    expect(auditSection).toContain('x-permissions:');
+    expect(auditSection).toContain('- orders.view_audit');
+    expect(auditSection).toContain('- orders.view_financials');
     expect(auditSection).toContain("$ref: '#/components/parameters/Page'");
     expect(auditSection).toContain("$ref: '#/components/parameters/PageSize'");
     expect(auditSection).toContain("'404':");

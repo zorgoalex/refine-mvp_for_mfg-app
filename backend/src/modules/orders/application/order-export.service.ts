@@ -30,6 +30,11 @@ export class OrderExportService {
         requiredPermissions: ['orders.export'],
       });
     }
+    if (!this.permissions.canUser(command.currentUser, 'orders.view_financials')) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['orders.view_financials'],
+      });
+    }
 
     await this.rateLimiter.assertAllowed(command);
 

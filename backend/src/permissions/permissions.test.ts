@@ -101,6 +101,47 @@ describe('permissions foundation', () => {
     expect(can('worker', 'projects.members.view')).toBe(false);
   });
 
+  it('keeps operator away from payment and finance visibility until business approval', () => {
+    expect(can('operator', 'payments.view')).toBe(false);
+    expect(can('operator', 'payments.create')).toBe(false);
+    expect(can('operator', 'payments.update')).toBe(false);
+    expect(can('operator', 'payments.delete')).toBe(false);
+    expect(can('operator', 'finance.view')).toBe(false);
+    expect(can('operator', 'finance.analytics.view')).toBe(false);
+    expect(can('operator', 'orders.view_financials')).toBe(false);
+  });
+
+  it('keeps viewer read-only without payment or financial field visibility', () => {
+    expect(can('viewer', 'orders.view')).toBe(true);
+    expect(can('viewer', 'orders.create')).toBe(false);
+    expect(can('viewer', 'orders.update')).toBe(false);
+    expect(can('viewer', 'payments.view')).toBe(false);
+    expect(can('viewer', 'payments.create')).toBe(false);
+    expect(can('viewer', 'payments.update')).toBe(false);
+    expect(can('viewer', 'payments.delete')).toBe(false);
+    expect(can('viewer', 'finance.view')).toBe(false);
+    expect(can('viewer', 'finance.analytics.view')).toBe(false);
+    expect(can('viewer', 'orders.view_financials')).toBe(false);
+  });
+
+  it('preserves existing manager and top manager finance permissions', () => {
+    expect(can('manager', 'payments.view')).toBe(true);
+    expect(can('manager', 'payments.create')).toBe(true);
+    expect(can('manager', 'payments.update')).toBe(true);
+    expect(can('manager', 'payments.delete')).toBe(false);
+    expect(can('manager', 'finance.view')).toBe(true);
+    expect(can('manager', 'finance.analytics.view')).toBe(false);
+    expect(can('manager', 'orders.view_financials')).toBe(true);
+
+    expect(can('top_manager', 'payments.view')).toBe(true);
+    expect(can('top_manager', 'payments.create')).toBe(true);
+    expect(can('top_manager', 'payments.update')).toBe(true);
+    expect(can('top_manager', 'payments.delete')).toBe(false);
+    expect(can('top_manager', 'finance.view')).toBe(true);
+    expect(can('top_manager', 'finance.analytics.view')).toBe(true);
+    expect(can('top_manager', 'orders.view_financials')).toBe(true);
+  });
+
   it('sets legacy Hasura allowed roles with superadmin at the top', () => {
     expect(HASURA_ALLOWED_ROLES.superadmin).toEqual([
       'superadmin',
@@ -148,6 +189,19 @@ describe('permissions foundation', () => {
       'projects.members.manage',
     ]);
     expect(contractPermissions).toEqual(expect.arrayContaining(projectPermissions));
+  });
+
+  it('keeps finance visibility permissions in the static OpenAPI PermissionName enum', () => {
+    const contract = readOpenApiContract();
+    const contractPermissions = readPermissionNameEnum(contract);
+
+    expect(contractPermissions).toEqual(
+      expect.arrayContaining([
+        'orders.view_financials',
+        'finance.view',
+        'finance.analytics.view',
+      ]),
+    );
   });
 });
 
