@@ -31,6 +31,7 @@
 - Финансы: платежи, статусы оплат, итоговые суммы, пересчёт оплачено/остаток.
 - Производственный календарь: диапазон дат, Drag & Drop, контекстное меню статусов, компактные виды карточек, цветовая кодировка материалов.
 - Этапы производства: независимые toggle-этапы, хранение фактов в `production_status_events`, отображение в списке, карточках календаря и карточке заказа.
+- Текущий статус производства заказа: переключатель «Автообновление статусов производства» в карточке — в авто-режиме статус заказа выводится из статусов деталей (наименее продвинутая деталь), в ручном режиме фиксируется текущий статус; переключение и смена статуса идут через backend-команды с проверкой прав, optimistic-версией и аудитом.
 - Настройки приложения: `app_settings`, вкладки заказов, финансов, этапов производства, видимости ресурсов и анализа фото.
 - Импорт деталей: Excel, PDF и фото через VLM API.
 - VLM-конфигурация из БД: провайдеры, модели, промпты и дефолтные настройки запросов.
@@ -376,6 +377,7 @@ npm run dev:full
 - `npm run test:e2e:payments-stage-canary` — opt-in Playwright smoke для stage payments UI/backend path с реальными DB writes на тестовом заказе.
 - `npm run test:e2e:production-actions-cutover` — Playwright smoke для backend production actions/calendar moves cutover flag.
 - `npm run test:e2e:production-actions-stage-canary` — opt-in Playwright smoke для stage production actions backend path с audit/outbox/idempotency checks.
+- `npm run test:e2e:production-actions-mode-stage-canary` — opt-in write canary для backend команд переключения режима статуса производства (`/production-status-mode/auto` и `/manual`) на backend-test: enter-manual → restore-auto на тестовом заказе с audit/outbox/idempotency и restore-to-zero.
 - `npm run test:e2e:deadline-engine-stage-canary` - opt-in read-only smoke for deployed Deadline Engine frontend/API stage acceptance.
 - `npm run test:e2e:deadline-create-override-stage-canary` - opt-in write canary for deployed Deadline Engine create/override command acceptance on stage only.
 - `npm run test:e2e:deadline-status-transition-stage-canary` - opt-in write canary for Deadline Engine `change_order_status` transition rules on backend-test only.
@@ -425,6 +427,7 @@ npm run test:e2e:users-cutover
 npm run test:e2e:order-export-cutover
 npm run test:e2e:production-actions-cutover
 npm run test:e2e:production-actions-stage-canary
+npm run test:e2e:production-actions-mode-stage-canary
 npm run test:e2e:deadline-engine-stage-canary
 npm run test:e2e:deadline-create-override-stage-canary
 npm run test:e2e:order-ui-full-coverage
@@ -553,6 +556,7 @@ npx playwright test \
   tests/order-created-by-stage-canary.spec.ts \
   tests/payments-stage-canary.spec.ts \
   tests/production-actions-stage-canary.spec.ts \
+  tests/production-actions-mode-stage-canary.spec.ts \
   --project=chromium
 '
 ```
