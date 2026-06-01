@@ -2851,6 +2851,75 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/projects/reports/orders:
+    get:
+      tags:
+        - Projects
+      operationId: listProjectOrderReportIds
+      summary: List order ids filtered by project membership
+      description: Returns only order ids, pagination, and applied project report filter metadata.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - projects.view
+        - orders.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: projectMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [any, all, primary, none]
+            default: any
+        - name: projectIds
+          in: query
+          required: false
+          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          schema:
+            type: string
+        - name: temporalMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [current, asOf, overlap]
+            default: current
+        - name: asOf
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Project-filtered order report ids
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectOrderReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/projects/{projectId}:
     parameters:
       - name: projectId
@@ -4314,6 +4383,106 @@ components:
           type: integer
           minimum: 0
           example: 125
+
+    ProjectOrderReportItem:
+      type: object
+      required:
+        - orderId
+      properties:
+        orderId:
+          type: integer
+
+    ProjectOrderReportPagination:
+      type: object
+      required:
+        - page
+        - pageSize
+        - total
+        - totalPages
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 200
+        total:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 1
+
+    ProjectOrderReportTemporalFilter:
+      oneOf:
+        - type: object
+          required:
+            - mode
+          properties:
+            mode:
+              type: string
+              enum: [current]
+        - type: object
+          required:
+            - mode
+            - asOf
+          properties:
+            mode:
+              type: string
+              enum: [asOf]
+            asOf:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - mode
+            - from
+            - to
+          properties:
+            mode:
+              type: string
+              enum: [overlap]
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+
+    ProjectOrderReportFilter:
+      type: object
+      required:
+        - mode
+        - temporal
+      properties:
+        mode:
+          type: string
+          enum: [any, all, primary, none]
+        projectIds:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+        temporal:
+          $ref: '#/components/schemas/ProjectOrderReportTemporalFilter'
+
+    ProjectOrderReportResponse:
+      type: object
+      required:
+        - data
+        - pagination
+        - filter
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOrderReportItem'
+        pagination:
+          $ref: '#/components/schemas/ProjectOrderReportPagination'
+        filter:
+          $ref: '#/components/schemas/ProjectOrderReportFilter'
 
     OrderListResponse:
       type: object
