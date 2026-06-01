@@ -112,8 +112,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       ? {
           orderId: Number(row.order_id),
           version: Number(row.version),
-          createdByUserId: row.created_by === null ? null : String(row.created_by),
-          managerUserId: row.manager_id === null ? null : String(row.manager_id),
+          createdByUserId: toNullableString(row.created_by),
+          managerUserId: toNullableString(row.manager_id),
         }
       : null;
   }
@@ -136,8 +136,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           orderName: row.order_name,
           clientId: row.client_id === null ? null : Number(row.client_id),
           version: Number(row.version),
-          createdByUserId: row.created_by === null ? null : String(row.created_by),
-          managerUserId: row.manager_id === null ? null : String(row.manager_id),
+          createdByUserId: toNullableString(row.created_by),
+          managerUserId: toNullableString(row.manager_id),
         }
       : null;
   }
@@ -1042,4 +1042,8 @@ async function softDeleteByIds(
     `,
     [ids, orderId],
   );
+}
+
+function toNullableString(value: string | number | null | undefined): string | null {
+  return value === null || value === undefined ? null : String(value);
 }

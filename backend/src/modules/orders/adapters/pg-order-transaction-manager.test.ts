@@ -20,7 +20,12 @@ describe('PgOrderTransactionManager', () => {
 
     await manager.runInTransaction(async (uow) => {
       await uow.setSessionUser('42');
-      await expect(uow.loadOrderForUpdate(100)).resolves.toEqual({ orderId: 100, version: 2 });
+      await expect(uow.loadOrderForUpdate(100)).resolves.toEqual({
+        orderId: 100,
+        version: 2,
+        createdByUserId: '42',
+        managerUserId: '42',
+      });
       await uow.assertChildOwnership(100, [{ entityType: 'detail', id: 200 }]);
       const orderId = await uow.createOrderHeader({
         header: header(),
@@ -47,7 +52,7 @@ describe('PgOrderTransactionManager', () => {
 
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('SELECT set_session_user($1)');
-    expect(sql).toContain('SELECT order_id, version FROM orders');
+    expect(sql).toContain('SELECT order_id, version, created_by, manager_id FROM orders');
     expect(sql).toContain('INSERT INTO orders');
     expect(sql).toContain('INSERT INTO order_details');
     expect(sql).toContain('INSERT INTO payments');
@@ -442,7 +447,10 @@ function createDatabase(
       }
 
       if (text.includes('SELECT order_id, version')) {
-        return { rows: [{ order_id: 100, version: 2 }], rowCount: 1 };
+        return {
+          rows: [{ order_id: 100, version: 2, created_by: 42, manager_id: 42 }],
+          rowCount: 1,
+        };
       }
 
       if (normalized.startsWith('SELECT order_id, order_name')) {
