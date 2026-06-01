@@ -419,7 +419,9 @@ paths:
         финансовые итоги и возвращает полный актуальный OrderDto.
       security:
         - bearerAuth: []
-      x-permission: orders.create
+      x-permissions:
+        - orders.create
+        - orders.view_financials
       x-transactional: true
       requestBody:
         required: true
@@ -518,7 +520,9 @@ paths:
         проверка optimistic locking через поле version.
       security:
         - bearerAuth: []
-      x-permission: orders.update
+      x-permissions:
+        - orders.update
+        - orders.view_financials
       x-transactional: true
       requestBody:
         required: true
@@ -756,6 +760,7 @@ paths:
       x-permissions:
         - orders.update
         - payments.update
+        - orders.view_financials
       requestBody:
         required: true
         content:
@@ -1174,7 +1179,9 @@ paths:
         заказ, детали, платежи, клиента, статусы, считает итоговый export payload и вызывает интеграцию.
       security:
         - bearerAuth: []
-      x-permission: orders.export
+      x-permissions:
+        - orders.export
+        - orders.view_financials
       x-rate-limit: export_by_user_and_order
       requestBody:
         required: false
@@ -1230,7 +1237,9 @@ paths:
       description: Возвращает audit events по заказу.
       security:
         - bearerAuth: []
-      x-permission: orders.view_audit
+      x-permissions:
+        - orders.view_audit
+        - orders.view_financials
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
@@ -1260,7 +1269,9 @@ paths:
       summary: Экспортировать snapshot заказа
       security:
         - bearerAuth: []
-      x-permission: orders.export
+      x-permissions:
+        - orders.export
+        - orders.view_financials
       responses:
         '200':
           description: JSON snapshot файла заказа
@@ -1291,7 +1302,9 @@ paths:
       summary: Экспортировать batch snapshot'ов заказов
       security:
         - bearerAuth: []
-      x-permission: orders.export
+      x-permissions:
+        - orders.export
+        - orders.view_financials
       parameters:
         - name: dateFrom
           in: query
@@ -1340,7 +1353,12 @@ paths:
       summary: Импортировать snapshot заказа
       security:
         - bearerAuth: []
-      x-permission: orders.import
+      x-permissions:
+        - orders.import
+        - orders.view_financials
+        - payments.create
+        - payments.update
+        - payments.delete
       requestBody:
         required: true
         content:
@@ -1376,7 +1394,12 @@ paths:
       summary: Импортировать batch snapshot'ов заказов
       security:
         - bearerAuth: []
-      x-permission: orders.import
+      x-permissions:
+        - orders.import
+        - orders.view_financials
+        - payments.create
+        - payments.update
+        - payments.delete
       requestBody:
         required: true
         content:
@@ -3891,11 +3914,14 @@ components:
         - orders.export
         - orders.change_status
         - orders.change_production_status
+        - orders.view_financials
         - orders.view_audit
         - payments.view
         - payments.create
         - payments.update
         - payments.delete
+        - finance.view
+        - finance.analytics.view
         - clients.view
         - clients.create
         - clients.update

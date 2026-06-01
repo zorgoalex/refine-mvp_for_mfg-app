@@ -29,6 +29,7 @@ export class OrderSnapshotService {
 
   exportOrderSnapshot(command: ExportOrderSnapshotCommand): Promise<ExportedOrderSnapshotFile> {
     this.require(command, 'orders.export');
+    this.requireFinanceVisibility(command);
     return this.ports.snapshots.exportOrderSnapshot(command);
   }
 
@@ -36,11 +37,13 @@ export class OrderSnapshotService {
     command: ExportOrderSnapshotBatchCommand,
   ): Promise<ExportedOrderSnapshotBatchFile> {
     this.require(command, 'orders.export');
+    this.requireFinanceVisibility(command);
     return this.ports.snapshots.exportOrderSnapshotBatch(command);
   }
 
   importOrderSnapshot(command: ImportOrderSnapshotCommand): Promise<ImportOrderSnapshotResponseDto> {
     this.require(command, 'orders.import');
+    this.requireFinanceImportPermissions(command);
     return this.ports.snapshots.importOrderSnapshot(command);
   }
 
@@ -48,6 +51,7 @@ export class OrderSnapshotService {
     command: ImportOrderSnapshotBatchCommand,
   ): Promise<ImportOrderSnapshotBatchResponseDto> {
     this.require(command, 'orders.import');
+    this.requireFinanceImportPermissions(command);
     return this.ports.snapshots.importOrderSnapshotBatch(command);
   }
 
@@ -59,6 +63,33 @@ export class OrderSnapshotService {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: [permission],
       });
+    }
+  }
+
+  private requireFinanceVisibility(
+    command: Pick<ExportOrderSnapshotCommand, 'currentUser'>,
+  ): void {
+    if (!this.permissions.canUser(command.currentUser, 'orders.view_financials')) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['orders.view_financials'],
+      });
+    }
+  }
+
+  private requireFinanceImportPermissions(
+    command: Pick<ImportOrderSnapshotCommand, 'currentUser'>,
+  ): void {
+    for (const permission of [
+      'orders.view_financials',
+      'payments.create',
+      'payments.update',
+      'payments.delete',
+    ] as const) {
+      if (!this.permissions.canUser(command.currentUser, permission)) {
+        throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+          requiredPermissions: [permission],
+        });
+      }
     }
   }
 }

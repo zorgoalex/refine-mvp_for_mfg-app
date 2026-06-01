@@ -50,6 +50,31 @@ describe('OrderExportService', () => {
     expect(calls).toEqual(['manager-id:42:custom.xlsx']);
   });
 
+  it('requires finance visibility before exporting order financial data', async () => {
+    const service = new OrderExportService({
+      exporter: {
+        async exportToGoogleDrive() {
+          throw new Error('exporter should not be called');
+        },
+      },
+    });
+
+    await expect(
+      service.exportToGoogleDrive({
+        currentUser: operator(),
+        orderId: 42,
+        request: { format: 'xlsx', fileName: null },
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: {
+        requiredPermissions: ['orders.view_financials'],
+      },
+    } satisfies Partial<ApiError>);
+  });
+
+
   it('checks rate limit before exporter call', async () => {
     const calls: string[] = [];
     const service = new OrderExportService({
@@ -93,5 +118,15 @@ function viewer(): CurrentUser {
     role: 'viewer',
     roleId: 100,
     permissions: getPermissionsForRole('viewer'),
+  };
+}
+
+function operator(): CurrentUser {
+  return {
+    id: 'operator-id',
+    username: 'operator',
+    role: 'operator',
+    roleId: 11,
+    permissions: getPermissionsForRole('operator'),
   };
 }

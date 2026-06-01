@@ -36,21 +36,85 @@ describe('OrderSnapshotService', () => {
   it('delegates export/import for users with permissions', async () => {
     const snapshots = fakeSnapshots();
     const service = new OrderSnapshotService({ snapshots });
-    const currentUser = manager();
 
-    await expect(service.exportOrderSnapshot({ currentUser, orderId: 10 })).resolves.toEqual({
+    await expect(service.exportOrderSnapshot({ currentUser: manager(), orderId: 10 })).resolves.toEqual({
       fileName: 'order.erp-order.json',
       content: '{}',
     });
     await expect(
-      service.importOrderSnapshot({ currentUser, snapshot: minimalSnapshot() }),
+      service.importOrderSnapshot({ currentUser: admin(), snapshot: minimalSnapshot() }),
     ).resolves.toMatchObject({
       success: true,
       status: 'created',
       orderId: 10,
     });
   });
+
+  it('requires finance visibility before snapshot exports', async () => {
+    const snapshots = fakeSnapshots();
+    const service = new OrderSnapshotService({ snapshots });
+
+    expectPermissionDenied(() =>
+      service.exportOrderSnapshot({
+        currentUser: operator(),
+        orderId: 10,
+      }),
+    );
+    expectPermissionDenied(() =>
+      service.exportOrderSnapshotBatch({
+        currentUser: operator(),
+        orderIds: [10],
+      }),
+    );
+    expect(snapshots.exportOrderSnapshot).not.toHaveBeenCalled();
+    expect(snapshots.exportOrderSnapshotBatch).not.toHaveBeenCalled();
+  });
+
+  it('requires finance and payment mutation permissions before snapshot imports', async () => {
+    const snapshots = fakeSnapshots();
+    const service = new OrderSnapshotService({ snapshots });
+
+    expectPermissionDenied(() =>
+      service.importOrderSnapshot({
+        currentUser: operator(),
+        snapshot: minimalSnapshot(),
+      }),
+    );
+    expectPermissionDeniedWithRequired(() =>
+      service.importOrderSnapshot({
+        currentUser: manager(),
+        snapshot: minimalSnapshot(),
+      }),
+      'payments.delete',
+    );
+    expectPermissionDeniedWithRequired(() =>
+      service.importOrderSnapshotBatch({
+        currentUser: manager(),
+        zipBase64: 'zip',
+      }),
+      'payments.delete',
+    );
+    expect(snapshots.importOrderSnapshot).not.toHaveBeenCalled();
+    expect(snapshots.importOrderSnapshotBatch).not.toHaveBeenCalled();
+  });
 });
+
+function expectPermissionDenied(fn: () => unknown): void {
+  expectPermissionDeniedWithRequired(fn, 'orders.view_financials');
+}
+
+function expectPermissionDeniedWithRequired(fn: () => unknown, permission: string): void {
+  try {
+    fn();
+    throw new Error('Expected permission denial');
+  } catch (error) {
+    expect(error).toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { requiredPermissions: [permission] },
+    } satisfies Partial<ApiError>);
+  }
+}
 
 function fakeSnapshots(): OrderSnapshotPort {
   return {
@@ -99,6 +163,16 @@ function manager(): CurrentUser {
   };
 }
 
+function admin(): CurrentUser {
+  return {
+    id: '1',
+    username: 'admin',
+    role: 'admin',
+    roleId: 1,
+    permissions: getPermissionsForRole('admin'),
+  };
+}
+
 function viewer(): CurrentUser {
   return {
     id: '100',
@@ -106,6 +180,16 @@ function viewer(): CurrentUser {
     role: 'viewer',
     roleId: 100,
     permissions: getPermissionsForRole('viewer'),
+  };
+}
+
+function operator(): CurrentUser {
+  return {
+    id: '11',
+    username: 'operator',
+    role: 'operator',
+    roleId: 11,
+    permissions: getPermissionsForRole('operator'),
   };
 }
 

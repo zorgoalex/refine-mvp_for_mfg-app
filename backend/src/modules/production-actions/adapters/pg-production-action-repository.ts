@@ -5,6 +5,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { PermissionName } from '../../../permissions/permissions';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type {
   ActivateProductionStageCommand,
@@ -417,7 +418,11 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      await this.assertOrderScope(command.currentUser, order, ['orders.update', 'payments.update'], requestId);
+      await this.assertOrderScope(command.currentUser, order, [
+        'orders.update',
+        'payments.update',
+        'orders.view_financials',
+      ], requestId);
       const status = await loadPaymentStatus(tx, command.dto.paymentStatusId);
       assertVersion(order, command.dto.version);
 
@@ -1289,11 +1294,13 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
     requiredPermissions: readonly string[],
     requestId: string,
   ): Promise<void> {
-    const allowed = this.orderAccessPolicy.canUpdate(currentUser, {
+    const allowed =
+      requiredPermissions.every((permission) => currentUser.permissions.includes(permission as PermissionName)) &&
+      this.orderAccessPolicy.canUpdate(currentUser, {
       orderId: order.orderId,
       createdByUserId: order.createdByUserId,
       managerUserId: order.managerUserId,
-    });
+      });
 
     if (!allowed) {
       await writeDeniedActionAudit(this.database, {

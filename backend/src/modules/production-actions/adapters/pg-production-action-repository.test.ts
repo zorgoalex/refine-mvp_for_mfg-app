@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { getPermissionsForRole } from '../../../permissions/permissions';
+import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
 import { PgProductionActionRepository } from './pg-production-action-repository';
 
 describe('PgProductionActionRepository', () => {
@@ -468,6 +468,28 @@ describe('PgProductionActionRepository', () => {
       'order.payment_status_changed',
     );
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
+
+  it('rejects manual payment status changes without finance visibility', async () => {
+    const database = createDatabase();
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changePaymentStatus({
+        currentUser: userWithPermissions('viewer', ['orders.update', 'payments.update']),
+        orderId: 15,
+        dto: { paymentStatusId: 3, version: 3, idempotencyKey: 'payment-status-key-1' },
+        requestId: 'request-payment-status',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.update', 'payments.update', 'orders.view_financials'] },
+    });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET payment_status_id');
+    expect(sql).toContain('INSERT INTO audit_log');
   });
 
   it('changes manual production current status with idempotency, cascade metadata, audit, and outbox', async () => {
@@ -1190,6 +1212,16 @@ function currentUser(role: CurrentUser['role'] = 'admin', id = '1'): CurrentUser
     role,
     roleId: 1,
     permissions: getPermissionsForRole(role),
+  };
+}
+
+function userWithPermissions(role: CurrentUser['role'], permissions: PermissionName[]): CurrentUser {
+  return {
+    id: `${role}-custom-id`,
+    username: `${role}_custom`,
+    role,
+    roleId: 1,
+    permissions,
   };
 }
 

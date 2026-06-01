@@ -92,9 +92,14 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   async loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null> {
-    const result = await this.tx.query<{ order_id: string | number; version: string | number }>(
+    const result = await this.tx.query<{
+      order_id: string | number;
+      version: string | number;
+      created_by: string | number | null;
+      manager_id: string | number | null;
+    }>(
       `
-      SELECT order_id, version
+      SELECT order_id, version, created_by, manager_id
       FROM orders
       WHERE order_id = $1 AND delete_flag = false
       FOR UPDATE
@@ -103,7 +108,14 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     );
     const row = result.rows[0];
 
-    return row ? { orderId: Number(row.order_id), version: Number(row.version) } : null;
+    return row
+      ? {
+          orderId: Number(row.order_id),
+          version: Number(row.version),
+          createdByUserId: row.created_by === null ? null : String(row.created_by),
+          managerUserId: row.manager_id === null ? null : String(row.manager_id),
+        }
+      : null;
   }
 
   async loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null> {

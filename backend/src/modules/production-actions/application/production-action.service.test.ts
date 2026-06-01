@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { getPermissionsForRole } from '../../../permissions/permissions';
+import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
 import type { ProductionActionRepositoryPort } from './production-action.types';
 import { ProductionActionService } from './production-action.service';
 
@@ -126,6 +126,22 @@ describe('ProductionActionService', () => {
       'restore-auto:15',
       'enter-manual:15',
     ]);
+  });
+
+  it('requires finance visibility before changing payment status', async () => {
+    const service = new ProductionActionService({ productionActions: createRepository() });
+
+    await expect(
+      service.changePaymentStatus({
+        currentUser: userWithPermissions('viewer', ['orders.update', 'payments.update']),
+        orderId: 15,
+        dto: { paymentStatusId: 3, version: 5, idempotencyKey: 'payment-status-key-1' },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['payments.update', 'orders.update', 'orders.view_financials'] },
+    } satisfies Partial<ApiError>);
   });
 
   it('delegates deadline-engine order status command without user permission checks', async () => {
@@ -294,6 +310,16 @@ function currentUser(role: CurrentUser['role']): CurrentUser {
     role,
     roleId: 1,
     permissions: getPermissionsForRole(role),
+  };
+}
+
+function userWithPermissions(role: CurrentUser['role'], permissions: PermissionName[]): CurrentUser {
+  return {
+    id: `${role}-custom-id`,
+    username: `${role}_custom`,
+    role,
+    roleId: 1,
+    permissions,
   };
 }
 

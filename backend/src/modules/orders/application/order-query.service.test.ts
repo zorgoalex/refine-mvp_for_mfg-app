@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { getPermissionsForRole } from '../../../permissions/permissions';
+import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
-import type { OrderAuditListResponseDto, OrderListResponseDto } from '../dto/order.dto';
-import type { OrderReadRepositoryPort } from './order-query.types';
+import type {
+  OrderAuditListResponseDto,
+  OrderDto,
+  OrderListItemDto,
+  OrderListResponseDto,
+} from '../dto/order.dto';
+import type { OrderListQuery, OrderReadRepositoryPort } from './order-query.types';
 import { OrderQueryService } from './order-query.service';
 import { createOrderDtoForQueryTest } from './order-query.test-helpers';
 
@@ -53,6 +58,225 @@ describe('OrderQueryService', () => {
       service.list({ currentUser: currentUser(), query: defaultQuery() }),
     ).resolves.toEqual(response);
     expect(calls).toEqual(['manager-id:updatedAt']);
+  });
+
+  it.each(['viewer', 'operator'] as const)(
+    'masks list financial fields for %s without orders.view_financials',
+    async (role) => {
+      const response: OrderListResponseDto = {
+        data: [createOrderListItemForQueryTest(42)],
+        pagination: { page: 1, pageSize: 25, total: 1, totalPages: 1 },
+      };
+      const service = new OrderQueryService({
+        reader: {
+          async listOrders() {
+            return response;
+          },
+          async getOrderById() {
+            throw new Error('get should not be called');
+          },
+          async getOrderAudit() {
+            throw new Error('audit should not be called');
+          },
+          async getOrderFormData() {
+            throw new Error('form data should not be called');
+          },
+        },
+      });
+
+      const result = await service.list({ currentUser: currentUser(role), query: defaultQuery() });
+      const item = result.data[0] as Record<string, unknown>;
+
+      expect(item).toMatchObject({
+        orderId: 42,
+        orderName: 'Test order',
+        paymentDate: null,
+        paymentStatusId: 0,
+        paymentStatusName: '',
+        totalAmount: 0,
+        discount: 0,
+        surcharge: 0,
+        finalAmount: 0,
+        paidAmount: 0,
+        debtAmount: 0,
+        partsCount: 5,
+        totalArea: 12.5,
+      });
+    },
+  );
+
+  it.each(['viewer', 'operator'] as const)(
+    'masks order financial fields and payment rows for %s without orders.view_financials',
+    async (role) => {
+      const order = createFinancialOrderDtoForQueryTest(42);
+      const service = new OrderQueryService({
+        reader: {
+          async listOrders() {
+            throw new Error('list should not be called');
+          },
+          async getOrderById() {
+            return order;
+          },
+          async getOrderAudit() {
+            throw new Error('audit should not be called');
+          },
+          async getOrderFormData() {
+            throw new Error('form data should not be called');
+          },
+        },
+      });
+
+      const result = await service.getById({ currentUser: currentUser(role), orderId: 42 });
+      const header = result.header as Record<string, unknown>;
+      const totals = result.totals as Record<string, unknown>;
+
+      expect(result.payments).toEqual([]);
+      expect(result.details).toMatchObject([
+        {
+          millingCostPerSqm: null,
+          detailCost: 0,
+        },
+      ]);
+      expect(result.requirements).toMatchObject([
+        {
+          purchasePrice: null,
+        },
+      ]);
+      expect(header).toMatchObject({
+        paymentDate: null,
+        paymentStatusId: 0,
+        totalAmount: 0,
+        discount: 0,
+        surcharge: 0,
+        finalAmount: 0,
+        paidAmount: 0,
+        partsCount: 5,
+        totalArea: 12.5,
+      });
+      expect(totals).toEqual({
+        totalAmount: 0,
+        finalAmount: 0,
+        paidAmount: 0,
+        debtAmount: 0,
+        partsCount: 5,
+        totalArea: 12.5,
+      });
+    },
+  );
+
+  it.each([
+    { sortBy: 'paymentStatusName' as const },
+    { sortBy: 'finalAmount' as const },
+    { sortBy: 'paidAmount' as const },
+    { sortBy: 'debtAmount' as const },
+    { paymentStatusId: 2 },
+  ])('rejects unauthorized financial list query controls %o', async (queryOverride) => {
+    const service = new OrderQueryService({
+      reader: readerThatShouldNotBeCalled(),
+    });
+
+    await expect(
+      service.list({
+        currentUser: currentUser('viewer'),
+        query: defaultQuery(queryOverride),
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: {
+        requiredPermissions: ['orders.view_financials'],
+      },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('preserves order financial fields for manager with orders.view_financials', async () => {
+    const listItem = createOrderListItemForQueryTest(42);
+    const order = createFinancialOrderDtoForQueryTest(42);
+    const service = new OrderQueryService({
+      reader: {
+        async listOrders() {
+          return {
+            data: [listItem],
+            pagination: { page: 1, pageSize: 25, total: 1, totalPages: 1 },
+          };
+        },
+        async getOrderById() {
+          return order;
+        },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
+        },
+        async getOrderFormData() {
+          throw new Error('form data should not be called');
+        },
+      },
+    });
+
+    await expect(
+      service.list({ currentUser: currentUser('manager'), query: defaultQuery() }),
+    ).resolves.toEqual({
+      data: [listItem],
+      pagination: { page: 1, pageSize: 25, total: 1, totalPages: 1 },
+    });
+    await expect(
+      service.getById({ currentUser: currentUser('manager'), orderId: 42 }),
+    ).resolves.toBe(order);
+  });
+
+  it('requires payments.view in addition to finance visibility for nested payment rows', async () => {
+    const order = createFinancialOrderDtoForQueryTest(42);
+    const service = new OrderQueryService({
+      reader: {
+        async listOrders() {
+          throw new Error('list should not be called');
+        },
+        async getOrderById() {
+          return order;
+        },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
+        },
+        async getOrderFormData() {
+          throw new Error('form data should not be called');
+        },
+      },
+    });
+
+    const result = await service.getById({
+      currentUser: userWithPermissions('viewer', ['orders.view', 'orders.view_financials']),
+      orderId: 42,
+    });
+
+    expect(result.payments).toEqual([]);
+    expect(result.header.totalAmount).toBe(1000);
+    expect(result.totals.finalAmount).toBe(950);
+  });
+
+  it('keeps nested payment rows when both finance visibility and payments.view are present', async () => {
+    const order = createFinancialOrderDtoForQueryTest(42);
+    const service = new OrderQueryService({
+      reader: {
+        async listOrders() {
+          throw new Error('list should not be called');
+        },
+        async getOrderById() {
+          return order;
+        },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
+        },
+        async getOrderFormData() {
+          throw new Error('form data should not be called');
+        },
+      },
+    });
+
+    const result = await service.getById({
+      currentUser: userWithPermissions('viewer', ['orders.view', 'orders.view_financials', 'payments.view']),
+      orderId: 42,
+    });
+
+    expect(result.payments).toEqual(order.payments);
   });
 
   it('returns order by id and maps missing order to ORDER_NOT_FOUND', async () => {
@@ -118,6 +342,28 @@ describe('OrderQueryService', () => {
       statusCode: 403,
       details: {
         requiredPermissions: ['orders.view_audit'],
+      },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('requires finance visibility before loading order audit', async () => {
+    const service = new OrderQueryService({
+      reader: readerThatShouldNotBeCalled(),
+    });
+
+    await expect(
+      service.getAudit({
+        currentUser: userWithPermissions('viewer', ['orders.view', 'orders.view_audit']),
+        orderId: 42,
+        page: 1,
+        pageSize: 50,
+        requestId: 'request-audit-1',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: {
+        requiredPermissions: ['orders.view_financials'],
       },
     } satisfies Partial<ApiError>);
   });
@@ -198,15 +444,51 @@ describe('OrderQueryService', () => {
     await expect(service.getFormData({ currentUser: currentUser() })).resolves.toBe(response);
     expect(calls).toEqual(['form-data:manager-id']);
   });
+
+  it('masks finance and payment reference form data without finance visibility', async () => {
+    const response = createOrderFormDataResponse();
+    const service = new OrderQueryService({
+      reader: {
+        async listOrders() {
+          throw new Error('list should not be called');
+        },
+        async getOrderById() {
+          throw new Error('get should not be called');
+        },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
+        },
+        async getOrderFormData() {
+          return response;
+        },
+      },
+    });
+
+    await expect(service.getFormData({ currentUser: currentUser('operator') })).resolves.toMatchObject({
+      millingTypes: [{ id: 3, name: 'Modern', costPerSqm: null }],
+      paymentStatuses: [],
+      paymentTypes: [],
+    });
+  });
 });
 
-function currentUser(): CurrentUser {
+function currentUser(role: CurrentUser['role'] = 'manager'): CurrentUser {
   return {
-    id: 'manager-id',
-    username: 'manager',
-    role: 'manager',
-    roleId: 10,
-    permissions: getPermissionsForRole('manager'),
+    id: `${role}-id`,
+    username: role,
+    role,
+    roleId: role === 'viewer' ? 100 : role === 'operator' ? 11 : 10,
+    permissions: getPermissionsForRole(role),
+  };
+}
+
+function userWithPermissions(role: CurrentUser['role'], permissions: PermissionName[]): CurrentUser {
+  return {
+    id: `${role}-custom-id`,
+    username: `${role}_custom`,
+    role,
+    roleId: role === 'viewer' ? 100 : role === 'operator' ? 11 : 10,
+    permissions,
   };
 }
 
@@ -230,13 +512,14 @@ function currentUserWithAuditPermission(): CurrentUser {
   };
 }
 
-function defaultQuery() {
+function defaultQuery(overrides: Partial<OrderListQuery> = {}): OrderListQuery {
   return {
     page: 1,
     pageSize: 25,
     sortBy: 'updatedAt' as const,
     sortOrder: 'desc' as const,
     onlyMyOrders: false,
+    ...overrides,
   };
 }
 
@@ -271,5 +554,140 @@ function createOrderFormDataResponse(): OrderFormDataResponseDto {
     workshops: [{ id: 10, name: 'Workshop' }],
     employees: [{ id: 11, fullName: 'Employee' }],
     units: [{ id: 12, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
+  };
+}
+
+function createFinancialOrderDtoForQueryTest(orderId: number): OrderDto {
+  const order = createOrderDtoForQueryTest(orderId);
+
+  return {
+    ...order,
+    header: {
+      ...order.header,
+      paymentStatusId: 2,
+      paymentDate: '2026-05-01',
+      totalAmount: 1000,
+      discount: 100,
+      surcharge: 50,
+      finalAmount: 950,
+      paidAmount: 400,
+      partsCount: 5,
+      totalArea: 12.5,
+    },
+    details: [
+      {
+        id: 200,
+        orderId,
+        detailNumber: 1,
+        detailName: 'Paid detail',
+        height: 1000,
+        width: 500,
+        quantity: 2,
+        materialId: 1001,
+        millingTypeId: 1001,
+        edgeTypeId: 1001,
+        filmId: null,
+        area: 1,
+        millingCostPerSqm: 2500,
+        detailCost: 5000,
+        priority: 100,
+        productionStatusId: null,
+        jointOrderId: null,
+        note: null,
+        linkCuttingFile: null,
+        linkCuttingImageFile: null,
+        linkCadFile: null,
+        linkPdfFile: null,
+        refKey1c: null,
+      },
+    ],
+    payments: [
+      {
+        id: 300,
+        orderId,
+        typePaidId: 1,
+        amount: 400,
+        paymentDate: '2026-05-01',
+        notes: 'advance',
+        refKey1c: null,
+      },
+    ],
+    requirements: [
+      {
+        id: 400,
+        orderId,
+        resourceType: 'material',
+        materialId: 1001,
+        filmId: null,
+        edgeTypeId: null,
+        requiredQuantity: 2,
+        unitId: 1001,
+        wastePercentage: null,
+        finalQuantity: null,
+        requirementStatusId: 1001,
+        supplierId: null,
+        purchasePrice: 1500,
+        requisitionId: null,
+        warehouseId: null,
+        reservedAt: null,
+        consumedAt: null,
+        notes: null,
+        calculationDetails: null,
+        refKey1c: null,
+      },
+    ],
+    totals: {
+      totalAmount: 1000,
+      finalAmount: 950,
+      paidAmount: 400,
+      debtAmount: 550,
+      partsCount: 5,
+      totalArea: 12.5,
+    },
+  };
+}
+
+function createOrderListItemForQueryTest(orderId: number): OrderListItemDto {
+  return {
+    orderId,
+    orderName: 'Test order',
+    clientId: 1001,
+    clientName: 'Test client',
+    orderDate: '2026-04-30',
+    plannedCompletionDate: null,
+    completionDate: null,
+    issueDate: null,
+    paymentDate: '2026-05-01',
+    orderStatusId: 1001,
+    orderStatusName: 'New',
+    paymentStatusId: 2,
+    paymentStatusName: 'Partial',
+    productionStatusId: null,
+    productionStatusName: null,
+    priority: 100,
+    totalAmount: 1000,
+    discount: 100,
+    surcharge: 50,
+    finalAmount: 950,
+    paidAmount: 400,
+    debtAmount: 550,
+    partsCount: 5,
+    totalArea: 12.5,
+    managerId: 10,
+    notes: null,
+    materialIds: [],
+    materialNames: [],
+    millingTypeId: null,
+    millingTypeName: null,
+    dowelingOrderId: null,
+    dowelingOrderName: null,
+    designEngineerId: null,
+    passedProductionStatusCodes: [],
+    primaryProject: null,
+    projects: [],
+    createdBy: 15,
+    editedBy: 16,
+    updatedAt: '2026-04-30T00:00:00.000Z',
+    version: 1,
   };
 }

@@ -34,6 +34,8 @@ export interface DeleteOrderCommand {
 export interface LockedOrderRow {
   orderId: number;
   version: number;
+  createdByUserId: string | null;
+  managerUserId: string | null;
 }
 
 export interface LockedOrderDeleteRow {

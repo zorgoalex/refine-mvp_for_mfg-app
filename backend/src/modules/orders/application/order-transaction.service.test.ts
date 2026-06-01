@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { getPermissionsForRole, type UserRole } from '../../../permissions/permissions';
+import { getPermissionsForRole, type PermissionName, type UserRole } from '../../../permissions/permissions';
 import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
@@ -41,6 +41,8 @@ interface FakeOrderRecord {
   dowelingLinks: NormalizedSaveOrderDowelingLinkDto[];
   totals: OrderTotalsDto;
   version: number;
+  createdByUserId: string | null;
+  managerUserId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -110,6 +112,8 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
       dowelingLinks: record.dowelingLinks ?? [],
       totals,
       version: record.version,
+      createdByUserId: record.createdByUserId ?? 'user_manager',
+      managerUserId: record.managerUserId ?? 'user_manager',
       createdAt: record.createdAt ?? '2026-04-30T00:00:00.000Z',
       updatedAt: record.updatedAt ?? '2026-04-30T00:00:00.000Z',
     });
@@ -140,7 +144,14 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
   async loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null> {
     this.call('loadOrderForUpdate');
     const order = this.state.orders.get(orderId);
-    return order ? { orderId, version: order.version } : null;
+    return order
+      ? {
+          orderId,
+          version: order.version,
+          createdByUserId: order.createdByUserId,
+          managerUserId: order.managerUserId,
+        }
+      : null;
   }
 
   async loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null> {
@@ -199,6 +210,8 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       dowelingLinks: [],
       totals: input.totals,
       version: 0,
+      createdByUserId: 'user_manager',
+      managerUserId: input.header.managerId === null ? null : String(input.header.managerId),
       createdAt: now,
       updatedAt: now,
     });
@@ -446,7 +459,7 @@ describe('OrderTransactionService', () => {
     });
 
     const result = await new OrderTransactionService({ transactions }).update({
-      currentUser: currentUser('manager'),
+      currentUser: currentUser('admin'),
       orderId: 42,
       dto: createSaveDto({
         header: {
@@ -493,7 +506,7 @@ describe('OrderTransactionService', () => {
     expect(result.payments).toHaveLength(0);
     expect(result.totals.totalAmount).toBe(10000);
     expect(transactions.state.auditEvents).toEqual([
-      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 },
+      { action: 'orders.update', orderId: 42, actorUserId: 'user_admin', actorUsername: 'admin', actorRole: 'admin', clientId: 1001 },
     ]);
     expect(transactions.calls.slice(0, 6)).toEqual([
       'begin',
@@ -913,6 +926,194 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'rollback']);
   });
 
+  it.each([
+    ['operator', currentUser('operator')],
+    ['viewer with order create permission', userWithPermissions('viewer', ['orders.create'])],
+  ])('rejects payment-bearing create for %s without finance visibility', async (_label, actor) => {
+    const transactions = new FakeOrderTransactions();
+
+    await expect(
+      new OrderTransactionService({ transactions }).create({
+        currentUser: actor,
+        dto: createSaveDto(),
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { requiredPermissions: ['orders.view_financials'] },
+    } satisfies Partial<ApiError>);
+
+    expect(transactions.state.orders.size).toBe(0);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'rollback']);
+  });
+
+  it.each([
+    ['operator', currentUser('operator')],
+    ['viewer with order update permission', userWithPermissions('viewer', ['orders.update'])],
+  ])('rejects payment deletion for %s without finance visibility', async (_label, actor) => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      payments: [payment({ id: 21, amount: 1000 })],
+    });
+
+    await expect(
+      new OrderTransactionService({ transactions }).update({
+        currentUser: actor,
+        orderId: 42,
+        dto: createSaveDto({
+          payments: [],
+          deleted: { paymentIds: [21] },
+          version: 3,
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { requiredPermissions: ['orders.view_financials'] },
+    } satisfies Partial<ApiError>);
+
+    expect(transactions.state.orders.get(42)?.payments).toHaveLength(1);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'rollback']);
+  });
+
+  it('requires payments.delete for nested order-save payment deletion', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      payments: [payment({ id: 21, amount: 1000 })],
+    });
+
+    await expect(
+      new OrderTransactionService({ transactions }).update({
+        currentUser: currentUser('manager'),
+        orderId: 42,
+        dto: createSaveDto({
+          payments: [],
+          deleted: { paymentIds: [21] },
+          version: 3,
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { requiredPermissions: ['payments.delete'] },
+    } satisfies Partial<ApiError>);
+
+    expect(transactions.state.orders.get(42)?.payments).toHaveLength(1);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'loadOrderForUpdate', 'rollback']);
+  });
+
+  it('omits payment rows from save responses when actor cannot view payments', async () => {
+    const transactions = new FakeOrderTransactions();
+    const actor = userWithPermissions('viewer', [
+      'orders.create',
+      'orders.view_financials',
+      'payments.create',
+      'payments.update',
+    ]);
+
+    const result = await new OrderTransactionService({ transactions }).create({
+      currentUser: actor,
+      dto: createSaveDto(),
+    });
+
+    expect(result.payments).toEqual([]);
+    expect(transactions.state.orders.get(100)?.payments).toHaveLength(1);
+  });
+
+  it('requires payments.update for explicit payment status changes through order save', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      payments: [],
+    });
+
+    await expect(
+      new OrderTransactionService({ transactions }).update({
+        currentUser: {
+          ...userWithPermissions('manager', ['orders.update', 'orders.view_financials']),
+          id: 'user_manager',
+        },
+        orderId: 42,
+        dto: createSaveDto({
+          header: {
+            orderId: 42,
+            orderName: 'Updated order',
+            clientId: 1001,
+            orderDate: '2026-04-30',
+            orderStatusId: 1001,
+            paymentStatusId: 42,
+          },
+          payments: [],
+          version: 3,
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { requiredPermissions: ['payments.update'] },
+    } satisfies Partial<ApiError>);
+
+    expect(transactions.state.auditEvents).toEqual([]);
+  });
+
+  it('rejects financial order fields for actors without finance visibility even without payment rows', async () => {
+    const transactions = new FakeOrderTransactions();
+    const operationalOnlyDto = createSaveDto({
+      header: {
+        orderName: 'Operational order',
+        clientId: 1001,
+        orderDate: '2026-04-30',
+        orderStatusId: 1001,
+      },
+      details: [
+        {
+          clientKey: 'detail-temp-1',
+          height: 550,
+          width: 200,
+          quantity: 2,
+          materialId: 1001,
+          millingTypeId: 1001,
+          edgeTypeId: 1001,
+        },
+      ],
+      payments: [],
+      requirements: [
+        {
+          clientKey: 'requirement-temp-1',
+          resourceType: 'material',
+          materialId: 1001,
+          requiredQuantity: 1,
+          unitId: 1,
+          requirementStatusId: 1,
+          purchasePrice: 100,
+        },
+      ],
+    });
+
+    await expect(
+      new OrderTransactionService({ transactions }).create({
+        currentUser: currentUser('operator'),
+        dto: operationalOnlyDto,
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { requiredPermissions: ['orders.view_financials'] },
+    } satisfies Partial<ApiError>);
+
+    expect(transactions.state.orders.size).toBe(0);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'rollback']);
+  });
+
   it('rolls back created header and skips success audit when a child write fails', async () => {
     const transactions = new FakeOrderTransactions();
     transactions.failAt = 'upsertPayments';
@@ -1014,6 +1215,16 @@ function currentUser(role: UserRole): CurrentUser {
     role,
     roleId: 10,
     permissions: getPermissionsForRole(role),
+  };
+}
+
+function userWithPermissions(role: UserRole, permissions: PermissionName[]): CurrentUser {
+  return {
+    id: `user_${role}_custom`,
+    username: `${role}_custom`,
+    role,
+    roleId: role === 'viewer' ? 100 : 10,
+    permissions,
   };
 }
 

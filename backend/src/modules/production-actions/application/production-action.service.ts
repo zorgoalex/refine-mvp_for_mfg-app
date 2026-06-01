@@ -47,7 +47,11 @@ export class ProductionActionService {
   }
 
   async changePaymentStatus(command: ChangePaymentStatusCommand) {
-    this.requirePermissions(command.currentUser, ['payments.update', 'orders.update']);
+    this.requirePermissions(command.currentUser, [
+      'payments.update',
+      'orders.update',
+      'orders.view_financials',
+    ]);
     return this.ports.productionActions.changePaymentStatus(command);
   }
 
