@@ -11,10 +11,16 @@ import {
   UnavailableProjectOrderReportRepository,
 } from './reporting/project-order-report.repository';
 import { ProjectOrderReportService } from './reporting/project-order-report.service';
+import { ProjectOrderStatusReportController } from './reporting/project-order-status-report.controller';
+import {
+  PgProjectOrderStatusReportRepository,
+  UnavailableProjectOrderStatusReportRepository,
+} from './reporting/project-order-status-report.repository';
+import { ProjectOrderStatusReportService } from './reporting/project-order-status-report.service';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [ProjectsController, ProjectOrderReportController],
+  controllers: [ProjectsController, ProjectOrderReportController, ProjectOrderStatusReportController],
   providers: [
     ProjectsRuntimeConfigService,
     {
@@ -34,6 +40,16 @@ import { ProjectOrderReportService } from './reporting/project-order-report.serv
           reports: database.isConfigured
             ? new PgProjectOrderReportRepository(database)
             : new UnavailableProjectOrderReportRepository(),
+      }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ProjectOrderStatusReportService,
+      useFactory: (database: DatabaseService) =>
+        new ProjectOrderStatusReportService({
+          reports: database.isConfigured
+            ? new PgProjectOrderStatusReportRepository(database)
+            : new UnavailableProjectOrderStatusReportRepository(),
         }),
       inject: [DatabaseService],
     },

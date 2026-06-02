@@ -2920,6 +2920,73 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/projects/reports/order-status-counts:
+    get:
+      tags:
+        - Projects
+      operationId: listProjectOrderStatusCounts
+      summary: List order status counts filtered by project membership
+      description: Returns only order status aggregate counts and applied project report filter metadata.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - projects.view
+        - orders.view
+      parameters:
+        - name: projectMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [any, all, primary, none]
+            default: any
+        - name: projectIds
+          in: query
+          required: false
+          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          schema:
+            type: string
+        - name: temporalMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [current, asOf, overlap]
+            default: current
+        - name: asOf
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Project-filtered order status counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectOrderStatusReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/projects/{projectId}:
     parameters:
       - name: projectId
@@ -4483,6 +4550,154 @@ components:
           $ref: '#/components/schemas/ProjectOrderReportPagination'
         filter:
           $ref: '#/components/schemas/ProjectOrderReportFilter'
+
+    ProjectOrderStatusReportItem:
+      type: object
+      required:
+        - statusId
+        - statusName
+        - orderCount
+      properties:
+        statusId:
+          type: integer
+        statusName:
+          type: string
+        orderCount:
+          type: integer
+          minimum: 0
+
+    ProjectOrderStatusReportResponse:
+      type: object
+      required:
+        - data
+        - filter
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOrderStatusReportItem'
+        filter:
+          $ref: '#/components/schemas/ProjectOrderStatusReportFilter'
+
+    ProjectOrderStatusReportFilter:
+      oneOf:
+        - type: object
+          required:
+            - projectMode
+            - temporalMode
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [none]
+            temporalMode:
+              type: string
+              enum: [current]
+        - type: object
+          required:
+            - projectMode
+            - projectIds
+            - temporalMode
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [any, all, primary]
+            projectIds:
+              type: array
+              maxItems: 50
+              items:
+                type: string
+                format: uuid
+            temporalMode:
+              type: string
+              enum: [current]
+        - type: object
+          required:
+            - projectMode
+            - temporalMode
+            - asOf
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [none]
+            temporalMode:
+              type: string
+              enum: [asOf]
+            asOf:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectMode
+            - projectIds
+            - temporalMode
+            - asOf
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [any, all, primary]
+            projectIds:
+              type: array
+              maxItems: 50
+              items:
+                type: string
+                format: uuid
+            temporalMode:
+              type: string
+              enum: [asOf]
+            asOf:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectMode
+            - temporalMode
+            - from
+            - to
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [none]
+            temporalMode:
+              type: string
+              enum: [overlap]
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectMode
+            - projectIds
+            - temporalMode
+            - from
+            - to
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [any, all, primary]
+            projectIds:
+              type: array
+              maxItems: 50
+              items:
+                type: string
+                format: uuid
+            temporalMode:
+              type: string
+              enum: [overlap]
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
 
     OrderListResponse:
       type: object
