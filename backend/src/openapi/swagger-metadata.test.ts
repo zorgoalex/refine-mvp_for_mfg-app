@@ -65,6 +65,22 @@ describe('Swagger controller metadata', () => {
       expect(decoratorBlock).toContain("limit: { type: 'integer', minimum: 1 }");
     }
   });
+
+  it('documents Projects order status report response filter as a strict oneOf schema in Swagger metadata', () => {
+    const controllerSource = readFileSync(
+      resolve(backendRoot(), 'src/modules/projects/reporting/project-order-status-report.controller.ts'),
+      'utf8',
+    );
+
+    expect(controllerSource).toContain('filter: {');
+    expect(controllerSource).toContain('oneOf: [');
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'asOf']");
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'from', 'to']");
+    expect(controllerSource).toContain('additionalProperties: false');
+    expect(controllerSource).toContain("orderCount: { type: 'integer', minimum: 0 }");
+    expect(controllerSource).toContain("schema: swaggerSchema(dateTimeQuerySwaggerSchema)");
+  });
 });
 
 function backendRoot(): string {

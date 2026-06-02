@@ -12,6 +12,8 @@ describe('projects OpenAPI contract', () => {
     expect(contract).toContain('  /api/v1/projects/lookup:');
     expect(contract).toContain('  /api/v1/projects/{projectId}:');
     expect(contract).toContain('  /api/v1/projects/{projectId}/members:');
+    expect(contract).toContain('  /api/v1/projects/reports/orders:');
+    expect(contract).toContain('  /api/v1/projects/reports/order-status-counts:');
   });
 
   it('documents get project bad request and list pagination totalPages', () => {
@@ -120,6 +122,61 @@ describe('projects OpenAPI contract', () => {
     expect(memberSchema).toContain('displayName:');
     expect(responseSchema).toContain('changed:');
     expect(responseSchema).toContain('auditId:');
+  });
+
+  it('documents project report endpoints with explicit read permissions and narrow response schemas', () => {
+    const contract = readOpenApiContract();
+    const orderIdsSection = sectionBetween(
+      contract,
+      '  /api/v1/projects/reports/orders:',
+      '  /api/v1/projects/reports/order-status-counts:',
+    );
+    const statusCountsSection = sectionBetween(
+      contract,
+      '  /api/v1/projects/reports/order-status-counts:',
+      '  /api/v1/projects/{projectId}:',
+    );
+    const statusItemSchema = sectionBetween(
+      contract,
+      '    ProjectOrderStatusReportItem:',
+      '    ProjectOrderStatusReportResponse:',
+    );
+    const statusResponseSchema = sectionBetween(
+      contract,
+      '    ProjectOrderStatusReportResponse:',
+      '    ProjectOrderStatusReportFilter:',
+    );
+    const statusFilterSchema = sectionBetween(
+      contract,
+      '    ProjectOrderStatusReportFilter:',
+      '    OrderListResponse:',
+    );
+
+    expect(orderIdsSection).toContain('operationId: listProjectOrderReportIds');
+    expect(orderIdsSection).toContain('- projects.view');
+    expect(orderIdsSection).toContain('- orders.view');
+    expect(statusCountsSection).toContain('operationId: listProjectOrderStatusCounts');
+    expect(statusCountsSection).toContain('- projects.view');
+    expect(statusCountsSection).toContain('- orders.view');
+    expect(statusCountsSection).toContain("$ref: '#/components/schemas/ProjectOrderStatusReportResponse'");
+    expect(statusItemSchema).toContain('statusId:');
+    expect(statusItemSchema).toContain('statusName:');
+    expect(statusItemSchema).toContain('orderCount:');
+    expect(statusResponseSchema).toContain("$ref: '#/components/schemas/ProjectOrderStatusReportFilter'");
+    expect(statusFilterSchema).toContain('oneOf:');
+    expect(statusFilterSchema).toContain('- projectIds');
+    expect(statusFilterSchema).toContain('- asOf');
+    expect(statusFilterSchema).toContain('- from');
+    expect(statusFilterSchema).toContain('- to');
+    expect(statusFilterSchema).toContain('additionalProperties: false');
+    expect(statusFilterSchema).toContain('projectMode:');
+    expect(statusFilterSchema).toContain('temporalMode:');
+    expect(statusResponseSchema).not.toContain('pagination:');
+    expect(statusResponseSchema).not.toContain('orderId:');
+    expect(statusResponseSchema).not.toContain('client');
+    expect(statusResponseSchema).not.toContain('payment');
+    expect(statusResponseSchema).not.toContain('deadline');
+    expect(statusResponseSchema).not.toContain('audit');
   });
 });
 
