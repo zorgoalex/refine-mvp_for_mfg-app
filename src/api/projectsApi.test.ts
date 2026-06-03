@@ -79,7 +79,7 @@ describe('projectsApi', () => {
       },
       omitted: [],
     };
-    const fetchMock = mockFetch(overviewResponse);
+    const fetchMock = mockFetch(overviewResponse, overviewResponse, overviewResponse);
 
     await projectsApi.getProjectOverview(project.id, {
       temporalMode: 'current',
@@ -90,6 +90,27 @@ describe('projectsApi', () => {
       '/api/v1/projects/11111111-1111-4111-8111-111111111111/overview?temporalMode=current&createdFrom=2026-01-01T00%3A00%3A00Z',
     );
     expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+
+    await projectsApi.getProjectOverview(project.id, {
+      temporalMode: 'asOf',
+      asOf: '2026-02-01T12:30:00Z',
+    });
+
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      '/api/v1/projects/11111111-1111-4111-8111-111111111111/overview?temporalMode=asOf&asOf=2026-02-01T12%3A30%3A00Z',
+    );
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('GET');
+
+    await projectsApi.getProjectOverview(project.id, {
+      temporalMode: 'overlap',
+      from: '2026-03-01T00:00:00Z',
+      to: '2026-03-31T23:59:59Z',
+    });
+
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      '/api/v1/projects/11111111-1111-4111-8111-111111111111/overview?temporalMode=overlap&from=2026-03-01T00%3A00%3A00Z&to=2026-03-31T23%3A59%3A59Z',
+    );
+    expect(fetchMock.mock.calls[2][1]?.method).toBe('GET');
     expect(Object.prototype.hasOwnProperty.call(overviewResponse.project, 'metadata')).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(overviewResponse.project, 'createdBy')).toBe(false);
   });
