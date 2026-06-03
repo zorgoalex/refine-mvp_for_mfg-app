@@ -16,6 +16,7 @@ describe('projects OpenAPI contract', () => {
     expect(contract).toContain('  /api/v1/projects/reports/order-status-counts:');
     expect(contract).toContain('  /api/v1/projects/reports/order-relation-counts:');
     expect(contract).toContain('  /api/v1/projects/reports/order-created-month-counts:');
+    expect(contract).toContain('  /api/v1/projects/{projectId}/overview:');
   });
 
   it('documents get project bad request and list pagination totalPages', () => {
@@ -265,6 +266,121 @@ describe('projects OpenAPI contract', () => {
       expect(createdMonthResponseSchema).not.toContain(leakedToken);
     }
   });
+
+  it('documents project overview with narrow response schemas and no domain leaks', () => {
+    const contract = readOpenApiContract();
+    const overviewSection = sectionBetween(
+      contract,
+      '  /api/v1/projects/{projectId}/overview:',
+      '  /api/v1/projects/{projectId}:',
+    );
+    const responseSchema = sectionBetween(
+      contract,
+      '    ProjectOverviewResponse:',
+      '    ProjectOverviewProject:',
+    );
+    const projectSchema = sectionBetween(
+      contract,
+      '    ProjectOverviewProject:',
+      '    ProjectOverviewOrders:',
+    );
+    const ordersSchema = sectionBetween(
+      contract,
+      '    ProjectOverviewOrders:',
+      '    ProjectOverviewStatusCount:',
+    );
+    const statusCountSchema = sectionBetween(
+      contract,
+      '    ProjectOverviewStatusCount:',
+      '    ProjectOverviewRelationCount:',
+    );
+    const relationCountSchema = sectionBetween(
+      contract,
+      '    ProjectOverviewRelationCount:',
+      '    ProjectOverviewCreatedMonthCount:',
+    );
+    const createdMonthCountSchema = sectionBetween(
+      contract,
+      '    ProjectOverviewCreatedMonthCount:',
+      '    ProjectOverviewFilter:',
+    );
+    const filterSchema = sectionBetween(
+      contract,
+      '    ProjectOverviewFilter:',
+      '    OrderListResponse:',
+    );
+
+    expect(overviewSection).toContain('operationId: getProjectOverview');
+    expect(overviewSection).toContain('- projects.view');
+    expect(overviewSection).toContain('- orders.view');
+    expect(overviewSection).toContain("$ref: '#/components/schemas/ProjectOverviewResponse'");
+    expect(overviewSection).toContain('format: uuid');
+    expect(overviewSection).toContain('enum: [current, asOf, overlap]');
+    expect(overviewSection).toContain('default: current');
+    expect(queryParameterNames(overviewSection)).toEqual([
+      'temporalMode',
+      'asOf',
+      'from',
+      'to',
+      'createdFrom',
+      'createdTo',
+    ]);
+    expect(overviewSection).not.toContain('name: projectIds');
+
+    for (const schema of [
+      responseSchema,
+      projectSchema,
+      ordersSchema,
+      statusCountSchema,
+      relationCountSchema,
+      createdMonthCountSchema,
+      filterSchema,
+    ]) {
+      expect(schema).toContain('additionalProperties: false');
+    }
+
+    expect(projectSchema).toContain('ownerUserId:');
+    expect(projectSchema).not.toContain('metadata:');
+    expect(projectSchema).not.toContain('createdBy:');
+    expect(ordersSchema).toContain('totalCount:');
+    expect(ordersSchema).toContain('statusCounts:');
+    expect(ordersSchema).toContain('relationCounts:');
+    expect(ordersSchema).toContain('createdMonthCounts:');
+    expect(statusCountSchema).toContain('statusId:');
+    expect(relationCountSchema).toContain('relationType:');
+    expect(createdMonthCountSchema).toContain('format: date');
+    expect(filterSchema).toContain('oneOf:');
+    expect(filterSchema).toContain('projectId:');
+    expect(filterSchema).toContain('createdFrom:');
+    expect(filterSchema).toContain('createdTo:');
+    expect(responseSchema).toContain('enum: [finance, payments, clientPhones, audit, deadline, production, members, users, orderDetails, activityTimeline]');
+
+    for (const leakedToken of [
+      'Payment',
+      'Deadline',
+      'Production',
+      'Audit',
+      'ProjectMember',
+      'OrderDetails',
+      'ClientPhone',
+      'amount',
+      'phone',
+      'employeeId',
+      'displayName',
+      'email',
+      'metadata',
+      'createdBy',
+    ]) {
+      expect(overviewSection).not.toContain(leakedToken);
+      expect(responseSchema).not.toContain(leakedToken);
+      expect(projectSchema).not.toContain(leakedToken);
+      expect(ordersSchema).not.toContain(leakedToken);
+      expect(statusCountSchema).not.toContain(leakedToken);
+      expect(relationCountSchema).not.toContain(leakedToken);
+      expect(createdMonthCountSchema).not.toContain(leakedToken);
+      expect(filterSchema).not.toContain(leakedToken);
+    }
+  });
 });
 
 function readOpenApiContract(): string {
@@ -287,4 +403,8 @@ function sectionBetween(source: string, start: string, end: string): string {
   expect(endIndex).toBeGreaterThan(startIndex);
 
   return source.slice(startIndex, endIndex);
+}
+
+function queryParameterNames(section: string): string[] {
+  return [...section.matchAll(/^\s{8}- name: ([^\n]+)\n\s{10}in: query$/gm)].map((match) => match[1]);
 }

@@ -5,6 +5,9 @@ import { PgProjectRepository, UnavailableProjectRepository } from './project.rep
 import { ProjectsController } from './projects.controller';
 import { ProjectsRuntimeConfigService } from './projects-runtime-config.service';
 import { ProjectsService } from './projects.service';
+import { ProjectOverviewController } from './overview/project-overview.controller';
+import { PgProjectOverviewRepository, UnavailableProjectOverviewRepository } from './overview/project-overview.repository';
+import { ProjectOverviewService } from './overview/project-overview.service';
 import { ProjectOrderReportController } from './reporting/project-order-report.controller';
 import {
   PgProjectOrderReportRepository,
@@ -38,6 +41,7 @@ import { ProjectOrderStatusReportService } from './reporting/project-order-statu
     ProjectOrderStatusReportController,
     ProjectOrderRelationCountsReportController,
     ProjectOrderCreatedMonthCountsReportController,
+    ProjectOverviewController,
   ],
   providers: [
     ProjectsRuntimeConfigService,
@@ -88,6 +92,16 @@ import { ProjectOrderStatusReportService } from './reporting/project-order-statu
           reports: database.isConfigured
             ? new PgProjectOrderRelationCountsReportRepository(database)
             : new UnavailableProjectOrderRelationCountsReportRepository(),
+        }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ProjectOverviewService,
+      useFactory: (database: DatabaseService) =>
+        new ProjectOverviewService({
+          overviews: database.isConfigured
+            ? new PgProjectOverviewRepository(database)
+            : new UnavailableProjectOverviewRepository(),
         }),
       inject: [DatabaseService],
     },

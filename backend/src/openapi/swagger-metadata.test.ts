@@ -130,6 +130,30 @@ describe('Swagger controller metadata', () => {
     expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
   });
 
+  it('documents Projects overview response and query metadata without projectIds in Swagger metadata', () => {
+    const controllerSource = readFileSync(
+      resolve(backendRoot(), 'src/modules/projects/overview/project-overview.controller.ts'),
+      'utf8',
+    );
+
+    expect(controllerSource).toContain("@Controller('projects/:projectId/overview')");
+    expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
+    expect(controllerSource).toContain("operationId: 'getProjectOverview'");
+    expect(controllerSource).toContain("name: 'temporalMode'");
+    expect(controllerSource).toContain("schema: { default: 'current' }");
+    expect(controllerSource).toContain("name: 'asOf'");
+    expect(controllerSource).toContain("name: 'from'");
+    expect(controllerSource).toContain("name: 'to'");
+    expect(controllerSource).toContain("name: 'createdFrom'");
+    expect(controllerSource).toContain("name: 'createdTo'");
+    expect(controllerSource).not.toContain("name: 'projectIds'");
+    expect(controllerSource).toContain('additionalProperties: false');
+    expect(controllerSource).toContain("required: ['projectId', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['projectId', 'temporalMode', 'asOf']");
+    expect(controllerSource).toContain("required: ['projectId', 'temporalMode', 'from', 'to']");
+    expect(controllerSource).toContain("items: { type: 'string', enum: PROJECT_OVERVIEW_OMITTED }");
+  });
+
   it('registers a runtime bearerAuth security scheme matching the static contract', () => {
     const swaggerSource = readFileSync(resolve(backendRoot(), 'src/config/swagger.ts'), 'utf8');
 

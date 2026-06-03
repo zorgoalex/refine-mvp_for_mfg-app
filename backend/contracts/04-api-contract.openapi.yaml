@@ -3133,6 +3133,87 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/projects/{projectId}/overview:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - Projects
+      operationId: getProjectOverview
+      summary: Get project overview
+      description: Returns only project summary fields and aggregate order counts for one project.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - projects.view
+        - orders.view
+      parameters:
+        - name: temporalMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [current, asOf, overlap]
+            default: current
+        - name: asOf
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: createdFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Project overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectOverviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/projects/{projectId}:
     parameters:
       - name: projectId
@@ -5044,6 +5125,219 @@ components:
               items:
                 type: string
                 format: uuid
+            temporalMode:
+              type: string
+              enum: [overlap]
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+            createdFrom:
+              type: string
+              format: date-time
+            createdTo:
+              type: string
+              format: date-time
+
+    ProjectOverviewResponse:
+      type: object
+      required:
+        - project
+        - orders
+        - filter
+        - omitted
+      additionalProperties: false
+      properties:
+        project:
+          $ref: '#/components/schemas/ProjectOverviewProject'
+        orders:
+          $ref: '#/components/schemas/ProjectOverviewOrders'
+        filter:
+          $ref: '#/components/schemas/ProjectOverviewFilter'
+        omitted:
+          type: array
+          items:
+            type: string
+            enum: [finance, payments, clientPhones, audit, deadline, production, members, users, orderDetails, activityTimeline]
+
+    ProjectOverviewProject:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - description
+        - status
+        - startsAt
+        - endsAt
+        - ownerUserId
+        - createdAt
+        - updatedAt
+        - archivedAt
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [draft, active, paused, completed, archived]
+        startsAt:
+          type: string
+          format: date
+          nullable: true
+        endsAt:
+          type: string
+          format: date
+          nullable: true
+        ownerUserId:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ProjectOverviewOrders:
+      type: object
+      required:
+        - totalCount
+        - statusCounts
+        - relationCounts
+        - createdMonthCounts
+      additionalProperties: false
+      properties:
+        totalCount:
+          type: integer
+          minimum: 0
+        statusCounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOverviewStatusCount'
+        relationCounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOverviewRelationCount'
+        createdMonthCounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOverviewCreatedMonthCount'
+
+    ProjectOverviewStatusCount:
+      type: object
+      required:
+        - statusId
+        - statusName
+        - orderCount
+      additionalProperties: false
+      properties:
+        statusId:
+          type: integer
+        statusName:
+          type: string
+        orderCount:
+          type: integer
+          minimum: 0
+
+    ProjectOverviewRelationCount:
+      type: object
+      required:
+        - relationType
+        - isPrimary
+        - orderCount
+      additionalProperties: false
+      properties:
+        relationType:
+          type: string
+          enum: [main, secondary, reporting, billing, derived]
+        isPrimary:
+          type: boolean
+        orderCount:
+          type: integer
+          minimum: 0
+
+    ProjectOverviewCreatedMonthCount:
+      type: object
+      required:
+        - month
+        - orderCount
+      additionalProperties: false
+      properties:
+        month:
+          type: string
+          format: date
+        orderCount:
+          type: integer
+          minimum: 0
+
+    ProjectOverviewFilter:
+      oneOf:
+        - type: object
+          required:
+            - projectId
+            - temporalMode
+          additionalProperties: false
+          properties:
+            projectId:
+              type: string
+              format: uuid
+            temporalMode:
+              type: string
+              enum: [current]
+            createdFrom:
+              type: string
+              format: date-time
+            createdTo:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectId
+            - temporalMode
+            - asOf
+          additionalProperties: false
+          properties:
+            projectId:
+              type: string
+              format: uuid
+            temporalMode:
+              type: string
+              enum: [asOf]
+            asOf:
+              type: string
+              format: date-time
+            createdFrom:
+              type: string
+              format: date-time
+            createdTo:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectId
+            - temporalMode
+            - from
+            - to
+          additionalProperties: false
+          properties:
+            projectId:
+              type: string
+              format: uuid
             temporalMode:
               type: string
               enum: [overlap]
