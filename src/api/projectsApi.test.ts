@@ -62,6 +62,35 @@ describe('projectsApi', () => {
     expect(fetchMock.mock.calls[3][1]?.method).toBe('DELETE');
   });
 
+  it('gets project overview with backend query params', async () => {
+    const project = projectDto();
+    const fetchMock = mockFetch({
+      project,
+      orders: {
+        totalCount: 0,
+        statusCounts: [],
+        relationCounts: [],
+        createdMonthCounts: [],
+      },
+      filter: {
+        projectId: project.id,
+        temporalMode: 'current',
+        createdFrom: '2026-01-01T00:00:00Z',
+      },
+      omitted: [],
+    });
+
+    await projectsApi.getProjectOverview(project.id, {
+      temporalMode: 'current',
+      createdFrom: '2026-01-01T00:00:00Z',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/projects/11111111-1111-4111-8111-111111111111/overview?temporalMode=current&createdFrom=2026-01-01T00%3A00%3A00Z',
+    );
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
   it('rejects invalid project ids before fetch', async () => {
     const fetchMock = mockFetch({ project: projectDto() });
 

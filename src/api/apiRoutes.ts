@@ -86,6 +86,7 @@ export const apiRoutes = {
     list: backendApiPath('/projects'),
     lookup: backendApiPath('/projects/lookup'),
     byId: (projectId: string) => backendApiPath(`/projects/${projectId}`),
+    overview: (projectId: string) => backendApiPath(`/projects/${projectId}/overview`),
   },
   users: {
     list: backendApiPath('/users'),

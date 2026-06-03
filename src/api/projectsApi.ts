@@ -9,6 +9,8 @@ import type {
   ProjectListResponse,
   ProjectLookupQuery,
   ProjectLookupResponse,
+  ProjectOverviewQuery,
+  ProjectOverviewResponse,
   ProjectResponse,
   ReplaceOrderProjectsRequest,
   ReplaceOrderProjectsResponse,
@@ -31,6 +33,15 @@ export const projectsApi = {
       apiRoutes.projects.byId(validateProjectId(projectId)),
     );
     return response.project;
+  },
+
+  getProjectOverview(
+    projectId: string,
+    params: ProjectOverviewQuery = {},
+  ): Promise<ProjectOverviewResponse> {
+    return httpClient.get<ProjectOverviewResponse>(
+      withQuery(apiRoutes.projects.overview(validateProjectId(projectId)), params),
+    );
   },
 
   createProject(request: CreateProjectRequest): Promise<ProjectResponse> {

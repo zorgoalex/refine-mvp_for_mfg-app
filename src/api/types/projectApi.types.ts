@@ -30,6 +30,15 @@ export interface ProjectLookupQuery {
   limit?: number;
 }
 
+export interface ProjectOverviewQuery {
+  temporalMode?: 'current' | 'asOf' | 'overlap';
+  asOf?: string;
+  from?: string;
+  to?: string;
+  createdFrom?: string;
+  createdTo?: string;
+}
+
 export interface ProjectListResponse {
   data: ProjectDto[];
   pagination: {
@@ -53,6 +62,41 @@ export interface ProjectLookupResponse {
 
 export interface ProjectResponse {
   project: ProjectDto;
+}
+
+export interface ProjectOverviewResponse {
+  project: Omit<ProjectDto, 'metadata' | 'createdBy'>;
+  orders: {
+    totalCount: number;
+    statusCounts: Array<{ statusId: number; statusName: string; orderCount: number }>;
+    relationCounts: Array<{
+      relationType: OrderProjectRelationType;
+      isPrimary: boolean;
+      orderCount: number;
+    }>;
+    createdMonthCounts: Array<{ month: string; orderCount: number }>;
+  };
+  filter: {
+    projectId: string;
+    temporalMode: 'current' | 'asOf' | 'overlap';
+    asOf?: string;
+    from?: string;
+    to?: string;
+    createdFrom?: string;
+    createdTo?: string;
+  };
+  omitted: Array<
+    | 'finance'
+    | 'payments'
+    | 'clientPhones'
+    | 'audit'
+    | 'deadline'
+    | 'production'
+    | 'members'
+    | 'users'
+    | 'orderDetails'
+    | 'activityTimeline'
+  >;
 }
 
 export interface CreateProjectRequest {
