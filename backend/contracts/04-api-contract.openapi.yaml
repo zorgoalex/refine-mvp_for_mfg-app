@@ -3054,6 +3054,85 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/projects/reports/order-created-month-counts:
+    get:
+      tags:
+        - Projects
+      operationId: listProjectOrderCreatedMonthCounts
+      summary: List monthly project order-created counts filtered by project membership
+      description: Returns only monthly order-created aggregate counts and applied project report filter metadata.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - projects.view
+        - orders.view
+      parameters:
+        - name: projectMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [any, all, primary, none]
+            default: any
+        - name: projectIds
+          in: query
+          required: false
+          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          schema:
+            type: string
+        - name: temporalMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [current, asOf, overlap]
+            default: current
+        - name: asOf
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: createdFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Project-filtered monthly order-created counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/projects/{projectId}:
     parameters:
       - name: projectId
@@ -4796,6 +4875,190 @@ components:
             $ref: '#/components/schemas/ProjectOrderRelationCountsReportItem'
         filter:
           $ref: '#/components/schemas/ProjectOrderStatusReportFilter'
+
+    ProjectOrderCreatedMonthCountsReportItem:
+      type: object
+      required:
+        - month
+        - orderCount
+      additionalProperties: false
+      properties:
+        month:
+          type: string
+          format: date
+        orderCount:
+          type: integer
+          minimum: 0
+
+    ProjectOrderCreatedMonthCountsReportResponse:
+      type: object
+      required:
+        - data
+        - filter
+      additionalProperties: false
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportItem'
+        filter:
+          $ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportFilter'
+
+    ProjectOrderCreatedMonthCountsReportFilter:
+      oneOf:
+        - type: object
+          required:
+            - projectMode
+            - temporalMode
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [none]
+            temporalMode:
+              type: string
+              enum: [current]
+            createdFrom:
+              type: string
+              format: date-time
+            createdTo:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectMode
+            - projectIds
+            - temporalMode
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [any, all, primary]
+            projectIds:
+              type: array
+              maxItems: 50
+              items:
+                type: string
+                format: uuid
+            temporalMode:
+              type: string
+              enum: [current]
+            createdFrom:
+              type: string
+              format: date-time
+            createdTo:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectMode
+            - temporalMode
+            - asOf
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [none]
+            temporalMode:
+              type: string
+              enum: [asOf]
+            asOf:
+              type: string
+              format: date-time
+            createdFrom:
+              type: string
+              format: date-time
+            createdTo:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectMode
+            - projectIds
+            - temporalMode
+            - asOf
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [any, all, primary]
+            projectIds:
+              type: array
+              maxItems: 50
+              items:
+                type: string
+                format: uuid
+            temporalMode:
+              type: string
+              enum: [asOf]
+            asOf:
+              type: string
+              format: date-time
+            createdFrom:
+              type: string
+              format: date-time
+            createdTo:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectMode
+            - temporalMode
+            - from
+            - to
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [none]
+            temporalMode:
+              type: string
+              enum: [overlap]
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+            createdFrom:
+              type: string
+              format: date-time
+            createdTo:
+              type: string
+              format: date-time
+        - type: object
+          required:
+            - projectMode
+            - projectIds
+            - temporalMode
+            - from
+            - to
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [any, all, primary]
+            projectIds:
+              type: array
+              maxItems: 50
+              items:
+                type: string
+                format: uuid
+            temporalMode:
+              type: string
+              enum: [overlap]
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+            createdFrom:
+              type: string
+              format: date-time
+            createdTo:
+              type: string
+              format: date-time
 
     OrderListResponse:
       type: object

@@ -106,6 +106,30 @@ describe('Swagger controller metadata', () => {
     expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
   });
 
+  it('documents Projects order created month counts response as a strict oneOf schema in Swagger metadata', () => {
+    const controllerSource = readFileSync(
+      resolve(backendRoot(), 'src/modules/projects/reporting/project-order-created-month-counts-report.controller.ts'),
+      'utf8',
+    );
+
+    expect(controllerSource).toContain('additionalProperties: false');
+    expect(controllerSource).toContain('filter: {');
+    expect(controllerSource).toContain('oneOf: [');
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'asOf']");
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'from', 'to']");
+    expect(controllerSource).toContain("required: ['month', 'orderCount']");
+    expect(controllerSource).toContain("month: { type: 'string', format: 'date' }");
+    expect(controllerSource).toContain("orderCount: { type: 'integer', minimum: 0 }");
+    expect(controllerSource).toContain("schema: swaggerSchema(dateTimeQuerySwaggerSchema)");
+    expect(controllerSource).toContain("schema: { default: 'any' }");
+    expect(controllerSource).toContain("schema: { default: 'current' }");
+    expect(controllerSource).toContain("name: 'createdFrom'");
+    expect(controllerSource).toContain("name: 'createdTo'");
+    expect(controllerSource).toContain('Returns only monthly order-created aggregate counts and applied project report filter metadata.');
+    expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
+  });
+
   it('registers a runtime bearerAuth security scheme matching the static contract', () => {
     const swaggerSource = readFileSync(resolve(backendRoot(), 'src/config/swagger.ts'), 'utf8');
 
