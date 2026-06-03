@@ -87,6 +87,7 @@ test.describe('Frontend pages smoke', () => {
 
         for (const route of authenticatedRoutes) {
             await test.step(route.label, async () => {
+                console.log(`[frontend-pages-smoke] ${route.label}: ${route.path}`);
                 graphQLErrors.length = 0;
                 pageErrors.length = 0;
                 consoleErrors.length = 0;
