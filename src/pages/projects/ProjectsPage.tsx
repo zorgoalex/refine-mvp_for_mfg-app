@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGetIdentity } from '@refinedev/core';
 import {
   Alert,
@@ -58,6 +58,62 @@ interface ProjectsPageProps {
   initialOverview?: ProjectOverviewResponse | null;
 }
 
+export interface OverviewSelectionState {
+  activeRequestId: number;
+  loadingProjectId: string | null;
+  overview: ProjectOverviewResponse | null;
+}
+
+type OverviewSelectionAction =
+  | { type: 'request'; projectId: string; requestId?: number }
+  | { type: 'success'; requestId: number; overview: ProjectOverviewResponse }
+  | { type: 'failure'; requestId: number }
+  | { type: 'close' };
+
+export function getNextOverviewSelectionState(
+  state: OverviewSelectionState,
+  action: OverviewSelectionAction,
+): OverviewSelectionState {
+  switch (action.type) {
+    case 'request': {
+      const requestId = action.requestId ?? state.activeRequestId + 1;
+      return {
+        activeRequestId: requestId,
+        loadingProjectId: action.projectId,
+        overview: null,
+      };
+    }
+    case 'success':
+      if (action.requestId !== state.activeRequestId || state.loadingProjectId === null) {
+        return state;
+      }
+
+      return {
+        activeRequestId: state.activeRequestId,
+        loadingProjectId: null,
+        overview: action.overview,
+      };
+    case 'failure':
+      if (action.requestId !== state.activeRequestId) {
+        return state;
+      }
+
+      return {
+        activeRequestId: state.activeRequestId,
+        loadingProjectId: null,
+        overview: state.overview,
+      };
+    case 'close':
+      return {
+        activeRequestId: state.activeRequestId + 1,
+        loadingProjectId: null,
+        overview: null,
+      };
+    default:
+      return state;
+  }
+}
+
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   initialProjects = [],
   initialOverview = null,
@@ -68,8 +124,12 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
-  const [overviewLoadingId, setOverviewLoadingId] = useState<string | null>(null);
-  const [overview, setOverview] = useState<ProjectOverviewResponse | null>(initialOverview);
+  const [overviewSelection, setOverviewSelection] = useState<OverviewSelectionState>({
+    activeRequestId: 0,
+    loadingProjectId: null,
+    overview: initialOverview,
+  });
+  const overviewRequestIdRef = useRef(0);
 
   const currentUser = identity ?? null;
   const canView = canViewProjectsPage(featureFlags, currentUser);
@@ -122,16 +182,35 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   }, [loadProjects]);
 
   const handleOverview = useCallback(async (projectId: string) => {
-    setOverviewLoadingId(projectId);
-    setOverview(null);
+    const requestId = overviewRequestIdRef.current + 1;
+    overviewRequestIdRef.current = requestId;
+    setOverviewSelection((state) => getNextOverviewSelectionState(state, {
+      type: 'request',
+      projectId,
+      requestId,
+    }));
+
     try {
       const response = await projectsApi.getProjectOverview(projectId);
-      setOverview(response);
+      setOverviewSelection((state) => getNextOverviewSelectionState(state, {
+        type: 'success',
+        requestId,
+        overview: response,
+      }));
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось загрузить обзор проекта');
-    } finally {
-      setOverviewLoadingId(null);
+      if (overviewRequestIdRef.current === requestId) {
+        message.error(error instanceof Error ? error.message : 'Не удалось загрузить обзор проекта');
+      }
+      setOverviewSelection((state) => getNextOverviewSelectionState(state, {
+        type: 'failure',
+        requestId,
+      }));
     }
+  }, []);
+
+  const handleCloseOverview = useCallback(() => {
+    overviewRequestIdRef.current += 1;
+    setOverviewSelection((state) => getNextOverviewSelectionState(state, { type: 'close' }));
   }, []);
 
   const columns = useMemo<ColumnsType<ProjectDto>>(
@@ -167,7 +246,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         render: (_, project) => (
           <Space>
             <Button
-              loading={overviewLoadingId === project.id}
+              loading={overviewSelection.loadingProjectId === project.id}
               onClick={() => void handleOverview(project.id)}
             >
               Обзор
@@ -184,7 +263,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         ),
       },
     ],
-    [archivingId, canArchive, handleArchive, handleOverview, overviewLoadingId],
+    [archivingId, canArchive, handleArchive, handleOverview, overviewSelection.loadingProjectId],
   );
 
   if (!canView) {
@@ -244,10 +323,10 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
           loading={loading}
           pagination={{ pageSize: 25 }}
         />
-        {overview ? (
+        {overviewSelection.overview ? (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Button onClick={() => setOverview(null)}>Закрыть</Button>
-            <ProjectDetailOverview overview={overview} />
+            <Button onClick={handleCloseOverview}>Закрыть</Button>
+            <ProjectDetailOverview overview={overviewSelection.overview} />
           </Space>
         ) : null}
       </Space>
