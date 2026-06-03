@@ -114,7 +114,10 @@ function parseCreatedRange(query: Record<string, string | string[] | undefined>)
     throw validationError('createdTo', 'createdTo must be after createdFrom');
   }
 
-  return { from, to };
+  return {
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+  };
 }
 
 function optionalIso(value: string | undefined, field: string): string | undefined {

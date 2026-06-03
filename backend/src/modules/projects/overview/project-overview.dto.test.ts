@@ -55,11 +55,14 @@ describe('ProjectOverviewResponseDto', () => {
 
 describe('parseProjectOverviewQuery', () => {
   it('defaults to current temporal mode and no created range', () => {
-    expect(parseProjectOverviewQuery({})).toEqual({
+    const result = parseProjectOverviewQuery({});
+
+    expect(result).toEqual({
       temporal: { mode: 'current' },
       filter: { temporalMode: 'current' },
       createdRange: {},
     });
+    expect(Object.keys(result.createdRange)).toEqual([]);
   });
 
   it('parses overlap and created range', () => {
