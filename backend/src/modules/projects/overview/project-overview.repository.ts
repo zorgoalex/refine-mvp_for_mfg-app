@@ -70,7 +70,7 @@ export class PgProjectOverviewRepository implements ProjectOverviewRepositoryPor
     const [totalCount, statusCounts, relationCounts, createdMonthCounts] = await Promise.all([
       this.getTotalCount(predicateFilter),
       this.getStatusCounts(predicateFilter),
-      this.getRelationCounts(predicateFilter),
+      this.getRelationCounts(predicateFilter, input.projectId),
       this.getCreatedMonthCounts(predicateFilter, input.query),
     ]);
 
@@ -179,6 +179,7 @@ export class PgProjectOverviewRepository implements ProjectOverviewRepositoryPor
 
   private async getRelationCounts(
     filter: ProjectReportFilter,
+    projectId: string,
   ): Promise<ProjectOverviewResponseDto['orders']['relationCounts']> {
     const params: unknown[] = [];
     const predicate = appendProjectReportPredicate({
@@ -186,6 +187,7 @@ export class PgProjectOverviewRepository implements ProjectOverviewRepositoryPor
       orderIdExpression: 'o.order_id',
       filter,
     });
+    const relationProjectIdIndex = params.push(projectId);
 
     const result = await this.database.query<RelationCountRow>(
       `
@@ -196,6 +198,7 @@ export class PgProjectOverviewRepository implements ProjectOverviewRepositoryPor
       FROM public.orders o
       JOIN public.project_order_projects pop_relation ON pop_relation.order_id = o.order_id
       WHERE ${predicate}
+        AND pop_relation.project_id = $${relationProjectIdIndex}::uuid
         AND pop_relation.valid_to IS NULL
       GROUP BY pop_relation.relation_type, pop_relation.is_primary
       ORDER BY pop_relation.relation_type ASC, pop_relation.is_primary DESC

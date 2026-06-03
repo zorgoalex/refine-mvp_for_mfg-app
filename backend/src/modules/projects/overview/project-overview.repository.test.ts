@@ -24,6 +24,41 @@ describe('PgProjectOverviewRepository', () => {
     expect(response.omitted).toEqual(PROJECT_OVERVIEW_OMITTED);
   });
 
+  it('binds relation count rows to the selected project with a parameter', async () => {
+    const database = fakeDatabase();
+    const repo = new PgProjectOverviewRepository(database);
+
+    await repo.getOverview({ projectId: projectId(), query: overviewQuery() });
+
+    const relationQuery = database.queries.find((query) => query.text.includes('pop_relation'));
+    expect(relationQuery).toBeDefined();
+    expect(relationQuery?.text).toMatch(/pop_relation\.project_id = \$\d+::uuid/);
+    expect(relationQuery?.text).toContain('pop_relation.valid_to IS NULL');
+    expect(relationQuery?.params).toContain(projectId());
+  });
+
+  it('uses created range bounds as parameterized inclusive from and exclusive to filters', async () => {
+    const database = fakeDatabase();
+    const repo = new PgProjectOverviewRepository(database);
+    const createdFrom = '2026-05-01T00:00:00.000Z';
+    const createdTo = '2026-06-01T00:00:00.000Z';
+
+    await repo.getOverview({
+      projectId: projectId(),
+      query: {
+        temporal: { mode: 'current' },
+        filter: { temporalMode: 'current', createdFrom, createdTo },
+        createdRange: { from: createdFrom, to: createdTo },
+      },
+    });
+
+    const createdQuery = database.queries.find((query) => query.text.includes("date_trunc('month'"));
+    expect(createdQuery).toBeDefined();
+    expect(createdQuery?.text).toContain('o.created_at >= $2::timestamptz');
+    expect(createdQuery?.text).toContain('o.created_at < $3::timestamptz');
+    expect(createdQuery?.params).toEqual([[projectId()], createdFrom, createdTo]);
+  });
+
   it('returns project identity and aggregate DTO shape', async () => {
     const database = fakeDatabase({
       statusRows: [{ status_id: '5', status_name: 'In work', order_count: '3' }],

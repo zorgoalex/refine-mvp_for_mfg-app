@@ -21,6 +21,24 @@ describe('ProjectOverviewService', () => {
         missingPermissions: ['orders.view'],
       },
     });
+    await expect(
+      service.getOverview({ currentUser: user(['orders.view']), projectId: projectId(), query }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: {
+        requiredPermissions: ['projects.view', 'orders.view'],
+        missingPermissions: ['projects.view'],
+      },
+    });
+    await expect(service.getOverview({ currentUser: user([]), projectId: projectId(), query })).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: {
+        requiredPermissions: ['projects.view', 'orders.view'],
+        missingPermissions: ['projects.view', 'orders.view'],
+      },
+    });
 
     expect(overviews.calls).toEqual([]);
   });
