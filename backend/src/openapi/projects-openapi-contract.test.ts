@@ -15,6 +15,7 @@ describe('projects OpenAPI contract', () => {
     expect(contract).toContain('  /api/v1/projects/reports/orders:');
     expect(contract).toContain('  /api/v1/projects/reports/order-status-counts:');
     expect(contract).toContain('  /api/v1/projects/reports/order-relation-counts:');
+    expect(contract).toContain('  /api/v1/projects/reports/order-created-month-counts:');
   });
 
   it('documents get project bad request and list pagination totalPages', () => {
@@ -140,6 +141,11 @@ describe('projects OpenAPI contract', () => {
     const relationCountsSection = sectionBetween(
       contract,
       '  /api/v1/projects/reports/order-relation-counts:',
+      '  /api/v1/projects/reports/order-created-month-counts:',
+    );
+    const createdMonthCountsSection = sectionBetween(
+      contract,
+      '  /api/v1/projects/reports/order-created-month-counts:',
       '  /api/v1/projects/{projectId}:',
     );
     const statusItemSchema = sectionBetween(
@@ -165,6 +171,21 @@ describe('projects OpenAPI contract', () => {
     const relationResponseSchema = sectionBetween(
       contract,
       '    ProjectOrderRelationCountsReportResponse:',
+      '    ProjectOrderCreatedMonthCountsReportItem:',
+    );
+    const createdMonthItemSchema = sectionBetween(
+      contract,
+      '    ProjectOrderCreatedMonthCountsReportItem:',
+      '    ProjectOrderCreatedMonthCountsReportResponse:',
+    );
+    const createdMonthResponseSchema = sectionBetween(
+      contract,
+      '    ProjectOrderCreatedMonthCountsReportResponse:',
+      '    ProjectOrderCreatedMonthCountsReportFilter:',
+    );
+    const createdMonthFilterSchema = sectionBetween(
+      contract,
+      '    ProjectOrderCreatedMonthCountsReportFilter:',
       '    OrderListResponse:',
     );
 
@@ -179,6 +200,10 @@ describe('projects OpenAPI contract', () => {
     expect(relationCountsSection).toContain('- projects.view');
     expect(relationCountsSection).toContain('- orders.view');
     expect(relationCountsSection).toContain("$ref: '#/components/schemas/ProjectOrderRelationCountsReportResponse'");
+    expect(createdMonthCountsSection).toContain('operationId: listProjectOrderCreatedMonthCounts');
+    expect(createdMonthCountsSection).toContain('- projects.view');
+    expect(createdMonthCountsSection).toContain('- orders.view');
+    expect(createdMonthCountsSection).toContain("$ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportResponse'");
     expect(statusItemSchema).toContain('statusId:');
     expect(statusItemSchema).toContain('statusName:');
     expect(statusItemSchema).toContain('orderCount:');
@@ -204,8 +229,20 @@ describe('projects OpenAPI contract', () => {
     expect(relationItemSchema).toContain('additionalProperties: false');
     expect(relationResponseSchema).toContain('additionalProperties: false');
     expect(relationResponseSchema).toContain("$ref: '#/components/schemas/ProjectOrderStatusReportFilter'");
+    expect(createdMonthItemSchema).toContain('month:');
+    expect(createdMonthItemSchema).toContain('format: date');
+    expect(createdMonthItemSchema).toContain('orderCount:');
+    expect(createdMonthItemSchema).toContain('additionalProperties: false');
+    expect(createdMonthResponseSchema).toContain('additionalProperties: false');
+    expect(createdMonthResponseSchema).toContain("$ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportFilter'");
+    expect(createdMonthFilterSchema).toContain('oneOf:');
+    expect(createdMonthFilterSchema).toContain('createdFrom:');
+    expect(createdMonthFilterSchema).toContain('createdTo:');
+    expect(createdMonthFilterSchema).toContain('additionalProperties: false');
     expect(relationResponseSchema).not.toContain('pagination:');
     expect(relationResponseSchema).not.toContain('orderId:');
+    expect(createdMonthResponseSchema).not.toContain('pagination:');
+    expect(createdMonthResponseSchema).not.toContain('orderId:');
     for (const leakedToken of [
       'amount',
       'payment',
@@ -223,6 +260,9 @@ describe('projects OpenAPI contract', () => {
       expect(relationCountsSection).not.toContain(leakedToken);
       expect(relationItemSchema).not.toContain(leakedToken);
       expect(relationResponseSchema).not.toContain(leakedToken);
+      expect(createdMonthCountsSection).not.toContain(leakedToken);
+      expect(createdMonthItemSchema).not.toContain(leakedToken);
+      expect(createdMonthResponseSchema).not.toContain(leakedToken);
     }
   });
 });
