@@ -18,6 +18,7 @@ export function setupSwagger(app: INestApplication, env: SwaggerEnv): void {
     .setDescription('Stage-1 ERP backend API contract')
     .setVersion('0.1.0')
     .addServer(env.API_PREFIX, 'Current versioned API')
+    .addBearerAuth(undefined, 'bearerAuth')
     .addBearerAuth()
     .addCookieAuth(REFRESH_COOKIE_NAME, { type: 'apiKey' }, REFRESH_COOKIE_NAME)
     .build();

@@ -2987,6 +2987,73 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/projects/reports/order-relation-counts:
+    get:
+      tags:
+        - Projects
+      operationId: listProjectOrderRelationCounts
+      summary: List project order relation counts filtered by project membership
+      description: Returns only project-order relation aggregate counts and applied project report filter metadata.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - projects.view
+        - orders.view
+      parameters:
+        - name: projectMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [any, all, primary, none]
+            default: any
+        - name: projectIds
+          in: query
+          required: false
+          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          schema:
+            type: string
+        - name: temporalMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [current, asOf, overlap]
+            default: current
+        - name: asOf
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Project-filtered order relation counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectOrderRelationCountsReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/projects/{projectId}:
     parameters:
       - name: projectId
@@ -4698,6 +4765,37 @@ components:
             to:
               type: string
               format: date-time
+
+    ProjectOrderRelationCountsReportItem:
+      type: object
+      required:
+        - relationType
+        - isPrimary
+        - orderCount
+      additionalProperties: false
+      properties:
+        relationType:
+          type: string
+          enum: [main, secondary, reporting, billing, derived]
+        isPrimary:
+          type: boolean
+        orderCount:
+          type: integer
+          minimum: 0
+
+    ProjectOrderRelationCountsReportResponse:
+      type: object
+      required:
+        - data
+        - filter
+      additionalProperties: false
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOrderRelationCountsReportItem'
+        filter:
+          $ref: '#/components/schemas/ProjectOrderStatusReportFilter'
 
     OrderListResponse:
       type: object

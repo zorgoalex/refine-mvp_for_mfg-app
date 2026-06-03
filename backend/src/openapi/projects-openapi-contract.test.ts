@@ -14,6 +14,7 @@ describe('projects OpenAPI contract', () => {
     expect(contract).toContain('  /api/v1/projects/{projectId}/members:');
     expect(contract).toContain('  /api/v1/projects/reports/orders:');
     expect(contract).toContain('  /api/v1/projects/reports/order-status-counts:');
+    expect(contract).toContain('  /api/v1/projects/reports/order-relation-counts:');
   });
 
   it('documents get project bad request and list pagination totalPages', () => {
@@ -134,6 +135,11 @@ describe('projects OpenAPI contract', () => {
     const statusCountsSection = sectionBetween(
       contract,
       '  /api/v1/projects/reports/order-status-counts:',
+      '  /api/v1/projects/reports/order-relation-counts:',
+    );
+    const relationCountsSection = sectionBetween(
+      contract,
+      '  /api/v1/projects/reports/order-relation-counts:',
       '  /api/v1/projects/{projectId}:',
     );
     const statusItemSchema = sectionBetween(
@@ -149,6 +155,16 @@ describe('projects OpenAPI contract', () => {
     const statusFilterSchema = sectionBetween(
       contract,
       '    ProjectOrderStatusReportFilter:',
+      '    ProjectOrderRelationCountsReportItem:',
+    );
+    const relationItemSchema = sectionBetween(
+      contract,
+      '    ProjectOrderRelationCountsReportItem:',
+      '    ProjectOrderRelationCountsReportResponse:',
+    );
+    const relationResponseSchema = sectionBetween(
+      contract,
+      '    ProjectOrderRelationCountsReportResponse:',
       '    OrderListResponse:',
     );
 
@@ -159,6 +175,10 @@ describe('projects OpenAPI contract', () => {
     expect(statusCountsSection).toContain('- projects.view');
     expect(statusCountsSection).toContain('- orders.view');
     expect(statusCountsSection).toContain("$ref: '#/components/schemas/ProjectOrderStatusReportResponse'");
+    expect(relationCountsSection).toContain('operationId: listProjectOrderRelationCounts');
+    expect(relationCountsSection).toContain('- projects.view');
+    expect(relationCountsSection).toContain('- orders.view');
+    expect(relationCountsSection).toContain("$ref: '#/components/schemas/ProjectOrderRelationCountsReportResponse'");
     expect(statusItemSchema).toContain('statusId:');
     expect(statusItemSchema).toContain('statusName:');
     expect(statusItemSchema).toContain('orderCount:');
@@ -177,6 +197,33 @@ describe('projects OpenAPI contract', () => {
     expect(statusResponseSchema).not.toContain('payment');
     expect(statusResponseSchema).not.toContain('deadline');
     expect(statusResponseSchema).not.toContain('audit');
+    expect(relationItemSchema).toContain('relationType:');
+    expect(relationItemSchema).toContain('enum: [main, secondary, reporting, billing, derived]');
+    expect(relationItemSchema).toContain('isPrimary:');
+    expect(relationItemSchema).toContain('orderCount:');
+    expect(relationItemSchema).toContain('additionalProperties: false');
+    expect(relationResponseSchema).toContain('additionalProperties: false');
+    expect(relationResponseSchema).toContain("$ref: '#/components/schemas/ProjectOrderStatusReportFilter'");
+    expect(relationResponseSchema).not.toContain('pagination:');
+    expect(relationResponseSchema).not.toContain('orderId:');
+    for (const leakedToken of [
+      'amount',
+      'payment',
+      'client',
+      'deadline',
+      'production',
+      'audit',
+      'project_members',
+      'members:',
+      'employeeId',
+      'displayName',
+      'phone',
+      'email',
+    ]) {
+      expect(relationCountsSection).not.toContain(leakedToken);
+      expect(relationItemSchema).not.toContain(leakedToken);
+      expect(relationResponseSchema).not.toContain(leakedToken);
+    }
   });
 });
 

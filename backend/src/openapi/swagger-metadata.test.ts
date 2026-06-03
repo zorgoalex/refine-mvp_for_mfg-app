@@ -81,6 +81,36 @@ describe('Swagger controller metadata', () => {
     expect(controllerSource).toContain("orderCount: { type: 'integer', minimum: 0 }");
     expect(controllerSource).toContain("schema: swaggerSchema(dateTimeQuerySwaggerSchema)");
   });
+
+  it('documents Projects order relation counts response as a strict oneOf schema in Swagger metadata', () => {
+    const controllerSource = readFileSync(
+      resolve(backendRoot(), 'src/modules/projects/reporting/project-order-relation-counts-report.controller.ts'),
+      'utf8',
+    );
+
+    expect(controllerSource).toContain('additionalProperties: false');
+    expect(controllerSource).toContain('filter: {');
+    expect(controllerSource).toContain('oneOf: [');
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'asOf']");
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'from', 'to']");
+    expect(controllerSource).toContain("required: ['relationType', 'isPrimary', 'orderCount']");
+    expect(controllerSource).toContain("relationType: { type: 'string', enum: ['main', 'secondary', 'reporting', 'billing', 'derived'] }");
+    expect(controllerSource).toContain("isPrimary: { type: 'boolean' }");
+    expect(controllerSource).toContain("orderCount: { type: 'integer', minimum: 0 }");
+    expect(controllerSource).toContain("schema: swaggerSchema(dateTimeQuerySwaggerSchema)");
+    expect(controllerSource).toContain("schema: { default: 'any' }");
+    expect(controllerSource).toContain("schema: { default: 'current' }");
+    expect(controllerSource).toContain('Comma-separated project UUIDs. Required unless projectMode is none.');
+    expect(controllerSource).toContain('Returns only project-order relation aggregate counts and applied project report filter metadata.');
+    expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
+  });
+
+  it('registers a runtime bearerAuth security scheme matching the static contract', () => {
+    const swaggerSource = readFileSync(resolve(backendRoot(), 'src/config/swagger.ts'), 'utf8');
+
+    expect(swaggerSource).toContain(".addBearerAuth(undefined, 'bearerAuth')");
+  });
 });
 
 function backendRoot(): string {
