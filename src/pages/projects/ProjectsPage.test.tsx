@@ -42,6 +42,7 @@ describe('ProjectsPage', () => {
     expect(html).toContain('Код проекта');
     expect(html).toContain('Название');
     expect(html).toContain('Создать');
+    expect(html).toContain('Обзор');
     expect(html).toContain('Архивировать');
     expect(html).not.toContain('Архив</span>');
   });

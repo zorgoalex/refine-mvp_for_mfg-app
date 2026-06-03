@@ -18,12 +18,14 @@ import { projectsApi } from '../../api/projectsApi';
 import type {
   CreateProjectRequest,
   ProjectDto,
+  ProjectOverviewResponse,
   ProjectStatus,
 } from '../../api/types/projectApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { can } from '../../utils/permissions';
 import type { UserIdentity } from '../../types/auth';
 import { canViewProjectsPage } from '../../utils/projectAccess';
+import { ProjectDetailOverview } from './ProjectDetailOverview';
 
 const { Title } = Typography;
 
@@ -53,15 +55,21 @@ interface ProjectFormValues {
 
 interface ProjectsPageProps {
   initialProjects?: ProjectDto[];
+  initialOverview?: ProjectOverviewResponse | null;
 }
 
-export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = [] }) => {
+export const ProjectsPage: React.FC<ProjectsPageProps> = ({
+  initialProjects = [],
+  initialOverview = null,
+}) => {
   const [form] = Form.useForm<ProjectFormValues>();
   const { data: identity } = useGetIdentity<UserIdentity>();
   const [projects, setProjects] = useState<ProjectDto[]>(initialProjects);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [overviewLoadingId, setOverviewLoadingId] = useState<string | null>(null);
+  const [overview, setOverview] = useState<ProjectOverviewResponse | null>(initialOverview);
 
   const currentUser = identity ?? null;
   const canView = canViewProjectsPage(featureFlags, currentUser);
@@ -100,7 +108,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = []
     }
   };
 
-  const handleArchive = async (projectId: string) => {
+  const handleArchive = useCallback(async (projectId: string) => {
     setArchivingId(projectId);
     try {
       await projectsApi.archiveProject(projectId);
@@ -111,7 +119,20 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = []
     } finally {
       setArchivingId(null);
     }
-  };
+  }, [loadProjects]);
+
+  const handleOverview = useCallback(async (projectId: string) => {
+    setOverviewLoadingId(projectId);
+    setOverview(null);
+    try {
+      const response = await projectsApi.getProjectOverview(projectId);
+      setOverview(response);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось загрузить обзор проекта');
+    } finally {
+      setOverviewLoadingId(null);
+    }
+  }, []);
 
   const columns = useMemo<ColumnsType<ProjectDto>>(
     () => [
@@ -142,20 +163,28 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = []
       {
         title: '',
         key: 'actions',
-        width: 150,
+        width: 260,
         render: (_, project) => (
-          <Button
-            danger
-            disabled={!canArchive || project.status === 'archived'}
-            loading={archivingId === project.id}
-            onClick={() => void handleArchive(project.id)}
-          >
-            Архивировать
-          </Button>
+          <Space>
+            <Button
+              loading={overviewLoadingId === project.id}
+              onClick={() => void handleOverview(project.id)}
+            >
+              Обзор
+            </Button>
+            <Button
+              danger
+              disabled={!canArchive || project.status === 'archived'}
+              loading={archivingId === project.id}
+              onClick={() => void handleArchive(project.id)}
+            >
+              Архивировать
+            </Button>
+          </Space>
         ),
       },
     ],
-    [archivingId, canArchive],
+    [archivingId, canArchive, handleArchive, handleOverview, overviewLoadingId],
   );
 
   if (!canView) {
@@ -215,6 +244,12 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ initialProjects = []
           loading={loading}
           pagination={{ pageSize: 25 }}
         />
+        {overview ? (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Button onClick={() => setOverview(null)}>Закрыть</Button>
+            <ProjectDetailOverview overview={overview} />
+          </Space>
+        ) : null}
       </Space>
     </div>
   );
