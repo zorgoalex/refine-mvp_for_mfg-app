@@ -30,14 +30,15 @@ export interface ProjectLookupQuery {
   limit?: number;
 }
 
-export interface ProjectOverviewQuery {
-  temporalMode?: 'current' | 'asOf' | 'overlap';
-  asOf?: string;
-  from?: string;
-  to?: string;
+type ProjectOverviewCreatedRangeQuery = {
   createdFrom?: string;
   createdTo?: string;
-}
+};
+
+export type ProjectOverviewQuery =
+  | ({ temporalMode?: 'current' } & ProjectOverviewCreatedRangeQuery)
+  | ({ temporalMode: 'asOf'; asOf: string } & ProjectOverviewCreatedRangeQuery)
+  | ({ temporalMode: 'overlap'; from: string; to: string } & ProjectOverviewCreatedRangeQuery);
 
 export interface ProjectListResponse {
   data: ProjectDto[];

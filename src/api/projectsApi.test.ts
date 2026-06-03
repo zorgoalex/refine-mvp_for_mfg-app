@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectsApi, validateProjectId } from './projectsApi';
-import type { ProjectDto } from './types/projectApi.types';
+import type { ProjectDto, ProjectOverviewResponse } from './types/projectApi.types';
 
 describe('projectsApi', () => {
   beforeEach(() => {
@@ -63,8 +63,8 @@ describe('projectsApi', () => {
   });
 
   it('gets project overview with backend query params', async () => {
-    const project = projectDto();
-    const fetchMock = mockFetch({
+    const project = projectOverviewProjectDto();
+    const overviewResponse: ProjectOverviewResponse = {
       project,
       orders: {
         totalCount: 0,
@@ -78,7 +78,8 @@ describe('projectsApi', () => {
         createdFrom: '2026-01-01T00:00:00Z',
       },
       omitted: [],
-    });
+    };
+    const fetchMock = mockFetch(overviewResponse);
 
     await projectsApi.getProjectOverview(project.id, {
       temporalMode: 'current',
@@ -89,6 +90,8 @@ describe('projectsApi', () => {
       '/api/v1/projects/11111111-1111-4111-8111-111111111111/overview?temporalMode=current&createdFrom=2026-01-01T00%3A00%3A00Z',
     );
     expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+    expect(Object.prototype.hasOwnProperty.call(overviewResponse.project, 'metadata')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(overviewResponse.project, 'createdBy')).toBe(false);
   });
 
   it('rejects invalid project ids before fetch', async () => {
@@ -98,6 +101,9 @@ describe('projectsApi', () => {
     await expect(projectsApi.getProject('11111111-1111-1111-1111-111111111111')).rejects.toThrow(
       'Invalid projectId',
     );
+    expect(() =>
+      projectsApi.getProjectOverview('11111111-1111-1111-1111-111111111111'),
+    ).toThrow('Invalid projectId');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -159,6 +165,27 @@ function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     updatedAt: '2026-05-01T00:00:00.000Z',
     archivedAt: null,
     createdBy: null,
+    ...overrides,
+  };
+}
+
+function projectOverviewProjectDto(
+  overrides: Partial<ProjectOverviewResponse['project']> = {},
+): ProjectOverviewResponse['project'] {
+  const project = projectDto();
+
+  return {
+    id: project.id,
+    code: project.code,
+    name: project.name,
+    description: project.description,
+    status: project.status,
+    startsAt: project.startsAt,
+    endsAt: project.endsAt,
+    ownerUserId: project.ownerUserId,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    archivedAt: project.archivedAt,
     ...overrides,
   };
 }
