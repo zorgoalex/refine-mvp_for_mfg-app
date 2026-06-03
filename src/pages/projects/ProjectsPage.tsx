@@ -22,7 +22,7 @@ import type {
   ProjectStatus,
 } from '../../api/types/projectApi.types';
 import { featureFlags } from '../../config/featureFlags';
-import { can } from '../../utils/permissions';
+import { can, canAll } from '../../utils/permissions';
 import type { UserIdentity } from '../../types/auth';
 import { canViewProjectsPage } from '../../utils/projectAccess';
 import { ProjectDetailOverview } from './ProjectDetailOverview';
@@ -135,6 +135,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   const canView = canViewProjectsPage(featureFlags, currentUser);
   const canCreate = !featureFlags.useBackendPermissions || can('projects.create', currentUser);
   const canArchive = !featureFlags.useBackendPermissions || can('projects.archive', currentUser);
+  const canViewOverview = !featureFlags.useBackendPermissions || canAll(['projects.view', 'orders.view'], currentUser);
 
   const loadProjects = useCallback(async () => {
     if (!canView) return;
@@ -245,12 +246,14 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         width: 260,
         render: (_, project) => (
           <Space>
-            <Button
-              loading={overviewSelection.loadingProjectId === project.id}
-              onClick={() => void handleOverview(project.id)}
-            >
-              Обзор
-            </Button>
+            {canViewOverview ? (
+              <Button
+                loading={overviewSelection.loadingProjectId === project.id}
+                onClick={() => void handleOverview(project.id)}
+              >
+                Обзор
+              </Button>
+            ) : null}
             <Button
               danger
               disabled={!canArchive || project.status === 'archived'}
@@ -263,7 +266,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         ),
       },
     ],
-    [archivingId, canArchive, handleArchive, handleOverview, overviewSelection.loadingProjectId],
+    [archivingId, canArchive, canViewOverview, handleArchive, handleOverview, overviewSelection.loadingProjectId],
   );
 
   if (!canView) {

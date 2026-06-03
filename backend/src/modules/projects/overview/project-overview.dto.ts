@@ -79,6 +79,8 @@ export interface ProjectOverviewResponseDto {
 }
 
 export function parseProjectOverviewQuery(query: Record<string, string | string[] | undefined>): ProjectOverviewQuery {
+  rejectForbiddenScopeParams(query);
+
   const temporal = parseTemporal(query);
   const createdRange = parseCreatedRange(query);
 
@@ -87,6 +89,12 @@ export function parseProjectOverviewQuery(query: Record<string, string | string[
     filter: toResponseFilter(temporal, createdRange),
     createdRange,
   };
+}
+
+function rejectForbiddenScopeParams(query: Record<string, string | string[] | undefined>): void {
+  if (query.projectIds !== undefined) {
+    throw validationError('projectIds', 'projectIds is not accepted for project overview');
+  }
 }
 
 function parseTemporal(query: Record<string, string | string[] | undefined>): ProjectOverviewTemporalFilter {

@@ -113,6 +113,14 @@ describe('parseProjectOverviewQuery', () => {
     );
   });
 
+  it('rejects projectIds because the path projectId is the only accepted project scope', () => {
+    expect(() =>
+      parseProjectOverviewQuery({
+        projectIds: '11111111-1111-4111-8111-111111111111',
+      }),
+    ).toThrow('projectIds is not accepted for project overview');
+  });
+
   it('rejects invalid ISO timestamps', () => {
     expect(() =>
       parseProjectOverviewQuery({

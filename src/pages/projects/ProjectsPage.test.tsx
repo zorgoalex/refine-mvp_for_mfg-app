@@ -14,6 +14,22 @@ vi.mock('@refinedev/core', () => ({
 }));
 
 describe('ProjectsPage', () => {
+  const projectFixture = {
+    id: '11111111-1111-4111-8111-111111111111',
+    code: 'PRJ-001',
+    name: 'Project',
+    description: null,
+    status: 'active',
+    startsAt: null,
+    endsAt: null,
+    ownerUserId: null,
+    metadata: {},
+    createdAt: '2026-05-01T00:00:00.000Z',
+    updatedAt: '2026-05-01T00:00:00.000Z',
+    archivedAt: null,
+    createdBy: null,
+  } as const;
+
   it('renders a minimal project list with create and archive controls', () => {
     applyFeatureFlags({
       ...getFeatureFlags({}),
@@ -23,23 +39,7 @@ describe('ProjectsPage', () => {
 
     const html = renderToString(
       <ProjectsPage
-        initialProjects={[
-          {
-            id: '11111111-1111-4111-8111-111111111111',
-            code: 'PRJ-001',
-            name: 'Project',
-            description: null,
-            status: 'active',
-            startsAt: null,
-            endsAt: null,
-            ownerUserId: null,
-            metadata: {},
-            createdAt: '2026-05-01T00:00:00.000Z',
-            updatedAt: '2026-05-01T00:00:00.000Z',
-            archivedAt: null,
-            createdBy: null,
-          },
-        ]}
+        initialProjects={[projectFixture]}
       />,
     );
 
@@ -50,6 +50,20 @@ describe('ProjectsPage', () => {
     expect(html).toContain('Обзор');
     expect(html).toContain('Архивировать');
     expect(html).not.toContain('Архив</span>');
+  });
+
+  it('hides project overview action when backend permissions lack orders.view', () => {
+    applyFeatureFlags({
+      ...getFeatureFlags({}),
+      useBackendProjects: true,
+      useBackendPermissions: true,
+    });
+
+    const html = renderToString(<ProjectsPage initialProjects={[projectFixture]} />);
+
+    expect(html).toContain('Проекты');
+    expect(html).not.toContain('Обзор');
+    expect(html).toContain('Архивировать');
   });
 
   it('keeps the latest selected overview when requests resolve out of order', () => {
