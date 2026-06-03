@@ -12,10 +12,16 @@ export type ProjectOverviewCreatedRange = {
   to?: string;
 };
 
+type ProjectOverviewResponseFilterBase = {
+  projectId?: string;
+  createdFrom?: string;
+  createdTo?: string;
+};
+
 export type ProjectOverviewQueryFilter =
-  | { temporalMode: 'current'; createdFrom?: string; createdTo?: string }
-  | { temporalMode: 'asOf'; asOf: string; createdFrom?: string; createdTo?: string }
-  | { temporalMode: 'overlap'; from: string; to: string; createdFrom?: string; createdTo?: string };
+  | ({ temporalMode: 'current' } & ProjectOverviewResponseFilterBase)
+  | ({ temporalMode: 'asOf'; asOf: string } & ProjectOverviewResponseFilterBase)
+  | ({ temporalMode: 'overlap'; from: string; to: string } & ProjectOverviewResponseFilterBase);
 
 export interface ProjectOverviewQuery {
   temporal: ProjectOverviewTemporalFilter;
@@ -23,7 +29,19 @@ export interface ProjectOverviewQuery {
   createdRange: ProjectOverviewCreatedRange;
 }
 
-export const PROJECT_OVERVIEW_OMITTED = [
+export type ProjectOverviewOmittedDomain =
+  | 'finance'
+  | 'payments'
+  | 'clientPhones'
+  | 'audit'
+  | 'deadline'
+  | 'production'
+  | 'members'
+  | 'users'
+  | 'orderDetails'
+  | 'activityTimeline';
+
+export const PROJECT_OVERVIEW_OMITTED: ProjectOverviewOmittedDomain[] = [
   'finance',
   'payments',
   'clientPhones',
@@ -34,28 +52,30 @@ export const PROJECT_OVERVIEW_OMITTED = [
   'users',
   'orderDetails',
   'activityTimeline',
-] as const;
+] as const satisfies ProjectOverviewOmittedDomain[];
 
 export interface ProjectOverviewResponseDto {
-  id: string;
-  code: string;
-  name: string;
-  description: string | null;
-  status: ProjectStatus;
-  startsAt: string | null;
-  endsAt: string | null;
-  ownerUserId: number | null;
-  createdAt: string;
-  updatedAt: string;
-  archivedAt: string | null;
+  project: {
+    id: string;
+    code: string;
+    name: string;
+    description: string | null;
+    status: ProjectStatus;
+    startsAt: string | null;
+    endsAt: string | null;
+    ownerUserId: number | null;
+    createdAt: string;
+    updatedAt: string;
+    archivedAt: string | null;
+  };
   orders: {
-    total: number;
+    totalCount: number;
     statusCounts: ProjectOrderStatusReportItemDto[];
     relationCounts: ProjectOrderRelationCountsReportItemDto[];
-    monthCounts: ProjectOrderCreatedMonthCountsReportItemDto[];
+    createdMonthCounts: ProjectOrderCreatedMonthCountsReportItemDto[];
   };
   filter: ProjectOverviewQueryFilter;
-  omitted: typeof PROJECT_OVERVIEW_OMITTED;
+  omitted: ProjectOverviewOmittedDomain[];
 }
 
 export function parseProjectOverviewQuery(query: Record<string, string | string[] | undefined>): ProjectOverviewQuery {
