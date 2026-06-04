@@ -2987,6 +2987,55 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/projects/reports/production-status-counts:
+    get:
+      tags:
+        - Projects
+      operationId: listProjectProductionStatusCounts
+      summary: List current production status counts filtered by project membership
+      description: Returns only current order production status aggregate counts and applied current project report filter metadata.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - projects.view
+        - orders.view
+      parameters:
+        - name: projectMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [any, all, primary, none]
+            default: any
+        - name: projectIds
+          in: query
+          required: false
+          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          schema:
+            type: string
+        - name: temporalMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [current]
+            default: current
+      responses:
+        '200':
+          description: Project-filtered current production status counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectProductionStatusCountsReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/projects/reports/order-relation-counts:
     get:
       tags:
@@ -4925,6 +4974,75 @@ components:
             to:
               type: string
               format: date-time
+
+    ProjectProductionStatusCountsReportItem:
+      type: object
+      required:
+        - productionStatusId
+        - productionStatusCode
+        - productionStatusName
+        - orderCount
+      additionalProperties: false
+      properties:
+        productionStatusId:
+          type: integer
+          nullable: true
+        productionStatusCode:
+          type: string
+          nullable: true
+        productionStatusName:
+          type: string
+        orderCount:
+          type: integer
+          minimum: 0
+
+    ProjectProductionStatusCountsReportResponse:
+      type: object
+      required:
+        - data
+        - filter
+      additionalProperties: false
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectProductionStatusCountsReportItem'
+        filter:
+          $ref: '#/components/schemas/ProjectProductionStatusCountsReportFilter'
+
+    ProjectProductionStatusCountsReportFilter:
+      oneOf:
+        - type: object
+          required:
+            - projectMode
+            - temporalMode
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [none]
+            temporalMode:
+              type: string
+              enum: [current]
+        - type: object
+          required:
+            - projectMode
+            - projectIds
+            - temporalMode
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [any, all, primary]
+            projectIds:
+              type: array
+              maxItems: 50
+              items:
+                type: string
+                format: uuid
+            temporalMode:
+              type: string
+              enum: [current]
 
     ProjectOrderRelationCountsReportItem:
       type: object

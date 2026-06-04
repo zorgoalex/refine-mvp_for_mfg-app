@@ -106,6 +106,34 @@ describe('Swagger controller metadata', () => {
     expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
   });
 
+  it('documents Projects production status counts response as a strict current-only schema in Swagger metadata', () => {
+    const controllerSource = readFileSync(
+      resolve(backendRoot(), 'src/modules/projects/reporting/project-production-status-counts-report.controller.ts'),
+      'utf8',
+    );
+
+    expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
+    expect(controllerSource).toContain('additionalProperties: false');
+    expect(controllerSource).toContain('filter: {');
+    expect(controllerSource).toContain('oneOf: [');
+    expect(controllerSource).toContain("required: ['projectMode', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode']");
+    expect(controllerSource).toContain("schema: { default: 'any' }");
+    expect(controllerSource).toContain("schema: { default: 'current' }");
+    expect(controllerSource).toContain("enum: ['current']");
+    expect(controllerSource).not.toContain("name: 'asOf'");
+    expect(controllerSource).not.toContain("name: 'from'");
+    expect(controllerSource).not.toContain("name: 'to'");
+    expect(controllerSource).toContain(
+      "required: ['productionStatusId', 'productionStatusCode', 'productionStatusName', 'orderCount']",
+    );
+    expect(controllerSource).toContain(
+      'Returns only current orders.production_status_id aggregate counts and applied current project report filter metadata.',
+    );
+    expect(controllerSource).toContain("productionStatusId: { type: 'integer', nullable: true }");
+    expect(controllerSource).toContain("productionStatusCode: { type: 'string', nullable: true }");
+  });
+
   it('documents Projects order created month counts response as a strict oneOf schema in Swagger metadata', () => {
     const controllerSource = readFileSync(
       resolve(backendRoot(), 'src/modules/projects/reporting/project-order-created-month-counts-report.controller.ts'),

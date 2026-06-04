@@ -2,9 +2,10 @@
 // Displays list of order payments with inline editing capabilities
 // Pattern: same as OrderDetailTable for consistency
 
-import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Table, Button, Space, Form, InputNumber, Input, Select, DatePicker, Typography, Tooltip } from 'antd';
-import { EditOutlined, CheckOutlined } from '@ant-design/icons';
+import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import { Table, Button, Space, Form, InputNumber, Input, Select, DatePicker, Typography, Tooltip, Dropdown } from 'antd';
+import { EditOutlined, CheckOutlined, DeleteOutlined } from '@ant-design/icons';
+import type { MenuProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useSelect } from '@refinedev/antd';
@@ -57,9 +58,18 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
 
   const [form] = Form.useForm();
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
+  const [paymentContextMenu, setPaymentContextMenu] = useState<{
+    x: number;
+    y: number;
+    record: Payment;
+  } | null>(null);
   const highlightedRowRef = useRef<HTMLElement | null>(null);
 
   const isEditing = (record: Payment) => (record.temp_id || record.payment_id) === editingKey;
+
+  const closePaymentContextMenu = useCallback(() => {
+    setPaymentContextMenu(null);
+  }, []);
 
   // Calculate total payments amount
   const totalPaymentsAmount = useMemo(() => {
@@ -386,6 +396,45 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
     },
   ];
 
+  const paymentContextMenuItems: MenuProps['items'] = useMemo(
+    () => [
+      {
+        key: 'edit',
+        icon: <EditOutlined style={{ color: '#1890ff' }} />,
+        label: <span style={{ color: '#1890ff' }}>Редактировать</span>,
+      },
+      { type: 'divider' as const },
+      {
+        key: 'delete',
+        icon: <DeleteOutlined />,
+        label: 'Удалить',
+        danger: true,
+      },
+    ],
+    [],
+  );
+
+  const handlePaymentContextMenuClick: MenuProps['onClick'] = useCallback(
+    (info) => {
+      if (!paymentContextMenu?.record) return;
+
+      if (info.key === 'edit') {
+        startEdit(paymentContextMenu.record);
+        closePaymentContextMenu();
+        return;
+      }
+
+      if (info.key === 'delete') {
+        const tempId = paymentContextMenu.record.temp_id || paymentContextMenu.record.payment_id;
+        if (tempId) {
+          onDelete(tempId, paymentContextMenu.record.payment_id);
+        }
+        closePaymentContextMenu();
+      }
+    },
+    [closePaymentContextMenu, onDelete, paymentContextMenu?.record],
+  );
+
   const rowSelection = onSelectChange
     ? {
         selectedRowKeys,
@@ -395,132 +444,87 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
     : undefined;
 
   return (
-    <Form form={form} component={false}>
-      <Table<Payment>
-        dataSource={sortedPayments}
-        columns={columns}
-        rowKey={(record) => record.temp_id || record.payment_id || 0}
-        rowSelection={rowSelection}
-        showSorterTooltip={false}
-        pagination={false}
-        scroll={{ y: 300 }}
-        size="small"
-        bordered
-        onRow={(record, index) => {
-          const rowKey = record.temp_id || record.payment_id || 0;
-          const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
-          const isCurrentlyEditing = isEditing(record);
+    <>
+      <Form form={form} component={false}>
+        <Table<Payment>
+          dataSource={sortedPayments}
+          columns={columns}
+          rowKey={(record) => record.temp_id || record.payment_id || 0}
+          rowSelection={rowSelection}
+          showSorterTooltip={false}
+          pagination={false}
+          scroll={{ y: 300 }}
+          size="small"
+          bordered
+          onRow={(record, index) => {
+            const rowKey = record.temp_id || record.payment_id || 0;
+            const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
+            const isCurrentlyEditing = isEditing(record);
 
-          return {
-            ref: isHighlighted ? highlightedRowRef : undefined,
-            style: {
-              backgroundColor: isCurrentlyEditing
-                ? '#fffbe6' // Warm yellow for editing row
-                : isHighlighted
-                ? '#e6f7ff' // Light blue for highlighted row
-                : (index! % 2 === 0 ? '#ffffff' : '#f5f5f5'),
-              boxShadow: isCurrentlyEditing ? '0 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
-              transform: isCurrentlyEditing ? 'scale(1.01)' : 'scale(1)',
-              position: isCurrentlyEditing ? 'relative' as const : 'relative' as const,
-              zIndex: isCurrentlyEditing ? 10 : 1,
-              transition: 'all 0.3s ease',
-              border: isCurrentlyEditing ? '2px solid #faad14' : 'none',
-            },
-            onDoubleClick: () => startEdit(record),
-            onContextMenu: (e) => {
-              e.preventDefault();
+            return {
+              ref: isHighlighted ? highlightedRowRef : undefined,
+              style: {
+                backgroundColor: isCurrentlyEditing
+                  ? '#fffbe6' // Warm yellow for editing row
+                  : isHighlighted
+                  ? '#e6f7ff' // Light blue for highlighted row
+                  : (index! % 2 === 0 ? '#ffffff' : '#f5f5f5'),
+                boxShadow: isCurrentlyEditing ? '0 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
+                transform: isCurrentlyEditing ? 'scale(1.01)' : 'scale(1)',
+                position: isCurrentlyEditing ? 'relative' as const : 'relative' as const,
+                zIndex: isCurrentlyEditing ? 10 : 1,
+                transition: 'all 0.3s ease',
+                border: isCurrentlyEditing ? '2px solid #faad14' : 'none',
+              },
+              onDoubleClick: () => startEdit(record),
+              onContextMenu: (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setPaymentContextMenu({ x: e.clientX, y: e.clientY, record });
+              },
+            };
+          }}
+          summary={() => (
+            <Table.Summary.Row>
+              <Table.Summary.Cell index={0} colSpan={2}>
+                <Text strong>Итого:</Text>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={2} align="right">
+                <Text strong>
+                  {formatNumber(totalPaymentsAmount, 2)} {CURRENCY_SYMBOL}
+                </Text>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={3} colSpan={2} />
+            </Table.Summary.Row>
+          )}
+        />
+      </Form>
 
-              // Remove any existing context menus first
-              const existingMenus = document.querySelectorAll('.order-payment-context-menu');
-              existingMenus.forEach(menu => menu.remove());
-
-              // Create context menu programmatically
-              const menu = document.createElement('div');
-              menu.className = 'ant-dropdown order-payment-context-menu';
-              menu.style.position = 'fixed';
-              menu.style.left = `${e.clientX}px`;
-              menu.style.top = `${e.clientY}px`;
-              menu.style.zIndex = '9999';
-
-              const menuContent = `
-                <ul class="ant-dropdown-menu" style="background: white; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;">
-                  <li class="ant-dropdown-menu-item menu-item-edit" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                    <span role="img" aria-label="edit" style="color: #1890ff;">
-                      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
-                        <path d="M257.7 752c2 0 4-.2 6-.5L431.9 722c2-.4 3.9-1.3 5.3-2.8l423.9-423.9a9.96 9.96 0 000-14.1L694.9 114.9c-1.9-1.9-4.4-2.9-7.1-2.9s-5.2 1-7.1 2.9L256.8 538.8c-1.5 1.5-2.4 3.3-2.8 5.3l-29.5 168.2a33.5 33.5 0 009.4 29.8c6.6 6.4 14.9 9.9 23.8 9.9zm67.4-174.4L687.8 215l73.3 73.3-362.7 362.6-88.9 15.7 15.6-89zM880 836H144c-17.7 0-32 14.3-32 32v36c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-36c0-17.7-14.3-32-32-32z"></path>
-                      </svg>
-                    </span>
-                    <span style="color: #1890ff;">Редактировать</span>
-                  </li>
-                  <li style="border-top: 1px solid #f0f0f0; margin: 4px 0;"></li>
-                  <li class="ant-dropdown-menu-item ant-dropdown-menu-item-danger menu-item-delete" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                    <span role="img" aria-label="delete" style="color: #ff4d4f;">
-                      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
-                        <path d="M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72zm504 72H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM731.3 840H292.7l-24.2-512h487l-24.2 512z"></path>
-                      </svg>
-                    </span>
-                    <span style="color: #ff4d4f;">Удалить</span>
-                  </li>
-                </ul>
-              `;
-              menu.innerHTML = menuContent;
-              document.body.appendChild(menu);
-
-              // Edit item handler
-              const editItem = menu.querySelector('.menu-item-edit');
-              editItem?.addEventListener('click', () => {
-                startEdit(record);
-                menu.remove();
-              });
-              editItem?.addEventListener('mouseenter', () => {
-                (editItem as HTMLElement).style.backgroundColor = '#e6f7ff';
-              });
-              editItem?.addEventListener('mouseleave', () => {
-                (editItem as HTMLElement).style.backgroundColor = 'white';
-              });
-
-              // Delete item handler
-              const deleteItem = menu.querySelector('.menu-item-delete');
-              deleteItem?.addEventListener('click', () => {
-                const tempId = record.temp_id || record.payment_id!;
-                onDelete(tempId, record.payment_id);
-                menu.remove();
-              });
-              deleteItem?.addEventListener('mouseenter', () => {
-                (deleteItem as HTMLElement).style.backgroundColor = '#fff1f0';
-              });
-              deleteItem?.addEventListener('mouseleave', () => {
-                (deleteItem as HTMLElement).style.backgroundColor = 'white';
-              });
-
-              const closeMenu = (event: MouseEvent) => {
-                if (!menu.contains(event.target as Node)) {
-                  menu.remove();
-                  document.removeEventListener('click', closeMenu);
-                }
-              };
-
-              setTimeout(() => {
-                document.addEventListener('click', closeMenu);
-              }, 0);
-            },
-          };
+      <Dropdown
+        open={!!paymentContextMenu}
+        placement="bottomLeft"
+        destroyPopupOnHide={false}
+        menu={{ items: paymentContextMenuItems, onClick: handlePaymentContextMenuClick }}
+        getPopupContainer={() => document.body}
+        overlayClassName="order-payment-context-dropdown"
+        trigger={['click', 'contextMenu']}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            closePaymentContextMenu();
+          }
         }}
-        summary={() => (
-          <Table.Summary.Row>
-            <Table.Summary.Cell index={0} colSpan={2}>
-              <Text strong>Итого:</Text>
-            </Table.Summary.Cell>
-            <Table.Summary.Cell index={2} align="right">
-              <Text strong>
-                {formatNumber(totalPaymentsAmount, 2)} {CURRENCY_SYMBOL}
-              </Text>
-            </Table.Summary.Cell>
-            <Table.Summary.Cell index={3} colSpan={2} />
-          </Table.Summary.Row>
-        )}
-      />
-    </Form>
+      >
+        <span
+          style={{
+            position: 'fixed',
+            left: paymentContextMenu?.x ?? -9999,
+            top: paymentContextMenu?.y ?? -9999,
+            width: 1,
+            height: 1,
+          }}
+        />
+      </Dropdown>
+    </>
   );
 });
 

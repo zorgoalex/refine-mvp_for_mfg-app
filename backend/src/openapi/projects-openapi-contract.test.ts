@@ -14,6 +14,7 @@ describe('projects OpenAPI contract', () => {
     expect(contract).toContain('  /api/v1/projects/{projectId}/members:');
     expect(contract).toContain('  /api/v1/projects/reports/orders:');
     expect(contract).toContain('  /api/v1/projects/reports/order-status-counts:');
+    expect(contract).toContain('  /api/v1/projects/reports/production-status-counts:');
     expect(contract).toContain('  /api/v1/projects/reports/order-relation-counts:');
     expect(contract).toContain('  /api/v1/projects/reports/order-created-month-counts:');
     expect(contract).toContain('  /api/v1/projects/{projectId}/overview:');
@@ -137,6 +138,11 @@ describe('projects OpenAPI contract', () => {
     const statusCountsSection = sectionBetween(
       contract,
       '  /api/v1/projects/reports/order-status-counts:',
+      '  /api/v1/projects/reports/production-status-counts:',
+    );
+    const productionStatusCountsSection = sectionBetween(
+      contract,
+      '  /api/v1/projects/reports/production-status-counts:',
       '  /api/v1/projects/reports/order-relation-counts:',
     );
     const relationCountsSection = sectionBetween(
@@ -162,6 +168,21 @@ describe('projects OpenAPI contract', () => {
     const statusFilterSchema = sectionBetween(
       contract,
       '    ProjectOrderStatusReportFilter:',
+      '    ProjectProductionStatusCountsReportItem:',
+    );
+    const productionStatusItemSchema = sectionBetween(
+      contract,
+      '    ProjectProductionStatusCountsReportItem:',
+      '    ProjectProductionStatusCountsReportResponse:',
+    );
+    const productionStatusResponseSchema = sectionBetween(
+      contract,
+      '    ProjectProductionStatusCountsReportResponse:',
+      '    ProjectProductionStatusCountsReportFilter:',
+    );
+    const productionStatusFilterSchema = sectionBetween(
+      contract,
+      '    ProjectProductionStatusCountsReportFilter:',
       '    ProjectOrderRelationCountsReportItem:',
     );
     const relationItemSchema = sectionBetween(
@@ -197,6 +218,10 @@ describe('projects OpenAPI contract', () => {
     expect(statusCountsSection).toContain('- projects.view');
     expect(statusCountsSection).toContain('- orders.view');
     expect(statusCountsSection).toContain("$ref: '#/components/schemas/ProjectOrderStatusReportResponse'");
+    expect(productionStatusCountsSection).toContain('operationId: listProjectProductionStatusCounts');
+    expect(productionStatusCountsSection).toContain('- projects.view');
+    expect(productionStatusCountsSection).toContain('- orders.view');
+    expect(productionStatusCountsSection).toContain("$ref: '#/components/schemas/ProjectProductionStatusCountsReportResponse'");
     expect(relationCountsSection).toContain('operationId: listProjectOrderRelationCounts');
     expect(relationCountsSection).toContain('- projects.view');
     expect(relationCountsSection).toContain('- orders.view');
@@ -223,6 +248,28 @@ describe('projects OpenAPI contract', () => {
     expect(statusResponseSchema).not.toContain('payment');
     expect(statusResponseSchema).not.toContain('deadline');
     expect(statusResponseSchema).not.toContain('audit');
+    expect(productionStatusItemSchema).toContain('productionStatusId:');
+    expect(productionStatusItemSchema).toContain('nullable: true');
+    expect(productionStatusItemSchema).toContain('productionStatusCode:');
+    expect(productionStatusItemSchema).toContain('productionStatusName:');
+    expect(productionStatusItemSchema).toContain('orderCount:');
+    expect(productionStatusItemSchema).toContain('additionalProperties: false');
+    expect(productionStatusResponseSchema).toContain('additionalProperties: false');
+    expect(productionStatusResponseSchema).toContain("$ref: '#/components/schemas/ProjectProductionStatusCountsReportFilter'");
+    expect(productionStatusFilterSchema).toContain('oneOf:');
+    expect(productionStatusFilterSchema).toContain('- projectMode');
+    expect(productionStatusFilterSchema).toContain('- projectIds');
+    expect(productionStatusFilterSchema).toContain('- temporalMode');
+    expect(productionStatusFilterSchema).toContain('enum: [current]');
+    expect(productionStatusFilterSchema).toContain('additionalProperties: false');
+    expect(productionStatusCountsSection).not.toContain('name: asOf');
+    expect(productionStatusCountsSection).not.toContain('name: from');
+    expect(productionStatusCountsSection).not.toContain('name: to');
+    expect(productionStatusFilterSchema).not.toContain('- asOf');
+    expect(productionStatusFilterSchema).not.toContain('- from');
+    expect(productionStatusFilterSchema).not.toContain('- to');
+    expect(productionStatusResponseSchema).not.toContain('pagination:');
+    expect(productionStatusResponseSchema).not.toContain('orderId:');
     expect(relationItemSchema).toContain('relationType:');
     expect(relationItemSchema).toContain('enum: [main, secondary, reporting, billing, derived]');
     expect(relationItemSchema).toContain('isPrimary:');
@@ -251,12 +298,14 @@ describe('projects OpenAPI contract', () => {
       'deadline',
       'production',
       'audit',
+      'production_status_events',
       'project_members',
       'members:',
       'employeeId',
       'displayName',
       'phone',
       'email',
+      'orderId',
     ]) {
       expect(relationCountsSection).not.toContain(leakedToken);
       expect(relationItemSchema).not.toContain(leakedToken);
@@ -264,6 +313,26 @@ describe('projects OpenAPI contract', () => {
       expect(createdMonthCountsSection).not.toContain(leakedToken);
       expect(createdMonthItemSchema).not.toContain(leakedToken);
       expect(createdMonthResponseSchema).not.toContain(leakedToken);
+    }
+
+    for (const leakedToken of [
+      'amount',
+      'payment',
+      'client',
+      'deadline',
+      'audit',
+      'production_status_events',
+      'project_members',
+      'members:',
+      'employeeId',
+      'displayName',
+      'phone',
+      'email',
+      'orderId',
+    ]) {
+      expect(productionStatusCountsSection).not.toContain(leakedToken);
+      expect(productionStatusItemSchema).not.toContain(leakedToken);
+      expect(productionStatusResponseSchema).not.toContain(leakedToken);
     }
   });
 

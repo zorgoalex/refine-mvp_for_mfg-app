@@ -32,6 +32,12 @@ import {
   UnavailableProjectOrderStatusReportRepository,
 } from './reporting/project-order-status-report.repository';
 import { ProjectOrderStatusReportService } from './reporting/project-order-status-report.service';
+import { ProjectProductionStatusCountsReportController } from './reporting/project-production-status-counts-report.controller';
+import {
+  PgProjectProductionStatusCountsReportRepository,
+  UnavailableProjectProductionStatusCountsReportRepository,
+} from './reporting/project-production-status-counts-report.repository';
+import { ProjectProductionStatusCountsReportService } from './reporting/project-production-status-counts-report.service';
 
 @Module({
   imports: [DatabaseModule],
@@ -39,6 +45,7 @@ import { ProjectOrderStatusReportService } from './reporting/project-order-statu
     ProjectsController,
     ProjectOrderReportController,
     ProjectOrderStatusReportController,
+    ProjectProductionStatusCountsReportController,
     ProjectOrderRelationCountsReportController,
     ProjectOrderCreatedMonthCountsReportController,
     ProjectOverviewController,
@@ -73,6 +80,16 @@ import { ProjectOrderStatusReportService } from './reporting/project-order-statu
             ? new PgProjectOrderStatusReportRepository(database)
             : new UnavailableProjectOrderStatusReportRepository(),
       }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ProjectProductionStatusCountsReportService,
+      useFactory: (database: DatabaseService) =>
+        new ProjectProductionStatusCountsReportService({
+          reports: database.isConfigured
+            ? new PgProjectProductionStatusCountsReportRepository(database)
+            : new UnavailableProjectProductionStatusCountsReportRepository(),
+        }),
       inject: [DatabaseService],
     },
     {
