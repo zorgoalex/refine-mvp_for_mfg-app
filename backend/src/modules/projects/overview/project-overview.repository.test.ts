@@ -88,6 +88,8 @@ describe('PgProjectOverviewRepository', () => {
         relationCounts: [{ relationType: 'main', isPrimary: true, orderCount: 2 }],
         createdMonthCounts: [{ month: '2026-06-01', orderCount: 4 }],
       },
+      linkedEntityCounts: [],
+      participants: { currentSummary: [] },
       filter: { projectId: projectId(), ...query.filter },
       omitted: PROJECT_OVERVIEW_OMITTED,
     });

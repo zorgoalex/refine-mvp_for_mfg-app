@@ -3393,6 +3393,7 @@ paths:
         - Projects
       operationId: listProjectMembers
       summary: List current project members
+      description: Compatibility endpoint for user-only project_members. Prefer /projects/{projectId}/participants for typed user/employee participants.
       security:
         - bearerAuth: []
       x-permission: projects.members.view
@@ -3417,6 +3418,7 @@ paths:
       operationId: replaceProjectMembers
       summary: Replace current project members
       description: |
+        Compatibility endpoint for user-only project_members. Prefer /projects/{projectId}/participants for typed user/employee participants.
         Replaces current project members by closing removed current rows and inserting new rows.
         Historical rows are preserved with [valid_from, valid_to) semantics.
       security:
@@ -3446,6 +3448,207 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/projects/{projectId}/entity-links:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - Projects
+      operationId: listProjectEntityLinks
+      summary: List project entity links
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - projects.view
+      parameters:
+        - name: entityType
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ProjectEntityTypeCode'
+        - name: includeClosed
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Project entity links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEntityLinksResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Projects
+      operationId: replaceProjectEntityLinks
+      summary: Replace current project entity links
+      security:
+        - bearerAuth: []
+      x-permission: projects.manage_links
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceProjectEntityLinksRequest'
+      responses:
+        '200':
+          description: Replaced project entity links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEntityLinksResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Projects
+      operationId: appendProjectEntityLinks
+      summary: Append project entity links
+      security:
+        - bearerAuth: []
+      x-permission: projects.manage_links
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceProjectEntityLinksRequest'
+      responses:
+        '201':
+          description: Appended project entity links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEntityLinksResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/projects/{projectId}/participants:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - Projects
+      operationId: listProjectParticipants
+      summary: List typed project participants
+      security:
+        - bearerAuth: []
+      x-permission: projects.participants.view
+      responses:
+        '200':
+          description: Project participants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectParticipantsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Projects
+      operationId: replaceProjectParticipants
+      summary: Replace typed project participants
+      security:
+        - bearerAuth: []
+      x-permission: projects.participants.manage
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceProjectParticipantsRequest'
+      responses:
+        '200':
+          description: Replaced project participants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectParticipantsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/projects/participant-roles:
+    get:
+      tags:
+        - Projects
+      operationId: listProjectParticipantRoles
+      summary: List project participant roles
+      security:
+        - bearerAuth: []
+      x-permission: projects.view
+      responses:
+        '200':
+          description: Project participant roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectParticipantRoleListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -4368,6 +4571,8 @@ components:
         - projects.view_history
         - projects.members.view
         - projects.members.manage
+        - projects.participants.view
+        - projects.participants.manage
         - settings.view
         - settings.manage
 
@@ -4621,6 +4826,237 @@ components:
         changed:
           type: boolean
         auditId:
+          type: string
+
+    ProjectEntityTypeCode:
+      type: string
+      enum:
+        - order
+        - user
+        - employee
+        - client
+        - workshop
+        - deadline_instance
+
+    ReplaceProjectEntityLinksRequest:
+      type: object
+      required:
+        - idempotencyKey
+        - links
+      additionalProperties: false
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+        links:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required:
+              - entityType
+              - entityId
+            additionalProperties: false
+            properties:
+              entityType:
+                $ref: '#/components/schemas/ProjectEntityTypeCode'
+              entityId:
+                type: string
+                minLength: 1
+                maxLength: 200
+              relationType:
+                type: string
+                default: related
+              metadata:
+                type: object
+                additionalProperties: true
+        reason:
+          type: string
+          maxLength: 500
+          nullable: true
+
+    ProjectEntityLink:
+      type: object
+      required:
+        - id
+        - entityType
+        - entityId
+        - displayLabel
+        - relationType
+        - validFrom
+        - validTo
+        - metadata
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        entityType:
+          $ref: '#/components/schemas/ProjectEntityTypeCode'
+        entityId:
+          type: string
+        displayLabel:
+          type: string
+          nullable: true
+        relationType:
+          type: string
+        validFrom:
+          type: string
+          format: date-time
+        validTo:
+          type: string
+          format: date-time
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+
+    ProjectEntityLinksResponse:
+      type: object
+      required:
+        - projectId
+        - links
+        - requestId
+      additionalProperties: false
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectEntityLink'
+        requestId:
+          type: string
+        changed:
+          type: boolean
+        auditId:
+          type: string
+
+    ReplaceProjectParticipantsRequest:
+      type: object
+      required:
+        - idempotencyKey
+        - participants
+      additionalProperties: false
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+        participants:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required:
+              - participantType
+              - participantId
+              - roleCode
+            additionalProperties: false
+            properties:
+              participantType:
+                type: string
+                enum: [user, employee]
+              participantId:
+                type: string
+                minLength: 1
+                maxLength: 200
+              roleCode:
+                type: string
+              metadata:
+                type: object
+                additionalProperties: true
+        reason:
+          type: string
+          maxLength: 500
+          nullable: true
+
+    ProjectParticipantRole:
+      type: object
+      required:
+        - code
+        - label
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        label:
+          type: string
+
+    ProjectParticipant:
+      type: object
+      required:
+        - id
+        - participantType
+        - participantId
+        - displayName
+        - role
+        - validFrom
+        - validTo
+        - metadata
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        participantType:
+          type: string
+          enum: [user, employee]
+        participantId:
+          type: string
+          nullable: true
+        displayName:
+          type: string
+          nullable: true
+        role:
+          $ref: '#/components/schemas/ProjectParticipantRole'
+        validFrom:
+          type: string
+          format: date-time
+        validTo:
+          type: string
+          format: date-time
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+
+    ProjectParticipantsResponse:
+      type: object
+      required:
+        - projectId
+        - participants
+        - requestId
+      additionalProperties: false
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectParticipant'
+        requestId:
+          type: string
+        changed:
+          type: boolean
+        auditId:
+          type: string
+
+    ProjectParticipantRoleListResponse:
+      type: object
+      required:
+        - roles
+        - requestId
+      additionalProperties: false
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectParticipantRole'
+        requestId:
           type: string
 
     Project:
@@ -5264,6 +5700,8 @@ components:
       required:
         - project
         - orders
+        - linkedEntityCounts
+        - participants
         - filter
         - omitted
       additionalProperties: false
@@ -5272,6 +5710,12 @@ components:
           $ref: '#/components/schemas/ProjectOverviewProject'
         orders:
           $ref: '#/components/schemas/ProjectOverviewOrders'
+        linkedEntityCounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectOverviewLinkedEntityCount'
+        participants:
+          $ref: '#/components/schemas/ProjectOverviewParticipants'
         filter:
           $ref: '#/components/schemas/ProjectOverviewFilter'
         omitted:
@@ -5279,6 +5723,43 @@ components:
           items:
             type: string
             enum: [finance, payments, clientPhones, audit, deadline, production, members, users, orderDetails, activityTimeline]
+
+    ProjectOverviewLinkedEntityCount:
+      type: object
+      required:
+        - entityType
+        - currentCount
+      additionalProperties: false
+      properties:
+        entityType:
+          $ref: '#/components/schemas/ProjectEntityTypeCode'
+        currentCount:
+          type: integer
+          minimum: 0
+
+    ProjectOverviewParticipants:
+      type: object
+      required:
+        - currentSummary
+      additionalProperties: false
+      properties:
+        currentSummary:
+          type: array
+          items:
+            type: object
+            required:
+              - roleCode
+              - roleLabel
+              - participantCount
+            additionalProperties: false
+            properties:
+              roleCode:
+                type: string
+              roleLabel:
+                type: string
+              participantCount:
+                type: integer
+                minimum: 0
 
     ProjectOverviewProject:
       type: object

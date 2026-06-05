@@ -393,7 +393,11 @@ export class ProjectsController {
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 503, description: 'Projects API is disabled' })
-  @ApiOperation({ operationId: 'listProjectMembers', summary: 'List current project members' })
+  @ApiOperation({
+    operationId: 'listProjectMembers',
+    summary: 'List current project members',
+    description: 'Compatibility endpoint for user-only project_members. Prefer /projects/{projectId}/participants for typed user/employee participants.',
+  })
   @Get(':projectId/members')
   async listMembers(
     @Req() request: RequestWithCurrentUser,
@@ -417,7 +421,11 @@ export class ProjectsController {
   @ApiResponse({ status: 409, description: 'Idempotency key conflict' })
   @ApiResponse({ status: 422, description: 'Invalid project members payload' })
   @ApiResponse({ status: 503, description: 'Projects API is disabled or read-only' })
-  @ApiOperation({ operationId: 'replaceProjectMembers', summary: 'Replace current project members' })
+  @ApiOperation({
+    operationId: 'replaceProjectMembers',
+    summary: 'Replace current project members',
+    description: 'Compatibility endpoint for user-only project_members. Prefer /projects/{projectId}/participants for typed user/employee participants.',
+  })
   @Put(':projectId/members')
   @HttpCode(200)
   async replaceMembers(

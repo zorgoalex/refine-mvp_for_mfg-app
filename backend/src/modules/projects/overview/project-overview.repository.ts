@@ -4,6 +4,7 @@ import type { DatabaseClient } from '../../../database/database.types';
 import type { ProjectStatus } from '../dto/project.dto';
 import type { ProjectOrderRelationType } from '../reporting/project-order-relation-counts-report.dto';
 import { appendProjectReportPredicate, type ProjectReportFilter } from '../reporting/project-report-predicates';
+import type { ProjectEntityTypeCode } from '../entity-links/project-entity-links.dto';
 import {
   PROJECT_OVERVIEW_OMITTED,
   type ProjectOverviewQuery,
@@ -15,6 +16,8 @@ const PROJECT_ORDER_RELATION_TYPES = ['main', 'secondary', 'reporting', 'billing
 interface ProjectOverviewInput {
   projectId: string;
   query: ProjectOverviewQuery;
+  visibleEntityTypes?: ProjectEntityTypeCode[];
+  canViewParticipants?: boolean;
 }
 
 interface ProjectRow extends QueryResultRow {
@@ -52,6 +55,17 @@ interface OrderCreatedMonthCountRow extends QueryResultRow {
   order_count: string | number;
 }
 
+interface LinkedEntityCountRow extends QueryResultRow {
+  entity_type_code: ProjectEntityTypeCode;
+  current_count: string | number;
+}
+
+interface ParticipantSummaryRow extends QueryResultRow {
+  role_code: string;
+  role_label: string;
+  participant_count: string | number;
+}
+
 export interface ProjectOverviewRepositoryPort {
   getOverview(input: ProjectOverviewInput): Promise<ProjectOverviewResponseDto>;
 }
@@ -67,11 +81,13 @@ export class PgProjectOverviewRepository implements ProjectOverviewRepositoryPor
       temporal: input.query.temporal,
     } as const satisfies ProjectReportFilter;
 
-    const [totalCount, statusCounts, relationCounts, createdMonthCounts] = await Promise.all([
+    const [totalCount, statusCounts, relationCounts, createdMonthCounts, linkedEntityCounts, participantSummary] = await Promise.all([
       this.getTotalCount(predicateFilter),
       this.getStatusCounts(predicateFilter),
       this.getRelationCounts(predicateFilter, input.projectId),
       this.getCreatedMonthCounts(predicateFilter, input.query),
+      this.getLinkedEntityCounts(input.projectId, input.visibleEntityTypes ?? []),
+      input.canViewParticipants ? this.getParticipantSummary(input.projectId) : Promise.resolve([]),
     ]);
 
     return {
@@ -93,6 +109,10 @@ export class PgProjectOverviewRepository implements ProjectOverviewRepositoryPor
         statusCounts,
         relationCounts,
         createdMonthCounts,
+      },
+      linkedEntityCounts,
+      participants: {
+        currentSummary: participantSummary,
       },
       filter: { projectId: input.projectId, ...input.query.filter },
       omitted: PROJECT_OVERVIEW_OMITTED,
@@ -245,6 +265,50 @@ export class PgProjectOverviewRepository implements ProjectOverviewRepositoryPor
     return result.rows.map((row) => ({
       month: row.month,
       orderCount: Number(row.order_count),
+    }));
+  }
+
+  private async getLinkedEntityCounts(
+    projectId: string,
+    visibleEntityTypes: ProjectEntityTypeCode[],
+  ): Promise<ProjectOverviewResponseDto['linkedEntityCounts']> {
+    if (visibleEntityTypes.length === 0) return [];
+    const result = await this.database.query<LinkedEntityCountRow>(
+      `
+      SELECT entity_type_code, COUNT(*)::int AS current_count
+      FROM public.project_entity_links
+      WHERE project_id = $1::uuid
+        AND valid_to IS NULL
+        AND entity_type_code = ANY($2::text[])
+      GROUP BY entity_type_code
+      ORDER BY entity_type_code ASC
+      `,
+      [projectId, visibleEntityTypes],
+    );
+    return result.rows.map((row) => ({
+      entityType: row.entity_type_code,
+      currentCount: Number(row.current_count),
+    }));
+  }
+
+  private async getParticipantSummary(projectId: string): Promise<ProjectOverviewResponseDto['participants']['currentSummary']> {
+    const result = await this.database.query<ParticipantSummaryRow>(
+      `
+      SELECT pp.role_code, r.label AS role_label, COUNT(*)::int AS participant_count
+      FROM public.project_participants pp
+      INNER JOIN public.project_participant_roles r ON r.code = pp.role_code
+      WHERE pp.project_id = $1::uuid
+        AND pp.valid_to IS NULL
+        AND r.is_active = true
+      GROUP BY pp.role_code, r.label, r.sort_order
+      ORDER BY r.sort_order ASC, pp.role_code ASC
+      `,
+      [projectId],
+    );
+    return result.rows.map((row) => ({
+      roleCode: row.role_code,
+      roleLabel: row.role_label,
+      participantCount: Number(row.participant_count),
     }));
   }
 }

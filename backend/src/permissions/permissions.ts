@@ -129,6 +129,8 @@ export const PERMISSIONS = [
   'projects.view_history',
   'projects.members.view',
   'projects.members.manage',
+  'projects.participants.view',
+  'projects.participants.manage',
 
   'settings.view',
   'settings.manage',
@@ -232,6 +234,7 @@ export const ROLE_PERMISSIONS = {
     'projects.manage_links',
     'projects.view_history',
     'projects.members.view',
+    'projects.participants.view',
 
     'vlm.use',
   ],

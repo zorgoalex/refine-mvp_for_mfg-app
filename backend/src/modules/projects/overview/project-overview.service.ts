@@ -2,6 +2,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
+import { PROJECT_ENTITY_REGISTRY } from '../entity-links/project-entity-registry';
 import type { ProjectOverviewQuery, ProjectOverviewResponseDto } from './project-overview.dto';
 import type { ProjectOverviewRepositoryPort } from './project-overview.repository';
 
@@ -33,7 +34,14 @@ export class ProjectOverviewService {
   async getOverview(command: GetProjectOverviewCommand): Promise<ProjectOverviewResponseDto> {
     this.requirePermissions(command.currentUser, REQUIRED_OVERVIEW_PERMISSIONS, command.requestId);
 
-    return this.ports.overviews.getOverview({ projectId: command.projectId, query: command.query });
+    return this.ports.overviews.getOverview({
+      projectId: command.projectId,
+      query: command.query,
+      visibleEntityTypes: Object.entries(PROJECT_ENTITY_REGISTRY)
+        .filter(([, entry]) => this.permissions.canUser(command.currentUser, entry.requiredPermission as PermissionName, command.requestId))
+        .map(([code]) => code as keyof typeof PROJECT_ENTITY_REGISTRY),
+      canViewParticipants: this.permissions.canUser(command.currentUser, 'projects.participants.view', command.requestId),
+    });
   }
 
   private requirePermissions(

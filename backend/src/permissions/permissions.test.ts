@@ -76,8 +76,10 @@ describe('permissions foundation', () => {
   it('assigns project permissions by role including P4 members foundation', () => {
     expect(can('superadmin', 'projects.manage_links')).toBe(true);
     expect(can('superadmin', 'projects.members.manage')).toBe(true);
+    expect(can('superadmin', 'projects.participants.manage')).toBe(true);
     expect(can('admin', 'projects.members.manage')).toBe(true);
     expect(can('admin', 'projects.members.view')).toBe(true);
+    expect(can('admin', 'projects.participants.manage')).toBe(true);
     expect(can('admin', 'projects.archive')).toBe(true);
     expect(can('admin', 'projects.view_history')).toBe(true);
 
@@ -85,6 +87,8 @@ describe('permissions foundation', () => {
     expect(can('top_manager', 'projects.view_history')).toBe(true);
     expect(can('top_manager', 'projects.manage_links')).toBe(true);
     expect(can('top_manager', 'projects.members.view')).toBe(true);
+    expect(can('top_manager', 'projects.participants.view')).toBe(true);
+    expect(can('top_manager', 'projects.participants.manage')).toBe(false);
     expect(can('top_manager', 'projects.members.manage')).toBe(false);
     expect(can('top_manager', 'projects.create')).toBe(false);
 
@@ -92,13 +96,21 @@ describe('permissions foundation', () => {
     expect(can('manager', 'projects.view_history')).toBe(false);
     expect(can('manager', 'projects.members.view')).toBe(false);
     expect(can('manager', 'projects.members.manage')).toBe(false);
+    expect(can('manager', 'projects.participants.view')).toBe(false);
+    expect(can('manager', 'projects.participants.manage')).toBe(false);
     expect(can('viewer', 'projects.view')).toBe(true);
     expect(can('viewer', 'projects.members.view')).toBe(false);
+    expect(can('viewer', 'projects.participants.view')).toBe(false);
+    expect(can('viewer', 'projects.participants.manage')).toBe(false);
 
     expect(can('operator', 'projects.view')).toBe(false);
     expect(can('operator', 'projects.members.view')).toBe(false);
+    expect(can('operator', 'projects.participants.view')).toBe(false);
+    expect(can('operator', 'projects.participants.manage')).toBe(false);
     expect(can('worker', 'projects.view')).toBe(false);
     expect(can('worker', 'projects.members.view')).toBe(false);
+    expect(can('worker', 'projects.participants.view')).toBe(false);
+    expect(can('worker', 'projects.participants.manage')).toBe(false);
   });
 
   it('keeps operator away from payment and finance visibility until business approval', () => {
@@ -187,6 +199,8 @@ describe('permissions foundation', () => {
       'projects.view_history',
       'projects.members.view',
       'projects.members.manage',
+      'projects.participants.view',
+      'projects.participants.manage',
     ]);
     expect(contractPermissions).toEqual(expect.arrayContaining(projectPermissions));
   });

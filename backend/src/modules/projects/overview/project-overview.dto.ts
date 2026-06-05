@@ -4,6 +4,7 @@ import type { ProjectOrderCreatedMonthCountsReportItemDto } from '../reporting/p
 import type { ProjectOrderRelationCountsReportItemDto } from '../reporting/project-order-relation-counts-report.dto';
 import type { ProjectOrderStatusReportItemDto } from '../reporting/project-order-status-report.dto';
 import type { ProjectReportTemporalFilter } from '../reporting/project-report-predicates';
+import type { ProjectEntityTypeCode } from '../entity-links/project-entity-links.dto';
 
 export type ProjectOverviewTemporalFilter = Exclude<ProjectReportTemporalFilter, { mode: 'factTime' }>;
 
@@ -73,6 +74,17 @@ export interface ProjectOverviewResponseDto {
     statusCounts: ProjectOrderStatusReportItemDto[];
     relationCounts: ProjectOrderRelationCountsReportItemDto[];
     createdMonthCounts: ProjectOrderCreatedMonthCountsReportItemDto[];
+  };
+  linkedEntityCounts: Array<{
+    entityType: ProjectEntityTypeCode;
+    currentCount: number;
+  }>;
+  participants: {
+    currentSummary: Array<{
+      roleCode: string;
+      roleLabel: string;
+      participantCount: number;
+    }>;
   };
   filter: ProjectOverviewQueryFilter;
   omitted: ProjectOverviewOmittedDomain[];

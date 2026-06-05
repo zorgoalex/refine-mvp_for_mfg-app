@@ -58,7 +58,7 @@ const projectOverviewFilterSwaggerSchema = {
 
 const projectOverviewResponseSwaggerSchema = {
   type: 'object',
-  required: ['project', 'orders', 'filter', 'omitted'],
+  required: ['project', 'orders', 'linkedEntityCounts', 'participants', 'filter', 'omitted'],
   additionalProperties: false,
   properties: {
     project: {
@@ -132,6 +132,38 @@ const projectOverviewResponseSwaggerSchema = {
             properties: {
               month: { type: 'string', format: 'date' },
               orderCount: { type: 'integer', minimum: 0 },
+            },
+          },
+        },
+      },
+    },
+    linkedEntityCounts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['entityType', 'currentCount'],
+        additionalProperties: false,
+        properties: {
+          entityType: { type: 'string' },
+          currentCount: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+    participants: {
+      type: 'object',
+      required: ['currentSummary'],
+      additionalProperties: false,
+      properties: {
+        currentSummary: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['roleCode', 'roleLabel', 'participantCount'],
+            additionalProperties: false,
+            properties: {
+              roleCode: { type: 'string' },
+              roleLabel: { type: 'string' },
+              participantCount: { type: 'integer', minimum: 0 },
             },
           },
         },

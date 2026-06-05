@@ -51,14 +51,29 @@ describe('ProjectOverviewService', () => {
     await expect(
       service.getOverview({ currentUser: user(['projects.view', 'orders.view']), projectId: projectId(), query }),
     ).resolves.toEqual(overviewResponse(query));
-    expect(overviews.calls).toEqual([{ projectId: projectId(), query }]);
+    expect(overviews.calls).toEqual([{
+      projectId: projectId(),
+      query,
+      visibleEntityTypes: ['order'],
+      canViewParticipants: false,
+    }]);
   });
 });
 
 function fakeOverviews() {
   return {
-    calls: [] as Array<{ projectId: string; query: ProjectOverviewQuery }>,
-    async getOverview(input: { projectId: string; query: ProjectOverviewQuery }): Promise<ProjectOverviewResponseDto> {
+    calls: [] as Array<{
+      projectId: string;
+      query: ProjectOverviewQuery;
+      visibleEntityTypes?: string[];
+      canViewParticipants?: boolean;
+    }>,
+    async getOverview(input: {
+      projectId: string;
+      query: ProjectOverviewQuery;
+      visibleEntityTypes?: string[];
+      canViewParticipants?: boolean;
+    }): Promise<ProjectOverviewResponseDto> {
       this.calls.push(input);
       return overviewResponse(input.query);
     },
@@ -94,6 +109,8 @@ function overviewResponse(query: ProjectOverviewQuery): ProjectOverviewResponseD
       relationCounts: [],
       createdMonthCounts: [],
     },
+    linkedEntityCounts: [],
+    participants: { currentSummary: [] },
     filter: { projectId: projectId(), ...query.filter },
     omitted: PROJECT_OVERVIEW_OMITTED,
   };
