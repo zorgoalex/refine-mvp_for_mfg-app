@@ -309,6 +309,16 @@ describe('PgOrderProjectLinkRepository', () => {
         idempotencyKey: 'order-projects-key-1:project_order_links_changed',
       },
     ]);
+    expect(database.state.outboxRows[0].payload).toMatchObject({
+      addedProjectIds: [PROJECT_1, PROJECT_2],
+      removedProjectIds: [PROJECT_OLD],
+      recipientVisibilityPolicy: 'project_participants_must_pass_base_entity_visibility',
+      facts: [
+        { factKey: `order:15:project:${PROJECT_1}:added`, orderId: '15', projectId: PROJECT_1, action: 'added' },
+        { factKey: `order:15:project:${PROJECT_2}:added`, orderId: '15', projectId: PROJECT_2, action: 'added' },
+        { factKey: `order:15:project:${PROJECT_OLD}:removed`, orderId: '15', projectId: PROJECT_OLD, action: 'removed' },
+      ],
+    });
   });
 
   it('denies GET when the order is outside the user view scope before returning links', async () => {

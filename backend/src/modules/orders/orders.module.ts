@@ -4,6 +4,15 @@ import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import type { BackendEnv } from '../../config/env.validation';
 import { PgOrderDeadlineSync } from '../deadlines/adapters/pg-order-deadline-sync';
+import {
+  PgProjectNotificationRecipientRepository,
+  UnavailableProjectNotificationRecipientRepository,
+} from '../projects/notifications/project-notification-recipient.repository';
+import {
+  PgProjectNotificationRepository,
+  UnavailableProjectNotificationRepository,
+} from '../projects/notifications/project-notification.repository';
+import { ProjectNotificationService } from '../projects/notifications/project-notification.service';
 import { ProjectsRuntimeConfigService } from '../projects/projects-runtime-config.service';
 import { PgOrderExporter } from './adapters/pg-order-exporter';
 import { PgOrderReadRepository } from './adapters/pg-order-read-repository';
@@ -78,13 +87,47 @@ export function shouldEnableOrderDeadlineSync(input: {
     },
     {
       provide: OrderProjectLinkService,
-      useFactory: (database: DatabaseService) =>
+      useFactory: (
+        database: DatabaseService,
+        projectNotifications: ProjectNotificationService,
+        projectsRuntimeConfig: ProjectsRuntimeConfigService,
+      ) =>
         new OrderProjectLinkService({
           links: database.isConfigured
             ? new PgOrderProjectLinkRepository(database)
             : new UnavailableOrderProjectLinkRepository(),
+          projectNotifications,
+          projectP8NotificationsEnabled: projectsRuntimeConfig.getFeatureFlags().projectP8NotificationsEnabled,
         }),
+      inject: [DatabaseService, ProjectNotificationService, ProjectsRuntimeConfigService],
+    },
+    {
+      provide: PgProjectNotificationRecipientRepository,
+      useFactory: (database: DatabaseService) =>
+        database.isConfigured
+          ? new PgProjectNotificationRecipientRepository(database)
+          : new UnavailableProjectNotificationRecipientRepository(),
       inject: [DatabaseService],
+    },
+    {
+      provide: PgProjectNotificationRepository,
+      useFactory: (database: DatabaseService) =>
+        database.isConfigured
+          ? new PgProjectNotificationRepository(database)
+          : new UnavailableProjectNotificationRepository(),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ProjectNotificationService,
+      useFactory: (
+        recipients: PgProjectNotificationRecipientRepository,
+        notifications: PgProjectNotificationRepository,
+      ) =>
+        new ProjectNotificationService({
+          recipients,
+          notifications,
+        }),
+      inject: [PgProjectNotificationRecipientRepository, PgProjectNotificationRepository],
     },
     {
       provide: OrderExportService,

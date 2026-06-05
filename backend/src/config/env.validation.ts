@@ -109,6 +109,7 @@ const envSchema = z
     BACKEND_ENABLE_VLM: booleanFromEnv.default(false),
     BACKEND_ENABLE_DEADLINES: booleanFromEnv.default(false),
     BACKEND_ENABLE_PROJECTS: booleanFromEnv.default(false),
+    BACKEND_ENABLE_PROJECT_P8_NOTIFICATIONS: booleanFromEnv.default(false),
     BACKEND_ORDERS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_PROJECTS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_EXPORT_DISABLED: booleanFromEnv.default(true),

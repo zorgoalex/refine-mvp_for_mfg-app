@@ -1,0 +1,246 @@
+import type { QueryResultRow } from 'pg';
+import type { DatabaseClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
+import {
+  ROLE_ID_TO_ROLE,
+  ROLE_PERMISSIONS,
+  type KnownRoleId,
+  type PermissionName,
+  type UserRole,
+} from '../../../permissions/permissions';
+import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import type { ProjectLinkedEntityRef, ProjectNotificationRecipient } from './project-notification.types';
+
+interface ParticipantRow extends QueryResultRow {
+  user_id: string | number;
+  username: string | null;
+  role_code: string;
+}
+
+interface UserPermissionRow extends QueryResultRow {
+  user_id: string | number;
+  username: string | null;
+  role_id: string | number;
+}
+
+interface OrderVisibilityRow extends UserPermissionRow {
+  order_id: string | number;
+  created_by: string | number | null;
+  manager_id: string | number | null;
+}
+
+interface DeadlineVisibilityRow extends OrderVisibilityRow {
+  deadline_id: string | number;
+}
+
+const ENTITY_VIEW_PERMISSIONS = {
+  user: 'users.view',
+  employee: 'employees.view',
+  client: 'clients.view',
+  workshop: 'workshops.view',
+} as const satisfies Record<'user' | 'employee' | 'client' | 'workshop', PermissionName>;
+
+export class PgProjectNotificationRecipientRepository {
+  private readonly orderAccessPolicy = new OrderAccessPolicy();
+
+  constructor(private readonly database: DatabaseClient) {}
+
+  async listCurrentUserParticipants(projectId: string): Promise<ProjectNotificationRecipient[]> {
+    const result = await this.database.query<ParticipantRow>(
+      `
+      SELECT
+        u.user_id::text AS user_id,
+        u.username,
+        pp.role_code
+      FROM public.project_participants pp
+      INNER JOIN public.users u
+        ON pp.participant_type = 'user'
+       AND u.user_id = pp.participant_id_text::bigint
+      WHERE pp.project_id = $1::uuid
+        AND pp.valid_to IS NULL
+        AND pp.participant_type = 'user'
+      ORDER BY pp.role_code ASC, u.user_id ASC
+      `,
+      [projectId],
+    );
+
+    return result.rows.map((row) => ({
+      userId: String(row.user_id),
+      username: row.username,
+      roleCode: row.role_code,
+    }));
+  }
+
+  async filterRecipientsByBaseVisibility(input: {
+    recipients: ProjectNotificationRecipient[];
+    linkedEntity: ProjectLinkedEntityRef;
+  }): Promise<ProjectNotificationRecipient[]> {
+    if (input.recipients.length === 0) return [];
+
+    switch (input.linkedEntity.entityType) {
+      case 'order':
+        return this.filterByOrderVisibility(input.recipients, input.linkedEntity.entityId);
+      case 'deadline_instance':
+        return this.filterByDeadlineVisibility(input.recipients, input.linkedEntity.entityId);
+      case 'user':
+      case 'employee':
+      case 'client':
+      case 'workshop':
+        return this.filterByPermission(input.recipients, ENTITY_VIEW_PERMISSIONS[input.linkedEntity.entityType]);
+    }
+  }
+
+  async canRecipientViewMemberIdentity(input: {
+    recipient: ProjectNotificationRecipient;
+    participantType: 'user' | 'employee';
+  }): Promise<boolean> {
+    const permission: PermissionName = input.participantType === 'user' ? 'users.view' : 'employees.view';
+    const currentUser = await this.loadCurrentUser(input.recipient.userId);
+    return currentUser?.permissions.includes(permission) ?? false;
+  }
+
+  private async filterByOrderVisibility(
+    recipients: ProjectNotificationRecipient[],
+    orderId: string,
+  ): Promise<ProjectNotificationRecipient[]> {
+    const rows = await this.database.query<OrderVisibilityRow>(
+      `
+      SELECT
+        u.user_id::text AS user_id,
+        u.username,
+        u.role_id,
+        o.order_id,
+        o.created_by,
+        o.manager_id
+      FROM public.users u
+      CROSS JOIN public.orders o
+      WHERE u.user_id = ANY($1::bigint[])
+        AND o.order_id = $2::bigint
+        AND o.delete_flag = false
+      `,
+      [recipients.map((recipient) => recipient.userId), orderId],
+    );
+    const recipientById = new Map(recipients.map((recipient) => [recipient.userId, recipient]));
+
+    return rows.rows
+      .filter((row) => {
+        const currentUser = mapUserRow(row);
+        return currentUser && this.orderAccessPolicy.canView(currentUser, {
+          orderId: row.order_id,
+          createdByUserId: nullableString(row.created_by),
+          managerUserId: nullableString(row.manager_id),
+          ownerUserId: nullableString(row.manager_id),
+        });
+      })
+      .map((row) => recipientById.get(String(row.user_id)))
+      .filter((recipient): recipient is ProjectNotificationRecipient => Boolean(recipient));
+  }
+
+  private async filterByDeadlineVisibility(
+    recipients: ProjectNotificationRecipient[],
+    deadlineInstanceId: string,
+  ): Promise<ProjectNotificationRecipient[]> {
+    const rows = await this.database.query<DeadlineVisibilityRow>(
+      `
+      SELECT
+        u.user_id::text AS user_id,
+        u.username,
+        u.role_id,
+        di.deadline_id,
+        o.order_id,
+        o.created_by,
+        o.manager_id
+      FROM public.users u
+      CROSS JOIN public.deadline_instances di
+      INNER JOIN public.orders o
+        ON o.order_id = di.order_id
+       AND o.delete_flag = false
+      WHERE u.user_id = ANY($1::bigint[])
+        AND di.deadline_id = $2::uuid
+      `,
+      [recipients.map((recipient) => recipient.userId), deadlineInstanceId],
+    );
+    const recipientById = new Map(recipients.map((recipient) => [recipient.userId, recipient]));
+
+    return rows.rows
+      .filter((row) => {
+        const currentUser = mapUserRow(row);
+        return Boolean(currentUser)
+          && currentUser!.permissions.includes('deadlines.view')
+          && this.orderAccessPolicy.canView(currentUser!, {
+            orderId: row.order_id,
+            createdByUserId: nullableString(row.created_by),
+            managerUserId: nullableString(row.manager_id),
+            ownerUserId: nullableString(row.manager_id),
+          });
+      })
+      .map((row) => recipientById.get(String(row.user_id)))
+      .filter((recipient): recipient is ProjectNotificationRecipient => Boolean(recipient));
+  }
+
+  private async filterByPermission(
+    recipients: ProjectNotificationRecipient[],
+    permission: PermissionName,
+  ): Promise<ProjectNotificationRecipient[]> {
+    const rows = await this.database.query<UserPermissionRow>(
+      `
+      SELECT u.user_id::text AS user_id, u.username, u.role_id
+      FROM public.users u
+      WHERE u.user_id = ANY($1::bigint[])
+      `,
+      [recipients.map((recipient) => recipient.userId)],
+    );
+    const allowedUserIds = new Set(
+      rows.rows
+        .map(mapUserRow)
+        .filter((user): user is CurrentUser => Boolean(user))
+        .filter((user) => user.permissions.includes(permission))
+        .map((user) => user.id),
+    );
+    return recipients.filter((recipient) => allowedUserIds.has(recipient.userId));
+  }
+
+  private async loadCurrentUser(userId: string): Promise<CurrentUser | null> {
+    const result = await this.database.query<UserPermissionRow>(
+      `
+      SELECT u.user_id::text AS user_id, u.username, u.role_id
+      FROM public.users u
+      WHERE u.user_id = $1::bigint
+      `,
+      [userId],
+    );
+    return result.rows[0] ? mapUserRow(result.rows[0]) : null;
+  }
+}
+
+export class UnavailableProjectNotificationRecipientRepository {
+  async listCurrentUserParticipants(): Promise<ProjectNotificationRecipient[]> {
+    return [];
+  }
+
+  async filterRecipientsByBaseVisibility(): Promise<ProjectNotificationRecipient[]> {
+    return [];
+  }
+
+  async canRecipientViewMemberIdentity(): Promise<boolean> {
+    return false;
+  }
+}
+
+function mapUserRow(row: UserPermissionRow): CurrentUser | null {
+  const roleId = Number(row.role_id);
+  const role = ROLE_ID_TO_ROLE[roleId as KnownRoleId] as UserRole | undefined;
+  if (!role) return null;
+
+  return {
+    id: String(row.user_id),
+    username: row.username ?? String(row.user_id),
+    role,
+    roleId,
+    permissions: ROLE_PERMISSIONS[role],
+  };
+}
+
+function nullableString(value: string | number | null): string | null {
+  return value == null ? null : String(value);
+}

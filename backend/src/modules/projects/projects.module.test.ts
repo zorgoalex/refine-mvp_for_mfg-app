@@ -17,4 +17,16 @@ describe('ProjectsModule wiring', () => {
     expect(appModule).toContain("import { ProjectsModule } from './modules/projects/projects.module'");
     expect(appModule).toMatch(/imports:\s*\[[\s\S]*ProjectsModule[\s\S]*\]/);
   });
+
+  it('registers project notification providers with fail-closed database wiring', () => {
+    const modulePath = resolve(process.cwd(), 'src/modules/projects/projects.module.ts');
+    const projectsModule = readFileSync(modulePath, 'utf8');
+
+    expect(projectsModule).toContain('ProjectNotificationService');
+    expect(projectsModule).toContain('PgProjectNotificationRecipientRepository');
+    expect(projectsModule).toContain('UnavailableProjectNotificationRecipientRepository');
+    expect(projectsModule).toContain('PgProjectNotificationRepository');
+    expect(projectsModule).toContain('UnavailableProjectNotificationRepository');
+    expect(projectsModule).toContain('database.isConfigured');
+  });
 });

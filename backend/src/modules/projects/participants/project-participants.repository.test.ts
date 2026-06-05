@@ -99,6 +99,44 @@ describe('PgProjectParticipantsRepository', () => {
     expect(auditQuery?.params.join('\n')).not.toContain('Employee 77');
     expect(auditQuery?.params.join('\n')).not.toContain('displayName');
   });
+
+  it('writes replayable member event facts for participant notifications', async () => {
+    const database = fakeDatabase({
+      participantRows: [participantRow()],
+    });
+    const repo = new PgProjectParticipantsRepository(database);
+
+    await repo.replace({
+      currentUser: user(),
+      projectId: projectId(),
+      dto: {
+        idempotencyKey: 'participants-member-events-key',
+        participants: [
+          { participantType: 'user', participantId: '158', roleCode: 'manager', metadata: {} },
+        ],
+      },
+      canViewUsers: true,
+    });
+
+    const outbox = database.queries.find((query) => query.text.includes('INSERT INTO outbox_events'));
+    const payload = JSON.parse(String(outbox?.params[2]));
+    expect(payload.memberEvents).toEqual([
+      {
+        eventType: 'PROJECT_MEMBER_ADDED',
+        factKey: 'participant:user:158:role:manager:added',
+        participantType: 'user',
+        participantId: '158',
+        roleCode: 'manager',
+      },
+      {
+        eventType: 'PROJECT_MEMBER_REMOVED',
+        factKey: 'participant:employee:77:role:manager:removed',
+        participantType: 'employee',
+        participantId: '77',
+        roleCode: 'manager',
+      },
+    ]);
+  });
 });
 
 function fakeDatabase({
@@ -118,6 +156,7 @@ function fakeDatabase({
       if (text.includes('SELECT id FROM public.project_projects')) return { rows: [{ id: projectId() }] };
       if (text.includes('FROM public.project_participant_roles') && text.includes('FOR KEY SHARE')) return { rows: [{ code: 'manager', label: 'Manager' }] };
       if (text.includes('FROM public.employees') && text.includes('FOR KEY SHARE')) return { rows: [{ id: '77' }] };
+      if (text.includes('FROM public.users') && text.includes('FOR KEY SHARE')) return { rows: [{ id: '158' }] };
       if (text.includes('FROM public.project_participants')) return { rows: participantRows };
       if (text.includes('INSERT INTO public.project_participants')) return { rows: [participantRow()] };
       if (text.includes('INSERT INTO audit_log')) return { rows: [{ audit_id: 'audit-1' }] };

@@ -112,6 +112,7 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
       let nextVersion = currentVersion;
       let auditId: string | undefined;
       let projects = currentRows;
+      let p8NotificationFacts: Array<{ orderId: string; projectId: string; action: 'added' | 'removed' }> = [];
 
       if (changed) {
         if (removed.length > 0) {
@@ -130,6 +131,7 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
         nextVersion = await bumpOrderVersion(tx, command.orderId);
         projects = [...currentRows.filter((link) => nextKeys.has(linkKey(link))), ...inserted]
           .sort(compareProjectLinks);
+        p8NotificationFacts = orderProjectNotificationFacts(command.orderId, added, removed);
         auditId = await writeAudit(tx, {
           command,
           requestId,
@@ -148,6 +150,8 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
           previousVersion: currentVersion,
           nextVersion,
           projects: projects.map(mapProjectLinkRow),
+          added,
+          removed,
         });
       }
 
@@ -159,6 +163,7 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
           requestId,
         }),
         changed,
+        p8NotificationFacts,
         ...(auditId ? { auditId } : {}),
       };
 
@@ -384,8 +389,24 @@ async function enqueueOutbox(
     previousVersion: number;
     nextVersion: number;
     projects: OrderProjectSummaryDto[];
+    added: ReplaceOrderProjectLinkDto[];
+    removed: ProjectLinkRow[];
   },
 ): Promise<void> {
+  const addedFacts = input.added.map((link) => ({
+    factKey: orderProjectFactKey(input.command.orderId, link.projectId, 'added'),
+    orderId: String(input.command.orderId),
+    projectId: link.projectId,
+    action: 'added' as const,
+  }));
+  const removedFacts = input.removed.map((link) => ({
+    factKey: orderProjectFactKey(input.command.orderId, link.project_id, 'removed'),
+    orderId: String(input.command.orderId),
+    projectId: link.project_id,
+    action: 'removed' as const,
+  }));
+  const facts = [...addedFacts, ...removedFacts];
+
   await tx.query(
     `
     INSERT INTO outbox_events (
@@ -406,6 +427,10 @@ async function enqueueOutbox(
         auditId: input.auditId,
         orderId: input.command.orderId,
         clientId: toNullableNumber(input.order.client_id),
+        addedProjectIds: input.added.map((link) => link.projectId),
+        removedProjectIds: input.removed.map((link) => link.project_id),
+        facts,
+        recipientVisibilityPolicy: 'project_participants_must_pass_base_entity_visibility',
         previousVersion: input.previousVersion,
         version: input.nextVersion,
         primaryProject: input.projects.find((project) => project.isPrimary) ?? null,
@@ -414,6 +439,29 @@ async function enqueueOutbox(
       `${input.command.dto.idempotencyKey}:project_order_links_changed`,
     ],
   );
+}
+
+function orderProjectFactKey(orderId: number, projectId: string, action: 'added' | 'removed'): string {
+  return `order:${orderId}:project:${projectId}:${action}`;
+}
+
+function orderProjectNotificationFacts(
+  orderId: number,
+  added: ReplaceOrderProjectLinkDto[],
+  removed: ProjectLinkRow[],
+): Array<{ orderId: string; projectId: string; action: 'added' | 'removed' }> {
+  return [
+    ...added.map((link) => ({
+      orderId: String(orderId),
+      projectId: link.projectId,
+      action: 'added' as const,
+    })),
+    ...removed.map((link) => ({
+      orderId: String(orderId),
+      projectId: link.project_id,
+      action: 'removed' as const,
+    })),
+  ];
 }
 
 async function reconcileIdempotency(

@@ -21,6 +21,15 @@ import {
   UnavailableProjectParticipantsRepository,
 } from './participants/project-participants.repository';
 import { ProjectParticipantsService } from './participants/project-participants.service';
+import { ProjectNotificationService } from './notifications/project-notification.service';
+import {
+  PgProjectNotificationRecipientRepository,
+  UnavailableProjectNotificationRecipientRepository,
+} from './notifications/project-notification-recipient.repository';
+import {
+  PgProjectNotificationRepository,
+  UnavailableProjectNotificationRepository,
+} from './notifications/project-notification.repository';
 import { ProjectOrderReportController } from './reporting/project-order-report.controller';
 import {
   PgProjectOrderReportRepository,
@@ -149,13 +158,47 @@ import { ProjectProductionStatusCountsReportService } from './reporting/project-
     },
     {
       provide: ProjectParticipantsService,
-      useFactory: (database: DatabaseService) =>
+      useFactory: (
+        database: DatabaseService,
+        notifications: ProjectNotificationService,
+        runtimeConfig: ProjectsRuntimeConfigService,
+      ) =>
         new ProjectParticipantsService({
           participants: database.isConfigured
             ? new PgProjectParticipantsRepository(database)
             : new UnavailableProjectParticipantsRepository(),
-        }),
+          notifications,
+          projectP8NotificationsEnabled: runtimeConfig.getFeatureFlags().projectP8NotificationsEnabled,
+      }),
+      inject: [DatabaseService, ProjectNotificationService, ProjectsRuntimeConfigService],
+    },
+    {
+      provide: PgProjectNotificationRecipientRepository,
+      useFactory: (database: DatabaseService) =>
+        database.isConfigured
+          ? new PgProjectNotificationRecipientRepository(database)
+          : new UnavailableProjectNotificationRecipientRepository(),
       inject: [DatabaseService],
+    },
+    {
+      provide: PgProjectNotificationRepository,
+      useFactory: (database: DatabaseService) =>
+        database.isConfigured
+          ? new PgProjectNotificationRepository(database)
+          : new UnavailableProjectNotificationRepository(),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ProjectNotificationService,
+      useFactory: (
+        recipients: PgProjectNotificationRecipientRepository,
+        notifications: PgProjectNotificationRepository,
+      ) =>
+        new ProjectNotificationService({
+          recipients,
+          notifications,
+        }),
+      inject: [PgProjectNotificationRecipientRepository, PgProjectNotificationRepository],
     },
   ],
 })

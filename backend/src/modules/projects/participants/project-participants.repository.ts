@@ -125,6 +125,7 @@ export class PgProjectParticipantsRepository implements ProjectParticipantsRepos
       const changed = removed.length > 0 || added.length > 0;
       let rows = currentRows;
       let auditId: string | undefined;
+      let p8MemberEvents: ReturnType<typeof memberEventsFromDeltas> = [];
 
       if (changed) {
         if (removed.length > 0) {
@@ -139,6 +140,7 @@ export class PgProjectParticipantsRepository implements ProjectParticipantsRepos
           ...currentRows.filter((participant) => !removedIds.has(participant.id)),
           ...inserted,
         ].sort(compareParticipants);
+        p8MemberEvents = memberEventsFromDeltas(added, removed);
         auditId = await writeAudit(tx, { command, requestId, before: currentRows, after: rows, added, removed });
         await enqueueOutbox(tx, { command, requestId, auditId, project, added, removed });
       }
@@ -151,6 +153,7 @@ export class PgProjectParticipantsRepository implements ProjectParticipantsRepos
         })),
         requestId,
         changed,
+        p8MemberEvents,
         ...(auditId ? { auditId } : {}),
       };
       await completeIdempotency(tx, command.dto.idempotencyKey, response);
@@ -390,6 +393,7 @@ async function enqueueOutbox(
 ): Promise<void> {
   const added = input.added.map(inputDimension);
   const removed = input.removed.map(rowDimension);
+  const memberEvents = memberEventsFromDeltas(input.added, input.removed);
   await tx.query(
     `
     INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
@@ -411,11 +415,32 @@ async function enqueueOutbox(
         projectCode: input.project.code,
         added,
         removed,
+        memberEvents,
         recipientVisibilityPolicy: 'participants_do_not_grant_protected_entity_visibility',
       }),
       `${input.command.dto.idempotencyKey}:project_participants_changed`,
     ],
   );
+}
+
+function memberEventsFromDeltas(added: NormalizedParticipant[], removed: ParticipantRow[]) {
+  return [
+    ...added.map(inputDimension).map((participant) => memberEvent(participant, 'added')),
+    ...removed.map(rowDimension).map((participant) => memberEvent(participant, 'removed')),
+  ];
+}
+
+function memberEvent(
+  participant: ReturnType<typeof inputDimension>,
+  action: 'added' | 'removed',
+) {
+  return {
+    eventType: action === 'added' ? 'PROJECT_MEMBER_ADDED' : 'PROJECT_MEMBER_REMOVED',
+    factKey: `participant:${participant.participantType}:${participant.participantId}:role:${participant.roleCode}:${action}`,
+    participantType: participant.participantType,
+    participantId: participant.participantId,
+    roleCode: participant.roleCode,
+  };
 }
 
 async function reconcileIdempotency(
