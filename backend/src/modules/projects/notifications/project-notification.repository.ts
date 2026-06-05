@@ -21,7 +21,7 @@ interface AuditRow extends QueryResultRow {
 const SOURCE = 'projects-p8-notifications';
 
 export class PgProjectNotificationRepository {
-  constructor(private readonly database: ProjectNotificationDatabase) {}
+  constructor(private readonly database: DatabaseClient | ProjectNotificationDatabase) {}
 
   async createNotifications(input: {
     eventType: ProjectNotificationEventType;
@@ -33,7 +33,7 @@ export class PgProjectNotificationRepository {
     deliveries: ProjectNotificationDelivery[];
     auditMetadata: Record<string, unknown>;
   }): Promise<{ attempted: number; created: number; notificationIds: string[] }> {
-    return this.database.transaction(async (tx) => {
+    return withNotificationTransaction(this.database, async (tx) => {
       const reserved = await reserveFact(tx, input);
       if (!reserved) {
         return { attempted: input.deliveries.length, created: 0, notificationIds: [] };
@@ -75,6 +75,17 @@ export class PgProjectNotificationRepository {
       };
     });
   }
+}
+
+function withNotificationTransaction<T>(
+  database: DatabaseClient | ProjectNotificationDatabase,
+  handler: (tx: DatabaseClient) => Promise<T>,
+): Promise<T> {
+  if ('transaction' in database && typeof database.transaction === 'function') {
+    return database.transaction(handler as (client: TransactionClient) => Promise<T>);
+  }
+
+  return handler(database);
 }
 
 async function reserveFact(

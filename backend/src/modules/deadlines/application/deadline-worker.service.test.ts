@@ -186,6 +186,139 @@ describe('DeadlineWorkerService', () => {
     expect(createNotification).not.toHaveBeenCalled();
   });
 
+  it('notifies project overdue adapter only after a newly persisted DEADLINE_EXPIRED event', async () => {
+    const calls: unknown[] = [];
+    const events: DeadlineEventDto[] = [];
+    const repository = createRepository({
+      due: [createDeadline({ deadlineId: deadlineUuid('1'), orderId: 42 })],
+      events,
+      executions: [],
+      rules: [],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager(repository),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+      projectDeadlineOverduePort: {
+        async notifyDeadlineOverdue(input) {
+          calls.push(input);
+        },
+      },
+    });
+
+    await worker.processDueDeadlines({
+      now: '2026-05-01T10:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      trigger: 'manual',
+      actorUserId: '42',
+      requestId: 'req-worker-1',
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    });
+
+    expect(calls).toEqual([
+      expect.objectContaining({
+        deadlineEventId: 'event-1',
+        deadlineInstanceId: deadlineUuid('1'),
+        orderId: '42',
+        actorUserId: '42',
+        requestId: 'req-worker-1',
+      }),
+    ]);
+  });
+
+  it('rolls back the newly persisted DEADLINE_EXPIRED event when project overdue adapter fails', async () => {
+    const events: DeadlineEventDto[] = [];
+    const projectSideEffects: string[] = [];
+    const repository = createRepository({
+      due: [createDeadline({ deadlineId: deadlineUuid('1'), orderId: 42 })],
+      events,
+      executions: [],
+      rules: [],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: eventRollbackTransactionManager({
+        repository,
+        events,
+        projectSideEffects,
+        projectDeadlineOverduePort: {
+          async notifyDeadlineOverdue(input) {
+            projectSideEffects.push(`reserved:${input.deadlineEventId}`);
+            throw new Error('project overdue adapter unavailable');
+          },
+        },
+      }),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+    });
+
+    await expect(worker.processDueDeadlines({
+      now: '2026-05-01T10:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      trigger: 'manual',
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    })).rejects.toThrow('project overdue adapter unavailable');
+
+    expect(events).toEqual([]);
+    expect(projectSideEffects).toEqual([]);
+  });
+
+  it('does not notify project overdue adapter for idempotent replay or completed events', async () => {
+    const notifyDeadlineOverdue = vi.fn();
+    const existingEvent = createEvent({
+      deadlineEventId: 'event-existing',
+      eventType: 'DEADLINE_EXPIRED',
+      deadlineId: deadlineUuid('1'),
+      orderId: 42,
+    });
+    const repository = createRepository({
+      due: [createDeadline({ deadlineId: deadlineUuid('1'), orderId: 42 })],
+      events: [],
+      executions: [],
+      rules: [],
+    });
+    const replayWorker = new DeadlineWorkerService({
+      transactions: transactionManager({
+        ...repository,
+        async createDeadlineEvent() {
+          return { event: existingEvent, created: false };
+        },
+      }),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+      projectDeadlineOverduePort: { notifyDeadlineOverdue },
+    });
+
+    await replayWorker.processDueDeadlines({
+      now: '2026-05-01T10:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      trigger: 'manual',
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    });
+
+    const completedWorker = new DeadlineWorkerService({
+      transactions: transactionManager(repository),
+      targetResolver: createTargetResolver({
+        isCompleted: true,
+        completedAt: '2026-05-01T08:30:00.000Z',
+      }),
+      notificationPort: createNotificationPort(),
+      projectDeadlineOverduePort: { notifyDeadlineOverdue },
+    });
+
+    await completedWorker.processDueDeadlines({
+      now: '2026-05-01T10:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      trigger: 'manual',
+      config: { actionsEnabled: false, notificationsEnabled: false },
+    });
+
+    expect(notifyDeadlineOverdue).not.toHaveBeenCalled();
+  });
+
   it('passes notification-enabled config through worker event dispatch without bypassing action idempotency', async () => {
     const notifications: unknown[] = [];
     const executions: unknown[] = [];
@@ -559,6 +692,34 @@ function transactionManager(repository: DeadlineRepositoryPort): DeadlineTransac
   };
 }
 
+function eventRollbackTransactionManager(input: {
+  repository: DeadlineRepositoryPort;
+  events: DeadlineEventDto[];
+  projectSideEffects?: string[];
+  projectDeadlineOverduePort?: DeadlineUnitOfWork['projectDeadlineOverduePort'];
+}): DeadlineTransactionManagerPort {
+  return {
+    async runInTransaction(handler) {
+      const beforeEvents = [...input.events];
+      const beforeProjectSideEffects = [...(input.projectSideEffects ?? [])];
+      try {
+        return await handler({
+          deadlines: input.repository,
+          projectDeadlineOverduePort: input.projectDeadlineOverduePort,
+        });
+      } catch (error) {
+        input.events.splice(0, input.events.length, ...beforeEvents);
+        input.projectSideEffects?.splice(
+          0,
+          input.projectSideEffects.length,
+          ...beforeProjectSideEffects,
+        );
+        throw error;
+      }
+    },
+  };
+}
+
 function rollbackAwareTransactionManager(input: {
   repository: DeadlineRepositoryPort;
   productionMutations: DeadlineChangeOrderStatusCommand[];
@@ -785,4 +946,8 @@ function createDeadline(overrides: Partial<DeadlineInstanceDto> = {}): DeadlineI
     updatedAt: '2026-05-01T08:00:00.000Z',
     ...overrides,
   };
+}
+
+function deadlineUuid(suffix: string = '1'): string {
+  return `${suffix.repeat(8)}-${suffix.repeat(4)}-4${suffix.repeat(3)}-8${suffix.repeat(3)}-${suffix.repeat(12)}`;
 }

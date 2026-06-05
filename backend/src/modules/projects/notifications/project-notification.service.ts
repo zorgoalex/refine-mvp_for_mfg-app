@@ -134,7 +134,7 @@ export class ProjectNotificationService {
     const fact: ProjectNotificationFact = {
       factKey: `deadline_instance:${input.deadlineInstanceId}:event:${input.sourceId}`,
       projectId: input.projectId,
-      linkedEntity: { entityType: 'order', entityId: input.orderId },
+      linkedEntity: { entityType: 'deadline_instance', entityId: input.deadlineInstanceId },
       auditRelated: { deadlineId: input.deadlineInstanceId, orderId: input.orderId },
     };
     const recipients = await this.visibleProjectRecipients(input.projectId, fact);

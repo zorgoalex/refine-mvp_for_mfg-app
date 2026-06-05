@@ -127,6 +127,48 @@ describe('ProjectNotificationService', () => {
     await expect(new ProjectNotificationService(deps).handleProjectOrderLinksChanged(orderInput()))
       .resolves.toMatchObject([{ created: 0 }]);
   });
+
+  it('filters overdue deadline recipients through deadline anchor visibility', async () => {
+    const deps = fakeDeps({ visibleRecipients: [recipient('1')] });
+
+    await new ProjectNotificationService(deps).handleProjectDeadlineOverdue({
+      projectId: projectId('1'),
+      sourceId: 'event-1',
+      actorUserId: null,
+      requestId: 'req-deadline-overdue',
+      deadlineInstanceId: deadlineId('1'),
+      orderId: '15',
+    });
+
+    expect(deps.recipients.visibilityChecks).toEqual([
+      {
+        recipients: [recipient('1')],
+        linkedEntity: { entityType: 'deadline_instance', entityId: deadlineId('1') },
+      },
+    ]);
+    expect(deps.notifications.calls[0]).toMatchObject({
+      eventType: 'PROJECT_DEADLINE_OVERDUE',
+      fact: {
+        factKey: `deadline_instance:${deadlineId('1')}:event:event-1`,
+      },
+      deliveries: [{ recipientUserId: '1' }],
+    });
+  });
+
+  it('does not create overdue deadline notification without an order anchor', async () => {
+    const deps = fakeDeps({ visibleRecipients: [recipient('1')] });
+
+    await expect(new ProjectNotificationService(deps).handleProjectDeadlineOverdue({
+      projectId: projectId('1'),
+      sourceId: 'event-1',
+      actorUserId: null,
+      requestId: 'req-deadline-overdue',
+      deadlineInstanceId: deadlineId('1'),
+      orderId: null,
+    })).resolves.toEqual({ attempted: 0, created: 0 });
+
+    expect(deps.notifications.calls).toEqual([]);
+  });
 });
 
 function fakeDeps({
@@ -144,11 +186,19 @@ function fakeDeps({
 } = {}) {
   const recipients = {
     projectsLookedUp: [] as string[],
+    visibilityChecks: [] as Array<{
+      recipients: ProjectNotificationRecipient[];
+      linkedEntity: { entityType: string; entityId: string };
+    }>,
     async listCurrentUserParticipants(project: string) {
       this.projectsLookedUp.push(project);
       return participantsByProject[project] ?? visibleByProject[project] ?? visibleRecipients;
     },
-    async filterRecipientsByBaseVisibility(input: { recipients: ProjectNotificationRecipient[] }) {
+    async filterRecipientsByBaseVisibility(input: {
+      recipients: ProjectNotificationRecipient[];
+      linkedEntity: { entityType: string; entityId: string };
+    }) {
+      this.visibilityChecks.push(input);
       if (visibleRecipients.length === 0) return [];
       return input.recipients;
     },
@@ -204,5 +254,9 @@ function recipient(userId: string): ProjectNotificationRecipient {
 }
 
 function projectId(suffix: string = '1'): string {
+  return `${suffix.repeat(8)}-${suffix.repeat(4)}-4${suffix.repeat(3)}-8${suffix.repeat(3)}-${suffix.repeat(12)}`;
+}
+
+function deadlineId(suffix: string = '1'): string {
   return `${suffix.repeat(8)}-${suffix.repeat(4)}-4${suffix.repeat(3)}-8${suffix.repeat(3)}-${suffix.repeat(12)}`;
 }

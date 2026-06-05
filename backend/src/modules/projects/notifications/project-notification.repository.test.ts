@@ -132,6 +132,19 @@ describe('PgProjectNotificationRepository', () => {
 
     expect(database.queries.some((query) => query.text.includes('INSERT INTO audit_log'))).toBe(false);
   });
+
+  it('uses the provided transaction client directly when no transaction method exists', async () => {
+    const tx = fakeTransactionClient();
+    const repository = new PgProjectNotificationRepository(tx);
+
+    await expect(repository.createNotifications(baseInput())).resolves.toMatchObject({
+      attempted: 2,
+      created: 2,
+    });
+
+    expect(tx.transactionCalls).toBe(0);
+    expect(tx.queries.some((query) => query.text.includes('INSERT INTO audit_log'))).toBe(true);
+  });
 });
 
 function baseInput() {
@@ -185,6 +198,26 @@ function fakeDatabase({
     },
   };
   return database;
+}
+
+function fakeTransactionClient() {
+  let notificationSequence = 0;
+  return {
+    transactionCalls: 0,
+    queries: [] as Array<{ text: string; params: readonly unknown[] }>,
+    async query<T>(text: string, params: readonly unknown[] = []) {
+      this.queries.push({ text, params });
+      if (params[0] === 'PROJECT_NOTIFICATION_FACT_RESERVED') {
+        return { rows: [{ outbox_event_id: 'outbox-1' }] as T[], rowCount: 1 };
+      }
+      if (text.includes('INSERT INTO audit_log')) return { rows: [{ audit_id: 'audit-1' }] as T[] };
+      if (text.includes('INSERT INTO notifications')) {
+        notificationSequence += 1;
+        return { rows: [{ notification_id: `n-${notificationSequence}` }] as T[] };
+      }
+      return { rows: [] as T[] };
+    },
+  };
 }
 
 function projectId(): string {
