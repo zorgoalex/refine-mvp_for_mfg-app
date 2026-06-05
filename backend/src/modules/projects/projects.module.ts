@@ -60,6 +60,12 @@ import {
   UnavailableProjectProductionStatusCountsReportRepository,
 } from './reporting/project-production-status-counts-report.repository';
 import { ProjectProductionStatusCountsReportService } from './reporting/project-production-status-counts-report.service';
+import { ProjectDeadlineStatusCountsReportController } from './reporting/project-deadline-status-counts-report.controller';
+import {
+  PgProjectDeadlineStatusCountsReportRepository,
+  UnavailableProjectDeadlineStatusCountsReportRepository,
+} from './reporting/project-deadline-status-counts-report.repository';
+import { ProjectDeadlineStatusCountsReportService } from './reporting/project-deadline-status-counts-report.service';
 
 @Module({
   imports: [DatabaseModule, PermissionsModule],
@@ -68,6 +74,7 @@ import { ProjectProductionStatusCountsReportService } from './reporting/project-
     ProjectOrderReportController,
     ProjectOrderStatusReportController,
     ProjectProductionStatusCountsReportController,
+    ProjectDeadlineStatusCountsReportController,
     ProjectOrderRelationCountsReportController,
     ProjectOrderCreatedMonthCountsReportController,
     ProjectOverviewController,
@@ -144,6 +151,16 @@ import { ProjectProductionStatusCountsReportService } from './reporting/project-
             ? new PgProjectOverviewRepository(database)
             : new UnavailableProjectOverviewRepository(),
       }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ProjectDeadlineStatusCountsReportService,
+      useFactory: (database: DatabaseService) =>
+        new ProjectDeadlineStatusCountsReportService({
+          reports: database.isConfigured
+            ? new PgProjectDeadlineStatusCountsReportRepository(database)
+            : new UnavailableProjectDeadlineStatusCountsReportRepository(),
+        }),
       inject: [DatabaseService],
     },
     {

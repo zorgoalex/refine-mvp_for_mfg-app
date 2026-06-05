@@ -3036,6 +3036,56 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/projects/reports/deadline-status-counts:
+    get:
+      tags:
+        - Projects
+      operationId: listProjectDeadlineStatusCounts
+      summary: List current deadline status counts filtered by effective project attribution
+      description: Returns only current deadline status aggregate counts and the applied current project report filter.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - projects.view
+        - orders.view
+        - deadlines.view
+      parameters:
+        - name: projectMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [any, all, none]
+            default: any
+        - name: projectIds
+          in: query
+          required: false
+          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          schema:
+            type: string
+        - name: temporalMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [current]
+            default: current
+      responses:
+        '200':
+          description: Project-filtered current deadline status counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDeadlineStatusCountsReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/projects/reports/order-relation-counts:
     get:
       tags:
@@ -5470,6 +5520,68 @@ components:
             projectMode:
               type: string
               enum: [any, all, primary]
+            projectIds:
+              type: array
+              maxItems: 50
+              items:
+                type: string
+                format: uuid
+            temporalMode:
+              type: string
+              enum: [current]
+
+    ProjectDeadlineStatusCountsReportItem:
+      type: object
+      required:
+        - deadlineStatus
+        - deadlineCount
+      additionalProperties: false
+      properties:
+        deadlineStatus:
+          type: string
+          enum: [active, paused, expired, completed_on_time, completed_late, cancelled, superseded]
+        deadlineCount:
+          type: integer
+          minimum: 0
+
+    ProjectDeadlineStatusCountsReportResponse:
+      type: object
+      required:
+        - data
+        - filter
+      additionalProperties: false
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectDeadlineStatusCountsReportItem'
+        filter:
+          $ref: '#/components/schemas/ProjectDeadlineStatusCountsReportFilter'
+
+    ProjectDeadlineStatusCountsReportFilter:
+      oneOf:
+        - type: object
+          required:
+            - projectMode
+            - temporalMode
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [none]
+            temporalMode:
+              type: string
+              enum: [current]
+        - type: object
+          required:
+            - projectMode
+            - projectIds
+            - temporalMode
+          additionalProperties: false
+          properties:
+            projectMode:
+              type: string
+              enum: [any, all]
             projectIds:
               type: array
               maxItems: 50
