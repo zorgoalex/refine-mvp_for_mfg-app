@@ -22,9 +22,11 @@ import { DeadlineSettingsController } from './http/deadline-settings.controller'
 import { DeadlineWorkerController } from './http/deadline-worker.controller';
 import { DeadlinesController } from './http/deadlines.controller';
 import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.service';
+import { ProjectsModule } from '../projects/projects.module';
+import { ProjectsRuntimeConfigService } from '../projects/projects-runtime-config.service';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, ProjectsModule],
   controllers: [
     DeadlinesController,
     DeadlinePoliciesController,
@@ -57,10 +59,16 @@ import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.s
     },
     {
       provide: DeadlineWorkerService,
-      useFactory: (database: DatabaseService) =>
+      useFactory: (
+        database: DatabaseService,
+        projectsRuntimeConfig: ProjectsRuntimeConfigService,
+      ) =>
         new DeadlineWorkerService({
           transactions: database.isConfigured
-            ? new PgDeadlineTransactionManager(database)
+            ? new PgDeadlineTransactionManager(
+                database,
+                projectsRuntimeConfig.getFeatureFlags().projectP8NotificationsEnabled,
+              )
             : new UnavailableDeadlineTransactionManager(),
           targetResolver: database.isConfigured
             ? new PgDeadlineTargetResolver(database)
@@ -95,7 +103,7 @@ import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.s
             },
           },
         }),
-      inject: [DatabaseService],
+      inject: [DatabaseService, ProjectsRuntimeConfigService],
     },
     {
       provide: DeadlineWorkerSchedulerService,

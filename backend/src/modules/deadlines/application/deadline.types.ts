@@ -309,6 +309,7 @@ export interface DeadlineUnitOfWork {
   deadlines: DeadlineRepositoryPort;
   statusActionPort?: DeadlineOrderStatusActionPort;
   productionStatusActionPort?: DeadlineProductionStatusActionPort;
+  projectDeadlineOverduePort?: DeadlineProjectDeadlineOverdueNotificationPort;
 }
 
 export interface DeadlineTransactionManagerPort {
@@ -342,6 +343,16 @@ export interface DeadlineNotificationResult {
 
 export interface DeadlineNotificationPort {
   createNotification(input: DeadlineNotificationInput): Promise<DeadlineNotificationResult>;
+}
+
+export interface DeadlineProjectDeadlineOverdueNotificationPort {
+  notifyDeadlineOverdue(input: {
+    deadlineEventId: string;
+    deadlineInstanceId: string;
+    orderId: string | null;
+    actorUserId: string | null;
+    requestId: string;
+  }): Promise<void>;
 }
 
 export interface DeadlineChangeOrderStatusCommand {

@@ -201,5 +201,9 @@ import { ProjectProductionStatusCountsReportService } from './reporting/project-
       inject: [PgProjectNotificationRecipientRepository, PgProjectNotificationRepository],
     },
   ],
+  exports: [
+    ProjectsRuntimeConfigService,
+    ProjectNotificationService,
+  ],
 })
 export class ProjectsModule {}

@@ -8,6 +8,7 @@ import type {
   DeadlineRepositoryPort,
   DeadlineNotificationPort,
   DeadlineOrderStatusActionPort,
+  DeadlineProjectDeadlineOverdueNotificationPort,
   DeadlineProductionStatusActionPort,
   DeadlineTargetResolverPort,
   DeadlineTransactionManagerPort,
@@ -19,6 +20,7 @@ export interface DeadlineWorkerServicePorts {
   notificationPort: DeadlineNotificationPort;
   statusActionPort?: DeadlineOrderStatusActionPort;
   productionStatusActionPort?: DeadlineProductionStatusActionPort;
+  projectDeadlineOverduePort?: DeadlineProjectDeadlineOverdueNotificationPort;
   dispatcher?: DeadlineActionDispatcherService;
 }
 
@@ -100,6 +102,17 @@ export class DeadlineWorkerService {
 
         if (eventResult.created) {
           dispatchEvents.push({ event });
+          const projectDeadlineOverduePort =
+            unitOfWork.projectDeadlineOverduePort ?? this.ports.projectDeadlineOverduePort;
+          if (event.eventType === 'DEADLINE_EXPIRED' && projectDeadlineOverduePort) {
+            await projectDeadlineOverduePort.notifyDeadlineOverdue({
+              deadlineEventId: event.deadlineEventId,
+              deadlineInstanceId: event.deadlineId,
+              orderId: event.orderId == null ? null : String(event.orderId),
+              actorUserId: command.actorUserId ?? null,
+              requestId: command.requestId ?? event.deadlineEventId,
+            });
+          }
         }
 
         result.processed += 1;
