@@ -14,6 +14,7 @@ const postgresContainer =
   process.env.PROJECTS_P8_NOTIFICATION_STAGE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
 const fixtureOrderId = readNumberEnv('PROJECTS_P8_NOTIFICATION_FIXTURE_ORDER_ID');
 const restoreEnabled = process.env.PROJECTS_P8_NOTIFICATION_RESTORE === 'true';
+const expectP8Disabled = process.env.PROJECTS_P8_NOTIFICATION_EXPECT_DISABLED === 'true';
 
 let fixture: FixturePreflight | null = null;
 
@@ -55,7 +56,7 @@ test.describe('Projects P8 notification stage canary', () => {
     }
   });
 
-  test('proves project participant/order-link notifications, visibility denial, idempotency, and restore-to-zero', async ({
+  test('proves project participant/order-link notification posture, idempotency, privacy, and restore-to-zero', async ({
     request,
   }) => {
     expect(fixture).not.toBeNull();
@@ -92,7 +93,17 @@ test.describe('Projects P8 notification stage canary', () => {
       participantsPayload,
     );
     expect(participants.participants).toHaveLength(4);
-    expect(loadNotificationCount(project.id)).toBeGreaterThan(participantNotificationsBefore);
+    if (expectP8Disabled) {
+      expect(loadNotificationCount(project.id)).toBe(participantNotificationsBefore);
+      expect(loadP8Residue(project.id)).toEqual({
+        notifications: 0,
+        outboxEvents: 0,
+        auditLogRows: 0,
+        commandIdempotencyKeys: 1,
+      });
+    } else {
+      expect(loadNotificationCount(project.id)).toBeGreaterThan(participantNotificationsBefore);
+    }
 
     const participantReplayBefore = loadP8Residue(project.id);
     await putJson<ProjectParticipantsResponse>(
@@ -128,8 +139,19 @@ test.describe('Projects P8 notification stage canary', () => {
     expect(loadP8Residue(project.id)).toEqual(orderLinkResidue);
 
     const notificationSnapshot = loadNotificationSnapshot(project.id, notificationPrefix);
-    expect(notificationSnapshot.projectMemberEvents).toBeGreaterThanOrEqual(1);
-    expect(notificationSnapshot.projectOrderEvents).toBeGreaterThanOrEqual(1);
+    if (expectP8Disabled) {
+      expect(notificationSnapshot.projectMemberEvents).toBe(0);
+      expect(notificationSnapshot.projectOrderEvents).toBe(0);
+      expect(loadP8Residue(project.id)).toEqual({
+        notifications: 0,
+        outboxEvents: 0,
+        auditLogRows: 0,
+        commandIdempotencyKeys: 2,
+      });
+    } else {
+      expect(notificationSnapshot.projectMemberEvents).toBeGreaterThanOrEqual(1);
+      expect(notificationSnapshot.projectOrderEvents).toBeGreaterThanOrEqual(1);
+    }
     expect(notificationSnapshot.workerOrderNotifications).toBe(0);
     expect(notificationSnapshot.employeeRecipientNotifications).toBe(0);
     expect(notificationSnapshot.forbiddenPayloadMatches).toBe(0);
@@ -142,7 +164,7 @@ test.describe('Projects P8 notification stage canary', () => {
 
 function requireCanaryEnv() {
   if (!canaryEnabled) throw new Error('PROJECTS_P8_NOTIFICATION_STAGE_CANARY=true is required');
-  if (fixtureKey !== 'projects-p8-notifications-2026-06-05') {
+  if (fixtureKey !== 'projects-p8-controlled-enable-2026-06-06') {
     throw new Error('Unexpected PROJECTS_P8_NOTIFICATION_CANARY_FIXTURE_KEY');
   }
   if (targetEnv !== 'backend-test') throw new Error('PROJECTS_P8_NOTIFICATION_TARGET_ENV=backend-test is required');
@@ -397,15 +419,32 @@ function loadNotificationSnapshot(projectId: string, notificationPrefix: string)
       ),
       'employeeRecipientNotifications', 0,
       'forbiddenPayloadMatches', (
-        SELECT count(*)::int FROM public.notifications
-        WHERE entity_id = '${sqlQuote(projectId)}'
-          AND idempotency_key LIKE '${sqlQuote(notificationPrefix)}%'
-          AND (
-            message ILIKE '%client%'
-            OR message ILIKE '%payment%'
-            OR message ILIKE '%finance%'
-            OR message ILIKE '%audit%'
-          )
+        SELECT count(*)::int
+        FROM (
+          SELECT concat_ws(' ', title, message, source_type, source_id) AS payload
+          FROM public.notifications
+          WHERE entity_id = '${sqlQuote(projectId)}'
+            AND idempotency_key LIKE '${sqlQuote(notificationPrefix)}%'
+          UNION ALL
+          SELECT concat_ws(' ', event_type, payload_json::text)
+          FROM public.outbox_events
+          WHERE aggregate_id = '${sqlQuote(projectId)}'
+            AND event_type IN ('PROJECT_NOTIFICATION_FACT_RESERVED', 'PROJECT_NOTIFICATION_CREATED')
+          UNION ALL
+          SELECT concat_ws(' ', event, metadata_json::text, before_json::text, after_json::text, diff_json::text)
+          FROM public.audit_log
+          WHERE entity_type = 'project'
+            AND entity_id = '${sqlQuote(projectId)}'
+            AND event = 'projects.notification_created'
+        ) scanned
+        WHERE payload ILIKE '%client%'
+           OR payload ILIKE '%payment%'
+           OR payload ILIKE '%finance%'
+           OR payload ILIKE '%audit%'
+           OR payload ILIKE '%phone%'
+           OR payload ILIKE '%телефон%'
+           OR payload ILIKE '%detail%'
+           OR payload ILIKE '%детал%'
       )
     )::text;
   `);
