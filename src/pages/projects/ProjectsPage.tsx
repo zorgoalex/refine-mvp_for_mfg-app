@@ -17,11 +17,12 @@ import type { ColumnsType } from 'antd/es/table';
 import { projectsApi } from '../../api/projectsApi';
 import type {
   CreateProjectRequest,
+  ProjectDeadlineStatusCountsResponse,
+  ProjectDto,
   ProjectEntityLinksResponse,
+  ProjectOverviewResponse,
   ProjectParticipantRolesResponse,
   ProjectParticipantsResponse,
-  ProjectDto,
-  ProjectOverviewResponse,
   ProjectStatus,
   ReplaceProjectEntityLink,
   ReplaceProjectParticipant,
@@ -66,6 +67,7 @@ interface ProjectsPageProps {
   initialEntityLinks?: ProjectEntityLinksResponse | null;
   initialParticipants?: ProjectParticipantsResponse | null;
   initialParticipantRoles?: ProjectParticipantRolesResponse | null;
+  initialDeadlineStatusCounts?: ProjectDeadlineStatusCountsResponse | null;
 }
 
 export interface OverviewSelectionState {
@@ -130,6 +132,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   initialEntityLinks = null,
   initialParticipants = null,
   initialParticipantRoles = null,
+  initialDeadlineStatusCounts = null,
 }) => {
   const [form] = Form.useForm<ProjectFormValues>();
   const { data: identity } = useGetIdentity<UserIdentity>();
@@ -147,6 +150,8 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   const [participantRoles, setParticipantRoles] = useState<ProjectParticipantRolesResponse | null>(
     initialParticipantRoles,
   );
+  const [deadlineStatusCounts, setDeadlineStatusCounts] =
+    useState<ProjectDeadlineStatusCountsResponse | null>(initialDeadlineStatusCounts);
   const overviewRequestIdRef = useRef(0);
 
   const currentUser = identity ?? null;
@@ -158,6 +163,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   const canManageEntityLinks = !featureFlags.useBackendPermissions || can('projects.manage_links', currentUser);
   const canViewParticipants = !featureFlags.useBackendPermissions || can('projects.participants.view', currentUser);
   const canManageParticipants = !featureFlags.useBackendPermissions || can('projects.participants.manage', currentUser);
+  const canViewDeadlineStatusCounts =
+    !featureFlags.useBackendPermissions ||
+    canAll(['projects.view', 'orders.view', 'deadlines.view'], currentUser);
 
   const loadProjects = useCallback(async () => {
     if (!canView) return;
@@ -176,6 +184,12 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
+
+  useEffect(() => {
+    if (!canViewDeadlineStatusCounts) {
+      setDeadlineStatusCounts(null);
+    }
+  }, [canViewDeadlineStatusCounts]);
 
   const handleCreate = async (values: ProjectFormValues) => {
     setCreating(true);
@@ -221,7 +235,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     }));
 
     try {
-      const [response, linksResponse, participantsResponse, rolesResponse] = await Promise.all([
+      const [response, linksResponse, participantsResponse, rolesResponse, deadlineResponse] = await Promise.all([
         projectsApi.getProjectOverview(projectId),
         canViewEntityLinks
           ? projectsApi.getProjectEntityLinks(projectId).catch((error) => handleAuxiliaryLoadError(error, requestId))
@@ -231,6 +245,13 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
           : Promise.resolve(null),
         canViewParticipants
           ? projectsApi.getProjectParticipantRoles().catch((error) => handleAuxiliaryLoadError(error, requestId))
+          : Promise.resolve(null),
+        canViewDeadlineStatusCounts
+          ? projectsApi.getProjectDeadlineStatusCounts({
+              projectMode: 'any',
+              projectIds: [projectId],
+              temporalMode: 'current',
+            }).catch((error) => handleAuxiliaryLoadError(error, requestId))
           : Promise.resolve(null),
       ]);
       setOverviewSelection((state) => getNextOverviewSelectionState(state, {
@@ -242,6 +263,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         setEntityLinks(linksResponse);
         setParticipants(participantsResponse);
         setParticipantRoles(rolesResponse);
+        setDeadlineStatusCounts(deadlineResponse);
       }
     } catch (error) {
       if (overviewRequestIdRef.current === requestId) {
@@ -252,7 +274,12 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         requestId,
       }));
     }
-  }, [canViewEntityLinks, canViewParticipants, handleAuxiliaryLoadError]);
+  }, [
+    canViewDeadlineStatusCounts,
+    canViewEntityLinks,
+    canViewParticipants,
+    handleAuxiliaryLoadError,
+  ]);
 
   const handleCloseOverview = useCallback(() => {
     overviewRequestIdRef.current += 1;
@@ -260,6 +287,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     setEntityLinks(null);
     setParticipants(null);
     setParticipantRoles(null);
+    setDeadlineStatusCounts(null);
   }, []);
 
   const handleAppendEntityLink = useCallback(async (link: ReplaceProjectEntityLink) => {
@@ -409,7 +437,14 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         {overviewSelection.overview ? (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Button onClick={handleCloseOverview}>Закрыть</Button>
-            <ProjectDetailOverview overview={overviewSelection.overview} />
+            <ProjectDetailOverview
+              overview={overviewSelection.overview}
+              deadlineStatusCounts={
+                canViewDeadlineStatusCounts
+                  ? getMatchingDeadlineStatusCounts(overviewSelection.overview.project.id, deadlineStatusCounts)
+                  : null
+              }
+            />
             {canViewEntityLinks ? (
               <ProjectEntityLinksPanel
                 response={entityLinks}
@@ -450,4 +485,14 @@ function createProjectIdempotencyKey(prefix: string): string {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `${prefix}:${uuid}`;
+}
+
+export function getMatchingDeadlineStatusCounts(
+  projectId: string,
+  response: ProjectDeadlineStatusCountsResponse | null,
+): ProjectDeadlineStatusCountsResponse | null {
+  if (!response || response.filter.projectMode === 'none') return null;
+  return response.filter.projectIds.length === 1 && response.filter.projectIds[0] === projectId
+    ? response
+    : null;
 }

@@ -1,7 +1,10 @@
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { ProjectOverviewResponse } from '../../api/types/projectApi.types';
+import type {
+  ProjectDeadlineStatusCountsResponse,
+  ProjectOverviewResponse,
+} from '../../api/types/projectApi.types';
 import { ProjectDetailOverview } from './ProjectDetailOverview';
 
 const overviewFixture: ProjectOverviewResponse = {
@@ -24,6 +27,16 @@ const overviewFixture: ProjectOverviewResponse = {
     relationCounts: [{ relationType: 'main', isPrimary: true, orderCount: 2 }],
     createdMonthCounts: [{ month: '2026-06-01', orderCount: 2 }],
   },
+  linkedEntityCounts: [
+    { entityType: 'order', currentCount: 2 },
+    { entityType: 'client', currentCount: 1 },
+  ],
+  participants: {
+    currentSummary: [
+      { roleCode: 'manager', roleLabel: 'Manager', participantCount: 1 },
+      { roleCode: 'observer', roleLabel: 'Observer', participantCount: 2 },
+    ],
+  },
   filter: {
     projectId: '11111111-1111-4111-8111-111111111111',
     temporalMode: 'current',
@@ -42,9 +55,20 @@ const overviewFixture: ProjectOverviewResponse = {
   ],
 };
 
+const deadlineStatusCounts: ProjectDeadlineStatusCountsResponse = {
+  data: [{ deadlineStatus: 'overdue', deadlineCount: 1 }],
+  filter: {
+    projectMode: 'any',
+    projectIds: [overviewFixture.project.id],
+    temporalMode: 'current',
+  },
+};
+
 describe('ProjectDetailOverview', () => {
   it('renders accepted aggregate overview fields without omitted domain labels', () => {
-    const html = renderToString(<ProjectDetailOverview overview={overviewFixture} />);
+    const html = renderToString(
+      <ProjectDetailOverview overview={overviewFixture} deadlineStatusCounts={deadlineStatusCounts} />,
+    );
 
     expect(html).toContain('P7 Overview');
     expect(html).toContain('P7');
@@ -53,8 +77,14 @@ describe('ProjectDetailOverview', () => {
     expect(html).toContain('New');
     expect(html).toContain('main');
     expect(html).toContain('2026-06-01');
+    expect(html).toContain('Связанные сущности');
+    expect(html).toContain('client');
+    expect(html).toContain('Участники');
+    expect(html).toContain('Manager');
+    expect(html).toContain('Deadline status counts');
+    expect(html).toContain('overdue');
     expect(html).not.toMatch(
-      /payment|deadline|production|audit|finance|member|user|client phone|order details|activity timeline/i,
+      /payment|production detail|audit|finance|member detail|user detail|client phone|order details|activity timeline/i,
     );
   });
 });

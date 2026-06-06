@@ -3,6 +3,7 @@ import { Descriptions, Space, Statistic, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type {
   OrderProjectRelationType,
+  ProjectDeadlineStatusCountsResponse,
   ProjectOverviewResponse,
   ProjectStatus,
 } from '../../api/types/projectApi.types';
@@ -19,11 +20,15 @@ const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
 
 interface ProjectDetailOverviewProps {
   overview: ProjectOverviewResponse;
+  deadlineStatusCounts?: ProjectDeadlineStatusCountsResponse | null;
 }
 
 type StatusCountRow = ProjectOverviewResponse['orders']['statusCounts'][number];
 type RelationCountRow = ProjectOverviewResponse['orders']['relationCounts'][number];
 type CreatedMonthCountRow = ProjectOverviewResponse['orders']['createdMonthCounts'][number];
+type LinkedEntityCountRow = ProjectOverviewResponse['linkedEntityCounts'][number];
+type ParticipantSummaryRow = ProjectOverviewResponse['participants']['currentSummary'][number];
+type DeadlineStatusCountRow = ProjectDeadlineStatusCountsResponse['data'][number];
 
 const statusColumns: ColumnsType<StatusCountRow> = [
   {
@@ -86,7 +91,55 @@ const createdMonthColumns: ColumnsType<CreatedMonthCountRow> = [
   },
 ];
 
-export const ProjectDetailOverview: React.FC<ProjectDetailOverviewProps> = ({ overview }) => {
+const linkedEntityColumns: ColumnsType<LinkedEntityCountRow> = [
+  {
+    title: 'Тип',
+    dataIndex: 'entityType',
+    key: 'entityType',
+  },
+  {
+    title: 'Количество',
+    dataIndex: 'currentCount',
+    key: 'currentCount',
+    width: 140,
+    align: 'right',
+  },
+];
+
+const participantColumns: ColumnsType<ParticipantSummaryRow> = [
+  {
+    title: 'Роль',
+    dataIndex: 'roleLabel',
+    key: 'roleLabel',
+  },
+  {
+    title: 'Количество',
+    dataIndex: 'participantCount',
+    key: 'participantCount',
+    width: 140,
+    align: 'right',
+  },
+];
+
+const deadlineStatusColumns: ColumnsType<DeadlineStatusCountRow> = [
+  {
+    title: 'Статус',
+    dataIndex: 'deadlineStatus',
+    key: 'deadlineStatus',
+  },
+  {
+    title: 'Количество',
+    dataIndex: 'deadlineCount',
+    key: 'deadlineCount',
+    width: 140,
+    align: 'right',
+  },
+];
+
+export const ProjectDetailOverview: React.FC<ProjectDetailOverviewProps> = ({
+  overview,
+  deadlineStatusCounts = null,
+}) => {
   const { project, orders } = overview;
   const dateRange = [project.startsAt, project.endsAt].filter(Boolean).join(' - ') || '-';
 
@@ -114,6 +167,28 @@ export const ProjectDetailOverview: React.FC<ProjectDetailOverviewProps> = ({ ov
       </Descriptions>
 
       <Statistic title="Всего заказов" value={orders.totalCount} />
+
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Text strong>Связанные сущности</Text>
+        <Table
+          rowKey="entityType"
+          size="small"
+          columns={linkedEntityColumns}
+          dataSource={overview.linkedEntityCounts}
+          pagination={false}
+        />
+      </Space>
+
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Text strong>Участники</Text>
+        <Table
+          rowKey="roleCode"
+          size="small"
+          columns={participantColumns}
+          dataSource={overview.participants.currentSummary}
+          pagination={false}
+        />
+      </Space>
 
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         <Text strong>По статусам</Text>
@@ -147,6 +222,19 @@ export const ProjectDetailOverview: React.FC<ProjectDetailOverviewProps> = ({ ov
           pagination={false}
         />
       </Space>
+
+      {deadlineStatusCounts ? (
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Text strong>Deadline status counts</Text>
+          <Table
+            rowKey="deadlineStatus"
+            size="small"
+            columns={deadlineStatusColumns}
+            dataSource={deadlineStatusCounts.data}
+            pagination={false}
+          />
+        </Space>
+      ) : null}
     </Space>
   );
 };

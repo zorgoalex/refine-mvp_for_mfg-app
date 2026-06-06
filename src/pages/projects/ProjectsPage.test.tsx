@@ -2,9 +2,13 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { applyFeatureFlags, getFeatureFlags } from '../../config/featureFlags';
-import type { ProjectOverviewResponse } from '../../api/types/projectApi.types';
+import type {
+  ProjectDeadlineStatusCountsResponse,
+  ProjectOverviewResponse,
+} from '../../api/types/projectApi.types';
 import {
   ProjectsPage,
+  getMatchingDeadlineStatusCounts,
   getNextOverviewSelectionState,
   type OverviewSelectionState,
 } from './ProjectsPage';
@@ -37,7 +41,6 @@ describe('ProjectsPage', () => {
     mockIdentityPermissions(['projects.view', 'projects.create', 'projects.archive']);
     applyFeatureFlags({
       ...defaultFlags,
-      useBackendProjects: true,
       useBackendPermissions: false,
     });
 
@@ -221,6 +224,71 @@ describe('ProjectsPage', () => {
     ).toThrow('Cannot replace participants while a current participant id is unavailable');
   });
 
+  it('renders deadline status counts only when deadline report permissions are present', () => {
+    mockIdentityPermissions(['projects.view', 'orders.view', 'deadlines.view']);
+    applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
+
+    const html = renderToString(
+      <ProjectsPage
+        initialProjects={[projectFixture]}
+        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+        initialDeadlineStatusCounts={createDeadlineStatusCounts(projectFixture.id)}
+      />,
+    );
+
+    expect(html).toContain('Deadline status counts');
+    expect(html).toContain('overdue');
+  });
+
+  it('does not render injected deadline status counts without deadlines.view', () => {
+    mockIdentityPermissions(['projects.view', 'orders.view']);
+    applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
+
+    const html = renderToString(
+      <ProjectsPage
+        initialProjects={[projectFixture]}
+        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+        initialDeadlineStatusCounts={createDeadlineStatusCounts(projectFixture.id)}
+      />,
+    );
+
+    expect(html).not.toContain('Deadline status counts');
+    expect(html).not.toContain('overdue');
+  });
+
+  it('does not render injected deadline status counts for another project', () => {
+    mockIdentityPermissions(['projects.view', 'orders.view', 'deadlines.view']);
+    applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
+
+    const html = renderToString(
+      <ProjectsPage
+        initialProjects={[projectFixture]}
+        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+        initialDeadlineStatusCounts={createDeadlineStatusCounts('22222222-2222-4222-8222-222222222222')}
+      />,
+    );
+
+    expect(html).not.toContain('Deadline status counts');
+    expect(html).not.toContain('overdue');
+  });
+
+  it('matches deadline status counts only to the selected project id', () => {
+    const response = createDeadlineStatusCounts('22222222-2222-4222-8222-222222222222');
+    const multiProjectResponse: ProjectDeadlineStatusCountsResponse = {
+      ...createDeadlineStatusCounts(projectFixture.id),
+      filter: {
+        projectMode: 'any',
+        projectIds: [projectFixture.id, '22222222-2222-4222-8222-222222222222'],
+        temporalMode: 'current',
+      },
+    };
+
+    expect(getMatchingDeadlineStatusCounts(projectFixture.id, response)).toBeNull();
+    expect(getMatchingDeadlineStatusCounts('22222222-2222-4222-8222-222222222222', response)).toBe(response);
+    expect(getMatchingDeadlineStatusCounts(projectFixture.id, multiProjectResponse)).toBeNull();
+    expect(getMatchingDeadlineStatusCounts(projectFixture.id, null)).toBeNull();
+  });
+
   it('keeps the latest selected overview when requests resolve out of order', () => {
     const initialState: OverviewSelectionState = {
       activeRequestId: 0,
@@ -304,6 +372,17 @@ function createOverviewFixture(projectId: string, name: string): ProjectOverview
       temporalMode: 'current',
     },
     omitted: [],
+  };
+}
+
+function createDeadlineStatusCounts(projectId: string): ProjectDeadlineStatusCountsResponse {
+  return {
+    data: [{ deadlineStatus: 'overdue', deadlineCount: 1 }],
+    filter: {
+      projectMode: 'any',
+      projectIds: [projectId],
+      temporalMode: 'current',
+    },
   };
 }
 
