@@ -128,6 +128,7 @@ test.describe('Projects P8 notification stage canary', () => {
       orderLinksPayload,
     );
     expect(orderLinks.projects.map((item) => item.id)).toContain(project.id);
+    await expectProjectsSmoke(request, adminToken, project.id);
 
     const orderLinkResidue = loadP8Residue(project.id);
     await putJson<OrderProjectsResponse>(
@@ -306,6 +307,19 @@ async function putJson<T>(
 
 async function expectOk(response: APIResponse) {
   expect(response.ok(), await response.text()).toBe(true);
+}
+
+async function expectProjectsSmoke(request: APIRequestContext, token: string, projectId: string) {
+  for (const path of [
+    '/projects?page=1&pageSize=5',
+    `/projects/${projectId}`,
+    `/projects/${projectId}/overview`,
+  ]) {
+    const response = await request.get(`${backendApiUrl}${path}`, {
+      headers: authHeaders(token),
+    });
+    await expectOk(response);
+  }
 }
 
 async function expectPostRestoreProbe(
