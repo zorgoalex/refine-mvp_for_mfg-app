@@ -833,7 +833,7 @@ export class OrdersController {
     this.assertOrdersWriteEnabled();
 
     const currentUser = this.requireCurrentUser(request);
-    const order = await this.orders.create({ currentUser, dto });
+    const order = await this.orders.create({ currentUser, dto, requestId: request.requestId });
 
     return { order };
   }
@@ -859,7 +859,12 @@ export class OrdersController {
 
     const currentUser = this.requireCurrentUser(request);
     const orderId = parseOrderId(orderIdParam);
-    const order = await this.orders.update({ currentUser, orderId, dto });
+    const order = await this.orders.update({
+      currentUser,
+      orderId,
+      dto,
+      requestId: request.requestId,
+    });
 
     return { order };
   }

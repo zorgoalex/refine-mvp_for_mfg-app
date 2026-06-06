@@ -70,6 +70,7 @@ export class OrderTransactionService {
       orderId: order.header.orderId,
       currentUser: command.currentUser,
       eventType: 'ORDER_CREATED',
+      requestId: command.requestId,
     });
 
     return order;
@@ -133,6 +134,7 @@ export class OrderTransactionService {
       orderId: command.orderId,
       currentUser: command.currentUser,
       eventType: 'ORDER_UPDATED',
+      requestId: command.requestId,
     });
 
     return order;

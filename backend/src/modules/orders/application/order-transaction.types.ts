@@ -15,12 +15,14 @@ import type {
 export interface CreateOrderCommand {
   currentUser: CurrentUser;
   dto: SaveOrderDto;
+  requestId?: string;
 }
 
 export interface UpdateOrderCommand {
   currentUser: CurrentUser;
   orderId: number;
   dto: SaveOrderDto;
+  requestId?: string;
 }
 
 export interface DeleteOrderCommand {
@@ -151,5 +153,6 @@ export interface OrderDeadlineSyncPort {
     orderId: number;
     currentUser: CurrentUser;
     eventType: 'ORDER_CREATED' | 'ORDER_UPDATED';
+    requestId?: string;
   }): Promise<void>;
 }
