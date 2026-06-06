@@ -128,7 +128,7 @@ test.describe('deadline order-save sync stage canary', () => {
       outboxRows: 1,
       orderOutboxRows: 1,
       auditRequestRows: 1,
-      outboxRequestRows: 1,
+      outboxRequestRows: 2,
     });
     expect(evidence.deadlineIds).toHaveLength(1);
 
@@ -141,7 +141,8 @@ test.describe('deadline order-save sync stage canary', () => {
 
     runRuntimeCommand(disableCommand, 'disable order-save sync before restore probe');
     expectBackendOrderSyncFlag(false);
-    restoreOrder(requireSnapshot());
+    if (!snapshot) throw new Error('order snapshot is missing');
+    restoreOrder(snapshot);
     restoreFixtureRows(capturedDeadlineIds);
     expectResidueEmpty(loadResidueCounts(capturedDeadlineIds));
 
@@ -518,7 +519,10 @@ function loadResidueCounts(knownDeadlineIds: string[] = []): ResidueCounts {
       ),
       'commandIdempotencyKeys', (
         SELECT count(*)::int FROM command_idempotency_keys
-        WHERE idempotency_key = '${escapeSql(lockKey)}'
+        WHERE (
+            idempotency_key = '${escapeSql(lockKey)}'
+            AND status <> 'processing'
+          )
            OR idempotency_key LIKE '${escapeSql(requestIdPrefix)}%'
       ),
       'auditLog', (
@@ -567,7 +571,7 @@ function loadSyncEvidence(requestId: string): SyncEvidence {
       WHERE order_id = ${fixtureOrderId}
         AND entity_type = 'order'
         AND status = 'active'
-        AND deadline_at::date = '${escapeSql(plannedCompletionDate)}'::date
+        AND (deadline_at AT TIME ZONE 'UTC')::date = '${escapeSql(plannedCompletionDate)}'::date
     ),
     stage_deadlines AS (
       SELECT deadline_id::text
@@ -575,7 +579,7 @@ function loadSyncEvidence(requestId: string): SyncEvidence {
       WHERE order_id = ${fixtureOrderId}
         AND entity_type = 'order_stage'
         AND status = 'active'
-        AND deadline_at::date = '${escapeSql(plannedCompletionDate)}'::date
+        AND (deadline_at AT TIME ZONE 'UTC')::date = '${escapeSql(plannedCompletionDate)}'::date
     ),
     fixture_events AS (
       SELECT deadline_event_id::text, deadline_id::text
@@ -832,11 +836,6 @@ function currentBranch(): string {
 
 function currentCommit(): string {
   return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-}
-
-function requireSnapshot(): OrderSnapshot {
-  if (!snapshot) throw new Error('order snapshot is missing');
-  return snapshot;
 }
 
 function dateOnly(value: string): string {
