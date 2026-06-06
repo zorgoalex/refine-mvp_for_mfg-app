@@ -3613,6 +3613,50 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/projects/{projectId}/batch-link:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags:
+        - Projects
+      operationId: dryRunProjectBatchLink
+      summary: Dry-run project batch link proposals
+      security:
+        - bearerAuth: []
+      x-permission: projects.manage_links
+      x-role-codes:
+        - admin
+        - top_manager
+      x-write-enabled: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectBatchLinkDryRunRequest'
+      responses:
+        '200':
+          description: Dry-run project batch link proposals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectBatchLinkDryRunResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/projects/{projectId}/participants:
     parameters:
       - name: projectId
@@ -4887,6 +4931,227 @@ components:
         - client
         - workshop
         - deadline_instance
+
+    ProjectBatchLinkDryRunRequest:
+      type: object
+      required:
+        - mode
+        - fixtureKey
+        - idempotencyKey
+        - entityType
+        - source
+        - items
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum:
+            - dry-run
+        fixtureKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+        entityType:
+          $ref: '#/components/schemas/ProjectEntityTypeCode'
+        source:
+          type: object
+          required:
+            - type
+            - reference
+          additionalProperties: false
+          properties:
+            type:
+              type: string
+              minLength: 1
+              maxLength: 100
+            reference:
+              type: string
+              minLength: 1
+              maxLength: 200
+        items:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required:
+              - entityId
+              - reason
+              - confidence
+            additionalProperties: false
+            properties:
+              entityId:
+                type: string
+                minLength: 1
+                maxLength: 200
+              reason:
+                type: string
+                minLength: 1
+                maxLength: 500
+              confidence:
+                type: string
+                minLength: 1
+                maxLength: 100
+              sourceRow:
+                type: string
+                minLength: 1
+                maxLength: 200
+
+    ProjectBatchLinkDryRunResponse:
+      type: object
+      required:
+        - projectId
+        - mode
+        - summary
+        - proposals
+        - skipped
+        - sampleEvidence
+        - writeEnabled
+      additionalProperties: false
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum:
+            - dry-run
+        summary:
+          type: object
+          required:
+            - proposed
+            - skipped
+            - conflicts
+            - sampledEvidenceRows
+          additionalProperties: false
+          properties:
+            proposed:
+              type: integer
+              minimum: 0
+            skipped:
+              type: integer
+              minimum: 0
+            conflicts:
+              type: integer
+              minimum: 0
+            sampledEvidenceRows:
+              type: integer
+              minimum: 0
+        proposals:
+          type: array
+          items:
+            type: object
+            required:
+              - entityType
+              - entityId
+              - action
+              - source
+              - confidence
+              - reason
+            additionalProperties: false
+            properties:
+              entityType:
+                $ref: '#/components/schemas/ProjectEntityTypeCode'
+              entityId:
+                type: string
+              action:
+                type: string
+                enum:
+                  - link
+              source:
+                type: string
+              confidence:
+                type: string
+              reason:
+                type: string
+        skipped:
+          type: array
+          items:
+            type: object
+            required:
+              - entityType
+              - entityId
+              - source
+              - sourceRow
+              - confidence
+              - reasonCode
+              - reasonText
+              - evidence
+            additionalProperties: false
+            properties:
+              entityType:
+                $ref: '#/components/schemas/ProjectEntityTypeCode'
+              entityId:
+                type: string
+              source:
+                type: string
+              sourceRow:
+                type: string
+                nullable: true
+              confidence:
+                type: string
+              reasonCode:
+                type: string
+                enum:
+                  - entity_not_found
+              reasonText:
+                type: string
+              evidence:
+                type: object
+                additionalProperties: true
+        sampleEvidence:
+          type: array
+          items:
+            type: object
+            required:
+              - projectId
+              - entityType
+              - entityId
+              - source
+              - sourceRow
+              - reason
+              - skipReason
+              - fixtureKey
+              - idempotencyKey
+              - requestId
+              - actorUserId
+              - actorUsername
+            additionalProperties: false
+            properties:
+              projectId:
+                type: string
+                format: uuid
+              entityType:
+                $ref: '#/components/schemas/ProjectEntityTypeCode'
+              entityId:
+                type: string
+              source:
+                type: string
+              sourceRow:
+                type: string
+              reason:
+                type: string
+              skipReason:
+                type: string
+                nullable: true
+              fixtureKey:
+                type: string
+              idempotencyKey:
+                type: string
+              requestId:
+                type: string
+                nullable: true
+              actorUserId:
+                type: string
+              actorUsername:
+                type: string
+        writeEnabled:
+          type: boolean
+          enum:
+            - false
 
     ReplaceProjectEntityLinksRequest:
       type: object
