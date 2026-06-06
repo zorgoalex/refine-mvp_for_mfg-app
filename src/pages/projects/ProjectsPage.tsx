@@ -17,6 +17,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { projectsApi } from '../../api/projectsApi';
 import type {
   CreateProjectRequest,
+  ProjectDeadlineStatusCountsResponse,
   ProjectDto,
   ProjectOverviewResponse,
   ProjectStatus,
@@ -56,6 +57,7 @@ interface ProjectFormValues {
 interface ProjectsPageProps {
   initialProjects?: ProjectDto[];
   initialOverview?: ProjectOverviewResponse | null;
+  initialDeadlineStatusCounts?: ProjectDeadlineStatusCountsResponse | null;
 }
 
 export interface OverviewSelectionState {
@@ -117,6 +119,7 @@ export function getNextOverviewSelectionState(
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   initialProjects = [],
   initialOverview = null,
+  initialDeadlineStatusCounts = null,
 }) => {
   const [form] = Form.useForm<ProjectFormValues>();
   const { data: identity } = useGetIdentity<UserIdentity>();
@@ -129,6 +132,8 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     loadingProjectId: null,
     overview: initialOverview,
   });
+  const [deadlineStatusCounts, setDeadlineStatusCounts] =
+    useState<ProjectDeadlineStatusCountsResponse | null>(initialDeadlineStatusCounts);
   const overviewRequestIdRef = useRef(0);
 
   const currentUser = identity ?? null;
@@ -136,6 +141,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   const canCreate = !featureFlags.useBackendPermissions || can('projects.create', currentUser);
   const canArchive = !featureFlags.useBackendPermissions || can('projects.archive', currentUser);
   const canViewOverview = !featureFlags.useBackendPermissions || canAll(['projects.view', 'orders.view'], currentUser);
+  const canViewDeadlineStatusCounts =
+    !featureFlags.useBackendPermissions ||
+    canAll(['projects.view', 'orders.view', 'deadlines.view'], currentUser);
 
   const loadProjects = useCallback(async () => {
     if (!canView) return;
@@ -154,6 +162,12 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
+
+  useEffect(() => {
+    if (!canViewDeadlineStatusCounts) {
+      setDeadlineStatusCounts(null);
+    }
+  }, [canViewDeadlineStatusCounts]);
 
   const handleCreate = async (values: ProjectFormValues) => {
     setCreating(true);
@@ -192,12 +206,27 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     }));
 
     try {
-      const response = await projectsApi.getProjectOverview(projectId);
+      const [response, deadlineResponse] = await Promise.all([
+        projectsApi.getProjectOverview(projectId),
+        canViewDeadlineStatusCounts
+          ? projectsApi.getProjectDeadlineStatusCounts({
+              projectMode: 'any',
+              projectIds: [projectId],
+              temporalMode: 'current',
+            }).catch((error) => {
+              message.error(error instanceof Error ? error.message : 'Не удалось загрузить deadline отчет проекта');
+              return null;
+            })
+          : Promise.resolve(null),
+      ]);
       setOverviewSelection((state) => getNextOverviewSelectionState(state, {
         type: 'success',
         requestId,
         overview: response,
       }));
+      if (overviewRequestIdRef.current === requestId) {
+        setDeadlineStatusCounts(deadlineResponse);
+      }
     } catch (error) {
       if (overviewRequestIdRef.current === requestId) {
         message.error(error instanceof Error ? error.message : 'Не удалось загрузить обзор проекта');
@@ -207,11 +236,12 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         requestId,
       }));
     }
-  }, []);
+  }, [canViewDeadlineStatusCounts]);
 
   const handleCloseOverview = useCallback(() => {
     overviewRequestIdRef.current += 1;
     setOverviewSelection((state) => getNextOverviewSelectionState(state, { type: 'close' }));
+    setDeadlineStatusCounts(null);
   }, []);
 
   const columns = useMemo<ColumnsType<ProjectDto>>(
@@ -329,7 +359,14 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         {overviewSelection.overview ? (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Button onClick={handleCloseOverview}>Закрыть</Button>
-            <ProjectDetailOverview overview={overviewSelection.overview} />
+            <ProjectDetailOverview
+              overview={overviewSelection.overview}
+              deadlineStatusCounts={
+                canViewDeadlineStatusCounts
+                  ? getMatchingDeadlineStatusCounts(overviewSelection.overview.project.id, deadlineStatusCounts)
+                  : null
+              }
+            />
           </Space>
         ) : null}
       </Space>
@@ -346,4 +383,14 @@ function mapCreateRequest(values: ProjectFormValues): CreateProjectRequest {
     startsAt: values.startsAt?.format('YYYY-MM-DD') ?? null,
     endsAt: values.endsAt?.format('YYYY-MM-DD') ?? null,
   };
+}
+
+export function getMatchingDeadlineStatusCounts(
+  projectId: string,
+  response: ProjectDeadlineStatusCountsResponse | null,
+): ProjectDeadlineStatusCountsResponse | null {
+  if (!response || response.filter.projectMode === 'none') return null;
+  return response.filter.projectIds.length === 1 && response.filter.projectIds[0] === projectId
+    ? response
+    : null;
 }
