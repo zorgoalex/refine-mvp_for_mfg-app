@@ -438,15 +438,16 @@ describe('OrderTransactionService', () => {
       transactions: transactionsWithSync,
       deadlineSync: {
         async syncOrderDeadlinesAfterSave(command) {
-          syncCalls.push(`${command.eventType}:${command.orderId}:${command.currentUser.id}`);
+          syncCalls.push(`${command.eventType}:${command.orderId}:${command.currentUser.id}:${command.requestId}`);
         },
       },
     }).create({
       currentUser: currentUser('manager'),
       dto: createSaveDto(),
+      requestId: 'req-order-create-1',
     });
 
-    expect(syncCalls).toEqual(['ORDER_CREATED:100:user_manager']);
+    expect(syncCalls).toEqual(['ORDER_CREATED:100:user_manager:req-order-create-1']);
   });
 
   it('updates an order after lock, version check and child ownership validation', async () => {

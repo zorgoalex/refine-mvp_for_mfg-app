@@ -46,6 +46,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
     orderId: number;
     currentUser: CurrentUser;
     eventType: 'ORDER_CREATED' | 'ORDER_UPDATED';
+    requestId?: string;
   }): Promise<void> {
     await this.database.transaction(async (tx) => {
       const outbox = new PgOutboxPort(tx);
@@ -56,12 +57,13 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
         payload: {
           orderId: input.orderId,
           actorUserId: input.currentUser.id,
+          requestId: input.requestId ?? null,
           source: 'orders.transaction',
         },
       });
 
-      await this.syncFinalOrderDeadline(tx, input.orderId, input.currentUser);
-      await this.syncStageDeadlines(tx, input.orderId, input.currentUser);
+      await this.syncFinalOrderDeadline(tx, input.orderId, input.currentUser, input.requestId);
+      await this.syncStageDeadlines(tx, input.orderId, input.currentUser, input.requestId);
     });
   }
 
@@ -69,6 +71,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
     tx: TransactionClient,
     orderId: number,
     currentUser: CurrentUser,
+    requestId: string | undefined,
   ): Promise<void> {
     const result = await tx.query<OrderDeadlineSourceRow>(
       `
@@ -96,6 +99,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
       completedDate: order.completion_date,
       metadata: { label: 'Финальный дедлайн заказа' },
       currentUser,
+      requestId,
     });
   }
 
@@ -103,6 +107,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
     tx: TransactionClient,
     orderId: number,
     currentUser: CurrentUser,
+    requestId: string | undefined,
   ): Promise<void> {
     const result = await tx.query<WorkshopDeadlineSourceRow>(
       `
@@ -146,10 +151,11 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
           productionStatusId: toNullableNumber(workshop.production_status_id),
         },
         currentUser,
+        requestId,
       });
     }
 
-    await this.cancelRemovedStageDeadlines(tx, orderId, activeWorkshopIds, currentUser);
+    await this.cancelRemovedStageDeadlines(tx, orderId, activeWorkshopIds, currentUser, requestId);
   }
 
   private async syncOneDeadline(
@@ -165,6 +171,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
       completedDate: string | Date | null;
       metadata: Record<string, unknown>;
       currentUser: CurrentUser;
+      requestId?: string;
     },
   ): Promise<void> {
     const existing = await findCurrentDeadline(tx, input.entityType, input.entityId);
@@ -174,6 +181,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
       if (existing && (existing.status === 'active' || existing.status === 'paused')) {
         await this.cancelDeadline(tx, existing.deadline_id, input.currentUser, {
           reason: 'planned_completion_date_removed',
+          requestId: input.requestId,
         });
       }
       return;
@@ -193,7 +201,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
 
     const completedAt = toCompletionAt(input.completedDate);
     if (completedAt && deadline.status === 'active') {
-      await this.completeDeadline(tx, deadline, completedAt, input.currentUser);
+      await this.completeDeadline(tx, deadline, completedAt, input.currentUser, input.requestId);
     }
   }
 
@@ -210,6 +218,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
       responsibleUserId: number | null;
       metadata: Record<string, unknown>;
       currentUser: CurrentUser;
+      requestId?: string;
     },
   ): Promise<DeadlineInstanceDto> {
     if (existing) {
@@ -264,6 +273,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
         source: 'orders.sync',
         previousDeadlineId: existing?.deadline_id ?? null,
         actorUserId: input.currentUser.id,
+        requestId: input.requestId,
       },
     });
 
@@ -305,6 +315,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
     deadline: DeadlineInstanceDto,
     completedAt: string,
     currentUser: CurrentUser,
+    requestId: string | undefined,
   ): Promise<void> {
     const status = getCompletionDeadlineStatus({
       deadlineAt: deadline.deadlineAt,
@@ -333,7 +344,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
       clientId: deadline.clientId,
       deadlineAt: deadline.deadlineAt,
       eventAt: new Date().toISOString(),
-      payload: { source: 'orders.sync', completedAt, actorUserId: currentUser.id },
+      payload: { source: 'orders.sync', completedAt, actorUserId: currentUser.id, requestId },
     });
   }
 
@@ -376,6 +387,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
     orderId: number,
     activeWorkshopIds: Set<number>,
     currentUser: CurrentUser,
+    requestId: string | undefined,
   ): Promise<void> {
     const result = await tx.query<DeadlineRow>(
       `
@@ -399,6 +411,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
       if (!activeWorkshopIds.has(entityId)) {
         await this.cancelDeadline(tx, row.deadline_id, currentUser, {
           reason: 'order_workshop_removed',
+          requestId,
         });
       }
     }

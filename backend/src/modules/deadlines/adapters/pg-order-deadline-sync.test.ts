@@ -11,6 +11,7 @@ describe('PgOrderDeadlineSync', () => {
       orderId: 100,
       currentUser: currentUser(),
       eventType: 'ORDER_CREATED',
+      requestId: 'req-order-save-sync-1',
     });
 
     const sql = database.queries.map((query) => normalizeSql(query.text));
@@ -19,6 +20,29 @@ describe('PgOrderDeadlineSync', () => {
     expect(sql.filter((query) => query.includes('INSERT INTO audit_log'))).toHaveLength(2);
     expect(sql.filter((query) => query.includes('INSERT INTO outbox_events'))).toHaveLength(3);
     expect(database.queries[0].params[0]).toBe('ORDER_CREATED');
+
+    const deadlineAuditQueries = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(deadlineAuditQueries.map((query) => query.params[4])).toEqual([
+      'req-order-save-sync-1',
+      'req-order-save-sync-1',
+    ]);
+    expect(deadlineAuditQueries.map((query) => query.params[2])).toEqual([
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+    ]);
+    const deadlineOutboxPayloads = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO outbox_events'))
+      .map((query) => JSON.parse(String(query.params.find((param) => String(param).startsWith('{')))) as Record<string, unknown>);
+    expect(deadlineOutboxPayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          orderId: 100,
+          requestId: 'req-order-save-sync-1',
+        }),
+      ]),
+    );
   });
 });
 
@@ -103,6 +127,7 @@ function createDatabase() {
               entityId: String(params[4]),
               orderWorkshopId: params[6] as number | null,
               deadlineAt: String(params[8]),
+              payload: JSON.parse(String(params[11])),
             }),
           ],
         };
@@ -165,6 +190,7 @@ function eventRow(input: {
   entityId: string;
   orderWorkshopId: number | null;
   deadlineAt: string;
+  payload: Record<string, unknown>;
 }) {
   return {
     deadline_event_id: input.eventId,
@@ -179,7 +205,7 @@ function eventRow(input: {
     deadline_at: input.deadlineAt,
     event_at: '2026-05-01T10:00:00.000Z',
     delay_minutes: null,
-    payload_json: {},
+    payload_json: input.payload,
     created_at: '2026-05-01T10:00:00.000Z',
   };
 }
