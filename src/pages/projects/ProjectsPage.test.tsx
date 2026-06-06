@@ -8,9 +8,10 @@ import {
   getNextOverviewSelectionState,
   type OverviewSelectionState,
 } from './ProjectsPage';
+import { upsertParticipant } from './ProjectParticipantsPanel';
 
 vi.mock('@refinedev/core', () => ({
-  useGetIdentity: () => ({ data: { id: '1', username: 'admin', role: 'admin', permissions: ['projects.view', 'projects.create', 'projects.archive'] } }),
+  useGetIdentity: () => ({ data: mockIdentity }),
 }));
 
 describe('ProjectsPage', () => {
@@ -30,9 +31,12 @@ describe('ProjectsPage', () => {
     createdBy: null,
   } as const;
 
+  const defaultFlags = { ...getFeatureFlags({}), useBackendProjects: true };
+
   it('renders a minimal project list with create and archive controls', () => {
+    mockIdentityPermissions(['projects.view', 'projects.create', 'projects.archive']);
     applyFeatureFlags({
-      ...getFeatureFlags({}),
+      ...defaultFlags,
       useBackendProjects: true,
       useBackendPermissions: false,
     });
@@ -53,9 +57,9 @@ describe('ProjectsPage', () => {
   });
 
   it('hides project overview action when backend permissions lack orders.view', () => {
+    mockIdentityPermissions(['projects.view', 'projects.create', 'projects.archive']);
     applyFeatureFlags({
-      ...getFeatureFlags({}),
-      useBackendProjects: true,
+      ...defaultFlags,
       useBackendPermissions: true,
     });
 
@@ -64,6 +68,157 @@ describe('ProjectsPage', () => {
     expect(html).toContain('Проекты');
     expect(html).not.toContain('Обзор');
     expect(html).toContain('Архивировать');
+  });
+
+  it('renders project entity links with accepted backend permissions', () => {
+    mockIdentityPermissions(['projects.view', 'orders.view', 'projects.manage_links']);
+    applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
+
+    const html = renderToString(
+      <ProjectsPage
+        initialProjects={[projectFixture]}
+        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+        initialEntityLinks={{
+          projectId: projectFixture.id,
+          requestId: 'req-links',
+          links: [{
+            id: 'link-1',
+            entityType: 'order',
+            entityId: '11195',
+            displayLabel: 'Заказ 11195',
+            relationType: 'related',
+            validFrom: '2026-06-06T00:00:00.000Z',
+            validTo: null,
+            metadata: {},
+          }],
+        }}
+      />,
+    );
+
+    expect(html).toContain('Связанные сущности');
+    expect(html).toContain('order');
+    expect(html).toContain('Заказ 11195');
+    expect(html).not.toMatch(/payment|finance|audit|client phone|order details/i);
+  });
+
+  it('filters entity link rows and add options by entity-specific permissions', () => {
+    mockIdentityPermissions(['projects.view', 'orders.view', 'projects.manage_links']);
+    applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
+
+    const html = renderToString(
+      <ProjectsPage
+        initialProjects={[projectFixture]}
+        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+        initialEntityLinks={{
+          projectId: projectFixture.id,
+          requestId: 'req-links',
+          links: [
+            {
+              id: 'order-link',
+              entityType: 'order',
+              entityId: '11195',
+              displayLabel: 'Заказ 11195',
+              relationType: 'related',
+              validFrom: '2026-06-06T00:00:00.000Z',
+              validTo: null,
+              metadata: {},
+            },
+            {
+              id: 'deadline-link',
+              entityType: 'deadline_instance',
+              entityId: '11111111-1111-4111-8111-111111111111',
+              displayLabel: 'Deadline private',
+              relationType: 'related',
+              validFrom: '2026-06-06T00:00:00.000Z',
+              validTo: null,
+              metadata: {},
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain('Заказ 11195');
+    expect(html).toContain('order');
+    expect(html).not.toContain('Deadline private');
+    expect(html).not.toContain('deadline_instance');
+    expect(html).not.toContain('client');
+  });
+
+  it('renders typed participants when participants permission is present', () => {
+    mockIdentityPermissions(['projects.view', 'orders.view', 'projects.participants.view']);
+    applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
+
+    const html = renderToString(
+      <ProjectsPage
+        initialProjects={[projectFixture]}
+        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+        initialParticipants={{
+          projectId: projectFixture.id,
+          requestId: 'req-participants',
+          participants: [{
+            id: 'participant-1',
+            participantType: 'employee',
+            participantId: '11',
+            displayName: 'Engineer A',
+            role: { code: 'observer', label: 'Observer' },
+            validFrom: '2026-06-06T00:00:00.000Z',
+            validTo: null,
+            metadata: {},
+          }],
+        }}
+        initialParticipantRoles={{ requestId: 'req-roles', roles: [{ code: 'observer', label: 'Observer' }] }}
+      />,
+    );
+
+    expect(html).toContain('Участники проекта');
+    expect(html).toContain('employee');
+    expect(html).toContain('Engineer A');
+    expect(html).toContain('Observer');
+  });
+
+  it('does not show participant replace form until participants are loaded', () => {
+    mockIdentityPermissions([
+      'projects.view',
+      'orders.view',
+      'projects.participants.view',
+      'projects.participants.manage',
+    ]);
+    applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
+
+    const html = renderToString(
+      <ProjectsPage
+        initialProjects={[projectFixture]}
+        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+        initialParticipants={null}
+        initialParticipantRoles={{ requestId: 'req-roles', roles: [{ code: 'observer', label: 'Observer' }] }}
+      />,
+    );
+
+    expect(html).toContain('Участники проекта');
+    expect(html).not.toContain('Сохранить участников');
+  });
+
+  it('blocks participant replacement when an existing participant id is unavailable', () => {
+    expect(() =>
+      upsertParticipant([
+        {
+          id: 'redacted',
+          participantType: 'employee',
+          participantId: null,
+          displayName: 'Redacted',
+          role: { code: 'observer', label: 'Observer' },
+          validFrom: '2026-06-06T00:00:00.000Z',
+          validTo: null,
+          metadata: {},
+        },
+      ], {
+        participantType: 'user',
+        participantId: '158',
+        roleCode: 'manager',
+        metadata: {},
+      }),
+    ).toThrow('Cannot replace participants while a current participant id is unavailable');
   });
 
   it('keeps the latest selected overview when requests resolve out of order', () => {
@@ -142,10 +297,28 @@ function createOverviewFixture(projectId: string, name: string): ProjectOverview
       relationCounts: [{ relationType: 'main', isPrimary: true, orderCount: 1 }],
       createdMonthCounts: [{ month: '2026-06-01', orderCount: 1 }],
     },
+    linkedEntityCounts: [],
+    participants: { currentSummary: [] },
     filter: {
       projectId,
       temporalMode: 'current',
     },
     omitted: [],
+  };
+}
+
+let mockIdentity = {
+  id: '1',
+  username: 'admin',
+  role: 'admin',
+  permissions: ['projects.view', 'projects.create', 'projects.archive'],
+};
+
+function mockIdentityPermissions(permissions: string[]): void {
+  mockIdentity = {
+    id: '1',
+    username: 'admin',
+    role: 'admin',
+    permissions,
   };
 }

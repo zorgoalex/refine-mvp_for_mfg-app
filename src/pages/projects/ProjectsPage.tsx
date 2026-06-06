@@ -17,15 +17,22 @@ import type { ColumnsType } from 'antd/es/table';
 import { projectsApi } from '../../api/projectsApi';
 import type {
   CreateProjectRequest,
+  ProjectEntityLinksResponse,
+  ProjectParticipantRolesResponse,
+  ProjectParticipantsResponse,
   ProjectDto,
   ProjectOverviewResponse,
   ProjectStatus,
+  ReplaceProjectEntityLink,
+  ReplaceProjectParticipant,
 } from '../../api/types/projectApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { can, canAll } from '../../utils/permissions';
 import type { UserIdentity } from '../../types/auth';
 import { canViewProjectsPage } from '../../utils/projectAccess';
 import { ProjectDetailOverview } from './ProjectDetailOverview';
+import { ProjectEntityLinksPanel } from './ProjectEntityLinksPanel';
+import { ProjectParticipantsPanel } from './ProjectParticipantsPanel';
 
 const { Title } = Typography;
 
@@ -56,6 +63,9 @@ interface ProjectFormValues {
 interface ProjectsPageProps {
   initialProjects?: ProjectDto[];
   initialOverview?: ProjectOverviewResponse | null;
+  initialEntityLinks?: ProjectEntityLinksResponse | null;
+  initialParticipants?: ProjectParticipantsResponse | null;
+  initialParticipantRoles?: ProjectParticipantRolesResponse | null;
 }
 
 export interface OverviewSelectionState {
@@ -117,6 +127,9 @@ export function getNextOverviewSelectionState(
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   initialProjects = [],
   initialOverview = null,
+  initialEntityLinks = null,
+  initialParticipants = null,
+  initialParticipantRoles = null,
 }) => {
   const [form] = Form.useForm<ProjectFormValues>();
   const { data: identity } = useGetIdentity<UserIdentity>();
@@ -129,6 +142,11 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     loadingProjectId: null,
     overview: initialOverview,
   });
+  const [entityLinks, setEntityLinks] = useState<ProjectEntityLinksResponse | null>(initialEntityLinks);
+  const [participants, setParticipants] = useState<ProjectParticipantsResponse | null>(initialParticipants);
+  const [participantRoles, setParticipantRoles] = useState<ProjectParticipantRolesResponse | null>(
+    initialParticipantRoles,
+  );
   const overviewRequestIdRef = useRef(0);
 
   const currentUser = identity ?? null;
@@ -136,6 +154,10 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   const canCreate = !featureFlags.useBackendPermissions || can('projects.create', currentUser);
   const canArchive = !featureFlags.useBackendPermissions || can('projects.archive', currentUser);
   const canViewOverview = !featureFlags.useBackendPermissions || canAll(['projects.view', 'orders.view'], currentUser);
+  const canViewEntityLinks = !featureFlags.useBackendPermissions || can('projects.view', currentUser);
+  const canManageEntityLinks = !featureFlags.useBackendPermissions || can('projects.manage_links', currentUser);
+  const canViewParticipants = !featureFlags.useBackendPermissions || can('projects.participants.view', currentUser);
+  const canManageParticipants = !featureFlags.useBackendPermissions || can('projects.participants.manage', currentUser);
 
   const loadProjects = useCallback(async () => {
     if (!canView) return;
@@ -182,6 +204,13 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     }
   }, [loadProjects]);
 
+  const handleAuxiliaryLoadError = useCallback((error: unknown, requestId: number): null => {
+    if (overviewRequestIdRef.current === requestId) {
+      message.error(error instanceof Error ? error.message : 'Не удалось загрузить данные проекта');
+    }
+    return null;
+  }, []);
+
   const handleOverview = useCallback(async (projectId: string) => {
     const requestId = overviewRequestIdRef.current + 1;
     overviewRequestIdRef.current = requestId;
@@ -192,12 +221,28 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     }));
 
     try {
-      const response = await projectsApi.getProjectOverview(projectId);
+      const [response, linksResponse, participantsResponse, rolesResponse] = await Promise.all([
+        projectsApi.getProjectOverview(projectId),
+        canViewEntityLinks
+          ? projectsApi.getProjectEntityLinks(projectId).catch((error) => handleAuxiliaryLoadError(error, requestId))
+          : Promise.resolve(null),
+        canViewParticipants
+          ? projectsApi.getProjectParticipants(projectId).catch((error) => handleAuxiliaryLoadError(error, requestId))
+          : Promise.resolve(null),
+        canViewParticipants
+          ? projectsApi.getProjectParticipantRoles().catch((error) => handleAuxiliaryLoadError(error, requestId))
+          : Promise.resolve(null),
+      ]);
       setOverviewSelection((state) => getNextOverviewSelectionState(state, {
         type: 'success',
         requestId,
         overview: response,
       }));
+      if (overviewRequestIdRef.current === requestId) {
+        setEntityLinks(linksResponse);
+        setParticipants(participantsResponse);
+        setParticipantRoles(rolesResponse);
+      }
     } catch (error) {
       if (overviewRequestIdRef.current === requestId) {
         message.error(error instanceof Error ? error.message : 'Не удалось загрузить обзор проекта');
@@ -207,12 +252,47 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         requestId,
       }));
     }
-  }, []);
+  }, [canViewEntityLinks, canViewParticipants, handleAuxiliaryLoadError]);
 
   const handleCloseOverview = useCallback(() => {
     overviewRequestIdRef.current += 1;
     setOverviewSelection((state) => getNextOverviewSelectionState(state, { type: 'close' }));
+    setEntityLinks(null);
+    setParticipants(null);
+    setParticipantRoles(null);
   }, []);
+
+  const handleAppendEntityLink = useCallback(async (link: ReplaceProjectEntityLink) => {
+    const projectId = overviewSelection.overview?.project.id;
+    if (!projectId) return;
+
+    try {
+      const response = await projectsApi.appendProjectEntityLinks(projectId, {
+        idempotencyKey: createProjectIdempotencyKey('project-entity-links'),
+        links: [link],
+      });
+      setEntityLinks(response);
+      message.success('Связь проекта добавлена');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось сохранить связь проекта');
+    }
+  }, [overviewSelection.overview?.project.id]);
+
+  const handleReplaceParticipants = useCallback(async (nextParticipants: ReplaceProjectParticipant[]) => {
+    const projectId = overviewSelection.overview?.project.id;
+    if (!projectId) return;
+
+    try {
+      const response = await projectsApi.replaceProjectParticipants(projectId, {
+        idempotencyKey: createProjectIdempotencyKey('project-participants'),
+        participants: nextParticipants,
+      });
+      setParticipants(response);
+      message.success('Участники проекта сохранены');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось сохранить участников проекта');
+    }
+  }, [overviewSelection.overview?.project.id]);
 
   const columns = useMemo<ColumnsType<ProjectDto>>(
     () => [
@@ -330,6 +410,22 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Button onClick={handleCloseOverview}>Закрыть</Button>
             <ProjectDetailOverview overview={overviewSelection.overview} />
+            {canViewEntityLinks ? (
+              <ProjectEntityLinksPanel
+                response={entityLinks}
+                currentUser={currentUser}
+                canManage={canManageEntityLinks}
+                onAppend={(link) => void handleAppendEntityLink(link)}
+              />
+            ) : null}
+            {canViewParticipants ? (
+              <ProjectParticipantsPanel
+                response={participants}
+                roles={participantRoles?.roles ?? []}
+                canManage={canManageParticipants}
+                onReplace={(nextParticipants) => void handleReplaceParticipants(nextParticipants)}
+              />
+            ) : null}
           </Space>
         ) : null}
       </Space>
@@ -346,4 +442,12 @@ function mapCreateRequest(values: ProjectFormValues): CreateProjectRequest {
     startsAt: values.startsAt?.format('YYYY-MM-DD') ?? null,
     endsAt: values.endsAt?.format('YYYY-MM-DD') ?? null,
   };
+}
+
+function createProjectIdempotencyKey(prefix: string): string {
+  const uuid =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}:${uuid}`;
 }
