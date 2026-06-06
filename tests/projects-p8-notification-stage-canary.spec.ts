@@ -454,11 +454,17 @@ function loadNotificationSnapshot(projectId: string, notificationPrefix: string)
         WHERE payload ILIKE '%client%'
            OR payload ILIKE '%payment%'
            OR payload ILIKE '%finance%'
-           OR payload ILIKE '%audit%'
            OR payload ILIKE '%phone%'
            OR payload ILIKE '%телефон%'
            OR payload ILIKE '%detail%'
            OR payload ILIKE '%детал%'
+           OR payload IN (
+             SELECT concat_ws(' ', title, message, source_type, source_id)
+             FROM public.notifications
+             WHERE entity_id = '${sqlQuote(projectId)}'
+               AND idempotency_key LIKE '${sqlQuote(notificationPrefix)}%'
+               AND concat_ws(' ', title, message, source_type, source_id) ILIKE '%audit%'
+           )
       )
     )::text;
   `);
