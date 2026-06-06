@@ -19,10 +19,12 @@ export interface ProjectBatchLinkItemDto {
 }
 
 export interface ProjectBatchLinkRequestDto {
-  mode: 'dry-run';
+  mode: 'dry-run' | 'write';
+  writeIntent?: 'explicit-selected-ids';
   fixtureKey: string;
   idempotencyKey: string;
   entityType: ProjectEntityTypeCode;
+  relationType: string;
   source: ProjectBatchLinkSourceDto;
   items: ProjectBatchLinkItemDto[];
 }
@@ -64,17 +66,25 @@ export interface ProjectBatchLinkSampleEvidenceDto {
 
 export interface ProjectBatchLinkResponseDto {
   projectId: string;
-  mode: 'dry-run';
+  mode: 'dry-run' | 'write';
   summary: {
     proposed: number;
+    created?: number;
+    existing?: number;
     skipped: number;
     conflicts: number;
     sampledEvidenceRows: number;
   };
   proposals: ProjectBatchLinkProposalDto[];
+  created?: ProjectBatchLinkProposalDto[];
+  existing?: ProjectBatchLinkProposalDto[];
   skipped: ProjectBatchLinkSkippedDto[];
   sampleEvidence: ProjectBatchLinkSampleEvidenceDto[];
-  writeEnabled: false;
+  changed?: boolean;
+  auditId?: string | null;
+  outboxEventId?: string | null;
+  requestId?: string | null;
+  writeEnabled: boolean;
 }
 
 const sourceSchema = z.object({
@@ -91,14 +101,31 @@ const itemSchema = z.object({
 
 const batchLinkRequestSchema = z
   .object({
-    mode: z.literal('dry-run'),
+    mode: z.enum(['dry-run', 'write']),
+    writeIntent: z.literal('explicit-selected-ids').optional(),
     fixtureKey: z.string().trim().min(1).max(200),
     idempotencyKey: z.string().trim().min(1).max(200),
     entityType: z.enum(PROJECT_ENTITY_TYPE_CODES),
+    relationType: z.string().trim().min(1).max(100).regex(/^[a-z][a-z0-9_:-]{0,99}$/),
     source: sourceSchema,
     items: z.array(itemSchema).max(500),
   })
+  .strict()
   .superRefine((request, context) => {
+    if (request.mode === 'write' && request.writeIntent !== 'explicit-selected-ids') {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'writeIntent=explicit-selected-ids is required for write mode',
+        path: ['writeIntent'],
+      });
+    }
+    if (request.mode === 'dry-run' && request.writeIntent !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'writeIntent is only accepted for write mode',
+        path: ['writeIntent'],
+      });
+    }
     for (const [index, item] of request.items.entries()) {
       if (!hasValidEntityIdShape(request.entityType, item.entityId)) {
         context.addIssue({
@@ -111,16 +138,6 @@ const batchLinkRequestSchema = z
   });
 
 export function parseProjectBatchLinkRequest(body: unknown): ProjectBatchLinkRequestDto {
-  const mode = (body && typeof body === 'object' && 'mode' in body)
-    ? (body as { mode?: unknown }).mode
-    : undefined;
-  if (mode !== 'dry-run') {
-    throw new ApiError(422, 'VALIDATION_ERROR', 'Only dry-run batch link mode is accepted', {
-      field: 'mode',
-      writeEnabled: false,
-    });
-  }
-
   const parsed = batchLinkRequestSchema.safeParse(body);
   if (!parsed.success) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'VALIDATION_ERROR: Project batch link payload validation failed', {

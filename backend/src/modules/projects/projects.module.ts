@@ -187,6 +187,9 @@ import { ProjectDeadlineStatusCountsReportService } from './reporting/project-de
           batchLinks: database.isConfigured
             ? new PgProjectBatchLinkRepository(database)
             : new UnavailableProjectBatchLinkRepository(),
+          entityLinks: database.isConfigured
+            ? new PgProjectEntityLinksRepository(database)
+            : new UnavailableProjectEntityLinksRepository(),
         }),
       inject: [DatabaseService],
     },

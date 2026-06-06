@@ -17,13 +17,15 @@ const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 const batchLinkRequestSwaggerSchema = {
   type: 'object',
-  required: ['mode', 'fixtureKey', 'idempotencyKey', 'entityType', 'source', 'items'],
+  required: ['mode', 'fixtureKey', 'idempotencyKey', 'entityType', 'relationType', 'source', 'items'],
   additionalProperties: false,
   properties: {
-    mode: { type: 'string', enum: ['dry-run'] },
+    mode: { type: 'string', enum: ['dry-run', 'write'] },
+    writeIntent: { type: 'string', enum: ['explicit-selected-ids'] },
     fixtureKey: { type: 'string', minLength: 1, maxLength: 200 },
     idempotencyKey: { type: 'string', minLength: 1, maxLength: 200 },
     entityType: { type: 'string', enum: PROJECT_ENTITY_TYPE_CODES },
+    relationType: { type: 'string', minLength: 1, maxLength: 100 },
     source: {
       type: 'object',
       required: ['type', 'reference'],
@@ -57,7 +59,7 @@ const batchLinkResponseSwaggerSchema = {
   additionalProperties: false,
   properties: {
     projectId: { type: 'string', format: 'uuid' },
-    mode: { type: 'string', enum: ['dry-run'] },
+    mode: { type: 'string', enum: ['dry-run', 'write'] },
     summary: {
       type: 'object',
       required: ['proposed', 'skipped', 'conflicts', 'sampledEvidenceRows'],
@@ -72,7 +74,11 @@ const batchLinkResponseSwaggerSchema = {
     proposals: { type: 'array', items: { type: 'object', additionalProperties: true } },
     skipped: { type: 'array', items: { type: 'object', additionalProperties: true } },
     sampleEvidence: { type: 'array', items: { type: 'object', additionalProperties: true } },
-    writeEnabled: { type: 'boolean', enum: [false] },
+    changed: { type: 'boolean' },
+    auditId: { type: 'string', nullable: true },
+    outboxEventId: { type: 'string', nullable: true },
+    requestId: { type: 'string', nullable: true },
+    writeEnabled: { type: 'boolean' },
   },
 } as const;
 
@@ -89,13 +95,13 @@ export class ProjectBatchLinkController {
 
   @ApiParam({ name: 'projectId', type: String, description: 'Project UUID' })
   @ApiBody({ schema: swaggerSchema(batchLinkRequestSwaggerSchema) })
-  @ApiResponse({ status: 200, description: 'Dry-run project batch link proposals', schema: swaggerSchema(batchLinkResponseSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Project batch link dry-run or write result', schema: swaggerSchema(batchLinkResponseSwaggerSchema) })
   @ApiResponse({ status: 400, description: 'Invalid project id' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
-  @ApiResponse({ status: 422, description: 'Invalid payload or non-dry-run mode' })
+  @ApiResponse({ status: 422, description: 'Invalid payload' })
   @ApiResponse({ status: 503, description: 'Projects API is disabled' })
-  @ApiOperation({ operationId: 'dryRunProjectBatchLink', summary: 'Dry-run project batch link proposals' })
+  @ApiOperation({ operationId: 'executeProjectBatchLink', summary: 'Dry-run or write explicitly selected project batch links' })
   @Post()
   @HttpCode(200)
   async dryRun(
@@ -104,17 +110,35 @@ export class ProjectBatchLinkController {
     @Body() body: unknown,
   ): Promise<ProjectBatchLinkResponseDto> {
     this.assertProjectsEnabled();
-    return this.batchLinks.dryRun({
-      currentUser: this.requireCurrentUser(request),
-      projectId: parseProjectId(projectIdParam),
-      dto: parseProjectBatchLinkRequest(body),
+    const currentUser = this.requireCurrentUser(request);
+    const projectId = parseProjectId(projectIdParam);
+    const dto = parseProjectBatchLinkRequest(body);
+    const command = {
+      currentUser,
+      projectId,
+      dto,
       requestId: request.requestId,
-    });
+    };
+    if (dto.mode === 'write') {
+      this.assertBatchWriteEnabled();
+      return this.batchLinks.write(command);
+    }
+    return this.batchLinks.dryRun(command);
   }
 
   private assertProjectsEnabled(): void {
     if (!this.runtimeConfig.getFeatureFlags().projectsEnabled) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Projects API is disabled', { feature: 'projects' });
+    }
+  }
+
+  private assertBatchWriteEnabled(): void {
+    const flags = this.runtimeConfig.getFeatureFlags();
+    if (flags.projectsReadOnly || !flags.projectsBatchLinkWriteEnabled) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Projects batch link write mode is disabled', {
+        feature: 'projects',
+        writeEnabled: false,
+      });
     }
   }
 

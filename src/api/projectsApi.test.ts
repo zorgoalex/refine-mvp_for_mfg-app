@@ -164,6 +164,7 @@ describe('projectsApi', () => {
       { projectId, links: [], requestId: 'req-links-list' },
       { projectId, links: [], requestId: 'req-links-put', changed: true },
       { projectId, links: [], requestId: 'req-links-post', changed: true },
+      { projectId, mode: 'write', summary: { proposed: 1, created: 1, existing: 0, skipped: 0, conflicts: 0, sampledEvidenceRows: 1 }, proposals: [], created: [], existing: [], skipped: [], sampleEvidence: [], writeEnabled: true },
       { projectId, participants: [], requestId: 'req-participants-list' },
       { projectId, participants: [], requestId: 'req-participants-put', changed: true },
       { roles: [{ code: 'observer', label: 'Observer' }], requestId: 'req-roles' },
@@ -179,6 +180,16 @@ describe('projectsApi', () => {
       idempotencyKey: 'links-append-key',
       links: [{ entityType: 'client', entityId: '22', relationType: 'related' }],
     });
+    await projectsApi.batchLinkProjectEntities(projectId, {
+      mode: 'write',
+      writeIntent: 'explicit-selected-ids',
+      fixtureKey: 'projects-batch-link-write-2026-06-06',
+      idempotencyKey: 'batch-link-write-key',
+      entityType: 'order',
+      relationType: 'related',
+      source: { type: 'operator_csv', reference: 'reviewed-input-001' },
+      items: [{ entityId: '11195', reason: 'explicit reviewed mapping', confidence: 'explicit' }],
+    });
     await projectsApi.getProjectParticipants(projectId);
     await projectsApi.replaceProjectParticipants(projectId, {
       idempotencyKey: 'participants-replace-key',
@@ -190,6 +201,7 @@ describe('projectsApi', () => {
       [`/api/v1/projects/${projectId}/entity-links`, 'GET'],
       [`/api/v1/projects/${projectId}/entity-links`, 'PUT'],
       [`/api/v1/projects/${projectId}/entity-links`, 'POST'],
+      [`/api/v1/projects/${projectId}/batch-link`, 'POST'],
       [`/api/v1/projects/${projectId}/participants`, 'GET'],
       [`/api/v1/projects/${projectId}/participants`, 'PUT'],
       ['/api/v1/projects/participant-roles', 'GET'],
@@ -199,7 +211,17 @@ describe('projectsApi', () => {
       links: [{ entityType: 'order', entityId: '11195', relationType: 'related', metadata: {} }],
       reason: 'frontend test',
     }));
-    expect(fetchMock.mock.calls[4][1]?.body).toBe(JSON.stringify({
+    expect(fetchMock.mock.calls[3][1]?.body).toBe(JSON.stringify({
+      mode: 'write',
+      writeIntent: 'explicit-selected-ids',
+      fixtureKey: 'projects-batch-link-write-2026-06-06',
+      idempotencyKey: 'batch-link-write-key',
+      entityType: 'order',
+      relationType: 'related',
+      source: { type: 'operator_csv', reference: 'reviewed-input-001' },
+      items: [{ entityId: '11195', reason: 'explicit reviewed mapping', confidence: 'explicit' }],
+    }));
+    expect(fetchMock.mock.calls[5][1]?.body).toBe(JSON.stringify({
       idempotencyKey: 'participants-replace-key',
       participants: [{ participantType: 'user', participantId: '158', roleCode: 'manager', metadata: {} }],
     }));

@@ -8,6 +8,8 @@ import type {
   ProjectDeadlineStatusCountsResponse,
   ProjectDto,
   ProjectEntityLinksResponse,
+  ProjectBatchLinkRequest,
+  ProjectBatchLinkResponse,
   ProjectListQuery,
   ProjectListResponse,
   ProjectLookupQuery,
@@ -74,6 +76,16 @@ export const projectsApi = {
     return httpClient.post<ProjectEntityLinksResponse>(
       apiRoutes.projects.entityLinks(validateProjectId(projectId)),
       normalizeEntityLinksRequest(request),
+    );
+  },
+
+  batchLinkProjectEntities(
+    projectId: string,
+    request: ProjectBatchLinkRequest,
+  ): Promise<ProjectBatchLinkResponse> {
+    return httpClient.post<ProjectBatchLinkResponse>(
+      apiRoutes.projects.batchLink(validateProjectId(projectId)),
+      request,
     );
   },
 

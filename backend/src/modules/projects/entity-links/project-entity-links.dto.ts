@@ -30,6 +30,9 @@ export interface ProjectEntityLinksResponseDto {
   requestId: string;
   changed?: boolean;
   auditId?: string;
+  outboxEventId?: string | null;
+  createdLinks?: ProjectEntityLinkDto[];
+  existingLinks?: ProjectEntityLinkDto[];
 }
 
 export interface ReplaceProjectEntityLinkDto {

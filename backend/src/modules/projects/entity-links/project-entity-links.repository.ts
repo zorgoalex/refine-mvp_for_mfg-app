@@ -37,10 +37,15 @@ export interface AppendProjectEntityLinksCommand {
   requestId?: string;
 }
 
+export interface AppendIdempotentProjectEntityLinksCommand extends AppendProjectEntityLinksCommand {
+  source: 'projects-batch-link';
+}
+
 export interface ProjectEntityLinksRepositoryPort {
   list(command: ListProjectEntityLinksCommand): Promise<ProjectEntityLinksResponseDto>;
   replace(command: ReplaceProjectEntityLinksCommand): Promise<ProjectEntityLinksResponseDto>;
   append(command: AppendProjectEntityLinksCommand): Promise<ProjectEntityLinksResponseDto>;
+  appendIdempotent?(command: AppendIdempotentProjectEntityLinksCommand): Promise<ProjectEntityLinksResponseDto>;
 }
 
 type ProjectLinksDatabase = DatabaseClient & {
@@ -111,6 +116,10 @@ export class PgProjectEntityLinksRepository implements ProjectEntityLinksReposit
   async append(command: AppendProjectEntityLinksCommand): Promise<ProjectEntityLinksResponseDto> {
     return writeLinks(this.database, command, 'append');
   }
+
+  async appendIdempotent(command: AppendIdempotentProjectEntityLinksCommand): Promise<ProjectEntityLinksResponseDto> {
+    return writeLinks(this.database, command, 'batch_append');
+  }
 }
 
 export class UnavailableProjectEntityLinksRepository implements ProjectEntityLinksRepositoryPort {
@@ -125,12 +134,16 @@ export class UnavailableProjectEntityLinksRepository implements ProjectEntityLin
   async append(): Promise<ProjectEntityLinksResponseDto> {
     throw databaseUnavailable();
   }
+
+  async appendIdempotent(): Promise<ProjectEntityLinksResponseDto> {
+    throw databaseUnavailable();
+  }
 }
 
 async function writeLinks(
   database: ProjectLinksDatabase,
-  command: ReplaceProjectEntityLinksCommand | AppendProjectEntityLinksCommand,
-  mode: 'replace' | 'append',
+  command: ReplaceProjectEntityLinksCommand | AppendProjectEntityLinksCommand | AppendIdempotentProjectEntityLinksCommand,
+  mode: 'replace' | 'append' | 'batch_append',
 ): Promise<ProjectEntityLinksResponseDto> {
   const normalized = normalizeLinks(command.dto.links);
 
@@ -169,6 +182,7 @@ async function writeLinks(
     const changed = removed.length > 0 || added.length > 0;
     let links = currentRows;
     let auditId: string | undefined;
+    let outboxEventId: string | null = null;
 
     if (changed) {
       if (removed.length > 0) {
@@ -185,15 +199,21 @@ async function writeLinks(
         ...currentRows.filter((link) => !removedKeys.has(linkKey(link))),
         ...inserted,
       ].sort(compareLinks);
-      auditId = await writeAudit(tx, { command, requestId, before: currentRows.map(mapLinkRow), after: links.map(mapLinkRow), removed, added });
-      await enqueueOutbox(tx, { command, requestId, auditId, project, removed, added });
+      auditId = await writeAudit(tx, { command, requestId, before: currentRows.map(mapLinkRow), after: links.map(mapLinkRow), removed, added, existing: normalized.filter((link) => currentByKey.has(inputKey(link))) });
+      outboxEventId = await enqueueOutbox(tx, { command, requestId, auditId, project, removed, added });
     }
 
+    const hydrated = (await hydrateLinkRows(tx, links)).map(mapLinkRow);
+    const createdKeys = new Set(added.map(inputKey));
+    const existingKeys = new Set(normalized.filter((link) => currentByKey.has(inputKey(link))).map(inputKey));
     const response = {
       projectId: command.projectId,
-      links: (await hydrateLinkRows(tx, links)).map(mapLinkRow),
+      links: hydrated,
       requestId,
       changed,
+      outboxEventId,
+      createdLinks: hydrated.filter((link) => createdKeys.has(dtoKey(link))),
+      existingLinks: hydrated.filter((link) => existingKeys.has(dtoKey(link))),
       ...(auditId ? { auditId } : {}),
     };
     await completeIdempotency(tx, command.dto.idempotencyKey, response);
@@ -331,16 +351,19 @@ async function hydrateLinkRows(database: DatabaseClient, rows: LinkRow[]): Promi
 async function writeAudit(
   tx: DatabaseClient,
   input: {
-    command: ReplaceProjectEntityLinksCommand | AppendProjectEntityLinksCommand;
+    command: ReplaceProjectEntityLinksCommand | AppendProjectEntityLinksCommand | AppendIdempotentProjectEntityLinksCommand;
     requestId: string;
     before: ProjectEntityLinkDto[];
     after: ProjectEntityLinkDto[];
     removed: LinkRow[];
     added: NormalizedLink[];
+    existing: NormalizedLink[];
   },
 ): Promise<string> {
   const added = input.added.map(linkDimension);
   const removed = input.removed.map(rowDimension);
+  const existing = input.existing.map(linkDimension);
+  const source = 'source' in input.command ? input.command.source : SOURCE;
   const result = await tx.query<AuditRow>(
     `
     INSERT INTO audit_log (
@@ -359,20 +382,27 @@ async function writeAudit(
       input.command.currentUser.username,
       input.command.currentUser.role,
       input.requestId,
-      SOURCE,
+      source,
       JSON.stringify({ links: input.before }),
       JSON.stringify({ links: input.after }),
-      JSON.stringify({ added, removed }),
+      JSON.stringify({ added, removed, existing, skipped: [] }),
       JSON.stringify({
         idempotencyKey: input.command.dto.idempotencyKey,
         reason: normalizeReason(input.command.dto.reason),
-        relatedEntityTypes: [...new Set([...added, ...removed].map((item) => item.entityType))],
-        relatedOrderIds: dimensionIds([...added, ...removed], 'order'),
-        relatedUserIds: dimensionIds([...added, ...removed], 'user'),
-        relatedEmployeeIds: dimensionIds([...added, ...removed], 'employee'),
-        relatedClientIds: dimensionIds([...added, ...removed], 'client'),
-        relatedWorkshopIds: dimensionIds([...added, ...removed], 'workshop'),
-        relatedDeadlineInstanceIds: dimensionIds([...added, ...removed], 'deadline_instance'),
+        batchSourceType: input.command.dto.links[0]?.metadata?.batchSourceType ?? null,
+        batchSourceReference: input.command.dto.links[0]?.metadata?.batchSourceReference ?? null,
+        fixtureKey: input.command.dto.links[0]?.metadata?.fixtureKey ?? null,
+        sourceRows: input.command.dto.links.map((link) => link.metadata?.sourceRow ?? null),
+        createdCount: added.length,
+        existingCount: existing.length,
+        skippedCount: 0,
+        relatedEntityTypes: [...new Set([...added, ...removed, ...existing].map((item) => item.entityType))],
+        relatedOrderIds: dimensionIds([...added, ...removed, ...existing], 'order'),
+        relatedUserIds: dimensionIds([...added, ...removed, ...existing], 'user'),
+        relatedEmployeeIds: dimensionIds([...added, ...removed, ...existing], 'employee'),
+        relatedClientIds: dimensionIds([...added, ...removed, ...existing], 'client'),
+        relatedWorkshopIds: dimensionIds([...added, ...removed, ...existing], 'workshop'),
+        relatedDeadlineInstanceIds: dimensionIds([...added, ...removed, ...existing], 'deadline_instance'),
       }),
     ],
   );
@@ -382,27 +412,29 @@ async function writeAudit(
 async function enqueueOutbox(
   tx: DatabaseClient,
   input: {
-    command: ReplaceProjectEntityLinksCommand | AppendProjectEntityLinksCommand;
+    command: ReplaceProjectEntityLinksCommand | AppendProjectEntityLinksCommand | AppendIdempotentProjectEntityLinksCommand;
     requestId: string;
     auditId: string;
     project: ProjectRow;
     removed: LinkRow[];
     added: NormalizedLink[];
   },
-): Promise<void> {
+): Promise<string | null> {
   const added = input.added.map(linkDimension);
   const removed = input.removed.map(rowDimension);
-  await tx.query(
+  const source = 'source' in input.command ? input.command.source : SOURCE;
+  const result = await tx.query<{ outbox_event_id: string }>(
     `
     INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
     VALUES ($1, 'project', $2, $3::jsonb, $4)
     ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING outbox_event_id::text
     `,
     [
       'PROJECT_ENTITY_LINKS_CHANGED',
       input.command.projectId,
       JSON.stringify({
-        source: SOURCE,
+        source,
         eventType: 'PROJECT_ENTITY_LINKS_CHANGED',
         idempotencyKey: input.command.dto.idempotencyKey,
         outboxIdempotencyKey: `${input.command.dto.idempotencyKey}:project_entity_links_changed`,
@@ -419,13 +451,14 @@ async function enqueueOutbox(
       `${input.command.dto.idempotencyKey}:project_entity_links_changed`,
     ],
   );
+  return result.rows[0]?.outbox_event_id ?? null;
 }
 
 async function reconcileIdempotency(
   tx: DatabaseClient,
-  command: ReplaceProjectEntityLinksCommand | AppendProjectEntityLinksCommand,
+  command: ReplaceProjectEntityLinksCommand | AppendProjectEntityLinksCommand | AppendIdempotentProjectEntityLinksCommand,
   normalizedLinks: NormalizedLink[],
-  mode: 'replace' | 'append',
+  mode: 'replace' | 'append' | 'batch_append',
 ): Promise<{ completedResponse?: ProjectEntityLinksResponseDto }> {
   const requestHash = hashRequest({
     actorUserId: command.currentUser.id,
@@ -439,7 +472,12 @@ async function reconcileIdempotency(
     })),
     reason: normalizeReason(command.dto.reason),
   });
-  const commandName = mode === 'replace' ? 'projects.entity_links.replace' : 'projects.entity_links.append';
+  const commandName =
+    mode === 'replace'
+      ? 'projects.entity_links.replace'
+      : mode === 'batch_append'
+        ? 'projects.entity_links.batch_append'
+        : 'projects.entity_links.append';
   const inserted = await tx.query<IdempotencyRow>(
     `
     INSERT INTO command_idempotency_keys (
@@ -505,6 +543,10 @@ function mapLinkRow(row: LinkRow): ProjectEntityLinkDto {
 }
 
 function inputKey(link: NormalizedLink): string {
+  return `${link.entityType}:${link.entityId}:${link.relationType}`;
+}
+
+function dtoKey(link: ProjectEntityLinkDto): string {
   return `${link.entityType}:${link.entityId}:${link.relationType}`;
 }
 
