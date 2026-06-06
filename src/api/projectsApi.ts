@@ -4,16 +4,23 @@ import { validateOrderId, withQuery } from './ordersApi';
 import type {
   CreateProjectRequest,
   OrderProjectsResponse,
+  ProjectDeadlineStatusCountsQuery,
+  ProjectDeadlineStatusCountsResponse,
   ProjectDto,
+  ProjectEntityLinksResponse,
   ProjectListQuery,
   ProjectListResponse,
   ProjectLookupQuery,
   ProjectLookupResponse,
   ProjectOverviewQuery,
   ProjectOverviewResponse,
+  ProjectParticipantRolesResponse,
+  ProjectParticipantsResponse,
   ProjectResponse,
+  ReplaceProjectEntityLinksRequest,
   ReplaceOrderProjectsRequest,
   ReplaceOrderProjectsResponse,
+  ReplaceProjectParticipantsRequest,
   UpdateProjectRequest,
 } from './types/projectApi.types';
 
@@ -41,6 +48,69 @@ export const projectsApi = {
   ): Promise<ProjectOverviewResponse> {
     return httpClient.get<ProjectOverviewResponse>(
       withQuery(apiRoutes.projects.overview(validateProjectId(projectId)), params),
+    );
+  },
+
+  getProjectEntityLinks(projectId: string): Promise<ProjectEntityLinksResponse> {
+    return httpClient.get<ProjectEntityLinksResponse>(
+      apiRoutes.projects.entityLinks(validateProjectId(projectId)),
+    );
+  },
+
+  replaceProjectEntityLinks(
+    projectId: string,
+    request: ReplaceProjectEntityLinksRequest,
+  ): Promise<ProjectEntityLinksResponse> {
+    return httpClient.put<ProjectEntityLinksResponse>(
+      apiRoutes.projects.entityLinks(validateProjectId(projectId)),
+      normalizeEntityLinksRequest(request),
+    );
+  },
+
+  appendProjectEntityLinks(
+    projectId: string,
+    request: ReplaceProjectEntityLinksRequest,
+  ): Promise<ProjectEntityLinksResponse> {
+    return httpClient.post<ProjectEntityLinksResponse>(
+      apiRoutes.projects.entityLinks(validateProjectId(projectId)),
+      normalizeEntityLinksRequest(request),
+    );
+  },
+
+  getProjectParticipants(projectId: string): Promise<ProjectParticipantsResponse> {
+    return httpClient.get<ProjectParticipantsResponse>(
+      apiRoutes.projects.participants(validateProjectId(projectId)),
+    );
+  },
+
+  replaceProjectParticipants(
+    projectId: string,
+    request: ReplaceProjectParticipantsRequest,
+  ): Promise<ProjectParticipantsResponse> {
+    return httpClient.put<ProjectParticipantsResponse>(
+      apiRoutes.projects.participants(validateProjectId(projectId)),
+      normalizeParticipantsRequest(request),
+    );
+  },
+
+  getProjectParticipantRoles(): Promise<ProjectParticipantRolesResponse> {
+    return httpClient.get<ProjectParticipantRolesResponse>(apiRoutes.projects.participantRoles);
+  },
+
+  getProjectDeadlineStatusCounts(
+    params: ProjectDeadlineStatusCountsQuery,
+  ): Promise<ProjectDeadlineStatusCountsResponse> {
+    const projectIds = 'projectIds' in params ? params.projectIds.map(validateProjectId) : undefined;
+    if ('projectIds' in params && projectIds.length === 0) {
+      throw new Error('projectIds are required');
+    }
+
+    return httpClient.get<ProjectDeadlineStatusCountsResponse>(
+      withQuery(apiRoutes.projects.reports.deadlineStatusCounts, {
+        ...params,
+        temporalMode: params.temporalMode ?? 'current',
+        projectIds: projectIds?.join(','),
+      }),
     );
   },
 
@@ -80,4 +150,25 @@ export function validateProjectId(projectId: string): string {
   }
 
   return projectId;
+}
+
+function normalizeEntityLinksRequest(
+  request: ReplaceProjectEntityLinksRequest,
+): ReplaceProjectEntityLinksRequest {
+  return {
+    ...request,
+    links: request.links.map((link) => ({ ...link, metadata: link.metadata ?? {} })),
+  };
+}
+
+function normalizeParticipantsRequest(
+  request: ReplaceProjectParticipantsRequest,
+): ReplaceProjectParticipantsRequest {
+  return {
+    ...request,
+    participants: request.participants.map((participant) => ({
+      ...participant,
+      metadata: participant.metadata ?? {},
+    })),
+  };
 }
