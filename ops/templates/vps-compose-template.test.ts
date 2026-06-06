@@ -14,6 +14,9 @@ describe('VPS compose backend runtime flags', () => {
 
     expect(compose).toContain('BACKEND_ENABLE_PROJECTS: ${BACKEND_ENABLE_PROJECTS:-false}');
     expect(compose).toContain('BACKEND_PROJECTS_READ_ONLY: ${BACKEND_PROJECTS_READ_ONLY:-true}');
+    expect(compose).toContain(
+      'BACKEND_ENABLE_PROJECT_P8_NOTIFICATIONS: ${BACKEND_ENABLE_PROJECT_P8_NOTIFICATIONS:-false}',
+    );
   });
 
   it('documents Projects feature flags in the VPS env example with safe defaults', () => {
@@ -21,5 +24,6 @@ describe('VPS compose backend runtime flags', () => {
 
     expect(envExample).toContain('BACKEND_ENABLE_PROJECTS=false');
     expect(envExample).toContain('BACKEND_PROJECTS_READ_ONLY=true');
+    expect(envExample).toContain('BACKEND_ENABLE_PROJECT_P8_NOTIFICATIONS=false');
   });
 });
