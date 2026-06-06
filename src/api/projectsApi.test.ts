@@ -72,6 +72,8 @@ describe('projectsApi', () => {
         relationCounts: [],
         createdMonthCounts: [],
       },
+      linkedEntityCounts: [],
+      participants: { currentSummary: [] },
       filter: {
         projectId: project.id,
         temporalMode: 'current',
@@ -154,6 +156,95 @@ describe('projectsApi', () => {
       projects: [],
       reason: 'test',
     }));
+  });
+
+  it('manages project entity links and participants through project-scoped endpoints', async () => {
+    const projectId = '11111111-1111-4111-8111-111111111111';
+    const fetchMock = mockFetch(
+      { projectId, links: [], requestId: 'req-links-list' },
+      { projectId, links: [], requestId: 'req-links-put', changed: true },
+      { projectId, links: [], requestId: 'req-links-post', changed: true },
+      { projectId, participants: [], requestId: 'req-participants-list' },
+      { projectId, participants: [], requestId: 'req-participants-put', changed: true },
+      { roles: [{ code: 'observer', label: 'Observer' }], requestId: 'req-roles' },
+    );
+
+    await projectsApi.getProjectEntityLinks(projectId);
+    await projectsApi.replaceProjectEntityLinks(projectId, {
+      idempotencyKey: 'links-replace-key',
+      links: [{ entityType: 'order', entityId: '11195', relationType: 'related' }],
+      reason: 'frontend test',
+    });
+    await projectsApi.appendProjectEntityLinks(projectId, {
+      idempotencyKey: 'links-append-key',
+      links: [{ entityType: 'client', entityId: '22', relationType: 'related' }],
+    });
+    await projectsApi.getProjectParticipants(projectId);
+    await projectsApi.replaceProjectParticipants(projectId, {
+      idempotencyKey: 'participants-replace-key',
+      participants: [{ participantType: 'user', participantId: '158', roleCode: 'manager' }],
+    });
+    await projectsApi.getProjectParticipantRoles();
+
+    expect(fetchMock.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
+      [`/api/v1/projects/${projectId}/entity-links`, 'GET'],
+      [`/api/v1/projects/${projectId}/entity-links`, 'PUT'],
+      [`/api/v1/projects/${projectId}/entity-links`, 'POST'],
+      [`/api/v1/projects/${projectId}/participants`, 'GET'],
+      [`/api/v1/projects/${projectId}/participants`, 'PUT'],
+      ['/api/v1/projects/participant-roles', 'GET'],
+    ]);
+    expect(fetchMock.mock.calls[1][1]?.body).toBe(JSON.stringify({
+      idempotencyKey: 'links-replace-key',
+      links: [{ entityType: 'order', entityId: '11195', relationType: 'related', metadata: {} }],
+      reason: 'frontend test',
+    }));
+    expect(fetchMock.mock.calls[4][1]?.body).toBe(JSON.stringify({
+      idempotencyKey: 'participants-replace-key',
+      participants: [{ participantType: 'user', participantId: '158', roleCode: 'manager', metadata: {} }],
+    }));
+  });
+
+  it('gets project deadline status counts through narrow report endpoint', async () => {
+    const fetchMock = mockFetch({
+      data: [{ deadlineStatus: 'overdue', deadlineCount: 2 }],
+      filter: {
+        projectMode: 'any',
+        projectIds: ['11111111-1111-4111-8111-111111111111'],
+        temporalMode: 'current',
+      },
+    });
+
+    await projectsApi.getProjectDeadlineStatusCounts({
+      projectMode: 'any',
+      projectIds: ['11111111-1111-4111-8111-111111111111'],
+      temporalMode: 'current',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/projects/reports/deadline-status-counts?projectMode=any&projectIds=11111111-1111-4111-8111-111111111111&temporalMode=current',
+    );
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('rejects invalid or empty deadline report project ids before fetch', async () => {
+    const fetchMock = mockFetch({ data: [], filter: { projectMode: 'none', temporalMode: 'current' } });
+
+    expect(() =>
+      projectsApi.getProjectDeadlineStatusCounts({
+        projectMode: 'any',
+        projectIds: ['11111111-1111-1111-1111-111111111111'],
+        temporalMode: 'current',
+      }),
+    ).toThrow('Invalid projectId');
+    expect(() =>
+      projectsApi.getProjectDeadlineStatusCounts({
+        projectMode: 'all',
+        projectIds: [],
+        temporalMode: 'current',
+      }),
+    ).toThrow('projectIds are required');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

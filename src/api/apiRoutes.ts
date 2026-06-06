@@ -87,6 +87,12 @@ export const apiRoutes = {
     lookup: backendApiPath('/projects/lookup'),
     byId: (projectId: string) => backendApiPath(`/projects/${projectId}`),
     overview: (projectId: string) => backendApiPath(`/projects/${projectId}/overview`),
+    entityLinks: (projectId: string) => backendApiPath(`/projects/${projectId}/entity-links`),
+    participants: (projectId: string) => backendApiPath(`/projects/${projectId}/participants`),
+    participantRoles: backendApiPath('/projects/participant-roles'),
+    reports: {
+      deadlineStatusCounts: backendApiPath('/projects/reports/deadline-status-counts'),
+    },
   },
   users: {
     list: backendApiPath('/users'),
