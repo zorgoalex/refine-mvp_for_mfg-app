@@ -88,6 +88,7 @@ export const apiRoutes = {
     byId: (projectId: string) => backendApiPath(`/projects/${projectId}`),
     overview: (projectId: string) => backendApiPath(`/projects/${projectId}/overview`),
     entityLinks: (projectId: string) => backendApiPath(`/projects/${projectId}/entity-links`),
+    batchLink: (projectId: string) => backendApiPath(`/projects/${projectId}/batch-link`),
     participants: (projectId: string) => backendApiPath(`/projects/${projectId}/participants`),
     participantRoles: backendApiPath('/projects/participant-roles'),
     reports: {

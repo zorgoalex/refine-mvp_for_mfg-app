@@ -3624,15 +3624,15 @@ paths:
     post:
       tags:
         - Projects
-      operationId: dryRunProjectBatchLink
-      summary: Dry-run project batch link proposals
+      operationId: executeProjectBatchLink
+      summary: Dry-run or write explicitly selected project batch links
       security:
         - bearerAuth: []
       x-permission: projects.manage_links
       x-role-codes:
         - admin
         - top_manager
-      x-write-enabled: false
+      x-write-gate: BACKEND_ENABLE_PROJECTS_BATCH_LINK_WRITE
       requestBody:
         required: true
         content:
@@ -3641,7 +3641,7 @@ paths:
               $ref: '#/components/schemas/ProjectBatchLinkDryRunRequest'
       responses:
         '200':
-          description: Dry-run project batch link proposals
+          description: Project batch link dry-run or write result
           content:
             application/json:
               schema:
@@ -4939,6 +4939,7 @@ components:
         - fixtureKey
         - idempotencyKey
         - entityType
+        - relationType
         - source
         - items
       additionalProperties: false
@@ -4947,6 +4948,11 @@ components:
           type: string
           enum:
             - dry-run
+            - write
+        writeIntent:
+          type: string
+          enum:
+            - explicit-selected-ids
         fixtureKey:
           type: string
           minLength: 1
@@ -4957,6 +4963,10 @@ components:
           maxLength: 200
         entityType:
           $ref: '#/components/schemas/ProjectEntityTypeCode'
+        relationType:
+          type: string
+          minLength: 1
+          maxLength: 100
         source:
           type: object
           required:
@@ -5019,6 +5029,7 @@ components:
           type: string
           enum:
             - dry-run
+            - write
         summary:
           type: object
           required:
@@ -5031,6 +5042,12 @@ components:
             proposed:
               type: integer
               minimum: 0
+            created:
+              type: integer
+              minimum: 0
+            existing:
+              type: integer
+              minimum: 0
             skipped:
               type: integer
               minimum: 0
@@ -5041,6 +5058,60 @@ components:
               type: integer
               minimum: 0
         proposals:
+          type: array
+          items:
+            type: object
+            required:
+              - entityType
+              - entityId
+              - action
+              - source
+              - confidence
+              - reason
+            additionalProperties: false
+            properties:
+              entityType:
+                $ref: '#/components/schemas/ProjectEntityTypeCode'
+              entityId:
+                type: string
+              action:
+                type: string
+                enum:
+                  - link
+              source:
+                type: string
+              confidence:
+                type: string
+              reason:
+                type: string
+        created:
+          type: array
+          items:
+            type: object
+            required:
+              - entityType
+              - entityId
+              - action
+              - source
+              - confidence
+              - reason
+            additionalProperties: false
+            properties:
+              entityType:
+                $ref: '#/components/schemas/ProjectEntityTypeCode'
+              entityId:
+                type: string
+              action:
+                type: string
+                enum:
+                  - link
+              source:
+                type: string
+              confidence:
+                type: string
+              reason:
+                type: string
+        existing:
           type: array
           items:
             type: object
@@ -5150,8 +5221,17 @@ components:
                 type: string
         writeEnabled:
           type: boolean
-          enum:
-            - false
+        changed:
+          type: boolean
+        auditId:
+          type: string
+          nullable: true
+        outboxEventId:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+          nullable: true
 
     ReplaceProjectEntityLinksRequest:
       type: object

@@ -5,6 +5,7 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import type { ProjectEntityTypeCode } from './project-entity-links.dto';
 import type {
   AppendProjectEntityLinksCommand,
+  AppendIdempotentProjectEntityLinksCommand,
   ListProjectEntityLinksCommand,
   ProjectEntityLinksRepositoryPort,
   ReplaceProjectEntityLinksCommand,
@@ -45,6 +46,15 @@ export class ProjectEntityLinksService {
     this.requirePermission(command.currentUser, 'projects.manage_links');
     this.requireSubmittedEntityPermissions(command.currentUser, command.dto.links.map((link) => link.entityType));
     return this.ports.links.append(command);
+  }
+
+  async appendIdempotent(command: AppendIdempotentProjectEntityLinksCommand) {
+    this.requirePermission(command.currentUser, 'projects.manage_links');
+    this.requireSubmittedEntityPermissions(command.currentUser, command.dto.links.map((link) => link.entityType));
+    if (!this.ports.links.appendIdempotent) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Project entity links adapter is not configured');
+    }
+    return this.ports.links.appendIdempotent(command);
   }
 
   visibleEntityTypes(currentUser: CurrentUser): ProjectEntityTypeCode[] {

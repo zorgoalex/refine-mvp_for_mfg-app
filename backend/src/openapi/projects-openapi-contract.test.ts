@@ -130,7 +130,7 @@ describe('projects OpenAPI contract', () => {
     expect(responseSchema).toContain('auditId:');
   });
 
-  it('documents dry-run-only project batch-link endpoint without write posture', () => {
+  it('documents gated project batch-link dry-run and write endpoint', () => {
     const contract = readOpenApiContract();
     const batchLinkSection = sectionBetween(
       contract,
@@ -148,19 +148,27 @@ describe('projects OpenAPI contract', () => {
       '    ReplaceProjectEntityLinksRequest:',
     );
 
-    expect(batchLinkSection).toContain('operationId: dryRunProjectBatchLink');
+    expect(batchLinkSection).toContain('operationId: executeProjectBatchLink');
     expect(batchLinkSection).toContain('x-permission: projects.manage_links');
     expect(batchLinkSection).toContain('x-role-codes:');
     expect(batchLinkSection).toContain('- admin');
     expect(batchLinkSection).toContain('- top_manager');
-    expect(batchLinkSection).toContain('x-write-enabled: false');
+    expect(batchLinkSection).toContain('x-write-gate: BACKEND_ENABLE_PROJECTS_BATCH_LINK_WRITE');
     expect(batchLinkSection).toContain("$ref: '#/components/schemas/ProjectBatchLinkDryRunRequest'");
     expect(batchLinkSection).toContain("$ref: '#/components/schemas/ProjectBatchLinkDryRunResponse'");
     expect(requestSchema).toContain('- mode');
+    expect(requestSchema).toContain('- relationType');
     expect(requestSchema).toContain('- dry-run');
+    expect(requestSchema).toContain('- write');
+    expect(requestSchema).toContain('writeIntent:');
+    expect(requestSchema).toContain('relationType:');
     expect(requestSchema).toContain("$ref: '#/components/schemas/ProjectEntityTypeCode'");
     expect(responseSchema).toContain('writeEnabled:');
-    expect(responseSchema).toContain('- false');
+    expect(responseSchema).toContain('created:');
+    expect(responseSchema).toContain('existing:');
+    expect(responseSchema).toContain('action:');
+    expect(responseSchema).toContain('auditId:');
+    expect(responseSchema).toContain('outboxEventId:');
     expect(responseSchema).toContain('sampleEvidence:');
   });
 

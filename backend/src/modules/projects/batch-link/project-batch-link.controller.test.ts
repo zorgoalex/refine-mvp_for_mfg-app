@@ -49,22 +49,66 @@ describe('ProjectBatchLinkController', () => {
     });
   });
 
-  it('rejects non-dry-run mode with writeEnabled=false details', async () => {
-    const controller = createController({ projectsEnabled: true, projectsReadOnly: false });
+  it('rejects write mode when the explicit write gate is disabled', async () => {
+    const controller = createController({
+      projectsEnabled: true,
+      projectsReadOnly: false,
+      projectsBatchLinkWriteEnabled: false,
+    });
 
     await expect(controller.dryRun(request(), projectId, {
       ...body(),
       mode: 'write',
+      writeIntent: 'explicit-selected-ids',
     })).rejects.toMatchObject({
-      statusCode: 422,
-      code: 'VALIDATION_ERROR',
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
       details: { writeEnabled: false },
+    });
+  });
+
+  it('dispatches write mode only when the explicit gate is enabled', async () => {
+    const controller = createController(
+      { projectsEnabled: true, projectsReadOnly: false, projectsBatchLinkWriteEnabled: true },
+      {
+        async write(command) {
+          return {
+            projectId: command.projectId,
+            mode: 'write',
+            summary: { proposed: 0, created: 0, existing: 0, skipped: 0, conflicts: 0, sampledEvidenceRows: 0 },
+            proposals: [],
+            created: [],
+            existing: [],
+            skipped: [],
+            sampleEvidence: [],
+            changed: false,
+            auditId: null,
+            outboxEventId: null,
+            requestId: command.requestId ?? null,
+            writeEnabled: true,
+          };
+        },
+      },
+    );
+
+    await expect(controller.dryRun(request(), projectId, {
+      ...body(),
+      mode: 'write',
+      writeIntent: 'explicit-selected-ids',
+    })).resolves.toMatchObject({
+      projectId,
+      mode: 'write',
+      writeEnabled: true,
     });
   });
 });
 
 function createController(
-  flags: { projectsEnabled: boolean; projectsReadOnly: boolean },
+  flags: {
+    projectsEnabled: boolean;
+    projectsReadOnly: boolean;
+    projectsBatchLinkWriteEnabled?: boolean;
+  },
   service: Partial<ProjectBatchLinkService> = {},
 ): ProjectBatchLinkController {
   return new ProjectBatchLinkController(
@@ -76,7 +120,11 @@ function createController(
     } as ProjectBatchLinkService,
     {
       getFeatureFlags() {
-        return flags;
+        return {
+          projectP8NotificationsEnabled: false,
+          projectsBatchLinkWriteEnabled: false,
+          ...flags,
+        };
       },
     } as ProjectsRuntimeConfigService,
   );
@@ -95,6 +143,7 @@ function body() {
     fixtureKey: 'projects-backfill-admin-2026-06-06',
     idempotencyKey: 'projects-backfill-admin-2026-06-06:dry-run:001',
     entityType: 'order',
+    relationType: 'related',
     source: { type: 'operator_csv', reference: 'reviewed-input-001' },
     items: [],
   };

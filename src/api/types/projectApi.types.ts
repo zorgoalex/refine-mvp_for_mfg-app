@@ -214,6 +214,64 @@ export interface ReplaceProjectEntityLinksRequest {
   reason?: string | null;
 }
 
+export interface ProjectBatchLinkRequest {
+  mode: 'dry-run' | 'write';
+  writeIntent?: 'explicit-selected-ids';
+  fixtureKey: string;
+  idempotencyKey: string;
+  entityType: ProjectEntityTypeCode;
+  relationType: string;
+  source: {
+    type: string;
+    reference: string;
+  };
+  items: Array<{
+    entityId: string;
+    reason: string;
+    confidence: string;
+    sourceRow?: string;
+  }>;
+}
+
+export interface ProjectBatchLinkResponse {
+  projectId: string;
+  mode: 'dry-run' | 'write';
+  summary: {
+    proposed: number;
+    created?: number;
+    existing?: number;
+    skipped: number;
+    conflicts: number;
+    sampledEvidenceRows: number;
+  };
+  proposals: Array<{
+    entityType: ProjectEntityTypeCode;
+    entityId: string;
+    action: 'link';
+    source: string;
+    confidence: string;
+    reason: string;
+  }>;
+  created?: ProjectBatchLinkResponse['proposals'];
+  existing?: ProjectBatchLinkResponse['proposals'];
+  skipped: Array<{
+    entityType: ProjectEntityTypeCode;
+    entityId: string;
+    source: string;
+    sourceRow: string | null;
+    confidence: string;
+    reasonCode: 'entity_not_found';
+    reasonText: string;
+    evidence: Record<string, unknown>;
+  }>;
+  sampleEvidence: Array<Record<string, unknown>>;
+  changed?: boolean;
+  auditId?: string | null;
+  outboxEventId?: string | null;
+  requestId?: string | null;
+  writeEnabled: boolean;
+}
+
 export type ProjectParticipantType = 'user' | 'employee';
 
 export interface ProjectParticipantRoleDto {

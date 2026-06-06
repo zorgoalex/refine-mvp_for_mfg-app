@@ -96,7 +96,7 @@ export const ordersApi = {
   },
 };
 
-export function withQuery(path: string, params: Record<string, unknown>): string {
+export function withQuery(path: string, params: object): string {
   const searchParams = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {

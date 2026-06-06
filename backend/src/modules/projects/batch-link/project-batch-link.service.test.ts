@@ -114,6 +114,7 @@ function command(overrides: Partial<Parameters<ProjectBatchLinkService['dryRun']
       fixtureKey: 'projects-backfill-admin-2026-06-06',
       idempotencyKey: 'projects-backfill-admin-2026-06-06:dry-run:001',
       entityType: 'order' as const,
+      relationType: 'related',
       source: { type: 'operator_csv', reference: 'reviewed-input-001' },
       items: [{ entityId: '11195', reason: 'explicit reviewed mapping', confidence: 'explicit' }],
     },
