@@ -29,4 +29,15 @@ describe('ProjectsModule wiring', () => {
     expect(projectsModule).toContain('UnavailableProjectNotificationRepository');
     expect(projectsModule).toContain('database.isConfigured');
   });
+
+  it('registers project batch-link dry-run with fail-closed database wiring', () => {
+    const modulePath = resolve(process.cwd(), 'src/modules/projects/projects.module.ts');
+    const projectsModule = readFileSync(modulePath, 'utf8');
+
+    expect(projectsModule).toContain('ProjectBatchLinkController');
+    expect(projectsModule).toContain('ProjectBatchLinkService');
+    expect(projectsModule).toContain('PgProjectBatchLinkRepository');
+    expect(projectsModule).toContain('UnavailableProjectBatchLinkRepository');
+    expect(projectsModule).toContain('database.isConfigured');
+  });
 });

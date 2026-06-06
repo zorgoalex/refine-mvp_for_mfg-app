@@ -19,6 +19,7 @@ describe('projects OpenAPI contract', () => {
     expect(contract).toContain('  /api/v1/projects/reports/order-relation-counts:');
     expect(contract).toContain('  /api/v1/projects/reports/order-created-month-counts:');
     expect(contract).toContain('  /api/v1/projects/{projectId}/overview:');
+    expect(contract).toContain('  /api/v1/projects/{projectId}/batch-link:');
   });
 
   it('documents get project bad request and list pagination totalPages', () => {
@@ -127,6 +128,40 @@ describe('projects OpenAPI contract', () => {
     expect(memberSchema).toContain('displayName:');
     expect(responseSchema).toContain('changed:');
     expect(responseSchema).toContain('auditId:');
+  });
+
+  it('documents dry-run-only project batch-link endpoint without write posture', () => {
+    const contract = readOpenApiContract();
+    const batchLinkSection = sectionBetween(
+      contract,
+      '  /api/v1/projects/{projectId}/batch-link:',
+      '  /api/v1/projects/{projectId}/participants:',
+    );
+    const requestSchema = sectionBetween(
+      contract,
+      '    ProjectBatchLinkDryRunRequest:',
+      '    ProjectBatchLinkDryRunResponse:',
+    );
+    const responseSchema = sectionBetween(
+      contract,
+      '    ProjectBatchLinkDryRunResponse:',
+      '    ReplaceProjectEntityLinksRequest:',
+    );
+
+    expect(batchLinkSection).toContain('operationId: dryRunProjectBatchLink');
+    expect(batchLinkSection).toContain('x-permission: projects.manage_links');
+    expect(batchLinkSection).toContain('x-role-codes:');
+    expect(batchLinkSection).toContain('- admin');
+    expect(batchLinkSection).toContain('- top_manager');
+    expect(batchLinkSection).toContain('x-write-enabled: false');
+    expect(batchLinkSection).toContain("$ref: '#/components/schemas/ProjectBatchLinkDryRunRequest'");
+    expect(batchLinkSection).toContain("$ref: '#/components/schemas/ProjectBatchLinkDryRunResponse'");
+    expect(requestSchema).toContain('- mode');
+    expect(requestSchema).toContain('- dry-run');
+    expect(requestSchema).toContain("$ref: '#/components/schemas/ProjectEntityTypeCode'");
+    expect(responseSchema).toContain('writeEnabled:');
+    expect(responseSchema).toContain('- false');
+    expect(responseSchema).toContain('sampleEvidence:');
   });
 
   it('documents project report endpoints with explicit read permissions and narrow response schemas', () => {

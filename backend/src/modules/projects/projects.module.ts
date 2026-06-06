@@ -15,6 +15,12 @@ import {
   UnavailableProjectEntityLinksRepository,
 } from './entity-links/project-entity-links.repository';
 import { ProjectEntityLinksService } from './entity-links/project-entity-links.service';
+import { ProjectBatchLinkController } from './batch-link/project-batch-link.controller';
+import {
+  PgProjectBatchLinkRepository,
+  UnavailableProjectBatchLinkRepository,
+} from './batch-link/project-batch-link.repository';
+import { ProjectBatchLinkService } from './batch-link/project-batch-link.service';
 import { ProjectParticipantsController } from './participants/project-participants.controller';
 import {
   PgProjectParticipantsRepository,
@@ -79,6 +85,7 @@ import { ProjectDeadlineStatusCountsReportService } from './reporting/project-de
     ProjectOrderCreatedMonthCountsReportController,
     ProjectOverviewController,
     ProjectEntityLinksController,
+    ProjectBatchLinkController,
     ProjectParticipantsController,
   ],
   providers: [
@@ -170,6 +177,16 @@ import { ProjectDeadlineStatusCountsReportService } from './reporting/project-de
           links: database.isConfigured
             ? new PgProjectEntityLinksRepository(database)
             : new UnavailableProjectEntityLinksRepository(),
+        }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ProjectBatchLinkService,
+      useFactory: (database: DatabaseService) =>
+        new ProjectBatchLinkService({
+          batchLinks: database.isConfigured
+            ? new PgProjectBatchLinkRepository(database)
+            : new UnavailableProjectBatchLinkRepository(),
         }),
       inject: [DatabaseService],
     },
