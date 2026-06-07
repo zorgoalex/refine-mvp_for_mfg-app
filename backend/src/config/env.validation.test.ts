@@ -498,4 +498,33 @@ describe('backend env validation', () => {
       BACKEND_DEADLINE_WORKER_ID: 'backend-local',
     });
   });
+
+  it('defaults notification engine flags to safe-off', () => {
+    expect(validateEnv({})).toMatchObject({
+      BACKEND_ENABLE_NOTIFICATION_ENGINE: false,
+      BACKEND_NOTIFICATION_RULES_READ_ONLY: true,
+      BACKEND_OUTBOX_RELAY_OWNER: 'none',
+      BACKEND_OUTBOX_RELAY_POLL_INTERVAL_MS: 60000,
+      BACKEND_OUTBOX_RELAY_BATCH_SIZE: 100,
+      BACKEND_OUTBOX_RELAY_WORKER_ID: 'backend-local',
+      BACKEND_OUTBOX_RELAY_MAX_ATTEMPTS: 10,
+    });
+  });
+
+  it('requires DATABASE_URL when notification engine is enabled', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_NOTIFICATION_ENGINE: 'true',
+      }),
+    ).toThrow(/DATABASE_URL is required when BACKEND_ENABLE_NOTIFICATION_ENGINE is true/);
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_NOTIFICATION_ENGINE: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_NOTIFICATION_ENGINE: true,
+    });
+  });
 });

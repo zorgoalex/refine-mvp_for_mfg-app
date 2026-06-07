@@ -126,6 +126,13 @@ const envSchema = z
     BACKEND_DEADLINE_WORKER_ID: z.string().trim().min(1).default('backend-local'),
     BACKEND_DEADLINE_ACTIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
+    BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
+    BACKEND_NOTIFICATION_RULES_READ_ONLY: booleanFromEnv.default(true),
+    BACKEND_OUTBOX_RELAY_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
+    BACKEND_OUTBOX_RELAY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
+    BACKEND_OUTBOX_RELAY_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(100),
+    BACKEND_OUTBOX_RELAY_WORKER_ID: z.string().trim().min(1).default('backend-local'),
+    BACKEND_OUTBOX_RELAY_MAX_ATTEMPTS: z.coerce.number().int().positive().max(100).default(10),
     GAS_WEBAPP_URL: optionalUrlFromEnv,
     GAS_API_KEY: optionalTrimmedStringFromEnv,
     GAS_EXPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(55000),
@@ -285,6 +292,14 @@ const envSchema = z
       ctx.addIssue({
         code: 'custom',
         message: 'DATABASE_URL is required when BACKEND_ENABLE_PROJECTS is true',
+        path: ['DATABASE_URL'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_NOTIFICATION_ENGINE && !env.DATABASE_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'DATABASE_URL is required when BACKEND_ENABLE_NOTIFICATION_ENGINE is true',
         path: ['DATABASE_URL'],
       });
     }
