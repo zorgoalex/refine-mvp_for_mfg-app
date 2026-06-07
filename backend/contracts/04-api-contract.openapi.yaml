@@ -2788,6 +2788,80 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/outbox-relay/process-now:
+    post:
+      tags:
+        - Outbox Relay
+      operationId: processOutboxRelayNow
+      summary: Process one manual outbox relay batch
+      description: Runs a single backend-owned outbox relay batch. This endpoint does not start an interval, poller, scheduler, or queue consumer.
+      security:
+        - bearerAuth: []
+      x-permission: notifications.manage_rules
+      responses:
+        '200':
+          description: Manual outbox relay batch processed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - claimed
+                  - processed
+                  - failed
+                properties:
+                  claimed:
+                    type: integer
+                  processed:
+                    type: integer
+                  failed:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/outbox-relay/process-scheduled:
+    post:
+      tags:
+        - Outbox Relay
+      operationId: processOutboxRelayScheduled
+      summary: Process one scheduled outbox relay batch
+      description: Runs a single platform-cron-owned outbox relay batch. This endpoint requires an external scheduler owner.
+      security:
+        - bearerAuth: []
+      x-permission: notifications.manage_rules
+      responses:
+        '200':
+          description: Scheduled outbox relay batch processed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - claimed
+                  - processed
+                  - failed
+                properties:
+                  claimed:
+                    type: integer
+                  processed:
+                    type: integer
+                  failed:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/notifications:
     get:
       tags:
