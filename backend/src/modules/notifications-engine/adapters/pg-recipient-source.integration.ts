@@ -54,7 +54,7 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
         ('E2E-manager', 10, 901, true),
         ('E2E-viewer', 100, NULL, true),
         ('E2E-worker', 20, 902, true),
-        ('E2E-outsider', 100, NULL, true),
+        ('E2E-outsider', 20, NULL, true),
         ('E2E-inactive', 10, NULL, false)
       RETURNING user_id
       `,
@@ -143,6 +143,8 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
   });
 
   it('filterByBaseVisibility keeps a base-visible user and drops a non-visible user for the same order', async () => {
+    // managerUserId (role 10 'own' scope) IS the order's manager_id/created_by -> base-visible.
+    // outsiderUserId (role 20 'assigned' scope) is neither manager nor assigned to this order -> dropped.
     const ctx = buildContext({ orderId });
     const result = await visibility.filterByBaseVisibility(pool, [managerUserId, viewerUserId, outsiderUserId], ctx);
     expect(result).toContain(managerUserId);
