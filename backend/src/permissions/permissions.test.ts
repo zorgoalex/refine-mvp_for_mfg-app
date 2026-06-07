@@ -154,6 +154,14 @@ describe('permissions foundation', () => {
     expect(can('top_manager', 'orders.view_financials')).toBe(true);
   });
 
+  it('grants notification rule permissions to admin and superadmin only', () => {
+    expect(can('superadmin', 'notifications.manage_rules')).toBe(true);
+    expect(can('admin', 'notifications.manage_rules')).toBe(true);
+    expect(can('admin', 'notifications.view_rules')).toBe(true);
+    expect(can('top_manager', 'notifications.manage_rules')).toBe(false);
+    expect(can('manager', 'notifications.view_rules')).toBe(false);
+  });
+
   it('sets legacy Hasura allowed roles with superadmin at the top', () => {
     expect(HASURA_ALLOWED_ROLES.superadmin).toEqual([
       'superadmin',
