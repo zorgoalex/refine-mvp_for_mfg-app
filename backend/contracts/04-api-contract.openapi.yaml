@@ -2592,6 +2592,202 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/notification-event-types:
+    get:
+      tags:
+        - Notification Rules
+      operationId: listNotificationEventTypes
+      summary: List configurable notification event types
+      security:
+        - bearerAuth: []
+      x-permission: notifications.view_rules
+      responses:
+        '200':
+          description: Configurable notification event types
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationEventTypeListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/notification-rules:
+    get:
+      tags:
+        - Notification Rules
+      operationId: listNotificationRules
+      summary: List notification rules
+      security:
+        - bearerAuth: []
+      x-permission: notifications.view_rules
+      parameters:
+        - name: eventType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: isEnabled
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Notification rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRuleListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Notification Rules
+      operationId: createNotificationRule
+      summary: Create a notification rule
+      security:
+        - bearerAuth: []
+      x-permission: notifications.manage_rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNotificationRuleRequest'
+      responses:
+        '201':
+          description: Created notification rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/notification-rules/{ruleId}:
+    parameters:
+      - name: ruleId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - Notification Rules
+      operationId: getNotificationRule
+      summary: Get a notification rule by id
+      security:
+        - bearerAuth: []
+      x-permission: notifications.view_rules
+      responses:
+        '200':
+          description: Notification rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Notification rule не найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags:
+        - Notification Rules
+      operationId: updateNotificationRule
+      summary: Update a notification rule
+      security:
+        - bearerAuth: []
+      x-permission: notifications.manage_rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNotificationRuleRequest'
+      responses:
+        '200':
+          description: Updated notification rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Notification rule не найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Notification Rules
+      operationId: deleteNotificationRule
+      summary: Delete a notification rule
+      security:
+        - bearerAuth: []
+      x-permission: notifications.manage_rules
+      responses:
+        '200':
+          description: Deleted notification rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Notification rule не найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/notifications:
     get:
       tags:
@@ -8718,6 +8914,202 @@ components:
           type: boolean
           enum:
             - true
+
+    NotificationRuleConditions:
+      type: object
+      properties:
+        allowedFromOrderStatusIds:
+          type: array
+          items:
+            type: integer
+        excludeOrderStatusIds:
+          type: array
+          items:
+            type: integer
+        excludeCompletedOrders:
+          type: boolean
+
+    NotificationRuleRecipients:
+      type: object
+      properties:
+        resolvers:
+          type: array
+          items:
+            type: string
+            enum:
+              - order_manager
+              - stage_assignee
+              - project_participants
+        roleCodes:
+          type: array
+          items:
+            type: string
+        userIds:
+          type: array
+          items:
+            type: integer
+
+    NotificationRule:
+      type: object
+      required:
+        - notificationRuleId
+        - ruleCode
+        - eventType
+        - isEnabled
+        - priority
+        - level
+        - conditions
+        - recipients
+        - titleTemplate
+        - messageTemplate
+        - createdAt
+        - updatedAt
+      properties:
+        notificationRuleId:
+          type: string
+          format: uuid
+        ruleCode:
+          type: string
+        eventType:
+          type: string
+        isEnabled:
+          type: boolean
+        priority:
+          type: integer
+        level:
+          type: string
+          enum:
+            - info
+            - warning
+            - error
+        conditions:
+          $ref: '#/components/schemas/NotificationRuleConditions'
+        recipients:
+          $ref: '#/components/schemas/NotificationRuleRecipients'
+        titleTemplate:
+          type: string
+          nullable: true
+        messageTemplate:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    NotificationRuleListResponse:
+      type: array
+      items:
+        $ref: '#/components/schemas/NotificationRule'
+
+    CreateNotificationRuleRequest:
+      type: object
+      required:
+        - ruleCode
+        - eventType
+      properties:
+        ruleCode:
+          type: string
+        eventType:
+          type: string
+        level:
+          type: string
+          enum:
+            - info
+            - warning
+            - error
+          default: info
+        priority:
+          type: integer
+          default: 100
+        isEnabled:
+          type: boolean
+          default: true
+        conditions:
+          $ref: '#/components/schemas/NotificationRuleConditions'
+        recipients:
+          $ref: '#/components/schemas/NotificationRuleRecipients'
+        titleTemplate:
+          type: string
+          nullable: true
+        messageTemplate:
+          type: string
+          nullable: true
+
+    UpdateNotificationRuleRequest:
+      type: object
+      properties:
+        level:
+          type: string
+          enum:
+            - info
+            - warning
+            - error
+        priority:
+          type: integer
+        isEnabled:
+          type: boolean
+        conditions:
+          $ref: '#/components/schemas/NotificationRuleConditions'
+        recipients:
+          $ref: '#/components/schemas/NotificationRuleRecipients'
+        titleTemplate:
+          type: string
+          nullable: true
+        messageTemplate:
+          type: string
+          nullable: true
+        reason:
+          type: string
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+
+    NotificationEventType:
+      type: object
+      required:
+        - eventType
+        - aggregateType
+        - owner
+        - contextFields
+        - supportedResolvers
+        - supportsOrderConditions
+      properties:
+        eventType:
+          type: string
+        aggregateType:
+          type: string
+        owner:
+          type: string
+          enum:
+            - engine
+            - legacy_inline
+        contextFields:
+          type: array
+          items:
+            type: string
+            enum:
+              - orderId
+              - clientId
+              - paymentId
+              - deadlineId
+        supportedResolvers:
+          type: array
+          items:
+            type: string
+            enum:
+              - order_manager
+              - stage_assignee
+              - project_participants
+        supportsOrderConditions:
+          type: boolean
+
+    NotificationEventTypeListResponse:
+      type: array
+      items:
+        $ref: '#/components/schemas/NotificationEventType'
 
     OrderDeadlineListResponse:
       type: object
