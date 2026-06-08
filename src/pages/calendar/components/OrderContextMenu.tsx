@@ -95,14 +95,26 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
   }, [visible, onClose]);
 
   const openMoveModal = () => {
-    // Default: today's date (most common move target)
-    setPickedDate(dayjs());
+    // Default: order's current planned date if available, else today
+    const initial = order.planned_completion_date
+      ? dayjs(order.planned_completion_date, ['YYYY-MM-DD', 'DD.MM.YYYY'], true)
+      : dayjs();
+    setPickedDate(initial.isValid() ? initial : dayjs());
     setIsMoveModalOpen(true);
     onClose();
   };
 
   const handleMoveOk = async () => {
     if (!pickedDate || !onMoveToDate) return;
+    const sourceKey = resolveCurrentSourceDate(order);
+    const targetKey = formatDateKey(pickedDate.toDate());
+    if (sourceKey === targetKey) {
+      // UX guard: source equals target — moveOrder would no-op silently.
+      // Inform the user instead of closing the modal as if nothing happened.
+      message.info('Заказ уже на выбранной дате');
+      setIsMoveModalOpen(false);
+      return;
+    }
     setIsMoving(true);
     try {
       await onMoveToDate(order, pickedDate.toDate());
