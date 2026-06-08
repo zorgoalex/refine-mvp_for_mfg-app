@@ -1,14 +1,9 @@
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import {
-  ROLE_ID_TO_ROLE,
-  ROLE_PERMISSIONS,
-  type KnownRoleId,
-  type PermissionName,
-  type UserRole,
-} from '../../../permissions/permissions';
+import type { PermissionName } from '../../../permissions/permissions';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import { filterUserIdsByOrderVisibility, mapUserRow } from '../../../permissions/visibility/order-visibility-filter';
 import type { ProjectLinkedEntityRef, ProjectNotificationRecipient } from './project-notification.types';
 
 interface ParticipantRow extends QueryResultRow {
@@ -103,37 +98,8 @@ export class PgProjectNotificationRecipientRepository {
     recipients: ProjectNotificationRecipient[],
     orderId: string,
   ): Promise<ProjectNotificationRecipient[]> {
-    const rows = await this.database.query<OrderVisibilityRow>(
-      `
-      SELECT
-        u.user_id::text AS user_id,
-        u.username,
-        u.role_id,
-        o.order_id,
-        o.created_by,
-        o.manager_id
-      FROM public.users u
-      CROSS JOIN public.orders o
-      WHERE u.user_id = ANY($1::bigint[])
-        AND o.order_id = $2::bigint
-        AND o.delete_flag = false
-      `,
-      [recipients.map((recipient) => recipient.userId), orderId],
-    );
-    const recipientById = new Map(recipients.map((recipient) => [recipient.userId, recipient]));
-
-    return rows.rows
-      .filter((row) => {
-        const currentUser = mapUserRow(row);
-        return currentUser && this.orderAccessPolicy.canView(currentUser, {
-          orderId: row.order_id,
-          createdByUserId: nullableString(row.created_by),
-          managerUserId: nullableString(row.manager_id),
-          ownerUserId: nullableString(row.manager_id),
-        });
-      })
-      .map((row) => recipientById.get(String(row.user_id)))
-      .filter((recipient): recipient is ProjectNotificationRecipient => Boolean(recipient));
+    const allowed = await filterUserIdsByOrderVisibility(this.database, recipients.map((r) => r.userId), orderId);
+    return recipients.filter((recipient) => allowed.has(recipient.userId));
   }
 
   private async filterByDeadlineVisibility(
@@ -225,20 +191,6 @@ export class UnavailableProjectNotificationRecipientRepository {
   async canRecipientViewMemberIdentity(): Promise<boolean> {
     return false;
   }
-}
-
-function mapUserRow(row: UserPermissionRow): CurrentUser | null {
-  const roleId = Number(row.role_id);
-  const role = ROLE_ID_TO_ROLE[roleId as KnownRoleId] as UserRole | undefined;
-  if (!role) return null;
-
-  return {
-    id: String(row.user_id),
-    username: row.username ?? String(row.user_id),
-    role,
-    roleId,
-    permissions: ROLE_PERMISSIONS[role],
-  };
 }
 
 function nullableString(value: string | number | null): string | null {

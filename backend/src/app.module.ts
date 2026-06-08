@@ -6,6 +6,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DeadlinesModule } from './modules/deadlines/deadlines.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { NotificationsEngineModule } from './modules/notifications-engine/notifications-engine.module';
 import { HealthModule } from './modules/health/health.module';
 import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
 import { OrdersModule } from './modules/orders/orders.module';
@@ -30,6 +31,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     ClientPhonesModule,
     DeadlinesModule,
     NotificationsModule,
+    NotificationsEngineModule,
     HealthModule,
     OrdersModule,
     PaymentsModule,
