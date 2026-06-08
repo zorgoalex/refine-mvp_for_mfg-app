@@ -38,13 +38,25 @@ export function useResponsive(
   options: { windowFallback?: boolean } = {},
 ): ResponsiveState {
   const { windowFallback = true } = options;
+  // Initial width: try the container first (rarely ready before first commit),
+  // then fall back to globalThis.innerWidth as best-effort. The ResizeObserver
+  // below corrects this on the first effect tick.
+  //
+  // Limitation: on a desktop window with the sider visible (~900px window,
+  // ~700px container) the initial fallback classifies as desktop while the
+  // actual container classifies as mobile. The set-once viewMode default in
+  // CalendarBoard is therefore set to STANDARD in that edge case. For typical
+  // viewports (mobile without sider, desktop with >= 1024px window) the
+  // fallback and the container agree, so no flicker. A proper fix would
+  // require passing the measured width as a prop from a parent that can
+  // read it before mount, which is out of scope.
   const [width, setWidth] = useState<number>(() => {
     const measured = measureContainerWidth(containerRef);
     if (measured > 0) {
       return measured;
     }
-    if (windowFallback && typeof globalThis.matchMedia === 'function') {
-      return LAYOUT_CONFIG.DESKTOP_COLUMN_WIDTH * 4;
+    if (windowFallback && typeof globalThis !== 'undefined' && typeof globalThis.innerWidth === 'number') {
+      return globalThis.innerWidth;
     }
     return 0;
   });
