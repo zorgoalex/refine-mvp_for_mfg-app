@@ -114,6 +114,43 @@ maybe('PgOutboxRepository integration', () => {
     expect(row.status).toBe('processing');
     expect(row.locked_by).toBe('E2E-worker-1');
   });
+
+  it('uses FOR UPDATE SKIP LOCKED: two concurrent claims in overlapping transactions never both take the same row', async () => {
+    const aggregateId = `E2E-order-${randomUUID()}`;
+    const outboxEventId = await insertPending(pool, aggregateId);
+
+    // Two distinct connections with overlapping open transactions race on the same pending row.
+    const concurrencyPool = new Pool({ connectionString: databaseUrl, max: 2 });
+    const clientA = await concurrencyPool.connect();
+    const clientB = await concurrencyPool.connect();
+    try {
+      await clientA.query(`SET search_path TO ${schemaName}`);
+      await clientB.query(`SET search_path TO ${schemaName}`);
+      await clientA.query('BEGIN');
+      await clientB.query('BEGIN');
+
+      const [claimA, claimB] = await Promise.all([
+        repository.claimPendingBatch(clientA, { batchSize: 10, workerId: 'E2E-A', now: new Date() }),
+        repository.claimPendingBatch(clientB, { batchSize: 10, workerId: 'E2E-B', now: new Date() }),
+      ]);
+
+      const gotA = claimA.some((r) => r.outboxEventId === outboxEventId);
+      const gotB = claimB.some((r) => r.outboxEventId === outboxEventId);
+      // SKIP LOCKED guarantees exactly one of the two concurrent claims takes the row.
+      expect(gotA !== gotB).toBe(true);
+
+      await clientA.query('COMMIT');
+      await clientB.query('COMMIT');
+    } finally {
+      clientA.release();
+      clientB.release();
+      await concurrencyPool.end();
+    }
+
+    const row = await fetchRow(pool, outboxEventId);
+    expect(row.status).toBe('processing');
+    expect(['E2E-A', 'E2E-B']).toContain(row.locked_by);
+  });
 });
 
 async function createMinimalSchema(pool: Pool): Promise<void> {
