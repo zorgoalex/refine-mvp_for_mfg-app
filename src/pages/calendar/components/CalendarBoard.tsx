@@ -27,6 +27,7 @@ import {
   calculateColumnsPerRow,
   groupDaysIntoRows,
   isMobileDevice,
+  isNarrowDevice,
 } from '../utils/calendarLayout';
 import { formatDateKey } from '../utils/dateUtils';
 import { useResponsive } from '../hooks/useResponsive';
@@ -37,7 +38,15 @@ import { useResponsive } from '../hooks/useResponsive';
 const CalendarBoard: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(1200);
-  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.STANDARD);
+  // Responsive: classify container width for mobile vs desktop nav/layout
+  const responsive = useResponsive(containerRef);
+  const isMobile = responsive.isMobile;
+  const isNarrow = responsive.isNarrow;
+  // AD-1: set-once default — first-render width decides BRIEF vs STANDARD.
+  // User choice is never overwritten on subsequent re-renders.
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    responsive.isMobile ? ViewMode.BRIEF : ViewMode.STANDARD,
+  );
   // Масштабирование карточек: 1.0 = дефолт (100%), диапазон от 0.7 (70%) до 1.5 (150%)
   const [cardScale, setCardScale] = useState<number>(1.0);
   const pendingOrderActionsRef = useRef<Map<number, Promise<void>>>(new Map());
@@ -45,10 +54,6 @@ const CalendarBoard: React.FC = () => {
   const MIN_SCALE = 0.7;
   const MAX_SCALE = 1.5;
   const SCALE_STEP = 0.1;
-
-  // Responsive: classify container width for mobile vs desktop nav/layout
-  const responsive = useResponsive(containerRef);
-  const isMobile = responsive.isMobile;
 
   // Генерация дней календаря
   const { days, startDate, endDate, goToToday, goForward, goBackward } =
@@ -313,7 +318,12 @@ const CalendarBoard: React.FC = () => {
 
   // Вычисляем layout (количество колонок и их ширину) с учетом масштаба
   const { columnWidth, columnsPerRow } = useMemo(() => {
-    return calculateColumnsPerRow(containerWidth, isMobileDevice(containerWidth), cardScale);
+    return calculateColumnsPerRow(
+      containerWidth,
+      isMobileDevice(containerWidth),
+      cardScale,
+      isNarrowDevice(containerWidth),
+    );
   }, [containerWidth, cardScale]);
 
   // Группируем дни по рядам

@@ -19,6 +19,9 @@ export const LAYOUT_CONFIG = {
 
   // Breakpoint для мобильных устройств
   MOBILE_BREAKPOINT: 768,
+
+  // Breakpoint для узких мобильных экранов (1 колонка + horizontal scroll)
+  NARROW_BREAKPOINT: 480,
 } as const;
 
 /**
@@ -32,14 +35,16 @@ export interface LayoutCalculation {
 /**
  * Вычисляет количество колонок в ряду и их ширину
  * @param containerWidth - ширина контейнера календаря
- * @param isMobile - является ли устройство мобильным
+ * @param isMobile - является ли устройство мобильным (containerWidth <= MOBILE_BREAKPOINT)
  * @param cardScale - масштаб карточек (от 0.7 до 1.5)
+ * @param isNarrow - узкий экран (containerWidth <= NARROW_BREAKPOINT). AD-6: forces 1 column.
  * @returns объект с шириной колонки и количеством колонок в ряду
  */
 export function calculateColumnsPerRow(
   containerWidth: number,
   isMobile: boolean = false,
-  cardScale: number = 1.0
+  cardScale: number = 1.0,
+  isNarrow: boolean = false
 ): LayoutCalculation {
   const {
     MOBILE_MIN_COLUMN_WIDTH,
@@ -48,6 +53,15 @@ export function calculateColumnsPerRow(
     COLUMN_GAP,
     CONTAINER_PADDING,
   } = LAYOUT_CONFIG;
+
+  // AD-6: очень узкий экран — 1 колонка, ширина = доступная ширина
+  if (isNarrow) {
+    const width = Math.max(
+      MOBILE_MIN_COLUMN_WIDTH,
+      containerWidth - CONTAINER_PADDING,
+    );
+    return { columnWidth: width, columnsPerRow: 1 };
+  }
 
   // Доступная ширина для колонок (минус padding)
   const availableWidth = containerWidth - CONTAINER_PADDING;
@@ -113,10 +127,17 @@ export function groupDaysIntoRows<T>(days: T[], columnsPerRow: number): T[][] {
 /**
  * Проверяет, является ли устройство мобильным на основе ширины экрана
  * @param width - ширина экрана или контейнера
- * @returns true если ширина меньше MOBILE_BREAKPOINT
+ * @returns true если ширина <= MOBILE_BREAKPOINT
  */
-export function isMobileDevice(width: number = window.innerWidth): boolean {
+export function isMobileDevice(width: number = typeof globalThis !== 'undefined' && typeof globalThis.innerWidth === 'number' ? globalThis.innerWidth : LAYOUT_CONFIG.DESKTOP_COLUMN_WIDTH * 4): boolean {
   return width <= LAYOUT_CONFIG.MOBILE_BREAKPOINT;
+}
+
+/**
+ * AD-6: проверяет, является ли экран узким (<= 480 px)
+ */
+export function isNarrowDevice(width: number = typeof globalThis !== 'undefined' && typeof globalThis.innerWidth === 'number' ? globalThis.innerWidth : LAYOUT_CONFIG.DESKTOP_COLUMN_WIDTH * 4): boolean {
+  return width <= LAYOUT_CONFIG.NARROW_BREAKPOINT;
 }
 
 /**
