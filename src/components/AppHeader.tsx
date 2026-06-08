@@ -1,12 +1,16 @@
 import React from "react";
 import { Layout, Space, Avatar, Typography, Dropdown, Button } from "antd";
-import { UserOutlined, LogoutOutlined, DownOutlined } from "@ant-design/icons";
+import { UserOutlined, LogoutOutlined, DownOutlined, MenuOutlined } from "@ant-design/icons";
 import { useGetIdentity, useLogout } from "@refinedev/core";
 import type { UserIdentity } from "../types/auth";
 import { NotificationBell } from "./NotificationBell";
 // import { NotificationTestButton } from "./NotificationTestButton"; // DEV ONLY - закомментирован
 
-export const AppHeader: React.FC = () => {
+export interface AppHeaderProps {
+  onOpenSider?: () => void;
+}
+
+export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
   const { data: identity } = useGetIdentity<UserIdentity>();
   const { mutate: logout } = useLogout();
 
@@ -37,6 +41,14 @@ export const AppHeader: React.FC = () => {
       }}
     >
       <Space size="middle" align="center">
+        {onOpenSider && (
+          <Button
+            type="text"
+            icon={<MenuOutlined style={{ fontSize: 18 }} />}
+            onClick={onOpenSider}
+            aria-label="Открыть меню навигации"
+          />
+        )}
         <Typography.Text strong style={{ fontSize: 16, lineHeight: 1.1 }}>
           ERP
           <br />
