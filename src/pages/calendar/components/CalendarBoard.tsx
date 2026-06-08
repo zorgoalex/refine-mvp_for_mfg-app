@@ -3,6 +3,7 @@ import { Spin, Alert, Button, Space, Segmented, Tooltip, message } from 'antd';
 import { LeftOutlined, RightOutlined, CalendarOutlined, ZoomInOutlined, ZoomOutOutlined, UndoOutlined } from '@ant-design/icons';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
+import { TouchBackend } from 'react-dnd-touch-backend';
 import { useInvalidate } from '@refinedev/core';
 import DayColumn from './DayColumn';
 import OrderContextMenu from './OrderContextMenu';
@@ -42,6 +43,23 @@ const CalendarBoard: React.FC = () => {
   const responsive = useResponsive(containerRef);
   const isMobile = responsive.isMobile;
   const isNarrow = responsive.isNarrow;
+
+  // AD-2: pick DnD backend based on pointer precision.
+  // TouchBackend only on touch-primary devices; touch-capable desktops
+  // (Surface, iPad + Magic Keyboard) keep HTML5Backend with no 150 ms
+  // long-press delay.
+  const dndBackend = useMemo(() => {
+    if (typeof window === 'undefined') return HTML5Backend;
+    const hasTouch =
+      'ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0;
+    const touchPrimary =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: coarse)').matches;
+    if (hasTouch && touchPrimary) {
+      return TouchBackend({ enableMouseEvents: true, delayTouchStart: 150 });
+    }
+    return HTML5Backend;
+  }, []);
   // AD-1: set-once default — first-render width decides BRIEF vs STANDARD.
   // User choice is never overwritten on subsequent re-renders.
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
@@ -350,7 +368,7 @@ const CalendarBoard: React.FC = () => {
   }
 
   return (
-    <DndProvider backend={HTML5Backend}>
+    <DndProvider backend={dndBackend}>
       <div className="calendar-board" ref={containerRef}>
         {/* Навигация по календарю — AD-4: двухрядный layout на mobile */}
         <div className={`calendar-navigation${isMobile ? ' calendar-navigation--mobile' : ''}`}>
