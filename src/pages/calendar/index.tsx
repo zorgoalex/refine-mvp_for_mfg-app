@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import CalendarBoard from './components/CalendarBoard';
 import './styles/calendar.css';
+import './styles/calendar-mobile.css';
 
 /**
  * Главная страница производственного календаря

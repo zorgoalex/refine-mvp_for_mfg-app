@@ -1,0 +1,94 @@
+/* ============================================
+   Calendar mobile overrides
+   Single source of truth for mobile styling.
+   Loaded after calendar.css in src/pages/calendar/index.tsx.
+   ============================================ */
+
+@media (max-width: 768px) {
+  /* Двухрядная навигация (AD-4) */
+  .calendar-navigation--mobile {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .calendar-navigation__row {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .calendar-navigation__flex-btn {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Существующая типографика (миграция из calendar.css:326-369) */
+  .calendar-navigation {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .calendar-row {
+    gap: 12px;
+  }
+
+  .day-column__header {
+    padding: 10px;
+  }
+
+  .day-column__day-name {
+    font-size: 13px;
+  }
+
+  .day-column__date {
+    font-size: 11px;
+  }
+
+  .day-column__total-area {
+    font-size: 12px;
+  }
+
+  .order-card {
+    padding: 8px;
+  }
+
+  .order-card__number {
+    font-size: 13px;
+  }
+
+  .order-card__milling,
+  .order-card__area,
+  .order-card__date,
+  .order-card__client {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* AD-6: 1 колонка + horizontal scroll + scroll-snap */
+  .calendar-grid {
+    overflow-x: auto;
+    overflow-y: visible;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .calendar-row {
+    flex-wrap: nowrap;
+    scroll-snap-align: start;
+  }
+
+  .day-column {
+    min-width: 90vw;
+    flex-shrink: 0;
+  }
+
+  /* На сверхузких экранах контекстное меню растягиваем во всю ширину */
+  .calendar-context-menu {
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+  }
+}

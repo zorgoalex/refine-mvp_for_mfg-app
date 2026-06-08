@@ -126,4 +126,6 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
   );
 };
 
-export default DayColumnBrief;
+const MemoizedDayColumnBrief = React.memo(DayColumnBrief);
+
+export default MemoizedDayColumnBrief;

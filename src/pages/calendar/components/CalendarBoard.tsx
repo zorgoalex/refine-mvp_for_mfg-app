@@ -519,7 +519,7 @@ const CalendarBoard: React.FC = () => {
 
       {/* Сетка дней календаря */}
       {!isLoading && (
-        <div className="calendar-grid">
+        <div className="calendar-grid" role="region" aria-label="Производственный календарь">
           {dayRows.map((row, rowIndex) => (
             <div key={`row-${rowIndex}`} className="calendar-row">
               {row.map((day) => {
