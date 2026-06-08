@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCurrentSourceDate } from './OrderContextMenu';
+import { isSameDateMove, resolveCurrentSourceDate } from './OrderContextMenu';
 import type { CalendarOrder } from '../types/calendar';
 
 function makeOrder(planned_completion_date: string | null): CalendarOrder {
@@ -31,5 +31,33 @@ describe('resolveCurrentSourceDate (AD-2 "Move to date" source)', () => {
     const result = resolveCurrentSourceDate(order);
     // Result is today's date in DD.MM.YYYY; just check format
     expect(result).toMatch(/^\d{2}\.\d{2}\.\d{4}$/);
+  });
+});
+
+describe('isSameDateMove (AD-2 UX guard)', () => {
+  it('returns true when picked date equals order planned_completion_date (ISO)', () => {
+    const order = makeOrder('2026-06-15');
+    const picked = new Date('2026-06-15T12:00:00');
+    expect(isSameDateMove(order, picked)).toBe(true);
+  });
+
+  it('returns true when picked date equals order planned_completion_date (DD.MM.YYYY)', () => {
+    const order = makeOrder('15.06.2026');
+    const picked = new Date('2026-06-15T12:00:00');
+    expect(isSameDateMove(order, picked)).toBe(true);
+  });
+
+  it('returns false when picked date is a different day', () => {
+    const order = makeOrder('2026-06-15');
+    const picked = new Date('2026-06-16T12:00:00');
+    expect(isSameDateMove(order, picked)).toBe(false);
+  });
+
+  it('ignores time-of-day in the picked date (only calendar day matters)', () => {
+    const order = makeOrder('2026-06-15');
+    const pickedMorning = new Date('2026-06-15T08:00:00');
+    const pickedEvening = new Date('2026-06-15T22:30:00');
+    expect(isSameDateMove(order, pickedMorning)).toBe(true);
+    expect(isSameDateMove(order, pickedEvening)).toBe(true);
   });
 });

@@ -207,7 +207,6 @@ export const CustomSider: React.FC = () => {
       canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions),
     canViewSettings,
     canCreateOrders,
-    isCreateModalOpen,
     setIsCreateModalOpen,
   });
 

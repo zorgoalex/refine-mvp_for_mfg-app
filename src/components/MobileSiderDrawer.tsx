@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Drawer, Menu, Button, Typography, Space } from "antd";
 import { CloseOutlined, PlusOutlined } from "@ant-design/icons";
 import { useResource, useNavigation } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
-import { useMediaQuery } from "../hooks/useMediaQuery";
 import { OrderCreateModal } from "../pages/orders/components/OrderCreateModal";
 import { authStorage } from "../utils/auth";
 import { authSession } from "../api/authSession";
@@ -97,7 +96,6 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
       canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions),
     canViewSettings,
     canCreateOrders,
-    isCreateModalOpen,
     setIsCreateModalOpen,
   });
 

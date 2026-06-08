@@ -33,7 +33,6 @@ export interface UseSiderMenuItemsInput {
   canViewNavigation: (resourceName: string) => boolean;
   canViewSettings: boolean;
   canCreateOrders: boolean;
-  isCreateModalOpen: boolean;
   setIsCreateModalOpen: (open: boolean) => void;
 }
 

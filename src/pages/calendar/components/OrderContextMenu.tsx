@@ -49,6 +49,15 @@ function resolveCurrentSourceDate(order: CalendarOrder): string {
 }
 
 /**
+ * AD-2 UX guard helper: returns true if moving the order to pickedDate
+ * would be a no-op (target equals the order's current planned date).
+ * Extracted for unit testing.
+ */
+export function isSameDateMove(order: CalendarOrder, pickedDate: Date): boolean {
+  return resolveCurrentSourceDate(order) === formatDateKey(pickedDate);
+}
+
+/**
  * Компонент контекстного меню для изменения статусов заказа и переноса даты
  * Появляется при правом клике / long-press на карточку заказа
  */
@@ -69,10 +78,14 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
   const [pickedDate, setPickedDate] = useState<Dayjs | null>(null);
   const [isMoving, setIsMoving] = useState(false);
 
-  if (!visible) return null;
+  // AD-2 fix: do NOT early-return when !visible. The Move-to-date Modal
+  // is part of this component and must survive the context menu being
+  // dismissed; otherwise the modal would be unmounted by the parent
+  // conditional before the user can interact with it.
 
   // Обработчик клика вне меню
   React.useEffect(() => {
+    if (!visible) return;
     const handleClickOutside = () => {
       onClose();
     };
@@ -199,25 +212,27 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
 
   return (
     <>
-      <div
-        className="calendar-context-menu"
-        style={{
-          position: 'fixed',
-          top: y,
-          left: x,
-          zIndex: 9999,
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <Menu
-          mode="vertical"
-          items={menuItems}
+      {visible && (
+        <div
+          className="calendar-context-menu"
           style={{
-            minWidth: 220,
-            boxShadow: '0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,.08)',
+            position: 'fixed',
+            top: y,
+            left: x,
+            zIndex: 9999,
           }}
-        />
-      </div>
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Menu
+            mode="vertical"
+            items={menuItems}
+            style={{
+              minWidth: 220,
+              boxShadow: '0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,.08)',
+            }}
+          />
+        </div>
+      )}
 
       <Modal
         title={`Перенести заказ ${order.order_name}`}

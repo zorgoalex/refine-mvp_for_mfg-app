@@ -4,11 +4,8 @@
   "main": "index.js",
   "scripts": {
     "dev": "node --max-old-space-size=4096 node_modules/vite/bin/vite.js",
-    "dev:mobile": "node --max-old-space-size=4096 node_modules/vite/bin/vite.js --port 5273 --strictPort --host",
     "dev:api": "vercel dev --listen 3001",
-    "dev:api:mobile": "vercel dev --listen 3101",
     "dev:full": "concurrently \"npm run dev\" \"npm run dev:api\" --names \"vite,api\" --prefix-colors \"cyan,magenta\"",
-    "dev:full:mobile": "concurrently \"npm run dev:mobile\" \"npm run dev:api:mobile\" --names \"vite,api\" --prefix-colors \"cyan,magenta\"",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
