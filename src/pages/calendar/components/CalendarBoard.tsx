@@ -3,6 +3,7 @@ import { Spin, Alert, Button, Space, Segmented, Tooltip, message } from 'antd';
 import { LeftOutlined, RightOutlined, CalendarOutlined, ZoomInOutlined, ZoomOutOutlined, UndoOutlined } from '@ant-design/icons';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
+import { TouchBackend } from 'react-dnd-touch-backend';
 import { useInvalidate } from '@refinedev/core';
 import DayColumn from './DayColumn';
 import OrderContextMenu from './OrderContextMenu';
@@ -27,8 +28,10 @@ import {
   calculateColumnsPerRow,
   groupDaysIntoRows,
   isMobileDevice,
+  isNarrowDevice,
 } from '../utils/calendarLayout';
 import { formatDateKey } from '../utils/dateUtils';
+import { useResponsive } from '../hooks/useResponsive';
 
 /**
  * Основной компонент доски календаря
@@ -36,7 +39,32 @@ import { formatDateKey } from '../utils/dateUtils';
 const CalendarBoard: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(1200);
-  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.STANDARD);
+  // Responsive: classify container width for mobile vs desktop nav/layout
+  const responsive = useResponsive(containerRef);
+  const isMobile = responsive.isMobile;
+  const isNarrow = responsive.isNarrow;
+
+  // AD-2: pick DnD backend based on pointer precision.
+  // TouchBackend only on touch-primary devices; touch-capable desktops
+  // (Surface, iPad + Magic Keyboard) keep HTML5Backend with no 150 ms
+  // long-press delay.
+  const dndBackend = useMemo(() => {
+    if (typeof window === 'undefined') return HTML5Backend;
+    const hasTouch =
+      'ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0;
+    const touchPrimary =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: coarse)').matches;
+    if (hasTouch && touchPrimary) {
+      return TouchBackend({ enableMouseEvents: true, delayTouchStart: 150 });
+    }
+    return HTML5Backend;
+  }, []);
+  // AD-1: set-once default — first-render width decides BRIEF vs STANDARD.
+  // User choice is never overwritten on subsequent re-renders.
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    responsive.isMobile ? ViewMode.BRIEF : ViewMode.STANDARD,
+  );
   // Масштабирование карточек: 1.0 = дефолт (100%), диапазон от 0.7 (70%) до 1.5 (150%)
   const [cardScale, setCardScale] = useState<number>(1.0);
   const pendingOrderActionsRef = useRef<Map<number, Promise<void>>>(new Map());
@@ -46,8 +74,9 @@ const CalendarBoard: React.FC = () => {
   const SCALE_STEP = 0.1;
 
   // Генерация дней календаря
+  // AD-6: stepDays=1 на mobile (по 1 дню), stepDays=7 на desktop (по неделе)
   const { days, startDate, endDate, goToToday, goForward, goBackward } =
-    useCalendarDays();
+    useCalendarDays({ stepDays: isMobile ? 1 : 7 });
 
   // Загрузка данных заказов
   const { ordersByDate, isLoading, error, refetch, productionWorkflowDisplay } = useCalendarData(
@@ -132,6 +161,25 @@ const CalendarBoard: React.FC = () => {
       console.error('[CalendarBoard] Error moving order:', error);
     });
   };
+
+  // AD-2: "Move to date" action triggered from OrderContextMenu.
+  // Computes source date from order.planned_completion_date and
+  // reuses the same useOrderMove backend path (audit + idempotency
+  // already wired in moveOrder).
+  const handleMoveToDate = useCallback(
+    async (order: CalendarOrder, newDate: Date) => {
+      const sourceDate = formatDateKey(order.planned_completion_date || new Date());
+      const targetDateKey = formatDateKey(newDate);
+      await queueOrderAction(order.order_id, async () => {
+        applyKnownOrderVersion(order);
+        const version = await moveOrder(order, newDate, sourceDate, targetDateKey);
+        if (version !== null) {
+          setOrderVersion(order, version);
+        }
+      });
+    },
+    [moveOrder, queueOrderAction, applyKnownOrderVersion, setOrderVersion],
+  );
   
   // Обработчик открытия контекстного меню
   const handleContextMenu = (e: React.MouseEvent, order: CalendarOrder) => {
@@ -279,7 +327,9 @@ const CalendarBoard: React.FC = () => {
   };
 
   // Проверка, доступно ли масштабирование для текущего режима
-  const isZoomAvailable = viewMode === ViewMode.STANDARD || viewMode === ViewMode.COMPACT;
+  // AD-4: zoom скрыт на mobile (auto-scale = 1.0)
+  const isZoomAvailable =
+    !isMobile && (viewMode === ViewMode.STANDARD || viewMode === ViewMode.COMPACT);
 
   // Отслеживаем размер контейнера для адаптивного layout
   useEffect(() => {
@@ -306,7 +356,12 @@ const CalendarBoard: React.FC = () => {
 
   // Вычисляем layout (количество колонок и их ширину) с учетом масштаба
   const { columnWidth, columnsPerRow } = useMemo(() => {
-    return calculateColumnsPerRow(containerWidth, isMobileDevice(containerWidth), cardScale);
+    return calculateColumnsPerRow(
+      containerWidth,
+      isMobileDevice(containerWidth),
+      cardScale,
+      isNarrowDevice(containerWidth),
+    );
   }, [containerWidth, cardScale]);
 
   // Группируем дни по рядам
@@ -332,79 +387,127 @@ const CalendarBoard: React.FC = () => {
   }
 
   return (
-    <DndProvider backend={HTML5Backend}>
+    <DndProvider backend={dndBackend}>
       <div className="calendar-board" ref={containerRef}>
-        {/* Навигация по календарю */}
-        <div className="calendar-navigation">
-        <Space size="middle" wrap>
-          <Space size="small">
-            <Button
-              icon={<LeftOutlined />}
-              onClick={goBackward}
-              title="Назад на неделю"
-            >
-              Назад
-            </Button>
-            <Button
-              icon={<CalendarOutlined />}
-              onClick={goToToday}
-              title="Вернуться к сегодняшнему дню"
-            >
-              Сегодня
-            </Button>
-            <Button
-              icon={<RightOutlined />}
-              onClick={goForward}
-              title="Вперед на неделю"
-            >
-              Вперед
-            </Button>
-            <Button onClick={() => refetch()} loading={isLoading || isMoving}>
-              Обновить
-            </Button>
-          </Space>
-
-          {/* Переключатель режимов отображения */}
-          <Segmented
-            options={[
-              { label: 'Стандартный', value: ViewMode.STANDARD },
-              { label: 'Компактный', value: ViewMode.COMPACT },
-              { label: 'Краткий', value: ViewMode.BRIEF },
-            ]}
-            value={viewMode}
-            onChange={(value) => setViewMode(value as ViewMode)}
-          />
-
-          {/* Кнопки масштабирования (только для стандартного и компактного вида) */}
-          {isZoomAvailable && (
+        {/* Навигация по календарю — AD-4: двухрядный layout на mobile */}
+        <div className={`calendar-navigation${isMobile ? ' calendar-navigation--mobile' : ''}`}>
+        {isMobile ? (
+          <>
+            {/* Row 1: навигация по дням (‹ Сегодня › Обновить) */}
+            <div className="calendar-navigation__row">
+              <Button
+                icon={<LeftOutlined />}
+                onClick={goBackward}
+                title="Назад"
+                className="calendar-navigation__flex-btn"
+              />
+              <Button
+                icon={<CalendarOutlined />}
+                onClick={goToToday}
+                title="Сегодня"
+                className="calendar-navigation__flex-btn"
+              >
+                Сегодня
+              </Button>
+              <Button
+                icon={<RightOutlined />}
+                onClick={goForward}
+                title="Вперёд"
+                className="calendar-navigation__flex-btn"
+              />
+              <Button
+                onClick={() => refetch()}
+                loading={isLoading || isMoving}
+                className="calendar-navigation__flex-btn"
+              >
+                Обновить
+              </Button>
+            </div>
+            {/* Row 2: Segmented — переключатель режимов отображения */}
+            <div className="calendar-navigation__row">
+              <Segmented
+                block
+                options={[
+                  { label: 'Стандарт', value: ViewMode.STANDARD },
+                  { label: 'Компакт', value: ViewMode.COMPACT },
+                  { label: 'Краткий', value: ViewMode.BRIEF },
+                ]}
+                value={viewMode}
+                onChange={(value) => setViewMode(value as ViewMode)}
+              />
+            </div>
+          </>
+        ) : (
+          <Space size="middle" wrap>
             <Space size="small">
-              <Tooltip title="Уменьшить">
-                <Button
-                  icon={<ZoomOutOutlined />}
-                  onClick={handleZoomOut}
-                  disabled={cardScale <= MIN_SCALE}
-                />
-              </Tooltip>
-              <Tooltip title="Сбросить масштаб">
-                <Button
-                  icon={<UndoOutlined />}
-                  onClick={handleZoomReset}
-                  disabled={Math.abs(cardScale - DEFAULT_SCALE) < 0.01}
-                />
-              </Tooltip>
-              <Tooltip title="Увеличить">
-                <Button
-                  icon={<ZoomInOutlined />}
-                  onClick={handleZoomIn}
-                  disabled={cardScale >= MAX_SCALE}
-                />
-              </Tooltip>
-              <span style={{ fontSize: '12px', color: '#8c8c8c', minWidth: '40px', textAlign: 'center' }}>
-                {Math.round(cardScale * 100)}%
-              </span>
+              <Button
+                icon={<LeftOutlined />}
+                onClick={goBackward}
+                title="Назад на неделю"
+              >
+                Назад
+              </Button>
+              <Button
+                icon={<CalendarOutlined />}
+                onClick={goToToday}
+                title="Вернуться к сегодняшнему дню"
+              >
+                Сегодня
+              </Button>
+              <Button
+                icon={<RightOutlined />}
+                onClick={goForward}
+                title="Вперед на неделю"
+              >
+                Вперед
+              </Button>
+              <Button onClick={() => refetch()} loading={isLoading || isMoving}>
+                Обновить
+              </Button>
             </Space>
-          )}
-        </Space>
+
+            {/* Переключатель режимов отображения */}
+            <Segmented
+              options={[
+                { label: 'Стандартный', value: ViewMode.STANDARD },
+                { label: 'Компактный', value: ViewMode.COMPACT },
+                { label: 'Краткий', value: ViewMode.BRIEF },
+              ]}
+              value={viewMode}
+              onChange={(value) => setViewMode(value as ViewMode)}
+            />
+
+            {/* Кнопки масштабирования (только для desktop + STANDARD/COMPACT) */}
+            {isZoomAvailable && (
+              <Space size="small">
+                <Tooltip title="Уменьшить">
+                  <Button
+                    icon={<ZoomOutOutlined />}
+                    onClick={handleZoomOut}
+                    disabled={cardScale <= MIN_SCALE}
+                  />
+                </Tooltip>
+                <Tooltip title="Сбросить масштаб">
+                  <Button
+                    icon={<UndoOutlined />}
+                    onClick={handleZoomReset}
+                    disabled={Math.abs(cardScale - DEFAULT_SCALE) < 0.01}
+                  />
+                </Tooltip>
+                <Tooltip title="Увеличить">
+                  <Button
+                    icon={<ZoomInOutlined />}
+                    onClick={handleZoomIn}
+                    disabled={cardScale >= MAX_SCALE}
+                  />
+                </Tooltip>
+                <span style={{ fontSize: '12px', color: '#8c8c8c', minWidth: '40px', textAlign: 'center' }}>
+                  {Math.round(cardScale * 100)}%
+                </span>
+              </Space>
+            )}
+          </Space>
+        )}
       </div>
 
       {/* Индикатор загрузки */}
@@ -416,7 +519,7 @@ const CalendarBoard: React.FC = () => {
 
       {/* Сетка дней календаря */}
       {!isLoading && (
-        <div className="calendar-grid">
+        <div className="calendar-grid" role="region" aria-label="Производственный календарь">
           {dayRows.map((row, rowIndex) => (
             <div key={`row-${rowIndex}`} className="calendar-row">
               {row.map((day) => {
@@ -453,6 +556,7 @@ const CalendarBoard: React.FC = () => {
           onClose={handleCloseContextMenu}
           onStatusChange={handleStatusChange}
           onProductionStatusToggle={handleProductionStatusToggle}
+          onMoveToDate={handleMoveToDate}
           activeProductionStatusIds={activeProductionStatusIds}
           backendProductionActionsEnabled={featureFlags.useBackendProductionActions}
           statuses={{

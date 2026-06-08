@@ -49,6 +49,7 @@ import {
   isLegacyAdminUser,
 } from "../utils/navigationPermissions";
 import { can } from "../utils/permissions";
+import { useSiderMenuItems } from "../utils/siderMenuItems";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -60,7 +61,7 @@ const CATEGORY_ORDER = [
   "Материалы",
   "Справочники",
   "Настройки",
-];
+] as const;
 
 const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
@@ -194,82 +195,19 @@ export const CustomSider: React.FC = () => {
     [currentUser, featureFlags.useBackendPermissions],
   );
 
-  const categorizedResources = useMemo(() => {
-    const categories: Record<string, Array<{ name: string; label: string; route: string }>> = CATEGORY_ORDER.reduce(
-      (acc, cat) => ({ ...acc, [cat]: [] as Array<{ name: string; label: string; route: string }> }),
-      {} as Record<string, Array<{ name: string; label: string; route: string }>>,
-    );
-
-    resources.forEach((resource) => {
-      if (resource.name === "orders_view" || resource.name === "calendar") return;
-      const category = CATEGORY_MAP[resource.name] || "Справочники";
-      const label = RESOURCE_LABELS[resource.name] || resource.meta?.label || resource.name;
-      let route = "";
-      if (typeof resource.list === "string") {
-        route = resource.list;
-      } else if (resource.meta?.route) {
-        route = resource.meta.route;
-      }
-      if (route) {
-        if (category === "Настройки" && !canViewSettings) {
-          return;
-        }
-        if (!canViewNavigationResource(resource.name, currentUser, featureFlags.useBackendPermissions)) {
-          return;
-        }
-        categories[category].push({ name: resource.name, label, route });
-      }
-    });
-
-    CATEGORY_ORDER.forEach((cat) => {
-      categories[cat].sort((a, b) => a.label.localeCompare(b.label, "ru"));
-    });
-
-    return categories;
-  }, [resources, currentUser, canViewSettings, featureFlags.useBackendPermissions]);
-
-  const selectedKey = useMemo(() => {
-    // Sort resources by route length descending to match longer/more specific routes first
-    // This prevents /clients from matching /clients-analytics
-    const sortedResources = [...resources]
-      .filter((r) => typeof r.list === "string")
-      .sort((a, b) => (b.list as string).length - (a.list as string).length);
-    const resource = sortedResources.find((r) => location.pathname.startsWith(r.list as string));
-    return resource?.name || "";
-  }, [location.pathname, resources]);
-
-  const ordersResource = resources.find((r) => r.name === "orders_view");
-  const ordersRoute = typeof ordersResource?.list === "string" ? ordersResource.list : "/orders";
-  const ordersLabel = RESOURCE_LABELS["orders_view"] || "Заказы";
-
-  const calendarResource = resources.find((r) => r.name === "calendar");
-  const calendarRoute = typeof calendarResource?.list === "string" ? calendarResource.list : "/calendar";
-  const calendarLabel = RESOURCE_LABELS["calendar"] || "Календарь";
-
-  const topMenuItems: MenuProps["items"] = [
-    canViewNavigationResource("orders_view", currentUser, featureFlags.useBackendPermissions)
-      ? { key: "orders_view", icon: RESOURCE_ICONS["orders_view"], label: ordersLabel, onClick: () => push(ordersRoute) }
-      : null,
-    canViewNavigationResource("calendar", currentUser, featureFlags.useBackendPermissions)
-      ? { key: "calendar", icon: RESOURCE_ICONS["calendar"], label: calendarLabel, onClick: () => push(calendarRoute) }
-      : null,
-  ].filter(Boolean) as MenuProps["items"];
-
-  const handleNewOrder = () => {
-    push(ordersRoute);
-    setIsCreateModalOpen(true);
-  };
-
-  const flatMenuItems: MenuProps["items"] = CATEGORY_ORDER.flatMap((category) => {
-    if (category === "Настройки" && !canViewSettings) return [];
-    const items = categorizedResources[category];
-    if (!items || items.length === 0) return [];
-    return items.map((item) => ({
-      key: item.name,
-      icon: RESOURCE_ICONS[item.name],
-      label: item.label,
-      onClick: () => push(item.route),
-    }));
+  const sider = useSiderMenuItems({
+    resources,
+    pathname: location.pathname,
+    push,
+    categoryOrder: CATEGORY_ORDER,
+    categoryMap: CATEGORY_MAP,
+    resourceLabels: RESOURCE_LABELS,
+    resourceIcons: RESOURCE_ICONS,
+    canViewNavigation: (name) =>
+      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions),
+    canViewSettings,
+    canCreateOrders,
+    setIsCreateModalOpen,
   });
 
   return (
@@ -305,8 +243,8 @@ export const CustomSider: React.FC = () => {
       >
         <Menu
           mode="inline"
-          selectedKeys={selectedKey === "orders_view" || selectedKey === "calendar" ? [selectedKey] : []}
-          items={topMenuItems}
+          selectedKeys={sider.selectedKey === "orders_view" || sider.selectedKey === "calendar" ? [sider.selectedKey] : []}
+          items={sider.topMenuItems}
           style={{ background: "transparent", border: "none", marginBottom: 0, color: "#E0E0E0" }}
           className="orders-menu"
         />
@@ -316,7 +254,7 @@ export const CustomSider: React.FC = () => {
             <Button
               type="primary"
               icon={collapsed ? <PlusOutlined /> : undefined}
-              onClick={handleNewOrder}
+              onClick={sider.handleNewOrder}
               block={!collapsed}
               style={{ marginBottom: 8 }}
               title={collapsed ? "Создать заказ" : undefined}
@@ -329,14 +267,14 @@ export const CustomSider: React.FC = () => {
         {collapsed ? (
           <Menu
             mode="inline"
-            selectedKeys={selectedKey ? [selectedKey] : []}
-            items={flatMenuItems}
+            selectedKeys={sider.selectedKey ? [sider.selectedKey] : []}
+            items={sider.flatMenuItems}
             style={{ border: "none", background: "transparent", fontSize: "0.98em" }}
           />
         ) : (
           <Collapse accordion ghost defaultActiveKey={undefined} style={{ background: "transparent", border: "none" }} className="sidebar-collapse">
             {CATEGORY_ORDER.map((category) => {
-              const items = categorizedResources[category];
+              const items = sider.categorizedResources[category];
               if (!items || items.length === 0) return null;
               if (category === "Настройки" && !canViewSettings) return null;
 
@@ -347,7 +285,7 @@ export const CustomSider: React.FC = () => {
                 onClick: () => push(item.route),
               }));
 
-              const isSelected = items.some((item) => item.name === selectedKey);
+              const isSelected = items.some((item) => item.name === sider.selectedKey);
 
               return (
                 <Panel
@@ -362,7 +300,7 @@ export const CustomSider: React.FC = () => {
                 >
                   <Menu
                     mode="inline"
-                    selectedKeys={isSelected ? [selectedKey] : []}
+                    selectedKeys={isSelected ? [sider.selectedKey] : []}
                     items={categoryItems}
                     style={{ border: "none", background: "transparent", fontSize: "0.98em" }}
                   />

@@ -323,52 +323,6 @@
 }
 
 /* ============================================
-   Responsive - Mobile
-   ============================================ */
-@media (max-width: 768px) {
-  .calendar-navigation {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .calendar-row {
-    gap: 12px;
-  }
-
-  .day-column__header {
-    padding: 10px;
-  }
-
-  .day-column__day-name {
-    font-size: 13px;
-  }
-
-  .day-column__date {
-    font-size: 11px;
-  }
-
-  .day-column__total-area {
-    font-size: 12px;
-  }
-
-  .order-card {
-    padding: 8px;
-  }
-
-  .order-card__number {
-    font-size: 13px;
-  }
-
-  .order-card__milling,
-  .order-card__area,
-  .order-card__date,
-  .order-card__client {
-    font-size: 11px;
-  }
-}
-
-/* ============================================
    Анимации
    ============================================ */
 @keyframes pulse {
