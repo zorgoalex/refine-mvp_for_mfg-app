@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:backend": "vitest run backend",
     "test:backend:deadline-integration": "vitest run --config vitest.deadline-integration.config.ts",
+    "test:backend:notification-integration": "vitest run --config vitest.notification-engine-integration.config.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:frontend-pages": "playwright test tests/frontend-pages-smoke.spec.ts",
