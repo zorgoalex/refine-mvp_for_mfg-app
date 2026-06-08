@@ -161,6 +161,25 @@ const CalendarBoard: React.FC = () => {
       console.error('[CalendarBoard] Error moving order:', error);
     });
   };
+
+  // AD-2: "Move to date" action triggered from OrderContextMenu.
+  // Computes source date from order.planned_completion_date and
+  // reuses the same useOrderMove backend path (audit + idempotency
+  // already wired in moveOrder).
+  const handleMoveToDate = useCallback(
+    async (order: CalendarOrder, newDate: Date) => {
+      const sourceDate = formatDateKey(order.planned_completion_date || new Date());
+      const targetDateKey = formatDateKey(newDate);
+      await queueOrderAction(order.order_id, async () => {
+        applyKnownOrderVersion(order);
+        const version = await moveOrder(order, newDate, sourceDate, targetDateKey);
+        if (version !== null) {
+          setOrderVersion(order, version);
+        }
+      });
+    },
+    [moveOrder, queueOrderAction, applyKnownOrderVersion, setOrderVersion],
+  );
   
   // Обработчик открытия контекстного меню
   const handleContextMenu = (e: React.MouseEvent, order: CalendarOrder) => {
@@ -537,6 +556,7 @@ const CalendarBoard: React.FC = () => {
           onClose={handleCloseContextMenu}
           onStatusChange={handleStatusChange}
           onProductionStatusToggle={handleProductionStatusToggle}
+          onMoveToDate={handleMoveToDate}
           activeProductionStatusIds={activeProductionStatusIds}
           backendProductionActionsEnabled={featureFlags.useBackendProductionActions}
           statuses={{

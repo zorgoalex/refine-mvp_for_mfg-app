@@ -1,8 +1,10 @@
-import React from 'react';
-import { Menu } from 'antd';
-import { CheckOutlined } from '@ant-design/icons';
+import React, { useState } from 'react';
+import { Menu, Modal, DatePicker, message } from 'antd';
+import { CheckOutlined, CalendarOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
+import dayjs, { type Dayjs } from 'dayjs';
 import { CalendarOrder } from '../types/calendar';
+import { formatDateKey, parseDateFromKey } from '../utils/dateUtils';
 
 export interface OrderContextMenuProps {
   order: CalendarOrder;
@@ -12,6 +14,13 @@ export interface OrderContextMenuProps {
   onClose: () => void;
   onStatusChange: (fieldName: string, statusId: number, statusName: string) => void;
   onProductionStatusToggle: (statusId: number, statusName: string) => void;
+  /**
+   * AD-2: callback to move the order to a specific date. Receives the
+   * picked Date object; current source date is derived from
+   * `order.planned_completion_date`. Returns a Promise that resolves
+   * when the move completes (or rejects on error).
+   */
+  onMoveToDate?: (order: CalendarOrder, newDate: Date) => Promise<void> | void;
   activeProductionStatusIds: Set<number>;
   backendProductionActionsEnabled?: boolean;
   statuses: {
@@ -21,9 +30,27 @@ export interface OrderContextMenuProps {
   };
 }
 
+function resolveCurrentSourceDate(order: CalendarOrder): string {
+  if (!order.planned_completion_date) {
+    return formatDateKey(new Date());
+  }
+  // The format may be ISO (YYYY-MM-DD) or DD.MM.YYYY. parseISO handles
+  // ISO; for DD.MM.YYYY, parseDateFromKey returns a Date directly.
+  const trimmed = order.planned_completion_date.trim();
+  const looksLikeIso = /^\d{4}-\d{2}-\d{2}/.test(trimmed);
+  if (looksLikeIso) {
+    return formatDateKey(trimmed);
+  }
+  const parsed = parseDateFromKey(trimmed);
+  if (parsed) {
+    return formatDateKey(parsed);
+  }
+  return formatDateKey(new Date());
+}
+
 /**
- * Компонент контекстного меню для изменения статусов заказа
- * Появляется при правом клике на карточку заказа
+ * Компонент контекстного меню для изменения статусов заказа и переноса даты
+ * Появляется при правом клике / long-press на карточку заказа
  */
 export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
   order,
@@ -33,15 +60,20 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
   onClose,
   onStatusChange,
   onProductionStatusToggle,
+  onMoveToDate,
   activeProductionStatusIds,
   backendProductionActionsEnabled = false,
   statuses,
 }) => {
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [pickedDate, setPickedDate] = useState<Dayjs | null>(null);
+  const [isMoving, setIsMoving] = useState(false);
+
   if (!visible) return null;
 
   // Обработчик клика вне меню
   React.useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleClickOutside = () => {
       onClose();
     };
 
@@ -61,6 +93,28 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
       document.removeEventListener('keydown', handleEscape);
     };
   }, [visible, onClose]);
+
+  const openMoveModal = () => {
+    // Default: today's date (most common move target)
+    setPickedDate(dayjs());
+    setIsMoveModalOpen(true);
+    onClose();
+  };
+
+  const handleMoveOk = async () => {
+    if (!pickedDate || !onMoveToDate) return;
+    setIsMoving(true);
+    try {
+      await onMoveToDate(order, pickedDate.toDate());
+      setIsMoveModalOpen(false);
+    } catch (error) {
+      message.error(
+        `Ошибка переноса заказа: ${(error as Error).message || 'Неизвестная ошибка'}`,
+      );
+    } finally {
+      setIsMoving(false);
+    }
+  };
 
   // Создаем пункты меню для статуса заказа
   const orderStatusItems: MenuProps['items'] = statuses.orderStatuses.map((status) => ({
@@ -121,29 +175,65 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
       label: 'Статус производства',
       children: productionStatusItems,
     },
+    { type: 'divider' },
+    {
+      key: 'move_to_date',
+      label: 'Перенести на дату',
+      icon: <CalendarOutlined />,
+      disabled: !onMoveToDate,
+      onClick: openMoveModal,
+    },
   ];
 
   return (
-    <div
-      className="calendar-context-menu"
-      style={{
-        position: 'fixed',
-        top: y,
-        left: x,
-        zIndex: 9999,
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <Menu
-        mode="vertical"
-        items={menuItems}
+    <>
+      <div
+        className="calendar-context-menu"
         style={{
-          minWidth: 220,
-          boxShadow: '0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,.08)',
+          position: 'fixed',
+          top: y,
+          left: x,
+          zIndex: 9999,
         }}
-      />
-    </div>
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Menu
+          mode="vertical"
+          items={menuItems}
+          style={{
+            minWidth: 220,
+            boxShadow: '0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,.08)',
+          }}
+        />
+      </div>
+
+      <Modal
+        title={`Перенести заказ ${order.order_name}`}
+        open={isMoveModalOpen}
+        onCancel={() => setIsMoveModalOpen(false)}
+        onOk={handleMoveOk}
+        okText="Перенести"
+        cancelText="Отмена"
+        confirmLoading={isMoving}
+        destroyOnClose
+      >
+        <p style={{ marginBottom: 12 }}>
+          Текущая плановая дата завершения:{' '}
+          <strong>{resolveCurrentSourceDate(order)}</strong>
+        </p>
+        <DatePicker
+          value={pickedDate}
+          onChange={(value) => setPickedDate(value)}
+          format="DD.MM.YYYY"
+          allowClear={false}
+          style={{ width: '100%' }}
+          autoFocus
+        />
+      </Modal>
+    </>
   );
 };
+
+export { resolveCurrentSourceDate };
 
 export default OrderContextMenu;
