@@ -29,6 +29,7 @@ import {
   isMobileDevice,
 } from '../utils/calendarLayout';
 import { formatDateKey } from '../utils/dateUtils';
+import { useResponsive } from '../hooks/useResponsive';
 
 /**
  * Основной компонент доски календаря
@@ -44,6 +45,10 @@ const CalendarBoard: React.FC = () => {
   const MIN_SCALE = 0.7;
   const MAX_SCALE = 1.5;
   const SCALE_STEP = 0.1;
+
+  // Responsive: classify container width for mobile vs desktop nav/layout
+  const responsive = useResponsive(containerRef);
+  const isMobile = responsive.isMobile;
 
   // Генерация дней календаря
   const { days, startDate, endDate, goToToday, goForward, goBackward } =
@@ -279,7 +284,9 @@ const CalendarBoard: React.FC = () => {
   };
 
   // Проверка, доступно ли масштабирование для текущего режима
-  const isZoomAvailable = viewMode === ViewMode.STANDARD || viewMode === ViewMode.COMPACT;
+  // AD-4: zoom скрыт на mobile (auto-scale = 1.0)
+  const isZoomAvailable =
+    !isMobile && (viewMode === ViewMode.STANDARD || viewMode === ViewMode.COMPACT);
 
   // Отслеживаем размер контейнера для адаптивного layout
   useEffect(() => {
@@ -334,77 +341,125 @@ const CalendarBoard: React.FC = () => {
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="calendar-board" ref={containerRef}>
-        {/* Навигация по календарю */}
-        <div className="calendar-navigation">
-        <Space size="middle" wrap>
-          <Space size="small">
-            <Button
-              icon={<LeftOutlined />}
-              onClick={goBackward}
-              title="Назад на неделю"
-            >
-              Назад
-            </Button>
-            <Button
-              icon={<CalendarOutlined />}
-              onClick={goToToday}
-              title="Вернуться к сегодняшнему дню"
-            >
-              Сегодня
-            </Button>
-            <Button
-              icon={<RightOutlined />}
-              onClick={goForward}
-              title="Вперед на неделю"
-            >
-              Вперед
-            </Button>
-            <Button onClick={() => refetch()} loading={isLoading || isMoving}>
-              Обновить
-            </Button>
-          </Space>
-
-          {/* Переключатель режимов отображения */}
-          <Segmented
-            options={[
-              { label: 'Стандартный', value: ViewMode.STANDARD },
-              { label: 'Компактный', value: ViewMode.COMPACT },
-              { label: 'Краткий', value: ViewMode.BRIEF },
-            ]}
-            value={viewMode}
-            onChange={(value) => setViewMode(value as ViewMode)}
-          />
-
-          {/* Кнопки масштабирования (только для стандартного и компактного вида) */}
-          {isZoomAvailable && (
+        {/* Навигация по календарю — AD-4: двухрядный layout на mobile */}
+        <div className={`calendar-navigation${isMobile ? ' calendar-navigation--mobile' : ''}`}>
+        {isMobile ? (
+          <>
+            {/* Row 1: навигация по дням (‹ Сегодня › Обновить) */}
+            <div className="calendar-navigation__row">
+              <Button
+                icon={<LeftOutlined />}
+                onClick={goBackward}
+                title="Назад"
+                className="calendar-navigation__flex-btn"
+              />
+              <Button
+                icon={<CalendarOutlined />}
+                onClick={goToToday}
+                title="Сегодня"
+                className="calendar-navigation__flex-btn"
+              >
+                Сегодня
+              </Button>
+              <Button
+                icon={<RightOutlined />}
+                onClick={goForward}
+                title="Вперёд"
+                className="calendar-navigation__flex-btn"
+              />
+              <Button
+                onClick={() => refetch()}
+                loading={isLoading || isMoving}
+                className="calendar-navigation__flex-btn"
+              >
+                Обновить
+              </Button>
+            </div>
+            {/* Row 2: Segmented — переключатель режимов отображения */}
+            <div className="calendar-navigation__row">
+              <Segmented
+                block
+                options={[
+                  { label: 'Стандарт', value: ViewMode.STANDARD },
+                  { label: 'Компакт', value: ViewMode.COMPACT },
+                  { label: 'Краткий', value: ViewMode.BRIEF },
+                ]}
+                value={viewMode}
+                onChange={(value) => setViewMode(value as ViewMode)}
+              />
+            </div>
+          </>
+        ) : (
+          <Space size="middle" wrap>
             <Space size="small">
-              <Tooltip title="Уменьшить">
-                <Button
-                  icon={<ZoomOutOutlined />}
-                  onClick={handleZoomOut}
-                  disabled={cardScale <= MIN_SCALE}
-                />
-              </Tooltip>
-              <Tooltip title="Сбросить масштаб">
-                <Button
-                  icon={<UndoOutlined />}
-                  onClick={handleZoomReset}
-                  disabled={Math.abs(cardScale - DEFAULT_SCALE) < 0.01}
-                />
-              </Tooltip>
-              <Tooltip title="Увеличить">
-                <Button
-                  icon={<ZoomInOutlined />}
-                  onClick={handleZoomIn}
-                  disabled={cardScale >= MAX_SCALE}
-                />
-              </Tooltip>
-              <span style={{ fontSize: '12px', color: '#8c8c8c', minWidth: '40px', textAlign: 'center' }}>
-                {Math.round(cardScale * 100)}%
-              </span>
+              <Button
+                icon={<LeftOutlined />}
+                onClick={goBackward}
+                title="Назад на неделю"
+              >
+                Назад
+              </Button>
+              <Button
+                icon={<CalendarOutlined />}
+                onClick={goToToday}
+                title="Вернуться к сегодняшнему дню"
+              >
+                Сегодня
+              </Button>
+              <Button
+                icon={<RightOutlined />}
+                onClick={goForward}
+                title="Вперед на неделю"
+              >
+                Вперед
+              </Button>
+              <Button onClick={() => refetch()} loading={isLoading || isMoving}>
+                Обновить
+              </Button>
             </Space>
-          )}
-        </Space>
+
+            {/* Переключатель режимов отображения */}
+            <Segmented
+              options={[
+                { label: 'Стандартный', value: ViewMode.STANDARD },
+                { label: 'Компактный', value: ViewMode.COMPACT },
+                { label: 'Краткий', value: ViewMode.BRIEF },
+              ]}
+              value={viewMode}
+              onChange={(value) => setViewMode(value as ViewMode)}
+            />
+
+            {/* Кнопки масштабирования (только для desktop + STANDARD/COMPACT) */}
+            {isZoomAvailable && (
+              <Space size="small">
+                <Tooltip title="Уменьшить">
+                  <Button
+                    icon={<ZoomOutOutlined />}
+                    onClick={handleZoomOut}
+                    disabled={cardScale <= MIN_SCALE}
+                  />
+                </Tooltip>
+                <Tooltip title="Сбросить масштаб">
+                  <Button
+                    icon={<UndoOutlined />}
+                    onClick={handleZoomReset}
+                    disabled={Math.abs(cardScale - DEFAULT_SCALE) < 0.01}
+                  />
+                </Tooltip>
+                <Tooltip title="Увеличить">
+                  <Button
+                    icon={<ZoomInOutlined />}
+                    onClick={handleZoomIn}
+                    disabled={cardScale >= MAX_SCALE}
+                  />
+                </Tooltip>
+                <span style={{ fontSize: '12px', color: '#8c8c8c', minWidth: '40px', textAlign: 'center' }}>
+                  {Math.round(cardScale * 100)}%
+                </span>
+              </Space>
+            )}
+          </Space>
+        )}
       </div>
 
       {/* Индикатор загрузки */}

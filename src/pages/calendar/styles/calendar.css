@@ -323,13 +323,25 @@
 }
 
 /* ============================================
-   Responsive - Mobile
+   Responsive - Mobile (AD-4: two-row nav, AD-1: BRIEF default)
+   TODO: migrate to calendar-mobile.css in slice 3.8 (per AD-8)
    ============================================ */
 @media (max-width: 768px) {
-  .calendar-navigation {
+  .calendar-navigation--mobile {
     flex-direction: column;
     align-items: stretch;
-    gap: 12px;
+    gap: 8px;
+  }
+
+  .calendar-navigation__row {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .calendar-navigation__flex-btn {
+    flex: 1;
+    min-width: 0;
   }
 
   .calendar-row {
