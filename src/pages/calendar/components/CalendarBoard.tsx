@@ -56,8 +56,9 @@ const CalendarBoard: React.FC = () => {
   const SCALE_STEP = 0.1;
 
   // Генерация дней календаря
+  // AD-6: stepDays=1 на mobile (по 1 дню), stepDays=7 на desktop (по неделе)
   const { days, startDate, endDate, goToToday, goForward, goBackward } =
-    useCalendarDays();
+    useCalendarDays({ stepDays: isMobile ? 1 : 7 });
 
   // Загрузка данных заказов
   const { ordersByDate, isLoading, error, refetch, productionWorkflowDisplay } = useCalendarData(

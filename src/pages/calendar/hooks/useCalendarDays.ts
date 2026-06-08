@@ -3,11 +3,27 @@ import { addDays } from 'date-fns';
 import { generateCalendarDays } from '../utils/dateUtils';
 import { CalendarDaysResult } from '../types/calendar';
 
+export type CalendarStepDays = 1 | 7;
+
+/**
+ * Pure helper: возвращает смещение в днях для перехода вперёд/назад.
+ * Используется для тестирования без React rendering.
+ */
+export function computeStepOffset(stepDays: CalendarStepDays, direction: 1 | -1): number {
+  return stepDays * direction;
+}
+
 /**
  * Hook для генерации и управления днями календаря
  * Генерирует диапазон: 5 дней назад + текущий день + 10 дней вперед (всего 16 дней)
+ *
+ * @param options.stepDays 1 (per-day) или 7 (per-week, default).
+ *   Mobile использует 1, desktop — 7.
  */
-export const useCalendarDays = (): CalendarDaysResult => {
+export const useCalendarDays = (
+  options: { stepDays?: CalendarStepDays } = {},
+): CalendarDaysResult => {
+  const stepDays: CalendarStepDays = options.stepDays ?? 7;
   const [centerDate, setCenterDate] = useState<Date>(new Date());
 
   // Генерируем массив дней: 5 дней назад + текущий день + 10 дней вперед
@@ -24,14 +40,14 @@ export const useCalendarDays = (): CalendarDaysResult => {
     setCenterDate(new Date());
   };
 
-  // Функция для перехода вперед (на неделю)
+  // Функция для перехода вперед (на stepDays дней)
   const goForward = () => {
-    setCenterDate((prev) => addDays(prev, 7));
+    setCenterDate((prev) => addDays(prev, computeStepOffset(stepDays, 1)));
   };
 
-  // Функция для перехода назад (на неделю)
+  // Функция для перехода назад (на stepDays дней)
   const goBackward = () => {
-    setCenterDate((prev) => addDays(prev, -7));
+    setCenterDate((prev) => addDays(prev, computeStepOffset(stepDays, -1)));
   };
 
   return {
