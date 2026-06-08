@@ -636,6 +636,17 @@ audit/outbox evidence, and restores the original order status plus all fixture
 rows. It requires `DEADLINE_STATUS_TRANSITION_TARGET_ENV=backend-test` and
 `DEADLINE_STATUS_TRANSITION_RESTORE=true`; it must not be run against production.
 
+Notification engine stage canary (`npm run test:e2e:notification-engine-stage-canary`)
+is an opt-in, fail-closed scaffold that creates one isolated notification rule
+and one pending outbox event fixture, triggers a manual outbox relay batch,
+and proves exactly-once delivery to the visible recipient, denial for a
+non-visible recipient, replay idempotency (no duplicate notification rows),
+and a privacy scan of the delivered title/message before restoring all
+fixture rows to zero. It refuses to run unless
+`NOTIFICATION_ENGINE_TARGET_ENV=backend-test` and the backend API host
+contains `backend-test` (prod/production/live targets are rejected), and it
+skips locally when `NOTIFICATION_ENGINE_STAGE_CANARY` is unset.
+
 ### Deadline notification action-rule stage canary
 
 The notification action-rule stage canary targets `<test-target-env>` / `<test-compose-project>` only and uses isolated fixture key `deadline-notification-action-canary-2026-05-24`. Required gates:
