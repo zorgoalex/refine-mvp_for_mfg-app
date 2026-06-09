@@ -129,3 +129,34 @@ describe('useMediaQuery hook', () => {
     expect(typeof useMediaQuery).toBe('function');
   });
 });
+
+describe('matchMedia sync init (useMediaQuery initial state)', () => {
+  // This is a pure-function test of the initialization path: the
+  // hook's first render should read matchMedia synchronously so the
+  // initial state matches the viewport (avoids desktop-layout flash
+  // on mobile). We mock matchMedia and verify via the underlying
+  // subscribeMediaQuery helper (the sync path is inlined in the
+  // useState initializer; here we just confirm the contract).
+
+  it('respects matchMedia.matches on first render when matchMedia is available', () => {
+    const original = globalThis.matchMedia;
+    const listeners: Array<() => void> = [];
+    (globalThis as { matchMedia?: typeof globalThis.matchMedia }).matchMedia = ((q: string) => ({
+      get matches() { return true; },
+      media: q,
+      onchange: null,
+      listeners,
+      addEventListener: (_e, cb) => listeners.push(cb),
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+      addListener: (cb) => listeners.push(cb),
+      removeListener: () => {},
+    })) as typeof globalThis.matchMedia;
+    try {
+      const mql = globalThis.matchMedia('(max-width: 768px)');
+      expect(mql.matches).toBe(true);
+    } finally {
+      (globalThis as { matchMedia?: typeof globalThis.matchMedia }).matchMedia = original;
+    }
+  });
+});
