@@ -36,7 +36,9 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
     onNumber: boolean;
   } | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLongPressDraggingRef = useRef(false);
   const dndManager = useDragDropManager();
+  const cardNodeRef = useRef<HTMLDivElement | null>(null);
 
   const cancelLongPress = () => {
     if (longPressTimerRef.current !== null) {
@@ -59,26 +61,20 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       const dx = t.clientX - start.x;
       const dy = t.clientY - start.y;
       if (dx * dx + dy * dy > LONG_PRESS_MAX_MOVE_PX * LONG_PRESS_MAX_MOVE_PX) return;
-      const registry = dndManager.getRegistry();
-      const sourceIds = registry.getSourceIds();
-      const matching: Array<string | symbol> = [];
-      for (const id of sourceIds) {
-        const src = registry.getSource(id);
-        if (src && src.spec.itemType === DRAG_TYPE) matching.push(id);
-      }
-      if (matching.length === 0) return;
+      if (handlerId == null) return;
       const clientOffset = { x: t.clientX, y: t.clientY };
-      const getSourceClientOffset = (id: string | symbol) => {
-        const node = registry.getSource(id)?.getNode?.();
+      const getSourceClientOffset = () => {
+        const node = cardNodeRef.current;
         if (!node) return null;
         const r = node.getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       };
-      dndManager.getActions().beginDrag(matching as any, {
+      dndManager.getActions().beginDrag([handlerId] as any, {
         clientOffset,
         getSourceClientOffset: getSourceClientOffset as any,
         publishSource: false,
       } as any);
+      isLongPressDraggingRef.current = true;
     }, LONG_PRESS_MS);
   };
   const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -96,13 +92,22 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
     }
   };
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const wasLongPress = isLongPressDraggingRef.current;
     cancelLongPress();
     const start = touchStartRef.current;
     touchStartRef.current = null;
     if (!start || !onContextMenu) return;
+    if (wasLongPress) {
+      lastTapRef.current = null;
+      return;
+    }
     const t = e.changedTouches[0];
     if (!t) return;
     if (start.onNumber) {
+      lastTapRef.current = null;
+      return;
+    }
+    if (Date.now() - start.t >= LONG_PRESS_MS) {
       lastTapRef.current = null;
       return;
     }
@@ -140,13 +145,20 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
   };
 
   // Настройка useDrag для перетаскивания карточки
-  const [{ isDragging }, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean }>({
+  const [collected, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean; handlerId: string | symbol | null }>({
     type: DRAG_TYPE,
     item: { order, sourceDate },
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
+      handlerId: monitor.getHandlerId(),
     }),
   });
+  const isDragging = collected.isDragging;
+  const handlerId = collected.handlerId;
+  const setCardRef = (node: HTMLDivElement | null) => {
+    cardNodeRef.current = node;
+    dragRef(node);
+  };
 
   // Вычисляем фрезеровку из деталей заказа
   const millingDisplay = getMillingDisplayValue(order.order_details);
@@ -182,7 +194,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
 
   return (
     <div
-      ref={dragRef}
+      ref={setCardRef}
       className={`order-card order-card--compact ${isDragging || isDraggingProp ? 'order-card--dragging' : ''}`}
       style={{
         borderColor,

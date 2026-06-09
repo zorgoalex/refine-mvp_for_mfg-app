@@ -224,11 +224,13 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
           onClick={(e) => e.stopPropagation()}
         >
           <Menu
-            mode="vertical"
+            mode="inline"
+            inlineIndent={12}
             items={menuItems}
             style={{
               minWidth: 220,
-              boxShadow: '0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,.08)',
+              border: 'none',
+              boxShadow: '0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,0.08)',
             }}
           />
         </div>

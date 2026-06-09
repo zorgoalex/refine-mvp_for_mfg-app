@@ -275,14 +275,18 @@ const CalendarBoard: React.FC = () => {
     }
   };
 
-  // Обработчик закрытия контекстного меню
+  // Обработчик закрытия контекстного меню.
+  // ВАЖНО: сохраняем `order` (не обнуляем), иначе <OrderContextMenu>
+  // размонтируется и локальный state Modal "Перенести на дату"
+  // теряется до того, как успевает закоммититься. Видимостью меню
+  // управляет флаг `visible`, а не наличие order.
   const handleCloseContextMenu = () => {
-    setContextMenu({
+    setContextMenu((prev) => ({
       visible: false,
       x: 0,
       y: 0,
-      order: null,
-    });
+      order: prev.order,
+    }));
   };
 
   // Обработчик чекбокса "Выдан"

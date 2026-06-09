@@ -97,32 +97,15 @@ const OrderCard: React.FC<OrderCardProps> = ({
       const dx = t.clientX - start.x;
       const dy = t.clientY - start.y;
       if (dx * dx + dy * dy > LONG_PRESS_MAX_MOVE_PX * LONG_PRESS_MAX_MOVE_PX) return;
-      // Programmatic beginDrag. handlerId was collected in the useDrag
-      // `collect` function; if it isn't ready yet (e.g. dragRef hasn't
-      // been attached), skip — the user can simply long-press again.
-      const monitor = dndManager.getMonitor();
-      const handlerId = monitor.getHandlerId();
-      const registry = dndManager.getRegistry();
-      // Collect ALL sourceIds for this DRAG_TYPE; there can be at most
-      // one mounted OrderCard per row/column at a time, but iterating
-      // is safer than relying on this card's own handlerId.
-      const sourceIds = registry.getSourceIds();
-      const matching: Array<string | symbol> = [];
-      for (const id of sourceIds) {
-        const src = registry.getSource(id);
-        if (src && src.spec.itemType === DRAG_TYPE) {
-          matching.push(id);
-        }
-      }
-      if (matching.length === 0) return;
+      if (handlerId == null) return;
       const clientOffset = { x: t.clientX, y: t.clientY };
-      const getSourceClientOffset = (id: string | symbol) => {
-        const node = registry.getSource(id)?.getNode?.();
+      const getSourceClientOffset = () => {
+        const node = cardNodeRef.current;
         if (!node) return null;
         const r = node.getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       };
-      dndManager.getActions().beginDrag(matching as any, {
+      dndManager.getActions().beginDrag([handlerId] as any, {
         clientOffset,
         getSourceClientOffset: getSourceClientOffset as any,
         publishSource: false,
@@ -148,13 +131,30 @@ const OrderCard: React.FC<OrderCardProps> = ({
     }
   };
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const wasLongPress = isLongPressDraggingRef.current;
     cancelLongPress();
     const start = touchStartRef.current;
     touchStartRef.current = null;
     if (!start || !onContextMenu) return;
+    // If a long-press drag was just initiated, do NOT record this as
+    // a tap. Otherwise a long press would be indistinguishable from a
+    // first tap and would pollute the double-tap detector.
+    if (wasLongPress) {
+      lastTapRef.current = null;
+      return;
+    }
     const t = e.changedTouches[0];
     if (!t) return;
     if (start.onNumber) {
+      lastTapRef.current = null;
+      return;
+    }
+    // If the touch lasted longer than the long-press window, treat it
+    // as a long press attempt, not a tap. (A successful long press is
+    // caught above by wasLongPress; this branch handles a long press
+    // that did not start a drag, e.g. because handlerId was not yet
+    // registered — we still don't want to count it as a tap.)
+    if (Date.now() - start.t >= LONG_PRESS_MS) {
       lastTapRef.current = null;
       return;
     }
@@ -212,7 +212,8 @@ const OrderCard: React.FC<OrderCardProps> = ({
   // moment TouchBackend's own touchmove handlers take over and
   // publishDragSource/drop work normally.
   const dndManager = useDragDropManager();
-  const [{ isDragging }, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean; handlerId: string | symbol | null }>({
+  const cardNodeRef = useRef<HTMLDivElement | null>(null);
+  const [collected, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean; handlerId: string | symbol | null }>({
     type: DRAG_TYPE,
     item: { order, sourceDate },
     collect: (monitor) => ({
@@ -220,6 +221,15 @@ const OrderCard: React.FC<OrderCardProps> = ({
       handlerId: monitor.getHandlerId(),
     }),
   });
+  const isDragging = collected.isDragging;
+  const handlerId = collected.handlerId;
+
+  // Combined ref callback: react-dnd connector + our own DOM ref so we
+  // can compute the source-node bounding rect for getSourceClientOffset.
+  const setCardRef = (node: HTMLDivElement | null) => {
+    cardNodeRef.current = node;
+    dragRef(node);
+  };
 
   // Вычисляем фрезеровку из деталей заказа
   const millingDisplay = getMillingDisplayValue(order.order_details);
@@ -287,7 +297,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
 
   return (
     <div
-      ref={dragRef}
+      ref={setCardRef}
       className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''} ${borderClass}`}
       style={{
         backgroundColor,
