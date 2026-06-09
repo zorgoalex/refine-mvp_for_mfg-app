@@ -21,10 +21,12 @@ import { ProductionStagesDisplay } from '../../../components/ProductionStagesDis
  */
 const DRAG_TYPE = 'ORDER_CARD';
 // Max delay between two taps to count as a double-tap (ms).
-// Must be strictly less than the TouchBackend `delay` (500 ms) used in
-// CalendarBoard's DndProvider, so a double-tap completes (second
-// touchend < 500 ms after first touchstart) before any drag can begin.
 const DOUBLE_TAP_DELAY_MS = 320;
+// Max distance the finger may move between touchstart and touchend for
+// the gesture to still be considered a tap (and feed the double-tap
+// detector). Slightly larger than the DnD touchSlop so finger jitter
+// during a tap never looks like a drag.
+const TAP_MAX_MOVE_PX = 12;
 
 const OrderCard: React.FC<OrderCardProps> = ({
   order,
@@ -37,18 +39,35 @@ const OrderCard: React.FC<OrderCardProps> = ({
 }) => {
   const navigate = useNavigate();
 
-  // AD-mobile: double-tap on the card opens the context menu. Replaces
-  // the previous broken `onTouchStart` single-tap handler. A second
-  // `click` within DOUBLE_TAP_DELAY_MS of the previous one is treated
-  // as a double-tap and invokes `onContextMenu` at the tap coordinates.
-  // Desktop users keep using the right mouse button (onContextMenu).
+  // AD-mobile: double-tap on the card opens the context menu. We use
+  // touchstart/touchend (not `click`) so the gesture works even when
+  // TouchBackend later calls preventDefault() on touchmove once a drag
+  // starts. The handler ignores gestures where the finger moved more
+  // than TAP_MAX_MOVE_PX, so a drag-in-progress never becomes a tap.
   const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
-  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!onContextMenu) return;
-    // Ignore clicks bubbling up from the order-number link: those navigate
-    // to the order page and must not be counted as a tap.
+  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const t = e.touches[0];
+    if (!t) return;
+    touchStartRef.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+  };
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start || !onContextMenu) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
+    // Clicks on the order-number link navigate; never count them.
     const target = e.target as HTMLElement;
     if (target.closest('.order-card__number')) {
+      lastTapRef.current = null;
+      return;
+    }
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (dx * dx + dy * dy > TAP_MAX_MOVE_PX * TAP_MAX_MOVE_PX) {
+      // finger moved too far → this was a drag/scroll, not a tap
       lastTapRef.current = null;
       return;
     }
@@ -56,7 +75,6 @@ const OrderCard: React.FC<OrderCardProps> = ({
     const last = lastTapRef.current;
     if (last && now - last.t <= DOUBLE_TAP_DELAY_MS) {
       lastTapRef.current = null;
-      // Synthesize a contextmenu-shaped event for handleContextMenu().
       onContextMenu(
         {
           clientX: last.x,
@@ -68,7 +86,16 @@ const OrderCard: React.FC<OrderCardProps> = ({
       );
       return;
     }
-    lastTapRef.current = { t: now, x: e.clientX, y: e.clientY };
+    lastTapRef.current = { t: now, x: t.clientX, y: t.clientY };
+  };
+  // Desktop fallback: a real `click` (mouse) on the card opens the
+  // context menu. Touch devices go through handleTouchEnd above.
+  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onContextMenu) return;
+    // Skip synthetic click following a touch gesture — handleTouchEnd
+    // already processed it. Detected via pointerType.
+    if ((e as any).pointerType === 'touch') return;
+    onContextMenu(e, order);
   };
 
   // Настройка useDrag для перетаскивания карточки
@@ -157,6 +184,8 @@ const OrderCard: React.FC<OrderCardProps> = ({
         marginBottom: marginCompensation,
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
       onClick={handleCardClick}
     >
       {/* Строка 1: Чекбокс | Номер | Материалы | Карандашик (если отрисован) */}

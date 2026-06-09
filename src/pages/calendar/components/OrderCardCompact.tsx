@@ -12,6 +12,7 @@ import { formatDateKey } from '../utils/dateUtils';
 const DRAG_TYPE = 'ORDER_CARD';
 // See OrderCard.tsx for the rationale on this value.
 const DOUBLE_TAP_DELAY_MS = 320;
+const TAP_MAX_MOVE_PX = 12;
 
 const OrderCardCompact: React.FC<OrderCardProps> = ({
   order,
@@ -23,13 +24,30 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
   const navigate = useNavigate();
 
   // AD-mobile: double-tap on the compact card opens the context menu.
+  // See OrderCard.tsx for the full rationale on the touchstart/touchend
+  // approach with movement check.
   const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
-  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!onContextMenu) return;
+  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const t = e.touches[0];
+    if (!t) return;
+    touchStartRef.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+  };
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start || !onContextMenu) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
     const target = e.target as HTMLElement;
-    // The order-number link navigates to the order page; do not treat
-    // that as a tap on the card body.
     if (target.closest('.order-card-compact__number')) {
+      lastTapRef.current = null;
+      return;
+    }
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (dx * dx + dy * dy > TAP_MAX_MOVE_PX * TAP_MAX_MOVE_PX) {
       lastTapRef.current = null;
       return;
     }
@@ -48,7 +66,12 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       );
       return;
     }
-    lastTapRef.current = { t: now, x: e.clientX, y: e.clientY };
+    lastTapRef.current = { t: now, x: t.clientX, y: t.clientY };
+  };
+  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onContextMenu) return;
+    if ((e as any).pointerType === 'touch') return;
+    onContextMenu(e, order);
   };
 
   // Настройка useDrag для перетаскивания карточки
@@ -105,6 +128,8 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
         marginBottom: marginCompensation,
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
       onClick={handleCardClick}
     >
       {/* Номер заказа */}

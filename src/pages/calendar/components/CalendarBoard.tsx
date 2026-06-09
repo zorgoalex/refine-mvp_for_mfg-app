@@ -57,14 +57,12 @@ const CalendarBoard: React.FC = () => {
   // (Calling `TouchBackend({...})` returns `new TouchBackendImpl(undefined, {}, {...})`
   // which crashes on first `manager` access.)
   //
-  // AD-mobile: TouchBackend is configured with `delay: 500` and a small
-  // `touchSlop` so that:
-  //   • a quick tap → no drag (scroll, click on order number still works)
-  //   • a double-tap (≤ 320 ms apart) → opens context menu, drag never starts
-  //   • a long press (≥ 500 ms) → drag begins, order can be moved to a
-  //     different day
-  // Default delay=0 made every touchstart start a drag, which made
-  // vertical scroll and ordinary clicks unusable on mobile.
+  // AD-mobile: on touch-primary devices, configure TouchBackend so that
+  //   • horizontal-ish drags still move orders between days
+  //   • vertical page scrolls are NOT hijacked as drags
+  //   • double-tap (handled separately in OrderCard/OrderCardCompact
+  //     via onTouchEnd) opens the context menu
+  // See the DndProvider `options` block below for the actual values.
   const useTouch = useMemo(() => {
     if (typeof window === 'undefined') return false;
     const hasTouch =
@@ -404,7 +402,27 @@ const CalendarBoard: React.FC = () => {
   return (
     <DndProvider
       backend={dndBackend}
-      options={useTouch ? { delay: 500, touchSlop: 8 } : undefined}
+      options={
+        useTouch
+          ? {
+              // AD-mobile: keep drag responsive (no delay). The previous
+              // attempt at delay: 500 broke drag entirely on real devices
+              // because touchend before the delay fires clears
+              // moveStartSourceIds in TouchBackendImpl, and once the
+              // timeout eventually fires the source list is empty so
+              // beginDrag is never called.
+              delay: 0,
+              touchSlop: 8,
+              // AD-mobile: when the finger moves mostly vertical (page
+              // scroll), treat it as a scroll gesture and do NOT start
+              // a drag. 30°..150° measured from +X axis is the canonical
+              // "vertical" wedge for react-dnd-touch-backend. This fixes
+              // the previous behaviour where vertical scrolling on mobile
+              // was hijacked as a drag.
+              scrollAngleRanges: [{ start: 30, end: 150 }],
+            }
+          : undefined
+      }
     >
       <div className="calendar-board" ref={containerRef}>
         {/* Навигация по календарю — AD-4: двухрядный layout на mobile */}
