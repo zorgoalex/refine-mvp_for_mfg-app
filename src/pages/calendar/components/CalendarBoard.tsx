@@ -399,34 +399,37 @@ const CalendarBoard: React.FC = () => {
         <div className={`calendar-navigation${isMobile ? ' calendar-navigation--mobile' : ''}`}>
         {isMobile ? (
           <>
-            {/* Row 1: навигация по дням (‹ Сегодня › Обновить) */}
+            {/* Row 1: навигация по дням (‹ Сегодня › Обновить).
+                На isNarrow (<=480) показываем только иконки чтобы 4 кнопки
+                помещались без обрезки текста. */}
             <div className="calendar-navigation__row">
               <Button
                 icon={<LeftOutlined />}
                 onClick={goBackward}
                 title="Назад"
-                className="calendar-navigation__flex-btn"
+                className={`calendar-navigation__flex-btn${isNarrow ? ' calendar-navigation__flex-btn--icon-only' : ''}`}
               />
               <Button
                 icon={<CalendarOutlined />}
                 onClick={goToToday}
                 title="Сегодня"
-                className="calendar-navigation__flex-btn"
+                className={`calendar-navigation__flex-btn${isNarrow ? ' calendar-navigation__flex-btn--icon-only' : ''}`}
               >
-                Сегодня
+                {!isNarrow && <span className="calendar-navigation__btn-label">Сегодня</span>}
               </Button>
               <Button
                 icon={<RightOutlined />}
                 onClick={goForward}
                 title="Вперёд"
-                className="calendar-navigation__flex-btn"
+                className={`calendar-navigation__flex-btn${isNarrow ? ' calendar-navigation__flex-btn--icon-only' : ''}`}
               />
               <Button
                 onClick={() => refetch()}
                 loading={isLoading || isMoving}
-                className="calendar-navigation__flex-btn"
+                title="Обновить"
+                className={`calendar-navigation__flex-btn${isNarrow ? ' calendar-navigation__flex-btn--icon-only' : ''}`}
               >
-                Обновить
+                {!isNarrow && <span className="calendar-navigation__btn-label">Обновить</span>}
               </Button>
             </div>
             {/* Row 2: Segmented — переключатель режимов отображения */}

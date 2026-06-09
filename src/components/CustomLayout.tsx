@@ -16,7 +16,11 @@ export const CustomLayout: React.FC<React.PropsWithChildren> = ({ children }) =>
   return (
     <RefineLayout
       Header={() => <AppHeader onOpenSider={isMobile ? openSider : undefined} />}
-      Sider={isMobile ? () => null : CustomSider}
+      // AD-5: on mobile, pass `Sider={undefined}` (not `() => null`)
+      // — passing a component (even one returning null) makes Antd
+      // Layout reserve its width as padding-left on the content
+      // area, leaving a large empty gutter on the left.
+      Sider={isMobile ? undefined : CustomSider}
     >
       <div style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}>
         <div style={{ flex: 1 }}>{children}</div>

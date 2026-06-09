@@ -19,8 +19,26 @@
   }
 
   .calendar-navigation__flex-btn {
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* На сверхузких экранах nav-кнопки показывают только иконку (через
+     .calendar-navigation__flex-btn--icon-only), чтобы не было
+     обрезки текста при 4 кнопках в ряд. */
+  .calendar-navigation__flex-btn--icon-only {
+    flex: 0 0 auto;
+    min-width: 36px;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .calendar-navigation__flex-btn--icon-only .calendar-navigation__btn-label {
+    display: none;
   }
 
   /* Существующая типографика (миграция из calendar.css:326-369) */
