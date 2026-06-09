@@ -177,7 +177,6 @@ export interface OrderCardProps {
   cardScale?: number; // Масштаб карточки (от 0.7 до 1.0)
   productionWorkflowDisplay?: ProductionWorkflowDisplay;
   onContextMenu?: (e: React.MouseEvent, order: CalendarOrder) => void;
-  onDoubleTap?: (e: React.TouchEvent, order: CalendarOrder) => void;
   onCheckboxChange?: (order: CalendarOrder, isChecked: boolean) => void;
   isDragging?: boolean;
 }

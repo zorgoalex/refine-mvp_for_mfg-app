@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Checkbox, Tag, Tooltip } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -20,6 +20,11 @@ import { ProductionStagesDisplay } from '../../../components/ProductionStagesDis
  * Дизайн соответствует скринам из ai_docs/logs/
  */
 const DRAG_TYPE = 'ORDER_CARD';
+// Max delay between two taps to count as a double-tap (ms).
+// Must be strictly less than the TouchBackend `delay` (500 ms) used in
+// CalendarBoard's DndProvider, so a double-tap completes (second
+// touchend < 500 ms after first touchstart) before any drag can begin.
+const DOUBLE_TAP_DELAY_MS = 320;
 
 const OrderCard: React.FC<OrderCardProps> = ({
   order,
@@ -28,10 +33,43 @@ const OrderCard: React.FC<OrderCardProps> = ({
   productionWorkflowDisplay,
   onCheckboxChange,
   onContextMenu,
-  onDoubleTap,
   isDragging: isDraggingProp = false,
 }) => {
   const navigate = useNavigate();
+
+  // AD-mobile: double-tap on the card opens the context menu. Replaces
+  // the previous broken `onTouchStart` single-tap handler. A second
+  // `click` within DOUBLE_TAP_DELAY_MS of the previous one is treated
+  // as a double-tap and invokes `onContextMenu` at the tap coordinates.
+  // Desktop users keep using the right mouse button (onContextMenu).
+  const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onContextMenu) return;
+    // Ignore clicks bubbling up from the order-number link: those navigate
+    // to the order page and must not be counted as a tap.
+    const target = e.target as HTMLElement;
+    if (target.closest('.order-card__number')) {
+      lastTapRef.current = null;
+      return;
+    }
+    const now = Date.now();
+    const last = lastTapRef.current;
+    if (last && now - last.t <= DOUBLE_TAP_DELAY_MS) {
+      lastTapRef.current = null;
+      // Synthesize a contextmenu-shaped event for handleContextMenu().
+      onContextMenu(
+        {
+          clientX: last.x,
+          clientY: last.y,
+          preventDefault: () => {},
+          stopPropagation: () => {},
+        } as unknown as React.MouseEvent,
+        order,
+      );
+      return;
+    }
+    lastTapRef.current = { t: now, x: e.clientX, y: e.clientY };
+  };
 
   // Настройка useDrag для перетаскивания карточки
   const [{ isDragging }, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean }>({
@@ -119,7 +157,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
         marginBottom: marginCompensation,
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
-      onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}
+      onClick={handleCardClick}
     >
       {/* Строка 1: Чекбокс | Номер | Материалы | Карандашик (если отрисован) */}
       <div className="order-card__header">

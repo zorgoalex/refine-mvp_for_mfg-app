@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDrag } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
@@ -10,16 +10,46 @@ import { formatDateKey } from '../utils/dateUtils';
  * Лаконичное отображение без иконок и форматирования
  */
 const DRAG_TYPE = 'ORDER_CARD';
+// See OrderCard.tsx for the rationale on this value.
+const DOUBLE_TAP_DELAY_MS = 320;
 
 const OrderCardCompact: React.FC<OrderCardProps> = ({
   order,
   sourceDate,
   cardScale = 1.0,
   onContextMenu,
-  onDoubleTap,
   isDragging: isDraggingProp = false,
 }) => {
   const navigate = useNavigate();
+
+  // AD-mobile: double-tap on the compact card opens the context menu.
+  const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onContextMenu) return;
+    const target = e.target as HTMLElement;
+    // The order-number link navigates to the order page; do not treat
+    // that as a tap on the card body.
+    if (target.closest('.order-card-compact__number')) {
+      lastTapRef.current = null;
+      return;
+    }
+    const now = Date.now();
+    const last = lastTapRef.current;
+    if (last && now - last.t <= DOUBLE_TAP_DELAY_MS) {
+      lastTapRef.current = null;
+      onContextMenu(
+        {
+          clientX: last.x,
+          clientY: last.y,
+          preventDefault: () => {},
+          stopPropagation: () => {},
+        } as unknown as React.MouseEvent,
+        order,
+      );
+      return;
+    }
+    lastTapRef.current = { t: now, x: e.clientX, y: e.clientY };
+  };
 
   // Настройка useDrag для перетаскивания карточки
   const [{ isDragging }, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean }>({
@@ -75,7 +105,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
         marginBottom: marginCompensation,
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
-      onTouchStart={onDoubleTap ? (e) => onDoubleTap(e, order) : undefined}
+      onClick={handleCardClick}
     >
       {/* Номер заказа */}
       <div

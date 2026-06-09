@@ -56,6 +56,15 @@ const CalendarBoard: React.FC = () => {
   // DndProvider's `options` prop, NOT by calling the factory.
   // (Calling `TouchBackend({...})` returns `new TouchBackendImpl(undefined, {}, {...})`
   // which crashes on first `manager` access.)
+  //
+  // AD-mobile: TouchBackend is configured with `delay: 500` and a small
+  // `touchSlop` so that:
+  //   • a quick tap → no drag (scroll, click on order number still works)
+  //   • a double-tap (≤ 320 ms apart) → opens context menu, drag never starts
+  //   • a long press (≥ 500 ms) → drag begins, order can be moved to a
+  //     different day
+  // Default delay=0 made every touchstart start a drag, which made
+  // vertical scroll and ordinary clicks unusable on mobile.
   const useTouch = useMemo(() => {
     if (typeof window === 'undefined') return false;
     const hasTouch =
@@ -393,7 +402,10 @@ const CalendarBoard: React.FC = () => {
   }
 
   return (
-    <DndProvider backend={dndBackend}>
+    <DndProvider
+      backend={dndBackend}
+      options={useTouch ? { delay: 500, touchSlop: 8 } : undefined}
+    >
       <div className="calendar-board" ref={containerRef}>
         {/* Навигация по календарю — AD-4: двухрядный layout на mobile */}
         <div className={`calendar-navigation${isMobile ? ' calendar-navigation--mobile' : ''}`}>
