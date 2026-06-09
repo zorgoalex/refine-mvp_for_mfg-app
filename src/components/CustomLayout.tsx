@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Layout as RefineLayout } from "@refinedev/antd";
 import { AppHeader } from "./AppHeader";
 import { AppFooter } from "./AppFooter";
@@ -12,6 +12,25 @@ export const CustomLayout: React.FC<React.PropsWithChildren> = ({ children }) =>
 
   const openSider = () => setIsSiderOpen(true);
   const closeSider = () => setIsSiderOpen(false);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const style = document.createElement("style");
+    style.setAttribute("data-calendar-mobile-fix", "true");
+    style.textContent = `
+      /* Hide the duplicate fixed sider-trigger button that Refine/AntD
+         leaves in the DOM on mobile (position: fixed; top: 64px;
+         z-index: 999; bars icon inside). The burger in AppHeader is
+         the single source of truth for opening the mobile drawer. */
+      button.ant-btn.ant-btn-default.ant-btn-lg.ant-btn-icon-only:has(> span[aria-label="bars"]) {
+        display: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      style.remove();
+    };
+  }, [isMobile]);
 
   return (
     <RefineLayout
