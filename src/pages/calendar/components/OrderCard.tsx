@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { Checkbox, Tag, Tooltip } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { useDrag } from 'react-dnd';
+import { useDrag, useDragDropManager } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
 import {
   getStatusColor,
@@ -27,6 +27,16 @@ const DOUBLE_TAP_DELAY_MS = 320;
 // detector). Slightly larger than the DnD touchSlop so finger jitter
 // during a tap never looks like a drag.
 const TAP_MAX_MOVE_PX = 12;
+// AD-mobile: how long the user must hold a card before it can be
+// dragged. Implemented as a custom long-press detector (NOT via
+// TouchBackend `delay`) because in react-dnd-touch-backend v16 any
+// touchend before the delay fires clears moveStartSourceIds and the
+// drag never starts.
+const LONG_PRESS_MS = 500;
+// Max distance the finger may move during the long-press hold. If it
+// moves more, we treat the gesture as a drag/scroll and never start
+// the programmatic drag.
+const LONG_PRESS_MAX_MOVE_PX = 12;
 
 const OrderCard: React.FC<OrderCardProps> = ({
   order,
@@ -47,20 +57,104 @@ const OrderCard: React.FC<OrderCardProps> = ({
   const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
   const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
 
+  // AD-mobile: custom long-press state. A longPressTimer ref is set on
+  // touchstart; if the finger moves more than LONG_PRESS_MAX_MOVE_PX or
+  // touchend fires before LONG_PRESS_MS, the timer is cleared and no
+  // drag is started. If the timer fires, we dispatch beginDrag manually
+  // via the dnd-core manager.
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLongPressDraggingRef = useRef(false);
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    isLongPressDraggingRef.current = false;
+  };
+
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     const t = e.touches[0];
     if (!t) return;
-    touchStartRef.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+    // Clicks on the order-number link navigate; never start a long
+    // press or a tap from such a touch.
+    const target = e.target as HTMLElement;
+    const onNumber = !!target.closest('.order-card__number');
+    touchStartRef.current = {
+      x: t.clientX,
+      y: t.clientY,
+      t: Date.now(),
+      onNumber,
+    };
+    // Schedule the long-press drag start. beginDrag is only called if
+    // the user has not lifted the finger and has not moved more than
+    // LONG_PRESS_MAX_MOVE_PX by the time the timer fires.
+    if (onNumber) return;
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      const start = touchStartRef.current;
+      if (!start) return;
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (dx * dx + dy * dy > LONG_PRESS_MAX_MOVE_PX * LONG_PRESS_MAX_MOVE_PX) return;
+      // Programmatic beginDrag. handlerId was collected in the useDrag
+      // `collect` function; if it isn't ready yet (e.g. dragRef hasn't
+      // been attached), skip — the user can simply long-press again.
+      const monitor = dndManager.getMonitor();
+      const handlerId = monitor.getHandlerId();
+      const registry = dndManager.getRegistry();
+      // Collect ALL sourceIds for this DRAG_TYPE; there can be at most
+      // one mounted OrderCard per row/column at a time, but iterating
+      // is safer than relying on this card's own handlerId.
+      const sourceIds = registry.getSourceIds();
+      const matching: Array<string | symbol> = [];
+      for (const id of sourceIds) {
+        const src = registry.getSource(id);
+        if (src && src.spec.itemType === DRAG_TYPE) {
+          matching.push(id);
+        }
+      }
+      if (matching.length === 0) return;
+      const clientOffset = { x: t.clientX, y: t.clientY };
+      const getSourceClientOffset = (id: string | symbol) => {
+        const node = registry.getSource(id)?.getNode?.();
+        if (!node) return null;
+        const r = node.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      };
+      dndManager.getActions().beginDrag(matching as any, {
+        clientOffset,
+        getSourceClientOffset: getSourceClientOffset as any,
+        publishSource: false,
+      } as any);
+      isLongPressDraggingRef.current = true;
+    }, LONG_PRESS_MS);
+  };
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    if (!start) return;
+    const t = e.touches[0];
+    if (!t) return;
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (
+      longPressTimerRef.current !== null &&
+      (dx * dx + dy * dy > LONG_PRESS_MAX_MOVE_PX * LONG_PRESS_MAX_MOVE_PX)
+    ) {
+      // The finger moved while we were waiting for the long-press
+      // timer. This is either a drag-in-progress (TouchBackend will
+      // pick it up) or a scroll. Cancel our own drag.
+      cancelLongPress();
+    }
   };
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    cancelLongPress();
     const start = touchStartRef.current;
     touchStartRef.current = null;
     if (!start || !onContextMenu) return;
     const t = e.changedTouches[0];
     if (!t) return;
-    // Clicks on the order-number link navigate; never count them.
-    const target = e.target as HTMLElement;
-    if (target.closest('.order-card__number')) {
+    if (start.onNumber) {
       lastTapRef.current = null;
       return;
     }
@@ -88,6 +182,10 @@ const OrderCard: React.FC<OrderCardProps> = ({
     }
     lastTapRef.current = { t: now, x: t.clientX, y: t.clientY };
   };
+  const handleTouchCancel = () => {
+    cancelLongPress();
+    touchStartRef.current = null;
+  };
   // Desktop fallback: a real `click` (mouse) on the card opens the
   // context menu. Touch devices go through handleTouchEnd above.
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -98,12 +196,28 @@ const OrderCard: React.FC<OrderCardProps> = ({
     onContextMenu(e, order);
   };
 
-  // Настройка useDrag для перетаскивания карточки
-  const [{ isDragging }, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean }>({
+  // AD-mobile: long press → drag.
+  //
+  // We do NOT use TouchBackend's `delay` option. In react-dnd-touch-backend
+  // v16 the delay path is broken: handleTopMoveEndCapture runs on every
+  // touchend and unconditionally clears moveStartSourceIds when no drag
+  // is in progress, so any tap fires touchend before the timeout
+  // expires and the drag is never started.
+  //
+  // Instead we keep delay=0 in DndProvider (drag still works on
+  // horizontal movement) AND add a custom long-press detector on
+  // touchstart: if the finger stays within LONG_PRESS_MAX_MOVE_PX for
+  // LONG_PRESS_MS, we programmatically dispatch beginDrag on the
+  // dnd-core manager with this card's source handlerId. From that
+  // moment TouchBackend's own touchmove handlers take over and
+  // publishDragSource/drop work normally.
+  const dndManager = useDragDropManager();
+  const [{ isDragging }, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean; handlerId: string | symbol | null }>({
     type: DRAG_TYPE,
     item: { order, sourceDate },
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
+      handlerId: monitor.getHandlerId(),
     }),
   });
 
@@ -185,7 +299,9 @@ const OrderCard: React.FC<OrderCardProps> = ({
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
       onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
       onClick={handleCardClick}
     >
       {/* Строка 1: Чекбокс | Номер | Материалы | Карандашик (если отрисован) */}

@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useDrag } from 'react-dnd';
+import { useDrag, useDragDropManager } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
 import { getCardBorderColor, getMillingDisplayValue } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
@@ -13,6 +13,8 @@ const DRAG_TYPE = 'ORDER_CARD';
 // See OrderCard.tsx for the rationale on this value.
 const DOUBLE_TAP_DELAY_MS = 320;
 const TAP_MAX_MOVE_PX = 12;
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MAX_MOVE_PX = 12;
 
 const OrderCardCompact: React.FC<OrderCardProps> = ({
   order,
@@ -23,25 +25,84 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
 }) => {
   const navigate = useNavigate();
 
-  // AD-mobile: double-tap on the compact card opens the context menu.
-  // See OrderCard.tsx for the full rationale on the touchstart/touchend
-  // approach with movement check.
+  // AD-mobile: long press → drag + double-tap → context menu. See
+  // OrderCard.tsx for the full rationale on the long-press approach
+  // (TouchBackend's own `delay` option is broken in v16).
   const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
-  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const touchStartRef = useRef<{
+    x: number;
+    y: number;
+    t: number;
+    onNumber: boolean;
+  } | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dndManager = useDragDropManager();
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     const t = e.touches[0];
     if (!t) return;
-    touchStartRef.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+    const target = e.target as HTMLElement;
+    const onNumber = !!target.closest('.order-card-compact__number');
+    touchStartRef.current = { x: t.clientX, y: t.clientY, t: Date.now(), onNumber };
+    if (onNumber) return;
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      const start = touchStartRef.current;
+      if (!start) return;
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (dx * dx + dy * dy > LONG_PRESS_MAX_MOVE_PX * LONG_PRESS_MAX_MOVE_PX) return;
+      const registry = dndManager.getRegistry();
+      const sourceIds = registry.getSourceIds();
+      const matching: Array<string | symbol> = [];
+      for (const id of sourceIds) {
+        const src = registry.getSource(id);
+        if (src && src.spec.itemType === DRAG_TYPE) matching.push(id);
+      }
+      if (matching.length === 0) return;
+      const clientOffset = { x: t.clientX, y: t.clientY };
+      const getSourceClientOffset = (id: string | symbol) => {
+        const node = registry.getSource(id)?.getNode?.();
+        if (!node) return null;
+        const r = node.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      };
+      dndManager.getActions().beginDrag(matching as any, {
+        clientOffset,
+        getSourceClientOffset: getSourceClientOffset as any,
+        publishSource: false,
+      } as any);
+    }, LONG_PRESS_MS);
+  };
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current;
+    if (!start) return;
+    const t = e.touches[0];
+    if (!t) return;
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (
+      longPressTimerRef.current !== null &&
+      dx * dx + dy * dy > LONG_PRESS_MAX_MOVE_PX * LONG_PRESS_MAX_MOVE_PX
+    ) {
+      cancelLongPress();
+    }
   };
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    cancelLongPress();
     const start = touchStartRef.current;
     touchStartRef.current = null;
     if (!start || !onContextMenu) return;
     const t = e.changedTouches[0];
     if (!t) return;
-    const target = e.target as HTMLElement;
-    if (target.closest('.order-card-compact__number')) {
+    if (start.onNumber) {
       lastTapRef.current = null;
       return;
     }
@@ -67,6 +128,10 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       return;
     }
     lastTapRef.current = { t: now, x: t.clientX, y: t.clientY };
+  };
+  const handleTouchCancel = () => {
+    cancelLongPress();
+    touchStartRef.current = null;
   };
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!onContextMenu) return;
@@ -129,7 +194,9 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, order) : undefined}
       onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
       onClick={handleCardClick}
     >
       {/* Номер заказа */}

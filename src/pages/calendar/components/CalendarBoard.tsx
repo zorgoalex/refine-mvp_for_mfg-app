@@ -405,21 +405,18 @@ const CalendarBoard: React.FC = () => {
       options={
         useTouch
           ? {
-              // AD-mobile: keep drag responsive (no delay). The previous
-              // attempt at delay: 500 broke drag entirely on real devices
-              // because touchend before the delay fires clears
-              // moveStartSourceIds in TouchBackendImpl, and once the
-              // timeout eventually fires the source list is empty so
-              // beginDrag is never called.
+              // AD-mobile: on touch-primary devices, we drive drag start
+              // ourselves via a custom long-press detector in
+              // OrderCard/OrderCardCompact. TouchBackend's own auto
+              // beginDrag would otherwise start dragging on every
+              // touchstart, hijacking taps and scrolls. Setting
+              // scrollAngleRanges to cover the full 0..360° range tells
+              // TouchBackend "every movement is a scroll, never start a
+              // drag" — our programmatic beginDrag is the only way a
+              // drag ever begins.
               delay: 0,
               touchSlop: 8,
-              // AD-mobile: when the finger moves mostly vertical (page
-              // scroll), treat it as a scroll gesture and do NOT start
-              // a drag. 30°..150° measured from +X axis is the canonical
-              // "vertical" wedge for react-dnd-touch-backend. This fixes
-              // the previous behaviour where vertical scrolling on mobile
-              // was hijacked as a drag.
-              scrollAngleRanges: [{ start: 30, end: 150 }],
+              scrollAngleRanges: [{ start: 0, end: 360 }],
             }
           : undefined
       }
@@ -585,8 +582,16 @@ const CalendarBoard: React.FC = () => {
         </div>
       )}
       
-      {/* Контекстное меню */}
-      {contextMenu.visible && contextMenu.order && (
+      {/* Контекстное меню.
+          ВАЖНО: OrderContextMenu рендерится всегда, пока есть выбранный
+          заказ, потому что в нём живёт Modal "Перенести на дату".
+          Если рендерить по условию contextMenu.visible, то при клике
+          по пункту меню мы сначала вызываем onClose() → setContextMenu
+          ({visible:false, order:null}), компонент размонтируется, и
+          локальный isMoveModalOpen теряется до того, как Modal успеет
+          открыться. Само попап-меню внутри OrderContextMenu
+          рендерится только когда visible=true. */}
+      {contextMenu.order && (
         <OrderContextMenu
           order={contextMenu.order}
           visible={contextMenu.visible}
