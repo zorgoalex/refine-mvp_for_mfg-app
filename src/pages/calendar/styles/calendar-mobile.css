@@ -36,6 +36,12 @@
     padding-left: 4px;
     padding-right: 4px;
   }
+
+  /* No fixed sider on mobile — content starts at x:0.
+     Overrides the desktop `margin-left: 176px` from app.css. */
+  .ant-layout-content {
+    margin-left: 0 !important;
+  }
 }
 
 @media (max-width: 480px) {
