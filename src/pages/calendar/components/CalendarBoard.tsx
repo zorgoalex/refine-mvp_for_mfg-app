@@ -48,18 +48,24 @@ const CalendarBoard: React.FC = () => {
   // TouchBackend only on touch-primary devices; touch-capable desktops
   // (Surface, iPad + Magic Keyboard) keep HTML5Backend with no 150 ms
   // long-press delay.
-  const dndBackend = useMemo(() => {
-    if (typeof window === 'undefined') return HTML5Backend;
+  //
+  // IMPORTANT: react-dnd v16 DndProvider expects `backend` to be either
+  // a class (like HTML5Backend) OR a factory function (like TouchBackend)
+  // — react-dnd calls it as `backend(manager, context)`. You must NOT
+  // invoke TouchBackend yourself with options; options are passed via
+  // DndProvider's `options` prop, NOT by calling the factory.
+  // (Calling `TouchBackend({...})` returns `new TouchBackendImpl(undefined, {}, {...})`
+  // which crashes on first `manager` access.)
+  const useTouch = useMemo(() => {
+    if (typeof window === 'undefined') return false;
     const hasTouch =
       'ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0;
     const touchPrimary =
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(pointer: coarse)').matches;
-    if (hasTouch && touchPrimary) {
-      return TouchBackend({ enableMouseEvents: true, delayTouchStart: 150 });
-    }
-    return HTML5Backend;
+    return hasTouch && touchPrimary;
   }, []);
+  const dndBackend = useTouch ? TouchBackend : HTML5Backend;
   // AD-1: set-once default — first-render width decides BRIEF vs STANDARD.
   // User choice is never overwritten on subsequent re-renders.
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
