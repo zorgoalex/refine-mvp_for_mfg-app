@@ -38,9 +38,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
         alignItems: "center",
         justifyContent: "space-between",
         borderBottom: "1px solid #f0f0f0",
+        gap: 8,
       }}
     >
-      <Space size="middle" align="center">
+      <Space size="middle" align="center" style={{ minWidth: 0, flexShrink: 1 }}>
         {onOpenSider && (
           <Button
             type="text"
@@ -49,10 +50,23 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
             aria-label="Открыть меню навигации"
           />
         )}
-        <Typography.Text strong style={{ fontSize: 16, lineHeight: 1.1 }}>
-          ERP
-          <br />
-          <span style={{ fontSize: 12, fontWeight: 500 }}>Zhihaz</span>
+        <Typography.Text
+          strong
+          style={{
+            fontSize: 16,
+            lineHeight: 1.1,
+            whiteSpace: "nowrap",
+            // On mobile, hide the "Zhihaz" subline entirely — header is
+            // too narrow to fit burger + 2-line ERP title + bell + avatar.
+            // The brand is still visible via the "ERP" line.
+          }}
+          className="app-header__brand"
+        >
+          <span className="app-header__brand-title">ERP</span>
+          <br className="app-header__brand-break" />
+          <span style={{ fontSize: 12, fontWeight: 500 }} className="app-header__brand-sub">
+            Zhihaz
+          </span>
         </Typography.Text>
 
         {/* DEV ONLY: Кнопки для тестирования уведомлений закомментированы */}

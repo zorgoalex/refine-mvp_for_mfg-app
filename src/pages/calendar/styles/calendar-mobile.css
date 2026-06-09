@@ -5,6 +5,18 @@
    ============================================ */
 
 @media (max-width: 768px) {
+  /* Hide the "Zhihaz" brand subline in the global AppHeader on mobile:
+     burger + "ERP" + bell + avatar don't fit. The brand "ERP" is
+     still visible. This applies to the AppHeader rendered above the
+     calendar (and any other page). */
+  .app-header__brand-break,
+  .app-header__brand-sub {
+    display: none;
+  }
+  .app-header__brand-title {
+    display: inline-block;
+  }
+
   /* Двухрядная навигация (AD-4) */
   .calendar-navigation--mobile {
     flex-direction: column;
