@@ -9,6 +9,15 @@ export interface DeadlinesFeatureFlags {
   deadlineWorkerSchedulerOwner: 'none' | 'in_process' | 'external';
   deadlineActionsEnabled: boolean;
   deadlineNotificationsEnabled: boolean;
+  /**
+   * Whether the global notification engine owns the `DEADLINE_EXPIRED` event
+   * for the convergence cutover. When `true`, the inline deadline
+   * `notify_*` / `escalate` paths must record `skipReason='owned_by_notification_engine'`
+   * instead of writing notifications — the engine is the single source of
+   * truth. Mirrors `BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE` from the
+   * notifications-engine module.
+   */
+  notificationEngineOwnsDeadline: boolean;
   deadlineWorkerPollIntervalMs: number;
   deadlineWorkerBatchSize: number;
   deadlineWorkerId: string;
@@ -30,6 +39,10 @@ export class DeadlinesRuntimeConfigService {
       deadlineNotificationsEnabled: this.config.get('BACKEND_DEADLINE_NOTIFICATIONS_ENABLED', {
         infer: true,
       }),
+      notificationEngineOwnsDeadline: this.config.get(
+        'BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE',
+        { infer: true },
+      ),
       deadlineWorkerPollIntervalMs: this.config.get(
         'BACKEND_DEADLINE_WORKER_POLL_INTERVAL_MS',
         { infer: true },

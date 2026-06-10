@@ -1,4 +1,5 @@
 import type { DatabaseClient } from '../../../database/database.types';
+import { resolveEffectiveEventType } from '../domain/deadline-event-extractor';
 import type { OutboxEventRecord } from '../domain/outbox-event.types';
 import type { NotificationEventContext } from '../domain/notification-rule.types';
 import type { NotificationContextBuilderPort } from '../ports/notification-context.port';
@@ -50,7 +51,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
     }
 
     return {
-      eventType: event.eventType,
+      eventType: resolveEffectiveEventType(event),
       outboxEventId: event.outboxEventId,
       aggregateType: event.aggregateType,
       aggregateId: event.aggregateId,
@@ -58,6 +59,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       clientId,
       paymentId,
       deadlineId,
+      deadlineInstanceId: event.aggregateType === 'deadline' ? event.aggregateId : null,
       orderStatusId,
       isOrderCompleted,
       payload,

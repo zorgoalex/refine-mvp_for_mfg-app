@@ -71,6 +71,7 @@ export class DeadlineWorkerController {
       config: {
         actionsEnabled: flags.deadlineActionsEnabled,
         notificationsEnabled: flags.deadlineNotificationsEnabled,
+        engineOwnsDeadline: flags.notificationEngineOwnsDeadline,
       },
     });
   }
@@ -126,6 +127,7 @@ export class DeadlineWorkerController {
       config: {
         actionsEnabled: flags.deadlineActionsEnabled,
         notificationsEnabled: flags.deadlineNotificationsEnabled,
+        engineOwnsDeadline: flags.notificationEngineOwnsDeadline,
       },
     });
   }

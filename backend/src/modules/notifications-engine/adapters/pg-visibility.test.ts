@@ -13,6 +13,7 @@ function buildContext(overrides: Partial<NotificationEventContext>): Notificatio
     clientId: null,
     paymentId: null,
     deadlineId: null,
+    deadlineInstanceId: null,
     orderStatusId: null,
     isOrderCompleted: false,
     payload: {},
