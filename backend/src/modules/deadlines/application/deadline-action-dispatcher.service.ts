@@ -3,6 +3,14 @@ import type { DeadlineRuleConfigSnapshotDto } from '../dto/deadline-action-rule.
 import type { DeadlineEventDto } from '../dto/deadline-instance.dto';
 import { isNotificationAction } from '../domain/deadline-actions';
 import { buildDeadlineActionIdempotencyKey } from '../domain/deadline-idempotency';
+import { withOwnerOverride } from '../../notifications-engine/domain/notification-event-registry';
+
+function isEngineOwnedEventType(
+  eventType: string,
+  engineOwnsDeadline: boolean,
+): boolean {
+  return withOwnerOverride(eventType, engineOwnsDeadline ? 'engine' : undefined)?.owner === 'engine';
+}
 import {
   buildRuleConfigSnapshot,
   evaluateDeadlineActionRules,
@@ -22,6 +30,17 @@ import type {
 export interface DeadlineActionDispatcherConfig {
   actionsEnabled: boolean;
   notificationsEnabled: boolean;
+  /**
+   * When `true`, the global notification engine owns the `DEADLINE_EXPIRED`
+   * event and the inline `notify_*` / `escalate` paths must record a
+   * `skipReason='owned_by_notification_engine'` skipped execution instead
+   * of writing a notification. This is the convergence cutover switch
+   * (mirrors `BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE`). Defaults to
+   * `false` for legacy-mode callers (the worker, the controller) which
+   * always set it explicitly; the field is optional so pre-existing test
+   * fixtures remain source-compatible.
+   */
+  engineOwnsDeadline?: boolean;
 }
 
 export interface DispatchDeadlineActionsCommand {
@@ -210,6 +229,18 @@ export class DeadlineActionDispatcherService {
       });
     }
 
+    if (
+      isNotificationAction(rule.actionType)
+      && command.config.engineOwnsDeadline
+      && isEngineOwnedEventType(command.event.eventType, command.config.engineOwnsDeadline)
+    ) {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'owned_by_notification_engine',
+      });
+    }
+
     if (isNotificationAction(rule.actionType)) {
       return this.dispatchNotification(command, rule, baseExecution);
     }
@@ -278,6 +309,17 @@ export class DeadlineActionDispatcherService {
         ...baseExecution,
         status: 'skipped',
         skipReason: 'notifications_disabled',
+      });
+    }
+
+    if (
+      command.config.engineOwnsDeadline
+      && isEngineOwnedEventType(command.event.eventType, command.config.engineOwnsDeadline)
+    ) {
+      return command.repository.createActionExecution({
+        ...baseExecution,
+        status: 'skipped',
+        skipReason: 'owned_by_notification_engine',
       });
     }
 

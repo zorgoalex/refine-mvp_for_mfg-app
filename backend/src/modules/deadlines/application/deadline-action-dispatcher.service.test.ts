@@ -84,6 +84,43 @@ describe('DeadlineActionDispatcherService', () => {
     ]);
   });
 
+  it('skips notify_* when the notification engine owns DEADLINE_EXPIRED (convergence cutover)', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [
+          createRule({ actionRuleId: 'notify-manager', actionType: 'notify_manager' }),
+          createRule({ actionRuleId: 'notify-assignee', actionType: 'notify_assignee' }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        notificationRecipients: { assigneeUserId: 10, managerUserId: 20 },
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'should-not-be-called' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true, engineOwnsDeadline: true },
+    });
+
+    expect(notifications).toEqual([]);
+    expect(executions).toHaveLength(2);
+    for (const execution of executions) {
+      expect(execution).toMatchObject({
+        status: 'skipped',
+        skipReason: 'owned_by_notification_engine',
+      });
+      expect(['notify_manager', 'notify_assignee']).toContain(execution.actionType);
+    }
+  });
+
   it('executes write_audit action when enabled', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const dispatcher = new DeadlineActionDispatcherService();
@@ -1331,6 +1368,40 @@ describe('DeadlineActionDispatcherService', () => {
       actionType: 'escalate',
       status: 'skipped',
       skipReason: 'notifications_disabled',
+    });
+  });
+
+  it('skips escalate when the notification engine owns DEADLINE_EXPIRED (convergence cutover)', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const notifications: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      repository: createRepository({
+        rules: [createRule({ actionType: 'escalate' })],
+        executions,
+      }),
+      targetResolver: createTargetResolver({
+        notificationRecipients: {
+          assigneeUserId: 10,
+          managerUserId: 20,
+        },
+      }),
+      notificationPort: {
+        async createNotification(input) {
+          notifications.push(input);
+          return { created: true, notificationId: 'should-not-be-called' };
+        },
+      },
+      config: { actionsEnabled: true, notificationsEnabled: true, engineOwnsDeadline: true },
+    });
+
+    expect(notifications).toEqual([]);
+    expect(executions[0]).toMatchObject({
+      actionType: 'escalate',
+      status: 'skipped',
+      skipReason: 'owned_by_notification_engine',
     });
   });
 

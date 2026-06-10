@@ -61,6 +61,7 @@ export class DeadlineWorkerSchedulerService implements OnModuleInit, OnModuleDes
         config: {
           actionsEnabled: flags.deadlineActionsEnabled,
           notificationsEnabled: flags.deadlineNotificationsEnabled,
+          engineOwnsDeadline: flags.notificationEngineOwnsDeadline,
         },
       });
 
