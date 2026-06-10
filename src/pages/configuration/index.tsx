@@ -10,11 +10,13 @@ import {
   CameraOutlined,
   BuildOutlined,
   ClockCircleOutlined,
+  BellOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { VlmConfigTab } from './VlmConfigTab';
 import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
 import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
+import { NotificationRulesConfig } from './components/NotificationRulesConfig';
 
 const { Text } = Typography;
 
@@ -400,6 +402,16 @@ export const ConfigurationPage: React.FC = () => {
         </span>
       ),
       children: <DeadlineTransitionRulesConfig />,
+    },
+    {
+      key: 'notification-rules',
+      label: (
+        <span>
+          <BellOutlined />
+          Уведомления
+        </span>
+      ),
+      children: <NotificationRulesConfig />,
     },
     {
       key: 'finance',
