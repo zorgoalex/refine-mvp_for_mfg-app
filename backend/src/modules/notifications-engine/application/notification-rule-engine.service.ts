@@ -1,6 +1,7 @@
 import type { DatabaseClient } from '../../../database/database.types';
+import { resolveEffectiveEventType } from '../domain/deadline-event-extractor';
 import { evaluateRuleConditions } from '../domain/notification-condition-evaluator';
-import { getEventDefinition } from '../domain/notification-event-registry';
+import { getEventDefinition, withOwnerOverride } from '../domain/notification-event-registry';
 import { buildNotificationDeliveryKey } from '../domain/notification-idempotency';
 import type { NotificationEventContext, NotificationRule } from '../domain/notification-rule.types';
 import type { OutboxEventRecord } from '../domain/outbox-event.types';
@@ -11,11 +12,24 @@ import type { RecipientResolverService } from './recipient-resolver.service';
 
 const SOURCE_TYPE = 'notification_rule';
 
+const DEADLINE_EVENT_TYPES = new Set(['DEADLINE_EXPIRED']);
+
+export interface NotificationRuleEngineRuntimeConfig {
+  isEngineOwnsDeadline(): boolean;
+}
+
 export interface NotificationRuleEngineDeps {
   ruleRepo: Pick<NotificationRuleRepositoryPort, 'listEnabledByEvent'>;
   contextBuilder: NotificationContextBuilderPort;
   recipientResolver: Pick<RecipientResolverService, 'resolve'>;
   notificationWrite: NotificationWritePort;
+  /**
+   * Optional runtime configuration for flag-driven event-type ownership.
+   * When omitted, the engine falls back to the static registry defaults
+   * (`legacy_inline` for deadline events). Provided by the
+   * `NotificationsRuntimeConfigService` at module wiring time.
+   */
+  runtimeConfig?: NotificationRuleEngineRuntimeConfig;
 }
 
 export interface ProcessEventResult {
@@ -89,13 +103,18 @@ export class NotificationRuleEngineService {
   constructor(private readonly deps: NotificationRuleEngineDeps) {}
 
   async processEvent(client: DatabaseClient, event: OutboxEventRecord): Promise<ProcessEventResult> {
-    const definition = getEventDefinition(event.eventType);
+    const effectiveType = resolveEffectiveEventType(event);
+    const ownsDeadline = this.deps.runtimeConfig?.isEngineOwnsDeadline() ?? false;
+    const ownershipOverride = ownsDeadline && DEADLINE_EVENT_TYPES.has(effectiveType)
+      ? 'engine' as const
+      : undefined;
+    const definition = withOwnerOverride(effectiveType, ownershipOverride) ?? getEventDefinition(effectiveType);
     if (!definition || definition.owner !== 'engine') {
       return { matched: 0, created: 0, skipped: 'not_engine_owned' };
     }
 
     const ctx = await this.deps.contextBuilder.buildContext(client, event);
-    const rules = await this.deps.ruleRepo.listEnabledByEvent(client, event.eventType);
+    const rules = await this.deps.ruleRepo.listEnabledByEvent(client, effectiveType);
 
     let matched = 0;
     let created = 0;

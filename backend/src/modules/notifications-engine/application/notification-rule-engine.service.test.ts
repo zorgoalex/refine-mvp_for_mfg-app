@@ -63,6 +63,7 @@ interface Fakes {
   contextBuilder: { buildContext: ReturnType<typeof vi.fn> };
   recipientResolver: { resolve: ReturnType<typeof vi.fn> };
   notificationWrite: { insertIfAbsent: ReturnType<typeof vi.fn> };
+  runtimeConfig?: { isEngineOwnsDeadline(): boolean };
 }
 
 function fakes(overrides: Partial<Fakes> = {}): Fakes {
@@ -216,5 +217,93 @@ describe('NotificationRuleEngineService.processEvent', () => {
 
     expect(title).toBe('Order 321 — order.status_changed');
     expect(message).toBe('Order 321 event order.status_changed (status 40)');
+  });
+
+  it('processes the deadline envelope as DEADLINE_EXPIRED when ownsDeadline=true (convergence)', async () => {
+    const r = rule({
+      notificationRuleId: 'rule-deadline-1',
+      eventType: 'DEADLINE_EXPIRED',
+      recipients: { resolvers: ['order_manager'] },
+    });
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [r]) },
+      contextBuilder: {
+        buildContext: vi.fn(async () => ctx({ eventType: 'DEADLINE_EXPIRED', deadlineInstanceId: 'dl-1' })),
+      },
+      recipientResolver: { resolve: vi.fn(async () => [77]) },
+      runtimeConfig: { isEngineOwnsDeadline: () => true },
+    });
+    const svc = service(deps);
+
+    const result = await svc.processEvent(
+      client,
+      event({
+        outboxEventId: 'outbox-deadline-1',
+        eventType: 'deadline.event.created',
+        aggregateType: 'deadline',
+        aggregateId: 'dl-1',
+        payload: { eventType: 'DEADLINE_EXPIRED', orderId: 500, deadlineEventId: 'de-1' },
+      }),
+    );
+
+    expect(result).toEqual({ matched: 1, created: 1 });
+    expect(deps.ruleRepo.listEnabledByEvent).toHaveBeenCalledWith(client, 'DEADLINE_EXPIRED');
+    expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the deadline envelope when ownsDeadline=false (legacy default)', async () => {
+    const r = rule({
+      notificationRuleId: 'rule-deadline-2',
+      eventType: 'DEADLINE_EXPIRED',
+      recipients: { resolvers: ['order_manager'] },
+    });
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [r]) },
+      runtimeConfig: { isEngineOwnsDeadline: () => false },
+    });
+    const svc = service(deps);
+
+    const result = await svc.processEvent(
+      client,
+      event({
+        eventType: 'deadline.event.created',
+        payload: { eventType: 'DEADLINE_EXPIRED', orderId: 500 },
+      }),
+    );
+
+    expect(result).toEqual({ matched: 0, created: 0, skipped: 'not_engine_owned' });
+    expect(deps.ruleRepo.listEnabledByEvent).not.toHaveBeenCalled();
+  });
+
+  it('skips deadline envelope with unknown inner type (safe skip)', async () => {
+    const deps = fakes({
+      runtimeConfig: { isEngineOwnsDeadline: () => true },
+    });
+    const svc = service(deps);
+
+    const result = await svc.processEvent(
+      client,
+      event({
+        eventType: 'deadline.event.created',
+        payload: { eventType: 'DEADLINE_SOMETHING_NEW' },
+      }),
+    );
+
+    expect(result).toEqual({ matched: 0, created: 0, skipped: 'not_engine_owned' });
+  });
+
+  it('does not flip order.* ownership regardless of ownsDeadline (regression)', async () => {
+    const r = rule({ notificationRuleId: 'rule-order' });
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [r]) },
+      recipientResolver: { resolve: vi.fn(async () => [1]) },
+      runtimeConfig: { isEngineOwnsDeadline: () => true },
+    });
+    const svc = service(deps);
+
+    const result = await svc.processEvent(client, event());
+
+    expect(result.matched).toBe(1);
+    expect(deps.ruleRepo.listEnabledByEvent).toHaveBeenCalledWith(client, 'order.production_status_changed');
   });
 });

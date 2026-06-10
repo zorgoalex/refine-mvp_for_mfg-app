@@ -33,7 +33,7 @@ import { OutboxRelayController } from './http/outbox-relay.controller';
     },
     {
       provide: NotificationRuleEngineService,
-      useFactory: () =>
+      useFactory: (runtimeConfig: NotificationsRuntimeConfigService) =>
         new NotificationRuleEngineService({
           ruleRepo: new PgNotificationRuleRepository(),
           contextBuilder: new PgNotificationContextBuilder(),
@@ -42,8 +42,9 @@ import { OutboxRelayController } from './http/outbox-relay.controller';
             new PgVisibilityAdapter(),
           ),
           notificationWrite: new PgNotificationWriteAdapter(),
+          runtimeConfig,
         }),
-      inject: [],
+      inject: [NotificationsRuntimeConfigService],
     },
     {
       provide: OutboxRelayService,
@@ -54,7 +55,16 @@ import { OutboxRelayController } from './http/outbox-relay.controller';
       ) => {
         const flags = runtimeConfig.getFeatureFlags();
         const engineConsumer: OutboxConsumer = {
-          supports: (eventType) => isEngineOwnedEvent(eventType),
+          supports: (eventType) => {
+            if (isEngineOwnedEvent(eventType)) return true;
+            // The deadline worker enqueues a single envelope event_type for
+            // every terminal type. The engine resolves the inner type at
+            // consumption time. When the convergence flag is on, the relay
+            // hands the envelope to the engine so the engine can dispatch
+            // the inner event. When the flag is off, the envelope is left
+            // for the legacy inline dispatcher (no double-send).
+            return eventType === 'deadline.event.created' && flags.engineOwnsDeadline;
+          },
           process: async (client, event) => {
             await engine.processEvent(client, event);
           },

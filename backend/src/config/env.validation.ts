@@ -128,6 +128,7 @@ const envSchema = z
     BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
     BACKEND_NOTIFICATION_RULES_READ_ONLY: booleanFromEnv.default(true),
+    BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE: booleanFromEnv.default(false),
     BACKEND_OUTBOX_RELAY_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
     BACKEND_OUTBOX_RELAY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
     BACKEND_OUTBOX_RELAY_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(100),

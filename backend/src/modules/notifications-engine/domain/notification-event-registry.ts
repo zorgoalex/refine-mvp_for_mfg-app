@@ -71,3 +71,23 @@ export function isEngineOwnedEvent(eventType: string): boolean {
 export function listConfigurableEventTypes(): NotificationEventDefinition[] {
   return Object.values(NOTIFICATION_EVENT_REGISTRY).filter((d) => d.owner === 'engine');
 }
+
+/**
+ * Returns the event definition with `owner` overridden by the supplied
+ * runtime overrides. The static registry encodes the *default* ownership
+ * (`legacy_inline` for deadline events); the engine uses this helper to
+ * apply the operational cutover flag
+ * (`BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE`) at consumption time without
+ * mutating the static shape. Non-deadline event types are returned
+ * unchanged.
+ */
+export function withOwnerOverride(
+  eventType: string,
+  override: NotificationOwner | undefined,
+): NotificationEventDefinition | undefined {
+  const definition = NOTIFICATION_EVENT_REGISTRY[eventType];
+  if (!definition || !override || definition.owner === override) {
+    return definition;
+  }
+  return { ...definition, owner: override };
+}
