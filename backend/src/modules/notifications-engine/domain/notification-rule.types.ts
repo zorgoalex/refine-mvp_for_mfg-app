@@ -38,6 +38,17 @@ export interface NotificationEventContext {
   clientId: number | null;
   paymentId: number | null;
   deadlineId: number | null;
+  /**
+   * The deadline INSTANCE id (UUID string) for deadline-derived events, or
+   * `null` for non-deadline events. This is the
+   * `deadline.event.created` envelope's `aggregate_id` (= `event.deadlineId`
+   * in the producer payload at `pg-deadline-repository.enqueueOutboxEvent`).
+   * The numeric `deadlineId` field is kept for legacy consumers but is always
+   * `null` for deadline events because the producer payload does not emit a
+   * numeric `deadlineId`. Template authors should use `{orderId}` for the
+   * parent order and resolve the deadline id via this field where needed.
+   */
+  deadlineInstanceId: string | null;
   orderStatusId: number | null;
   isOrderCompleted: boolean;
   payload: Record<string, unknown>;
