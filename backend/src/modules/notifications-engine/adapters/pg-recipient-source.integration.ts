@@ -39,6 +39,8 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
   let inactiveUserId: number;
   let orderId: number;
   let projectParticipantUserId: number;
+  let deadlineLinkedParticipantUserId: number;
+  const deadlineInstanceId = randomUUID();
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 1 });
@@ -105,6 +107,35 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
        VALUES ($1::uuid, 'user', $2::text, 'member', now(), NULL)`,
       [projectId, String(projectParticipantUserId)],
     );
+
+    // Second project linked to the deadline ONLY via a generic deadline-instance
+    // entity link (NOT via the order) — proves the P8 convergence parity fix:
+    // the engine must reach these participants too.
+    const deadlineProjectRows = await pool.query<{ id: string }>(
+      `INSERT INTO project_projects (name) VALUES ('E2E-project-deadline-only') RETURNING id`,
+    );
+    const deadlineProjectId = deadlineProjectRows.rows[0].id;
+
+    await pool.query(
+      `INSERT INTO project_entity_links (project_id, entity_type_code, entity_id_text, relation_type, valid_from, valid_to)
+       VALUES ($1::uuid, 'deadline_instance', $2::text, 'related', now(), NULL)`,
+      [deadlineProjectId, deadlineInstanceId],
+    );
+
+    const deadlineParticipantRows = await pool.query<{ user_id: number }>(
+      `
+      INSERT INTO users (username, role_id, employee_id, is_active)
+      VALUES ('E2E-deadline-participant', 100, NULL, true)
+      RETURNING user_id
+      `,
+    );
+    deadlineLinkedParticipantUserId = Number(deadlineParticipantRows.rows[0].user_id);
+
+    await pool.query(
+      `INSERT INTO project_participants (project_id, participant_type, participant_id_text, role_code, valid_from, valid_to)
+       VALUES ($1::uuid, 'user', $2::text, 'member', now(), NULL)`,
+      [deadlineProjectId, String(deadlineLinkedParticipantUserId)],
+    );
   });
 
   afterAll(async () => {
@@ -130,6 +161,14 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
     const ctx = buildContext({ orderId });
     const result = await recipientSource.resolveDynamic(pool, 'project_participants', ctx);
     expect(result).toEqual([projectParticipantUserId]);
+  });
+
+  it('resolves project_participants from BOTH order links and deadline_instance generic links (P8 parity)', async () => {
+    const ctx = buildContext({ orderId, deadlineInstanceId });
+    const result = await recipientSource.resolveDynamic(pool, 'project_participants', ctx);
+    expect(result.sort((a, b) => a - b)).toEqual(
+      [projectParticipantUserId, deadlineLinkedParticipantUserId].sort((a, b) => a - b),
+    );
   });
 
   it('resolveRoleMembers returns active users for a role', async () => {
@@ -203,6 +242,16 @@ async function createMinimalSchema(pool: Pool): Promise<void> {
       participant_type TEXT NOT NULL CHECK (participant_type IN ('user', 'employee')),
       participant_id_text TEXT NOT NULL,
       role_code TEXT NOT NULL,
+      valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+      valid_to TIMESTAMPTZ
+    );
+
+    CREATE TABLE project_entity_links (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_id UUID NOT NULL REFERENCES project_projects(id),
+      entity_type_code TEXT NOT NULL,
+      entity_id_text TEXT NOT NULL,
+      relation_type TEXT NOT NULL DEFAULT 'related',
       valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
       valid_to TIMESTAMPTZ
     );

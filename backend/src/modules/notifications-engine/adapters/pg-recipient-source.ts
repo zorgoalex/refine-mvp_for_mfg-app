@@ -26,13 +26,32 @@ export class PgRecipientSourceAdapter implements RecipientSourcePort {
         return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
       }
       case 'project_participants': {
+        // Fan out over projects linked to this deadline event via BOTH the
+        // order link (`project_order_projects`) AND the generic deadline link
+        // (`project_entity_links` with `entity_type_code='deadline_instance'`),
+        // matching the legacy P8 port's `deadline_links UNION order_links`
+        // query so the engine reaches every project the inline path reached.
+        // `ctx.deadlineInstanceId` is the deadline_instances.deadline_id (UUID)
+        // stored as `entity_id_text`; when null the deadline_links branch is
+        // empty (text `= NULL` is never true) and this degrades to order-only.
         const res = await client.query<{ user_id: string | number }>(
           `SELECT DISTINCT pp.participant_id_text::bigint AS user_id
-           FROM public.project_order_projects pop
+           FROM (
+             SELECT pop.project_id
+             FROM public.project_order_projects pop
+             WHERE pop.order_id = $1::bigint AND pop.valid_to IS NULL
+             UNION
+             SELECT pel.project_id
+             FROM public.project_entity_links pel
+             WHERE pel.entity_type_code = 'deadline_instance'
+               AND pel.entity_id_text = $2
+               AND pel.valid_to IS NULL
+           ) linked_projects
            JOIN public.project_participants pp
-             ON pp.project_id = pop.project_id AND pp.valid_to IS NULL AND pp.participant_type = 'user'
-           WHERE pop.order_id = $1::bigint AND pop.valid_to IS NULL`,
-          [ctx.orderId],
+             ON pp.project_id = linked_projects.project_id
+            AND pp.valid_to IS NULL
+            AND pp.participant_type = 'user'`,
+          [ctx.orderId, ctx.deadlineInstanceId],
         );
         return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
       }
