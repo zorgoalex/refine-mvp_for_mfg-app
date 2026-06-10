@@ -1,7 +1,11 @@
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { ProjectNotificationService } from '../../projects/notifications/project-notification.service';
-import type { DeadlineProjectDeadlineOverdueNotificationPort } from '../application/deadline.types';
+import type {
+  DeadlineProjectDeadlineOverdueNotificationInput,
+  DeadlineProjectDeadlineOverdueNotificationPort,
+  DeadlineProjectDeadlineOverdueSkipReason,
+} from '../application/deadline.types';
 
 interface ProjectLinkRow extends QueryResultRow {
   project_id: string;
@@ -14,13 +18,7 @@ export class PgProjectDeadlineOverdueNotificationPort implements DeadlineProject
     private readonly enabled: boolean,
   ) {}
 
-  async notifyDeadlineOverdue(input: {
-    deadlineEventId: string;
-    deadlineInstanceId: string;
-    orderId: string | null;
-    actorUserId: string | null;
-    requestId: string;
-  }): Promise<void> {
+  async notifyDeadlineOverdue(input: DeadlineProjectDeadlineOverdueNotificationInput): Promise<void> {
     if (!this.enabled) {
       await this.recordSkipped(input, 'project_p8_notifications_disabled');
       return;
@@ -73,15 +71,9 @@ export class PgProjectDeadlineOverdueNotificationPort implements DeadlineProject
     }
   }
 
-  private async recordSkipped(
-    input: {
-      deadlineEventId: string;
-      deadlineInstanceId: string;
-      orderId: string | null;
-      actorUserId: string | null;
-      requestId: string;
-    },
-    skipReason: 'project_p8_notifications_disabled' | 'no_order_visibility_anchor' | 'no_project_link',
+  async recordSkipped(
+    input: DeadlineProjectDeadlineOverdueNotificationInput,
+    skipReason: DeadlineProjectDeadlineOverdueSkipReason,
   ): Promise<void> {
     await this.database.query(
       `

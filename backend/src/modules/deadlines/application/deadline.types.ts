@@ -345,14 +345,36 @@ export interface DeadlineNotificationPort {
   createNotification(input: DeadlineNotificationInput): Promise<DeadlineNotificationResult>;
 }
 
+export type DeadlineProjectDeadlineOverdueSkipReason =
+  | 'project_p8_notifications_disabled'
+  | 'no_order_visibility_anchor'
+  | 'no_project_link'
+  | 'owned_by_notification_engine';
+
+export interface DeadlineProjectDeadlineOverdueNotificationInput {
+  deadlineEventId: string;
+  deadlineInstanceId: string;
+  orderId: string | null;
+  actorUserId: string | null;
+  requestId: string;
+}
+
 export interface DeadlineProjectDeadlineOverdueNotificationPort {
-  notifyDeadlineOverdue(input: {
-    deadlineEventId: string;
-    deadlineInstanceId: string;
-    orderId: string | null;
-    actorUserId: string | null;
-    requestId: string;
-  }): Promise<void>;
+  notifyDeadlineOverdue(input: DeadlineProjectDeadlineOverdueNotificationInput): Promise<void>;
+  /**
+   * Records a structured skip event (mirrors the existing
+   * `pg-project-deadline-overdue-notification-port.recordSkipped` private
+   * helper) so the inline path leaves a query/report-ready trail when it
+   * does NOT call the P8 service. Used by the convergence cutover to
+   * explain why no project_notification was written for a
+   * `DEADLINE_EXPIRED` envelope: the notification engine now owns the
+   * event and the engine's `project_participants` resolver handles
+   * delivery.
+   */
+  recordSkipped(
+    input: DeadlineProjectDeadlineOverdueNotificationInput,
+    skipReason: DeadlineProjectDeadlineOverdueSkipReason,
+  ): Promise<void>;
 }
 
 export interface DeadlineChangeOrderStatusCommand {

@@ -264,6 +264,43 @@ describe('DeadlineWorkerService', () => {
     expect(projectSideEffects).toEqual([]);
   });
 
+  it('skips P8 inline port and records owned_by_notification_engine marker when convergence flag is on', async () => {
+    const notifyDeadlineOverdue = vi.fn();
+    const recordSkipped = vi.fn();
+    const repository = createRepository({
+      due: [createDeadline({ deadlineId: deadlineUuid('1'), orderId: 42 })],
+      events: [],
+      executions: [],
+      rules: [],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager(repository),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+      projectDeadlineOverduePort: { notifyDeadlineOverdue, recordSkipped },
+    });
+
+    await worker.processDueDeadlines({
+      now: '2026-05-01T10:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-a',
+      trigger: 'manual',
+      actorUserId: '42',
+      requestId: 'req-convergence',
+      config: { actionsEnabled: false, notificationsEnabled: false, engineOwnsDeadline: true },
+    });
+
+    expect(notifyDeadlineOverdue).not.toHaveBeenCalled();
+    expect(recordSkipped).toHaveBeenCalledTimes(1);
+    expect(recordSkipped).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deadlineEventId: 'event-1',
+        orderId: '42',
+      }),
+      'owned_by_notification_engine',
+    );
+  });
+
   it('does not notify project overdue adapter for idempotent replay or completed events', async () => {
     const notifyDeadlineOverdue = vi.fn();
     const existingEvent = createEvent({

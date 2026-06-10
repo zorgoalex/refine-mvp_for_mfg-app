@@ -13,6 +13,7 @@ import type {
   DeadlineTargetResolverPort,
   DeadlineTransactionManagerPort,
 } from './deadline.types';
+import { withOwnerOverride } from '../../notifications-engine/domain/notification-event-registry';
 
 export interface DeadlineWorkerServicePorts {
   transactions: DeadlineTransactionManagerPort;
@@ -104,7 +105,15 @@ export class DeadlineWorkerService {
           dispatchEvents.push({ event });
           const projectDeadlineOverduePort =
             unitOfWork.projectDeadlineOverduePort ?? this.ports.projectDeadlineOverduePort;
-          if (event.eventType === 'DEADLINE_EXPIRED' && projectDeadlineOverduePort) {
+          const engineOwnsDeadline = command.config.engineOwnsDeadline === true;
+          const engineOwnsEventType =
+            withOwnerOverride(event.eventType, engineOwnsDeadline ? 'engine' : undefined)?.owner ===
+            'engine';
+          if (
+            event.eventType === 'DEADLINE_EXPIRED'
+            && projectDeadlineOverduePort
+            && !engineOwnsEventType
+          ) {
             await projectDeadlineOverduePort.notifyDeadlineOverdue({
               deadlineEventId: event.deadlineEventId,
               deadlineInstanceId: event.deadlineId,
@@ -112,6 +121,27 @@ export class DeadlineWorkerService {
               actorUserId: command.actorUserId ?? null,
               requestId: command.requestId ?? event.deadlineEventId,
             });
+          } else if (
+            event.eventType === 'DEADLINE_EXPIRED'
+            && projectDeadlineOverduePort
+            && engineOwnsEventType
+          ) {
+            // The notification engine owns the DEADLINE_EXPIRED event during
+            // the convergence cutover. The engine reproduces project-overdue
+            // delivery via the project_participants resolver, so the inline
+            // P8 port must NOT write a project_notification. Record an outbox
+            // skip marker so the existing skip-evidence pattern is preserved
+            // (mirrors `pg-project-deadline-overdue-notification-port.recordSkipped`).
+            await projectDeadlineOverduePort.recordSkipped(
+              {
+                deadlineEventId: event.deadlineEventId,
+                deadlineInstanceId: event.deadlineId,
+                orderId: event.orderId == null ? null : String(event.orderId),
+                actorUserId: command.actorUserId ?? null,
+                requestId: command.requestId ?? event.deadlineEventId,
+              },
+              'owned_by_notification_engine',
+            );
           }
         }
 
