@@ -83,7 +83,7 @@ test.describe('Projects batch-link write mode stage canary', () => {
   }) => {
     const fixture = discoverFixture();
     const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-    const admin = createSmokeUser(`e2e_projects_batch_write_admin_${runId}`, 2);
+    const admin = createSmokeUser(`e2e_projects_batch_write_admin_${runId}`, 1);
     userIds = [admin.userId];
 
     const token = await loginForApiToken(request, admin.username, admin.password);
