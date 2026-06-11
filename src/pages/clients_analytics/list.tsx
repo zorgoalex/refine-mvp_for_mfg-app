@@ -27,7 +27,8 @@ import {
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
-import { authStorage } from "../../utils/auth";
+import { HasuraReportError } from "../../api/hasuraReportClient";
+import { countClientsAnalyticsAfter, findClientAnalyticsByName } from "../../api/reports/clientsAnalyticsReportApi";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -143,89 +144,33 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
     }
 
     try {
-      const token = authStorage.getAccessToken();
-      if (!token) {
-        message.error("Не авторизован. Пожалуйста, войдите в систему.");
+      let foundClient;
+      try {
+        foundClient = await findClientAnalyticsByName(clientName);
+      } catch (e) {
+        message.error(
+          e instanceof HasuraReportError && e.code === "NOT_AUTHENTICATED"
+            ? "Не авторизован. Пожалуйста, войдите в систему."
+            : (e as Error).message || "Ошибка поиска"
+        );
         return;
       }
 
-      const response = await fetch(
-        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            query: `
-              query FindClient($clientNamePattern: String!) {
-                clients_analytics_view(
-                  where: { client_name: { _ilike: $clientNamePattern } }
-                  order_by: [{ client_id: desc }]
-                  limit: 1
-                ) {
-                  client_id
-                  client_name
-                }
-              }
-            `,
-            variables: { clientNamePattern: `%${clientName}%` },
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (data.errors && data.errors.length > 0) {
-        const errorMessage = data.errors[0]?.message || "Ошибка поиска";
-        message.error(errorMessage);
-        return;
-      }
-
-      const clients = data.data?.clients_analytics_view || [];
-
-      if (clients.length === 0) {
+      if (!foundClient) {
         message.error(`Клиент "${clientName}" не найден`);
         return;
       }
 
-      const foundClient = clients[0];
       const foundClientId = foundClient.client_id;
 
-      const countResponse = await fetch(
-        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            query: `
-              query GetGreaterCount($clientId: bigint!) {
-                clients_analytics_view_aggregate(
-                  where: { client_id: { _gt: $clientId } }
-                ) {
-                  aggregate {
-                    count
-                  }
-                }
-              }
-            `,
-            variables: { clientId: foundClientId },
-          }),
-        }
-      );
-
-      const countData = await countResponse.json();
-
-      if (countData.errors && countData.errors.length > 0) {
-        message.error(countData.errors[0]?.message || "Ошибка подсчета");
+      let greaterCount: number;
+      try {
+        greaterCount = await countClientsAnalyticsAfter(foundClientId);
+      } catch (e) {
+        message.error((e as Error).message || "Ошибка подсчета");
         return;
       }
 
-      const greaterCount = countData.data?.clients_analytics_view_aggregate?.aggregate?.count || 0;
       const targetPage = Math.floor(greaterCount / pageSize) + 1;
 
       if (targetPage !== current) {
