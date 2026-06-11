@@ -24,6 +24,7 @@ import {
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
 import { countPaymentsAfter, findPaymentByOrderName } from "../../api/reports/paymentsAnalyticsReportApi";
+import { HasuraReportError } from "../../api/hasuraReportClient";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -183,7 +184,15 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
 
     try {
       // Шаг 1: Находим платёж по order_name (LIKE поиск)
-      const foundPayment = await findPaymentByOrderName(orderName);
+      let foundPayment;
+      try {
+        foundPayment = await findPaymentByOrderName(orderName);
+      } catch (e) {
+        message.error(e instanceof HasuraReportError && e.code === 'NOT_AUTHENTICATED'
+          ? 'Не авторизован. Пожалуйста, войдите в систему.'
+          : (e as Error).message || 'Ошибка поиска');
+        return;
+      }
 
       if (!foundPayment) {
         message.error(`Платёж по заказу "${orderName}" не найден`);
@@ -193,11 +202,17 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
       // Шаг 2: Считаем платежи "выше" найденного
       // Сортировка: payment_date DESC, order_name DESC, payment_sequence_number ASC
       // "Выше" значит: date больше, ИЛИ date равна И order_name больше, ИЛИ date равна И order_name равна И seq_num меньше
-      const greaterCount = await countPaymentsAfter({
-        paymentDate: foundPayment.payment_date,
-        orderName: foundPayment.order_name,
-        seqNum: foundPayment.payment_sequence_number,
-      });
+      let greaterCount: number;
+      try {
+        greaterCount = await countPaymentsAfter({
+          paymentDate: foundPayment.payment_date,
+          orderName: foundPayment.order_name,
+          seqNum: foundPayment.payment_sequence_number,
+        });
+      } catch (e) {
+        message.error((e as Error).message || 'Ошибка подсчета');
+        return;
+      }
 
       // Вычисляем номер страницы
       const targetPage = Math.floor(greaterCount / pageSize) + 1;
