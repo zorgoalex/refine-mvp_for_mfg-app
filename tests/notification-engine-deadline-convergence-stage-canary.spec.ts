@@ -406,16 +406,23 @@ function p8SkipMarkerCount(): number {
 
 /**
  * Residue of the legacy P8 inline write path for this deadline. The legacy port
- * delivered via project_notifications; under convergence there must be none.
+ * delivers via the generic `notifications` table (entity_type='project',
+ * source_id=`${deadlineEventId}:${factKey}`) — there is no dedicated
+ * `project_notifications` table. Under convergence the engine owns the event so
+ * the P8 inline port records only a skip marker and writes zero notifications
+ * for this deadline's events.
  */
 function p8InlineResidueCount(): number {
   return Number(
     psql(`
-      SELECT count(*)::int FROM project_notifications
-      WHERE source_id IN (
-        SELECT deadline_event_id::text FROM deadline_events
-        WHERE deadline_id = '${escapeSql(fixtureDeadlineInstanceId)}'
-      );
+      SELECT count(*)::int
+      FROM notifications n
+      WHERE n.entity_type = 'project'
+        AND EXISTS (
+          SELECT 1 FROM deadline_events de
+          WHERE de.deadline_id = '${escapeSql(fixtureDeadlineInstanceId)}'
+            AND n.source_id LIKE de.deadline_event_id::text || ':%'
+        );
     `),
   );
 }
