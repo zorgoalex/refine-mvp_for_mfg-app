@@ -42,6 +42,8 @@ import { buildProductionStagesDisplayConfig } from "../../utils/productionWorkfl
 import type { ProductionStatusRef, ProductionWorkflowConfig } from "../../types/productionWorkflow";
 import { featureFlags } from "../../config/featureFlags";
 import { ordersApi } from "../../api/ordersApi";
+import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearchReportApi";
+import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { ProjectFilter } from "./components/projects/ProjectFilter";
 import "./list.css";
@@ -169,59 +171,20 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         return;
       }
 
-      // Получаем JWT токен пользователя
-      const token = authStorage.getAccessToken();
-      if (!token) {
-        message.error("Не авторизован. Пожалуйста, войдите в систему.");
-        return;
-      }
-
       // Шаг 1: Находим заказ по order_name (LIKE поиск)
-      const response = await fetch(
-        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            query: `
-              query FindOrder($orderNamePattern: String!) {
-                orders_view(
-                  where: { order_name: { _ilike: $orderNamePattern } }
-                  order_by: [{ order_date: desc }, { order_name_numeric: desc }]
-                  limit: 1
-                ) {
-                  order_id
-                  order_name
-                  order_name_numeric
-                  order_date
-                }
-              }
-            `,
-            variables: { orderNamePattern: `%${orderName}%` },
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (data.errors && data.errors.length > 0) {
-        const errorMessage = data.errors[0]?.message || "Ошибка поиска";
-        message.error(errorMessage);
-        console.error("GraphQL ошибка:", data.errors);
+      let foundOrder;
+      try {
+        foundOrder = await findOrderByName(orderName);
+      } catch (e) {
+        message.error(e instanceof HasuraReportError && e.code === 'NOT_AUTHENTICATED'
+          ? 'Не авторизован. Пожалуйста, войдите в систему.'
+          : (e as Error).message || 'Ошибка поиска');
         return;
       }
-
-      const orders = data.data?.orders_view || [];
-
-      if (orders.length === 0) {
+      if (!foundOrder) {
         message.error(`Заказ с "${orderName}" не найден`);
         return;
       }
-
-      const foundOrder = orders[0];
       const foundOrderId = foundOrder.order_id;
       const foundOrderNameNumeric = foundOrder.order_name_numeric;
       const foundOrderDate = foundOrder.order_date;
@@ -231,54 +194,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       // Считаем заказы "выше" найденного (с учетом сортировки order_date DESC, order_name_numeric DESC):
       // 1. Все заказы с order_date > foundOrderDate
       // 2. ПЛЮС заказы с order_date = foundOrderDate И order_name_numeric > foundOrderNameNumeric
-      const countResponse = await fetch(
-        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            query: `
-              query GetGreaterCount($orderDate: date!, $orderNameNumeric: Int) {
-                orders_view_aggregate(
-                  where: {
-                    _or: [
-                      { order_date: { _gt: $orderDate } }
-                      {
-                        _and: [
-                          { order_date: { _eq: $orderDate } }
-                          { order_name_numeric: { _gt: $orderNameNumeric } }
-                        ]
-                      }
-                    ]
-                  }
-                ) {
-                  aggregate {
-                    count
-                  }
-                }
-              }
-            `,
-            variables: {
-              orderDate: foundOrderDate,
-              orderNameNumeric: foundOrderNameNumeric,
-            },
-          }),
-        }
-      );
-
-      const countData = await countResponse.json();
-
-      if (countData.errors && countData.errors.length > 0) {
-        const errorMessage = countData.errors[0]?.message || "Ошибка подсчета";
-        message.error(errorMessage);
-        console.error("GraphQL ошибка при подсчете:", countData.errors);
+      let greaterCount: number;
+      try {
+        greaterCount = await countOrdersAfter({ orderDate: foundOrderDate, orderNameNumeric: foundOrderNameNumeric });
+      } catch (e) {
+        message.error((e as Error).message || 'Ошибка подсчета');
         return;
       }
-
-      const greaterCount = countData.data?.orders_view_aggregate?.aggregate?.count || 0;
 
       // Вычисляем номер страницы (поскольку сортировка DESC, большие ID сверху)
       const targetPage = Math.floor(greaterCount / pageSize) + 1;
