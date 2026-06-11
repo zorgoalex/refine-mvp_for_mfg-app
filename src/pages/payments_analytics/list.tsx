@@ -23,7 +23,7 @@ import {
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
-import { authStorage } from "../../utils/auth";
+import { countPaymentsAfter, findPaymentByOrderName } from "../../api/reports/paymentsAnalyticsReportApi";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -182,122 +182,22 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
     }
 
     try {
-      const token = authStorage.getAccessToken();
-      if (!token) {
-        message.error("Не авторизован. Пожалуйста, войдите в систему.");
-        return;
-      }
-
       // Шаг 1: Находим платёж по order_name (LIKE поиск)
-      const response = await fetch(
-        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            query: `
-              query FindPayment($orderNamePattern: String!) {
-                payments_view(
-                  where: { order_name: { _ilike: $orderNamePattern } }
-                  order_by: [{ payment_date: desc }, { order_name: desc }, { payment_sequence_number: asc }]
-                  limit: 1
-                ) {
-                  payment_id
-                  order_name
-                  payment_date
-                  payment_sequence_number
-                }
-              }
-            `,
-            variables: { orderNamePattern: `%${orderName}%` },
-          }),
-        }
-      );
+      const foundPayment = await findPaymentByOrderName(orderName);
 
-      const data = await response.json();
-
-      if (data.errors && data.errors.length > 0) {
-        const errorMessage = data.errors[0]?.message || "Ошибка поиска";
-        message.error(errorMessage);
-        console.error("GraphQL ошибка:", data.errors);
-        return;
-      }
-
-      const payments = data.data?.payments_view || [];
-
-      if (payments.length === 0) {
+      if (!foundPayment) {
         message.error(`Платёж по заказу "${orderName}" не найден`);
         return;
       }
 
-      const foundPayment = payments[0];
-      const foundPaymentId = foundPayment.payment_id;
-      const foundPaymentDate = foundPayment.payment_date;
-      const foundOrderName = foundPayment.order_name;
-      const foundSeqNum = foundPayment.payment_sequence_number;
-
       // Шаг 2: Считаем платежи "выше" найденного
       // Сортировка: payment_date DESC, order_name DESC, payment_sequence_number ASC
       // "Выше" значит: date больше, ИЛИ date равна И order_name больше, ИЛИ date равна И order_name равна И seq_num меньше
-      const countResponse = await fetch(
-        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            query: `
-              query GetGreaterCount($paymentDate: date!, $orderName: String!, $seqNum: bigint!) {
-                payments_view_aggregate(
-                  where: {
-                    _or: [
-                      { payment_date: { _gt: $paymentDate } }
-                      {
-                        _and: [
-                          { payment_date: { _eq: $paymentDate } }
-                          { order_name: { _gt: $orderName } }
-                        ]
-                      }
-                      {
-                        _and: [
-                          { payment_date: { _eq: $paymentDate } }
-                          { order_name: { _eq: $orderName } }
-                          { payment_sequence_number: { _lt: $seqNum } }
-                        ]
-                      }
-                    ]
-                  }
-                ) {
-                  aggregate {
-                    count
-                  }
-                }
-              }
-            `,
-            variables: {
-              paymentDate: foundPaymentDate,
-              orderName: foundOrderName,
-              seqNum: foundSeqNum,
-            },
-          }),
-        }
-      );
-
-      const countData = await countResponse.json();
-
-      if (countData.errors && countData.errors.length > 0) {
-        const errorMessage = countData.errors[0]?.message || "Ошибка подсчета";
-        message.error(errorMessage);
-        console.error("GraphQL ошибка при подсчете:", countData.errors);
-        return;
-      }
-
-      const greaterCount = countData.data?.payments_view_aggregate?.aggregate?.count || 0;
+      const greaterCount = await countPaymentsAfter({
+        paymentDate: foundPayment.payment_date,
+        orderName: foundPayment.order_name,
+        seqNum: foundPayment.payment_sequence_number,
+      });
 
       // Вычисляем номер страницы
       const targetPage = Math.floor(greaterCount / pageSize) + 1;
@@ -308,7 +208,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
       }
 
       // Подсвечиваем найденную строку
-      setHighlightedPaymentId(foundPaymentId);
+      setHighlightedPaymentId(foundPayment.payment_id);
       message.success(`Платёж по заказу "${foundPayment.order_name}" найден`);
 
       // Убираем подсветку через 3 секунды
