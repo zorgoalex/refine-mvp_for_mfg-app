@@ -4,7 +4,8 @@ import { List, useTable, ShowButton, EditButton, CreateButton } from "@refinedev
 import { Space, Table, Badge, Input, Button, message } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
-import { authStorage } from "../../utils/auth";
+import { HasuraReportError } from "../../api/hasuraReportClient";
+import { countClientsAfter, findClientByName } from "../../api/reports/clientsSearchReportApi";
 
 export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const [searchValue, setSearchValue] = useState<string>("");
@@ -59,100 +60,35 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
     }
 
     try {
-      const token = authStorage.getAccessToken();
-      if (!token) {
-        message.error("Не авторизован. Пожалуйста, войдите в систему.");
-        return;
-      }
-
-      // Шаг 1: Находим клиента по client_name (LIKE поиск)
-      const response = await fetch(
-        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            query: `
-              query FindClient($clientNamePattern: citext!) {
-                clients(
-                  where: {
-                    client_name: { _ilike: $clientNamePattern }
-                    is_active: { _eq: true }
-                  }
-                  order_by: [{ client_id: desc }]
-                  limit: 1
-                ) {
-                  client_id
-                  client_name
-                }
-              }
-            `,
-            variables: { clientNamePattern: `%${clientName.toLowerCase()}%` },
-          }),
+      let foundClient;
+      try {
+        foundClient = await findClientByName(clientName);
+      } catch (e) {
+        if (e instanceof HasuraReportError && e.code === "NOT_AUTHENTICATED") {
+          message.error("Не авторизован. Пожалуйста, войдите в систему.");
+        } else {
+          message.error((e as Error).message || "Ошибка поиска");
+          console.error("GraphQL ошибка:", e);
         }
-      );
-
-      const data = await response.json();
-
-      if (data.errors && data.errors.length > 0) {
-        const errorMessage = data.errors[0]?.message || "Ошибка поиска";
-        message.error(errorMessage);
-        console.error("GraphQL ошибка:", data.errors);
         return;
       }
 
-      const clients = data.data?.clients || [];
-
-      if (clients.length === 0) {
+      if (!foundClient) {
         message.error(`Клиент с "${clientName}" не найден`);
         return;
       }
 
-      const foundClient = clients[0];
       const foundClientId = foundClient.client_id;
 
       // Шаг 2: Получаем количество клиентов с client_id > найденного (для DESC сортировки)
-      const countResponse = await fetch(
-        `${import.meta.env.VITE_HASURA_GRAPHQL_URL}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            query: `
-              query GetGreaterCount($clientId: bigint!) {
-                clients_aggregate(
-                  where: {
-                    client_id: { _gt: $clientId }
-                    is_active: { _eq: true }
-                  }
-                ) {
-                  aggregate {
-                    count
-                  }
-                }
-              }
-            `,
-            variables: { clientId: foundClientId },
-          }),
-        }
-      );
-
-      const countData = await countResponse.json();
-
-      if (countData.errors && countData.errors.length > 0) {
-        const errorMessage = countData.errors[0]?.message || "Ошибка подсчета";
-        message.error(errorMessage);
-        console.error("GraphQL ошибка при подсчете:", countData.errors);
+      let greaterCount: number;
+      try {
+        greaterCount = await countClientsAfter(foundClientId);
+      } catch (e) {
+        message.error((e as Error).message || "Ошибка подсчета");
+        console.error("GraphQL ошибка при подсчете:", e);
         return;
       }
-
-      const greaterCount = countData.data?.clients_aggregate?.aggregate?.count || 0;
 
       // Вычисляем номер страницы
       const targetPage = Math.floor(greaterCount / pageSize) + 1;
