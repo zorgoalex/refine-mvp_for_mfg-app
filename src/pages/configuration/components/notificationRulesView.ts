@@ -164,10 +164,11 @@ export function buildUpdatePayload(
   if (draft.priority !== undefined) result.priority = draft.priority;
   if (draft.isEnabled !== undefined) result.isEnabled = draft.isEnabled;
 
-  const conditions = buildConditions(draft);
-  if (Object.keys(conditions).length > 0) {
-    result.conditions = conditions;
-  }
+  // Always send `conditions` on edit (even `{}`). The backend merge keeps the
+  // existing `conditions` when the key is ABSENT, so omitting an empty object
+  // would silently no-op a "clear all conditions" edit (stale gating persists).
+  // An explicit `{}` clears it. Mirrors buildCreatePayload, which always sends.
+  result.conditions = buildConditions(draft);
 
   const recipients = buildRecipients(draft);
   if (Object.keys(recipients).length > 0) {

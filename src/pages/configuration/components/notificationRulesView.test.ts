@@ -106,7 +106,7 @@ describe('notificationRulesView', () => {
   });
 
   describe('buildUpdatePayload', () => {
-    it('includes reason and expectedUpdatedAt, omits empty arrays and absent fields', () => {
+    it('includes reason and expectedUpdatedAt, always sends conditions, omits empty recipients', () => {
       const result = buildUpdatePayload(
         { priority: 50, isEnabled: false } as NotificationRuleDraft,
         'tuning',
@@ -117,8 +117,26 @@ describe('notificationRulesView', () => {
       expect(result.isEnabled).toBe(false);
       expect(result.reason).toBe('tuning');
       expect(result.expectedUpdatedAt).toBe('2026-06-10T00:00:00.000Z');
-      expect(result.conditions).toBeUndefined();
+      // conditions is ALWAYS present (even {}) so a cleared edit actually clears
+      // instead of silently keeping the backend's existing conditions.
+      expect(result.conditions).toEqual({});
+      // recipients omission is harmless — backend rejects empty recipients.
       expect(result.recipients).toBeUndefined();
+    });
+
+    it('clearing all conditions on edit sends an explicit empty object (not omitted)', () => {
+      // Draft built from a rule that previously had conditions, then cleared in
+      // the form (unchecked excludeCompletedOrders, blanked both id lists).
+      const cleared = buildDraftFromRule(baseRule);
+      cleared.excludeCompletedOrders = false;
+      cleared.allowedFromOrderStatusIdsText = '';
+      cleared.excludeOrderStatusIdsText = '';
+
+      const result = buildUpdatePayload(cleared, 'remove gating', '2026-06-10T00:00:00.000Z');
+
+      // Must be present and empty so the backend clears conditions_json.
+      expect(result.conditions).toEqual({});
+      expect('conditions' in result).toBe(true);
     });
   });
 
