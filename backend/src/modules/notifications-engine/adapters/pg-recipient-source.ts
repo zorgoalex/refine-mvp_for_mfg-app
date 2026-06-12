@@ -68,6 +68,31 @@ export class PgRecipientSourceAdapter implements RecipientSourcePort {
         );
         return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
       }
+      case 'direction_head': {
+        const res = await client.query<{ user_id: string | number }>(
+          `SELECT DISTINCT dh.user_id
+           FROM (
+             SELECT dw.direction_id
+             FROM public.order_workshops ow
+             JOIN public.direction_workshops dw ON dw.workshop_id = ow.workshop_id
+             WHERE ow.order_id = $1::bigint AND ow.delete_flag = false
+             UNION
+             SELECT dwc.direction_id
+             FROM public.order_workshops ow
+             JOIN public.work_centers wc ON wc.workshop_id = ow.workshop_id
+             JOIN public.direction_work_centers dwc ON dwc.workcenter_id = wc.workcenter_id
+             WHERE ow.order_id = $1::bigint AND ow.delete_flag = false
+           ) matched_directions
+           JOIN public.directions d
+             ON d.direction_id = matched_directions.direction_id AND d.is_active = true
+           JOIN public.direction_heads dh
+             ON dh.direction_id = d.direction_id AND dh.is_active = true
+           JOIN public.users u
+             ON u.user_id = dh.user_id AND u.is_active = true`,
+          [ctx.orderId],
+        );
+        return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
+      }
       default:
         return [];
     }

@@ -112,3 +112,36 @@ describe('PgRecipientSourceAdapter.workshop_head', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('PgRecipientSourceAdapter.direction_head', () => {
+  const adapter = new PgRecipientSourceAdapter();
+
+  it('resolves direction heads via both whole-workshop and work-center membership', async () => {
+    const { client, calls } = fakeClient([{ user_id: 21 }]);
+    const ctx = buildContext({ orderId: 42 });
+
+    const result = await adapter.resolveDynamic(client, 'direction_head', ctx);
+
+    expect(result).toEqual([21]);
+    expect(calls).toHaveLength(1);
+    const { sql, params } = calls[0];
+    expect(sql).toContain('order_workshops');
+    expect(sql).toContain('direction_heads');
+    expect(sql).toContain('direction_workshops');
+    expect(sql).toContain('direction_work_centers');
+    expect(sql).toContain('work_centers');
+    expect(sql).toContain('d.is_active = true');
+    expect(sql).toContain('dh.is_active = true');
+    expect(params).toEqual([42]);
+  });
+
+  it('returns [] when there is no order anchor', async () => {
+    const { client, calls } = fakeClient([{ user_id: 1 }]);
+    const ctx = buildContext({ orderId: null });
+
+    const result = await adapter.resolveDynamic(client, 'direction_head', ctx);
+
+    expect(result).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+});
