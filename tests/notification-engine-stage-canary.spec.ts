@@ -49,6 +49,8 @@ test.describe('notification engine stage canary', () => {
   let userId: number | null = null;
   let fixtureRuleId: string | null = null;
   let fixtureOutboxId: string | null = null;
+  let fixtureHeadUserId: number | null = null;
+  let fixtureHeadRuleId: string | null = null;
 
   test.beforeAll(() => {
     requireCanaryEnv();
@@ -57,6 +59,8 @@ test.describe('notification engine stage canary', () => {
     const created = createFixture();
     fixtureRuleId = created.ruleId;
     fixtureOutboxId = created.outboxId;
+    fixtureHeadUserId = created.headUserId;
+    fixtureHeadRuleId = created.headRuleId;
   });
 
   test.afterAll(() => {
@@ -70,6 +74,7 @@ test.describe('notification engine stage canary', () => {
     } finally {
       try {
         cleanupUser(userId);
+        cleanupUser(fixtureHeadUserId);
       } catch (cleanupError) {
         if (!restoreError) throw cleanupError;
       }
@@ -123,6 +128,21 @@ test.describe('notification engine stage canary', () => {
     expect(privacyTarget).not.toMatch(/\{[a-zA-Z0-9_]+\}/);
     expect(privacyTarget).toContain(String(fixtureOrderId));
     expect(privacyTarget).toContain(EVENT_TYPE);
+
+    expect(fixtureHeadRuleId).not.toBeNull();
+    expect(fixtureHeadUserId).not.toBeNull();
+    const headKey = `notif-rule:${outboxId}:${fixtureHeadRuleId}:${fixtureHeadUserId}`;
+    const headDelivered = loadDeliveredNotifications(headKey);
+    expect(headDelivered, 'workshop_head resolver must deliver to the fixture head').toHaveLength(1);
+    expect(headDelivered[0]).toMatchObject({
+      sourceType: 'notification_rule',
+      sourceId: fixtureHeadRuleId!,
+      entityType: 'order',
+      entityId: String(fixtureOrderId),
+      idempotencyKey: headKey,
+    });
+    // replaySummary above already ran a second processNow; prove no duplicate
+    expect(loadDeliveredNotifications(headKey), 'replay must not duplicate head delivery').toHaveLength(1);
 
     expectFixtureResidueZero(restoreFixture(), 'explicit restore');
 
@@ -294,6 +314,8 @@ function cleanupUser(id: number | null) {
 interface CreatedFixture {
   ruleId: string;
   outboxId: string;
+  headUserId: number;
+  headRuleId: string;
 }
 
 /**
@@ -353,13 +375,39 @@ function createFixture(): CreatedFixture {
 
   expect(result.ruleId).toBeTruthy();
   expect(result.outboxId).toBeTruthy();
-  return result;
+
+  // Dedicated fixture head user (role 2 -> globally base-visible; fixture
+  // full_name -> precise residue scope; fresh -> cannot be a real head).
+  const headRunId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+  const headUsername = `e2e_test_notif_wh_head_${headRunId}_${crypto.randomBytes(4).toString('hex')}`;
+  const headPassword = crypto.randomBytes(24).toString('base64url');
+  const headUserId = createSmokeUser(headUsername, headPassword);
+
+  const headRuleId = psql(`
+    WITH wh AS (
+      INSERT INTO workshop_heads (workshop_id, user_id, is_active)
+      SELECT ow.workshop_id, ${headUserId}, true
+      FROM order_workshops ow
+      WHERE ow.order_id = ${fixtureOrderId} AND ow.delete_flag = false
+      ON CONFLICT (workshop_id, user_id) DO NOTHING
+      RETURNING workshop_id
+    )
+    INSERT INTO notification_rules
+      (rule_code, event_type, is_enabled, priority, level, conditions_json, recipients_json, title_template, message_template)
+    VALUES
+      ('${escapeSql(ruleCode)}-workshop-head', '${escapeSql(EVENT_TYPE)}', true, 100, 'info',
+       '{}'::jsonb, '{"resolvers": ["workshop_head"]}'::jsonb, 'WH', 'workshop head fixture order ${fixtureOrderId}')
+    RETURNING notification_rule_id;
+  `);
+
+  return { ...result, headUserId, headRuleId };
 }
 
 interface FixtureResidue {
   notifications: number;
   outboxEvents: number;
   notificationRules: number;
+  workshopHeads: number;
 }
 
 /**
@@ -394,11 +442,20 @@ function restoreFixture(): FixtureResidue {
       DELETE FROM notification_rules
       WHERE rule_code LIKE 'E2E-notif-canary-%'
       RETURNING notification_rule_id
+    ),
+    deleted_workshop_heads AS (
+      DELETE FROM workshop_heads
+      WHERE user_id IN (
+        SELECT user_id FROM users
+        WHERE full_name = 'E2E Test Notification Engine Stage Canary'
+      )
+      RETURNING workshop_id
     )
     SELECT json_build_object(
       'notifications', (SELECT count(*)::int FROM deleted_notifications),
       'outboxEvents', (SELECT count(*)::int FROM deleted_outbox),
-      'notificationRules', (SELECT count(*)::int FROM deleted_rules)
+      'notificationRules', (SELECT count(*)::int FROM deleted_rules),
+      'workshopHeads', (SELECT count(*)::int FROM deleted_workshop_heads)
     )::text;
   `);
 }
@@ -408,6 +465,7 @@ function expectFixtureResidueZero(_residue: FixtureResidue, label: string) {
   expect(proof.notifications, label).toBe(0);
   expect(proof.outboxEvents, label).toBe(0);
   expect(proof.notificationRules, label).toBe(0);
+  expect(proof.workshopHeads, label).toBe(0);
 }
 
 function loadFixtureResidueProof(): FixtureResidue {
@@ -431,6 +489,12 @@ function loadFixtureResidueProof(): FixtureResidue {
       'notificationRules', (
         SELECT count(*)::int FROM notification_rules
         WHERE rule_code LIKE 'E2E-notif-canary-%'
+      ),
+      'workshopHeads', (
+        SELECT count(*)::int
+        FROM workshop_heads wh
+        JOIN users u ON u.user_id = wh.user_id
+        WHERE u.full_name = 'E2E Test Notification Engine Stage Canary'
       )
     )::text;
   `);
