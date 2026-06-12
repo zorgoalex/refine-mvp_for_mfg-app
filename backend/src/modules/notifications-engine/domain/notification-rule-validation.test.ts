@@ -34,6 +34,35 @@ describe('validateNotificationRuleInput', () => {
     expect(validateNotificationRuleInput({ ...base, recipients: { roleCodes: ['ghost'] } }, { knownRoleCodes: ['admin'] }))
       .toEqual({ ok: false, code: 'UNKNOWN_ROLE_CODE', detail: 'ghost' });
   });
+  it('accepts workshop_head and direction_head for order events', () => {
+    expect(
+      validateNotificationRuleInput(
+        { ...base, recipients: { resolvers: ['workshop_head' as const] } },
+        { knownRoleCodes: [] },
+      ),
+    ).toEqual({ ok: true });
+    expect(
+      validateNotificationRuleInput(
+        { ...base, recipients: { resolvers: ['direction_head' as const] } },
+        { knownRoleCodes: [] },
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it('rejects head resolvers for the project-only PROJECT_DEADLINE_OVERDUE event', () => {
+    expect(
+      validateNotificationRuleInput(
+        {
+          ...base,
+          eventType: 'PROJECT_DEADLINE_OVERDUE',
+          conditions: {},
+          recipients: { resolvers: ['workshop_head' as const] },
+        },
+        { knownRoleCodes: [] },
+      ),
+    ).toEqual({ ok: false, code: 'UNSUPPORTED_RESOLVER', detail: 'workshop_head' });
+  });
+
   it('rejects order-status conditions on an event without order context', () => {
     expect(validateNotificationRuleInput(
       { ...base, eventType: 'PROJECT_DEADLINE_OVERDUE', conditions: { allowedFromOrderStatusIds: [1] }, recipients: { resolvers: ['project_participants'] } },
