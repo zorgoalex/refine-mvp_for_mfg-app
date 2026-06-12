@@ -82,3 +82,33 @@ describe('PgRecipientSourceAdapter.project_participants fanout', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('PgRecipientSourceAdapter.workshop_head', () => {
+  const adapter = new PgRecipientSourceAdapter();
+
+  it('resolves heads of the order workshops to active users', async () => {
+    const { client, calls } = fakeClient([{ user_id: 11 }, { user_id: 12 }]);
+    const ctx = buildContext({ orderId: 42 });
+
+    const result = await adapter.resolveDynamic(client, 'workshop_head', ctx);
+
+    expect(result).toEqual([11, 12]);
+    expect(calls).toHaveLength(1);
+    const { sql, params } = calls[0];
+    expect(sql).toContain('order_workshops');
+    expect(sql).toContain('workshop_heads');
+    expect(sql).toContain('wh.is_active = true');
+    expect(sql).toContain('u.is_active = true');
+    expect(params).toEqual([42]);
+  });
+
+  it('returns [] when there is no order anchor', async () => {
+    const { client, calls } = fakeClient([{ user_id: 1 }]);
+    const ctx = buildContext({ orderId: null });
+
+    const result = await adapter.resolveDynamic(client, 'workshop_head', ctx);
+
+    expect(result).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+});
