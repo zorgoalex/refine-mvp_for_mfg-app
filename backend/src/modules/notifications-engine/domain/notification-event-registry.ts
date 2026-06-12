@@ -1,5 +1,10 @@
 export type NotificationOwner = 'engine' | 'legacy_inline';
-export type RecipientResolverKind = 'order_manager' | 'stage_assignee' | 'project_participants';
+export type RecipientResolverKind =
+  | 'order_manager'
+  | 'stage_assignee'
+  | 'project_participants'
+  | 'workshop_head'
+  | 'direction_head';
 export type EventContextField = 'orderId' | 'clientId' | 'paymentId' | 'deadlineId';
 
 export interface NotificationEventDefinition {
@@ -15,6 +20,8 @@ const ORDER_RESOLVERS: RecipientResolverKind[] = [
   'order_manager',
   'stage_assignee',
   'project_participants',
+  'workshop_head',
+  'direction_head',
 ];
 
 export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefinition> = {

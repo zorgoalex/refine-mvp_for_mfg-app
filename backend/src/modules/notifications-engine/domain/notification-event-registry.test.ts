@@ -30,4 +30,23 @@ describe('notification event registry', () => {
     expect(getEventDefinition('nope.unknown')).toBeUndefined();
     expect(isEngineOwnedEvent('nope.unknown')).toBe(false);
   });
+
+  it('exposes workshop_head and direction_head resolvers for order events', () => {
+    for (const eventType of [
+      'order.status_changed',
+      'order.production_status_changed',
+      'order.payment_status_changed',
+      'DEADLINE_EXPIRED',
+    ]) {
+      const def = getEventDefinition(eventType);
+      expect(def?.supportedResolvers).toEqual(
+        expect.arrayContaining(['workshop_head', 'direction_head']),
+      );
+    }
+  });
+
+  it('does not add head resolvers to the project-only PROJECT_DEADLINE_OVERDUE event', () => {
+    const def = getEventDefinition('PROJECT_DEADLINE_OVERDUE');
+    expect(def?.supportedResolvers).toEqual(['project_participants']);
+  });
 });
