@@ -191,6 +191,70 @@ function actionRuleMatchesFixture(
   return fixtureKey === ruleFixtureKey;
 }
 
+/**
+ * Lenient condition gate for non-status-transition mutating actions
+ * (`set_overdue_flag`, `change_production_status`). Unlike
+ * `change_order_status`, a rule with NO `conditions` configured at all is
+ * NEVER gated here — this preserves existing rules created before this gate
+ * existed. `conditions` keys are evaluated with the SAME semantics as the
+ * notification engine's `evaluateRuleConditions` (parity contract, see
+ * `notification-condition-evaluator.ts`), except `excludeOrderStatusIds`
+ * here only checks `orderContext.orderStatusId` (these actions have no
+ * `targetStatusId` concept).
+ */
+export function getMutatingActionConditionSkipReason(input: {
+  rule: DeadlineActionRuleDto;
+  orderContext: OrderDeadlineEvaluationContext | null;
+  orderContextUnavailable: boolean;
+  isCurrentDeadlineEvent: boolean;
+}): string | null {
+  const conditions = input.rule.config?.conditions;
+  const hasConditions = Boolean(
+    conditions
+    && (conditions.excludeCompletedOrders === true
+      || (conditions.allowedFromOrderStatusIds?.length ?? 0) > 0
+      || (conditions.excludeOrderStatusIds?.length ?? 0) > 0
+      || conditions.requireCurrentDeadlineEvent === true),
+  );
+
+  // NOTE: `requireCurrentDeadlineEvent: false` does NOT count as a "gating
+  // condition" here — a rule whose only configured key is
+  // `requireCurrentDeadlineEvent: false` has NO gating conditions at all
+  // (same as a rule with empty `conditions`): no orderContext is required,
+  // and the rule is never staleness-gated. This mirrors the dispatcher-side
+  // `hasGatingConditions` predicate (Architecture > Dispatcher change) — both
+  // must agree, or a rule could be fetched-for without being gated (wasted
+  // query) or gated without having been fetched-for (spurious skip).
+  if (!hasConditions) {
+    return null;
+  }
+
+  if (!input.orderContext) {
+    return input.orderContextUnavailable ? 'stale_deadline_event' : 'missing_order_id';
+  }
+
+  if (conditions?.excludeCompletedOrders && input.orderContext.isCompleted) {
+    return 'order_completed';
+  }
+
+  const excluded = conditions?.excludeOrderStatusIds ?? [];
+  if (excluded.includes(input.orderContext.orderStatusId)) {
+    return 'status_excluded';
+  }
+
+  const allowedFrom = conditions?.allowedFromOrderStatusIds ?? [];
+  if (allowedFrom.length > 0 && !allowedFrom.includes(input.orderContext.orderStatusId)) {
+    return 'status_not_allowed';
+  }
+
+  const requireCurrentDeadlineEvent = conditions?.requireCurrentDeadlineEvent ?? true;
+  if (requireCurrentDeadlineEvent && !input.isCurrentDeadlineEvent) {
+    return 'stale_deadline_event';
+  }
+
+  return null;
+}
+
 function buildActionRuleOverrideMap(overrides: DeadlineOrderOverrideDto[]): Map<string, DeadlineOrderOverrideDto> {
   return new Map(
     overrides
@@ -221,6 +285,10 @@ function getRuleSkipReason(input: {
   if (input.override?.isDisabled) {
     return 'order_override_disabled';
   }
+  if (input.rule.actionType === 'set_overdue_flag' || input.rule.actionType === 'change_production_status') {
+    return getMutatingActionConditionSkipReason(input);
+  }
+
   if (input.rule.actionType !== 'change_order_status') {
     return null;
   }
