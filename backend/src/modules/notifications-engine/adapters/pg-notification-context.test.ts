@@ -152,4 +152,99 @@ describe('PgNotificationContextBuilder', () => {
     expect(ctx.eventType).toBe('order.production_status_changed');
     expect(ctx.deadlineInstanceId).toBeNull();
   });
+
+  it('computes isCurrentDeadlineEvent=true for a deadline envelope when the staleness query returns a row', async () => {
+    const client = makeFakeClient([
+      { rows: [{ order_status_id: 11, client_id: 42, completion_date: null }] }, // order top-up
+      { rows: [{ exists: true }] }, // staleness query: row found -> current
+    ]);
+    const builder = new PgNotificationContextBuilder();
+    const ctx = await builder.buildContext(client, baseEnvelope);
+
+    expect(ctx.isCurrentDeadlineEvent).toBe(true);
+  });
+
+  it('computes isCurrentDeadlineEvent=false for a deadline envelope when the staleness query returns no row', async () => {
+    const client = makeFakeClient([
+      { rows: [{ order_status_id: 11, client_id: 42, completion_date: null }] }, // order top-up
+      { rows: [] }, // staleness query: no row -> stale
+    ]);
+    const builder = new PgNotificationContextBuilder();
+    const ctx = await builder.buildContext(client, baseEnvelope);
+
+    expect(ctx.isCurrentDeadlineEvent).toBe(false);
+  });
+
+  it('defaults isCurrentDeadlineEvent=true for non-deadline events (no staleness query issued)', async () => {
+    const orderEnvelope: OutboxEventRecord = {
+      outboxEventId: '00000000-0000-0000-0000-000000000003',
+      eventType: 'order.production_status_changed',
+      aggregateType: 'order',
+      aggregateId: '500',
+      payload: { orderId: 500, beforeStatus: '11', afterStatus: '12' },
+    };
+    let queryCalls = 0;
+    const client = {
+      query: async (): Promise<QueryResult> => {
+        queryCalls += 1;
+        return { rows: [] } as unknown as QueryResult;
+      },
+    } as unknown as DatabaseClient;
+    const builder = new PgNotificationContextBuilder();
+    const ctx = await builder.buildContext(client, orderEnvelope);
+
+    expect(ctx.isCurrentDeadlineEvent).toBe(true);
+    expect(queryCalls).toBe(1); // only the order top-up query
+  });
+
+  it('defaults isCurrentDeadlineEvent=true for a deadline envelope missing payload.deadlineEventId (cannot evaluate staleness)', async () => {
+    const noEventIdEnvelope: OutboxEventRecord = {
+      outboxEventId: '00000000-0000-0000-0000-000000000004',
+      eventType: 'deadline.event.created',
+      aggregateType: 'deadline',
+      aggregateId: '11111111-1111-4111-8111-111111111111',
+      payload: {
+        eventType: 'DEADLINE_EXPIRED',
+        entityType: 'order',
+        entityId: '500',
+        orderId: 500,
+        // deadlineEventId intentionally omitted
+      },
+    };
+    const client = makeFakeClient([
+      { rows: [{ order_status_id: 11, client_id: 42, completion_date: null }] }, // order top-up only
+    ]);
+    const builder = new PgNotificationContextBuilder();
+    const ctx = await builder.buildContext(client, noEventIdEnvelope);
+
+    expect(ctx.isCurrentDeadlineEvent).toBe(true);
+  });
+
+  it('defaults isCurrentDeadlineEvent=true for a deadline envelope with no orderId (cannot evaluate staleness)', async () => {
+    const noOrderEnvelope: OutboxEventRecord = {
+      outboxEventId: '00000000-0000-0000-0000-000000000005',
+      eventType: 'deadline.event.created',
+      aggregateType: 'deadline',
+      aggregateId: '11111111-1111-4111-8111-111111111111',
+      payload: {
+        deadlineEventId: '22222222-2222-4222-8222-222222222222',
+        eventType: 'DEADLINE_EXPIRED',
+        entityType: 'order',
+        entityId: '500',
+        // orderId intentionally omitted
+      },
+    };
+    let queryCalls = 0;
+    const client = {
+      query: async (): Promise<QueryResult> => {
+        queryCalls += 1;
+        return { rows: [] } as unknown as QueryResult;
+      },
+    } as unknown as DatabaseClient;
+    const builder = new PgNotificationContextBuilder();
+    const ctx = await builder.buildContext(client, noOrderEnvelope);
+
+    expect(ctx.isCurrentDeadlineEvent).toBe(true);
+    expect(queryCalls).toBe(0);
+  });
 });
