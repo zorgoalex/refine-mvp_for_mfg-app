@@ -249,3 +249,24 @@ function readPermissionNameEnum(contract: string): string[] {
     .split('\n')
     .map((line) => line.trim().replace(/^- /, ''));
 }
+
+describe('org management permissions', () => {
+  it('exposes org.view and org.manage in the catalog', () => {
+    expect(PERMISSIONS).toContain('org.view');
+    expect(PERMISSIONS).toContain('org.manage');
+  });
+
+  it('grants org.manage only to superadmin and admin', () => {
+    expect(can('superadmin', 'org.manage')).toBe(true);
+    expect(can('admin', 'org.manage')).toBe(true);
+    expect(can('top_manager', 'org.manage')).toBe(false);
+    expect(can('manager', 'org.manage')).toBe(false);
+  });
+
+  it('grants org.view to superadmin, admin, and top_manager only', () => {
+    expect(can('superadmin', 'org.view')).toBe(true);
+    expect(can('admin', 'org.view')).toBe(true);
+    expect(can('top_manager', 'org.view')).toBe(true);
+    expect(can('manager', 'org.view')).toBe(false);
+  });
+});

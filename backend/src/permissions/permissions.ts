@@ -132,6 +132,9 @@ export const PERMISSIONS = [
   'projects.participants.view',
   'projects.participants.manage',
 
+  'org.view',
+  'org.manage',
+
   'settings.view',
   'settings.manage',
   'audit.view',
@@ -212,6 +215,7 @@ export const ROLE_PERMISSIONS = {
     'workshops.manage',
     'work_centers.view',
     'work_centers.manage',
+    'org.view',
 
     'requirements.view',
     'requirements.create',
