@@ -1,5 +1,7 @@
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../common/errors/api-error';
+import { auditService } from '../../common/audit/audit.service';
+import type { AuditEvent } from '../../common/audit/audit-event.types';
 import type { DatabaseClient, TransactionClient } from '../../database/database.types';
 import type { CurrentUser } from '../../permissions/current-user';
 import type { DirectionDetailDto, DirectionSummaryDto, HeadDto } from './org.types';
@@ -148,6 +150,142 @@ export class PgOrgRepository {
       isActive: r.is_active,
     }));
   }
+
+  async createDirection(c: CreateDirectionCommand): Promise<DirectionDetailDto> {
+    return this.database.transaction(async (tx) => {
+      const inserted = await tx
+        .query<{ direction_id: number }>(
+          `INSERT INTO public.directions (direction_name, description, is_active, created_by, edited_by)
+           VALUES ($1, $2, $3, $4, $4) RETURNING direction_id`,
+          [c.name, c.description, c.isActive, toNullableUserId(c.currentUser.id)],
+        )
+        .catch(rethrowUniqueName);
+      const directionId = Number(inserted.rows[0].direction_id);
+      await auditService.record(
+        tx,
+        buildDirectionAuditEvent('ORG_DIRECTION_CREATED', {
+          directionId,
+          currentUser: c.currentUser,
+          requestId: c.requestId,
+          before: null,
+          after: { directionName: c.name, description: c.description, isActive: c.isActive },
+        }),
+      );
+      return loadDirectionDetail(tx, directionId);
+    });
+  }
+
+  async updateDirection(c: UpdateDirectionCommand): Promise<DirectionDetailDto> {
+    return this.database.transaction(async (tx) => {
+      const current = await tx.query<DirectionSummaryRow>(
+        `SELECT direction_id, direction_name, description, is_active FROM public.directions WHERE direction_id = $1::smallint FOR UPDATE`,
+        [c.directionId],
+      );
+      if (!current.rows[0]) {
+        throw new ApiError(404, 'ORG_DIRECTION_NOT_FOUND', 'Direction not found', { directionId: c.directionId });
+      }
+      const before = current.rows[0];
+      const nextName = c.patch.name ?? before.direction_name;
+      const nextDescription = c.patch.description !== undefined ? c.patch.description : before.description;
+      const nextActive = c.patch.isActive !== undefined ? c.patch.isActive : before.is_active;
+      await tx
+        .query(
+          `UPDATE public.directions SET direction_name=$2, description=$3, is_active=$4, edited_by=$5, updated_at=now()
+           WHERE direction_id=$1::smallint`,
+          [c.directionId, nextName, nextDescription, nextActive, toNullableUserId(c.currentUser.id)],
+        )
+        .catch(rethrowUniqueName);
+      const deactivated = before.is_active === true && nextActive === false;
+      await auditService.record(
+        tx,
+        buildDirectionAuditEvent(deactivated ? 'ORG_DIRECTION_DEACTIVATED' : 'ORG_DIRECTION_UPDATED', {
+          directionId: c.directionId,
+          currentUser: c.currentUser,
+          requestId: c.requestId,
+          before: { directionName: before.direction_name, description: before.description, isActive: before.is_active },
+          after: { directionName: nextName, description: nextDescription, isActive: nextActive },
+        }),
+      );
+      return loadDirectionDetail(tx, c.directionId);
+    });
+  }
+
+  async deleteDirection(c: DeleteDirectionCommand): Promise<{ directionId: number }> {
+    return this.database.transaction(async (tx) => {
+      const current = await tx.query<DirectionSummaryRow>(
+        `SELECT direction_id, direction_name, description, is_active FROM public.directions WHERE direction_id = $1::smallint FOR UPDATE`,
+        [c.directionId],
+      );
+      if (!current.rows[0]) {
+        throw new ApiError(404, 'ORG_DIRECTION_NOT_FOUND', 'Direction not found', { directionId: c.directionId });
+      }
+      const counts = await tx.query<{ workshops: string; work_centers: string; heads: string }>(
+        `SELECT (SELECT count(*) FROM public.direction_workshops WHERE direction_id=$1::smallint) AS workshops,
+                (SELECT count(*) FROM public.direction_work_centers WHERE direction_id=$1::smallint) AS work_centers,
+                (SELECT count(*) FROM public.direction_heads WHERE direction_id=$1::smallint) AS heads`,
+        [c.directionId],
+      );
+      await tx.query(`DELETE FROM public.directions WHERE direction_id = $1::smallint`, [c.directionId]);
+      await auditService.record(
+        tx,
+        buildDirectionAuditEvent('ORG_DIRECTION_DELETED', {
+          directionId: c.directionId,
+          currentUser: c.currentUser,
+          requestId: c.requestId,
+          before: { directionName: current.rows[0].direction_name, isActive: current.rows[0].is_active },
+          after: null,
+          metadata: {
+            cascadedCounts: {
+              workshops: Number(counts.rows[0].workshops),
+              workCenters: Number(counts.rows[0].work_centers),
+              heads: Number(counts.rows[0].heads),
+            },
+          },
+        }),
+      );
+      return { directionId: c.directionId };
+    });
+  }
+}
+
+// ── Audit builders / write helpers ──────────────────────────────────────────
+
+export function buildDirectionAuditEvent(
+  event: 'ORG_DIRECTION_CREATED' | 'ORG_DIRECTION_UPDATED' | 'ORG_DIRECTION_DEACTIVATED' | 'ORG_DIRECTION_DELETED',
+  input: {
+    directionId: number;
+    currentUser: CurrentUser;
+    requestId?: string;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    metadata?: Record<string, unknown>;
+  },
+): AuditEvent {
+  return {
+    event,
+    entityType: 'direction',
+    entityId: input.directionId,
+    actorUserId: input.currentUser.id,
+    actorUsername: input.currentUser.username,
+    actorRole: input.currentUser.role,
+    requestId: input.requestId ?? SOURCE,
+    source: SOURCE,
+    before: input.before,
+    after: input.after,
+    metadata: input.metadata ?? null,
+  };
+}
+
+function toNullableUserId(value: string | number): number | null {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function rethrowUniqueName(err: unknown): never {
+  if ((err as { code?: string }).code === '23505') {
+    throw new ApiError(409, 'ORG_DIRECTION_NAME_TAKEN', 'A direction with this name already exists');
+  }
+  throw err;
 }
 
 // ── Shared loaders / guards ────────────────────────────────────────────────
