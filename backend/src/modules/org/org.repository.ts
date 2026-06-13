@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../common/errors/api-error';
 import { auditService } from '../../common/audit/audit.service';
@@ -83,9 +84,7 @@ export interface OrgRepositoryPort {
   ): Promise<Array<{ workcenterId: number; workshopId: number; name: string; isActive: boolean }>>;
 }
 
-// NOTE: write methods are added in Tasks 7-8; once the class satisfies every
-// OrgRepositoryPort member it will declare `implements OrgRepositoryPort`.
-export class PgOrgRepository {
+export class PgOrgRepository implements OrgRepositoryPort {
   constructor(private readonly database: OrgDatabase) {}
 
   async listDirections(): Promise<DirectionSummaryDto[]> {
@@ -246,6 +245,193 @@ export class PgOrgRepository {
       return { directionId: c.directionId };
     });
   }
+
+  async replaceDirectionWorkshops(c: ReplaceDirectionIdSetCommand): Promise<DirectionDetailDto> {
+    return this.replaceDirectionMembership(c, {
+      table: 'direction_workshops',
+      idColumn: 'workshop_id',
+      refTable: 'workshops',
+      refId: 'workshop_id',
+      commandName: 'org.directions.replace_workshops',
+      addedKey: 'addedWorkshops',
+      removedKey: 'removedWorkshops',
+      notFound: ['ORG_WORKSHOP_NOT_FOUND', 'Workshop not found'],
+    });
+  }
+
+  async replaceDirectionWorkCenters(c: ReplaceDirectionIdSetCommand): Promise<DirectionDetailDto> {
+    return this.replaceDirectionMembership(c, {
+      table: 'direction_work_centers',
+      idColumn: 'workcenter_id',
+      refTable: 'work_centers',
+      refId: 'workcenter_id',
+      commandName: 'org.directions.replace_work_centers',
+      addedKey: 'addedWorkCenters',
+      removedKey: 'removedWorkCenters',
+      notFound: ['ORG_WORKCENTER_NOT_FOUND', 'Work center not found'],
+    });
+  }
+
+  private async replaceDirectionMembership(
+    c: ReplaceDirectionIdSetCommand,
+    cfg: MembershipConfig,
+  ): Promise<DirectionDetailDto> {
+    return this.database.transaction(async (tx) => {
+      const idempotency = await reconcileIdempotency(tx, {
+        idempotencyKey: c.idempotencyKey,
+        commandName: cfg.commandName,
+        actorUserId: c.currentUser.id,
+        entityType: 'direction',
+        entityId: String(c.directionId),
+        requestHash: hashIdSet(c.currentUser.id, c.directionId, c.ids),
+      });
+      if (idempotency.completed) return idempotency.response as DirectionDetailDto;
+      await ensureDirectionExistsForUpdate(tx, c.directionId);
+      await validateIdSet(tx, cfg.refTable, cfg.refId, c.ids, cfg.notFound);
+      const currentRows = await tx.query<{ id: number }>(
+        `SELECT ${cfg.idColumn} AS id FROM public.${cfg.table} WHERE direction_id = $1::smallint`,
+        [c.directionId],
+      );
+      const current = currentRows.rows.map((r) => Number(r.id));
+      const { added, removed } = computeIdDelta(current, c.ids);
+      if (added.length || removed.length) {
+        if (removed.length) {
+          await tx.query(
+            `DELETE FROM public.${cfg.table} WHERE direction_id=$1::smallint AND ${cfg.idColumn} = ANY($2::smallint[])`,
+            [c.directionId, removed],
+          );
+        }
+        for (const id of added) {
+          await tx.query(
+            `INSERT INTO public.${cfg.table} (direction_id, ${cfg.idColumn}, created_by) VALUES ($1::smallint, $2::smallint, $3)
+             ON CONFLICT DO NOTHING`,
+            [c.directionId, id, toNullableUserId(c.currentUser.id)],
+          );
+        }
+        await auditService.record(tx, {
+          event: 'ORG_DIRECTION_MEMBERSHIP_REPLACED',
+          entityType: 'direction',
+          entityId: c.directionId,
+          actorUserId: c.currentUser.id,
+          actorUsername: c.currentUser.username,
+          actorRole: c.currentUser.role,
+          requestId: c.requestId ?? SOURCE,
+          source: SOURCE,
+          diff: { [cfg.addedKey]: added, [cfg.removedKey]: removed },
+          metadata: { idempotencyKey: c.idempotencyKey, reason: c.reason },
+        });
+      }
+      const detail = await loadDirectionDetail(tx, c.directionId);
+      await completeIdempotency(tx, c.idempotencyKey, detail);
+      return detail;
+    });
+  }
+
+  async replaceDirectionHeads(c: ReplaceDirectionIdSetCommand): Promise<DirectionDetailDto> {
+    return this.database.transaction(async (tx) => {
+      const idempotency = await reconcileIdempotency(tx, {
+        idempotencyKey: c.idempotencyKey,
+        commandName: 'org.directions.replace_heads',
+        actorUserId: c.currentUser.id,
+        entityType: 'direction',
+        entityId: String(c.directionId),
+        requestHash: hashIdSet(c.currentUser.id, c.directionId, c.ids),
+      });
+      if (idempotency.completed) return idempotency.response as DirectionDetailDto;
+      await ensureDirectionExistsForUpdate(tx, c.directionId);
+      await validateActiveUsers(tx, c.ids);
+      const current = (
+        await tx.query<{ user_id: number }>(
+          `SELECT user_id FROM public.direction_heads WHERE direction_id=$1::smallint AND is_active=true`,
+          [c.directionId],
+        )
+      ).rows.map((r) => Number(r.user_id));
+      const { added, removed } = computeIdDelta(current, c.ids);
+      if (added.length || removed.length) {
+        if (removed.length) {
+          await tx.query(
+            `UPDATE public.direction_heads SET is_active=false WHERE direction_id=$1::smallint AND user_id=ANY($2::bigint[])`,
+            [c.directionId, removed],
+          );
+        }
+        for (const userId of added) {
+          await tx.query(
+            `INSERT INTO public.direction_heads (direction_id, user_id, is_active, created_by)
+             VALUES ($1::smallint, $2::bigint, true, $3)
+             ON CONFLICT (direction_id, user_id) DO UPDATE SET is_active=true`,
+            [c.directionId, userId, toNullableUserId(c.currentUser.id)],
+          );
+        }
+        for (const ev of buildHeadAuditEvents({
+          scope: 'direction',
+          entityId: c.directionId,
+          currentUser: c.currentUser,
+          requestId: c.requestId,
+          idempotencyKey: c.idempotencyKey,
+          added,
+          removed,
+        })) {
+          await auditService.record(tx, ev);
+        }
+      }
+      const detail = await loadDirectionDetail(tx, c.directionId);
+      await completeIdempotency(tx, c.idempotencyKey, detail);
+      return detail;
+    });
+  }
+
+  async replaceWorkshopHeads(c: ReplaceWorkshopHeadsCommand): Promise<HeadDto[]> {
+    return this.database.transaction(async (tx) => {
+      const idempotency = await reconcileIdempotency(tx, {
+        idempotencyKey: c.idempotencyKey,
+        commandName: 'org.workshops.replace_heads',
+        actorUserId: c.currentUser.id,
+        entityType: 'workshop',
+        entityId: String(c.workshopId),
+        requestHash: hashIdSet(c.currentUser.id, c.workshopId, c.ids),
+      });
+      if (idempotency.completed) return idempotency.response as HeadDto[];
+      await ensureWorkshopExistsForUpdate(tx, c.workshopId);
+      await validateActiveUsers(tx, c.ids);
+      const current = (
+        await tx.query<{ user_id: number }>(
+          `SELECT user_id FROM public.workshop_heads WHERE workshop_id=$1::smallint AND is_active=true`,
+          [c.workshopId],
+        )
+      ).rows.map((r) => Number(r.user_id));
+      const { added, removed } = computeIdDelta(current, c.ids);
+      if (added.length || removed.length) {
+        if (removed.length) {
+          await tx.query(
+            `UPDATE public.workshop_heads SET is_active=false WHERE workshop_id=$1::smallint AND user_id=ANY($2::bigint[])`,
+            [c.workshopId, removed],
+          );
+        }
+        for (const userId of added) {
+          await tx.query(
+            `INSERT INTO public.workshop_heads (workshop_id, user_id, is_active, created_by)
+             VALUES ($1::smallint, $2::bigint, true, $3)
+             ON CONFLICT (workshop_id, user_id) DO UPDATE SET is_active=true`,
+            [c.workshopId, userId, toNullableUserId(c.currentUser.id)],
+          );
+        }
+        for (const ev of buildHeadAuditEvents({
+          scope: 'workshop',
+          entityId: c.workshopId,
+          currentUser: c.currentUser,
+          requestId: c.requestId,
+          idempotencyKey: c.idempotencyKey,
+          added,
+          removed,
+        })) {
+          await auditService.record(tx, ev);
+        }
+      }
+      const heads = await loadWorkshopHeads(tx, c.workshopId);
+      await completeIdempotency(tx, c.idempotencyKey, heads);
+      return heads;
+    });
+  }
 }
 
 // ── Audit builders / write helpers ──────────────────────────────────────────
@@ -274,6 +460,47 @@ export function buildDirectionAuditEvent(
     after: input.after,
     metadata: input.metadata ?? null,
   };
+}
+
+export function computeIdDelta(current: number[], next: number[]): { added: number[]; removed: number[] } {
+  const currentSet = new Set(current);
+  const nextSet = new Set(next);
+  return {
+    added: next.filter((id) => !currentSet.has(id)).sort((a, b) => a - b),
+    removed: current.filter((id) => !nextSet.has(id)).sort((a, b) => a - b),
+  };
+}
+
+export function buildHeadAuditEvents(input: {
+  scope: 'workshop' | 'direction';
+  entityId: number;
+  currentUser: CurrentUser;
+  requestId?: string;
+  idempotencyKey: string;
+  added: number[];
+  removed: number[];
+}): AuditEvent[] {
+  const entityType = input.scope;
+  const addedName = input.scope === 'workshop' ? 'ORG_WORKSHOP_HEAD_ADDED' : 'ORG_DIRECTION_HEAD_ADDED';
+  const removedName = input.scope === 'workshop' ? 'ORG_WORKSHOP_HEAD_REMOVED' : 'ORG_DIRECTION_HEAD_REMOVED';
+  const base = (event: string, userId: number, before: unknown, after: unknown): AuditEvent => ({
+    event,
+    entityType,
+    entityId: input.entityId,
+    actorUserId: input.currentUser.id,
+    actorUsername: input.currentUser.username,
+    actorRole: input.currentUser.role,
+    requestId: input.requestId ?? SOURCE,
+    source: SOURCE,
+    relatedUserId: userId,
+    before: before as Record<string, unknown> | null,
+    after: after as Record<string, unknown> | null,
+    metadata: { idempotencyKey: input.idempotencyKey },
+  });
+  return [
+    ...input.added.map((u) => base(addedName, u, null, { userId: u })),
+    ...input.removed.map((u) => base(removedName, u, { userId: u }, null)),
+  ];
 }
 
 function toNullableUserId(value: string | number): number | null {
@@ -352,6 +579,130 @@ async function loadWorkshopHeads(db: DatabaseClient, workshopId: number): Promis
     [workshopId],
   );
   return r.rows.map((row) => ({ userId: Number(row.user_id), displayName: row.display_name, isActive: row.is_active }));
+}
+
+// ── Membership / idempotency helpers ────────────────────────────────────────
+
+interface MembershipConfig {
+  table: string;
+  idColumn: string;
+  refTable: string;
+  refId: string;
+  commandName: string;
+  addedKey: string;
+  removedKey: string;
+  notFound: [string, string];
+}
+
+function hashIdSet(actorUserId: string | number, parentId: number, ids: number[]): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ actorUserId: String(actorUserId), parentId, ids: [...ids].sort((a, b) => a - b) }))
+    .digest('hex');
+}
+
+async function validateActiveUsers(tx: DatabaseClient, ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  const r = await tx.query<{ user_id: number }>(
+    `SELECT user_id FROM public.users WHERE user_id = ANY($1::bigint[]) AND is_active = true FOR KEY SHARE`,
+    [ids],
+  );
+  const found = new Set(r.rows.map((row) => Number(row.user_id)));
+  const missing = ids.find((id) => !found.has(id));
+  if (missing !== undefined) {
+    throw new ApiError(422, 'ORG_HEAD_NOT_ACTIVE_USER', 'Head must be an existing active user', { userId: missing });
+  }
+}
+
+async function validateIdSet(
+  tx: DatabaseClient,
+  refTable: string,
+  refId: string,
+  ids: number[],
+  notFound: [string, string],
+): Promise<void> {
+  if (ids.length === 0) return;
+  const r = await tx.query<{ id: number }>(
+    `SELECT ${refId} AS id FROM public.${refTable} WHERE ${refId} = ANY($1::smallint[]) FOR KEY SHARE`,
+    [ids],
+  );
+  const found = new Set(r.rows.map((row) => Number(row.id)));
+  const missing = ids.find((id) => !found.has(id));
+  if (missing !== undefined) throw new ApiError(422, notFound[0], notFound[1], { id: missing });
+}
+
+async function ensureDirectionExistsForUpdate(tx: DatabaseClient, directionId: number): Promise<void> {
+  const r = await tx.query('SELECT direction_id FROM public.directions WHERE direction_id=$1::smallint FOR UPDATE', [
+    directionId,
+  ]);
+  if (!r.rows[0]) throw new ApiError(404, 'ORG_DIRECTION_NOT_FOUND', 'Direction not found', { directionId });
+}
+
+async function ensureWorkshopExistsForUpdate(tx: DatabaseClient, workshopId: number): Promise<void> {
+  const r = await tx.query('SELECT workshop_id FROM public.workshops WHERE workshop_id=$1::smallint FOR UPDATE', [
+    workshopId,
+  ]);
+  if (!r.rows[0]) throw new ApiError(404, 'ORG_WORKSHOP_NOT_FOUND', 'Workshop not found', { workshopId });
+}
+
+interface IdempotencyInput {
+  idempotencyKey: string;
+  commandName: string;
+  actorUserId: string | number;
+  entityType: string;
+  entityId: string;
+  requestHash: string;
+}
+
+async function reconcileIdempotency(
+  tx: DatabaseClient,
+  input: IdempotencyInput,
+): Promise<{ completed: boolean; response?: unknown }> {
+  const inserted = await tx.query<{ request_hash: string; status: string }>(
+    `INSERT INTO command_idempotency_keys (idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'processing')
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING request_hash, status`,
+    [input.idempotencyKey, input.commandName, toNullableUserId(input.actorUserId), input.entityType, input.entityId, input.requestHash],
+  );
+  if (inserted.rows[0]) return { completed: false };
+  const existing = await tx.query<{ request_hash: string; status: string; response_json: unknown }>(
+    `SELECT request_hash, status, response_json FROM command_idempotency_keys WHERE idempotency_key=$1 FOR UPDATE`,
+    [input.idempotencyKey],
+  );
+  const row = existing.rows[0];
+  if (!row) {
+    throw new ApiError(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing', {
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+  if (row.request_hash !== input.requestHash) {
+    throw new ApiError(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request', {
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+  // Replay returns the ORIGINAL committed response (matching projects pattern),
+  // not the current DB state — the latter can drift if another write landed
+  // between the first call and the retry.
+  if (row.status === 'completed') return { completed: true, response: parseStoredJson(row.response_json) };
+  if (row.status === 'failed') {
+    throw new ApiError(409, 'IDEMPOTENCY_FAILED', 'Idempotent command previously failed', {
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+  throw new ApiError(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing', {
+    idempotencyKey: input.idempotencyKey,
+  });
+}
+
+async function completeIdempotency(tx: DatabaseClient, idempotencyKey: string, response: unknown): Promise<void> {
+  await tx.query(
+    `UPDATE command_idempotency_keys SET status='completed', response_json=$2::jsonb, completed_at=now() WHERE idempotency_key=$1`,
+    [idempotencyKey, JSON.stringify(response)],
+  );
+}
+
+function parseStoredJson(value: unknown): unknown {
+  return typeof value === 'string' ? JSON.parse(value) : value;
 }
 
 interface DirectionSummaryRow extends QueryResultRow {
