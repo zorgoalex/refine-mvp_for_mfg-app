@@ -100,6 +100,18 @@ export const apiRoutes = {
       deadlineStatusCounts: backendApiPath('/projects/reports/deadline-status-counts'),
     },
   },
+  org: {
+    directions: backendApiPath('/org/directions'),
+    directionById: (directionId: number) => backendApiPath(`/org/directions/${directionId}`),
+    directionWithConfirm: (directionId: number) => backendApiPath(`/org/directions/${directionId}?confirm=true`),
+    directionWorkshops: (directionId: number) => backendApiPath(`/org/directions/${directionId}/workshops`),
+    directionWorkCenters: (directionId: number) => backendApiPath(`/org/directions/${directionId}/work-centers`),
+    directionHeads: (directionId: number) => backendApiPath(`/org/directions/${directionId}/heads`),
+    workshopHeads: (workshopId: number) => backendApiPath(`/org/workshops/${workshopId}/heads`),
+    assignableUsers: backendApiPath('/org/lookups/assignable-users'),
+    lookupWorkshops: backendApiPath('/org/lookups/workshops'),
+    lookupWorkCenters: backendApiPath('/org/lookups/work-centers'),
+  },
   users: {
     list: backendApiPath('/users'),
     byId: (userId: number) => backendApiPath(`/users/${userId}`),
