@@ -14,6 +14,7 @@ export interface AuditEvent {
   relatedPaymentId?: number | null;
   relatedProductionEventId?: number | null;
   relatedDeadlineId?: number | null;
+  relatedUserId?: number | null;
   statusField?: string | null;
   statusId?: number | null;
   statusName?: string | null;

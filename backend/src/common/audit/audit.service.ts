@@ -12,7 +12,7 @@ const AUDIT_INSERT = `
     event, entity_type, entity_id, user_id, username, role_code, role,
     request_id, source,
     related_order_id, related_client_id, related_payment_id,
-    related_production_event_id, related_deadline_id,
+    related_production_event_id, related_deadline_id, related_user_id,
     status_field, status_id, status_name, status_code, stage_code,
     before_json, after_json, diff_json, metadata_json
   )
@@ -20,9 +20,9 @@ const AUDIT_INSERT = `
     $1, $2, $3, $4, $5, $6, $6,
     $7, $8,
     $9, $10, $11,
-    $12, $13,
-    $14, $15, $16, $17, $18,
-    $19::jsonb, $20::jsonb, $21::jsonb, $22::jsonb
+    $12, $13, $14,
+    $15, $16, $17, $18, $19,
+    $20::jsonb, $21::jsonb, $22::jsonb, $23::jsonb
   )
   RETURNING audit_id
 `;
@@ -54,6 +54,7 @@ export class AuditService {
       event.relatedPaymentId ?? null,
       event.relatedProductionEventId ?? null,
       event.relatedDeadlineId ?? null,
+      event.relatedUserId ?? null,
       event.statusField ?? null,
       event.statusId ?? null,
       event.statusName ?? null,

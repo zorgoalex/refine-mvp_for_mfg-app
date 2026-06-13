@@ -90,7 +90,7 @@ describe('PgUserRepository', () => {
     expect(audit?.params[5]).toBe('admin');                // $6 role_code / role
     expect(audit?.params[6]).toBe('req_users_create');     // $7 request_id
     expect(audit?.params[7]).toBe('backend-users-command'); // $8 source
-    expect(audit?.params[19]).toContain('"username":"new_manager"'); // $20 after_json
+    expect(audit?.params[20]).toContain('"username":"new_manager"'); // $21 after_json
   });
 
   it('maps duplicate username/email violations to UserAlreadyExistsError', async () => {
@@ -193,7 +193,7 @@ describe('PgUserRepository', () => {
     const audit = database.queries.find((query) => query.text.includes('INSERT INTO audit_log'));
     expect(audit?.params[0]).toBe('users.deactivate');
     expect(audit?.params[7]).toBe('backend-users-command'); // $8 source
-    expect(audit?.params[21]).toBe(JSON.stringify({ revokedSessions: 1 })); // $22 metadata_json
+    expect(audit?.params[22]).toBe(JSON.stringify({ revokedSessions: 1 })); // $23 metadata_json
   });
 });
 
