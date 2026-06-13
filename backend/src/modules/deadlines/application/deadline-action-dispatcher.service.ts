@@ -77,7 +77,11 @@ export class DeadlineActionDispatcherService {
 
   private async evaluateRules(command: DispatchDeadlineActionsCommand, rules: DeadlineActionRuleDto[]) {
     const orderId = command.event.orderId ?? null;
-    const statusRules = rules.filter((rule) => rule.actionType === 'change_order_status');
+    const orderContextCandidateRules = rules.filter((rule) =>
+      rule.actionType === 'change_order_status'
+      || ((rule.actionType === 'set_overdue_flag' || rule.actionType === 'change_production_status')
+          && hasGatingConditions(rule)),
+    );
     const actionRuleIds = rules.map((rule) => rule.actionRuleId);
     const overrides =
       orderId && actionRuleIds.length > 0
@@ -90,11 +94,11 @@ export class DeadlineActionDispatcherService {
       (override) => override.actionRuleId && actionRuleIdSet.has(override.actionRuleId),
     );
     const orderContext =
-      orderId && statusRules.length > 0
+      orderId && orderContextCandidateRules.length > 0
         ? await command.repository.getOrderDeadlineEvaluationContext(orderId)
         : null;
     const isCurrentDeadlineEvent =
-      orderId && statusRules.length > 0
+      orderId && orderContextCandidateRules.length > 0
         ? await command.repository.isDeadlineEventCurrentForOrder({
             orderId,
             deadlineId: command.event.deadlineId,
@@ -109,7 +113,7 @@ export class DeadlineActionDispatcherService {
       targetType: command.event.entityType,
       targetId: command.event.entityId,
       orderContext,
-      orderContextUnavailable: Boolean(orderId && statusRules.length > 0 && !orderContext),
+      orderContextUnavailable: Boolean(orderId && orderContextCandidateRules.length > 0 && !orderContext),
       isCurrentDeadlineEvent,
       actionsEnabled: command.config.actionsEnabled,
       rules,
@@ -697,6 +701,27 @@ function getEventFixtureKey(event: DeadlineEventDto): string | null {
   const fixtureKey = event.payload?.fixtureKey;
 
   return typeof fixtureKey === 'string' && fixtureKey.trim() !== '' ? fixtureKey : null;
+}
+
+/**
+ * `true` only if `rule.config.conditions` has at least one key that actually
+ * narrows execution — used as a fetch-cost gate for set_overdue_flag /
+ * change_production_status (change_order_status always needs orderContext
+ * regardless, see the caller). MUST stay in sync with the `hasConditions`
+ * check inside `getMutatingActionConditionSkipReason`
+ * (deadline-action-evaluator.ts, Task 3) — both treat
+ * `requireCurrentDeadlineEvent: false` as NOT a gating condition (a rule with
+ * only that key configured is equivalent to a rule with empty `conditions`).
+ */
+function hasGatingConditions(rule: DeadlineActionRuleDto): boolean {
+  const conditions = rule.config?.conditions;
+  if (!conditions) return false;
+  return Boolean(
+    conditions.excludeCompletedOrders === true
+    || (conditions.allowedFromOrderStatusIds?.length ?? 0) > 0
+    || (conditions.excludeOrderStatusIds?.length ?? 0) > 0
+    || conditions.requireCurrentDeadlineEvent === true,
+  );
 }
 
 function getEventRequestId(event: DeadlineEventDto): string | undefined {

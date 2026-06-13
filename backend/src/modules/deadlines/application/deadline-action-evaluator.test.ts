@@ -249,6 +249,308 @@ describe('evaluateDeadlineActionRules', () => {
       skipReason: null,
     });
   });
+
+  describe('set_overdue_flag / change_production_status condition gating', () => {
+    it('REGRESSION: a set_overdue_flag rule with no conditions configured still runs (no orderContext fetched)', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: null,
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: true,
+        rules: [
+          rule({ actionRuleId: 'overdue-rule', actionType: 'set_overdue_flag', config: {} }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({ actionRuleId: 'overdue-rule', wouldRun: true, skipReason: null }),
+      ]);
+    });
+
+    it('REGRESSION: a change_production_status rule with no conditions configured still runs', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: null,
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: true,
+        rules: [
+          rule({
+            actionRuleId: 'production-rule',
+            actionType: 'change_production_status',
+            config: { actionConfig: { targetProductionStatusId: 6, productionStatusScope: 'order' } },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({ actionRuleId: 'production-rule', wouldRun: true, skipReason: null }),
+      ]);
+    });
+
+    it('skips set_overdue_flag when excludeCompletedOrders is configured and the order is completed', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: { orderId: 42, orderStatusId: 90, isCompleted: true },
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: true,
+        rules: [
+          rule({
+            actionRuleId: 'overdue-rule',
+            actionType: 'set_overdue_flag',
+            config: { conditions: { excludeCompletedOrders: true } },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({
+          actionRuleId: 'overdue-rule',
+          wouldRun: false,
+          skipReason: 'order_completed',
+        }),
+      ]);
+    });
+
+    it('skips change_production_status when the order status is in excludeOrderStatusIds', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: { orderId: 42, orderStatusId: 5, isCompleted: false },
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: true,
+        rules: [
+          rule({
+            actionRuleId: 'production-rule',
+            actionType: 'change_production_status',
+            config: {
+              conditions: { excludeOrderStatusIds: [5] },
+              actionConfig: { targetProductionStatusId: 6, productionStatusScope: 'order' },
+            },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({
+          actionRuleId: 'production-rule',
+          wouldRun: false,
+          skipReason: 'status_excluded',
+        }),
+      ]);
+    });
+
+    it('runs set_overdue_flag when allowedFromOrderStatusIds includes the current order status', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: { orderId: 42, orderStatusId: 10, isCompleted: false },
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: true,
+        rules: [
+          rule({
+            actionRuleId: 'overdue-rule',
+            actionType: 'set_overdue_flag',
+            config: { conditions: { allowedFromOrderStatusIds: [10, 11] } },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({ actionRuleId: 'overdue-rule', wouldRun: true, skipReason: null }),
+      ]);
+    });
+
+    it('skips set_overdue_flag when allowedFromOrderStatusIds does not include the current order status', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: { orderId: 42, orderStatusId: 99, isCompleted: false },
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: true,
+        rules: [
+          rule({
+            actionRuleId: 'overdue-rule',
+            actionType: 'set_overdue_flag',
+            config: { conditions: { allowedFromOrderStatusIds: [10, 11] } },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({
+          actionRuleId: 'overdue-rule',
+          wouldRun: false,
+          skipReason: 'status_not_allowed',
+        }),
+      ]);
+    });
+
+    it('skips set_overdue_flag when the rule has conditions but orderContext is unavailable (stale)', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: null,
+        orderContextUnavailable: true,
+        isCurrentDeadlineEvent: true,
+        rules: [
+          rule({
+            actionRuleId: 'overdue-rule',
+            actionType: 'set_overdue_flag',
+            config: { conditions: { excludeCompletedOrders: true } },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({
+          actionRuleId: 'overdue-rule',
+          wouldRun: false,
+          skipReason: 'stale_deadline_event',
+        }),
+      ]);
+    });
+
+    it('skips set_overdue_flag with conditions when no orderContext AND orderContextUnavailable is false (missing_order_id)', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: null,
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: true,
+        rules: [
+          rule({
+            actionRuleId: 'overdue-rule',
+            actionType: 'set_overdue_flag',
+            config: { conditions: { excludeCompletedOrders: true } },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({
+          actionRuleId: 'overdue-rule',
+          wouldRun: false,
+          skipReason: 'missing_order_id',
+        }),
+      ]);
+    });
+
+    it('skips set_overdue_flag with conditions when isCurrentDeadlineEvent is false and requireCurrentDeadlineEvent defaults to true', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: { orderId: 42, orderStatusId: 10, isCompleted: false },
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: false,
+        rules: [
+          rule({
+            actionRuleId: 'overdue-rule',
+            actionType: 'set_overdue_flag',
+            config: { conditions: { allowedFromOrderStatusIds: [10] } },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({
+          actionRuleId: 'overdue-rule',
+          wouldRun: false,
+          skipReason: 'stale_deadline_event',
+        }),
+      ]);
+    });
+
+    it('runs set_overdue_flag with conditions when isCurrentDeadlineEvent is false but requireCurrentDeadlineEvent is false', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: { orderId: 42, orderStatusId: 10, isCompleted: false },
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: false,
+        rules: [
+          rule({
+            actionRuleId: 'overdue-rule',
+            actionType: 'set_overdue_flag',
+            config: {
+              conditions: { allowedFromOrderStatusIds: [10], requireCurrentDeadlineEvent: false },
+            },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({ actionRuleId: 'overdue-rule', wouldRun: true, skipReason: null }),
+      ]);
+    });
+
+    it('EDGE CASE: a set_overdue_flag rule with ONLY requireCurrentDeadlineEvent:false has no gating conditions (no orderContext needed, runs even when stale)', () => {
+      const result = evaluateDeadlineActionRules({
+        eventType: 'DEADLINE_EXPIRED',
+        deadlineEventId: 'event-1',
+        deadlineId: 'deadline-1',
+        targetType: 'order',
+        targetId: '42',
+        orderContext: null,
+        orderContextUnavailable: false,
+        isCurrentDeadlineEvent: false,
+        rules: [
+          rule({
+            actionRuleId: 'overdue-rule',
+            actionType: 'set_overdue_flag',
+            config: { conditions: { requireCurrentDeadlineEvent: false } },
+          }),
+        ],
+        overrides: [],
+      });
+
+      expect(result.candidates).toEqual([
+        expect.objectContaining({ actionRuleId: 'overdue-rule', wouldRun: true, skipReason: null }),
+      ]);
+    });
+  });
 });
 
 function rule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineActionRuleDto {

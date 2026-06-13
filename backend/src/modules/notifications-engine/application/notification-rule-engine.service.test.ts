@@ -23,6 +23,7 @@ function ctx(overrides: Partial<NotificationEventContext> = {}): NotificationEve
     deadlineInstanceId: null,
     orderStatusId: 30,
     isOrderCompleted: false,
+    isCurrentDeadlineEvent: true,
     payload: { orderId: 500, clientId: 12, orderStatusId: 30, actorUserId: 9, requestId: 'req-1' },
     ...overrides,
   };
