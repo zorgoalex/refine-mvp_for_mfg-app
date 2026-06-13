@@ -200,4 +200,34 @@ describe('Deadline convergence — zero double-send (engine fakes)', () => {
     // the engine call graph; the test does not call it.
     expect(DeadlineActionDispatcherService).toBeDefined();
   });
+
+  it('skips a notify_manager-equivalent rule for a stale DEADLINE_EXPIRED event (requireCurrentDeadlineEvent default)', async () => {
+    const ctx = deadlineContext({ isCurrentDeadlineEvent: false });
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [rule({ conditions: {} })]) },
+      contextBuilder: { buildContext: vi.fn(async () => ctx) },
+      recipientResolver: { resolve: vi.fn(async () => [10]) },
+      runtimeConfig: { isEngineOwnsDeadline: () => true },
+    });
+
+    const result = await engine(deps).processEvent(client, deadlineEnvelope());
+
+    expect(result).toEqual({ matched: 0, created: 0 });
+    expect(deps.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
+  });
+
+  it('fires a notify_manager-equivalent rule for a current DEADLINE_EXPIRED event', async () => {
+    const ctx = deadlineContext({ isCurrentDeadlineEvent: true });
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [rule({ conditions: {} })]) },
+      contextBuilder: { buildContext: vi.fn(async () => ctx) },
+      recipientResolver: { resolve: vi.fn(async () => [10]) },
+      runtimeConfig: { isEngineOwnsDeadline: () => true },
+    });
+
+    const result = await engine(deps).processEvent(client, deadlineEnvelope());
+
+    expect(result).toEqual({ matched: 1, created: 1 });
+    expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
+  });
 });
