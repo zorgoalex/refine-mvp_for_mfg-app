@@ -1779,6 +1779,202 @@ describe('DeadlineActionDispatcherService', () => {
       errorMessage: 'notification service unavailable',
     });
   });
+
+  describe('orderContext fetching for set_overdue_flag/change_production_status conditions', () => {
+    it('fetches orderContext and gates a set_overdue_flag rule with excludeCompletedOrders', async () => {
+      const executions: DeadlineActionExecutionDto[] = [];
+      const overdueUpdates: Array<{ deadlineId: string; expiredAt: string }> = [];
+      const currentEventChecks: unknown[] = [];
+      const dispatcher = new DeadlineActionDispatcherService();
+
+      await dispatcher.dispatch({
+        event: createEvent(),
+        repository: createRepository({
+          rules: [
+            createRule({
+              actionRuleId: 'overdue-completed-guard',
+              actionType: 'set_overdue_flag',
+              config: { conditions: { excludeCompletedOrders: true } },
+            }),
+          ],
+          executions,
+          overdueUpdates,
+          orderContext: { orderId: 42, orderStatusId: 90, isCompleted: true },
+          currentEventChecks,
+        }),
+        targetResolver: createTargetResolver(),
+        notificationPort: createNotificationPort(),
+        config: { actionsEnabled: true, notificationsEnabled: true },
+      });
+
+      expect(overdueUpdates).toEqual([]);
+      expect(executions[0]).toMatchObject({
+        actionRuleId: 'overdue-completed-guard',
+        actionType: 'set_overdue_flag',
+        status: 'skipped',
+        skipReason: 'order_completed',
+      });
+    });
+
+    it('REGRESSION: set_overdue_flag rule with no conditions still executes when other rules need orderContext', async () => {
+      const executions: DeadlineActionExecutionDto[] = [];
+      const overdueUpdates: Array<{ deadlineId: string; expiredAt: string }> = [];
+      const dispatcher = new DeadlineActionDispatcherService();
+
+      await dispatcher.dispatch({
+        event: createEvent({
+          deadlineEventId: 'event-overdue-2',
+          deadlineId: 'deadline-overdue-2',
+          eventAt: '2026-05-01T10:00:00.000Z',
+        }),
+        repository: createRepository({
+          rules: [
+            createRule({ actionRuleId: 'overdue-no-conditions', actionType: 'set_overdue_flag', config: {} }),
+            createRule({
+              actionRuleId: 'production-with-conditions',
+              actionType: 'change_production_status',
+              config: {
+                conditions: { excludeCompletedOrders: true },
+                actionConfig: { targetProductionStatusId: 6, productionStatusScope: 'order' },
+              },
+            }),
+          ],
+          executions,
+          overdueUpdates,
+          orderContext: { orderId: 42, orderStatusId: 10, isCompleted: false },
+        }),
+        targetResolver: createTargetResolver(),
+        notificationPort: createNotificationPort(),
+        config: { actionsEnabled: true, notificationsEnabled: true },
+      });
+
+      expect(overdueUpdates).toEqual([
+        { deadlineId: 'deadline-overdue-2', expiredAt: '2026-05-01T10:00:00.000Z' },
+      ]);
+      expect(executions.find((e) => e.actionRuleId === 'overdue-no-conditions')).toMatchObject({
+        status: 'executed',
+      });
+    });
+
+    it('does not fetch orderContext for non-order targets even with set_overdue_flag conditions configured', async () => {
+      const executions: DeadlineActionExecutionDto[] = [];
+      const overdueUpdates: Array<{ deadlineId: string; expiredAt: string }> = [];
+      const orderContextCalls: number[] = [];
+      const dispatcher = new DeadlineActionDispatcherService();
+
+      await dispatcher.dispatch({
+        event: createEvent({
+          entityType: 'project',
+          entityId: 'project-1',
+          orderId: undefined,
+        }),
+        repository: {
+          ...createRepository({
+            rules: [
+              createRule({
+                actionRuleId: 'overdue-project-rule',
+                actionType: 'set_overdue_flag',
+                config: { conditions: { excludeCompletedOrders: true } },
+              }),
+            ],
+            executions,
+            overdueUpdates,
+          }),
+          async getOrderDeadlineEvaluationContext(orderId: number) {
+            orderContextCalls.push(orderId);
+            return { orderId, orderStatusId: 1, isCompleted: false };
+          },
+        },
+        targetResolver: createTargetResolver(),
+        notificationPort: createNotificationPort(),
+        config: { actionsEnabled: true, notificationsEnabled: true },
+      });
+
+      expect(orderContextCalls).toEqual([]);
+      // No orderContext -> hasConditions is true but orderContext is null and
+      // orderContextUnavailable is false (no orderId on the event at all) ->
+      // missing_order_id, NOT executed, NOT a DB write.
+      expect(overdueUpdates).toEqual([]);
+      expect(executions[0]).toMatchObject({
+        actionRuleId: 'overdue-project-rule',
+        actionType: 'set_overdue_flag',
+        status: 'skipped',
+        skipReason: 'missing_order_id',
+      });
+    });
+
+    it('HOT PATH: a set_overdue_flag rule with no conditions triggers zero orderContext/isCurrentDeadlineEvent calls', async () => {
+      const executions: DeadlineActionExecutionDto[] = [];
+      const overdueUpdates: Array<{ deadlineId: string; expiredAt: string }> = [];
+      const orderContextCalls: number[] = [];
+      const currentEventCalls: unknown[] = [];
+      const dispatcher = new DeadlineActionDispatcherService();
+
+      await dispatcher.dispatch({
+        event: createEvent(),
+        repository: {
+          ...createRepository({
+            rules: [
+              createRule({ actionRuleId: 'overdue-no-conditions', actionType: 'set_overdue_flag', config: {} }),
+            ],
+            executions,
+            overdueUpdates,
+          }),
+          async getOrderDeadlineEvaluationContext(orderId: number) {
+            orderContextCalls.push(orderId);
+            return { orderId, orderStatusId: 1, isCompleted: false };
+          },
+          async isDeadlineEventCurrentForOrder(input: unknown) {
+            currentEventCalls.push(input);
+            return true;
+          },
+        },
+        targetResolver: createTargetResolver(),
+        notificationPort: createNotificationPort(),
+        config: { actionsEnabled: true, notificationsEnabled: true },
+      });
+
+      expect(orderContextCalls).toEqual([]);
+      expect(currentEventCalls).toEqual([]);
+      expect(executions[0]).toMatchObject({ actionRuleId: 'overdue-no-conditions', status: 'executed' });
+      expect(overdueUpdates).not.toEqual([]);
+    });
+
+    it('EDGE CASE: a set_overdue_flag rule with ONLY requireCurrentDeadlineEvent:false triggers zero orderContext calls and still runs', async () => {
+      const executions: DeadlineActionExecutionDto[] = [];
+      const overdueUpdates: Array<{ deadlineId: string; expiredAt: string }> = [];
+      const orderContextCalls: number[] = [];
+      const dispatcher = new DeadlineActionDispatcherService();
+
+      await dispatcher.dispatch({
+        event: createEvent(),
+        repository: {
+          ...createRepository({
+            rules: [
+              createRule({
+                actionRuleId: 'overdue-no-staleness-gate',
+                actionType: 'set_overdue_flag',
+                config: { conditions: { requireCurrentDeadlineEvent: false } },
+              }),
+            ],
+            executions,
+            overdueUpdates,
+          }),
+          async getOrderDeadlineEvaluationContext(orderId: number) {
+            orderContextCalls.push(orderId);
+            return { orderId, orderStatusId: 1, isCompleted: false };
+          },
+        },
+        targetResolver: createTargetResolver(),
+        notificationPort: createNotificationPort(),
+        config: { actionsEnabled: true, notificationsEnabled: true },
+      });
+
+      expect(orderContextCalls).toEqual([]);
+      expect(executions[0]).toMatchObject({ actionRuleId: 'overdue-no-staleness-gate', status: 'executed' });
+      expect(overdueUpdates).not.toEqual([]);
+    });
+  });
 });
 
 function createRepository(input: {
