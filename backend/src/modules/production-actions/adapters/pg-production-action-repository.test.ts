@@ -192,7 +192,7 @@ describe('PgProductionActionRepository', () => {
     expect(audit?.params[5]).toBe('manager');
     expect(audit?.params[6]).toBe('request-denied-audit');
     expect(audit?.params[7]).toBe('backend-production-command');
-    expect(audit?.params[21]).toBe(
+    expect(audit?.params[22]).toBe(
       JSON.stringify({
         source: 'backend-production-command',
         denied: true,

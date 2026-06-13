@@ -148,8 +148,8 @@ describe('PgPaymentRepository', () => {
       (c) => /INSERT INTO audit_log/i.test(c.text) && JSON.stringify(c.params).includes('payments.update'),
     );
     expect(audit).toBeDefined();
-    // params[18] is before_json — a JSON-stringified snapshot of the prior row
-    const beforeJson = audit!.params[18] as string;
+    // params[19] is before_json — a JSON-stringified snapshot of the prior row
+    const beforeJson = audit!.params[19] as string;
     expect(beforeJson).toBeDefined();
     expect(beforeJson).not.toBeNull();
     const before = JSON.parse(beforeJson);

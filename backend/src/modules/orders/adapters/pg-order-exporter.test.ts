@@ -87,7 +87,7 @@ describe('PgOrderExporter', () => {
     expect(successAudit!.text).toMatch(/related_order_id/i);
     // Param indices per AUDIT_INSERT: [0]=event [1]=entity_type [2]=entity_id [3]=user_id
     // [4]=username [5]=role_code [6]=request_id [7]=source [8]=related_order_id
-    // [9]=related_client_id ... [21]=metadata_json
+    // [9]=related_client_id [13]=related_user_id ... [22]=metadata_json
     expect(successAudit!.params[0]).toBe('orders.export');
     expect(successAudit!.params[4]).toBe('manager');       // actorUsername
     expect(successAudit!.params[5]).toBe('manager');       // actorRole / role_code
@@ -95,7 +95,7 @@ describe('PgOrderExporter', () => {
     expect(successAudit!.params[7]).toBe('backend-orders-command'); // source
     expect(successAudit!.params[8]).toBe(42);              // related_order_id
     expect(successAudit!.params[9]).toBe(7);               // related_client_id (from headerRow client_id=7)
-    const metadata = JSON.parse(successAudit!.params[21] as string);
+    const metadata = JSON.parse(successAudit!.params[22] as string);
     expect(metadata).toMatchObject({ target: 'google-drive' });
   });
 

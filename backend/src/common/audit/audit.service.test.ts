@@ -95,6 +95,37 @@ describe('AuditService.record', () => {
   });
 });
 
+describe('AuditService related_user_id dimension', () => {
+  it('binds relatedUserId into the insert parameters', async () => {
+    const captured: Captured[] = [];
+    await new AuditService().record(fakeClient(captured), {
+      event: 'ORG_WORKSHOP_HEAD_ADDED',
+      entityType: 'workshop',
+      entityId: 5,
+      requestId: 'req-1',
+      source: 'org-management',
+      relatedUserId: 42,
+    });
+    const { text, params } = captured[0];
+    expect(text).toMatch(/related_user_id/);
+    expect(params).toContain(42);
+  });
+
+  it('defaults relatedUserId to null when omitted', async () => {
+    const captured: Captured[] = [];
+    await new AuditService().record(fakeClient(captured), {
+      event: 'ORG_DIRECTION_CREATED',
+      entityType: 'direction',
+      entityId: 1,
+      requestId: 'req-2',
+      source: 'org-management',
+    });
+    const { params } = captured[0];
+    // related_user_id must be present as a bind value (null), not undefined
+    expect(params).toContain(null);
+  });
+});
+
 describe('AuditService.recordDenied', () => {
   it('writes a denied audit row with denied metadata', async () => {
     const captured: Captured[] = [];
