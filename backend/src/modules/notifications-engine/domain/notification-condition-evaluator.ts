@@ -4,7 +4,7 @@ export interface ConditionResult { matched: boolean; skipReason?: string; }
 
 export function evaluateRuleConditions(
   conditions: NotificationRuleConditions,
-  ctx: Pick<NotificationEventContext, 'orderStatusId' | 'isOrderCompleted'>,
+  ctx: Pick<NotificationEventContext, 'orderStatusId' | 'isOrderCompleted' | 'isCurrentDeadlineEvent'>,
 ): ConditionResult {
   if (conditions.excludeCompletedOrders && ctx.isOrderCompleted) {
     return { matched: false, skipReason: 'order_completed' };
@@ -17,6 +17,10 @@ export function evaluateRuleConditions(
     if (ctx.orderStatusId == null || !conditions.allowedFromOrderStatusIds.includes(ctx.orderStatusId)) {
       return { matched: false, skipReason: 'status_not_allowed' };
     }
+  }
+  const requireCurrentDeadlineEvent = conditions.requireCurrentDeadlineEvent ?? true;
+  if (requireCurrentDeadlineEvent && !ctx.isCurrentDeadlineEvent) {
+    return { matched: false, skipReason: 'stale_deadline_event' };
   }
   return { matched: true };
 }

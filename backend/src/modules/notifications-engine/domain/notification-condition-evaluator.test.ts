@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateRuleConditions } from './notification-condition-evaluator';
 
-const ctx = { orderStatusId: 30, isOrderCompleted: false } as any;
+const ctx = { orderStatusId: 30, isOrderCompleted: false, isCurrentDeadlineEvent: true } as any;
 
 describe('evaluateRuleConditions', () => {
   it('passes when no conditions', () => {
@@ -19,5 +19,30 @@ describe('evaluateRuleConditions', () => {
   it('honors excludeOrderStatusIds', () => {
     expect(evaluateRuleConditions({ excludeOrderStatusIds: [30] }, ctx))
       .toEqual({ matched: false, skipReason: 'status_excluded' });
+  });
+
+  describe('requireCurrentDeadlineEvent staleness guard', () => {
+    it('defaults requireCurrentDeadlineEvent to true and skips stale deadline events', () => {
+      expect(evaluateRuleConditions({}, { ...ctx, isCurrentDeadlineEvent: false }))
+        .toEqual({ matched: false, skipReason: 'stale_deadline_event' });
+    });
+
+    it('passes a current deadline event with the default (true) requirement', () => {
+      expect(evaluateRuleConditions({}, { ...ctx, isCurrentDeadlineEvent: true }))
+        .toEqual({ matched: true });
+    });
+
+    it('allows opting out via requireCurrentDeadlineEvent: false', () => {
+      expect(evaluateRuleConditions(
+        { requireCurrentDeadlineEvent: false },
+        { ...ctx, isCurrentDeadlineEvent: false },
+      )).toEqual({ matched: true });
+    });
+
+    it('does not gate non-deadline events (isCurrentDeadlineEvent: true by convention)', () => {
+      // order.* events always pass isCurrentDeadlineEvent: true from the context builder.
+      expect(evaluateRuleConditions({}, { ...ctx, isCurrentDeadlineEvent: true }))
+        .toEqual({ matched: true });
+    });
   });
 });

@@ -6,6 +6,15 @@ export interface NotificationRuleConditions {
   allowedFromOrderStatusIds?: number[];
   excludeOrderStatusIds?: number[];
   excludeCompletedOrders?: boolean;
+  /**
+   * When `true` (the default), DEADLINE_EXPIRED-derived events are skipped
+   * with `skipReason: 'stale_deadline_event'` if a newer deadline event has
+   * superseded this one for the same order/deadline (mirrors the inline
+   * `deadline-action-evaluator.ts` `requireCurrentDeadlineEvent` semantics).
+   * For non-deadline event types `ctx.isCurrentDeadlineEvent` is always
+   * `true`, so this condition is a no-op.
+   */
+  requireCurrentDeadlineEvent?: boolean;
 }
 
 export interface NotificationRuleRecipients {
