@@ -21,6 +21,7 @@ function buildContext(overrides: Partial<NotificationEventContext>): Notificatio
     deadlineInstanceId: null,
     orderStatusId: null,
     isOrderCompleted: false,
+    isCurrentDeadlineEvent: true,
     payload: {},
     ...overrides,
   };

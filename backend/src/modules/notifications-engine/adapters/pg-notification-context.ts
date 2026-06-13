@@ -62,6 +62,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       deadlineInstanceId: event.aggregateType === 'deadline' ? event.aggregateId : null,
       orderStatusId,
       isOrderCompleted,
+      isCurrentDeadlineEvent: true,
       payload,
     };
   }

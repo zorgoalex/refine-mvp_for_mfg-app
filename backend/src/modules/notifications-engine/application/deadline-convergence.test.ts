@@ -43,6 +43,7 @@ function deadlineContext(overrides: Partial<NotificationEventContext> = {}): Not
     deadlineInstanceId: 'deadline-instance-1',
     orderStatusId: 11,
     isOrderCompleted: false,
+    isCurrentDeadlineEvent: true,
     payload: { orderId: 500, clientId: 42, orderStatusId: 11 },
     ...overrides,
   };

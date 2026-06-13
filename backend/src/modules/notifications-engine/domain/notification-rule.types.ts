@@ -51,5 +51,16 @@ export interface NotificationEventContext {
   deadlineInstanceId: string | null;
   orderStatusId: number | null;
   isOrderCompleted: boolean;
+  /**
+   * `true` when this deadline-derived event is for the CURRENT (latest)
+   * DEADLINE_EXPIRED deadline_events row for the order/deadline pair, or
+   * `true` (no staleness concept) for non-deadline events. Computed by
+   * `PgNotificationContextBuilder` via the same query as
+   * `PgDeadlineRepository.isDeadlineEventCurrentForOrder`. Used by
+   * `evaluateRuleConditions`'s `requireCurrentDeadlineEvent` check to skip
+   * stale DEADLINE_EXPIRED notifications/escalations after a newer deadline
+   * event has superseded this one.
+   */
+  isCurrentDeadlineEvent: boolean;
   payload: Record<string, unknown>;
 }
