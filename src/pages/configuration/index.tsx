@@ -11,12 +11,14 @@ import {
   BuildOutlined,
   ClockCircleOutlined,
   BellOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { VlmConfigTab } from './VlmConfigTab';
 import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
 import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
 import { NotificationRulesConfig } from './components/NotificationRulesConfig';
+import { OrgStructureConfig } from './components/OrgStructureConfig';
 
 const { Text } = Typography;
 
@@ -412,6 +414,16 @@ export const ConfigurationPage: React.FC = () => {
         </span>
       ),
       children: <NotificationRulesConfig />,
+    },
+    {
+      key: 'org-structure',
+      label: (
+        <span>
+          <ApartmentOutlined />
+          Орг-структура
+        </span>
+      ),
+      children: <OrgStructureConfig />,
     },
     {
       key: 'finance',
