@@ -22,12 +22,12 @@ export class OrgController {
     @Inject(OrgRuntimeConfigService) private readonly runtimeConfig: OrgRuntimeConfigService,
   ) {}
 
-  @Get('directions')
-  @ApiOperation({ summary: 'List directions with membership/head counts' })
+  @ApiOperation({ operationId: 'listDirections', summary: 'List directions with membership/head counts' })
   @ApiResponse({ status: 200, description: 'Directions list' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled' })
+  @Get('directions')
   async listDirections(@Req() req: RequestWithCurrentUser) {
     this.assertOrgEnabled();
     const currentUser = this.requireCurrentUser(req);
@@ -37,15 +37,15 @@ export class OrgController {
     };
   }
 
-  @Post('directions')
-  @HttpCode(201)
-  @ApiOperation({ summary: 'Create a direction' })
+  @ApiOperation({ operationId: 'createDirection', summary: 'Create a direction' })
   @ApiResponse({ status: 201, description: 'Direction created' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 409, description: 'Direction name already exists' })
   @ApiResponse({ status: 422, description: 'Invalid request body' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled or read-only' })
+  @Post('directions')
+  @HttpCode(201)
   async createDirection(@Req() req: RequestWithCurrentUser, @Body() body: unknown) {
     this.assertOrgWritesEnabled();
     const currentUser = this.requireCurrentUser(req);
@@ -53,13 +53,13 @@ export class OrgController {
     return this.org.createDirection({ currentUser, ...dto, requestId: req.requestId });
   }
 
-  @Get('directions/:directionId')
-  @ApiOperation({ summary: 'Get direction detail (workshops, work-centers, heads)' })
+  @ApiOperation({ operationId: 'getDirection', summary: 'Get direction detail (workshops, work-centers, heads)' })
   @ApiResponse({ status: 200, description: 'Direction detail' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 404, description: 'Direction not found' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled' })
+  @Get('directions/:directionId')
   async getDirection(@Req() req: RequestWithCurrentUser, @Param('directionId') p: string) {
     this.assertOrgEnabled();
     return this.org.getDirection({
@@ -69,8 +69,7 @@ export class OrgController {
     });
   }
 
-  @Patch('directions/:directionId')
-  @ApiOperation({ summary: 'Update a direction (partial)' })
+  @ApiOperation({ operationId: 'updateDirection', summary: 'Update a direction (partial)' })
   @ApiResponse({ status: 200, description: 'Direction updated' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -78,6 +77,7 @@ export class OrgController {
   @ApiResponse({ status: 409, description: 'Direction name already exists' })
   @ApiResponse({ status: 422, description: 'Invalid request body' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled or read-only' })
+  @Patch('directions/:directionId')
   async updateDirection(@Req() req: RequestWithCurrentUser, @Param('directionId') p: string, @Body() body: unknown) {
     this.assertOrgWritesEnabled();
     const patch = parseUpdateDirectionRequest(body);
@@ -89,15 +89,15 @@ export class OrgController {
     });
   }
 
-  @Delete('directions/:directionId')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Hard-delete a direction (requires confirm=true)' })
+  @ApiOperation({ operationId: 'deleteDirection', summary: 'Hard-delete a direction (requires confirm=true)' })
   @ApiResponse({ status: 200, description: 'Direction deleted' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 404, description: 'Direction not found' })
   @ApiResponse({ status: 422, description: 'Hard delete requires confirm=true' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled or read-only' })
+  @Delete('directions/:directionId')
+  @HttpCode(200)
   async deleteDirection(
     @Req() req: RequestWithCurrentUser,
     @Param('directionId') p: string,
@@ -113,9 +113,7 @@ export class OrgController {
     });
   }
 
-  @Put('directions/:directionId/workshops')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Replace the workshop membership of a direction (idempotent)' })
+  @ApiOperation({ operationId: 'replaceDirectionWorkshops', summary: 'Replace the workshop membership of a direction (idempotent)' })
   @ApiResponse({ status: 200, description: 'Membership replaced' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -123,6 +121,8 @@ export class OrgController {
   @ApiResponse({ status: 409, description: 'Idempotency conflict' })
   @ApiResponse({ status: 422, description: 'Invalid request body' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled or read-only' })
+  @Put('directions/:directionId/workshops')
+  @HttpCode(200)
   async replaceDirectionWorkshops(
     @Req() req: RequestWithCurrentUser,
     @Param('directionId') p: string,
@@ -140,9 +140,7 @@ export class OrgController {
     });
   }
 
-  @Put('directions/:directionId/work-centers')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Replace the work-center membership of a direction (idempotent)' })
+  @ApiOperation({ operationId: 'replaceDirectionWorkCenters', summary: 'Replace the work-center membership of a direction (idempotent)' })
   @ApiResponse({ status: 200, description: 'Membership replaced' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -150,6 +148,8 @@ export class OrgController {
   @ApiResponse({ status: 409, description: 'Idempotency conflict' })
   @ApiResponse({ status: 422, description: 'Invalid request body' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled or read-only' })
+  @Put('directions/:directionId/work-centers')
+  @HttpCode(200)
   async replaceDirectionWorkCenters(
     @Req() req: RequestWithCurrentUser,
     @Param('directionId') p: string,
@@ -167,9 +167,7 @@ export class OrgController {
     });
   }
 
-  @Put('directions/:directionId/heads')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Replace the heads of a direction (idempotent, per-user audit)' })
+  @ApiOperation({ operationId: 'replaceDirectionHeads', summary: 'Replace the heads of a direction (idempotent, per-user audit)' })
   @ApiResponse({ status: 200, description: 'Heads replaced' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -177,6 +175,8 @@ export class OrgController {
   @ApiResponse({ status: 409, description: 'Idempotency conflict' })
   @ApiResponse({ status: 422, description: 'Invalid request body or head is not an active user' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled or read-only' })
+  @Put('directions/:directionId/heads')
+  @HttpCode(200)
   async replaceDirectionHeads(
     @Req() req: RequestWithCurrentUser,
     @Param('directionId') p: string,
@@ -194,13 +194,13 @@ export class OrgController {
     });
   }
 
-  @Get('workshops/:workshopId/heads')
-  @ApiOperation({ summary: 'List the heads of a workshop' })
+  @ApiOperation({ operationId: 'listWorkshopHeads', summary: 'List the heads of a workshop' })
   @ApiResponse({ status: 200, description: 'Workshop heads' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 404, description: 'Workshop not found' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled' })
+  @Get('workshops/:workshopId/heads')
   async listWorkshopHeads(@Req() req: RequestWithCurrentUser, @Param('workshopId') p: string) {
     this.assertOrgEnabled();
     return this.org.listWorkshopHeads({
@@ -210,9 +210,7 @@ export class OrgController {
     });
   }
 
-  @Put('workshops/:workshopId/heads')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Replace the heads of a workshop (idempotent, per-user audit)' })
+  @ApiOperation({ operationId: 'replaceWorkshopHeads', summary: 'Replace the heads of a workshop (idempotent, per-user audit)' })
   @ApiResponse({ status: 200, description: 'Heads replaced' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -220,6 +218,8 @@ export class OrgController {
   @ApiResponse({ status: 409, description: 'Idempotency conflict' })
   @ApiResponse({ status: 422, description: 'Invalid request body or head is not an active user' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled or read-only' })
+  @Put('workshops/:workshopId/heads')
+  @HttpCode(200)
   async replaceWorkshopHeads(@Req() req: RequestWithCurrentUser, @Param('workshopId') p: string, @Body() body: unknown) {
     this.assertOrgWritesEnabled();
     const dto = parseReplaceIdSetRequest(body);
@@ -233,12 +233,12 @@ export class OrgController {
     });
   }
 
-  @Get('lookups/assignable-users')
-  @ApiOperation({ summary: 'List active users assignable as heads' })
+  @ApiOperation({ operationId: 'orgAssignableUsers', summary: 'List active users assignable as heads' })
   @ApiResponse({ status: 200, description: 'Assignable users' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled' })
+  @Get('lookups/assignable-users')
   async assignableUsers(@Req() req: RequestWithCurrentUser) {
     this.assertOrgEnabled();
     return {
@@ -247,12 +247,12 @@ export class OrgController {
     };
   }
 
-  @Get('lookups/workshops')
-  @ApiOperation({ summary: 'List workshops for membership selection' })
+  @ApiOperation({ operationId: 'orgLookupWorkshops', summary: 'List workshops for membership selection' })
   @ApiResponse({ status: 200, description: 'Workshops' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled' })
+  @Get('lookups/workshops')
   async lookupWorkshops(@Req() req: RequestWithCurrentUser) {
     this.assertOrgEnabled();
     return {
@@ -261,12 +261,12 @@ export class OrgController {
     };
   }
 
-  @Get('lookups/work-centers')
-  @ApiOperation({ summary: 'List work-centers for membership selection' })
+  @ApiOperation({ operationId: 'orgLookupWorkCenters', summary: 'List work-centers for membership selection' })
   @ApiResponse({ status: 200, description: 'Work centers' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 503, description: 'Org management API is disabled' })
+  @Get('lookups/work-centers')
   async lookupWorkCenters(@Req() req: RequestWithCurrentUser) {
     this.assertOrgEnabled();
     return {

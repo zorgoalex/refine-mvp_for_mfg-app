@@ -4016,6 +4016,386 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/org/directions:
+    get:
+      tags:
+        - Org
+      operationId: listDirections
+      summary: List directions with membership/head counts
+      security:
+        - bearerAuth: []
+      x-permission: org.view
+      responses:
+        '200':
+          description: Directions list
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Org
+      operationId: createDirection
+      summary: Create a direction
+      security:
+        - bearerAuth: []
+      x-permission: org.manage
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                  nullable: true
+                isActive:
+                  type: boolean
+      responses:
+        '201':
+          description: Direction created
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A direction with this name already exists
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/org/directions/{directionId}:
+    parameters:
+      - name: directionId
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      tags:
+        - Org
+      operationId: getDirection
+      summary: Get direction detail (workshops, work-centers, heads)
+      security:
+        - bearerAuth: []
+      x-permission: org.view
+      responses:
+        '200':
+          description: Direction detail
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Direction not found
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - Org
+      operationId: updateDirection
+      summary: Update a direction (partial)
+      security:
+        - bearerAuth: []
+      x-permission: org.manage
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                  nullable: true
+                isActive:
+                  type: boolean
+      responses:
+        '200':
+          description: Direction updated
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Direction not found
+        '409':
+          description: A direction with this name already exists
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Org
+      operationId: deleteDirection
+      summary: Hard-delete a direction (requires confirm=true)
+      security:
+        - bearerAuth: []
+      x-permission: org.manage
+      x-transactional: true
+      parameters:
+        - name: confirm
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - 'true'
+      responses:
+        '200':
+          description: Direction deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Direction not found
+        '422':
+          description: Hard delete requires confirm=true
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/org/directions/{directionId}/workshops:
+    parameters:
+      - name: directionId
+        in: path
+        required: true
+        schema:
+          type: integer
+    put:
+      tags:
+        - Org
+      operationId: replaceDirectionWorkshops
+      summary: Replace the workshop membership of a direction (idempotent)
+      security:
+        - bearerAuth: []
+      x-permission: org.manage
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgReplaceIdSetRequest'
+      responses:
+        '200':
+          description: Membership replaced
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Direction not found
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/org/directions/{directionId}/work-centers:
+    parameters:
+      - name: directionId
+        in: path
+        required: true
+        schema:
+          type: integer
+    put:
+      tags:
+        - Org
+      operationId: replaceDirectionWorkCenters
+      summary: Replace the work-center membership of a direction (idempotent)
+      security:
+        - bearerAuth: []
+      x-permission: org.manage
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgReplaceIdSetRequest'
+      responses:
+        '200':
+          description: Membership replaced
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Direction not found
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/org/directions/{directionId}/heads:
+    parameters:
+      - name: directionId
+        in: path
+        required: true
+        schema:
+          type: integer
+    put:
+      tags:
+        - Org
+      operationId: replaceDirectionHeads
+      summary: Replace the heads of a direction (idempotent, per-user audit)
+      security:
+        - bearerAuth: []
+      x-permission: org.manage
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgReplaceIdSetRequest'
+      responses:
+        '200':
+          description: Heads replaced
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Direction not found
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/org/workshops/{workshopId}/heads:
+    parameters:
+      - name: workshopId
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      tags:
+        - Org
+      operationId: listWorkshopHeads
+      summary: List the heads of a workshop
+      security:
+        - bearerAuth: []
+      x-permission: org.view
+      responses:
+        '200':
+          description: Workshop heads
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Workshop not found
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Org
+      operationId: replaceWorkshopHeads
+      summary: Replace the heads of a workshop (idempotent, per-user audit)
+      security:
+        - bearerAuth: []
+      x-permission: org.manage
+      x-transactional: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgReplaceIdSetRequest'
+      responses:
+        '200':
+          description: Heads replaced
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Workshop not found
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/org/lookups/assignable-users:
+    get:
+      tags:
+        - Org
+      operationId: orgAssignableUsers
+      summary: List active users assignable as heads
+      security:
+        - bearerAuth: []
+      x-permission: org.view
+      responses:
+        '200':
+          description: Assignable users
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/org/lookups/workshops:
+    get:
+      tags:
+        - Org
+      operationId: orgLookupWorkshops
+      summary: List workshops for membership selection
+      security:
+        - bearerAuth: []
+      x-permission: org.view
+      responses:
+        '200':
+          description: Workshops
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/org/lookups/work-centers:
+    get:
+      tags:
+        - Org
+      operationId: orgLookupWorkCenters
+      summary: List work-centers for membership selection
+      security:
+        - bearerAuth: []
+      x-permission: org.view
+      responses:
+        '200':
+          description: Work centers
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/users:
     get:
       tags:
@@ -4937,6 +5317,8 @@ components:
         - projects.members.manage
         - projects.participants.view
         - projects.participants.manage
+        - org.view
+        - org.manage
         - settings.view
         - settings.manage
 
@@ -5598,6 +5980,28 @@ components:
           type: boolean
         auditId:
           type: string
+
+    OrgReplaceIdSetRequest:
+      type: object
+      required:
+        - idempotencyKey
+        - ids
+      additionalProperties: false
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+        ids:
+          type: array
+          maxItems: 500
+          items:
+            type: integer
+            minimum: 1
+        reason:
+          type: string
+          nullable: true
+          maxLength: 500
 
     ReplaceProjectParticipantsRequest:
       type: object
