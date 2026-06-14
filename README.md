@@ -381,6 +381,7 @@ npm run dev:full
 - `npm run test:e2e:deadline-engine-stage-canary` - opt-in read-only smoke for deployed Deadline Engine frontend/API stage acceptance.
 - `npm run test:e2e:deadline-create-override-stage-canary` - opt-in write canary for deployed Deadline Engine create/override command acceptance on stage only.
 - `npm run test:e2e:deadline-status-transition-stage-canary` - opt-in write canary for Deadline Engine `change_order_status` transition rules on backend-test only.
+- `npm run test:e2e:notification-rules-project-scope-stage-canary` — opt-in write canary for project-scoped notification rules on backend-test only; requires explicit fixture key, credentials from external `.env`, and restore enabled.
 - `npm run test:e2e:order-ui-full-coverage` — opt-in durable Playwright coverage для заказа: заполняет формы, кликает кнопки, проверяет поля, вкладки, creator history и оставляет созданный заказ.
 - `npm run test:e2e:order-created-by-stage-canary` — opt-in deployed backend canary: проверяет, что stage `/api/v1/orders/:id` отдает `createdBy/editedBy` для order UI.
 - `npm run test:e2e:vlm-cutover` — Playwright smoke для backend VLM cutover flag.
@@ -646,6 +647,14 @@ fixture rows to zero. It refuses to run unless
 `NOTIFICATION_ENGINE_TARGET_ENV=backend-test` and the backend API host
 contains `backend-test` (prod/production/live targets are rejected), and it
 skips locally when `NOTIFICATION_ENGINE_STAGE_CANARY` is unset.
+
+Notification rules project-scope canary is guarded by
+`NOTIFICATION_RULES_PROJECT_SCOPE_STAGE_CANARY=true`,
+`NOTIFICATION_RULES_PROJECT_SCOPE_TARGET_ENV=backend-test`,
+`NOTIFICATION_RULES_PROJECT_SCOPE_RESTORE=true`, and an explicit
+`NOTIFICATION_RULES_PROJECT_SCOPE_FIXTURE_KEY`. It creates one temporary
+project and two temporary notification rules, then restores scoped residue to
+zero. Do not run it concurrently with other stage write canaries.
 
 ### Deadline notification action-rule stage canary
 
