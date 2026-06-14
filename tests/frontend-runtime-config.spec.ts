@@ -31,8 +31,11 @@ test.describe('Frontend runtime config', () => {
         });
 
         await page.goto('/configuration');
-        await page.getByRole('tab', { name: /Анализ фото/ }).click();
+        await page
+            .locator('.ant-tabs-tab-btn', { hasText: 'Анализ фото' })
+            .evaluate((element) => (element as HTMLElement).click());
 
+        await expect(page.getByText('Статус VLM API')).toBeVisible();
         await expect(page.getByText('Подключено')).toBeVisible();
         await expect.poll(() => backendHealthCalls).toBeGreaterThan(0);
         expect(legacyHealthCalls).toBe(0);

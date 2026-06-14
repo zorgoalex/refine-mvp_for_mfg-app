@@ -3,6 +3,18 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('ProjectsModule wiring', () => {
+  function readProjectsModule(): string {
+    const candidates = [
+      resolve(process.cwd(), 'backend/src/modules/projects/projects.module.ts'),
+      resolve(process.cwd(), 'src/modules/projects/projects.module.ts'),
+    ];
+    const modulePath = candidates.find((candidate) => existsSync(candidate));
+
+    expect(modulePath).toBeDefined();
+
+    return readFileSync(modulePath as string, 'utf8');
+  }
+
   it('is imported by the backend AppModule', () => {
     const candidates = [
       resolve(process.cwd(), 'backend/src/app.module.ts'),
@@ -19,8 +31,7 @@ describe('ProjectsModule wiring', () => {
   });
 
   it('registers project notification providers with fail-closed database wiring', () => {
-    const modulePath = resolve(process.cwd(), 'src/modules/projects/projects.module.ts');
-    const projectsModule = readFileSync(modulePath, 'utf8');
+    const projectsModule = readProjectsModule();
 
     expect(projectsModule).toContain('ProjectNotificationService');
     expect(projectsModule).toContain('PgProjectNotificationRecipientRepository');
@@ -31,8 +42,7 @@ describe('ProjectsModule wiring', () => {
   });
 
   it('registers project batch-link dry-run with fail-closed database wiring', () => {
-    const modulePath = resolve(process.cwd(), 'src/modules/projects/projects.module.ts');
-    const projectsModule = readFileSync(modulePath, 'utf8');
+    const projectsModule = readProjectsModule();
 
     expect(projectsModule).toContain('ProjectBatchLinkController');
     expect(projectsModule).toContain('ProjectBatchLinkService');

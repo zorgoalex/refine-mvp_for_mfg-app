@@ -56,6 +56,7 @@ test.describe('notification rules admin UI stage canary', () => {
   test.beforeAll(() => {
     assertTargetEnv(targetEnv);
     assertBackendApiUrl(backendApiUrl);
+    assertFrontendUrl(frontendUrl);
     // No prior fixture rule should exist.
     expect(fixtureRuleResidue(), 'preflight: no leftover E2E rule').toBe(0);
   });
@@ -95,7 +96,8 @@ test.describe('notification rules admin UI stage canary', () => {
     expect(created.isEnabled).toBe(true);
     expect(fixtureRuleResidue(), 'rule must exist after create').toBe(1);
 
-    const edited = await patchRule(request, token, created.notificationRuleId, created.updatedAt);
+    const current = await getRuleByCode(request, token, ruleCode);
+    const edited = await patchRule(request, token, current.notificationRuleId, current.updatedAt);
     expect(edited.priority).toBe(150);
     expect(edited.isEnabled).toBe(false);
 
@@ -130,6 +132,17 @@ async function createRule(request: APIRequestContext, token: string): Promise<Ru
   if (response.status() === 503) throwIfEngineDisabled(await parseResponseBody(response));
   await expectOk(response);
   return (await response.json()) as RuleDto;
+}
+
+async function getRuleByCode(request: APIRequestContext, token: string, expectedRuleCode: string): Promise<RuleDto> {
+  const response = await request.get(`${backendApiUrl}/notification-rules`, {
+    headers: authHeaders(token),
+  });
+  await expectOk(response);
+  const rules = (await response.json()) as RuleDto[];
+  const rule = rules.find((item) => item.ruleCode === expectedRuleCode);
+  expect(rule, `rule ${expectedRuleCode} must be returned by /notification-rules`).toBeTruthy();
+  return rule as RuleDto;
 }
 
 async function patchRule(
@@ -171,11 +184,18 @@ async function loginForApiToken(request: APIRequestContext, username: string, pa
 }
 
 async function loginThroughUi(page: Page, username: string, password: string): Promise<void> {
-  await page.goto(`${frontendUrl}/login`, { waitUntil: 'networkidle' });
-  await page.getByLabel(/Имя пользователя|Username|Логин/i).first().fill(username);
-  await page.getByLabel(/Пароль|Password/i).first().fill(password);
-  await page.getByRole('button', { name: /Войти|Log\s*in|Sign\s*in/i }).first().click();
-  await page.waitForLoadState('networkidle');
+  await page.goto(`${frontendUrl}/login`, { waitUntil: 'domcontentloaded' });
+  const loginResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/v1/auth/login') &&
+      response.request().method() === 'POST',
+  );
+  await page.locator('input[autocomplete="username"], input#username').fill(username);
+  await page.locator('input[autocomplete="current-password"], input#password').fill(password);
+  await page.getByRole('button', { name: 'Войти' }).click();
+  const loginResponse = await loginResponsePromise;
+  expect(loginResponse.ok()).toBe(true);
+  await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 30000 });
 }
 
 function throwIfEngineDisabled(body: unknown): void {
@@ -217,6 +237,13 @@ function assertBackendApiUrl(url: string) {
   const host = new URL(url).hostname.toLowerCase();
   if (/prod|production|\blive\b/.test(host)) {
     throw new Error(`Refusing to target a prod/live-looking backend host: ${host}`);
+  }
+}
+
+function assertFrontendUrl(url: string) {
+  const host = new URL(url).hostname.toLowerCase();
+  if (/prod|production|\blive\b/.test(host)) {
+    throw new Error(`Refusing to target a prod/live-looking frontend host: ${host}`);
   }
 }
 

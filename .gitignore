@@ -59,6 +59,7 @@ ai_docs/
 .agents/
 .gemini/
 .factory/
+opencode.jsonc
 .worktrees/
 CLAUDE.md
 AGENTS.md
