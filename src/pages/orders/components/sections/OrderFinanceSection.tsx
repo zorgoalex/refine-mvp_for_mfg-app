@@ -1,8 +1,9 @@
 // Order Finance Section
 // Contains: Total Amount, Discount, Discounted Amount, Paid Amount, Payment Date
 
-import React, { useEffect, useState, useMemo } from 'react';
-import { Form, InputNumber, DatePicker, Row, Col, Select, Switch } from 'antd';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
+import { Form, InputNumber, DatePicker, Row, Col, Select, Switch, Dropdown } from 'antd';
+import type { MenuProps } from 'antd';
 import { CalculatorOutlined, DownOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -35,6 +36,7 @@ export const OrderFinanceSection: React.FC = () => {
   // State for showing/hiding percent input field
   const [showPercentInput, setShowPercentInput] = useState(false);
   const [percentValue, setPercentValue] = useState<number | null>(null);
+  const [finalAmountContextMenu, setFinalAmountContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   // State for discount/surcharge mode - determine from header values
   const [adjustmentMode, setAdjustmentMode] = useState<'discount' | 'surcharge'>(() => {
@@ -135,7 +137,7 @@ export const OrderFinanceSection: React.FC = () => {
     }
   };
 
-  const handleFinalAmountChange = (value: number | null) => {
+  const handleFinalAmountChange = useCallback((value: number | null) => {
     const finalAmount = value || 0;
     updateHeaderField('final_amount', finalAmount);
 
@@ -159,7 +161,31 @@ export const OrderFinanceSection: React.FC = () => {
       updateHeaderField('discount', 0);
       updateHeaderField('surcharge', 0);
     }
-  };
+  }, [header.total_amount, updateHeaderField]);
+
+  const closeFinalAmountContextMenu = useCallback(() => {
+    setFinalAmountContextMenu(null);
+  }, []);
+
+  const applyMinOrderAmount = useCallback(() => {
+    handleFinalAmountChange(minOrderAmount);
+    setFinalAmountContextMenu(null);
+  }, [handleFinalAmountChange, minOrderAmount]);
+
+  const finalAmountMenuItems = useMemo<MenuProps['items']>(() => {
+    if (minOrderAmount <= 0) return [];
+    return [
+      {
+        key: 'apply-min-order-amount',
+        label: (
+          <span style={{ color: '#1890ff', fontWeight: 500 }}>
+            Мин. сумма заказа: {formatNumber(minOrderAmount, 2)} {CURRENCY_SYMBOL}
+          </span>
+        ),
+        onClick: applyMinOrderAmount,
+      },
+    ];
+  }, [applyMinOrderAmount, minOrderAmount]);
 
   // Toggle calculator mode
   const togglePercentInput = () => {
@@ -328,67 +354,10 @@ export const OrderFinanceSection: React.FC = () => {
                 min={0}
                 style={{ width: '100%' }}
                 onContextMenu={(e) => {
-                  if (minOrderAmount > 0) {
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    // Remove any existing context menus
-                    const existingMenus = document.querySelectorAll('.final-amount-context-menu');
-                    existingMenus.forEach(menu => menu.remove());
-
-                    // Create context menu
-                    const menu = document.createElement('div');
-                    menu.className = 'ant-dropdown final-amount-context-menu';
-                    menu.style.position = 'fixed';
-                    menu.style.left = `${e.clientX}px`;
-                    menu.style.top = `${e.clientY}px`;
-                    menu.style.zIndex = '9999';
-
-                    const menuContent = `
-                      <ul class="ant-dropdown-menu" style="background: white; border: 1px solid #d9d9d9; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;">
-                        <li class="ant-dropdown-menu-item" style="padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                          <span style="color: #1890ff; font-weight: 500;">
-                            Мин. сумма заказа: ${formatNumber(minOrderAmount, 2)} ${CURRENCY_SYMBOL}
-                          </span>
-                        </li>
-                      </ul>
-                    `;
-                    menu.innerHTML = menuContent;
-                    document.body.appendChild(menu);
-
-                    const menuItem = menu.querySelector('.ant-dropdown-menu-item');
-                    menuItem?.addEventListener('click', () => {
-                      handleFinalAmountChange(minOrderAmount);
-                      menu.remove();
-                    });
-
-                    menuItem?.addEventListener('mouseenter', () => {
-                      (menuItem as HTMLElement).style.backgroundColor = '#e6f7ff';
-                    });
-
-                    menuItem?.addEventListener('mouseleave', () => {
-                      (menuItem as HTMLElement).style.backgroundColor = 'white';
-                    });
-
-                    const closeMenu = (event: MouseEvent) => {
-                      if (!menu.contains(event.target as Node)) {
-                        menu.remove();
-                        document.removeEventListener('click', closeMenu);
-                        document.removeEventListener('contextmenu', closeMenuOnContext);
-                      }
-                    };
-
-                    const closeMenuOnContext = () => {
-                      menu.remove();
-                      document.removeEventListener('click', closeMenu);
-                      document.removeEventListener('contextmenu', closeMenuOnContext);
-                    };
-
-                    setTimeout(() => {
-                      document.addEventListener('click', closeMenu);
-                      document.addEventListener('contextmenu', closeMenuOnContext);
-                    }, 0);
-                  }
+                  if (minOrderAmount <= 0) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setFinalAmountContextMenu({ x: e.clientX, y: e.clientY });
                 }}
               />
             </Form.Item>
@@ -470,6 +439,32 @@ export const OrderFinanceSection: React.FC = () => {
           </Col>
         </Row>
       </Form>
+      <Dropdown
+        open={!!finalAmountContextMenu}
+        menu={{ items: finalAmountMenuItems }}
+        trigger={['contextMenu']}
+        placement="bottomLeft"
+        onOpenChange={(open) => {
+          if (!open) closeFinalAmountContextMenu();
+        }}
+        overlayStyle={{
+          position: 'fixed',
+          left: finalAmountContextMenu?.x ?? -9999,
+          top: finalAmountContextMenu?.y ?? -9999,
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            left: finalAmountContextMenu?.x ?? -9999,
+            top: finalAmountContextMenu?.y ?? -9999,
+            width: 1,
+            height: 1,
+            pointerEvents: 'none',
+          }}
+        />
+      </Dropdown>
     </div>
   );
 };
