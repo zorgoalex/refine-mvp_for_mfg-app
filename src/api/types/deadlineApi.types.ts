@@ -318,8 +318,7 @@ export interface DeadlineActionRuleResponse {
 }
 
 export interface UpdateGlobalTransitionRuleRequest {
-  enabled?: boolean;
-  isEnabled?: boolean;
+  expectedUpdatedAt: string;
   priority?: number;
   eventType?: 'DEADLINE_EXPIRED';
   actionType?: 'change_order_status';

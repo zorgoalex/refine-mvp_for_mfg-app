@@ -7,8 +7,10 @@ import { isTerminalDeadlineStatus } from '../domain/deadline-status';
 import { DeadlineInvalidStatusTransitionError, DeadlineNotFoundError } from '../errors/deadline.errors';
 import type {
   CancelDeadlineCommand,
+  CreateGlobalTransitionRuleCommand,
   CreateDeadlineCommand,
   CreateDeadlinePolicyCommand,
+  DeleteGlobalTransitionRuleCommand,
   DeadlineTransactionManagerPort,
   OverrideDeadlineCommand,
   PauseDeadlineCommand,
@@ -194,15 +196,65 @@ export class DeadlineCommandService {
       rule: await unitOfWork.deadlines.updateGlobalTransitionRule({
         ...command,
         audit: {
-          event: 'deadline.action_rule_updated',
+          event: 'DEADLINE_TRANSITION_RULE_UPDATED',
           source: 'admin-ui',
           actorUserId: command.currentUser.id,
-          requestId: command.requestId ?? null,
+          requestId: command.requestId,
           timerRuleId: null,
           actionRuleId: command.actionRuleId,
           orderId: null,
           before: {},
           after: command.dto as unknown as Record<string, unknown>,
+          diff: {},
+          reason: command.dto.reason,
+          comment: command.dto.comment ?? null,
+          executionEvidence: null,
+        },
+      }),
+    }));
+  }
+
+  async createGlobalTransitionRule(command: Omit<CreateGlobalTransitionRuleCommand, 'audit'>) {
+    this.requirePermission(command, 'deadlines.actions.manage');
+
+    return this.ports.transactions.runInTransaction(async (unitOfWork) => ({
+      rule: await unitOfWork.deadlines.createGlobalTransitionRule({
+        ...command,
+        audit: {
+          event: 'DEADLINE_TRANSITION_RULE_CREATED',
+          source: 'admin-ui',
+          actorUserId: command.currentUser.id,
+          requestId: command.requestId,
+          timerRuleId: null,
+          actionRuleId: null,
+          orderId: null,
+          before: {},
+          after: command.dto as unknown as Record<string, unknown>,
+          diff: {},
+          reason: command.dto.reason,
+          comment: command.dto.comment ?? null,
+          executionEvidence: null,
+        },
+      }),
+    }));
+  }
+
+  async deleteGlobalTransitionRule(command: Omit<DeleteGlobalTransitionRuleCommand, 'audit'>) {
+    this.requirePermission(command, 'deadlines.actions.manage');
+
+    return this.ports.transactions.runInTransaction(async (unitOfWork) => ({
+      rule: await unitOfWork.deadlines.deleteGlobalTransitionRule({
+        ...command,
+        audit: {
+          event: 'DEADLINE_TRANSITION_RULE_DELETED',
+          source: 'admin-ui',
+          actorUserId: command.currentUser.id,
+          requestId: command.requestId,
+          timerRuleId: null,
+          actionRuleId: command.actionRuleId,
+          orderId: null,
+          before: {},
+          after: { deleted: true },
           diff: {},
           reason: command.dto.reason,
           comment: command.dto.comment ?? null,

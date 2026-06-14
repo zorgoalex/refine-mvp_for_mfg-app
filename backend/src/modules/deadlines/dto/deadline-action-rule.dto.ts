@@ -26,6 +26,7 @@ export interface DeadlineActionRuleConfigDto {
   };
   conditions?: DeadlineActionRuleConditionsDto;
   actionConfig?: DeadlineActionRuleActionConfigDto;
+  ruleCode?: string;
   fixtureKey?: string;
 }
 
@@ -134,7 +135,23 @@ export interface PreviewOrderDeadlineActionRulesDto {
   selectionReason: string;
 }
 
+export interface CreateGlobalTransitionRuleRequestDto {
+  ruleCode?: string;
+  isEnabled?: false;
+  priority?: number;
+  eventType?: 'DEADLINE_EXPIRED';
+  actionType?: 'change_order_status';
+  targetOrderStatusId: number;
+  allowedFromOrderStatusIds: number[];
+  excludeOrderStatusIds?: number[];
+  excludeCompletedOrders?: boolean;
+  requireCurrentDeadlineEvent?: boolean;
+  reason: string;
+  comment?: string | null;
+}
+
 export interface UpdateGlobalTransitionRuleRequestDto {
+  expectedUpdatedAt: string;
   enabled?: boolean;
   isEnabled?: boolean;
   priority?: number;
@@ -145,6 +162,12 @@ export interface UpdateGlobalTransitionRuleRequestDto {
   excludeOrderStatusIds?: number[];
   excludeCompletedOrders?: boolean;
   requireCurrentDeadlineEvent?: boolean;
+  reason: string;
+  comment?: string | null;
+}
+
+export interface DeleteGlobalTransitionRuleRequestDto {
+  expectedUpdatedAt: string;
   reason: string;
   comment?: string | null;
 }

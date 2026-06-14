@@ -119,7 +119,7 @@ export function DeadlineTransitionRulesConfig() {
     try {
       const response = await deadlinesApi.updateDeadlineTransitionRule(
         selectedRule.actionRuleId,
-        buildTransitionRuleUpdatePayload(draft, trimmedReason, comment),
+        buildTransitionRuleUpdatePayload(selectedRule, draft, trimmedReason, comment),
       );
       const updatedRule = response.rule;
       setRules((current) =>
@@ -193,7 +193,7 @@ export function DeadlineTransitionRulesConfig() {
                   <Switch
                     size="small"
                     checked={draft?.isEnabled ?? rule.isEnabled}
-                    onChange={(checked) => updateDraft(rule.actionRuleId, { isEnabled: checked })}
+                    disabled
                   />
                 );
               },

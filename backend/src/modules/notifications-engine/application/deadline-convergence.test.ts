@@ -41,6 +41,7 @@ function deadlineContext(overrides: Partial<NotificationEventContext> = {}): Not
     paymentId: null,
     deadlineId: null,
     deadlineInstanceId: 'deadline-instance-1',
+    projectIds: [],
     orderStatusId: 11,
     isOrderCompleted: false,
     isCurrentDeadlineEvent: true,

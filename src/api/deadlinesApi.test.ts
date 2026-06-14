@@ -151,7 +151,7 @@ describe('deadlinesApi', () => {
 
     await deadlinesApi.listDeadlineTransitionRules();
     await deadlinesApi.updateDeadlineTransitionRule(deadlineId, {
-      isEnabled: false,
+      expectedUpdatedAt: '2026-05-01T10:00:00.000Z',
       priority: 25,
       targetOrderStatusId: 7,
       allowedFromOrderStatusIds: [1, 2],
@@ -169,7 +169,7 @@ describe('deadlinesApi', () => {
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({
-          isEnabled: false,
+          expectedUpdatedAt: '2026-05-01T10:00:00.000Z',
           priority: 25,
           targetOrderStatusId: 7,
           allowedFromOrderStatusIds: [1, 2],

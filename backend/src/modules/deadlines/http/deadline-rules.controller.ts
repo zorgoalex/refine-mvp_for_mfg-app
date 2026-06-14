@@ -7,6 +7,8 @@ import { DeadlineCommandService } from '../application/deadline-command.service'
 import { DeadlineQueryService } from '../application/deadline-query.service';
 import { isUuid } from '../domain/deadline-validation';
 import type {
+  CreateGlobalTransitionRuleRequestDto,
+  DeleteGlobalTransitionRuleRequestDto,
   PreviewOrderDeadlineActionRulesRequestDto,
   UpdateGlobalTransitionRuleRequestDto,
   UpsertDeadlineOrderOverrideInput,
@@ -16,6 +18,11 @@ import { DeadlinesRuntimeConfigService } from './deadlines-runtime-config.servic
 const uuidSchema = z.string().trim().refine(isUuid, { message: 'Invalid UUID' });
 const positiveIntSchema = z.number().int().positive();
 const reasonSchema = z.string().trim().min(1).max(1000);
+const isoTimestampSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => !Number.isNaN(Date.parse(value)), { message: 'Invalid timestamp' });
 
 const previewRequestSchema = z.object({
   eventType: z.literal('DEADLINE_EXPIRED').default('DEADLINE_EXPIRED'),
@@ -66,8 +73,40 @@ const retireOverrideSchema = z.object({
   reason: reasonSchema,
 });
 
+function rejectEnabledTransitionRule(
+  value: { enabled?: boolean; isEnabled?: boolean },
+  context: z.RefinementCtx,
+): void {
+  if (value.enabled === true || value.isEnabled === true) {
+    context.addIssue({
+      code: 'custom',
+      path: value.isEnabled === true ? ['isEnabled'] : ['enabled'],
+      message: 'Transition rules cannot be enabled before an approved operator window',
+    });
+  }
+}
+
+const createGlobalTransitionRuleSchema = z
+  .object({
+    ruleCode: z.string().trim().min(1).max(100).optional(),
+    enabled: z.literal(false).optional(),
+    isEnabled: z.literal(false).default(false),
+    priority: z.number().int().min(0).max(100000).default(100),
+    eventType: z.literal('DEADLINE_EXPIRED').default('DEADLINE_EXPIRED'),
+    actionType: z.literal('change_order_status').default('change_order_status'),
+    targetOrderStatusId: positiveIntSchema,
+    allowedFromOrderStatusIds: z.array(positiveIntSchema).min(1),
+    excludeOrderStatusIds: z.array(positiveIntSchema).default([]),
+    excludeCompletedOrders: z.boolean().default(true),
+    requireCurrentDeadlineEvent: z.boolean().default(true),
+    reason: reasonSchema,
+    comment: z.string().trim().max(2000).nullable().optional(),
+  })
+  .superRefine(rejectEnabledTransitionRule);
+
 const updateGlobalTransitionRuleSchema = z
   .object({
+    expectedUpdatedAt: isoTimestampSchema,
     enabled: z.boolean().optional(),
     isEnabled: z.boolean().optional(),
     priority: z.number().int().min(0).max(100000).optional(),
@@ -82,6 +121,7 @@ const updateGlobalTransitionRuleSchema = z
     comment: z.string().trim().max(2000).nullable().optional(),
   })
   .superRefine((value, context) => {
+    rejectEnabledTransitionRule(value, context);
     if (value.allowedFromOrderStatusIds && value.allowedFromOrderStatusIds.length === 0) {
       context.addIssue({
         code: 'custom',
@@ -90,6 +130,12 @@ const updateGlobalTransitionRuleSchema = z
       });
     }
   });
+
+const deleteGlobalTransitionRuleSchema = z.object({
+  expectedUpdatedAt: isoTimestampSchema,
+  reason: reasonSchema,
+  comment: z.string().trim().max(2000).nullable().optional(),
+});
 
 @ApiTags('Deadline Rules')
 @ApiBearerAuth()
@@ -196,8 +242,25 @@ export class DeadlineRulesController {
     });
   }
 
+  @ApiResponse({ status: 201, description: 'Created global status transition rule' })
+  @ApiOperation({ operationId: 'createGlobalDeadlineTransitionRule', summary: 'Create a global deadline transition rule' })
+  @Post('deadline-transition-rules')
+  async createGlobalTransitionRule(
+    @Req() request: RequestWithCurrentUser,
+    @Body() body: unknown,
+  ) {
+    this.assertWriteEnabled();
+
+    return this.commands.createGlobalTransitionRule({
+      currentUser: this.requireCurrentUser(request),
+      requestId: requireDeadlineRuleRequestId(request),
+      dto: parseCreateGlobalTransitionRuleRequest(body),
+    });
+  }
+
   @ApiParam({ name: 'actionRuleId', type: String })
   @ApiResponse({ status: 200, description: 'Updated global status transition rule' })
+  @ApiResponse({ status: 409, description: 'Stale or conflicting global status transition rule update' })
   @ApiOperation({ operationId: 'updateGlobalDeadlineTransitionRule', summary: 'Update a global deadline transition rule' })
   @Patch('deadline-transition-rules/:actionRuleId')
   async updateGlobalTransitionRule(
@@ -209,9 +272,30 @@ export class DeadlineRulesController {
 
     return this.commands.updateGlobalTransitionRule({
       currentUser: this.requireCurrentUser(request),
-      requestId: request.requestId,
+      requestId: requireDeadlineRuleRequestId(request),
       actionRuleId: parseDeadlineActionRuleId(actionRuleIdParam),
       dto: parseUpdateGlobalTransitionRuleRequest(body),
+    });
+  }
+
+  @ApiParam({ name: 'actionRuleId', type: String })
+  @ApiResponse({ status: 200, description: 'Deleted global status transition rule' })
+  @ApiResponse({ status: 409, description: 'Stale or referenced global status transition rule' })
+  @ApiOperation({ operationId: 'deleteGlobalDeadlineTransitionRule', summary: 'Delete a global deadline transition rule' })
+  @Delete('deadline-transition-rules/:actionRuleId')
+  @HttpCode(200)
+  async deleteGlobalTransitionRule(
+    @Req() request: RequestWithCurrentUser,
+    @Param('actionRuleId') actionRuleIdParam: string,
+    @Body() body: unknown,
+  ) {
+    this.assertWriteEnabled();
+
+    return this.commands.deleteGlobalTransitionRule({
+      currentUser: this.requireCurrentUser(request),
+      requestId: requireDeadlineRuleRequestId(request),
+      actionRuleId: parseDeadlineActionRuleId(actionRuleIdParam),
+      dto: parseDeleteGlobalTransitionRuleRequest(body),
     });
   }
 
@@ -282,10 +366,22 @@ export function parseRetireDeadlineOrderOverrideRequest(body: unknown): { reason
   return parseRequestBody(retireOverrideSchema, body);
 }
 
+export function parseCreateGlobalTransitionRuleRequest(
+  body: unknown,
+): CreateGlobalTransitionRuleRequestDto {
+  return parseRequestBody(createGlobalTransitionRuleSchema, body);
+}
+
 export function parseUpdateGlobalTransitionRuleRequest(
   body: unknown,
 ): UpdateGlobalTransitionRuleRequestDto {
   return parseRequestBody(updateGlobalTransitionRuleSchema, body);
+}
+
+export function parseDeleteGlobalTransitionRuleRequest(
+  body: unknown,
+): DeleteGlobalTransitionRuleRequestDto {
+  return parseRequestBody(deleteGlobalTransitionRuleSchema, body);
 }
 
 export function parseDeadlineActionRuleId(value: string): string {
@@ -318,4 +414,12 @@ function parseRequestBody<T extends z.ZodType>(schema: T, body: unknown): z.infe
   }
 
   return parsed.data;
+}
+
+function requireDeadlineRuleRequestId(request: RequestWithCurrentUser): string {
+  if (!request.requestId) {
+    throw new ApiError(500, 'REQUEST_ID_MISSING', 'Request id is missing');
+  }
+
+  return request.requestId;
 }

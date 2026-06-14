@@ -7,7 +7,9 @@ import type { DeadlineCommandService } from '../application/deadline-command.ser
 import type { DeadlineQueryService } from '../application/deadline-query.service';
 import {
   DeadlineRulesController,
+  parseCreateGlobalTransitionRuleRequest,
   parseDeadlineActionRuleId,
+  parseDeleteGlobalTransitionRuleRequest,
   parseOrderDeadlineActionPreviewRequest,
   parseRetireDeadlineOrderOverrideRequest,
   parseUpdateGlobalTransitionRuleRequest,
@@ -20,12 +22,15 @@ describe('DeadlineRulesController', () => {
     expect(Reflect.getMetadata(PATH_METADATA, DeadlineRulesController)).toBe('');
   });
 
-  it('allows effective rule reads in read-only mode and blocks override writes', async () => {
+  it('allows reads in read-only mode and blocks transition rule writes', async () => {
     const controller = createController({
       flags: { deadlinesEnabled: true, deadlinesReadOnly: true },
       queries: {
         async listOrderEffectiveRules(command) {
           return { orderId: command.orderId, policies: [], actionRules: [], overrides: [] };
+        },
+        async listGlobalTransitionRules() {
+          return { data: [] };
         },
       },
     });
@@ -47,6 +52,16 @@ describe('DeadlineRulesController', () => {
       statusCode: 503,
       code: 'DEADLINES_READ_ONLY',
     } satisfies Partial<ApiError>);
+    await expect(controller.listGlobalTransitionRules({ user: currentUser() })).resolves.toEqual({
+      data: [],
+    });
+    await expect(
+      controller.createGlobalTransitionRule({ user: currentUser(), requestId: 'req-create' }, {
+        targetOrderStatusId: 7,
+        allowedFromOrderStatusIds: [1],
+        reason: 'Create disabled rule',
+      }),
+    ).rejects.toMatchObject({ statusCode: 503, code: 'DEADLINES_READ_ONLY' });
   });
 
   it('delegates preview and write APIs with parsed ids and request id propagation', async () => {
@@ -79,7 +94,15 @@ describe('DeadlineRulesController', () => {
           return { override: orderOverride({ retiredAt: '2026-05-25T10:00:00.000Z' }) };
         },
         async updateGlobalTransitionRule(command) {
-          calls.push(`updateGlobal:${command.currentUser.id}:${command.requestId}:${command.actionRuleId}:${command.dto.reason}`);
+          calls.push(`updateGlobal:${command.currentUser.id}:${command.requestId}:${command.actionRuleId}:${command.dto.expectedUpdatedAt}:${command.dto.reason}`);
+          return { rule: actionRule({ actionRuleId: command.actionRuleId }) };
+        },
+        async createGlobalTransitionRule(command) {
+          calls.push(`createGlobal:${command.currentUser.id}:${command.requestId}:${command.dto.targetOrderStatusId}:${command.dto.isEnabled}`);
+          return { rule: actionRule({ isEnabled: false }) };
+        },
+        async deleteGlobalTransitionRule(command) {
+          calls.push(`deleteGlobal:${command.currentUser.id}:${command.requestId}:${command.actionRuleId}:${command.dto.expectedUpdatedAt}:${command.dto.reason}`);
           return { rule: actionRule({ actionRuleId: command.actionRuleId }) };
         },
       },
@@ -106,17 +129,32 @@ describe('DeadlineRulesController', () => {
       '33333333-3333-4333-8333-333333333333',
       transitionRulePatch(),
     );
+    await controller.createGlobalTransitionRule({ user: currentUser(), requestId: 'req-global-create' }, {
+      targetOrderStatusId: 9,
+      allowedFromOrderStatusIds: [1],
+      reason: 'Create disabled rule',
+    });
+    await controller.deleteGlobalTransitionRule(
+      { user: currentUser(), requestId: 'req-global-delete' },
+      '33333333-3333-4333-8333-333333333333',
+      {
+        expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+        reason: 'Delete disabled rule',
+      },
+    );
 
     expect(calls).toEqual([
       'preview:admin-id:42:DEADLINE_EXPIRED',
       'listGlobal:admin-id',
       'upsert:admin-id:req-upsert:42:Manual customer exception',
       'retire:admin-id:req-retire:42:22222222-2222-4222-8222-222222222222:Exception cleared',
-      'updateGlobal:admin-id:req-global:33333333-3333-4333-8333-333333333333:Change escalation target',
+      'updateGlobal:admin-id:req-global:33333333-3333-4333-8333-333333333333:2026-06-14T00:00:00.000Z:Change escalation target',
+      'createGlobal:admin-id:req-global-create:9:false',
+      'deleteGlobal:admin-id:req-global-delete:33333333-3333-4333-8333-333333333333:2026-06-14T00:00:00.000Z:Delete disabled rule',
     ]);
   });
 
-  it('validates rule ids, override targets, preview event and required audit reasons', () => {
+  it('validates rule ids, override targets, preview event and transition rule parsers', () => {
     expect(parseDeadlineActionRuleId('11111111-1111-4111-8111-111111111111')).toBe(
       '11111111-1111-4111-8111-111111111111',
     );
@@ -149,15 +187,93 @@ describe('DeadlineRulesController', () => {
       }),
     ).toThrow(ApiError);
     expect(() => parseRetireDeadlineOrderOverrideRequest({ reason: '' })).toThrow(ApiError);
+    expect(parseCreateGlobalTransitionRuleRequest({
+      targetOrderStatusId: 7,
+      allowedFromOrderStatusIds: [1, 2],
+      reason: 'Create disabled transition rule',
+    })).toMatchObject({
+      isEnabled: false,
+      priority: 100,
+      eventType: 'DEADLINE_EXPIRED',
+      actionType: 'change_order_status',
+      excludeOrderStatusIds: [],
+      excludeCompletedOrders: true,
+      requireCurrentDeadlineEvent: true,
+    });
+    expect(() =>
+      parseCreateGlobalTransitionRuleRequest({
+        isEnabled: true,
+        targetOrderStatusId: 7,
+        allowedFromOrderStatusIds: [1],
+        reason: 'Enable before approval',
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      parseCreateGlobalTransitionRuleRequest({
+        enabled: true,
+        targetOrderStatusId: 7,
+        allowedFromOrderStatusIds: [1],
+        reason: 'Enable before approval',
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      parseUpdateGlobalTransitionRuleRequest({
+        expectedUpdatedAt: 'not-a-date',
+        reason: 'Bad stale token',
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      parseUpdateGlobalTransitionRuleRequest({
+        reason: 'Missing expectedUpdatedAt',
+      }),
+    ).toThrow(ApiError);
     expect(() =>
       parseUpdateGlobalTransitionRuleRequest({
         enabled: true,
+        expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
         priority: 10,
         targetOrderStatusId: 7,
-        allowedFromOrderStatusIds: [],
-        reason: 'Missing allowed statuses',
+        allowedFromOrderStatusIds: [1],
+        reason: 'Enable before approval',
       }),
     ).toThrow(ApiError);
+    expect(() =>
+      parseDeleteGlobalTransitionRuleRequest({
+        expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+        reason: '',
+      }),
+    ).toThrow(ApiError);
+  });
+
+  it('requires request ids for transition rule writes', async () => {
+    const controller = createController({
+      flags: { deadlinesEnabled: true, deadlinesReadOnly: false },
+    });
+
+    await expect(
+      controller.createGlobalTransitionRule({ user: currentUser() }, {
+        targetOrderStatusId: 7,
+        allowedFromOrderStatusIds: [1],
+        reason: 'Create disabled rule',
+      }),
+    ).rejects.toMatchObject({ statusCode: 500, code: 'REQUEST_ID_MISSING' });
+    await expect(
+      controller.updateGlobalTransitionRule(
+        { user: currentUser() },
+        '33333333-3333-4333-8333-333333333333',
+        transitionRulePatch(),
+      ),
+    ).rejects.toMatchObject({ statusCode: 500, code: 'REQUEST_ID_MISSING' });
+    await expect(
+      controller.deleteGlobalTransitionRule(
+        { user: currentUser() },
+        '33333333-3333-4333-8333-333333333333',
+        {
+          expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+          reason: 'Delete disabled rule',
+        },
+      ),
+    ).rejects.toMatchObject({ statusCode: 500, code: 'REQUEST_ID_MISSING' });
   });
 });
 
@@ -175,6 +291,12 @@ function createController(options: {
     },
     async updateGlobalTransitionRule() {
       throw new Error('updateGlobalTransitionRule should not be called');
+    },
+    async createGlobalTransitionRule() {
+      throw new Error('createGlobalTransitionRule should not be called');
+    },
+    async deleteGlobalTransitionRule() {
+      throw new Error('deleteGlobalTransitionRule should not be called');
     },
     ...options.commands,
   } as unknown as DeadlineCommandService;
@@ -219,7 +341,8 @@ function currentUser(): CurrentUser {
 
 function transitionRulePatch() {
   return {
-    enabled: true,
+    expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+    enabled: false,
     priority: 10,
     eventType: 'DEADLINE_EXPIRED',
     actionType: 'change_order_status',

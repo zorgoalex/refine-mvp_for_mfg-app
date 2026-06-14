@@ -21,8 +21,10 @@ import type {
   CreateDeadlineEventInput,
   CreateDeadlineEventResult,
   CreateDeadlinePolicyCommand,
+  CreateGlobalTransitionRuleCommand,
   DeadlineListQuery,
   DeadlineRepositoryPort,
+  DeleteGlobalTransitionRuleCommand,
   FindDueDeadlinesCommand,
   ListDeadlinesCommand,
   OverrideDeadlineCommand,
@@ -1139,6 +1141,49 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     return result.rows.map(mapActionRule);
   }
 
+  async createGlobalTransitionRule(
+    command: CreateGlobalTransitionRuleCommand,
+  ): Promise<DeadlineActionRuleDto> {
+    await this.assertActiveOrderStatusesExist([
+      command.dto.targetOrderStatusId,
+      ...command.dto.allowedFromOrderStatusIds,
+      ...(command.dto.excludeOrderStatusIds ?? []),
+    ]);
+
+    const result = await this.database.query<DeadlineActionRuleRow>(
+      `
+      INSERT INTO deadline_action_rules (
+        scope_type, event_type, action_type, is_enabled, priority, config_json
+      )
+      VALUES ('order', 'DEADLINE_EXPIRED', 'change_order_status', $1, $2, $3::jsonb)
+      RETURNING ${ACTION_RULE_COLUMNS}
+      `,
+      [
+        false,
+        command.dto.priority ?? 100,
+        JSON.stringify(buildCreateTransitionRuleConfig(command.dto)),
+      ],
+    );
+    const rule = mapActionRule(result.rows[0]);
+    const afterAudit = actionRuleAuditSnapshot(rule);
+    await this.writeConfigAudit({
+      event: command.audit.event,
+      entityType: 'deadline_transition_rule',
+      entityId: rule.actionRuleId,
+      userId: String(command.currentUser.id),
+      requestId: command.requestId,
+      source: command.audit.source,
+      relatedOrderId: null,
+      relatedClientId: null,
+      before: {},
+      after: afterAudit,
+      diff: diffRecords({}, afterAudit),
+      metadata: buildTransitionRuleAuditMetadata(rule, command.dto.reason, command.dto.comment ?? null),
+    });
+
+    return rule;
+  }
+
   async updateGlobalTransitionRule(
     command: UpdateGlobalTransitionRuleCommand,
   ): Promise<DeadlineActionRuleDto> {
@@ -1151,6 +1196,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         AND event_type = 'DEADLINE_EXPIRED'
         AND action_type = 'change_order_status'
         AND config_json->'scope'->>'type' = 'global_orders'
+      FOR UPDATE
       `,
       [command.actionRuleId],
     );
@@ -1161,6 +1207,17 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     }
 
     const before = mapActionRule(current.rows[0]);
+    if (!sameMillisecond(before.updatedAt, command.dto.expectedUpdatedAt)) {
+      throw new ApiError(409, 'DEADLINE_TRANSITION_RULE_STALE', 'Deadline transition rule was modified concurrently', {
+        actionRuleId: command.actionRuleId,
+      });
+    }
+
+    await this.assertActiveOrderStatusesExist([
+      ...(command.dto.targetOrderStatusId !== undefined ? [command.dto.targetOrderStatusId] : []),
+      ...(command.dto.allowedFromOrderStatusIds ?? []),
+      ...(command.dto.excludeOrderStatusIds ?? []),
+    ]);
     const config = buildTransitionRuleConfig(before.config, command.dto);
     const result = await this.database.query<DeadlineActionRuleRow>(
       `
@@ -1168,49 +1225,130 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       SET is_enabled = $2,
           priority = $3,
           config_json = $4::jsonb,
-          updated_at = now()
+          updated_at = GREATEST(
+            date_trunc('milliseconds', clock_timestamp()),
+            date_trunc('milliseconds', updated_at) + interval '1 millisecond'
+          )
       WHERE action_rule_id = $1
         AND scope_type = 'order'
         AND event_type = 'DEADLINE_EXPIRED'
         AND action_type = 'change_order_status'
         AND config_json->'scope'->>'type' = 'global_orders'
+        AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $5::timestamptz)
       RETURNING ${ACTION_RULE_COLUMNS}
       `,
       [
         command.actionRuleId,
-        command.dto.isEnabled ?? command.dto.enabled ?? before.isEnabled,
+        false,
         command.dto.priority ?? before.priority,
         JSON.stringify(config),
+        command.dto.expectedUpdatedAt,
       ],
     );
-    const rule = mapActionRule(result.rows[0] ?? {
-      ...current.rows[0],
-      is_enabled: command.dto.isEnabled ?? command.dto.enabled ?? before.isEnabled,
-      priority: command.dto.priority ?? before.priority,
-      config_json: config,
-      updated_at: new Date(),
-    });
+    if (!result.rows[0]) {
+      throw new ApiError(409, 'DEADLINE_TRANSITION_RULE_STALE', 'Deadline transition rule was modified concurrently', {
+        actionRuleId: command.actionRuleId,
+      });
+    }
+
+    const rule = mapActionRule(result.rows[0]);
     const beforeAudit = actionRuleAuditSnapshot(before);
     const afterAudit = actionRuleAuditSnapshot(rule);
     await this.writeConfigAudit({
-      event: selectActionRuleAuditEvent(before, rule),
-      entityType: 'deadline_action_rule',
+      event: command.audit.event,
+      entityType: 'deadline_transition_rule',
       entityId: rule.actionRuleId,
       userId: String(command.currentUser.id),
       requestId: command.requestId,
       source: command.audit.source,
       relatedOrderId: null,
+      relatedClientId: null,
       before: beforeAudit,
       after: afterAudit,
       diff: diffRecords(beforeAudit, afterAudit),
-      metadata: {
-        actionRuleId: rule.actionRuleId,
-        reason: command.dto.reason,
-        comment: command.dto.comment ?? null,
-      },
+      metadata: buildTransitionRuleAuditMetadata(rule, command.dto.reason, command.dto.comment ?? null),
     });
 
     return rule;
+  }
+
+  async deleteGlobalTransitionRule(
+    command: DeleteGlobalTransitionRuleCommand,
+  ): Promise<DeadlineActionRuleDto> {
+    const current = await this.database.query<DeadlineActionRuleRow>(
+      `
+      SELECT ${ACTION_RULE_COLUMNS}
+      FROM deadline_action_rules
+      WHERE action_rule_id = $1
+        AND scope_type = 'order'
+        AND event_type = 'DEADLINE_EXPIRED'
+        AND action_type = 'change_order_status'
+        AND config_json->'scope'->>'type' = 'global_orders'
+      FOR UPDATE
+      `,
+      [command.actionRuleId],
+    );
+    if (!current.rows[0]) {
+      throw new ApiError(404, 'DEADLINE_ACTION_RULE_NOT_FOUND', 'Deadline action rule not found', {
+        actionRuleId: command.actionRuleId,
+      });
+    }
+
+    const before = mapActionRule(current.rows[0]);
+    if (!sameMillisecond(before.updatedAt, command.dto.expectedUpdatedAt)) {
+      throw new ApiError(409, 'DEADLINE_TRANSITION_RULE_STALE', 'Deadline transition rule was modified concurrently', {
+        actionRuleId: command.actionRuleId,
+      });
+    }
+
+    await this.assertTransitionRuleNotReferenced(command.actionRuleId);
+
+    let result;
+    try {
+      result = await this.database.query<DeadlineActionRuleRow>(
+        `
+        DELETE FROM deadline_action_rules
+        WHERE action_rule_id = $1
+          AND scope_type = 'order'
+          AND event_type = 'DEADLINE_EXPIRED'
+          AND action_type = 'change_order_status'
+          AND config_json->'scope'->>'type' = 'global_orders'
+          AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $2::timestamptz)
+        RETURNING ${ACTION_RULE_COLUMNS}
+        `,
+        [command.actionRuleId, command.dto.expectedUpdatedAt],
+      );
+    } catch (error) {
+      if (isForeignKeyViolation(error)) {
+        throw transitionRuleInUseError(command.actionRuleId);
+      }
+      throw error;
+    }
+
+    if (!result.rows[0]) {
+      throw new ApiError(409, 'DEADLINE_TRANSITION_RULE_STALE', 'Deadline transition rule was modified concurrently', {
+        actionRuleId: command.actionRuleId,
+      });
+    }
+
+    const deleted = mapActionRule(result.rows[0]);
+    const beforeAudit = actionRuleAuditSnapshot(before);
+    await this.writeConfigAudit({
+      event: command.audit.event,
+      entityType: 'deadline_transition_rule',
+      entityId: deleted.actionRuleId,
+      userId: String(command.currentUser.id),
+      requestId: command.requestId,
+      source: command.audit.source,
+      relatedOrderId: null,
+      relatedClientId: null,
+      before: beforeAudit,
+      after: { deleted: true, ...beforeAudit },
+      diff: diffRecords(beforeAudit, { deleted: true, ...beforeAudit }),
+      metadata: buildTransitionRuleAuditMetadata(before, command.dto.reason, command.dto.comment ?? null),
+    });
+
+    return deleted;
   }
 
   async getOrderDeadlineEvaluationContext(orderId: number) {
@@ -1344,6 +1482,53 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     const row = result.rows[0];
 
     return row ? mapOrderOverride(row) : null;
+  }
+
+  private async assertActiveOrderStatusesExist(statusIds: number[]): Promise<void> {
+    const uniqueStatusIds = [...new Set(statusIds)];
+    if (uniqueStatusIds.length === 0) {
+      return;
+    }
+
+    const result = await this.database.query<{ order_status_id: string | number }>(
+      `
+      SELECT order_status_id
+      FROM order_statuses
+      WHERE order_status_id = ANY($1::bigint[])
+        AND is_active = true
+      `,
+      [uniqueStatusIds],
+    );
+    const found = new Set(result.rows.map((row) => Number(row.order_status_id)));
+    const missingStatusIds = uniqueStatusIds.filter((statusId) => !found.has(statusId));
+    if (missingStatusIds.length > 0) {
+      throw new ApiError(422, 'DEADLINE_TRANSITION_RULE_STATUS_NOT_FOUND', 'Deadline transition rule references inactive or missing order statuses', {
+        statusIds: missingStatusIds,
+      });
+    }
+  }
+
+  private async assertTransitionRuleNotReferenced(actionRuleId: string): Promise<void> {
+    const overrides = await this.database.query<{ total: string | number }>(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM deadline_order_overrides
+      WHERE action_rule_id = $1
+      `,
+      [actionRuleId],
+    );
+    const executions = await this.database.query<{ total: string | number }>(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM deadline_action_executions
+      WHERE action_rule_id = $1
+      `,
+      [actionRuleId],
+    );
+
+    if (Number(overrides.rows[0]?.total ?? 0) > 0 || Number(executions.rows[0]?.total ?? 0) > 0) {
+      throw transitionRuleInUseError(actionRuleId);
+    }
   }
 
   private async upsertSettingActionRule(
@@ -1592,20 +1777,6 @@ function actionRuleAuditSnapshot(rule: DeadlineActionRuleDto): Record<string, un
   };
 }
 
-function selectActionRuleAuditEvent(
-  before: DeadlineActionRuleDto,
-  after: DeadlineActionRuleDto,
-): string {
-  if (!before.isEnabled && after.isEnabled) {
-    return 'deadline.action_rule_enabled';
-  }
-  if (before.isEnabled && !after.isEnabled) {
-    return 'deadline.action_rule_disabled';
-  }
-
-  return 'deadline.action_rule_updated';
-}
-
 function orderOverrideAuditSnapshot(override: DeadlineOrderOverrideDto): Record<string, unknown> {
   return {
     overrideId: override.overrideId,
@@ -1618,6 +1789,24 @@ function orderOverrideAuditSnapshot(override: DeadlineOrderOverrideDto): Record<
     reason: override.reason,
     retiredByUserId: override.retiredByUserId ?? null,
     retiredAt: override.retiredAt ?? null,
+  };
+}
+
+function buildCreateTransitionRuleConfig(
+  dto: CreateGlobalTransitionRuleCommand['dto'],
+): DeadlineActionRuleConfigDto {
+  return {
+    ...(dto.ruleCode ? { ruleCode: dto.ruleCode } : {}),
+    scope: { type: 'global_orders' },
+    conditions: {
+      allowedFromOrderStatusIds: dto.allowedFromOrderStatusIds,
+      excludeOrderStatusIds: dto.excludeOrderStatusIds ?? [],
+      excludeCompletedOrders: dto.excludeCompletedOrders ?? true,
+      requireCurrentDeadlineEvent: dto.requireCurrentDeadlineEvent ?? true,
+    },
+    actionConfig: {
+      targetOrderStatusId: dto.targetOrderStatusId,
+    },
   };
 }
 
@@ -1650,6 +1839,45 @@ function buildTransitionRuleConfig(
         : {}),
     },
   };
+}
+
+function buildTransitionRuleAuditMetadata(
+  rule: DeadlineActionRuleDto,
+  reason: string,
+  comment: string | null,
+): Record<string, unknown> {
+  return {
+    actionRuleId: rule.actionRuleId,
+    eventType: 'DEADLINE_EXPIRED',
+    actionType: 'change_order_status',
+    scopeType: 'order',
+    scope: { type: 'global_orders' },
+    targetOrderStatusId: rule.config?.actionConfig?.targetOrderStatusId ?? null,
+    allowedFromOrderStatusIds: rule.config?.conditions?.allowedFromOrderStatusIds ?? [],
+    excludeOrderStatusIds: rule.config?.conditions?.excludeOrderStatusIds ?? [],
+    excludeCompletedOrders: rule.config?.conditions?.excludeCompletedOrders ?? true,
+    requireCurrentDeadlineEvent: rule.config?.conditions?.requireCurrentDeadlineEvent ?? true,
+    priority: rule.priority,
+    isEnabled: rule.isEnabled,
+    reason,
+    comment,
+  };
+}
+
+function transitionRuleInUseError(actionRuleId: string): ApiError {
+  return new ApiError(409, 'DEADLINE_TRANSITION_RULE_IN_USE', 'Deadline transition rule is referenced and cannot be deleted', {
+    actionRuleId,
+  });
+}
+
+function isForeignKeyViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === '23503';
+}
+
+function sameMillisecond(left: string, right: string): boolean {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  return !Number.isNaN(leftTime) && !Number.isNaN(rightTime) && leftTime === rightTime;
 }
 
 function pickRecord(

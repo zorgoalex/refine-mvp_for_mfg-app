@@ -611,25 +611,47 @@ describe('DeadlineCommandService', () => {
     ]);
   });
 
-  it('allows global transition rule writes with deadline action admin permission', async () => {
+  it('allows global transition rule create/update/delete with deadline action admin permission', async () => {
     const calls: string[] = [];
     const service = new DeadlineCommandService({
       transactions: transactionManager(
         createRepository({
+          async createGlobalTransitionRule(command) {
+            calls.push(`create:${command.requestId}:${command.dto.targetOrderStatusId}:${command.audit.event}`);
+            return transitionRule({ actionRuleId: 'rule-created', priority: command.dto.priority ?? 100 });
+          },
           async updateGlobalTransitionRule(command) {
-            calls.push(`${command.actionRuleId}:${command.dto.priority}:${command.audit.reason}`);
+            calls.push(`update:${command.requestId}:${command.actionRuleId}:${command.dto.expectedUpdatedAt}:${command.audit.event}`);
             return transitionRule({ actionRuleId: command.actionRuleId, priority: command.dto.priority ?? 10 });
+          },
+          async deleteGlobalTransitionRule(command) {
+            calls.push(`delete:${command.requestId}:${command.actionRuleId}:${command.dto.expectedUpdatedAt}:${command.audit.event}`);
+            return transitionRule({ actionRuleId: command.actionRuleId, isEnabled: false });
           },
         }),
       ),
     });
 
     await expect(
+      service.createGlobalTransitionRule({
+        currentUser: currentUser(['deadlines.actions.manage']),
+        requestId: 'req-rule-create',
+        dto: {
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          reason: 'Create disabled rule',
+        },
+      }),
+    ).resolves.toMatchObject({
+      rule: { actionRuleId: 'rule-created', priority: 100 },
+    });
+    await expect(
       service.updateGlobalTransitionRule({
         currentUser: currentUser(['deadlines.actions.manage']),
-        requestId: 'req-rule',
+        requestId: 'req-rule-update',
         actionRuleId: 'rule-1',
         dto: {
+          expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
           priority: 5,
           targetOrderStatusId: 7,
           allowedFromOrderStatusIds: [1],
@@ -639,7 +661,24 @@ describe('DeadlineCommandService', () => {
     ).resolves.toMatchObject({
       rule: { actionRuleId: 'rule-1', priority: 5 },
     });
-    expect(calls).toEqual(['rule-1:5:Escalate expired final deadlines']);
+    await expect(
+      service.deleteGlobalTransitionRule({
+        currentUser: currentUser(['deadlines.actions.manage']),
+        requestId: 'req-rule-delete',
+        actionRuleId: 'rule-1',
+        dto: {
+          expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+          reason: 'Delete unused rule',
+        },
+      }),
+    ).resolves.toMatchObject({
+      rule: { actionRuleId: 'rule-1', isEnabled: false },
+    });
+    expect(calls).toEqual([
+      'create:req-rule-create:7:DEADLINE_TRANSITION_RULE_CREATED',
+      'update:req-rule-update:rule-1:2026-06-14T00:00:00.000Z:DEADLINE_TRANSITION_RULE_UPDATED',
+      'delete:req-rule-delete:rule-1:2026-06-14T00:00:00.000Z:DEADLINE_TRANSITION_RULE_DELETED',
+    ]);
   });
 
   it('rejects global transition rule writes with settings.manage only', async () => {
@@ -653,10 +692,41 @@ describe('DeadlineCommandService', () => {
         requestId: 'req-rule',
         actionRuleId: 'rule-1',
         dto: {
+          expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
           priority: 5,
           targetOrderStatusId: 7,
           allowedFromOrderStatusIds: [1],
           reason: 'Escalate expired final deadlines',
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['deadlines.actions.manage'] },
+    } satisfies Partial<ApiError>);
+    await expect(
+      service.createGlobalTransitionRule({
+        currentUser: currentUser(['settings.manage']),
+        requestId: 'req-rule-create',
+        dto: {
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          reason: 'Create disabled rule',
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['deadlines.actions.manage'] },
+    } satisfies Partial<ApiError>);
+    await expect(
+      service.deleteGlobalTransitionRule({
+        currentUser: currentUser(['settings.manage']),
+        requestId: 'req-rule-delete',
+        actionRuleId: 'rule-1',
+        dto: {
+          expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+          reason: 'Delete disabled rule',
         },
       }),
     ).rejects.toMatchObject({
@@ -763,6 +833,9 @@ function createRepository(overrides: Partial<DeadlineRepositoryPort> = {}): Dead
     async listGlobalTransitionRules() {
       return [];
     },
+    async createGlobalTransitionRule() {
+      throw new Error('not implemented');
+    },
     async getOrderDeadlineEvaluationContext(orderId) {
       return { orderId, orderStatusId: 1, isCompleted: false };
     },
@@ -776,6 +849,9 @@ function createRepository(overrides: Partial<DeadlineRepositoryPort> = {}): Dead
       throw new Error('not implemented');
     },
     async updateGlobalTransitionRule() {
+      throw new Error('not implemented');
+    },
+    async deleteGlobalTransitionRule() {
       throw new Error('not implemented');
     },
     ...overrides,

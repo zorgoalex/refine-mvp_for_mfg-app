@@ -37,10 +37,11 @@ describe('deadlineTransitionRulesView', () => {
     });
   });
 
-  it('builds audit-ready transition rule update payloads', () => {
+  it('builds stale-safe disabled transition rule update payloads', () => {
     const payload = buildTransitionRuleUpdatePayload(
+      rule({ updatedAt: '2026-06-14T00:00:00.000Z' }),
       {
-        isEnabled: false,
+        isEnabled: true,
         priority: 25,
         targetOrderStatusId: 8,
         allowedFromOrderStatusIdsText: '1, 2',
@@ -53,7 +54,7 @@ describe('deadlineTransitionRulesView', () => {
     );
 
     expect(payload).toEqual({
-      isEnabled: false,
+      expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
       priority: 25,
       eventType: 'DEADLINE_EXPIRED',
       actionType: 'change_order_status',
@@ -69,6 +70,7 @@ describe('deadlineTransitionRulesView', () => {
 
   it('sends an empty exclude list when blank so backend config can be cleared', () => {
     const payload = buildTransitionRuleUpdatePayload(
+      rule(),
       {
         isEnabled: true,
         priority: 10,
@@ -83,11 +85,14 @@ describe('deadlineTransitionRulesView', () => {
 
     expect(payload.allowedFromOrderStatusIds).toEqual([1]);
     expect(payload.excludeOrderStatusIds).toEqual([]);
+    expect('isEnabled' in payload).toBe(false);
+    expect('enabled' in payload).toBe(false);
   });
 
   it('rejects blank required allowed-from statuses before building payload', () => {
     expect(() =>
       buildTransitionRuleUpdatePayload(
+        rule(),
         {
           isEnabled: true,
           priority: 10,
@@ -117,6 +122,7 @@ describe('deadlineTransitionRulesView', () => {
     );
     expect(() =>
       buildTransitionRuleUpdatePayload(
+        rule(),
         {
           isEnabled: true,
           priority: 10,

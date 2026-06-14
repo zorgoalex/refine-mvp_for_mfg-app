@@ -1944,6 +1944,37 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Deadlines
+      operationId: createGlobalDeadlineTransitionRule
+      summary: Создать глобальное status-transition deadline rule
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.actions.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGlobalTransitionRuleRequest'
+      responses:
+        '201':
+          description: Transition rule создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineActionRuleResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/deadline-transition-rules/{actionRuleId}:
     parameters:
@@ -1986,6 +2017,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Deadlines
+      operationId: deleteGlobalDeadlineTransitionRule
+      summary: Удалить глобальное status-transition deadline rule
+      security:
+        - bearerAuth: []
+      x-permission: deadlines.actions.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteGlobalTransitionRuleRequest'
+      responses:
+        '200':
+          description: Transition rule удалено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineActionRuleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Transition rule не найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -10136,18 +10210,24 @@ components:
         selectionReason:
           type: string
 
-    UpdateGlobalTransitionRuleRequest:
+    CreateGlobalTransitionRuleRequest:
       type: object
       required:
+        - targetOrderStatusId
+        - allowedFromOrderStatusIds
         - reason
       properties:
-        enabled:
-          type: boolean
+        ruleCode:
+          type: string
+          maxLength: 100
         isEnabled:
           type: boolean
+          enum:
+            - false
         priority:
           type: integer
           minimum: 0
+          maximum: 100000
         eventType:
           type: string
           enum:
@@ -10177,6 +10257,75 @@ components:
           type: boolean
         requireCurrentDeadlineEvent:
           type: boolean
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        comment:
+          type: string
+          maxLength: 2000
+          nullable: true
+
+    UpdateGlobalTransitionRuleRequest:
+      type: object
+      required:
+        - expectedUpdatedAt
+        - reason
+      properties:
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 100000
+        eventType:
+          type: string
+          enum:
+            - DEADLINE_EXPIRED
+        actionType:
+          type: string
+          enum:
+            - change_order_status
+        targetOrderStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+        allowedFromOrderStatusIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+        excludeOrderStatusIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+        excludeCompletedOrders:
+          type: boolean
+        requireCurrentDeadlineEvent:
+          type: boolean
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        comment:
+          type: string
+          maxLength: 2000
+          nullable: true
+
+    DeleteGlobalTransitionRuleRequest:
+      type: object
+      required:
+        - expectedUpdatedAt
+        - reason
+      properties:
+        expectedUpdatedAt:
+          type: string
+          format: date-time
         reason:
           type: string
           minLength: 1

@@ -35,6 +35,7 @@ export function buildTransitionRuleDraft(rule: DeadlineActionRuleDto): DeadlineT
 }
 
 export function buildTransitionRuleUpdatePayload(
+  rule: DeadlineActionRuleDto,
   draft: DeadlineTransitionRuleDraft,
   reason: string,
   comment?: string | null,
@@ -53,7 +54,7 @@ export function buildTransitionRuleUpdatePayload(
   }
 
   const payload: UpdateGlobalTransitionRuleRequest = {
-    isEnabled: draft.isEnabled,
+    expectedUpdatedAt: rule.updatedAt,
     priority: draft.priority,
     eventType: 'DEADLINE_EXPIRED',
     actionType: 'change_order_status',

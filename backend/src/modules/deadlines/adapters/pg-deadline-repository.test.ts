@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
 import { PgDeadlineRepository } from './pg-deadline-repository';
 
@@ -1540,16 +1541,100 @@ describe('PgDeadlineRepository', () => {
     expect(sql).toContain('e.deadline_event_id = ( SELECT latest.deadline_event_id');
   });
 
-  it('lists and updates global transition rules with config conditions and audit reason', async () => {
+  it('creates disabled global transition rules with status validation and audit only', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
 
-    await expect(repository.listGlobalTransitionRules()).resolves.toMatchObject([
-      {
-        actionRuleId: 'rule-change-status',
-        actionType: 'change_order_status',
+    await expect(
+      repository.createGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-create',
+        dto: {
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1, 2],
+          excludeOrderStatusIds: [8],
+          reason: 'Create disabled transition rule',
+        },
+        audit: transitionRuleAudit('DEADLINE_TRANSITION_RULE_CREATED', 'req-transition-create'),
+      }),
+    ).resolves.toMatchObject({
+      actionRuleId: 'rule-change-status',
+      isEnabled: false,
+      priority: 100,
+      config: {
+        scope: { type: 'global_orders' },
+        conditions: {
+          allowedFromOrderStatusIds: [1, 2],
+          excludeOrderStatusIds: [8],
+          excludeCompletedOrders: true,
+          requireCurrentDeadlineEvent: true,
+        },
+        actionConfig: { targetOrderStatusId: 7 },
       },
-    ]);
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('FROM order_statuses');
+    expect(sql).toContain('INSERT INTO deadline_action_rules');
+    expect(sql).toContain("VALUES ('order', 'DEADLINE_EXPIRED', 'change_order_status', $1, $2, $3::jsonb)");
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+    expect(sql).not.toContain('INSERT INTO deadline_events');
+
+    const insert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_action_rules'),
+    );
+    expect(insert?.params[0]).toBe(false);
+    expect(insert?.params[1]).toBe(100);
+    expect(JSON.parse(String(insert?.params[2]))).toMatchObject({
+      scope: { type: 'global_orders' },
+      conditions: {
+        allowedFromOrderStatusIds: [1, 2],
+        excludeOrderStatusIds: [8],
+        excludeCompletedOrders: true,
+        requireCurrentDeadlineEvent: true,
+      },
+      actionConfig: { targetOrderStatusId: 7 },
+    });
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(audit?.params[0]).toBe('DEADLINE_TRANSITION_RULE_CREATED');
+    expect(audit?.params[1]).toBe('deadline_transition_rule');
+    expect(audit?.params[4]).toBe('req-transition-create');
+  });
+
+  it('rejects transition rule status ids that are missing or inactive', async () => {
+    const database = createDatabase({ missingOrderStatusIds: [8] });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.createGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-create',
+        dto: {
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1, 2],
+          excludeOrderStatusIds: [8],
+          reason: 'Create disabled transition rule',
+        },
+        audit: transitionRuleAudit('DEADLINE_TRANSITION_RULE_CREATED', 'req-transition-create'),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'DEADLINE_TRANSITION_RULE_STATUS_NOT_FOUND',
+      details: { statusIds: [8] },
+    } satisfies Partial<ApiError>);
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('FROM order_statuses');
+    expect(sql).not.toContain('INSERT INTO deadline_action_rules');
+  });
+
+  it('updates global transition rules with stale safety, forced disabled posture and audit reason', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
 
     await expect(
       repository.updateGlobalTransitionRule({
@@ -1557,7 +1642,8 @@ describe('PgDeadlineRepository', () => {
         requestId: 'req-transition-rule',
         actionRuleId: 'rule-change-status',
         dto: {
-          enabled: true,
+          expectedUpdatedAt: '2026-05-01T10:00:00.000Z',
+          enabled: false,
           priority: 5,
           eventType: 'DEADLINE_EXPIRED',
           actionType: 'change_order_status',
@@ -1568,24 +1654,11 @@ describe('PgDeadlineRepository', () => {
           requireCurrentDeadlineEvent: true,
           reason: 'Escalate overdue orders',
         },
-        audit: {
-          event: 'deadline.action_rule_updated',
-          source: 'admin-ui',
-          actorUserId: 42,
-          requestId: 'req-transition-rule',
-          timerRuleId: null,
-          actionRuleId: 'rule-change-status',
-          orderId: null,
-          before: {},
-          after: { priority: 5 },
-          diff: { priority: { from: 50, to: 5 } },
-          reason: 'Escalate overdue orders',
-          comment: null,
-          executionEvidence: null,
-        },
+        audit: transitionRuleAudit('DEADLINE_TRANSITION_RULE_UPDATED', 'req-transition-rule'),
       }),
     ).resolves.toMatchObject({
       actionRuleId: 'rule-change-status',
+      isEnabled: false,
       priority: 5,
       config: {
         conditions: {
@@ -1599,16 +1672,22 @@ describe('PgDeadlineRepository', () => {
     });
 
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('FROM order_statuses');
     expect(sql).toContain("scope_type = 'order'");
     expect(sql).toContain("event_type = 'DEADLINE_EXPIRED'");
     expect(sql).toContain("action_type = 'change_order_status'");
     expect(sql).toContain("config_json->'scope'->>'type' = 'global_orders'");
     expect(sql).toContain('UPDATE deadline_action_rules');
     expect(sql).toContain('config_json = $4::jsonb');
+    expect(sql).toContain("date_trunc('milliseconds', updated_at)");
+    expect(sql).toContain("date_trunc('milliseconds', $5::timestamptz)");
+    expect(sql).toContain('GREATEST( date_trunc');
 
     const update = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('UPDATE deadline_action_rules'),
     );
+    expect(update?.params[1]).toBe(false);
+    expect(update?.params[4]).toBe('2026-05-01T10:00:00.000Z');
     expect(JSON.parse(String(update?.params[3]))).toMatchObject({
       scope: { type: 'global_orders' },
       conditions: {
@@ -1619,80 +1698,156 @@ describe('PgDeadlineRepository', () => {
       },
       actionConfig: { targetOrderStatusId: 7 },
     });
-  });
-
-  it('audits global transition rule enable transitions with enabled event', async () => {
-    const database = createDatabase({ actionRuleEnabled: false });
-    const repository = new PgDeadlineRepository(database.client);
-
-    await repository.updateGlobalTransitionRule({
-      currentUser: currentUser(),
-      requestId: 'req-transition-enable',
-      actionRuleId: 'rule-change-status',
-      dto: {
-        enabled: true,
-        reason: 'Enable expired order escalation',
-      },
-      audit: {
-        event: 'deadline.action_rule_updated',
-        source: 'admin-ui',
-        actorUserId: 42,
-        requestId: 'req-transition-enable',
-        timerRuleId: null,
-        actionRuleId: 'rule-change-status',
-        orderId: null,
-        before: {},
-        after: {},
-        diff: {},
-        reason: 'Enable expired order escalation',
-        comment: null,
-        executionEvidence: null,
-      },
-    });
 
     const audit = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
     );
-    expect(audit?.params[0]).toBe('deadline.action_rule_enabled');
-    expect(JSON.parse(String(audit?.params[8]))).toMatchObject({ isEnabled: false });
-    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({ isEnabled: true });
+    expect(audit?.params[0]).toBe('DEADLINE_TRANSITION_RULE_UPDATED');
+    expect(audit?.params[1]).toBe('deadline_transition_rule');
+    expect(JSON.parse(String(audit?.params[11]))).toMatchObject({
+      actionRuleId: 'rule-change-status',
+      reason: 'Escalate overdue orders',
+      targetOrderStatusId: 7,
+      allowedFromOrderStatusIds: [1, 2],
+      isEnabled: false,
+    });
   });
 
-  it('audits global transition rule disable transitions with disabled event', async () => {
-    const database = createDatabase({ actionRuleEnabled: true });
+  it('returns stale conflict when transition rule update token no longer matches', async () => {
+    const database = createDatabase({ emptyTransitionRuleUpdate: true });
     const repository = new PgDeadlineRepository(database.client);
 
-    await repository.updateGlobalTransitionRule({
-      currentUser: currentUser(),
-      requestId: 'req-transition-disable',
-      actionRuleId: 'rule-change-status',
-      dto: {
-        enabled: false,
-        reason: 'Disable expired order escalation',
-      },
-      audit: {
-        event: 'deadline.action_rule_updated',
-        source: 'admin-ui',
-        actorUserId: 42,
-        requestId: 'req-transition-disable',
-        timerRuleId: null,
+    await expect(
+      repository.updateGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-stale',
         actionRuleId: 'rule-change-status',
-        orderId: null,
-        before: {},
-        after: {},
-        diff: {},
-        reason: 'Disable expired order escalation',
-        comment: null,
-        executionEvidence: null,
-      },
+        dto: {
+          expectedUpdatedAt: '2026-05-01T10:00:00.000Z',
+          enabled: false,
+          reason: 'Stale transition rule',
+        },
+        audit: transitionRuleAudit('DEADLINE_TRANSITION_RULE_UPDATED', 'req-transition-stale'),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_TRANSITION_RULE_STALE',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('returns stale update conflict before validating changed status ids', async () => {
+    const database = createDatabase({
+      emptyTransitionRuleUpdate: true,
+      missingOrderStatusIds: [999],
     });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.updateGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-stale',
+        actionRuleId: 'rule-change-status',
+        dto: {
+          expectedUpdatedAt: '2026-05-01T10:00:01.000Z',
+          targetOrderStatusId: 999,
+          reason: 'Stale transition rule',
+        },
+        audit: transitionRuleAudit('DEADLINE_TRANSITION_RULE_UPDATED', 'req-transition-stale'),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_TRANSITION_RULE_STALE',
+    } satisfies Partial<ApiError>);
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).not.toContain('FROM order_statuses');
+  });
+
+  it('deletes unreferenced global transition rules with stale safety and deleted audit snapshot', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.deleteGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-delete',
+        actionRuleId: 'rule-change-status',
+        dto: {
+          expectedUpdatedAt: '2026-05-01T10:00:00.000Z',
+          reason: 'Remove unused transition rule',
+        },
+        audit: transitionRuleAudit('DEADLINE_TRANSITION_RULE_DELETED', 'req-transition-delete'),
+      }),
+    ).resolves.toMatchObject({
+      actionRuleId: 'rule-change-status',
+    });
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).toContain('FOR UPDATE');
+    expect(sql).toContain('FROM deadline_order_overrides');
+    expect(sql).toContain('FROM deadline_action_executions');
+    expect(sql).toContain('DELETE FROM deadline_action_rules');
+    expect(sql).toContain("date_trunc('milliseconds', updated_at)");
+    expect(sql).toContain("date_trunc('milliseconds', $2::timestamptz)");
 
     const audit = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
     );
-    expect(audit?.params[0]).toBe('deadline.action_rule_disabled');
-    expect(JSON.parse(String(audit?.params[8]))).toMatchObject({ isEnabled: true });
-    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({ isEnabled: false });
+    expect(audit?.params[0]).toBe('DEADLINE_TRANSITION_RULE_DELETED');
+    expect(JSON.parse(String(audit?.params[9]))).toMatchObject({ deleted: true });
+    expect(JSON.parse(String(audit?.params[11]))).toMatchObject({
+      reason: 'Remove unused transition rule',
+    });
+  });
+
+  it('returns stale delete conflict before checking transition rule references', async () => {
+    const database = createDatabase({ transitionRuleDependencyCount: 1 });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.deleteGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-delete',
+        actionRuleId: 'rule-change-status',
+        dto: {
+          expectedUpdatedAt: '2026-05-01T10:00:01.000Z',
+          reason: 'Delete stale transition rule',
+        },
+        audit: transitionRuleAudit('DEADLINE_TRANSITION_RULE_DELETED', 'req-transition-delete'),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_TRANSITION_RULE_STALE',
+    } satisfies Partial<ApiError>);
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).not.toContain('FROM deadline_order_overrides');
+    expect(sql).not.toContain('FROM deadline_action_executions');
+    expect(sql).not.toContain('DELETE FROM deadline_action_rules');
+  });
+
+  it('blocks deleting transition rules referenced by overrides or executions', async () => {
+    const database = createDatabase({ transitionRuleDependencyCount: 1 });
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.deleteGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-delete',
+        actionRuleId: 'rule-change-status',
+        dto: {
+          expectedUpdatedAt: '2026-05-01T10:00:00.000Z',
+          reason: 'Remove referenced transition rule',
+        },
+        audit: transitionRuleAudit('DEADLINE_TRANSITION_RULE_DELETED', 'req-transition-delete'),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DEADLINE_TRANSITION_RULE_IN_USE',
+    } satisfies Partial<ApiError>);
+
+    const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
+    expect(sql).not.toContain('DELETE FROM deadline_action_rules');
   });
 
   it('loads order evaluation context without mutating preview side effects', async () => {
@@ -1762,6 +1917,10 @@ function createDatabase(
     eventWasInserted?: boolean;
     currentDeadlineEvent?: boolean;
     actionRuleEnabled?: boolean;
+    emptyTransitionRuleUpdate?: boolean;
+    emptyTransitionRuleDelete?: boolean;
+    missingOrderStatusIds?: number[];
+    transitionRuleDependencyCount?: number;
     emptyRetireUpdate?: boolean;
     existingOverride?: OrderOverrideTestRow;
     noExistingOverride?: boolean;
@@ -1785,16 +1944,34 @@ function createDatabase(
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
 
-      if (text.includes('COUNT(*)::int')) {
-        return { rows: [{ total: 1 }] };
-      }
-
       if (text.includes('FROM deadline_action_rules') && text.includes('GROUP BY action_type')) {
         return {
           rows: [
             { action_type: 'notify_assignee', is_enabled: notifyAssigneeEnabled },
           ],
         };
+      }
+
+      if (text.includes('FROM order_statuses')) {
+        const requested = (params[0] as number[] | undefined) ?? [];
+        const missing = new Set(options.missingOrderStatusIds ?? []);
+        return {
+          rows: requested
+            .filter((statusId) => !missing.has(statusId))
+            .map((statusId) => ({ order_status_id: statusId })),
+        };
+      }
+
+      if (text.includes('COUNT(*)::int') && text.includes('deadline_order_overrides')) {
+        return { rows: [{ total: options.transitionRuleDependencyCount ?? 0 }] };
+      }
+
+      if (text.includes('COUNT(*)::int') && text.includes('deadline_action_executions')) {
+        return { rows: [{ total: options.transitionRuleDependencyCount ?? 0 }] };
+      }
+
+      if (text.includes('COUNT(*)::int')) {
+        return { rows: [{ total: 1 }] };
       }
 
       if (text.includes('SELECT action_rule_id') && text.includes('FROM deadline_action_rules')) {
@@ -1829,6 +2006,9 @@ function createDatabase(
 
       if (text.includes('UPDATE deadline_action_rules')) {
         if (text.includes('RETURNING')) {
+          if (options.emptyTransitionRuleUpdate) {
+            return { rows: [] };
+          }
           return {
             rows: [
               actionRuleRow({
@@ -1848,6 +2028,44 @@ function createDatabase(
           notifyAssigneeEnabled = Boolean(params[1]);
         }
         return { rows: [] };
+      }
+
+      if (text.includes('INSERT INTO deadline_action_rules')) {
+        return {
+          rows: [
+            actionRuleRow({
+              action_rule_id: 'rule-change-status',
+              action_type: 'change_order_status',
+              is_enabled: Boolean(params[0]),
+              priority: params[1] as number,
+              config_json:
+                typeof params[2] === 'string'
+                  ? (JSON.parse(params[2]) as Record<string, unknown>)
+                  : {},
+            }),
+          ],
+        };
+      }
+
+      if (text.includes('DELETE FROM deadline_action_rules')) {
+        if (options.emptyTransitionRuleDelete) {
+          return { rows: [] };
+        }
+        return {
+          rows: [
+            actionRuleRow({
+              action_rule_id: String(params[0]),
+              action_type: 'change_order_status',
+              is_enabled: false,
+              priority: 50,
+              config_json: {
+                scope: { type: 'global_orders' },
+                conditions: { allowedFromOrderStatusIds: [1] },
+                actionConfig: { targetOrderStatusId: 5 },
+              },
+            }),
+          ],
+        };
       }
 
       if (text.includes('RETURNING') && text.includes('INSERT INTO deadline_order_overrides')) {
@@ -2256,6 +2474,24 @@ function currentUser() {
     role: 'admin' as const,
     roleId: 1,
     permissions: [],
+  };
+}
+
+function transitionRuleAudit(event: string, requestId: string) {
+  return {
+    event,
+    source: 'admin-ui' as const,
+    actorUserId: 42,
+    requestId,
+    timerRuleId: null,
+    actionRuleId: 'rule-change-status',
+    orderId: null,
+    before: {},
+    after: {},
+    diff: {},
+    reason: 'Transition rule change',
+    comment: null,
+    executionEvidence: null,
   };
 }
 

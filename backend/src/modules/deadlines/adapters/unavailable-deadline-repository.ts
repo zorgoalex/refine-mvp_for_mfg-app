@@ -14,7 +14,9 @@ import type {
   CreateDeadlineEventInput,
   CreateDeadlineEventResult,
   CreateDeadlinePolicyCommand,
+  CreateGlobalTransitionRuleCommand,
   DeadlineRepositoryPort,
+  DeleteGlobalTransitionRuleCommand,
   FindDueDeadlinesCommand,
   ListDeadlinesCommand,
   OrderDeadlineEvaluationContext,
@@ -144,8 +146,20 @@ export class UnavailableDeadlineRepository implements DeadlineRepositoryPort {
     throw deadlineAdapterUnavailableError('deadline_repository');
   }
 
+  async createGlobalTransitionRule(
+    _command: CreateGlobalTransitionRuleCommand,
+  ): Promise<DeadlineActionRuleDto> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
   async updateGlobalTransitionRule(
     _command: UpdateGlobalTransitionRuleCommand,
+  ): Promise<DeadlineActionRuleDto> {
+    throw deadlineAdapterUnavailableError('deadline_repository');
+  }
+
+  async deleteGlobalTransitionRule(
+    _command: DeleteGlobalTransitionRuleCommand,
   ): Promise<DeadlineActionRuleDto> {
     throw deadlineAdapterUnavailableError('deadline_repository');
   }

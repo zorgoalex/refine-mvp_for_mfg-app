@@ -7,6 +7,8 @@ import type {
   PreviewOrderDeadlineActionRulesDto,
   PreviewOrderDeadlineActionRulesRequestDto,
   DeadlineRuleConfigSnapshotDto,
+  CreateGlobalTransitionRuleRequestDto,
+  DeleteGlobalTransitionRuleRequestDto,
   UpdateGlobalTransitionRuleRequestDto,
   UpsertDeadlineOrderOverrideInput,
 } from '../dto/deadline-action-rule.dto';
@@ -174,11 +176,26 @@ export interface ListGlobalTransitionRulesCommand {
   currentUser: CurrentUser;
 }
 
+export interface CreateGlobalTransitionRuleCommand {
+  currentUser: CurrentUser;
+  requestId: string;
+  dto: CreateGlobalTransitionRuleRequestDto;
+  audit: DeadlineAuditContract;
+}
+
 export interface UpdateGlobalTransitionRuleCommand {
   currentUser: CurrentUser;
-  requestId?: string;
+  requestId: string;
   actionRuleId: string;
   dto: UpdateGlobalTransitionRuleRequestDto;
+  audit: DeadlineAuditContract;
+}
+
+export interface DeleteGlobalTransitionRuleCommand {
+  currentUser: CurrentUser;
+  requestId: string;
+  actionRuleId: string;
+  dto: DeleteGlobalTransitionRuleRequestDto;
   audit: DeadlineAuditContract;
 }
 
@@ -300,7 +317,9 @@ export interface DeadlineRepositoryPort {
   upsertOrderOverride(command: UpsertDeadlineOrderOverrideCommand): Promise<DeadlineOrderOverrideDto>;
   retireOrderOverride(command: RetireDeadlineOrderOverrideCommand): Promise<DeadlineOrderOverrideDto>;
   listGlobalTransitionRules(): Promise<DeadlineActionRuleDto[]>;
+  createGlobalTransitionRule(command: CreateGlobalTransitionRuleCommand): Promise<DeadlineActionRuleDto>;
   updateGlobalTransitionRule(command: UpdateGlobalTransitionRuleCommand): Promise<DeadlineActionRuleDto>;
+  deleteGlobalTransitionRule(command: DeleteGlobalTransitionRuleCommand): Promise<DeadlineActionRuleDto>;
   getOrderDeadlineEvaluationContext(orderId: number): Promise<OrderDeadlineEvaluationContext | null>;
   isDeadlineEventCurrentForOrder(query: DeadlineEventCurrentForOrderQuery): Promise<boolean>;
 }
