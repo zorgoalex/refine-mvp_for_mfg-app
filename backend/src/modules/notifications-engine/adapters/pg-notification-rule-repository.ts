@@ -77,9 +77,15 @@ export class PgNotificationRuleRepository implements NotificationRuleRepositoryP
           title_template = CASE WHEN $7 THEN $8 ELSE title_template END,
           message_template = CASE WHEN $9 THEN $10 ELSE message_template END,
           updated_by_user_id = $11,
-          updated_at = now()
+          updated_at = GREATEST(
+            date_trunc('milliseconds', clock_timestamp()),
+            date_trunc('milliseconds', updated_at) + interval '1 millisecond'
+          )
       WHERE notification_rule_id = $1
-        AND ($12::timestamptz IS NULL OR updated_at = $12::timestamptz)
+        AND (
+          $12::timestamptz IS NULL
+          OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $12::timestamptz)
+        )
       RETURNING ${RULE_COLUMNS}
       `,
       [

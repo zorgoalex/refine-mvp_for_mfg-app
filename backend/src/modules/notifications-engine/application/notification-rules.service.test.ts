@@ -97,6 +97,7 @@ describe('NotificationRulesService', () => {
       const updated = await service.update(currentUser(), 'req-update-1', existing.notificationRuleId, {
         patch: { priority: 50, isEnabled: false },
         reason: 'Lower priority while testing',
+        expectedUpdatedAt: existing.updatedAt,
       });
 
       expect(updated.priority).toEqual(50);
@@ -104,7 +105,12 @@ describe('NotificationRulesService', () => {
       expect(repo.updated).toHaveLength(1);
       expect(repo.updated[0]).toMatchObject({
         ruleId: existing.notificationRuleId,
-        patch: expect.objectContaining({ priority: 50, isEnabled: false, updatedByUserId: 1 }),
+        patch: expect.objectContaining({
+          priority: 50,
+          isEnabled: false,
+          updatedByUserId: 1,
+          expectedUpdatedAt: existing.updatedAt,
+        }),
       });
 
       expect(audit.recorded).toHaveLength(1);

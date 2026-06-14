@@ -238,7 +238,12 @@ describe('NotificationRulesController', () => {
         controller.update(
           { user: currentUser(), requestId: 'req-update-1' },
           'rule-7',
-          { priority: 25, isEnabled: false, reason: 'Lower urgency' },
+          {
+            priority: 25,
+            isEnabled: false,
+            reason: 'Lower urgency',
+            expectedUpdatedAt: '2026-06-14T10:00:00.123Z',
+          },
         ),
       ).resolves.toEqual(notificationRule({ notificationRuleId: 'rule-7', priority: 25 }));
 
@@ -250,6 +255,40 @@ describe('NotificationRulesController', () => {
           command: {
             patch: { priority: 25, isEnabled: false },
             reason: 'Lower urgency',
+            expectedUpdatedAt: '2026-06-14T10:00:00.123Z',
+          },
+        },
+      ]);
+    });
+
+    it('keeps missing expectedUpdatedAt as an explicit compatibility update path', async () => {
+      const calls: unknown[] = [];
+      const controller = createController({
+        flags: flags({ engineEnabled: true, rulesReadOnly: false }),
+        service: {
+          async update(user, requestId, ruleId, command) {
+            calls.push({ userId: user.id, requestId, ruleId, command });
+            return notificationRule({ notificationRuleId: ruleId, priority: 25 });
+          },
+        },
+      });
+
+      await expect(
+        controller.update(
+          { user: currentUser(), requestId: 'req-update-compat' },
+          'rule-7',
+          { priority: 25, reason: 'Legacy client compatibility' },
+        ),
+      ).resolves.toEqual(notificationRule({ notificationRuleId: 'rule-7', priority: 25 }));
+
+      expect(calls).toEqual([
+        {
+          userId: 'admin-id',
+          requestId: 'req-update-compat',
+          ruleId: 'rule-7',
+          command: {
+            patch: { priority: 25 },
+            reason: 'Legacy client compatibility',
           },
         },
       ]);

@@ -109,6 +109,105 @@ maybe('PgNotificationRuleRepository integration', () => {
     const afterDelete = await repository.getById(pool, created.notificationRuleId);
     expect(afterDelete).toBeNull();
   });
+
+  it('accepts API-visible millisecond updatedAt when stored timestamp has microseconds', async () => {
+    const ruleCode = `E2E-rule-precision-${randomUUID()}`;
+    const eventType = 'order.status_changed';
+
+    const created = await repository.create(pool, {
+      ruleCode,
+      eventType,
+      level: 'info',
+      priority: 100,
+      isEnabled: true,
+      conditions: {},
+      recipients: { resolvers: ['order_manager'] },
+      titleTemplate: 'Order {{orderId}} changed',
+      messageTemplate: 'Status changed',
+      createdByUserId: 1,
+    });
+
+    await pool.query(
+      `
+      UPDATE notification_rules
+      SET updated_at = '2026-06-14 10:00:00.123456+00'
+      WHERE notification_rule_id = $1
+      `,
+      [created.notificationRuleId],
+    );
+
+    const fetched = await repository.getById(pool, created.notificationRuleId);
+    expect(fetched?.updatedAt).toBe('2026-06-14T10:00:00.123Z');
+
+    const updated = await repository.update(pool, created.notificationRuleId, {
+      priority: 75,
+      updatedByUserId: 2,
+      expectedUpdatedAt: fetched?.updatedAt,
+    });
+
+    expect(updated.priority).toBe(75);
+    expect(updated.updatedAt).not.toBe(fetched?.updatedAt);
+
+    await expect(
+      repository.update(pool, created.notificationRuleId, {
+        priority: 50,
+        updatedByUserId: 2,
+        expectedUpdatedAt: fetched?.updatedAt,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'NOTIFICATION_RULE_STALE',
+    });
+  });
+
+  it('advances the public updatedAt token beyond the previous millisecond token', async () => {
+    const ruleCode = `E2E-rule-token-advance-${randomUUID()}`;
+    const eventType = 'order.status_changed';
+
+    const created = await repository.create(pool, {
+      ruleCode,
+      eventType,
+      level: 'info',
+      priority: 100,
+      isEnabled: true,
+      conditions: {},
+      recipients: { resolvers: ['order_manager'] },
+      titleTemplate: 'Order {{orderId}} changed',
+      messageTemplate: 'Status changed',
+      createdByUserId: 1,
+    });
+
+    await pool.query(
+      `
+      UPDATE notification_rules
+      SET updated_at = date_trunc('milliseconds', clock_timestamp()) + interval '1 hour'
+      WHERE notification_rule_id = $1
+      `,
+      [created.notificationRuleId],
+    );
+
+    const fetched = await repository.getById(pool, created.notificationRuleId);
+    expect(fetched).not.toBeNull();
+
+    const updated = await repository.update(pool, created.notificationRuleId, {
+      priority: 75,
+      updatedByUserId: 2,
+      expectedUpdatedAt: fetched?.updatedAt,
+    });
+
+    expect(Date.parse(updated.updatedAt)).toBeGreaterThan(Date.parse(fetched?.updatedAt ?? ''));
+
+    await expect(
+      repository.update(pool, created.notificationRuleId, {
+        priority: 50,
+        updatedByUserId: 2,
+        expectedUpdatedAt: fetched?.updatedAt,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'NOTIFICATION_RULE_STALE',
+    });
+  });
 });
 
 async function applyMigration(pool: Pool): Promise<void> {

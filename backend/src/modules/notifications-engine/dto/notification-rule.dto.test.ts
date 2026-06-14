@@ -242,7 +242,7 @@ describe('parseCreateNotificationRuleRequest', () => {
 });
 
 describe('parseUpdateNotificationRuleRequest', () => {
-  it('parses a valid partial update with reason', () => {
+  it('parses a valid compatibility update without expectedUpdatedAt', () => {
     const result = parseUpdateNotificationRuleRequest({
       level: 'error',
       priority: 10,
