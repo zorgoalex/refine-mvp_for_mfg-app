@@ -37,6 +37,21 @@ describe('projectsApi', () => {
     expect(fetchMock.mock.calls[1][1]?.method).toBe('GET');
   });
 
+  it('maps project options through the backend projects list endpoint', async () => {
+    const project = projectDto({ code: 'PRJ-101', name: 'Kitchen' });
+    const fetchMock = mockFetch({
+      data: [project],
+      pagination: { page: 1, pageSize: 200, total: 1, totalPages: 1 },
+    });
+
+    await expect(projectsApi.listProjectOptions({ search: 'kit' })).resolves.toEqual([
+      { value: project.id, label: 'PRJ-101 · Kitchen' },
+    ]);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/projects?pageSize=200&search=kit');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
   it('gets, creates, updates, and archives projects through v1 endpoints', async () => {
     const project = projectDto();
     const fetchMock = mockFetch(

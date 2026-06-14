@@ -48,6 +48,7 @@ maybe('PgNotificationRuleRepository integration', () => {
 
     expect(created.ruleCode).toBe(ruleCode);
     expect(created.eventType).toBe(eventType);
+    expect(created.projectId).toBeNull();
     expect(created.level).toBe('info');
     expect(created.isEnabled).toBe(true);
     expect(created.conditions).toEqual({ allowedFromOrderStatusIds: [1, 2] });
@@ -60,6 +61,7 @@ maybe('PgNotificationRuleRepository integration', () => {
 
     const updated = await repository.update(pool, created.notificationRuleId, {
       level: 'warning',
+      projectId: null,
       priority: 50,
       isEnabled: false,
       conditions: { allowedFromOrderStatusIds: [3] },
@@ -71,6 +73,7 @@ maybe('PgNotificationRuleRepository integration', () => {
     });
 
     expect(updated.level).toBe('warning');
+    expect(updated.projectId).toBeNull();
     expect(updated.priority).toBe(50);
     expect(updated.isEnabled).toBe(false);
     expect(updated.conditions).toEqual({ allowedFromOrderStatusIds: [3] });
@@ -211,7 +214,12 @@ maybe('PgNotificationRuleRepository integration', () => {
 });
 
 async function applyMigration(pool: Pool): Promise<void> {
-  const migrationPath = resolve(__dirname, '../../../../db/migrations/014_notification_rules.sql');
-  const sql = readFileSync(migrationPath, 'utf8');
-  await pool.query(sql);
+  for (const migrationFile of [
+    '014_notification_rules.sql',
+    '018_notification_rules_project_scope.sql',
+  ]) {
+    const migrationPath = resolve(__dirname, '../../../../db/migrations', migrationFile);
+    const sql = readFileSync(migrationPath, 'utf8');
+    await pool.query(sql);
+  }
 }

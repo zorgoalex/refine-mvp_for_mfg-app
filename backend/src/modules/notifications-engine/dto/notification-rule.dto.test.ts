@@ -77,6 +77,20 @@ describe('parseCreateNotificationRuleRequest', () => {
     });
   });
 
+  it('parses projectId on create', () => {
+    const result = parseCreateNotificationRuleRequest({
+      ruleCode: 'project-deadline-overdue',
+      eventType: 'DEADLINE_EXPIRED',
+      level: 'warning',
+      priority: 10,
+      isEnabled: true,
+      projectId: '11111111-1111-4111-8111-111111111111',
+      recipients: { resolvers: ['project_participants'] },
+    });
+
+    expect(result.projectId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
   it('rejects a missing ruleCode', () => {
     expectInvalidPayloadError(() =>
       parseCreateNotificationRuleRequest({
@@ -232,6 +246,17 @@ describe('parseCreateNotificationRuleRequest', () => {
     );
   });
 
+  it('rejects malformed projectId', () => {
+    expectInvalidPayloadError(() =>
+      parseCreateNotificationRuleRequest({
+        ruleCode: 'bad-project',
+        eventType: 'DEADLINE_EXPIRED',
+        projectId: 'not-a-uuid',
+        recipients: { resolvers: ['project_participants'] },
+      }),
+    );
+  });
+
   it('rejects a non-object body', () => {
     expectInvalidPayloadError(() => parseCreateNotificationRuleRequest('not-an-object'));
   });
@@ -265,6 +290,16 @@ describe('parseUpdateNotificationRuleRequest', () => {
       patch: { isEnabled: false },
       expectedUpdatedAt: '2026-06-01T10:00:00.000Z',
     });
+  });
+
+  it('parses null projectId on update as explicit clear', () => {
+    const result = parseUpdateNotificationRuleRequest({
+      projectId: null,
+      reason: 'make rule global',
+      expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+    });
+
+    expect(result.patch).toEqual({ projectId: null });
   });
 
   it('parses an update touching conditions and recipients', () => {

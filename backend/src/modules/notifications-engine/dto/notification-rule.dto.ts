@@ -36,6 +36,7 @@ const levelSchema = z.enum(['info', 'warning', 'error']);
 const integerArraySchema = z.array(z.number().int());
 const stringArraySchema = z.array(z.string());
 const nullableTemplateSchema = z.string().nullable();
+const projectIdSchema = z.string().uuid().nullable();
 
 const conditionsSchema = z
   .object({
@@ -56,6 +57,7 @@ const recipientsSchema = z
 const createNotificationRuleSchema = z.object({
   ruleCode: z.string().trim().min(1),
   eventType: z.string().trim().min(1),
+  projectId: projectIdSchema.optional(),
   level: levelSchema.default('info'),
   priority: z.number().int().default(100),
   isEnabled: z.boolean().default(true),
@@ -70,6 +72,7 @@ const updateNotificationRuleSchema = z
     level: levelSchema.optional(),
     priority: z.number().int().optional(),
     isEnabled: z.boolean().optional(),
+    projectId: projectIdSchema.optional(),
     conditions: conditionsSchema.optional(),
     recipients: recipientsSchema.optional(),
     titleTemplate: nullableTemplateSchema.optional(),
@@ -82,6 +85,7 @@ const updateNotificationRuleSchema = z
       value.level !== undefined ||
       value.priority !== undefined ||
       value.isEnabled !== undefined ||
+      value.projectId !== undefined ||
       value.conditions !== undefined ||
       value.recipients !== undefined ||
       value.titleTemplate !== undefined ||
@@ -97,6 +101,7 @@ const updateNotificationRuleSchema = z
   });
 
 export interface UpdateNotificationRulePatch {
+  projectId?: string | null;
   level?: 'info' | 'warning' | 'error';
   priority?: number;
   isEnabled?: boolean;
@@ -133,6 +138,9 @@ export function parseCreateNotificationRuleRequest(
     recipients: toNotificationRuleRecipients(data.recipients),
   };
 
+  if (data.projectId !== undefined) {
+    result.projectId = data.projectId;
+  }
   if (data.titleTemplate !== undefined) {
     result.titleTemplate = data.titleTemplate;
   }
@@ -156,6 +164,7 @@ export function parseUpdateNotificationRuleRequest(body: unknown): UpdateNotific
   if (data.level !== undefined) patch.level = data.level;
   if (data.priority !== undefined) patch.priority = data.priority;
   if (data.isEnabled !== undefined) patch.isEnabled = data.isEnabled;
+  if (data.projectId !== undefined) patch.projectId = data.projectId;
   if (data.conditions !== undefined) patch.conditions = data.conditions;
   if (data.recipients !== undefined) patch.recipients = toNotificationRuleRecipients(data.recipients);
   if (data.titleTemplate !== undefined) patch.titleTemplate = data.titleTemplate;

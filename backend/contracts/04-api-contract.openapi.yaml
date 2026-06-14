@@ -2637,6 +2637,16 @@ paths:
           required: false
           schema:
             type: boolean
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            oneOf:
+              - type: string
+                format: uuid
+              - type: string
+                enum:
+                  - global
       responses:
         '200':
           description: Notification rules
@@ -9433,6 +9443,7 @@ components:
         - notificationRuleId
         - ruleCode
         - eventType
+        - projectId
         - isEnabled
         - priority
         - level
@@ -9450,6 +9461,11 @@ components:
           type: string
         eventType:
           type: string
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional project scope. Null means global rule.
         isEnabled:
           type: boolean
         priority:
@@ -9492,6 +9508,11 @@ components:
           type: string
         eventType:
           type: string
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional project scope. Null means global rule.
         level:
           type: string
           enum:
@@ -9529,6 +9550,11 @@ components:
           type: integer
         isEnabled:
           type: boolean
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional project scope. Null means global rule.
         conditions:
           $ref: '#/components/schemas/NotificationRuleConditions'
         recipients:

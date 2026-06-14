@@ -129,16 +129,54 @@ describe('NotificationRulesController', () => {
       });
 
       await expect(
-        controller.list({ user: currentUser() }, { eventType: 'order.status_changed', isEnabled: 'true' }),
+        controller.list({
+          user: currentUser(),
+        }, {
+          eventType: 'order.status_changed',
+          isEnabled: 'true',
+          projectId: '11111111-1111-4111-8111-111111111111',
+        }),
       ).resolves.toEqual([notificationRule()]);
 
       expect(calls).toEqual([
         {
           method: 'list',
           userId: 'admin-id',
-          filter: { eventType: 'order.status_changed', isEnabled: true },
+          filter: {
+            eventType: 'order.status_changed',
+            isEnabled: true,
+            projectId: '11111111-1111-4111-8111-111111111111',
+          },
         },
       ]);
+    });
+
+    it('delegates list with global project scope filter', async () => {
+      const calls: unknown[] = [];
+      const controller = createController({
+        flags: flags({ engineEnabled: true }),
+        service: {
+          async list(user, filter) {
+            calls.push({ userId: user.id, filter });
+            return [];
+          },
+        },
+      });
+
+      await controller.list({ user: currentUser() }, { projectId: 'global' });
+
+      expect(calls).toEqual([{ userId: 'admin-id', filter: { projectId: 'global' } }]);
+    });
+
+    it('rejects malformed list projectId with 422', async () => {
+      const controller = createController({ flags: flags({ engineEnabled: true }) });
+
+      await expect(
+        controller.list({ user: currentUser() }, { projectId: 'not-a-uuid' }),
+      ).rejects.toMatchObject({
+        statusCode: 422,
+        code: 'VALIDATION_ERROR',
+      } satisfies Partial<ApiError>);
     });
 
     it('delegates list with no filters when query params are absent', async () => {
@@ -201,6 +239,7 @@ describe('NotificationRulesController', () => {
           input: {
             ruleCode: 'notify-order-overdue',
             eventType: 'order.status_changed',
+            projectId: '11111111-1111-4111-8111-111111111111',
             level: 'warning',
             priority: 50,
             isEnabled: true,
@@ -241,6 +280,7 @@ describe('NotificationRulesController', () => {
           {
             priority: 25,
             isEnabled: false,
+            projectId: null,
             reason: 'Lower urgency',
             expectedUpdatedAt: '2026-06-14T10:00:00.123Z',
           },
@@ -253,7 +293,7 @@ describe('NotificationRulesController', () => {
           requestId: 'req-update-1',
           ruleId: 'rule-7',
           command: {
-            patch: { priority: 25, isEnabled: false },
+            patch: { priority: 25, isEnabled: false, projectId: null },
             reason: 'Lower urgency',
             expectedUpdatedAt: '2026-06-14T10:00:00.123Z',
           },
@@ -360,7 +400,10 @@ describe('NotificationRulesController', () => {
 });
 
 interface FakeNotificationRulesService {
-  list?(user: CurrentUser, filter: { eventType?: string; isEnabled?: boolean }): Promise<NotificationRule[]>;
+  list?(
+    user: CurrentUser,
+    filter: { eventType?: string; isEnabled?: boolean; projectId?: string | 'global' },
+  ): Promise<NotificationRule[]>;
   getById?(user: CurrentUser, ruleId: string): Promise<NotificationRule>;
   create?(user: CurrentUser, requestId: string, input: unknown): Promise<NotificationRule>;
   update?(user: CurrentUser, requestId: string, ruleId: string, command: unknown): Promise<NotificationRule>;
@@ -421,6 +464,7 @@ function notificationRule(overrides: Partial<NotificationRule> = {}): Notificati
     notificationRuleId: 'rule-1',
     ruleCode: 'notify-order-overdue',
     eventType: 'order.status_changed',
+    projectId: null,
     isEnabled: true,
     priority: 100,
     level: 'info',
@@ -441,6 +485,7 @@ function validCreateBody(): Record<string, unknown> {
     level: 'warning',
     priority: 50,
     isEnabled: true,
+    projectId: '11111111-1111-4111-8111-111111111111',
     conditions: {},
     recipients: { roleCodes: ['manager'] },
   };

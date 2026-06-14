@@ -14,6 +14,10 @@ interface DeadlineEventCurrentRow {
   exists: boolean;
 }
 
+interface ProjectAttributionRow {
+  project_id: string;
+}
+
 function toNullableNumber(value: unknown): number | null {
   if (value == null) return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -58,6 +62,8 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       }
     }
 
+    const deadlineInstanceId = event.aggregateType === 'deadline' ? event.aggregateId : null;
+    const projectIds = await this.resolveProjectIds(client, orderId, deadlineInstanceId);
     const isCurrentDeadlineEvent = await this.resolveIsCurrentDeadlineEvent(client, event, orderId);
 
     return {
@@ -69,7 +75,8 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       clientId,
       paymentId,
       deadlineId,
-      deadlineInstanceId: event.aggregateType === 'deadline' ? event.aggregateId : null,
+      deadlineInstanceId,
+      projectIds,
       orderStatusId,
       isOrderCompleted,
       isCurrentDeadlineEvent,
@@ -130,5 +137,55 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
     );
 
     return result.rows.length > 0;
+  }
+
+  private async resolveProjectIds(
+    client: DatabaseClient,
+    orderId: number | null,
+    deadlineInstanceId: string | null,
+  ): Promise<string[]> {
+    if (orderId == null && deadlineInstanceId == null) {
+      return [];
+    }
+
+    const result = deadlineInstanceId != null
+      ? await client.query<ProjectAttributionRow>(
+        `
+        WITH explicit_deadline_projects AS (
+          SELECT DISTINCT pel.project_id
+          FROM public.project_entity_links pel
+          WHERE pel.entity_type_code = 'deadline_instance'
+            AND pel.entity_id_text = $1::text
+            AND pel.valid_to IS NULL
+        ),
+        derived_order_projects AS (
+          SELECT DISTINCT pop.project_id
+          FROM public.project_order_projects pop
+          WHERE pop.order_id = $2::bigint
+            AND pop.valid_to IS NULL
+        )
+        SELECT project_id
+        FROM explicit_deadline_projects
+        UNION
+        SELECT project_id
+        FROM derived_order_projects
+        WHERE NOT EXISTS (SELECT 1 FROM explicit_deadline_projects)
+        `,
+        [deadlineInstanceId, orderId],
+      )
+      : await client.query<ProjectAttributionRow>(
+        `
+        SELECT DISTINCT pop.project_id
+        FROM public.project_order_projects pop
+        WHERE pop.order_id = $1::bigint
+          AND pop.valid_to IS NULL
+        `,
+        [orderId],
+      );
+
+    return result.rows
+      .map((row) => row.project_id)
+      .filter((projectId): projectId is string => typeof projectId === 'string' && projectId.trim() !== '')
+      .map((projectId) => projectId.toLowerCase());
   }
 }

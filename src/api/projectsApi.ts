@@ -33,6 +33,14 @@ export const projectsApi = {
     return httpClient.get<ProjectListResponse>(withQuery(apiRoutes.projects.list, params));
   },
 
+  async listProjectOptions(params: ProjectListQuery = {}): Promise<Array<{ label: string; value: string }>> {
+    const response = await this.listProjects({ pageSize: 200, ...params });
+    return response.data.map((project) => ({
+      value: project.id,
+      label: `${project.code} · ${project.name}`,
+    }));
+  },
+
   lookupProjects(params: ProjectLookupQuery = {}): Promise<ProjectLookupResponse> {
     return httpClient.get<ProjectLookupResponse>(withQuery(apiRoutes.projects.lookup, params));
   },

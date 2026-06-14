@@ -1,6 +1,11 @@
 export type NotificationLevel = 'info' | 'warning' | 'error';
 
-export type RecipientResolverKind = 'order_manager' | 'stage_assignee' | 'project_participants';
+export type RecipientResolverKind =
+  | 'order_manager'
+  | 'stage_assignee'
+  | 'workshop_head'
+  | 'direction_head'
+  | 'project_participants';
 
 export interface NotificationRuleConditions {
   allowedFromOrderStatusIds?: number[];
@@ -18,6 +23,7 @@ export interface NotificationRuleDto {
   notificationRuleId: string;
   ruleCode: string;
   eventType: string;
+  projectId: string | null;
   isEnabled: boolean;
   priority: number;
   level: NotificationLevel;
@@ -40,6 +46,7 @@ export interface NotificationEventTypeDto {
 export interface CreateNotificationRuleRequest {
   ruleCode: string;
   eventType: string;
+  projectId?: string | null;
   level: NotificationLevel;
   priority: number;
   isEnabled: boolean;
@@ -50,6 +57,7 @@ export interface CreateNotificationRuleRequest {
 }
 
 export interface UpdateNotificationRuleRequest {
+  projectId?: string | null;
   level?: NotificationLevel;
   priority?: number;
   isEnabled?: boolean;

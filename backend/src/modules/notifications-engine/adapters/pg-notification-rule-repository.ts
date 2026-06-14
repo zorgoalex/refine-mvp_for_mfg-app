@@ -15,6 +15,7 @@ interface NotificationRuleRow {
   notification_rule_id: string;
   rule_code: string;
   event_type: string;
+  project_id: string | null;
   is_enabled: boolean;
   priority: string | number;
   level: string;
@@ -27,7 +28,7 @@ interface NotificationRuleRow {
 }
 
 const RULE_COLUMNS = `
-  notification_rule_id, rule_code, event_type, is_enabled, priority, level,
+  notification_rule_id, rule_code, event_type, project_id, is_enabled, priority, level,
   conditions_json, recipients_json, title_template, message_template,
   created_at, updated_at
 `;
@@ -37,16 +38,17 @@ export class PgNotificationRuleRepository implements NotificationRuleRepositoryP
     const result = await client.query<NotificationRuleRow>(
       `
       INSERT INTO notification_rules (
-        rule_code, event_type, level, priority, is_enabled,
+        rule_code, event_type, project_id, level, priority, is_enabled,
         conditions_json, recipients_json, title_template, message_template,
         created_by_user_id, updated_by_user_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $10)
+      VALUES ($1, $2, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $11)
       RETURNING ${RULE_COLUMNS}
       `,
       [
         input.ruleCode,
         input.eventType,
+        input.projectId ?? null,
         input.level,
         input.priority,
         input.isEnabled,
@@ -69,27 +71,30 @@ export class PgNotificationRuleRepository implements NotificationRuleRepositoryP
     const result = await client.query<NotificationRuleRow>(
       `
       UPDATE notification_rules
-      SET level = COALESCE($2, level),
-          priority = COALESCE($3, priority),
-          is_enabled = COALESCE($4, is_enabled),
-          conditions_json = COALESCE($5::jsonb, conditions_json),
-          recipients_json = COALESCE($6::jsonb, recipients_json),
-          title_template = CASE WHEN $7 THEN $8 ELSE title_template END,
-          message_template = CASE WHEN $9 THEN $10 ELSE message_template END,
-          updated_by_user_id = $11,
+      SET project_id = CASE WHEN $2 THEN $3::uuid ELSE project_id END,
+          level = COALESCE($4, level),
+          priority = COALESCE($5, priority),
+          is_enabled = COALESCE($6, is_enabled),
+          conditions_json = COALESCE($7::jsonb, conditions_json),
+          recipients_json = COALESCE($8::jsonb, recipients_json),
+          title_template = CASE WHEN $9 THEN $10 ELSE title_template END,
+          message_template = CASE WHEN $11 THEN $12 ELSE message_template END,
+          updated_by_user_id = $13,
           updated_at = GREATEST(
             date_trunc('milliseconds', clock_timestamp()),
             date_trunc('milliseconds', updated_at) + interval '1 millisecond'
           )
       WHERE notification_rule_id = $1
         AND (
-          $12::timestamptz IS NULL
-          OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $12::timestamptz)
+          $14::timestamptz IS NULL
+          OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $14::timestamptz)
         )
       RETURNING ${RULE_COLUMNS}
       `,
       [
         ruleId,
+        patch.projectId !== undefined,
+        patch.projectId ?? null,
         patch.level ?? null,
         patch.priority ?? null,
         patch.isEnabled ?? null,
@@ -137,7 +142,7 @@ export class PgNotificationRuleRepository implements NotificationRuleRepositoryP
 
   async list(
     client: DatabaseClient,
-    filter: { eventType?: string; isEnabled?: boolean },
+    filter: { eventType?: string; isEnabled?: boolean; projectId?: string | 'global' },
   ): Promise<NotificationRule[]> {
     const result = await client.query<NotificationRuleRow>(
       `
@@ -145,9 +150,14 @@ export class PgNotificationRuleRepository implements NotificationRuleRepositoryP
       FROM notification_rules
       WHERE ($1::text IS NULL OR event_type = $1::text)
         AND ($2::boolean IS NULL OR is_enabled = $2::boolean)
+        AND CASE
+          WHEN $3::text IS NULL THEN true
+          WHEN $3::text = 'global' THEN project_id IS NULL
+          ELSE project_id = $3::uuid
+        END
       ORDER BY event_type ASC, priority ASC, created_at ASC
       `,
-      [filter.eventType ?? null, filter.isEnabled ?? null],
+      [filter.eventType ?? null, filter.isEnabled ?? null, filter.projectId ?? null],
     );
 
     return result.rows.map(mapRow);
@@ -174,6 +184,7 @@ function mapRow(row: NotificationRuleRow): NotificationRule {
     notificationRuleId: row.notification_rule_id,
     ruleCode: row.rule_code,
     eventType: row.event_type,
+    projectId: row.project_id,
     isEnabled: row.is_enabled,
     priority: toNumber(row.priority),
     level: row.level as NotificationRule['level'],

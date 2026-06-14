@@ -30,6 +30,7 @@ function buildContext(overrides: Partial<NotificationEventContext>): Notificatio
     paymentId: null,
     deadlineId: null,
     deadlineInstanceId: 'dl-uuid-1',
+    projectIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
     orderStatusId: null,
     isOrderCompleted: false,
     payload: {},
@@ -40,36 +41,34 @@ function buildContext(overrides: Partial<NotificationEventContext>): Notificatio
 describe('PgRecipientSourceAdapter.project_participants fanout', () => {
   const adapter = new PgRecipientSourceAdapter();
 
-  it('fans out over BOTH order links and deadline_instance generic links (P8 parity)', async () => {
+  it('fans out only over effective context projectIds', async () => {
     const { client, calls } = fakeClient([{ user_id: 7 }, { user_id: 9 }]);
-    const ctx = buildContext({ orderId: 42, deadlineInstanceId: 'dl-uuid-1' });
+    const ctx = buildContext({
+      orderId: 42,
+      deadlineInstanceId: 'dl-uuid-1',
+      projectIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+    });
 
     const result = await adapter.resolveDynamic(client, 'project_participants', ctx);
 
     expect(result).toEqual([7, 9]);
     expect(calls).toHaveLength(1);
     const { sql, params } = calls[0];
-    // Both project sources must be queried (the deadline_instance generic-link
-    // half is the convergence parity fix for the legacy P8 port).
-    expect(sql).toContain('project_order_projects');
-    expect(sql).toContain('project_entity_links');
-    expect(sql).toContain("entity_type_code = 'deadline_instance'");
-    expect(sql.toUpperCase()).toContain('UNION');
-    // The deadline_instance anchor (ctx.deadlineInstanceId) must be passed so
-    // projects linked ONLY via a generic deadline link are reachable.
-    expect(params).toEqual([42, 'dl-uuid-1']);
+    expect(sql).toContain('project_participants');
+    expect(sql).toContain('pp.project_id = ANY($1::uuid[])');
+    expect(sql).not.toContain('project_order_projects');
+    expect(sql).not.toContain('project_entity_links');
+    expect(params).toEqual([['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']]);
   });
 
-  it('still resolves when there is no deadline link (deadlineInstanceId null degrades to order-only fanout)', async () => {
+  it('returns [] when effective project attribution is empty', async () => {
     const { client, calls } = fakeClient([{ user_id: 5 }]);
-    const ctx = buildContext({ orderId: 42, deadlineInstanceId: null });
+    const ctx = buildContext({ orderId: 42, deadlineInstanceId: null, projectIds: [] });
 
     const result = await adapter.resolveDynamic(client, 'project_participants', ctx);
 
-    expect(result).toEqual([5]);
-    // deadlineInstanceId is passed as null; the deadline_links branch yields no
-    // rows (entity_id_text = NULL is never true) so the UNION degrades safely.
-    expect(calls[0].params).toEqual([42, null]);
+    expect(result).toEqual([]);
+    expect(calls).toHaveLength(0);
   });
 
   it('returns [] when there is no order anchor (visibility anchor required, matches legacy P8)', async () => {
