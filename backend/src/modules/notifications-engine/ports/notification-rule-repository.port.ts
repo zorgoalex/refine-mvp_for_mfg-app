@@ -4,6 +4,7 @@ import type { NotificationRule } from '../domain/notification-rule.types';
 export interface CreateNotificationRuleInput {
   ruleCode: string;
   eventType: string;
+  projectId?: string | null;
   level: 'info' | 'warning' | 'error';
   priority: number;
   isEnabled: boolean;
@@ -15,6 +16,7 @@ export interface CreateNotificationRuleInput {
 }
 
 export interface UpdateNotificationRuleInput {
+  projectId?: string | null;
   level?: 'info' | 'warning' | 'error';
   priority?: number;
   isEnabled?: boolean;
@@ -31,6 +33,9 @@ export interface NotificationRuleRepositoryPort {
   update(client: DatabaseClient, ruleId: string, patch: UpdateNotificationRuleInput): Promise<NotificationRule>;
   delete(client: DatabaseClient, ruleId: string): Promise<NotificationRule | null>;
   getById(client: DatabaseClient, ruleId: string): Promise<NotificationRule | null>;
-  list(client: DatabaseClient, filter: { eventType?: string; isEnabled?: boolean }): Promise<NotificationRule[]>;
+  list(
+    client: DatabaseClient,
+    filter: { eventType?: string; isEnabled?: boolean; projectId?: string | 'global' },
+  ): Promise<NotificationRule[]>;
   listEnabledByEvent(client: DatabaseClient, eventType: string): Promise<NotificationRule[]>;
 }

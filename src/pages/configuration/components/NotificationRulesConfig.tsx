@@ -18,9 +18,10 @@ import {
   Typography,
   message,
 } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { notificationRulesApi } from '../../../api/notificationRulesApi';
+import { projectsApi } from '../../../api/projectsApi';
 import type {
   NotificationEventTypeDto,
   NotificationLevel,
@@ -46,6 +47,8 @@ const TEMPLATE_PLACEHOLDERS = ['{orderId}', '{clientId}', '{orderStatusId}', '{e
 const RESOLVER_LABELS: Record<RecipientResolverKind, string> = {
   order_manager: 'Менеджер заказа',
   stage_assignee: 'Ответственный за этап',
+  workshop_head: 'Руководитель цеха',
+  direction_head: 'Руководитель направления',
   project_participants: 'Участники проекта',
 };
 
@@ -89,6 +92,8 @@ export function NotificationRulesConfig() {
   const [loading, setLoading] = useState(false);
   const [rules, setRules] = useState<NotificationRuleDto[]>([]);
   const [eventTypes, setEventTypes] = useState<NotificationEventTypeDto[]>([]);
+  const [projectOptions, setProjectOptions] = useState<Array<{ label: string; value: string }>>([]);
+  const [projectOptionsLoading, setProjectOptionsLoading] = useState(false);
   const [error, setError] = useState<{ kind: 'engine_disabled' | 'other'; message: string } | null>(null);
 
   const [editor, setEditor] = useState<EditorMode>({ kind: 'closed' });
@@ -108,6 +113,27 @@ export function NotificationRulesConfig() {
   }, [eventTypes]);
 
   const selectedEventType = editor.kind === 'closed' ? null : eventTypeByName.get(draft.eventType) ?? null;
+  const projectNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of projectOptions) {
+      map.set(option.value, option.label);
+    }
+    return map;
+  }, [projectOptions]);
+
+  const loadProjectOptions = useCallback(async (search?: string) => {
+    setProjectOptionsLoading(true);
+    try {
+      const projects = await projectsApi.listProjectOptions({
+        ...(search?.trim() ? { search: search.trim() } : {}),
+      });
+      setProjectOptions(projects);
+    } catch {
+      setProjectOptions([]);
+    } finally {
+      setProjectOptionsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +142,7 @@ export function NotificationRulesConfig() {
       if (!canView) {
         setRules([]);
         setEventTypes([]);
+        setProjectOptions([]);
         return;
       }
 
@@ -129,6 +156,15 @@ export function NotificationRulesConfig() {
         if (cancelled) return;
         setRules(ruleList);
         setEventTypes(events);
+        setProjectOptionsLoading(true);
+        try {
+          const projects = await projectsApi.listProjectOptions();
+          if (!cancelled) setProjectOptions(projects);
+        } catch {
+          if (!cancelled) setProjectOptions([]);
+        } finally {
+          if (!cancelled) setProjectOptionsLoading(false);
+        }
       } catch (loadError) {
         if (cancelled) return;
         if (loadError instanceof ApiError && loadError.status === 503) {
@@ -332,6 +368,14 @@ export function NotificationRulesConfig() {
               width: 220,
             },
             {
+              title: 'Проект',
+              dataIndex: 'projectId',
+              key: 'projectId',
+              width: 180,
+              render: (projectId: string | null) =>
+                projectId ? projectNameById.get(projectId) ?? projectId : 'Все проекты',
+            },
+            {
               title: 'Level',
               dataIndex: 'level',
               key: 'level',
@@ -422,6 +466,21 @@ export function NotificationRulesConfig() {
               placeholder="Выберите событие"
               showSearch
               optionFilterProp="label"
+            />
+          </Form.Item>
+
+          <Form.Item label="Проект">
+            <Select
+              allowClear
+              showSearch
+              placeholder="Все проекты"
+              value={draft.projectId ?? undefined}
+              options={projectOptions}
+              onChange={(value) => updateDraft({ projectId: value ?? null })}
+              onSearch={(value) => void loadProjectOptions(value)}
+              filterOption={false}
+              loading={projectOptionsLoading}
+              notFoundContent={projectOptionsLoading ? <Spin size="small" /> : null}
             />
           </Form.Item>
 

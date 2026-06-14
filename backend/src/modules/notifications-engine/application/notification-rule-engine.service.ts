@@ -115,11 +115,16 @@ export class NotificationRuleEngineService {
 
     const ctx = await this.deps.contextBuilder.buildContext(client, event);
     const rules = await this.deps.ruleRepo.listEnabledByEvent(client, effectiveType);
+    const projectIds = new Set(ctx.projectIds.map((projectId) => projectId.toLowerCase()));
+    const matchingRules = rules.filter((rule) => {
+      if (rule.projectId == null) return true;
+      return projectIds.has(rule.projectId.toLowerCase());
+    });
 
     let matched = 0;
     let created = 0;
 
-    for (const rule of rules) {
+    for (const rule of matchingRules) {
       const { matched: ruleMatched } = evaluateRuleConditions(rule.conditions, ctx);
       if (!ruleMatched) continue;
       matched += 1;

@@ -29,6 +29,7 @@ export type NotificationRulesDatabase = DatabaseClient & {
 export interface CreateNotificationRuleCommandInput {
   ruleCode: string;
   eventType: string;
+  projectId?: string | null;
   level: 'info' | 'warning' | 'error';
   priority: number;
   isEnabled: boolean;
@@ -40,6 +41,7 @@ export interface CreateNotificationRuleCommandInput {
 
 export interface UpdateNotificationRuleCommandInput {
   patch: {
+    projectId?: string | null;
     level?: 'info' | 'warning' | 'error';
     priority?: number;
     isEnabled?: boolean;
@@ -55,6 +57,7 @@ export interface UpdateNotificationRuleCommandInput {
 export interface ListNotificationRulesFilter {
   eventType?: string;
   isEnabled?: boolean;
+  projectId?: string | 'global';
 }
 
 export interface NotificationRulesServicePorts {
@@ -98,6 +101,7 @@ export class NotificationRulesService {
       const createInput: CreateNotificationRuleInput = {
         ruleCode: input.ruleCode,
         eventType: input.eventType,
+        projectId: input.projectId ?? null,
         level: input.level,
         priority: input.priority,
         isEnabled: input.isEnabled,
@@ -287,6 +291,7 @@ function serializeRule(rule: NotificationRule): Record<string, unknown> {
     notificationRuleId: rule.notificationRuleId,
     ruleCode: rule.ruleCode,
     eventType: rule.eventType,
+    projectId: rule.projectId,
     isEnabled: rule.isEnabled,
     priority: rule.priority,
     level: rule.level,
@@ -301,6 +306,7 @@ function serializeRule(rule: NotificationRule): Record<string, unknown> {
 
 const DIFFABLE_FIELDS = [
   'level',
+  'projectId',
   'priority',
   'isEnabled',
   'conditions',
@@ -338,6 +344,7 @@ function mergeRuleWithPatch(
   return {
     ruleCode: existing.ruleCode,
     eventType: existing.eventType,
+    projectId: patch.projectId !== undefined ? patch.projectId : existing.projectId,
     level: patch.level ?? existing.level,
     priority: patch.priority ?? existing.priority,
     conditions: patch.conditions ?? existing.conditions,

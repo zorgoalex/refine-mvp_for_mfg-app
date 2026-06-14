@@ -85,6 +85,28 @@ describe('NotificationRulesService', () => {
       expect(audit.recorded).toHaveLength(0);
       expect(audit.denied).toHaveLength(0);
     });
+
+    it('passes projectId through create/update and keeps null as global scope', async () => {
+      const repo = fakeRepository({ rules: [createRule()] });
+      const service = buildService({ repo });
+
+      await service.create(currentUser(), 'req-project-scope-create', {
+        ...validCreateInput(),
+        projectId: '11111111-1111-4111-8111-111111111111',
+      });
+
+      expect(repo.created[0].projectId).toBe('11111111-1111-4111-8111-111111111111');
+
+      await service.update(currentUser(), 'req-project-scope-update', 'rule-1', {
+        patch: { projectId: null },
+        reason: 'clear project scope',
+      });
+
+      expect(repo.updated.at(-1)).toMatchObject({
+        ruleId: 'rule-1',
+        patch: { projectId: null },
+      });
+    });
   });
 
   describe('update', () => {
@@ -338,6 +360,7 @@ function createRule(overrides: Partial<NotificationRule> = {}): NotificationRule
     notificationRuleId: 'rule-1',
     ruleCode: 'notify-order-overdue-manager',
     eventType: 'order.production_status_changed',
+    projectId: null,
     isEnabled: true,
     priority: 100,
     level: 'warning',
@@ -411,6 +434,7 @@ function fakeRepository(options: { rules?: NotificationRule[] } = {}): Notificat
         notificationRuleId: rules.size === 0 ? 'rule-1' : `rule-${counter}`,
         ruleCode: input.ruleCode,
         eventType: input.eventType,
+        projectId: input.projectId ?? null,
         isEnabled: input.isEnabled,
         priority: input.priority,
         level: input.level,
@@ -432,6 +456,7 @@ function fakeRepository(options: { rules?: NotificationRule[] } = {}): Notificat
       }
       const next: NotificationRule = {
         ...existing,
+        projectId: patch.projectId !== undefined ? patch.projectId : existing.projectId,
         level: patch.level ?? existing.level,
         priority: patch.priority ?? existing.priority,
         isEnabled: patch.isEnabled ?? existing.isEnabled,

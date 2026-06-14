@@ -84,6 +84,46 @@ describe('PgNotificationContextBuilder', () => {
     expect(ctx.deadlineInstanceId).toBe('11111111-1111-4111-8111-111111111111');
   });
 
+  it('derives projectIds from current order project links for order events', async () => {
+    const orderEnvelope: OutboxEventRecord = {
+      outboxEventId: '00000000-0000-0000-0000-000000000006',
+      eventType: 'order.production_status_changed',
+      aggregateType: 'order',
+      aggregateId: '500',
+      payload: { orderId: 500, beforeStatus: '11', afterStatus: '12' },
+      attempts: 0,
+    };
+    const client = makeFakeClient([
+      { rows: [{ order_status_id: 11, client_id: 42, completion_date: null }] },
+      {
+        rows: [
+          { project_id: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' },
+          { project_id: 'BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB' },
+        ],
+      },
+    ]);
+    const builder = new PgNotificationContextBuilder();
+    const ctx = await builder.buildContext(client, orderEnvelope);
+
+    expect(ctx.projectIds).toEqual([
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    ]);
+  });
+
+  it('uses explicit deadline-instance project attribution for deadline envelopes', async () => {
+    const client = makeFakeClient([
+      { rows: [{ order_status_id: 11, client_id: 42, completion_date: null }] },
+      { rows: [{ project_id: 'CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC' }] },
+      { rows: [{ exists: true }] },
+    ]);
+    const builder = new PgNotificationContextBuilder();
+    const ctx = await builder.buildContext(client, baseEnvelope);
+
+    expect(ctx.projectIds).toEqual(['cccccccc-cccc-4ccc-8ccc-cccccccccccc']);
+    expect(ctx.isCurrentDeadlineEvent).toBe(true);
+  });
+
   it('marks isOrderCompleted when the order has a completion_date', async () => {
     const client = makeFakeClient([
       {
@@ -134,7 +174,7 @@ describe('PgNotificationContextBuilder', () => {
 
     expect(ctx.orderId).toBeNull();
     expect(ctx.deadlineInstanceId).toBe('11111111-1111-4111-8111-111111111111');
-    expect(queryCalls).toBe(0);
+    expect(queryCalls).toBe(1);
   });
 
   it('keeps the legacy order.* eventType unchanged', async () => {
@@ -156,6 +196,7 @@ describe('PgNotificationContextBuilder', () => {
   it('computes isCurrentDeadlineEvent=true for a deadline envelope when the staleness query returns a row', async () => {
     const client = makeFakeClient([
       { rows: [{ order_status_id: 11, client_id: 42, completion_date: null }] }, // order top-up
+      { rows: [] }, // project attribution
       { rows: [{ exists: true }] }, // staleness query: row found -> current
     ]);
     const builder = new PgNotificationContextBuilder();
@@ -167,6 +208,7 @@ describe('PgNotificationContextBuilder', () => {
   it('computes isCurrentDeadlineEvent=false for a deadline envelope when the staleness query returns no row', async () => {
     const client = makeFakeClient([
       { rows: [{ order_status_id: 11, client_id: 42, completion_date: null }] }, // order top-up
+      { rows: [] }, // project attribution
       { rows: [] }, // staleness query: no row -> stale
     ]);
     const builder = new PgNotificationContextBuilder();
@@ -194,7 +236,7 @@ describe('PgNotificationContextBuilder', () => {
     const ctx = await builder.buildContext(client, orderEnvelope);
 
     expect(ctx.isCurrentDeadlineEvent).toBe(true);
-    expect(queryCalls).toBe(1); // only the order top-up query
+    expect(queryCalls).toBe(2); // order top-up + project attribution
   });
 
   it('defaults isCurrentDeadlineEvent=true for a deadline envelope missing payload.deadlineEventId (cannot evaluate staleness)', async () => {
@@ -212,7 +254,8 @@ describe('PgNotificationContextBuilder', () => {
       },
     };
     const client = makeFakeClient([
-      { rows: [{ order_status_id: 11, client_id: 42, completion_date: null }] }, // order top-up only
+      { rows: [{ order_status_id: 11, client_id: 42, completion_date: null }] }, // order top-up
+      { rows: [] }, // project attribution
     ]);
     const builder = new PgNotificationContextBuilder();
     const ctx = await builder.buildContext(client, noEventIdEnvelope);
@@ -245,6 +288,6 @@ describe('PgNotificationContextBuilder', () => {
     const ctx = await builder.buildContext(client, noOrderEnvelope);
 
     expect(ctx.isCurrentDeadlineEvent).toBe(true);
-    expect(queryCalls).toBe(0);
+    expect(queryCalls).toBe(1);
   });
 });

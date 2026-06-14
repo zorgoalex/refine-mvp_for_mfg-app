@@ -27,6 +27,16 @@ export class NotificationRulesController {
 
   @ApiQuery({ name: 'eventType', required: false, type: String })
   @ApiQuery({ name: 'isEnabled', required: false, type: Boolean })
+  @ApiQuery({
+    name: 'projectId',
+    required: false,
+    schema: {
+      oneOf: [
+        { type: 'string', format: 'uuid' },
+        { type: 'string', enum: ['global'] },
+      ],
+    },
+  })
   @ApiResponse({ status: 200, description: 'Notification rules' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -166,6 +176,11 @@ function parseListFilter(query: Record<string, unknown>): ListNotificationRulesF
     filter.isEnabled = parseBooleanQueryParam(isEnabled);
   }
 
+  const projectId = query?.['projectId'];
+  if (projectId !== undefined) {
+    filter.projectId = parseProjectIdQueryParam(projectId);
+  }
+
   return filter;
 }
 
@@ -184,6 +199,20 @@ function parseBooleanQueryParam(value: unknown): boolean {
 
   throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid notification rule list filter', {
     errors: [{ field: 'isEnabled', message: 'isEnabled must be a boolean query parameter' }],
+  });
+}
+
+function parseProjectIdQueryParam(value: unknown): string | 'global' {
+  if (value === 'global') {
+    return 'global';
+  }
+
+  if (typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    return value;
+  }
+
+  throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid notification rule list filter', {
+    errors: [{ field: 'projectId', message: 'projectId must be a UUID or global' }],
   });
 }
 

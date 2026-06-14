@@ -19,6 +19,7 @@ function buildContext(overrides: Partial<NotificationEventContext>): Notificatio
     paymentId: null,
     deadlineId: null,
     deadlineInstanceId: null,
+    projectIds: [],
     orderStatusId: null,
     isOrderCompleted: false,
     isCurrentDeadlineEvent: true,
@@ -41,6 +42,8 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
   let orderId: number;
   let projectParticipantUserId: number;
   let deadlineLinkedParticipantUserId: number;
+  let orderProjectId: string;
+  let deadlineProjectId: string;
   const deadlineInstanceId = randomUUID();
 
   beforeAll(async () => {
@@ -86,12 +89,12 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
     const projectRows = await pool.query<{ id: string }>(
       `INSERT INTO project_projects (name) VALUES ('E2E-project-1') RETURNING id`,
     );
-    const projectId = projectRows.rows[0].id;
+    orderProjectId = projectRows.rows[0].id;
 
     await pool.query(
       `INSERT INTO project_order_projects (order_id, project_id, relation_type, is_primary, valid_from, valid_to)
        VALUES ($1::bigint, $2::uuid, 'primary', true, now(), NULL)`,
-      [orderId, projectId],
+      [orderId, orderProjectId],
     );
 
     const participantRows = await pool.query<{ user_id: number }>(
@@ -106,7 +109,7 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
     await pool.query(
       `INSERT INTO project_participants (project_id, participant_type, participant_id_text, role_code, valid_from, valid_to)
        VALUES ($1::uuid, 'user', $2::text, 'member', now(), NULL)`,
-      [projectId, String(projectParticipantUserId)],
+      [orderProjectId, String(projectParticipantUserId)],
     );
 
     // Second project linked to the deadline ONLY via a generic deadline-instance
@@ -115,7 +118,7 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
     const deadlineProjectRows = await pool.query<{ id: string }>(
       `INSERT INTO project_projects (name) VALUES ('E2E-project-deadline-only') RETURNING id`,
     );
-    const deadlineProjectId = deadlineProjectRows.rows[0].id;
+    deadlineProjectId = deadlineProjectRows.rows[0].id;
 
     await pool.query(
       `INSERT INTO project_entity_links (project_id, entity_type_code, entity_id_text, relation_type, valid_from, valid_to)
@@ -159,17 +162,15 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
   });
 
   it('resolves project_participants for typed user participants of projects linked to the order', async () => {
-    const ctx = buildContext({ orderId });
+    const ctx = buildContext({ orderId, projectIds: [orderProjectId] });
     const result = await recipientSource.resolveDynamic(pool, 'project_participants', ctx);
     expect(result).toEqual([projectParticipantUserId]);
   });
 
-  it('resolves project_participants from BOTH order links and deadline_instance generic links (P8 parity)', async () => {
-    const ctx = buildContext({ orderId, deadlineInstanceId });
+  it('resolves project_participants only from effective deadline project attribution', async () => {
+    const ctx = buildContext({ orderId, deadlineInstanceId, projectIds: [deadlineProjectId] });
     const result = await recipientSource.resolveDynamic(pool, 'project_participants', ctx);
-    expect(result.sort((a, b) => a - b)).toEqual(
-      [projectParticipantUserId, deadlineLinkedParticipantUserId].sort((a, b) => a - b),
-    );
+    expect(result).toEqual([deadlineLinkedParticipantUserId]);
   });
 
   it('resolveRoleMembers returns active users for a role', async () => {
