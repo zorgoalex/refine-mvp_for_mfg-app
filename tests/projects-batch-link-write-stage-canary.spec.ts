@@ -490,18 +490,19 @@ function loadProjectProof(projectId: string, idempotencyKey: string): ProjectPro
         FROM public.audit_log
         WHERE entity_type = 'project'
           AND entity_id = '${sqlQuote(projectId)}'
+          AND metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
       ),
       'outboxEvents', (
         SELECT count(*)::int
         FROM public.outbox_events
-        WHERE aggregate_id = '${sqlQuote(projectId)}'
-           OR idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
+        WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
       ),
       'auditRequestId', (
         SELECT request_id
         FROM public.audit_log
         WHERE entity_type = 'project'
           AND entity_id = '${sqlQuote(projectId)}'
+          AND metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
         ORDER BY created_at DESC
         LIMIT 1
       ),
@@ -510,6 +511,7 @@ function loadProjectProof(projectId: string, idempotencyKey: string): ProjectPro
         FROM public.audit_log
         WHERE entity_type = 'project'
           AND entity_id = '${sqlQuote(projectId)}'
+          AND metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
         ORDER BY created_at DESC
         LIMIT 1
       ),
@@ -518,6 +520,7 @@ function loadProjectProof(projectId: string, idempotencyKey: string): ProjectPro
         FROM public.audit_log
         WHERE entity_type = 'project'
           AND entity_id = '${sqlQuote(projectId)}'
+          AND metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
         ORDER BY created_at DESC
         LIMIT 1
       ),
@@ -553,11 +556,25 @@ function expectRestored(proof: RestoreProof, label: string) {
 }
 
 function stripVolatileResponseFields<T extends Record<string, unknown>>(value: T): unknown {
-  const clone = JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
-  delete clone.requestId;
-  delete clone.auditId;
-  delete clone.outboxEventId;
-  return clone;
+  return stripVolatileObject(JSON.parse(JSON.stringify(value)));
+}
+
+function stripVolatileObject(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripVolatileObject);
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === 'requestId' || key === 'auditId' || key === 'outboxEventId') {
+      continue;
+    }
+    result[key] = stripVolatileObject(entry);
+  }
+  return result;
 }
 
 function authHeaders(token: string): Record<string, string> {
