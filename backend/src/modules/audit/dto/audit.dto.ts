@@ -19,6 +19,7 @@ export interface AuditLogEventDto {
   relatedPaymentId: number | null;
   relatedDeadlineId: number | null;
   relatedProductionEventId: number | null;
+  relatedUserId: number | null;
   statusField: string | null;
   statusId: number | null;
   statusName: string | null;

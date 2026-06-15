@@ -12,6 +12,7 @@ export interface AuditLogEventDto {
   relatedPaymentId: number | null;
   relatedDeadlineId: number | null;
   relatedProductionEventId: number | null;
+  relatedUserId: number | null;
   statusField: string | null;
   statusId: number | null;
   statusName: string | null;
@@ -47,12 +48,14 @@ export interface AuditLogListQuery {
   entityType?: string;
   entityId?: string;
   userId?: number;
+  role?: string;
   source?: string;
   relatedOrderId?: number;
   relatedClientId?: number;
   relatedPaymentId?: number;
   relatedDeadlineId?: number;
   relatedProductionEventId?: number;
+  relatedUserId?: number;
   requestId?: string;
   createdFrom?: string;
   createdTo?: string;

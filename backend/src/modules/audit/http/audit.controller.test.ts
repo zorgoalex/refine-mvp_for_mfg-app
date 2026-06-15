@@ -13,6 +13,15 @@ describe('parseAuditListQuery', () => {
   it('rejects invalid pageSize', () => {
     expect(() => parseAuditListQuery({ pageSize: '9999' })).toThrow(ApiError);
   });
+  it('parses relatedUserId and role filters', () => {
+    expect(parseAuditListQuery({ relatedUserId: '158', role: 'admin' })).toEqual({
+      page: 1, pageSize: 50,
+      filters: { relatedUserId: 158, role: 'admin' },
+    });
+  });
+  it('rejects an over-long role value', () => {
+    expect(() => parseAuditListQuery({ role: 'x'.repeat(65) })).toThrow(ApiError);
+  });
 });
 
 describe('AuditController.list', () => {

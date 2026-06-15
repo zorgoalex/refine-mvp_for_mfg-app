@@ -6,8 +6,10 @@ export interface AuditLogFilters {
   entityType?: string;
   entityId?: string;
   userId?: number;
+  role?: string;
   source?: string;
   relatedOrderId?: number;
+  relatedUserId?: number;
   relatedClientId?: number;
   relatedPaymentId?: number;
   relatedDeadlineId?: number;

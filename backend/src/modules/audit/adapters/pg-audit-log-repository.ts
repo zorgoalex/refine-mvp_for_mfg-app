@@ -11,6 +11,7 @@ interface AuditRow extends QueryResultRow {
   related_order_id: string | number | null; related_client_id: string | number | null;
   related_payment_id: string | number | null; related_deadline_id: string | number | null;
   related_production_event_id: string | number | null;
+  related_user_id: string | number | null;
   status_field: string | null; status_id: string | number | null; status_name: string | null;
   status_code: string | null; stage_code: string | null; request_id: string;
   ip_address: string | null; user_agent: string | null;
@@ -21,6 +22,7 @@ interface AuditRow extends QueryResultRow {
 const SELECT_COLUMNS = `
   audit_id, event, entity_type, entity_id, user_id, username, role, source,
   related_order_id, related_client_id, related_payment_id, related_deadline_id, related_production_event_id,
+  related_user_id,
   status_field, status_id, status_name, status_code, stage_code,
   request_id, ip_address, user_agent, before_json, after_json, diff_json, metadata_json, created_at
 `;
@@ -36,12 +38,14 @@ function buildWhere(filters: AuditLogFilters): { where: string; params: unknown[
   if (filters.entityType) add('entity_type', '=', filters.entityType);
   if (filters.entityId) add('entity_id', '=', filters.entityId);
   if (filters.userId != null) add('user_id', '=', filters.userId);
+  if (filters.role) add('role', '=', filters.role);
   if (filters.source) add('source', '=', filters.source);
   if (filters.relatedOrderId != null) add('related_order_id', '=', filters.relatedOrderId);
   if (filters.relatedClientId != null) add('related_client_id', '=', filters.relatedClientId);
   if (filters.relatedPaymentId != null) add('related_payment_id', '=', filters.relatedPaymentId);
   if (filters.relatedDeadlineId != null) add('related_deadline_id', '=', filters.relatedDeadlineId);
   if (filters.relatedProductionEventId != null) add('related_production_event_id', '=', filters.relatedProductionEventId);
+  if (filters.relatedUserId != null) add('related_user_id', '=', filters.relatedUserId);
   if (filters.requestId) add('request_id', '=', filters.requestId);
   if (filters.createdFrom) add('created_at', '>=', filters.createdFrom);
   if (filters.createdTo) add('created_at', '<=', filters.createdTo);
@@ -69,6 +73,7 @@ function mapRow(row: AuditRow): AuditLogEventDto {
     relatedPaymentId: num(row.related_payment_id),
     relatedDeadlineId: num(row.related_deadline_id),
     relatedProductionEventId: num(row.related_production_event_id),
+    relatedUserId: num(row.related_user_id),
     statusField: row.status_field,
     statusId: num(row.status_id),
     statusName: row.status_name,

@@ -65,6 +65,29 @@ describe('PgAuditLogRepository.list', () => {
     expect(JSON.stringify(res.data[0].after)).toContain('bob');
   });
 
+  it('filters by related_user_id and role and maps relatedUserId', async () => {
+    const { client, calls } = db([
+      { rows: [{ total: 1 }] },
+      { rows: [{
+        audit_id: 'a3', event: 'org.direction_head_added', entity_type: 'direction', entity_id: '5',
+        user_id: 1, username: 'admin', role: 'admin', source: 'backend-org-command',
+        related_order_id: null, related_client_id: null, related_payment_id: null,
+        related_deadline_id: null, related_production_event_id: null, related_user_id: 158,
+        status_field: null, status_id: null, status_name: null, status_code: null, stage_code: null,
+        request_id: 'req3', ip_address: null, user_agent: null,
+        before_json: null, after_json: null, diff_json: null, metadata_json: null,
+        created_at: '2026-06-15T10:00:00.000Z',
+      }] },
+    ]);
+    const repo = new PgAuditLogRepository(client);
+    const res = await repo.list({ currentUser: undefined, filters: { relatedUserId: 158, role: 'admin' }, page: 1, pageSize: 50, requestId: 'rq' });
+    expect(calls[0].text).toMatch(/related_user_id = \$/);
+    expect(calls[0].text).toMatch(/role = \$/);
+    expect(calls[0].params).toContain(158);
+    expect(calls[0].params).toContain('admin');
+    expect(res.data[0].relatedUserId).toBe(158);
+  });
+
   it('emits no WHERE when no filters are set and computes offset', async () => {
     const { client, calls } = db([{ rows: [{ total: 0 }] }, { rows: [] }]);
     const repo = new PgAuditLogRepository(client);
