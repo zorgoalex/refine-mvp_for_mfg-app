@@ -1,7 +1,7 @@
 import type { DatabaseClient } from '../../../database/database.types';
 import { resolveEffectiveEventType } from '../domain/deadline-event-extractor';
 import type { OutboxEventRecord } from '../domain/outbox-event.types';
-import type { NotificationEventContext } from '../domain/notification-rule.types';
+import type { DeadlineNotificationEntityType, NotificationEventContext } from '../domain/notification-rule.types';
 import type { NotificationContextBuilderPort } from '../ports/notification-context.port';
 
 interface OrderTopUpRow {
@@ -12,6 +12,10 @@ interface OrderTopUpRow {
 
 interface DeadlineEventCurrentRow {
   exists: boolean;
+}
+
+interface DeadlineEntityTypeRow {
+  entity_type: unknown;
 }
 
 interface ProjectAttributionRow {
@@ -30,6 +34,10 @@ function toNullableNumber(value: unknown): number | null {
 
 function toNullableString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+function toDeadlineEntityType(value: unknown): DeadlineNotificationEntityType | null {
+  return value === 'order' || value === 'order_stage' ? value : null;
 }
 
 export class PgNotificationContextBuilder implements NotificationContextBuilderPort {
@@ -63,6 +71,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
     }
 
     const deadlineInstanceId = event.aggregateType === 'deadline' ? event.aggregateId : null;
+    const deadlineEntityType = await this.resolveDeadlineEntityType(client, deadlineInstanceId);
     const projectIds = await this.resolveProjectIds(client, orderId, deadlineInstanceId);
     const isCurrentDeadlineEvent = await this.resolveIsCurrentDeadlineEvent(client, event, orderId);
 
@@ -75,6 +84,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       clientId,
       paymentId,
       deadlineId,
+      deadlineEntityType,
       deadlineInstanceId,
       projectIds,
       orderStatusId,
@@ -82,6 +92,25 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       isCurrentDeadlineEvent,
       payload,
     };
+  }
+
+  private async resolveDeadlineEntityType(
+    client: DatabaseClient,
+    deadlineInstanceId: string | null,
+  ): Promise<DeadlineNotificationEntityType | null> {
+    if (deadlineInstanceId == null) {
+      return null;
+    }
+
+    const result = await client.query<DeadlineEntityTypeRow>(
+      `SELECT entity_type
+         FROM public.deadline_instances
+        WHERE deadline_id = $1::uuid
+        LIMIT 1`,
+      [deadlineInstanceId],
+    );
+
+    return toDeadlineEntityType(result.rows[0]?.entity_type);
   }
 
   /**

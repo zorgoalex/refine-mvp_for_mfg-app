@@ -4,10 +4,18 @@ export interface ConditionResult { matched: boolean; skipReason?: string; }
 
 export function evaluateRuleConditions(
   conditions: NotificationRuleConditions,
-  ctx: Pick<NotificationEventContext, 'orderStatusId' | 'isOrderCompleted' | 'isCurrentDeadlineEvent'>,
+  ctx: Pick<NotificationEventContext, 'orderStatusId' | 'isOrderCompleted' | 'deadlineEntityType' | 'isCurrentDeadlineEvent'>,
 ): ConditionResult {
   if (conditions.excludeCompletedOrders && ctx.isOrderCompleted) {
     return { matched: false, skipReason: 'order_completed' };
+  }
+  if (conditions.deadlineEntityTypes?.length) {
+    if (ctx.deadlineEntityType == null) {
+      return { matched: false, skipReason: 'deadline_entity_type_unavailable' };
+    }
+    if (!conditions.deadlineEntityTypes.includes(ctx.deadlineEntityType)) {
+      return { matched: false, skipReason: 'deadline_entity_type_not_allowed' };
+    }
   }
   if (conditions.excludeOrderStatusIds?.length && ctx.orderStatusId != null
       && conditions.excludeOrderStatusIds.includes(ctx.orderStatusId)) {

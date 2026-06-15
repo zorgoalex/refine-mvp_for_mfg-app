@@ -1,4 +1,5 @@
 export type NotificationLevel = 'info' | 'warning' | 'error';
+export type DeadlineNotificationEntityType = 'order' | 'order_stage';
 
 export type RecipientResolverKind =
   | 'order_manager'
@@ -9,8 +10,10 @@ export type RecipientResolverKind =
 
 export interface NotificationRuleConditions {
   allowedFromOrderStatusIds?: number[];
+  deadlineEntityTypes?: DeadlineNotificationEntityType[];
   excludeOrderStatusIds?: number[];
   excludeCompletedOrders?: boolean;
+  requireCurrentDeadlineEvent?: boolean;
 }
 
 export interface NotificationRuleRecipients {
@@ -41,6 +44,7 @@ export interface NotificationEventTypeDto {
   contextFields: string[];
   supportedResolvers: RecipientResolverKind[];
   supportsOrderConditions: boolean;
+  supportsDeadlineConditions: boolean;
 }
 
 export interface CreateNotificationRuleRequest {

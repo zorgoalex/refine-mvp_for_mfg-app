@@ -3,7 +3,12 @@ import { evaluateRuleConditions } from './notification-condition-evaluator';
 import { getMutatingActionConditionSkipReason } from '../../deadlines/application/deadline-action-evaluator';
 import type { NotificationRuleConditions } from './notification-rule.types';
 
-const ctx = { orderStatusId: 30, isOrderCompleted: false, isCurrentDeadlineEvent: true } as any;
+const ctx = {
+  orderStatusId: 30,
+  isOrderCompleted: false,
+  deadlineEntityType: null,
+  isCurrentDeadlineEvent: true,
+} as const;
 
 describe('evaluateRuleConditions', () => {
   it('passes when no conditions', () => {
@@ -21,6 +26,23 @@ describe('evaluateRuleConditions', () => {
   it('honors excludeOrderStatusIds', () => {
     expect(evaluateRuleConditions({ excludeOrderStatusIds: [30] }, ctx))
       .toEqual({ matched: false, skipReason: 'status_excluded' });
+  });
+  it('honors deadlineEntityTypes for final order deadline rules', () => {
+    expect(evaluateRuleConditions(
+      { deadlineEntityTypes: ['order'] },
+      { ...ctx, deadlineEntityType: 'order' },
+    )).toEqual({ matched: true });
+
+    expect(evaluateRuleConditions(
+      { deadlineEntityTypes: ['order'] },
+      { ...ctx, deadlineEntityType: 'order_stage' },
+    )).toEqual({ matched: false, skipReason: 'deadline_entity_type_not_allowed' });
+  });
+  it('fails closed when deadlineEntityTypes is configured but context has no deadline entity type', () => {
+    expect(evaluateRuleConditions(
+      { deadlineEntityTypes: ['order'] },
+      { ...ctx, deadlineEntityType: null },
+    )).toEqual({ matched: false, skipReason: 'deadline_entity_type_unavailable' });
   });
 
   describe('requireCurrentDeadlineEvent staleness guard', () => {
@@ -116,6 +138,7 @@ describe('parity: lenient deadline-action condition gate vs. evaluateRuleConditi
       const engineResult = evaluateRuleConditions(conditions, {
         orderStatusId: orderContext?.orderStatusId ?? null,
         isOrderCompleted: orderContext?.isCompleted ?? false,
+        deadlineEntityType: null,
         isCurrentDeadlineEvent,
       });
 

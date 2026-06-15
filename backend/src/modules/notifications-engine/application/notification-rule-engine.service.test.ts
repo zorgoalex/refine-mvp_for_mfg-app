@@ -20,6 +20,7 @@ function ctx(overrides: Partial<NotificationEventContext> = {}): NotificationEve
     clientId: 12,
     paymentId: null,
     deadlineId: null,
+    deadlineEntityType: null,
     deadlineInstanceId: null,
     projectIds: [],
     orderStatusId: 30,

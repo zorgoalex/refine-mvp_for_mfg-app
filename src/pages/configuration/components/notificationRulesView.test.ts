@@ -21,8 +21,10 @@ const baseRule: NotificationRuleDto = {
   priority: 100,
   level: 'warning',
   conditions: {
+    deadlineEntityTypes: ['order'],
     excludeCompletedOrders: true,
     excludeOrderStatusIds: [7, 8],
+    requireCurrentDeadlineEvent: true,
   },
   recipients: {
     resolvers: ['order_manager'],
@@ -62,6 +64,8 @@ describe('notificationRulesView', () => {
         priority: 100,
         isEnabled: true,
         excludeCompletedOrders: true,
+        deadlineEntityTypes: ['order'],
+        requireCurrentDeadlineEvent: true,
         allowedFromOrderStatusIdsText: '',
         excludeOrderStatusIdsText: '7,8',
         resolvers: ['order_manager'],
@@ -79,8 +83,10 @@ describe('notificationRulesView', () => {
         priority: 100,
         isEnabled: true,
         conditions: {
+          deadlineEntityTypes: ['order'],
           excludeCompletedOrders: true,
           excludeOrderStatusIds: [7, 8],
+          requireCurrentDeadlineEvent: true,
         },
         recipients: {
           resolvers: ['order_manager'],
@@ -96,6 +102,8 @@ describe('notificationRulesView', () => {
         ...emptyDraft(),
         ruleCode: 'r',
         eventType: 'order.status_changed',
+        deadlineEntityTypes: [],
+        requireCurrentDeadlineEvent: true,
         allowedFromOrderStatusIdsText: '1, 2',
         userIdsText: '100, 200',
         resolvers: [],
@@ -113,10 +121,16 @@ describe('notificationRulesView', () => {
         ruleCode: 'project-deadline',
         eventType: 'DEADLINE_EXPIRED',
         projectId: '11111111-1111-4111-8111-111111111111',
+        deadlineEntityTypes: ['order_stage'],
+        requireCurrentDeadlineEvent: false,
         resolvers: ['project_participants'],
       });
 
       expect(payload.projectId).toBe('11111111-1111-4111-8111-111111111111');
+      expect(payload.conditions).toEqual({
+        deadlineEntityTypes: ['order_stage'],
+        requireCurrentDeadlineEvent: false,
+      });
     });
   });
 
@@ -144,6 +158,8 @@ describe('notificationRulesView', () => {
       // the form (unchecked excludeCompletedOrders, blanked both id lists).
       const cleared = buildDraftFromRule(baseRule);
       cleared.excludeCompletedOrders = false;
+      cleared.deadlineEntityTypes = [];
+      cleared.requireCurrentDeadlineEvent = true;
       cleared.allowedFromOrderStatusIdsText = '';
       cleared.excludeOrderStatusIdsText = '';
 
@@ -179,6 +195,8 @@ describe('notificationRulesView', () => {
         priority: 100,
         isEnabled: true,
         excludeCompletedOrders: true,
+        deadlineEntityTypes: ['order'],
+        requireCurrentDeadlineEvent: true,
         allowedFromOrderStatusIdsText: '',
         excludeOrderStatusIdsText: '7, 8',
         resolvers: ['order_manager'],
@@ -198,6 +216,8 @@ describe('notificationRulesView', () => {
       expect(draft.priority).toBe(100);
       expect(draft.isEnabled).toBe(true);
       expect(draft.excludeCompletedOrders).toBe(false);
+      expect(draft.deadlineEntityTypes).toEqual([]);
+      expect(draft.requireCurrentDeadlineEvent).toBe(true);
       expect(draft.allowedFromOrderStatusIdsText).toBe('');
       expect(draft.excludeOrderStatusIdsText).toBe('');
       expect(draft.resolvers).toEqual([]);

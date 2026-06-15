@@ -23,6 +23,7 @@ import { ApiError } from '../../../api/apiError';
 import { notificationRulesApi } from '../../../api/notificationRulesApi';
 import { projectsApi } from '../../../api/projectsApi';
 import type {
+  DeadlineNotificationEntityType,
   NotificationEventTypeDto,
   NotificationLevel,
   NotificationRuleDto,
@@ -58,6 +59,11 @@ const LEVEL_LABELS: Record<NotificationLevel, string> = {
   error: 'Ошибка',
 };
 
+const DEADLINE_ENTITY_TYPE_LABELS: Record<DeadlineNotificationEntityType, string> = {
+  order: 'Срок заказа',
+  order_stage: 'Срок этапа заказа',
+};
+
 type EditorMode =
   | { kind: 'closed' }
   | { kind: 'create' }
@@ -73,6 +79,30 @@ function describeRecipients(rule: NotificationRuleDto): string {
   }
   if (rule.recipients.userIds?.length) {
     parts.push(`users: ${rule.recipients.userIds.join(', ')}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : '—';
+}
+
+function describeConditions(rule: NotificationRuleDto): string {
+  const parts: string[] = [];
+  if (rule.conditions.deadlineEntityTypes?.length) {
+    parts.push(
+      `deadline: ${rule.conditions.deadlineEntityTypes
+        .map((type) => DEADLINE_ENTITY_TYPE_LABELS[type] ?? type)
+        .join(', ')}`,
+    );
+  }
+  if (rule.conditions.requireCurrentDeadlineEvent !== undefined) {
+    parts.push(rule.conditions.requireCurrentDeadlineEvent ? 'только текущий срок' : 'включая старые события');
+  }
+  if (rule.conditions.excludeCompletedOrders) {
+    parts.push('без завершённых');
+  }
+  if (rule.conditions.allowedFromOrderStatusIds?.length) {
+    parts.push(`из статусов: ${rule.conditions.allowedFromOrderStatusIds.join(', ')}`);
+  }
+  if (rule.conditions.excludeOrderStatusIds?.length) {
+    parts.push(`исключить статусы: ${rule.conditions.excludeOrderStatusIds.join(', ')}`);
   }
   return parts.length > 0 ? parts.join(' · ') : '—';
 }
@@ -404,6 +434,11 @@ export function NotificationRulesConfig() {
               render: (_, rule) => <Text type="secondary">{describeRecipients(rule)}</Text>,
             },
             {
+              title: 'Условия',
+              key: 'conditions',
+              render: (_, rule) => <Text type="secondary">{describeConditions(rule)}</Text>,
+            },
+            {
               title: '',
               key: 'actions',
               width: 160,
@@ -521,6 +556,25 @@ export function NotificationRulesConfig() {
                 onChange={(event) => updateDraft({ excludeCompletedOrders: event.target.checked })}
               >
                 Исключить завершённые заказы
+              </Checkbox>
+              <Select<DeadlineNotificationEntityType[]>
+                mode="multiple"
+                value={draft.deadlineEntityTypes}
+                disabled={selectedEventType ? !selectedEventType.supportsDeadlineConditions : true}
+                onChange={(values) => updateDraft({ deadlineEntityTypes: values })}
+                options={Object.entries(DEADLINE_ENTITY_TYPE_LABELS).map(([value, label]) => ({
+                  value: value as DeadlineNotificationEntityType,
+                  label,
+                }))}
+                placeholder="Тип срока"
+                allowClear
+              />
+              <Checkbox
+                checked={draft.requireCurrentDeadlineEvent}
+                disabled={selectedEventType ? !selectedEventType.supportsDeadlineConditions : true}
+                onChange={(event) => updateDraft({ requireCurrentDeadlineEvent: event.target.checked })}
+              >
+                Только текущее событие срока
               </Checkbox>
               <Input
                 addonBefore="Из статусов"

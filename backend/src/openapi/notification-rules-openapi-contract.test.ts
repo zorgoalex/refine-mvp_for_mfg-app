@@ -35,4 +35,44 @@ describe('notification rules OpenAPI contract', () => {
       expect(section).toContain('nullable: true');
     }
   });
+
+  it('documents deadlineEntityTypes on notification rule conditions', () => {
+    const section = sectionBetween('    NotificationRuleConditions:', '\n\n    NotificationRuleRecipients:');
+    const deadlineEntityTypesSection = sectionBetweenIn(
+      section,
+      '        deadlineEntityTypes:',
+      '        excludeOrderStatusIds:',
+    );
+
+    expect(deadlineEntityTypesSection).toContain('type: array');
+    expect(deadlineEntityTypesSection).toContain('minItems: 1');
+    expect(deadlineEntityTypesSection).toContain('items:');
+    expect(deadlineEntityTypesSection).toContain('type: string');
+    expect(extractEnumValues(deadlineEntityTypesSection)).toEqual(['order', 'order_stage']);
+    expect(section).toContain('requireCurrentDeadlineEvent:');
+    expect(section).toContain('type: boolean');
+  });
+
+  it('documents deadline condition support on notification event metadata', () => {
+    const section = sectionBetween('    NotificationEventType:', '\n\n    NotificationEventTypeListResponse:');
+
+    expect(section).toContain('- supportsDeadlineConditions');
+    expect(section).toContain('supportsDeadlineConditions:');
+    expect(section).toContain('type: boolean');
+  });
 });
+
+function sectionBetweenIn(source: string, start: string, end: string): string {
+  const startIndex = source.indexOf(start);
+  expect(startIndex).toBeGreaterThanOrEqual(0);
+  const endIndex = source.indexOf(end, startIndex + start.length);
+  expect(endIndex).toBeGreaterThan(startIndex);
+  return source.slice(startIndex, endIndex);
+}
+
+function extractEnumValues(section: string): string[] {
+  return section
+    .split('\n')
+    .map((line) => /^\s+-\s+(.+)$/.exec(line)?.[1])
+    .filter((value): value is string => value != null);
+}

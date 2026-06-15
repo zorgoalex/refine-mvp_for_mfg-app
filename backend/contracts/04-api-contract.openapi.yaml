@@ -9484,11 +9484,21 @@ components:
           type: array
           items:
             type: integer
+        deadlineEntityTypes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+              - order
+              - order_stage
         excludeOrderStatusIds:
           type: array
           items:
             type: integer
         excludeCompletedOrders:
+          type: boolean
+        requireCurrentDeadlineEvent:
           type: boolean
 
     NotificationRuleRecipients:
@@ -9654,6 +9664,7 @@ components:
         - contextFields
         - supportedResolvers
         - supportsOrderConditions
+        - supportsDeadlineConditions
       properties:
         eventType:
           type: string
@@ -9682,6 +9693,8 @@ components:
               - stage_assignee
               - project_participants
         supportsOrderConditions:
+          type: boolean
+        supportsDeadlineConditions:
           type: boolean
 
     NotificationEventTypeListResponse:

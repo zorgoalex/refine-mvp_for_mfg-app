@@ -46,6 +46,7 @@ describe('parseCreateNotificationRuleRequest', () => {
         allowedFromOrderStatusIds: [1, 2],
         excludeOrderStatusIds: [7],
         excludeCompletedOrders: true,
+        requireCurrentDeadlineEvent: false,
       },
       recipients: {
         resolvers: ['order_manager'],
@@ -66,6 +67,7 @@ describe('parseCreateNotificationRuleRequest', () => {
         allowedFromOrderStatusIds: [1, 2],
         excludeOrderStatusIds: [7],
         excludeCompletedOrders: true,
+        requireCurrentDeadlineEvent: false,
       },
       recipients: {
         resolvers: ['order_manager'],
@@ -89,6 +91,50 @@ describe('parseCreateNotificationRuleRequest', () => {
     });
 
     expect(result.projectId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('preserves deadlineEntityTypes in conditions on create', () => {
+    const result = parseCreateNotificationRuleRequest({
+      ruleCode: 'deadline-expired-order',
+      eventType: 'DEADLINE_EXPIRED',
+      conditions: { deadlineEntityTypes: ['order'] },
+      recipients: { resolvers: ['order_manager'] },
+    });
+
+    expect(result.conditions).toEqual({ deadlineEntityTypes: ['order'] });
+  });
+
+  it('preserves requireCurrentDeadlineEvent in conditions on create', () => {
+    const result = parseCreateNotificationRuleRequest({
+      ruleCode: 'deadline-expired-current-only',
+      eventType: 'DEADLINE_EXPIRED',
+      conditions: { requireCurrentDeadlineEvent: true },
+      recipients: { resolvers: ['order_manager'] },
+    });
+
+    expect(result.conditions).toEqual({ requireCurrentDeadlineEvent: true });
+  });
+
+  it('rejects unsupported deadlineEntityTypes values on create', () => {
+    expectInvalidPayloadError(() =>
+      parseCreateNotificationRuleRequest({
+        ruleCode: 'deadline-expired-client',
+        eventType: 'DEADLINE_EXPIRED',
+        conditions: { deadlineEntityTypes: ['client'] },
+        recipients: { resolvers: ['order_manager'] },
+      }),
+    );
+  });
+
+  it('rejects empty deadlineEntityTypes on create', () => {
+    expectInvalidPayloadError(() =>
+      parseCreateNotificationRuleRequest({
+        ruleCode: 'deadline-expired-empty',
+        eventType: 'DEADLINE_EXPIRED',
+        conditions: { deadlineEntityTypes: [] },
+        recipients: { resolvers: ['order_manager'] },
+      }),
+    );
   });
 
   it('rejects a missing ruleCode', () => {
@@ -314,6 +360,38 @@ describe('parseUpdateNotificationRuleRequest', () => {
         recipients: { roleCodes: ['admin'] },
       },
     });
+  });
+
+  it('preserves deadlineEntityTypes in conditions on update', () => {
+    const result = parseUpdateNotificationRuleRequest({
+      conditions: { deadlineEntityTypes: ['order'] },
+    });
+
+    expect(result.patch.conditions).toEqual({ deadlineEntityTypes: ['order'] });
+  });
+
+  it('preserves requireCurrentDeadlineEvent in conditions on update', () => {
+    const result = parseUpdateNotificationRuleRequest({
+      conditions: { requireCurrentDeadlineEvent: false },
+    });
+
+    expect(result.patch.conditions).toEqual({ requireCurrentDeadlineEvent: false });
+  });
+
+  it('rejects unsupported deadlineEntityTypes values on update', () => {
+    expectInvalidPayloadError(() =>
+      parseUpdateNotificationRuleRequest({
+        conditions: { deadlineEntityTypes: ['client'] },
+      }),
+    );
+  });
+
+  it('rejects empty deadlineEntityTypes on update', () => {
+    expectInvalidPayloadError(() =>
+      parseUpdateNotificationRuleRequest({
+        conditions: { deadlineEntityTypes: [] },
+      }),
+    );
   });
 
   it('rejects an empty update body', () => {

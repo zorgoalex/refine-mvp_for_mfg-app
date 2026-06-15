@@ -14,6 +14,7 @@ export interface NotificationEventDefinition {
   contextFields: EventContextField[];
   supportedResolvers: RecipientResolverKind[];
   supportsOrderConditions: boolean;
+  supportsDeadlineConditions: boolean;
 }
 
 const ORDER_RESOLVERS: RecipientResolverKind[] = [
@@ -32,6 +33,7 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     contextFields: ['orderId', 'clientId'],
     supportedResolvers: ORDER_RESOLVERS,
     supportsOrderConditions: true,
+    supportsDeadlineConditions: false,
   },
   'order.production_status_changed': {
     eventType: 'order.production_status_changed',
@@ -40,6 +42,7 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     contextFields: ['orderId', 'clientId'],
     supportedResolvers: ORDER_RESOLVERS,
     supportsOrderConditions: true,
+    supportsDeadlineConditions: false,
   },
   'order.payment_status_changed': {
     eventType: 'order.payment_status_changed',
@@ -48,6 +51,7 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     contextFields: ['orderId', 'clientId', 'paymentId'],
     supportedResolvers: ORDER_RESOLVERS,
     supportsOrderConditions: true,
+    supportsDeadlineConditions: false,
   },
   DEADLINE_EXPIRED: {
     eventType: 'DEADLINE_EXPIRED',
@@ -56,6 +60,7 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     contextFields: ['orderId', 'deadlineId'],
     supportedResolvers: ORDER_RESOLVERS,
     supportsOrderConditions: true,
+    supportsDeadlineConditions: true,
   },
   PROJECT_DEADLINE_OVERDUE: {
     eventType: 'PROJECT_DEADLINE_OVERDUE',
@@ -64,6 +69,7 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     contextFields: ['orderId', 'deadlineId'],
     supportedResolvers: ['project_participants'],
     supportsOrderConditions: false,
+    supportsDeadlineConditions: true,
   },
 };
 
@@ -76,7 +82,9 @@ export function isEngineOwnedEvent(eventType: string): boolean {
 }
 
 export function listConfigurableEventTypes(): NotificationEventDefinition[] {
-  return Object.values(NOTIFICATION_EVENT_REGISTRY).filter((d) => d.owner === 'engine');
+  return Object.values(NOTIFICATION_EVENT_REGISTRY).filter(
+    (d) => d.owner === 'engine' || d.supportsDeadlineConditions,
+  );
 }
 
 /**

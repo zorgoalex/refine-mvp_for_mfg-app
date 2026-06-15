@@ -69,4 +69,26 @@ describe('validateNotificationRuleInput', () => {
       { knownRoleCodes: [] },
     )).toEqual({ ok: false, code: 'ORDER_CONDITION_UNSUPPORTED' });
   });
+
+  it('accepts deadlineEntityTypes for deadline events', () => {
+    expect(validateNotificationRuleInput(
+      {
+        ...base,
+        eventType: 'DEADLINE_EXPIRED',
+        conditions: { deadlineEntityTypes: ['order'] },
+      },
+      { knownRoleCodes: [] },
+    )).toEqual({ ok: true });
+  });
+
+  it('rejects deadlineEntityTypes for non-deadline events', () => {
+    expect(validateNotificationRuleInput(
+      {
+        ...base,
+        eventType: 'order.status_changed',
+        conditions: { deadlineEntityTypes: ['order'] },
+      },
+      { knownRoleCodes: [] },
+    )).toEqual({ ok: false, code: 'DEADLINE_CONDITION_UNSUPPORTED' });
+  });
 });

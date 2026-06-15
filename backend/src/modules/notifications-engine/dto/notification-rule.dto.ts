@@ -37,12 +37,15 @@ const integerArraySchema = z.array(z.number().int());
 const stringArraySchema = z.array(z.string());
 const nullableTemplateSchema = z.string().nullable();
 const projectIdSchema = z.string().uuid().nullable();
+const deadlineEntityTypesSchema = z.array(z.enum(['order', 'order_stage'])).min(1);
 
 const conditionsSchema = z
   .object({
     allowedFromOrderStatusIds: integerArraySchema.optional(),
+    deadlineEntityTypes: deadlineEntityTypesSchema.optional(),
     excludeOrderStatusIds: integerArraySchema.optional(),
     excludeCompletedOrders: z.boolean().optional(),
+    requireCurrentDeadlineEvent: z.boolean().optional(),
   })
   .strict();
 

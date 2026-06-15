@@ -63,5 +63,10 @@ export function validateNotificationRuleInput(
     return { ok: false, code: 'ORDER_CONDITION_UNSUPPORTED' };
   }
 
+  const usesDeadlineConditions = (input.conditions.deadlineEntityTypes?.length ?? 0) > 0;
+  if (usesDeadlineConditions && !def.supportsDeadlineConditions) {
+    return { ok: false, code: 'DEADLINE_CONDITION_UNSUPPORTED' };
+  }
+
   return { ok: true };
 }

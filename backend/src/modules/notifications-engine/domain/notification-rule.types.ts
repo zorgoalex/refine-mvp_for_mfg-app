@@ -1,9 +1,11 @@
 import type { RecipientResolverKind } from './notification-event-registry';
 
 export type NotificationLevel = 'info' | 'warning' | 'error';
+export type DeadlineNotificationEntityType = 'order' | 'order_stage';
 
 export interface NotificationRuleConditions {
   allowedFromOrderStatusIds?: number[];
+  deadlineEntityTypes?: DeadlineNotificationEntityType[];
   excludeOrderStatusIds?: number[];
   excludeCompletedOrders?: boolean;
   /**
@@ -48,6 +50,7 @@ export interface NotificationEventContext {
   clientId: number | null;
   paymentId: number | null;
   deadlineId: number | null;
+  deadlineEntityType: DeadlineNotificationEntityType | null;
   /**
    * The deadline INSTANCE id (UUID string) for deadline-derived events, or
    * `null` for non-deadline events. This is the

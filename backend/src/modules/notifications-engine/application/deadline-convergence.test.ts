@@ -40,6 +40,7 @@ function deadlineContext(overrides: Partial<NotificationEventContext> = {}): Not
     clientId: 42,
     paymentId: null,
     deadlineId: null,
+    deadlineEntityType: 'order',
     deadlineInstanceId: 'deadline-instance-1',
     projectIds: [],
     orderStatusId: 11,
@@ -91,6 +92,84 @@ function engine(deps: Fakes): NotificationRuleEngineService {
 }
 
 describe('Deadline convergence — zero double-send (engine fakes)', () => {
+  const finalOrderOnlyConditions = {
+    deadlineEntityTypes: ['order' as const],
+    excludeOrderStatusIds: [7],
+    excludeCompletedOrders: true,
+  };
+
+  function finalOrderOnlyRule(overrides: Partial<NotificationRule> = {}): NotificationRule {
+    return rule({
+      notificationRuleId: 'final-order-only',
+      ruleCode: 'deadline-final-order-only',
+      conditions: finalOrderOnlyConditions,
+      recipients: { resolvers: ['order_manager'] },
+      titleTemplate: 'Order {orderId} final deadline {secret}',
+      messageTemplate: 'Order {orderId} expired payload={payload} phone={clientPhone} token={secret}',
+      ...overrides,
+    });
+  }
+
+  it('fires a final-order-only manager rule only for current order deadlines and writes redacted text', async () => {
+    const currentOrderCtx = deadlineContext({
+      deadlineEntityType: 'order',
+      orderStatusId: 30,
+      isOrderCompleted: false,
+      isCurrentDeadlineEvent: true,
+      payload: {
+        orderId: 500,
+        secret: 'sk-should-not-render',
+        clientPhone: '+15555550123',
+        payload: 'raw-payload-should-not-render',
+      },
+    });
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [finalOrderOnlyRule()]) },
+      contextBuilder: { buildContext: vi.fn(async () => currentOrderCtx) },
+      recipientResolver: { resolve: vi.fn(async () => [100]) },
+      runtimeConfig: { isEngineOwnsDeadline: () => true },
+    });
+
+    const result = await engine(deps).processEvent(client, deadlineEnvelope());
+
+    expect(result).toEqual({ matched: 1, created: 1 });
+    expect(deps.recipientResolver.resolve).toHaveBeenCalledWith(
+      client,
+      { resolvers: ['order_manager'] },
+      currentOrderCtx,
+    );
+    expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
+    const inserted = deps.notificationWrite.insertIfAbsent.mock.calls[0][1];
+    expect(inserted.title).toContain('500');
+    expect(inserted.message).toContain('500');
+    for (const text of [inserted.title, inserted.message]) {
+      expect(text).not.toContain('sk-should-not-render');
+      expect(text).not.toContain('+15555550123');
+      expect(text).not.toContain('raw-payload-should-not-render');
+      expect(text).not.toMatch(/\{payload\}|\{clientPhone\}|\{secret\}/);
+    }
+  });
+
+  it.each([
+    ['deadlineEntityType is order_stage', { deadlineEntityType: 'order_stage' as const }],
+    ['orderStatusId is excluded', { orderStatusId: 7 }],
+    ['order is completed', { isOrderCompleted: true }],
+    ['deadline event is stale', { isCurrentDeadlineEvent: false }],
+  ])('does not write a final-order-only manager notification when %s', async (_name, contextOverride) => {
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [finalOrderOnlyRule()]) },
+      contextBuilder: { buildContext: vi.fn(async () => deadlineContext(contextOverride)) },
+      recipientResolver: { resolve: vi.fn(async () => [100]) },
+      runtimeConfig: { isEngineOwnsDeadline: () => true },
+    });
+
+    const result = await engine(deps).processEvent(client, deadlineEnvelope());
+
+    expect(result).toEqual({ matched: 0, created: 0 });
+    expect(deps.recipientResolver.resolve).not.toHaveBeenCalled();
+    expect(deps.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
+  });
+
   it('engine delivers manager/assignee/participants notifications for DEADLINE_EXPIRED envelope when ownsDeadline=true', async () => {
     const seededRules: NotificationRule[] = [
       rule({

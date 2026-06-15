@@ -1,5 +1,6 @@
 import type {
   CreateNotificationRuleRequest,
+  DeadlineNotificationEntityType,
   NotificationLevel,
   NotificationRuleDto,
   RecipientResolverKind,
@@ -15,6 +16,8 @@ export interface NotificationRuleDraft {
   priority: number;
   isEnabled: boolean;
   excludeCompletedOrders: boolean;
+  deadlineEntityTypes: DeadlineNotificationEntityType[];
+  requireCurrentDeadlineEvent: boolean;
   allowedFromOrderStatusIdsText: string;
   excludeOrderStatusIdsText: string;
   resolvers: RecipientResolverKind[];
@@ -33,6 +36,8 @@ export function emptyDraft(): NotificationRuleDraft {
     priority: 100,
     isEnabled: true,
     excludeCompletedOrders: false,
+    deadlineEntityTypes: [],
+    requireCurrentDeadlineEvent: true,
     allowedFromOrderStatusIdsText: '',
     excludeOrderStatusIdsText: '',
     resolvers: [],
@@ -52,6 +57,8 @@ export function buildDraftFromRule(rule: NotificationRuleDto): NotificationRuleD
     priority: rule.priority,
     isEnabled: rule.isEnabled,
     excludeCompletedOrders: rule.conditions.excludeCompletedOrders ?? false,
+    deadlineEntityTypes: rule.conditions.deadlineEntityTypes ?? [],
+    requireCurrentDeadlineEvent: rule.conditions.requireCurrentDeadlineEvent ?? true,
     allowedFromOrderStatusIdsText: formatIdList(rule.conditions.allowedFromOrderStatusIds),
     excludeOrderStatusIdsText: formatIdList(rule.conditions.excludeOrderStatusIds),
     resolvers: rule.recipients.resolvers ?? [],
@@ -95,9 +102,21 @@ function normalizeTemplate(value: string): string | null {
 function buildConditions(draft: Partial<NotificationRuleDraft>) {
   const conditions: {
     allowedFromOrderStatusIds?: number[];
+    deadlineEntityTypes?: DeadlineNotificationEntityType[];
     excludeOrderStatusIds?: number[];
     excludeCompletedOrders?: boolean;
+    requireCurrentDeadlineEvent?: boolean;
   } = {};
+
+  if (draft.deadlineEntityTypes && draft.deadlineEntityTypes.length > 0) {
+    conditions.deadlineEntityTypes = [...draft.deadlineEntityTypes];
+  }
+
+  if (draft.requireCurrentDeadlineEvent === false) {
+    conditions.requireCurrentDeadlineEvent = false;
+  } else if (draft.requireCurrentDeadlineEvent === true && draft.deadlineEntityTypes?.length) {
+    conditions.requireCurrentDeadlineEvent = true;
+  }
 
   const allowed = parseIdList(draft.allowedFromOrderStatusIdsText);
   if (allowed.length > 0) {
