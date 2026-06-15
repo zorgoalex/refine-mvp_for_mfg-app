@@ -383,6 +383,7 @@ npm run dev:full
 - `npm run test:e2e:deadline-status-transition-stage-canary` - opt-in write canary for Deadline Engine `change_order_status` transition rules on backend-test only.
 - `npm run test:e2e:notification-rules-project-scope-stage-canary` — opt-in write canary for project-scoped notification rules on backend-test only; requires explicit fixture key, credentials from external `.env`, and restore enabled.
 - `npm run projects-live-backfill:manifest -- <manifest.json>` — local Projects live-backfill manifest validator and dry-run/write payload generator; does not call backend or mutate data.
+- `npm run projects-live-backfill:proof-sql -- <manifest.json>` — local SQL proof query generator for a Projects live-backfill manifest; does not connect to the database.
 - `npm run test:e2e:projects-live-backfill-dry-run-stage-canary` — opt-in dry-run-only canary for an explicit Projects backfill manifest on backend-test; requires credentials from external `.env` and does not run write mode.
 - `npm run test:e2e:order-ui-full-coverage` — opt-in durable Playwright coverage для заказа: заполняет формы, кликает кнопки, проверяет поля, вкладки, creator history и оставляет созданный заказ.
 - `npm run test:e2e:order-created-by-stage-canary` — opt-in deployed backend canary: проверяет, что stage `/api/v1/orders/:id` отдает `createdBy/editedBy` для order UI.

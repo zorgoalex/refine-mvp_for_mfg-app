@@ -79,6 +79,57 @@ function validateProjectsLiveBackfillDryRunResponse(chunk, response) {
   };
 }
 
+function buildProjectsLiveBackfillProofSql(manifestInput) {
+  const plan = buildProjectsLiveBackfillPlan(manifestInput);
+  const entityIds = plan.chunks.flatMap((chunk) => chunk.writePayload.items.map((item) => item.entityId));
+  const firstWritePayload = plan.chunks[0]?.writePayload;
+  const projectId = sqlLiteral(plan.summary.projectId);
+  const entityType = sqlLiteral(plan.summary.entityType);
+  const entityIdList = entityIds.map(sqlLiteral).join(', ');
+  const writeIdempotencyKeys = plan.chunks.map((chunk) => sqlLiteral(chunk.writePayload.idempotencyKey)).join(', ');
+  const outboxIdempotencyKeys = plan.chunks
+    .map((chunk) => sqlLiteral(`${chunk.writePayload.idempotencyKey}:project_entity_links_changed`))
+    .join(', ');
+
+  return {
+    summary: {
+      projectId: plan.summary.projectId,
+      entityType: plan.summary.entityType,
+      itemCount: plan.summary.itemCount,
+      chunkCount: plan.summary.chunkCount,
+      firstWriteIdempotencyKey: firstWritePayload?.idempotencyKey ?? null,
+    },
+    queries: {
+      project:
+        `select id, code, name, status, metadata from project_projects where id=${projectId};`,
+      links:
+        `select id, project_id, entity_type_code, entity_id_text, relation_type, valid_to, metadata ` +
+        `from project_entity_links where project_id=${projectId} and entity_type_code=${entityType} ` +
+        `and entity_id_text in (${entityIdList}) order by entity_id_text;`,
+      activeLinkCount:
+        `select count(*) as active_links from project_entity_links where project_id=${projectId} ` +
+        `and entity_type_code=${entityType} and entity_id_text in (${entityIdList}) and valid_to is null;`,
+      audit:
+        `select audit_id, source, entity_type, entity_id, action, created_at from audit_log ` +
+        `where source='projects-batch-link' and entity_id=${projectId} order by created_at desc limit 10;`,
+      outbox:
+        `select outbox_event_id, event_type, aggregate_type, aggregate_id, idempotency_key, status, created_at, processed_at ` +
+        `from outbox_events where aggregate_id=${projectId} and idempotency_key in (${outboxIdempotencyKeys}) ` +
+        `order by created_at desc;`,
+      idempotency:
+        `select idempotency_key, command_name, entity_type, entity_id, status, created_at, completed_at ` +
+        `from command_idempotency_keys where idempotency_key in (${writeIdempotencyKeys}) order by created_at;`,
+      privacyScan:
+        `with rows as (` +
+        `select metadata_json::text as body from audit_log where source='projects-batch-link' and entity_id=${projectId} ` +
+        `union all select payload_json::text from outbox_events where aggregate_id=${projectId} ` +
+        `and idempotency_key in (${outboxIdempotencyKeys})` +
+        `) select count(*) filter (where body ~* '(authorization|bearer|password|access[_-]?token|refresh[_-]?token|cookie)') ` +
+        `as suspect_rows, count(*) as scanned_rows from rows;`,
+    },
+  };
+}
+
 function buildPayload(manifest, items, mode, chunkNumber) {
   const payload = {
     mode,
@@ -195,7 +246,12 @@ function isValidEntityId(entityType, entityId) {
   return POSITIVE_INTEGER_PATTERN.test(entityId);
 }
 
+function sqlLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
 module.exports = {
+  buildProjectsLiveBackfillProofSql,
   buildProjectsLiveBackfillPlan,
   parseProjectsLiveBackfillManifest,
   validateProjectsLiveBackfillDryRunResponse,
