@@ -12,13 +12,14 @@ import {
   Tag,
   Empty,
   Alert,
+  DatePicker,
 } from 'antd';
 import {
   FilterOutlined,
   ClearOutlined,
   AuditOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import { auditApi } from '../../api/auditApi';
 import type { AuditLogEventDto, AuditLogListQuery } from '../../api/types/auditApi.types';
 import { ApiError } from '../../api/httpClient';
@@ -30,20 +31,22 @@ const { Text } = Typography;
 
 const PAGE_SIZE_DEFAULT = 50;
 
-interface FilterValues {
+export interface FilterValues {
   event?: string;
   entityType?: string;
   entityId?: string;
   userId?: number;
+  role?: string;
   source?: string;
   relatedOrderId?: number;
   relatedClientId?: number;
   relatedPaymentId?: number;
   relatedDeadlineId?: number;
   relatedProductionEventId?: number;
+  relatedUserId?: number;
   requestId?: string;
-  createdFrom?: string;
-  createdTo?: string;
+  createdFrom?: Dayjs;
+  createdTo?: Dayjs;
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -72,7 +75,44 @@ function JsonCell({ value }: { value: unknown }) {
   );
 }
 
-function RelatedIds({ record }: { record: AuditLogEventDto }) {
+export function buildAuditQuery(values: FilterValues, pageSize: number): AuditLogListQuery {
+  const next: AuditLogListQuery = { page: 1, pageSize };
+  if (values.event) next.event = values.event;
+  if (values.entityType) next.entityType = values.entityType;
+  if (values.entityId) next.entityId = values.entityId;
+  if (values.userId != null) next.userId = values.userId;
+  if (values.role) next.role = values.role;
+  if (values.source) next.source = values.source;
+  if (values.relatedOrderId != null) next.relatedOrderId = values.relatedOrderId;
+  if (values.relatedClientId != null) next.relatedClientId = values.relatedClientId;
+  if (values.relatedPaymentId != null) next.relatedPaymentId = values.relatedPaymentId;
+  if (values.relatedDeadlineId != null) next.relatedDeadlineId = values.relatedDeadlineId;
+  if (values.relatedProductionEventId != null)
+    next.relatedProductionEventId = values.relatedProductionEventId;
+  if (values.relatedUserId != null) next.relatedUserId = values.relatedUserId;
+  if (values.requestId) next.requestId = values.requestId;
+  if (values.createdFrom) next.createdFrom = values.createdFrom.toISOString();
+  if (values.createdTo) next.createdTo = values.createdTo.toISOString();
+  return next;
+}
+
+export function isRowExpandable(record: AuditLogEventDto): boolean {
+  return (
+    record.before !== null ||
+    record.after !== null ||
+    record.diff !== null ||
+    record.metadata !== null ||
+    record.statusField !== null ||
+    record.statusId !== null ||
+    record.statusName !== null ||
+    record.statusCode !== null ||
+    record.stageCode !== null ||
+    record.ip !== null ||
+    record.userAgent !== null
+  );
+}
+
+export function RelatedIds({ record }: { record: AuditLogEventDto }) {
   const parts: React.ReactNode[] = [];
   if (record.relatedOrderId != null)
     parts.push(<Tag key="order" color="blue">Заказ #{record.relatedOrderId}</Tag>);
@@ -84,8 +124,44 @@ function RelatedIds({ record }: { record: AuditLogEventDto }) {
     parts.push(<Tag key="deadline" color="orange">Дедлайн #{record.relatedDeadlineId}</Tag>);
   if (record.relatedProductionEventId != null)
     parts.push(<Tag key="prod" color="purple">Произв. #{record.relatedProductionEventId}</Tag>);
+  if (record.relatedUserId != null)
+    parts.push(<Tag key="user" color="cyan">Пользователь #{record.relatedUserId}</Tag>);
   if (parts.length === 0) return <span style={{ color: '#bfbfbf' }}>—</span>;
   return <>{parts}</>;
+}
+
+function ContextRow({ label, value }: { label: string; value: React.ReactNode }) {
+  if (value === null || value === undefined || value === '') return null;
+  return (
+    <div style={{ fontSize: 11, lineHeight: '16px' }}>
+      <Text type="secondary">{label}: </Text>
+      <Text style={{ fontSize: 11, wordBreak: 'break-all' }}>{value}</Text>
+    </div>
+  );
+}
+
+export function ContextBlock({ record }: { record: AuditLogEventDto }) {
+  const hasStatus =
+    record.statusField != null ||
+    record.statusId != null ||
+    record.statusName != null ||
+    record.statusCode != null ||
+    record.stageCode != null;
+  if (!hasStatus && record.ip == null && record.userAgent == null) return null;
+  return (
+    <div style={{ flex: '1 1 220px', minWidth: 220 }}>
+      <Text strong style={{ fontSize: 12 }}>контекст</Text>
+      <div style={{ marginTop: 2 }}>
+        <ContextRow label="status_field" value={record.statusField} />
+        <ContextRow label="status_id" value={record.statusId} />
+        <ContextRow label="status_name" value={record.statusName} />
+        <ContextRow label="status_code" value={record.statusCode} />
+        <ContextRow label="stage_code" value={record.stageCode} />
+        <ContextRow label="ip" value={record.ip} />
+        <ContextRow label="user_agent" value={record.userAgent} />
+      </div>
+    </div>
+  );
 }
 
 export const AuditList: React.FC = () => {
@@ -142,25 +218,7 @@ export const AuditList: React.FC = () => {
   }, [query, fetchData]);
 
   const handleFilter = (values: FilterValues) => {
-    const next: AuditLogListQuery = {
-      page: 1,
-      pageSize: query.pageSize ?? PAGE_SIZE_DEFAULT,
-    };
-    if (values.event) next.event = values.event;
-    if (values.entityType) next.entityType = values.entityType;
-    if (values.entityId) next.entityId = values.entityId;
-    if (values.userId != null) next.userId = values.userId;
-    if (values.source) next.source = values.source;
-    if (values.relatedOrderId != null) next.relatedOrderId = values.relatedOrderId;
-    if (values.relatedClientId != null) next.relatedClientId = values.relatedClientId;
-    if (values.relatedPaymentId != null) next.relatedPaymentId = values.relatedPaymentId;
-    if (values.relatedDeadlineId != null) next.relatedDeadlineId = values.relatedDeadlineId;
-    if (values.relatedProductionEventId != null)
-      next.relatedProductionEventId = values.relatedProductionEventId;
-    if (values.requestId) next.requestId = values.requestId;
-    if (values.createdFrom) next.createdFrom = values.createdFrom;
-    if (values.createdTo) next.createdTo = values.createdTo;
-    setQuery(next);
+    setQuery(buildAuditQuery(values, query.pageSize ?? PAGE_SIZE_DEFAULT));
   };
 
   const handleClearFilters = () => {
@@ -178,6 +236,7 @@ export const AuditList: React.FC = () => {
 
   const expandedRowRender = (record: AuditLogEventDto) => (
     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      <ContextBlock record={record} />
       <div style={{ flex: '1 1 220px', minWidth: 220 }}>
         <Text strong style={{ fontSize: 12 }}>before</Text>
         <JsonCell value={record.before} />
@@ -285,6 +344,11 @@ export const AuditList: React.FC = () => {
                 </Form.Item>
               </div>
               <div className="aff-item">
+                <Form.Item name="role" label="Роль">
+                  <Input allowClear placeholder="admin..." size="small" style={{ width: 100 }} />
+                </Form.Item>
+              </div>
+              <div className="aff-item">
                 <Form.Item name="source" label="Источник">
                   <Input allowClear placeholder="backend" size="small" style={{ width: 100 }} />
                 </Form.Item>
@@ -315,18 +379,35 @@ export const AuditList: React.FC = () => {
                 </Form.Item>
               </div>
               <div className="aff-item">
+                <Form.Item name="relatedUserId" label="Пользователь #">
+                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 90 }} />
+                </Form.Item>
+              </div>
+              <div className="aff-item">
                 <Form.Item name="requestId" label="Request ID">
                   <Input allowClear placeholder="uuid..." size="small" style={{ width: 140 }} />
                 </Form.Item>
               </div>
               <div className="aff-item">
-                <Form.Item name="createdFrom" label="Дата с (ISO)">
-                  <Input allowClear placeholder="2026-01-01T00:00:00Z" size="small" style={{ width: 180 }} />
+                <Form.Item name="createdFrom" label="Дата с">
+                  <DatePicker
+                    showTime
+                    allowClear
+                    format="DD.MM.YYYY HH:mm:ss"
+                    size="small"
+                    style={{ width: 180 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
-                <Form.Item name="createdTo" label="Дата по (ISO)">
-                  <Input allowClear placeholder="2026-12-31T23:59:59Z" size="small" style={{ width: 180 }} />
+                <Form.Item name="createdTo" label="Дата по">
+                  <DatePicker
+                    showTime
+                    allowClear
+                    format="DD.MM.YYYY HH:mm:ss"
+                    size="small"
+                    style={{ width: 180 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
@@ -364,11 +445,7 @@ export const AuditList: React.FC = () => {
         onChange={(pag) => handleTableChange(pag)}
         expandable={{
           expandedRowRender,
-          rowExpandable: (record) =>
-            record.before !== null ||
-            record.after !== null ||
-            record.diff !== null ||
-            record.metadata !== null,
+          rowExpandable: isRowExpandable,
         }}
         locale={{ emptyText: <Empty description="Нет записей аудита" /> }}
       >
