@@ -3,6 +3,9 @@ const DEADLINE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
 const ENTITY_TYPES = new Set(['order', 'user', 'employee', 'client', 'workshop', 'deadline_instance']);
 const CHUNK_SIZE = 500;
+const DEFAULT_BACKEND_URL = 'https://backend-test.mebelkz.app/api/v1';
+const DEFAULT_USERNAME_ENVS = ['PROJECTS_LIVE_BACKFILL_USERNAME', 'CODEX_PLAYWRIGHT_USERNAME'];
+const DEFAULT_PASSWORD_ENVS = ['PROJECTS_LIVE_BACKFILL_PASSWORD', 'CODEX_PLAYWRIGHT_PASSWORD'];
 
 function parseProjectsLiveBackfillManifest(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -130,6 +133,214 @@ function buildProjectsLiveBackfillProofSql(manifestInput) {
   };
 }
 
+function parseProjectsLiveBackfillRunArgs(argv) {
+  const args = Array.isArray(argv) ? [...argv] : [];
+  const parsed = {
+    manifestPath: undefined,
+    mode: undefined,
+    backendUrl: DEFAULT_BACKEND_URL,
+    targetEnv: undefined,
+    approveWrite: false,
+    usernameEnv: undefined,
+    passwordEnv: undefined,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    switch (arg) {
+      case '--manifest':
+        parsed.manifestPath = requireArgValue(args, index, arg);
+        index += 1;
+        break;
+      case '--mode':
+        parsed.mode = requireArgValue(args, index, arg);
+        index += 1;
+        break;
+      case '--backend-url':
+        parsed.backendUrl = requireArgValue(args, index, arg);
+        index += 1;
+        break;
+      case '--target-env':
+        parsed.targetEnv = requireArgValue(args, index, arg);
+        index += 1;
+        break;
+      case '--approve-write':
+        parsed.approveWrite = true;
+        break;
+      case '--username-env':
+        parsed.usernameEnv = requireArgValue(args, index, arg);
+        index += 1;
+        break;
+      case '--password-env':
+        parsed.passwordEnv = requireArgValue(args, index, arg);
+        index += 1;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (!parsed.manifestPath) throw new Error('--manifest <path> is required');
+  if (!parsed.mode) throw new Error('--mode dry-run|write is required');
+  if (!['dry-run', 'write'].includes(parsed.mode)) throw new Error('--mode must be dry-run or write');
+
+  return parsed;
+}
+
+function resolveProjectsLiveBackfillRunConfig(parsedArgs, env = process.env) {
+  const targetEnv = parsedArgs.targetEnv ?? env.PROJECTS_LIVE_BACKFILL_TARGET_ENV;
+  const approveWrite = parsedArgs.approveWrite || env.PROJECTS_LIVE_BACKFILL_APPROVE_WRITE === 'true';
+  const username = parsedArgs.usernameEnv
+    ? readNamedEnv(env, parsedArgs.usernameEnv, '--username-env')
+    : readFirstEnv(env, DEFAULT_USERNAME_ENVS, 'PROJECTS_LIVE_BACKFILL_USERNAME or CODEX_PLAYWRIGHT_USERNAME');
+  const password = parsedArgs.passwordEnv
+    ? readNamedEnv(env, parsedArgs.passwordEnv, '--password-env')
+    : readFirstEnv(env, DEFAULT_PASSWORD_ENVS, 'PROJECTS_LIVE_BACKFILL_PASSWORD or CODEX_PLAYWRIGHT_PASSWORD');
+
+  const config = {
+    ...parsedArgs,
+    backendUrl: trimTrailingSlash(parsedArgs.backendUrl ?? DEFAULT_BACKEND_URL),
+    targetEnv: typeof targetEnv === 'string' ? targetEnv.trim() : '',
+    approveWrite,
+    username,
+    password,
+  };
+
+  assertProjectsLiveBackfillRunAllowed(config);
+  return config;
+}
+
+function assertProjectsLiveBackfillRunAllowed(config) {
+  if (!config.manifestPath) throw new Error('--manifest <path> is required');
+  if (!['dry-run', 'write'].includes(config.mode)) throw new Error('--mode must be dry-run or write');
+  if (config.targetEnv !== 'backend-test') {
+    throw new Error('PROJECTS_LIVE_BACKFILL_TARGET_ENV=backend-test or --target-env backend-test is required');
+  }
+  const backendUrl = new URL(config.backendUrl);
+  if (/prod|production|live/i.test(backendUrl.hostname)) {
+    throw new Error('Refusing Projects live backfill runner against prod/production/live backend host');
+  }
+  const backendHostname = backendUrl.hostname.replace(/^\[(.*)\]$/, '$1');
+  const allowedBackendHosts = new Set(['backend-test.mebelkz.app', 'localhost', '127.0.0.1', '::1']);
+  if (!allowedBackendHosts.has(backendHostname)) {
+    throw new Error('Refusing Projects live backfill runner against non-backend-test backend host');
+  }
+  if (config.mode === 'write' && config.approveWrite !== true) {
+    throw new Error('write mode requires --approve-write or PROJECTS_LIVE_BACKFILL_APPROVE_WRITE=true');
+  }
+  if (!config.username) throw new Error('Projects live backfill username is required');
+  if (!config.password) throw new Error('Projects live backfill password is required');
+}
+
+async function runProjectsLiveBackfill(configInput) {
+  const config = {
+    ...configInput,
+    backendUrl: trimTrailingSlash(configInput.backendUrl ?? DEFAULT_BACKEND_URL),
+  };
+  assertProjectsLiveBackfillRunAllowed(config);
+
+  const { readFileSync } = require('node:fs');
+  const manifest = JSON.parse(readFileSync(config.manifestPath, 'utf8'));
+  const plan = buildProjectsLiveBackfillPlan(manifest);
+  const fetchImpl = config.fetchImpl ?? globalThis.fetch;
+  if (typeof fetchImpl !== 'function') throw new Error('fetch is not available');
+
+  const token = await loginProjectsLiveBackfill(config, fetchImpl);
+  const chunks = [];
+
+  for (const chunk of plan.chunks) {
+    const payload = config.mode === 'write' ? chunk.writePayload : chunk.dryRunPayload;
+    const response = await postProjectsLiveBackfillChunk(config, fetchImpl, token, chunk, payload);
+    if (config.mode === 'dry-run') validateProjectsLiveBackfillDryRunResponse(chunk, response.body);
+    chunks.push({
+      chunkNumber: chunk.chunkNumber,
+      status: response.status,
+      summary: response.body.summary ?? null,
+      auditId: response.body.auditId ?? null,
+      outboxEventId: response.body.outboxEventId ?? null,
+      requestIdPresent: Boolean(response.body.requestId),
+    });
+  }
+
+  return {
+    mode: config.mode,
+    projectId: plan.summary.projectId,
+    chunkCount: plan.summary.chunkCount,
+    itemCount: plan.summary.itemCount,
+    chunks,
+  };
+}
+
+async function loginProjectsLiveBackfill(config, fetchImpl) {
+  const response = await fetchJson(fetchImpl, `${config.backendUrl}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: config.username, password: config.password }),
+  }, 'login');
+
+  if (!response.body?.accessToken || typeof response.body.accessToken !== 'string') {
+    throw new Error('login response did not include an access token');
+  }
+  return response.body.accessToken;
+}
+
+async function postProjectsLiveBackfillChunk(config, fetchImpl, token, chunk, payload) {
+  return fetchJson(fetchImpl, `${config.backendUrl}/projects/${chunk.projectId}/batch-link`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  }, `chunk ${chunk.chunkNumber}`);
+}
+
+async function fetchJson(fetchImpl, url, options, label) {
+  const response = await fetchImpl(url, options);
+  const body = await response.json().catch(async () => {
+    await response.text().catch(() => '');
+    return null;
+  });
+  if (!response.ok) {
+    throw new Error(`Projects live backfill ${label} failed with HTTP ${response.status}`);
+  }
+  return { status: response.status, body };
+}
+
+function requireArgValue(args, index, flag) {
+  const value = args[index + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${flag} requires a value`);
+  return value;
+}
+
+function readNamedEnv(env, envName, label) {
+  const key = requireEnvName(envName, label);
+  const value = env[key];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${label} ${key} is not set`);
+  }
+  return value;
+}
+
+function readFirstEnv(env, envNames, label) {
+  for (const envName of envNames) {
+    const value = env[envName];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  throw new Error(`${label} is required`);
+}
+
+function requireEnvName(value, label) {
+  if (typeof value !== 'string' || !/^[A-Z_][A-Z0-9_]*$/.test(value)) {
+    throw new Error(`${label} must be an environment variable name`);
+  }
+  return value;
+}
+
+function trimTrailingSlash(value) {
+  return String(value).replace(/\/+$/, '');
+}
+
 function buildPayload(manifest, items, mode, chunkNumber) {
   const payload = {
     mode,
@@ -253,6 +464,10 @@ function sqlLiteral(value) {
 module.exports = {
   buildProjectsLiveBackfillProofSql,
   buildProjectsLiveBackfillPlan,
+  parseProjectsLiveBackfillRunArgs,
   parseProjectsLiveBackfillManifest,
+  resolveProjectsLiveBackfillRunConfig,
+  assertProjectsLiveBackfillRunAllowed,
+  runProjectsLiveBackfill,
   validateProjectsLiveBackfillDryRunResponse,
 };
