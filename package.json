@@ -54,6 +54,7 @@
     "projects-live-backfill:manifest": "node scripts/projects-live-backfill-manifest.js",
     "projects-live-backfill:proof-sql": "node scripts/projects-live-backfill-proof-sql.js",
     "projects-live-backfill:run": "node scripts/projects-live-backfill-run.js",
+    "projects-inference-backfill:preview": "node scripts/projects-inference-backfill-preview.js",
     "test:deadline-notification-action-fixture": "vitest run scripts/deadline-notification-action-fixture-lib.test.js",
     "test:deadline-status-transition-fixture": "vitest run scripts/deadline-status-transition-fixture-lib.test.js",
     "test:deadline-escalate-fixture": "vitest run scripts/deadline-escalate-fixture-lib.test.js",
