@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Input, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
 import { SaveOutlined, ArrowUpOutlined, ArrowDownOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useInvalidate, useList, useUpdate } from '@refinedev/core';
+import { useLocation } from 'react-router-dom';
+import { useTabDirty } from '../../../hooks/useTabDirty';
 import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
 import {
   ProductionStatusRef,
@@ -173,6 +175,10 @@ export const ProductionWorkflowTab: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [isTogglingSettingActive, setIsTogglingSettingActive] = useState(false);
+
+  // Report editor dirty state to the workspace tab registry (single dirty contract).
+  const location = useLocation();
+  useTabDirty(location.pathname, isDirty);
 
   // Initialize draft once statuses are available (avoid resetting while editing)
   useEffect(() => {

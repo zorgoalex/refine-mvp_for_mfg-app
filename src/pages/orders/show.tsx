@@ -2,9 +2,10 @@ import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Collapse, Table, Breadcrumb, message } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined } from "@ant-design/icons";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useTabStore } from "../../stores/tabStore";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
 import { handleExcelError } from "../../utils/excel/excelErrorHandler";
@@ -78,6 +79,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const record = data?.data;
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
+
+  // Enrich the workspace tab label once the order record is loaded.
+  const location = useLocation();
+  const setTabTitle = useTabStore((s) => s.setTabTitle);
+  useEffect(() => {
+    if (record?.order_name) {
+      setTabTitle(location.pathname, `Заказ #${record.order_id} · ${record.order_name}`);
+    }
+  }, [record?.order_id, record?.order_name, location.pathname, setTabTitle]);
 
   const { data: clientData, isLoading: clientLoading } = useOne({
     resource: "clients",

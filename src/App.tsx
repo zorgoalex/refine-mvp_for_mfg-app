@@ -1,6 +1,6 @@
 import { Refine, Authenticated } from "@refinedev/core";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
-import { CustomLayout } from "./components/CustomLayout";
+import { WorkspaceLayout } from "./components/workspace/WorkspaceLayout";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider, notification, Spin } from "antd";
@@ -196,7 +196,6 @@ const App = () => {
               routerProvider={routerProvider}
               authProvider={authProvider}
               i18nProvider={i18nProvider}
-              Layout={CustomLayout}
               resources={[
                 {
                   name: "orders_view",
@@ -502,7 +501,9 @@ const App = () => {
               ]}
               options={{
                 syncWithLocation: true,
-                warnWhenUnsavedChanges: true,
+                // The workspace tab dirty registry owns unsaved-changes handling
+                // (single beforeunload + close-confirm). Disable Refine's per-form prompt.
+                warnWhenUnsavedChanges: false,
                 disableTelemetry: true,
               }}
             >
@@ -520,9 +521,7 @@ const App = () => {
                       key="authenticated-routes"
                       fallback={<CatchAllNavigate to="/login" />}
                     >
-                      <CustomLayout>
-                        <Outlet />
-                      </CustomLayout>
+                      <WorkspaceLayout />
                     </Authenticated>
                   }
                 >

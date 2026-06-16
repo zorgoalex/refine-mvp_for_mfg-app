@@ -1,0 +1,58 @@
+import React from 'react';
+import { Layout as RefineLayout } from '@refinedev/antd';
+import { AppHeader } from '../AppHeader';
+import { AppFooter } from '../AppFooter';
+import { CustomSider } from '../CustomSider';
+import { MobileSiderDrawer } from '../MobileSiderDrawer';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { WorkspaceTabs } from './WorkspaceTabs';
+import { KeepAliveOutlet } from './KeepAliveOutlet';
+import { useTabSync } from '../../hooks/useTabSync';
+import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
+
+export const WorkspaceLayout: React.FC = () => {
+  const [isSiderOpen, setIsSiderOpen] = React.useState(false);
+  const isMobile = useMediaQuery('(max-width: 768px)');
+
+  useTabSync();
+  useGlobalUnloadGuard();
+
+  React.useEffect(() => {
+    if (!isMobile) return;
+    const style = document.createElement('style');
+    style.setAttribute('data-calendar-mobile-fix', 'true');
+    style.textContent = `
+      /* Hide the duplicate fixed sider-trigger button that Refine/AntD
+         leaves in the DOM on mobile (position: fixed; top: 64px;
+         z-index: 999; bars icon inside). The burger in AppHeader is
+         the single source of truth for opening the mobile drawer. */
+      button.ant-btn.ant-btn-default.ant-btn-lg.ant-btn-icon-only:has(> span[aria-label="bars"]) {
+        display: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      style.remove();
+    };
+  }, [isMobile]);
+
+  return (
+    <RefineLayout
+      Header={() => <AppHeader onOpenSider={isMobile ? () => setIsSiderOpen(true) : undefined} />}
+      // AD-5: on mobile, pass `Sider={undefined}` (not `() => null`) so AntD Layout
+      // does not reserve sider width as content padding-left.
+      Sider={isMobile ? undefined : CustomSider}
+    >
+      <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }}>
+        <WorkspaceTabs />
+        <div style={{ flex: 1 }}>
+          <KeepAliveOutlet />
+        </div>
+        <AppFooter />
+      </div>
+      {isMobile && <MobileSiderDrawer open={isSiderOpen} onClose={() => setIsSiderOpen(false)} />}
+    </RefineLayout>
+  );
+};
+
+export default WorkspaceLayout;
