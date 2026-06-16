@@ -50,6 +50,7 @@ import {
 } from "../utils/navigationPermissions";
 import { can } from "../utils/permissions";
 import { useSiderMenuItems } from "../utils/siderMenuItems";
+import { RESOURCE_LABELS } from "../utils/tabLabels";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -108,44 +109,6 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Материалы": <InboxOutlined />,
   "Справочники": <SettingOutlined />,
   "Настройки": <SettingOutlined />,
-};
-
-const RESOURCE_LABELS: Record<string, string> = {
-  orders_view: "Заказы",
-  calendar: "Календарь",
-  projects: "Проекты",
-  clients: "Клиенты",
-  clients_analytics_view: "+Клиенты",
-  suppliers: "Поставщики",
-  vendors: "Производители",
-  film_vendors: "Производители плёнки",
-  payments: "Платежи",
-  payments_view: "+Платежи",
-  films: "Пленки",
-  materials: "Материалы",
-  order_resource_requirements: "Потребности заказов",
-  film_types: "Типы плёнки",
-  units: "Ед. измерения",
-  material_types: "Типы материалов",
-  edge_types: "Типы кромок",
-  milling_types: "Типы фрезеровки",
-  order_statuses: "Статусы заказов",
-  payment_statuses: "Статусы оплат",
-  production_statuses: "Статусы производства",
-  requisition_statuses: "Статусы заявок",
-  resource_requirements_statuses: "Статусы потребностей",
-  workshops: "Цеха",
-  work_centers: "Участки цехов",
-  payment_types: "Типы оплат",
-  transaction_direction: "Направления движения",
-  material_transaction_types: "Типы движений материалов",
-  employees: "Сотрудники",
-  users: "Пользователи",
-  movements_statuses: "Статусы движений",
-  order_workshops: "Цеха заказа",
-  doweling_orders_view: "Присадка",
-  configuration: "Конфигурация",
-  audit: "Аудит",
 };
 
 const CATEGORY_MAP: Record<string, string> = {
