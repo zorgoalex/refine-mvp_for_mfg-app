@@ -1,8 +1,8 @@
 // Zustand Store for Order Form State Management
 // Manages the entire order form state including header and all child tables
 
-import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
+import { create, useStore, type StoreApi, type UseBoundStore } from 'zustand';
+import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 import {
   Order,
   OrderDetail,
@@ -150,10 +150,16 @@ const generateTempId = (): number => {
   };
 
 // ============================================================================
-// STORE
+// STORE FACTORY (per-order draft isolation)
 // ============================================================================
 
-export const useOrderFormStore = create<OrderFormState>()(
+const DRAFT_STORAGE_PREFIX = 'order-form-storage';
+const draftStorageKey = (orderKey: string) => `${DRAFT_STORAGE_PREFIX}:${orderKey}`;
+
+type OrderDraftStore = UseBoundStore<StoreApi<OrderFormState>>;
+
+const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
+  create<OrderFormState>()(
   devtools(
     persist(
       (set, get) => ({
@@ -790,7 +796,8 @@ export const useOrderFormStore = create<OrderFormState>()(
           ),
       }),
       {
-        name: 'order-form-storage',
+        name: draftStorageKey(orderKey),
+        storage: createJSONStorage(() => sessionStorage),
         version: 3, // Increment to force migration from old storage
         // Only persist essential data for draft recovery
         partialize: (state) => ({
@@ -831,10 +838,57 @@ export const useOrderFormStore = create<OrderFormState>()(
       }
     ),
     {
-      name: 'OrderFormStore',
+      name: `orderFormStore:${orderKey}`,
     }
   )
 );
+
+// ============================================================================
+// STORE REGISTRY
+// ============================================================================
+
+const orderDraftStores = new Map<string, OrderDraftStore>();
+
+export const NEW_ORDER_KEY = 'new';
+
+export const getOrderDraftStore = (orderKey: string): OrderDraftStore => {
+  let store = orderDraftStores.get(orderKey);
+  if (!store) {
+    store = createOrderDraftStore(orderKey);
+    orderDraftStores.set(orderKey, store);
+  }
+  return store;
+};
+
+export const destroyOrderDraftStore = (orderKey: string): void => {
+  orderDraftStores.delete(orderKey);
+  try {
+    sessionStorage.removeItem(draftStorageKey(orderKey));
+  } catch {
+    /* sessionStorage unavailable */
+  }
+};
+
+export const orderDraftStoreExists = (orderKey: string): boolean =>
+  orderDraftStores.has(orderKey);
+
+// Scoped hook: subscribe to a specific order's draft store.
+export function useOrderDraftStore(orderKey: string): OrderFormState;
+export function useOrderDraftStore<T>(orderKey: string, selector: (s: OrderFormState) => T): T;
+export function useOrderDraftStore<T>(orderKey: string, selector?: (s: OrderFormState) => T) {
+  const store = getOrderDraftStore(orderKey);
+  return selector ? useStore(store, selector) : useStore(store);
+}
+
+// Legacy singleton alias = the "new" draft store (create flow).
+export const useOrderFormStore = Object.assign(
+  ((selector?: any) => useOrderDraftStore(NEW_ORDER_KEY, selector)) as any,
+  {
+    getState: () => getOrderDraftStore(NEW_ORDER_KEY).getState(),
+    setState: (...a: any[]) => (getOrderDraftStore(NEW_ORDER_KEY).setState as any)(...a),
+    subscribe: (...a: any[]) => (getOrderDraftStore(NEW_ORDER_KEY).subscribe as any)(...a),
+  }
+) as UseBoundStore<StoreApi<OrderFormState>>;
 
 // ============================================================================
 // SELECTORS (for optimized access)

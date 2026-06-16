@@ -49,6 +49,45 @@ describe('orderFormStore version sync', () => {
   });
 });
 
+describe('orderFormStore per-order isolation', () => {
+  let mod: typeof import('./orderFormStore');
+
+  beforeAll(async () => {
+    vi.stubGlobal('sessionStorage', createMemoryStorage());
+    vi.stubGlobal('localStorage', createMemoryStorage());
+    vi.resetModules();
+    mod = await import('./orderFormStore');
+  });
+
+  afterAll(() => vi.unstubAllGlobals());
+
+  it('keeps two order ids isolated; no cross-write', () => {
+    const a = mod.getOrderDraftStore('1');
+    const b = mod.getOrderDraftStore('2');
+    a.getState().updateHeaderField('order_name', 'A');
+    b.getState().updateHeaderField('order_name', 'B');
+    expect(a.getState().header.order_name).toBe('A');
+    expect(b.getState().header.order_name).toBe('B');
+    expect(a.getState().isDirty).toBe(true);
+  });
+
+  it('persists each draft + dirty marker under its own sessionStorage key', () => {
+    const a = mod.getOrderDraftStore('7');
+    a.getState().updateHeaderField('order_name', 'persist-me');
+    expect(sessionStorage.getItem('order-form-storage:7')).toContain('persist-me');
+    expect(sessionStorage.getItem('order-form-storage:7')).toContain('"isDirty":true');
+  });
+
+  it('destroyOrderDraftStore removes the registry entry and its sessionStorage', () => {
+    const a = mod.getOrderDraftStore('9');
+    a.getState().updateHeaderField('order_name', 'gone');
+    mod.destroyOrderDraftStore('9');
+    expect(sessionStorage.getItem('order-form-storage:9')).toBeNull();
+    // re-create is a fresh slice
+    expect(mod.getOrderDraftStore('9').getState().header.order_name).toBeUndefined();
+  });
+});
+
 function createMemoryStorage(): Storage {
   const values = new Map<string, string>();
 
