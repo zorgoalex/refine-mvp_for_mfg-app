@@ -39,7 +39,8 @@ interface UseAppSettingsResult {
   refetch: () => void;
 }
 
-export const useAppSettings = (): UseAppSettingsResult => {
+export const useAppSettings = (options?: { enabled?: boolean }): UseAppSettingsResult => {
+  const enabled = options?.enabled ?? true;
   const { data, isLoading, refetch } = useList<AppSetting>({
     resource: 'app_settings',
     pagination: { mode: 'off' },
@@ -47,6 +48,7 @@ export const useAppSettings = (): UseAppSettingsResult => {
     // We load both active and inactive rows to avoid UNIQUE(setting_key) conflicts
     // when a key exists but was deactivated in DB.
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
+    queryOptions: { enabled, refetchOnWindowFocus: false },
   });
 
   const { mutateAsync: createSetting } = useCreate<AppSetting>();

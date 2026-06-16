@@ -46,6 +46,7 @@ import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearc
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { ProjectFilter } from "./components/projects/ProjectFilter";
+import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
 import "./list.css";
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
@@ -66,7 +67,10 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const currentUser = authStorage.getUser();
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
   const canViewUsers = canQueryUsersResource(currentUser);
-  const { getSetting } = useAppSettings();
+  // Keep-alive: when this /orders tab is hidden (another tab active) every data
+  // hook is disabled so the cached list stops reacting to invalidateQueries.
+  const { isActive } = useKeepAlive();
+  const { getSetting } = useAppSettings({ enabled: isActive });
 
   const { tableProps, current, pageSize, setCurrent, sorters, setSorters, filters, setFilters } = useTable({
     syncWithLocation: true,
@@ -80,6 +84,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       mode: "server",
       pageSize: 20,
     },
+    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
   });
 
   const { show } = useNavigation();
@@ -229,6 +234,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     resource: "clients",
     optionLabel: "client_name",
     optionValue: "client_id",
+    queryOptions: { enabled: isActive },
   });
 
   const { selectProps: userSelectProps } = useSelect({
@@ -236,7 +242,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     optionLabel: "username",
     optionValue: "user_id",
     queryOptions: {
-      enabled: canViewUsers,
+      enabled: isActive && canViewUsers,
     },
   });
 
@@ -244,18 +250,21 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     resource: "order_statuses",
     optionLabel: "order_status_name",
     optionValue: useBackendOrdersRead ? "order_status_id" : "order_status_name",
+    queryOptions: { enabled: isActive },
   });
 
   const { selectProps: paymentStatusSelectProps } = useSelect({
     resource: "payment_statuses",
     optionLabel: "payment_status_name",
     optionValue: useBackendOrdersRead ? "payment_status_id" : "payment_status_name",
+    queryOptions: { enabled: isActive },
   });
 
   const { selectProps: dowelingSelectProps } = useSelect({
     resource: "doweling_orders",
     optionLabel: "doweling_order_name",
     optionValue: "doweling_order_name",
+    queryOptions: { enabled: isActive },
   });
 
   // Применение фильтров
@@ -441,7 +450,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { data: usersData } = useMany({
     resource: "users",
     ids: createdByIds,
-    queryOptions: { enabled: canViewUsers && createdByIds.length > 0 },
+    queryOptions: { enabled: isActive && canViewUsers && createdByIds.length > 0 },
   });
 
   const createdByMap = useMemo(() => {
@@ -479,7 +488,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       pageSize: 10000,
     },
     queryOptions: {
-      enabled: orderIds.length > 0 && !useBackendOrdersRead,
+      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead,
     },
   });
 
@@ -487,21 +496,25 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { data: materialsData } = useList({
     resource: "materials",
     pagination: { pageSize: 10000 },
+    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
   });
 
   const { data: millingTypesData } = useList({
     resource: "milling_types",
     pagination: { pageSize: 10000 },
+    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
   });
 
   const { data: edgeTypesData } = useList({
     resource: "edge_types",
     pagination: { pageSize: 10000 },
+    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
   });
 
   const { data: filmsData } = useList({
     resource: "films",
     pagination: { pageSize: 10000 },
+    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
   });
 
   // Загружаем связи с присадками для заказов на текущей странице
@@ -516,7 +529,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 10000 },
     queryOptions: {
-      enabled: orderIds.length > 0 && !useBackendOrdersRead,
+      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead,
     },
   });
 
@@ -532,7 +545,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 10000 },
     queryOptions: {
-      enabled: orderIds.length > 0 && !useBackendOrdersRead,
+      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead,
     },
   });
 
@@ -542,12 +555,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     pagination: { pageSize: 100 },
     // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
     filters: [{ field: "is_active", operator: "in", value: [true, false] }],
+    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
   });
 
   // Загружаем сотрудников для lookup конструктора
   const { data: employeesData } = useList({
     resource: "employees",
     pagination: { pageSize: 1000 },
+    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
   });
 
   // Map сотрудников для lookup по employee_id
