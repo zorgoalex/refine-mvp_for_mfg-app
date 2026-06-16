@@ -27,7 +27,9 @@ export interface SaveOrderViaBackendDependencies {
   ) => Promise<SaveOrderResponse>;
   toSaveDto: typeof mapOrderFormToSaveOrderDto;
   toFormValues: typeof mapOrderDtoToFormValues;
-  getOrderStore: () => OrderStoreSync;
+  // May return null when the draft slice was discarded mid-save — writes are skipped
+  // so a late completion does not resurrect the destroyed store.
+  getOrderStore: () => OrderStoreSync | null;
   invalidate?: InvalidateFn;
 }
 
@@ -43,11 +45,14 @@ export async function saveOrderViaBackend(
     : await deps.createOrder(dto);
 
   const formValues = deps.toFormValues(result.order);
+  // Skip store writes if the draft slice was discarded while the save was in flight.
   const store = deps.getOrderStore();
-  store.loadOrder(formValues);
-  store.setDirty(false);
-  store.setInitializing(false);
-  store.syncOriginals();
+  if (store) {
+    store.loadOrder(formValues);
+    store.setDirty(false);
+    store.setInitializing(false);
+    store.syncOriginals();
+  }
 
   await invalidateSavedOrder(result.order.header.orderId, deps.invalidate);
 

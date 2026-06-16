@@ -9,6 +9,7 @@ import { useOne, useList, useNavigation } from '@refinedev/core';
 import {
   useOrderDraftStore,
   getOrderDraftStore,
+  peekOrderDraftStore,
   OrderDraftStoreProvider,
   NEW_ORDER_KEY,
 } from '../../../stores/orderFormStore';
@@ -272,7 +273,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     setBackendOrderLoading(true);
 
     loadOrderViaBackend(orderId, {
-      getOrderStore: () => getOrderDraftStore(orderKey).getState(),
+      // peek (non-creating): a load resolving after discard must not resurrect the slice.
+      getOrderStore: () => peekOrderDraftStore(orderKey)?.getState() ?? null,
     })
       .then((formValues) => {
         if (cancelled || !formValues) return;
@@ -799,32 +801,37 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         console.log('[OrderForm] handleSave - savedOrderId:', savedOrderId);
 
         // On success: remain on the same page.
-        // If this was a create, set header.order_id so tabs unlock and state reflects persisted record
-        if (mode === 'create' && !header.order_id) {
-          console.log('[OrderForm] handleSave - setting header.order_id to:', savedOrderId);
-          setHeader({ order_id: savedOrderId });
-        }
+        // Only touch the draft store if its slice still exists — if the tab was
+        // closed/discarded while the save was in flight, these writes (bound store
+        // actions persist to sessionStorage) would resurrect the discarded draft.
+        if (peekOrderDraftStore(orderKey)) {
+          // If this was a create, set header.order_id so tabs unlock and state reflects persisted record
+          if (mode === 'create' && !header.order_id) {
+            console.log('[OrderForm] handleSave - setting header.order_id to:', savedOrderId);
+            setHeader({ order_id: savedOrderId });
+          }
 
-        console.log('[OrderForm] handleSave - setting dirty to false');
-        setDirty(false);
+          console.log('[OrderForm] handleSave - setting dirty to false');
+          setDirty(false);
 
-        // Clean up unfilled details from the store
-        const currentDetails = getOrderDraftStore(orderKey).getState().details;
-        const unfilledDetails = currentDetails.filter(detail => {
-          if (detail.detail_id) return false;
-          const hasNoHeight = !detail.height || detail.height === 0;
-          const hasNoWidth = !detail.width || detail.width === 0;
-          const hasNoArea = !detail.area || detail.area === 0;
-          return hasNoHeight && hasNoWidth && hasNoArea;
-        });
-        if (unfilledDetails.length > 0) {
-          console.log(`[OrderForm] handleSave - removing ${unfilledDetails.length} unfilled detail(s) from store`);
-          unfilledDetails.forEach(detail => {
-            const tempId = detail.temp_id || detail.detail_id;
-            if (tempId) {
-              deleteDetail(tempId, detail.detail_id);
-            }
+          // Clean up unfilled details from the store
+          const currentDetails = peekOrderDraftStore(orderKey)?.getState().details ?? [];
+          const unfilledDetails = currentDetails.filter(detail => {
+            if (detail.detail_id) return false;
+            const hasNoHeight = !detail.height || detail.height === 0;
+            const hasNoWidth = !detail.width || detail.width === 0;
+            const hasNoArea = !detail.area || detail.area === 0;
+            return hasNoHeight && hasNoWidth && hasNoArea;
           });
+          if (unfilledDetails.length > 0) {
+            console.log(`[OrderForm] handleSave - removing ${unfilledDetails.length} unfilled detail(s) from store`);
+            unfilledDetails.forEach(detail => {
+              const tempId = detail.temp_id || detail.detail_id;
+              if (tempId) {
+                deleteDetail(tempId, detail.detail_id);
+              }
+            });
+          }
         }
 
         console.log('[OrderForm] handleSave - onSaveSuccess callback exists?', !!onSaveSuccess);
@@ -989,8 +996,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
     // Tabbed route: close the workspace tab and navigate to a neighbour.
     const closeAndLeave = (discard: boolean) => {
+      // Resolve the neighbour from the PRE-removal tab list — closeTab mutates it.
+      const neighbor = computeNeighborPath(useTabStore.getState().tabs, tabKey);
       closeTab(tabKey, discard ? { discard: true } : undefined);
-      navigate(computeNeighborPath(useTabStore.getState().tabs, tabKey));
+      navigate(neighbor);
     };
     if (isDirty) confirmDiscard(() => closeAndLeave(true));
     else closeAndLeave(false);

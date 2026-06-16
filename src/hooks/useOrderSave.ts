@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { notification, Modal } from 'antd';
 import { OrderFormValues } from '../types/orders';
-import { getOrderDraftStore, orderDraftStoreExists } from '../stores/orderFormStore';
+import { peekOrderDraftStore, orderDraftStoreExists } from '../stores/orderFormStore';
 import { isApiError } from '../api/apiError';
 import { featureFlags } from '../config/featureFlags';
 import { saveOrderViaBackend } from './useOrderSaveBackend';
@@ -58,7 +58,8 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
       if (featureFlags.useBackendOrdersWrite) {
         const savedOrderId = await saveOrderViaBackend(values, isEdit, {
           invalidate,
-          getOrderStore: () => getOrderDraftStore(orderKey).getState(),
+          // peek (non-creating): a completion after discard must not resurrect the slice.
+          getOrderStore: () => peekOrderDraftStore(orderKey)?.getState() ?? null,
         });
 
         notification.success({
@@ -231,7 +232,9 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
       console.log(`[useOrderSave] Normalized ${normalizedDetails.length} detail numbers`);
 
       if (normalizedDetails.length > 0) {
-        const { originalDetails } = getOrderDraftStore(orderKey).getState();
+        // peek: do not recreate a discarded slice mid-save.
+        const { originalDetails } = peekOrderDraftStore(orderKey)?.getState()
+          ?? { originalDetails: {} as Record<number, any> };
         const normalizeDetail = (d: any) => {
           const {
             detail_id,
@@ -292,7 +295,7 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
           try {
             const result = await promise;
             if (result?.data?.detail_id) {
-              getOrderDraftStore(orderKey).getState().updateDetailId(tempId, result.data.detail_id);
+              peekOrderDraftStore(orderKey)?.getState().updateDetailId(tempId, result.data.detail_id);
               console.log(`[useOrderSave] Updated detail_id in store: temp_id=${tempId} -> detail_id=${result.data.detail_id}`);
             }
           } catch (e) {
@@ -402,7 +405,9 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
       }
 
       if (filledPayments.length > 0) {
-        const { originalPayments } = getOrderDraftStore(orderKey).getState();
+        // peek: do not recreate a discarded slice mid-save.
+        const { originalPayments } = peekOrderDraftStore(orderKey)?.getState()
+          ?? { originalPayments: {} as Record<number, any> };
         const normalizePayment = (p: any) => {
           const { payment_id, order_id, temp_id, created_at, updated_at, created_by, edited_by, ...rest } = p || {};
           return rest;
@@ -451,7 +456,7 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
           try {
             const result = await promise;
             if (result?.data?.payment_id) {
-              getOrderDraftStore(orderKey).getState().updatePaymentId(tempId, result.data.payment_id);
+              peekOrderDraftStore(orderKey)?.getState().updatePaymentId(tempId, result.data.payment_id);
               console.log(`[useOrderSave] Updated payment_id in store: temp_id=${tempId} -> payment_id=${result.data.payment_id}`);
             }
           } catch (e) {
@@ -628,9 +633,10 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
       setIsSaving(false);
       // Sync originals in store to current state to avoid redundant updates on next save.
       // Skip if the draft slice was discarded mid-save (tab closed) — do not resurrect it.
+      // Finalize only if the slice still exists; peek never recreates it.
       if (shouldFinalizeSave(orderKey)) {
         try {
-          getOrderDraftStore(orderKey).getState().syncOriginals();
+          peekOrderDraftStore(orderKey)?.getState().syncOriginals();
         } catch {}
       }
       return createdOrderId;

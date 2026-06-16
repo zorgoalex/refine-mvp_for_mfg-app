@@ -861,6 +861,14 @@ export const getOrderDraftStore = (orderKey: string): OrderDraftStore => {
   return store;
 };
 
+/**
+ * Non-creating lookup. Unlike getOrderDraftStore it never resurrects a destroyed
+ * slice — use it for late/in-flight completions (save/load resolving after the tab
+ * was discarded) so a stale write cannot recreate the Map entry + sessionStorage.
+ */
+export const peekOrderDraftStore = (orderKey: string): OrderDraftStore | undefined =>
+  orderDraftStores.get(orderKey);
+
 export const destroyOrderDraftStore = (orderKey: string): void => {
   orderDraftStores.delete(orderKey);
   try {

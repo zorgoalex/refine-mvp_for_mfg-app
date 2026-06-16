@@ -23,19 +23,40 @@ describe('useOrderSave discard-aware finalize', () => {
     expect(store.orderDraftStoreExists('555')).toBe(false);
   });
 
+  it('peekOrderDraftStore never resurrects a discarded slice (non-creating)', () => {
+    store.getOrderDraftStore('556');
+    store.destroyOrderDraftStore('556');
+    // peek must return undefined and must NOT recreate the Map entry...
+    expect(store.peekOrderDraftStore('556')).toBeUndefined();
+    expect(store.orderDraftStoreExists('556')).toBe(false);
+    // ...whereas getOrderDraftStore would auto-create (the foot-gun the guard avoids).
+    store.getOrderDraftStore('556');
+    expect(store.orderDraftStoreExists('556')).toBe(true);
+    store.destroyOrderDraftStore('556');
+  });
+
   it('useOrderSave is scoped by order key and exports a finalize guard', () => {
     const src = readFileSync(USE_ORDER_SAVE_PATH, 'utf8');
     expect(src).toMatch(/export const shouldFinalizeSave/);
     expect(src).toMatch(/useOrderSave\s*=\s*\(orderKey: string\)/);
-    expect(src).toContain('getOrderDraftStore(orderKey)');
+    expect(src).toContain('peekOrderDraftStore(orderKey)');
   });
 
   it('finalize (syncOriginals) only runs when the draft slice still exists', () => {
     const src = readFileSync(USE_ORDER_SAVE_PATH, 'utf8');
     // the syncOriginals success call is gated by the guard
-    expect(src).toMatch(/shouldFinalizeSave\(orderKey\)[\s\S]{0,120}syncOriginals\(\)/);
+    expect(src).toMatch(/shouldFinalizeSave\(orderKey\)[\s\S]{0,160}syncOriginals\(\)/);
     // no remaining unscoped singleton reads in the save flow
     expect(src).not.toContain('useOrderFormStore.getState()');
+  });
+
+  it('late/in-flight completion writes use the non-creating peek, never auto-create', () => {
+    const src = readFileSync(USE_ORDER_SAVE_PATH, 'utf8');
+    // every imperative store touch in the save flow must go through peekOrderDraftStore
+    expect(src).toContain('peekOrderDraftStore(orderKey)');
+    // getOrderDraftStore (auto-creating) must NOT be used in the save flow — it would
+    // resurrect a discarded slice mid-save and defeat shouldFinalizeSave.
+    expect(src).not.toContain('getOrderDraftStore(orderKey)');
   });
 
   it('backend save writes the scoped store (no unscoped singleton default leaks via the hook)', () => {

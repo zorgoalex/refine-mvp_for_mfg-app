@@ -23,7 +23,8 @@ export interface LoadOrderViaBackendDependencies {
   flags: Pick<FrontendFeatureFlags, 'useBackendOrdersRead'>;
   getOrderById: (orderId: number) => Promise<OrderDto>;
   toFormValues: typeof mapOrderDtoToFormValues;
-  getOrderStore: () => OrderStoreSync;
+  // May return null when the draft slice was discarded mid-load — writes are skipped.
+  getOrderStore: () => OrderStoreSync | null;
 }
 
 export interface ListOrdersViaBackendDependencies {
@@ -44,12 +45,14 @@ export async function loadOrderViaBackend(
 
   const order = await deps.getOrderById(validateOrderId(orderId));
   const formValues = deps.toFormValues(order);
+  // Skip store writes if the draft slice was discarded while the load was in flight.
   const store = deps.getOrderStore();
-
-  store.loadOrder(formValues);
-  store.setDirty(false);
-  store.setInitializing(false);
-  store.syncOriginals();
+  if (store) {
+    store.loadOrder(formValues);
+    store.setDirty(false);
+    store.setInitializing(false);
+    store.syncOriginals();
+  }
 
   return formValues;
 }
