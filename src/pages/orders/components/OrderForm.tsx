@@ -86,7 +86,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     error: statusesError,
   } =
     useDefaultStatuses();
-  const { saveOrder, isSaving } = useOrderSave();
+  const { saveOrder, isSaving } = useOrderSave(orderKey);
 
   // Bridge dirty state into the workspace tab registry (single dirty contract).
   useTabDirty(tabKey, isDirty);

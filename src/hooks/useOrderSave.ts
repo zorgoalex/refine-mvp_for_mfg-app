@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { notification, Modal } from 'antd';
 import { OrderFormValues } from '../types/orders';
-import { useOrderFormStore } from '../stores/orderFormStore';
+import { getOrderDraftStore, orderDraftStoreExists } from '../stores/orderFormStore';
 import { isApiError } from '../api/apiError';
 import { featureFlags } from '../config/featureFlags';
 import { saveOrderViaBackend } from './useOrderSaveBackend';
@@ -17,10 +17,17 @@ interface UseOrderSaveResult {
 }
 
 /**
+ * Pure guard: a save completion may only finalize (syncOriginals) the draft if the
+ * per-order slice still exists. If the tab was closed/discarded mid-save the slice is
+ * gone and a late completion must be ignored (no resurrection of a discarded draft).
+ */
+export const shouldFinalizeSave = (orderKey: string): boolean => orderDraftStoreExists(orderKey);
+
+/**
  * Hook for saving order form data
  * MVP Strategy: Sequential requests with rollback on error
  */
-export const useOrderSave = (): UseOrderSaveResult => {
+export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
   const dataProvider = useDataProvider();
   const invalidate = useInvalidate();
   const [isSaving, setIsSaving] = useState(false);
@@ -49,7 +56,10 @@ export const useOrderSave = (): UseOrderSaveResult => {
 
     try {
       if (featureFlags.useBackendOrdersWrite) {
-        const savedOrderId = await saveOrderViaBackend(values, isEdit, { invalidate });
+        const savedOrderId = await saveOrderViaBackend(values, isEdit, {
+          invalidate,
+          getOrderStore: () => getOrderDraftStore(orderKey).getState(),
+        });
 
         notification.success({
           message: `Заказ успешно ${isEdit ? 'обновлен' : 'создан'}`,
@@ -221,7 +231,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
       console.log(`[useOrderSave] Normalized ${normalizedDetails.length} detail numbers`);
 
       if (normalizedDetails.length > 0) {
-        const { originalDetails } = useOrderFormStore.getState();
+        const { originalDetails } = getOrderDraftStore(orderKey).getState();
         const normalizeDetail = (d: any) => {
           const {
             detail_id,
@@ -282,7 +292,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
           try {
             const result = await promise;
             if (result?.data?.detail_id) {
-              useOrderFormStore.getState().updateDetailId(tempId, result.data.detail_id);
+              getOrderDraftStore(orderKey).getState().updateDetailId(tempId, result.data.detail_id);
               console.log(`[useOrderSave] Updated detail_id in store: temp_id=${tempId} -> detail_id=${result.data.detail_id}`);
             }
           } catch (e) {
@@ -392,7 +402,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
       }
 
       if (filledPayments.length > 0) {
-        const { originalPayments } = useOrderFormStore.getState();
+        const { originalPayments } = getOrderDraftStore(orderKey).getState();
         const normalizePayment = (p: any) => {
           const { payment_id, order_id, temp_id, created_at, updated_at, created_by, edited_by, ...rest } = p || {};
           return rest;
@@ -441,7 +451,7 @@ export const useOrderSave = (): UseOrderSaveResult => {
           try {
             const result = await promise;
             if (result?.data?.payment_id) {
-              useOrderFormStore.getState().updatePaymentId(tempId, result.data.payment_id);
+              getOrderDraftStore(orderKey).getState().updatePaymentId(tempId, result.data.payment_id);
               console.log(`[useOrderSave] Updated payment_id in store: temp_id=${tempId} -> payment_id=${result.data.payment_id}`);
             }
           } catch (e) {
@@ -616,10 +626,13 @@ export const useOrderSave = (): UseOrderSaveResult => {
       });
 
       setIsSaving(false);
-      // Sync originals in store to current state to avoid redundant updates on next save
-      try {
-        useOrderFormStore.getState().syncOriginals();
-      } catch {}
+      // Sync originals in store to current state to avoid redundant updates on next save.
+      // Skip if the draft slice was discarded mid-save (tab closed) — do not resurrect it.
+      if (shouldFinalizeSave(orderKey)) {
+        try {
+          getOrderDraftStore(orderKey).getState().syncOriginals();
+        } catch {}
+      }
       return createdOrderId;
     } catch (err: any) {
       // Handle error silently in UI notifications
