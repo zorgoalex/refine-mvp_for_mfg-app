@@ -2,13 +2,20 @@
 // Master-Detail form with Tabs for child entities
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Card, Tabs, Button, Space, Spin, notification } from 'antd';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Card, Tabs, Button, Space, Spin, notification, Modal } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
-import { useOrderFormStore } from '../../../stores/orderFormStore';
+import {
+  useOrderDraftStore,
+  getOrderDraftStore,
+  OrderDraftStoreProvider,
+  NEW_ORDER_KEY,
+} from '../../../stores/orderFormStore';
+import { useTabStore, computeNeighborPath } from '../../../stores/tabStore';
+import { useTabDirty } from '../../../hooks/useTabDirty';
+import { DraggableModalWrapper } from '../../../components/DraggableModalWrapper';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
-import { useUnsavedChangesWarning } from '../../../hooks/useUnsavedChangesWarning';
 import { loadOrderViaBackend } from '../../../hooks/useOrderBackendRead';
 import { useOrderSave } from '../../../hooks/useOrderSave';
 import { useOrderExport } from '../../../hooks/useOrderExport';
@@ -45,6 +52,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   onSaveSuccess,
   onCancel,
 }) => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
+  const tabKey = location.pathname; // e.g. /orders/edit/11195 or /orders/create
+
   const {
     header,
     details,
@@ -61,7 +73,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     finalizeInitialization,
     isTotalAmountManual,
     deleteDetail,
-  } = useOrderFormStore();
+  } = useOrderDraftStore(orderKey);
 
   // Refs for tabs to apply current edits before save
   const detailsTabRef = useRef<OrderDetailsTabRef>(null);
@@ -74,24 +86,35 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     error: statusesError,
   } =
     useDefaultStatuses();
-  const { checkUnsavedChanges } = useUnsavedChangesWarning(isDirty);
   const { saveOrder, isSaving } = useOrderSave();
+
+  // Bridge dirty state into the workspace tab registry (single dirty contract).
+  useTabDirty(tabKey, isDirty);
+
+  const setTabTitle = useTabStore((s) => s.setTabTitle);
+  const closeTab = useTabStore((s) => s.closeTab);
+
+  // Enrich the tab label once the order name is known.
+  useEffect(() => {
+    if (mode === 'edit' && orderId && header?.order_name) {
+      setTabTitle(tabKey, `Заказ #${orderId} · ${header.order_name}`);
+    }
+  }, [mode, orderId, header?.order_name, tabKey, setTabTitle]);
   const { exportToDrive, isUploading } = useOrderExport();
 
-  // Read initial tab from URL parameter
-  const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = searchParams.get('tab') || 'details';
-  const [activeTab, setActiveTab] = useState(initialTab);
+  // Read sub-tab reactively from the URL (do NOT strip/replace it — the workspace
+  // tab keeps its query so deep-links into an already-open tab still work).
+  const activeTabFromUrl = new URLSearchParams(location.search).get('tab') || 'details';
+  const [activeTab, setActiveTab] = useState(activeTabFromUrl);
   const [backendOrderLoading, setBackendOrderLoading] = useState(false);
   const useBackendOrderRead = featureFlags.useBackendOrdersRead;
 
-  // Clear tab parameter from URL after reading it
+  // React to deep-link/sub-tab jumps into an already-open order tab.
   useEffect(() => {
-    if (searchParams.has('tab')) {
-      searchParams.delete('tab');
-      setSearchParams(searchParams, { replace: true });
-    }
-  }, []);
+    const t = new URLSearchParams(location.search).get('tab');
+    if (t && t !== activeTab) setActiveTab(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
 
   // Load existing order data in edit mode
@@ -238,10 +261,19 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       return;
     }
 
+    // A restored dirty draft (sessionStorage rehydration) is authoritative —
+    // do not clobber it via a backend reload.
+    if (getOrderDraftStore(orderKey).getState().isDirty) {
+      didInit.current = true;
+      return;
+    }
+
     let cancelled = false;
     setBackendOrderLoading(true);
 
-    loadOrderViaBackend(orderId)
+    loadOrderViaBackend(orderId, {
+      getOrderStore: () => getOrderDraftStore(orderKey).getState(),
+    })
       .then((formValues) => {
         if (cancelled || !formValues) return;
         didInit.current = true;
@@ -273,6 +305,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   // Load order data in edit mode (one-time per orderId)
   useEffect(() => {
     if (didInit.current) return;
+    // A restored dirty draft is authoritative — do not clobber it via loadOrder().
+    if (mode === 'edit' && getOrderDraftStore(orderKey).getState().isDirty) {
+      didInit.current = true;
+      return;
+    }
     if (mode === 'edit' && orderData?.data) {
       // Wait for details and payments only if they should be loaded
       const detailsReady = !shouldLoadDetails || (!detailsLoading && detailsData);
@@ -345,7 +382,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       return;
     }
 
-    const store = useOrderFormStore.getState();
+    const store = getOrderDraftStore(orderKey).getState();
     let patchedCount = 0;
 
     details.forEach((detail) => {
@@ -500,7 +537,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   ]);
 
   // Navigation
-  const { list, show } = useNavigation();
+  const { show } = useNavigation();
 
   // Handle save
   const handleSave = async () => {
@@ -772,7 +809,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         setDirty(false);
 
         // Clean up unfilled details from the store
-        const currentDetails = useOrderFormStore.getState().details;
+        const currentDetails = getOrderDraftStore(orderKey).getState().details;
         const unfilledDetails = currentDetails.filter(detail => {
           if (detail.detail_id) return false;
           const hasNoHeight = !detail.height || detail.height === 0;
@@ -826,13 +863,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
   };
 
-  const exitForm = () => {
-    reset();
-    if (onCancel) {
-      onCancel();
-    } else {
-      list('orders');
-    }
+  const confirmDiscard = (onConfirm: () => void) => {
+    Modal.confirm({
+      title: 'Несохраненные изменения',
+      content: 'У вас есть несохраненные изменения. Вы уверены, что хотите покинуть страницу?',
+      okText: 'Покинуть',
+      cancelText: 'Остаться',
+      modalRender: (m) => React.createElement(DraggableModalWrapper, null, m),
+      onOk: onConfirm,
+    });
   };
 
   const headerTabItems = useMemo(
@@ -935,7 +974,26 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   // Handle cancel / close requests
   const handleCancel = () => {
-    checkUnsavedChanges(exitForm);
+    if (isSaving) return; // disabled mid-save
+
+    // Embedded (create modal): delegate to the parent's cancel handler.
+    if (onCancel) {
+      const exit = () => {
+        reset();
+        onCancel();
+      };
+      if (isDirty) confirmDiscard(exit);
+      else exit();
+      return;
+    }
+
+    // Tabbed route: close the workspace tab and navigate to a neighbour.
+    const closeAndLeave = (discard: boolean) => {
+      closeTab(tabKey, discard ? { discard: true } : undefined);
+      navigate(computeNeighborPath(useTabStore.getState().tabs, tabKey));
+    };
+    if (isDirty) confirmDiscard(() => closeAndLeave(true));
+    else closeAndLeave(false);
   };
 
   // Show loading only for essential data
@@ -949,14 +1007,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   if (isLoadingEssential) {
     return (
-      <Card>
-        <div style={{ textAlign: 'center', padding: '50px' }}>
-          <Spin size="large" />
-          <div style={{ marginTop: '16px' }}>
-            {backendOrderLoading || orderLoading ? 'Загрузка заказа...' : 'Загрузка формы...'}
+      <OrderDraftStoreProvider orderKey={orderKey}>
+        <Card>
+          <div style={{ textAlign: 'center', padding: '50px' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: '16px' }}>
+              {backendOrderLoading || orderLoading ? 'Загрузка заказа...' : 'Загрузка формы...'}
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </OrderDraftStoreProvider>
     );
   }
 
@@ -967,6 +1027,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       : `Редактирование заказа${orderName ? ` «${orderName}»` : ''}`;
 
   return (
+    <OrderDraftStoreProvider orderKey={orderKey}>
     <Card
       title={cardTitle}
       extra={
@@ -993,6 +1054,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           <Button
             icon={<CloseOutlined />}
             onClick={handleCancel}
+            disabled={isSaving}
             style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
           >
             Закрыть
@@ -1011,5 +1073,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         type="card"
       />
     </Card>
+    </OrderDraftStoreProvider>
   );
 };

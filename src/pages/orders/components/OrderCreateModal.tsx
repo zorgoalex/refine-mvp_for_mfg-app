@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { OrderForm } from './OrderForm';
-import { useOrderFormStore } from '../../../stores/orderFormStore';
+import { useOrderFormStore, destroyOrderDraftStore, NEW_ORDER_KEY } from '../../../stores/orderFormStore';
 import { DraggableModalWrapper } from '../../../components/DraggableModalWrapper';
 
 interface OrderCreateModalProps {
@@ -22,6 +22,8 @@ export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClos
   useEffect(() => {
     if (open) {
       console.log('[OrderCreateModal] Modal opened, resetting store...');
+      // Drop any stale "new" draft (and its sessionStorage) so each create starts clean.
+      destroyOrderDraftStore(NEW_ORDER_KEY);
       reset();
       // Small delay to ensure store is reset
       setTimeout(() => {

@@ -1,6 +1,7 @@
 // Zustand Store for Order Form State Management
 // Manages the entire order form state including header and all child tables
 
+import React, { createContext, useContext } from 'react';
 import { create, useStore, type StoreApi, type UseBoundStore } from 'zustand';
 import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 import {
@@ -880,15 +881,45 @@ export function useOrderDraftStore<T>(orderKey: string, selector?: (s: OrderForm
   return selector ? useStore(store, selector) : useStore(store);
 }
 
-// Legacy singleton alias = the "new" draft store (create flow).
-export const useOrderFormStore = Object.assign(
-  ((selector?: any) => useOrderDraftStore(NEW_ORDER_KEY, selector)) as any,
-  {
-    getState: () => getOrderDraftStore(NEW_ORDER_KEY).getState(),
-    setState: (...a: any[]) => (getOrderDraftStore(NEW_ORDER_KEY).setState as any)(...a),
-    subscribe: (...a: any[]) => (getOrderDraftStore(NEW_ORDER_KEY).subscribe as any)(...a),
-  }
-) as UseBoundStore<StoreApi<OrderFormState>>;
+// ============================================================================
+// STORE CONTEXT (scope the active order's store down the OrderForm subtree)
+// ============================================================================
+
+const OrderDraftStoreContext = createContext<OrderDraftStore | null>(null);
+
+export const OrderDraftStoreProvider: React.FC<{ orderKey: string; children: React.ReactNode }> = ({
+  orderKey,
+  children,
+}) =>
+  React.createElement(
+    OrderDraftStoreContext.Provider,
+    { value: getOrderDraftStore(orderKey) },
+    children,
+  );
+
+/** Imperative StoreApi for the active scope (.getState()/.setState()/.subscribe()). Fallback = "new". */
+export const useOrderDraftStoreApi = (): OrderDraftStore =>
+  useContext(OrderDraftStoreContext) ?? getOrderDraftStore(NEW_ORDER_KEY);
+
+/** Context-aware hook: subscribes to the active scope's store (or "new" with no provider). */
+function useOrderFormStoreHook(): OrderFormState;
+function useOrderFormStoreHook<T>(selector: (s: OrderFormState) => T): T;
+function useOrderFormStoreHook<T>(selector?: (s: OrderFormState) => T) {
+  const store = useContext(OrderDraftStoreContext) ?? getOrderDraftStore(NEW_ORDER_KEY);
+  return selector ? useStore(store, selector) : useStore(store);
+}
+
+// Context-aware hook + static accessors bound to the "new" store (back-compat for
+// non-provider callers: import modals, create flow, version-sync unit test).
+export const useOrderFormStore = Object.assign(useOrderFormStoreHook, {
+  getState: () => getOrderDraftStore(NEW_ORDER_KEY).getState(),
+  setState: (...a: any[]) => (getOrderDraftStore(NEW_ORDER_KEY).setState as any)(...a),
+  subscribe: (...a: any[]) => (getOrderDraftStore(NEW_ORDER_KEY).subscribe as any)(...a),
+}) as typeof useOrderFormStoreHook & {
+  getState: () => OrderFormState;
+  setState: StoreApi<OrderFormState>['setState'];
+  subscribe: StoreApi<OrderFormState>['subscribe'];
+};
 
 // ============================================================================
 // SELECTORS (for optimized access)

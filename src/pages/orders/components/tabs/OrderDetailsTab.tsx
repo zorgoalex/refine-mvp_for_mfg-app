@@ -8,7 +8,7 @@ import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTabl
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { BulkEditModal } from '../modals/BulkEditModal';
 import { ImportDropdownButton } from '../import';
-import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { useOrderFormStore, useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 
@@ -34,6 +34,7 @@ interface DragSelectionState {
 
 export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField } = useOrderFormStore();
+  const storeApi = useOrderDraftStoreApi();
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
@@ -67,7 +68,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
 
     // Get the newly added detail
     await new Promise(resolve => setTimeout(resolve, 50));
-    const updatedDetails = useOrderFormStore.getState().details;
+    const updatedDetails = storeApi.getState().details;
     const lastDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
 
     if (!lastDetail || !tableRef.current) return;
@@ -125,7 +126,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     // Use setTimeout to ensure the detail is added to the list first
     setTimeout(() => {
       // Re-get the last detail after state update
-      const updatedDetails = useOrderFormStore.getState().details;
+      const updatedDetails = storeApi.getState().details;
       const lastDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
       const actualRowKey = lastDetail?.temp_id || lastDetail?.detail_id || rowKey;
 
@@ -242,7 +243,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
 
     // Get the newly inserted detail and start editing it
     await new Promise(resolve => setTimeout(resolve, 50));
-    const updatedDetails = useOrderFormStore.getState().details;
+    const updatedDetails = storeApi.getState().details;
 
     // Find the detail that was just inserted (it will have the highest temp_id)
     const newDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
@@ -391,7 +392,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     // Recalculate totals if cost could have changed
     if (dimensionsChanged || priceChanged) {
       // Update total_amount in header
-      const updatedDetails = useOrderFormStore.getState().details;
+      const updatedDetails = storeApi.getState().details;
       const totalAmount = updatedDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
       updateHeaderField('total_amount', Number(totalAmount.toFixed(2)));
 

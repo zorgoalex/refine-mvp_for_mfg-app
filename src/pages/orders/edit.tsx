@@ -1,11 +1,10 @@
 // Edit Order Page
 
 import React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { OrderForm } from './components/OrderForm';
 
 export const OrderEdit: React.FC = () => {
-  const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const orderId = id ? parseInt(id, 10) : undefined;
 
@@ -14,18 +13,15 @@ export const OrderEdit: React.FC = () => {
     // Navigation is disabled per product requirement
   };
 
-  const handleCancel = () => {
-    // Navigate back to previous page (preserves pagination state)
-    navigate(-1);
-  };
-
+  // No onCancel: in the tabbed workspace OrderForm owns the close path
+  // (closeTab + navigate to neighbour). Passing onCancel would force the
+  // embedded/modal branch instead.
   return (
     <OrderForm
       key={orderId}
       mode="edit"
       orderId={orderId}
       onSaveSuccess={handleSaveSuccess}
-      onCancel={handleCancel}
     />
   );
 };

@@ -7,7 +7,7 @@ import { Menu, notification } from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useDataProvider, useList, useUpdate, useInvalidate } from '@refinedev/core';
-import { useOrderFormStore } from '../../../stores/orderFormStore';
+import { useOrderFormStore, useOrderDraftStoreApi } from '../../../stores/orderFormStore';
 import { useProductionStatusEvent } from '../../../hooks/useProductionStatusEvent';
 import {
   createProductionActionIdempotencyKey,
@@ -36,6 +36,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
   onClose,
 }) => {
   const { header, updateHeaderField } = useOrderFormStore();
+  const storeApi = useOrderDraftStoreApi();
   const { toggleOrderEvent, events, refetch } = useProductionStatusEvent({ orderId: header.order_id });
   const { mutate: updateOrder } = useUpdate();
   const invalidate = useInvalidate();
@@ -187,7 +188,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
           }
 
           await queueHeaderAction(header.order_id, async () => {
-            const currentHeader = useOrderFormStore.getState().header;
+            const currentHeader = storeApi.getState().header;
             if (!Number.isInteger(currentHeader.version)) {
               await refreshHeaderFromOrder();
               await invalidate({ resource: 'orders_view', invalidates: ['list'] });
@@ -289,7 +290,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         let wasAdded: boolean | null = null;
         if (featureFlags.useBackendProductionActions) {
           await queueHeaderAction(header.order_id, async () => {
-            const currentHeader = useOrderFormStore.getState().header;
+            const currentHeader = storeApi.getState().header;
             if (!Number.isInteger(currentHeader.version)) {
               await refreshHeaderFromOrder();
               await invalidate({ resource: 'orders_view', invalidates: ['list'] });

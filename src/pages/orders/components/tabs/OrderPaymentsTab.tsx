@@ -6,7 +6,7 @@ import { Card, Button, Space, Modal, message } from 'antd';
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { OrderPaymentTable, OrderPaymentTableRef } from '../tables/OrderPaymentTable';
 import { PaymentModal } from '../modals/PaymentModal';
-import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { useOrderFormStore, useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
 import { Payment } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import dayjs from 'dayjs';
@@ -25,6 +25,7 @@ const QUICK_ADD_DEFAULTS = {
 
 export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
   const { payments, addPayment, deletePayment } = useOrderFormStore();
+  const storeApi = useOrderDraftStoreApi();
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingPayment, setEditingPayment] = useState<Payment | undefined>();
@@ -56,7 +57,7 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
 
     // Get the newly added payment
     await new Promise(resolve => setTimeout(resolve, 50));
-    const updatedPayments = useOrderFormStore.getState().payments;
+    const updatedPayments = storeApi.getState().payments;
     const lastPayment = [...updatedPayments].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
 
     if (!lastPayment || !tableRef.current) return;
@@ -96,7 +97,7 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
       message.success('Платеж добавлен');
     } else if (editingPayment) {
       const tempId = editingPayment.temp_id || editingPayment.payment_id!;
-      const { updatePayment } = useOrderFormStore.getState();
+      const { updatePayment } = storeApi.getState();
       updatePayment(tempId, paymentData);
       rowKey = tempId;
       message.success('Платеж обновлен');
@@ -111,7 +112,7 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
 
     // Highlight the row and auto-clear after 2 seconds
     setTimeout(() => {
-      const updatedPayments = useOrderFormStore.getState().payments;
+      const updatedPayments = storeApi.getState().payments;
       const lastPayment = [...updatedPayments].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
       const actualRowKey = lastPayment?.temp_id || lastPayment?.payment_id || rowKey;
 
