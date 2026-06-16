@@ -136,6 +136,10 @@ test.describe('Order UI full form coverage', () => {
         await expect(orderDialog).toBeHidden({ timeout: 30000 });
 
         await expect(page.getByText(orderName, { exact: true }).first()).toBeVisible({ timeout: 30000 });
+        // Opening an order creates a workspace tab labelled "Заказ #<id>" (enriched with the name after load).
+        await expect(workspaceTabs(page).locator('.ant-tabs-tab-active')).toContainText(`Заказ #${orderId}`, {
+            timeout: 30000,
+        });
         await verifyEditTabs(page, testInfo, orderName, detailName, paymentNote);
         await verifyDurableDatabaseState(orderId, orderName, detailName, paymentRef);
 
@@ -148,8 +152,37 @@ test.describe('Order UI full form coverage', () => {
         const row = page.getByRole('row', { name: new RegExp(orderName) }).first();
         await expect(row).toContainText(username);
         await screenshot(page, testInfo, 'orders-list-created-by');
+
+        // ============================================================
+        // Tabbed workspace context: dirty marker + Закрыть closes the tab
+        // ============================================================
+        await page.goto(`${frontendUrl}/orders/edit/${orderId}`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByText(orderName, { exact: true }).first()).toBeVisible({ timeout: 30000 });
+        const editForm = page.locator('.ant-card').filter({ hasText: orderName }).first();
+        await clickOrderTab(editForm, 'Основная информация');
+
+        // Make the order draft dirty → the active workspace tab shows the ● marker.
+        await fillNumber(formItem(editForm, 'Приоритет'), '88');
+        const activeTab = workspaceTabs(page).locator('.ant-tabs-tab-active');
+        await expect(activeTab).toContainText('●', { timeout: 30000 });
+        await expect(activeTab).toContainText(`Заказ #${orderId}`);
+        await screenshot(page, testInfo, 'edit-tab-dirty-marker');
+
+        // Закрыть on a dirty order prompts; confirming closes the tab and leaves the edit route.
+        const tabsBefore = await workspaceTabs(page).getByRole('tab').count();
+        await editForm.getByRole('button', { name: 'Закрыть' }).click();
+        await expect(page.getByText('Несохраненные изменения')).toBeVisible();
+        await page.getByRole('button', { name: 'Покинуть' }).click();
+        await expect(page).not.toHaveURL(new RegExp(`/orders/edit/${orderId}`), { timeout: 30000 });
+        await expect(workspaceTabs(page).getByRole('tab')).toHaveCount(tabsBefore - 1);
+        await screenshot(page, testInfo, 'edit-tab-closed');
     });
 });
+
+// The workspace tab-bar is the first AntD Tabs in the layout (rendered above page content).
+function workspaceTabs(page: Page): Locator {
+    return page.locator('.ant-tabs').first();
+}
 
 async function loginThroughUi(page: Page) {
     const authRequests: string[] = [];
