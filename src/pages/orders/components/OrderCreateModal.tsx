@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { OrderForm } from './OrderForm';
-import { useOrderFormStore, destroyOrderDraftStore, NEW_ORDER_KEY } from '../../../stores/orderFormStore';
+import { getOrderDraftStore, destroyOrderDraftStore, NEW_ORDER_KEY } from '../../../stores/orderFormStore';
 import { DraggableModalWrapper } from '../../../components/DraggableModalWrapper';
 
 interface OrderCreateModalProps {
@@ -15,26 +15,29 @@ interface OrderCreateModalProps {
 
 export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClose }) => {
   const navigate = useNavigate();
-  const { reset } = useOrderFormStore();
   const [isReady, setIsReady] = useState(false);
 
-  // Reset store when modal opens and mark as ready
+  // Reset store when modal opens and mark as ready.
+  // NOTE: depend ONLY on `open`. Destroying the "new" draft store recreates a fresh
+  // store instance on the next render, which would give a store action (e.g. `reset`)
+  // a new identity — putting such an action in the dep array re-fires this effect every
+  // render → destroy/recreate churn → "Maximum update depth exceeded". Resolve the fresh
+  // store imperatively instead of subscribing to it.
   useEffect(() => {
     if (open) {
-      console.log('[OrderCreateModal] Modal opened, resetting store...');
       // Drop any stale "new" draft (and its sessionStorage) so each create starts clean.
       destroyOrderDraftStore(NEW_ORDER_KEY);
-      reset();
+      getOrderDraftStore(NEW_ORDER_KEY).getState().reset();
       // Small delay to ensure store is reset
-      setTimeout(() => {
-        console.log('[OrderCreateModal] Store reset complete, ready to render form');
+      const timer = setTimeout(() => {
         setIsReady(true);
       }, 50);
-    } else {
-      // Reset ready state when modal closes
-      setIsReady(false);
+      return () => clearTimeout(timer);
     }
-  }, [open, reset]);
+    // Reset ready state when modal closes
+    setIsReady(false);
+    return undefined;
+  }, [open]);
 
   const handleSaveSuccess = (orderId: number) => {
     console.log('[OrderCreateModal] ========== handleSaveSuccess STARTED ==========');
