@@ -2,6 +2,7 @@ import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../database/database.types';
 import { redactLogFields } from '../logging/redaction';
 import type { AuditEvent, DeniedAuditEvent } from './audit-event.types';
+import { insertRelatedEntities } from './related-entities';
 
 interface AuditRow extends QueryResultRow {
   audit_id: string;
@@ -65,7 +66,11 @@ export class AuditService {
       redactJson(event.diff),
       redactJson(event.metadata),
     ]);
-    return result.rows[0]?.audit_id ?? '';
+    const auditId = result.rows[0]?.audit_id ?? '';
+    if (auditId) {
+      await insertRelatedEntities(client, auditId, event.relatedEntities ?? []);
+    }
+    return auditId;
   }
 
   async recordDenied(client: DatabaseClient, event: DeniedAuditEvent): Promise<string> {

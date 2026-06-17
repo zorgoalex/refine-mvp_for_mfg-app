@@ -1,3 +1,6 @@
+export type { AuditRelatedEntity } from './related-entities';
+import type { AuditRelatedEntity } from './related-entities';
+
 /** Query/report-ready audit event. Maps 1:1 onto audit_log columns. */
 export interface AuditEvent {
   /** audit_log.event (action is a generated column derived from event). */
@@ -24,6 +27,7 @@ export interface AuditEvent {
   after?: Record<string, unknown> | null;
   diff?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
+  relatedEntities?: AuditRelatedEntity[];
 }
 
 /** Convenience shape for permission-denied audit rows. */

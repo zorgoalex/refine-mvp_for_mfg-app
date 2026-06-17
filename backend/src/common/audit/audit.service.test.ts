@@ -126,6 +126,82 @@ describe('AuditService related_user_id dimension', () => {
   });
 });
 
+describe('AuditService relatedEntities bridge writes', () => {
+  const baseEvent = {
+    event: 'order.update',
+    entityType: 'order',
+    entityId: 10,
+    requestId: 'req-bridge',
+    source: 'backend-orders-command',
+  };
+
+  it('fan-writes deduplicated bridge rows after the parent INSERT', async () => {
+    const captured: Captured[] = [];
+    const service = new AuditService();
+
+    await service.record(fakeClient(captured), {
+      ...baseEvent,
+      relatedEntities: [
+        { entityType: 'user', entityId: 7 },
+        { entityType: 'user', entityId: 7 },       // duplicate — must be skipped
+        { entityType: 'employee', entityId: 3 },
+      ],
+    });
+
+    // First captured query is the audit_log INSERT
+    expect(captured[0].text).toMatch(/INSERT INTO audit_log/i);
+
+    // Exactly 2 bridge queries after dedup
+    const bridge = captured.filter(q =>
+      q.text.includes('INSERT INTO audit_log_related_entity'),
+    );
+    expect(bridge).toHaveLength(2);
+    expect(bridge[0].params).toEqual(['aud-1', 'user', 7]);
+    expect(bridge[1].params).toEqual(['aud-1', 'employee', 3]);
+  });
+
+  it('skips entities with non-finite entityId (NaN, Infinity)', async () => {
+    const captured: Captured[] = [];
+    await new AuditService().record(fakeClient(captured), {
+      ...baseEvent,
+      relatedEntities: [
+        { entityType: 'order', entityId: NaN },
+        { entityType: 'order', entityId: Infinity },
+        { entityType: 'order', entityId: 5 },
+      ],
+    });
+
+    const bridge = captured.filter(q =>
+      q.text.includes('INSERT INTO audit_log_related_entity'),
+    );
+    expect(bridge).toHaveLength(1);
+    expect(bridge[0].params).toEqual(['aud-1', 'order', 5]);
+  });
+
+  it('writes no bridge rows when relatedEntities is empty', async () => {
+    const captured: Captured[] = [];
+    await new AuditService().record(fakeClient(captured), {
+      ...baseEvent,
+      relatedEntities: [],
+    });
+
+    const bridge = captured.filter(q =>
+      q.text.includes('INSERT INTO audit_log_related_entity'),
+    );
+    expect(bridge).toHaveLength(0);
+  });
+
+  it('writes no bridge rows when relatedEntities is absent', async () => {
+    const captured: Captured[] = [];
+    await new AuditService().record(fakeClient(captured), { ...baseEvent });
+
+    const bridge = captured.filter(q =>
+      q.text.includes('INSERT INTO audit_log_related_entity'),
+    );
+    expect(bridge).toHaveLength(0);
+  });
+});
+
 describe('AuditService.recordDenied', () => {
   it('writes a denied audit row with denied metadata', async () => {
     const captured: Captured[] = [];
