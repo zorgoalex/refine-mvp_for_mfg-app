@@ -19,6 +19,18 @@ describe('parseAuditListQuery', () => {
       filters: { relatedUserId: 158, role: 'admin' },
     });
   });
+  it('parses relatedEntityType and relatedEntityId filters', () => {
+    expect(parseAuditListQuery({ relatedEntityType: 'employee', relatedEntityId: '3' })).toEqual({
+      page: 1, pageSize: 50,
+      filters: { relatedEntityType: 'employee', relatedEntityId: 3 },
+    });
+  });
+  it('strips undefined relatedEntity filters when omitted', () => {
+    expect(parseAuditListQuery({ event: 'orders.update' })).toEqual({
+      page: 1, pageSize: 50,
+      filters: { event: 'orders.update' },
+    });
+  });
   it('rejects an over-long role value', () => {
     expect(() => parseAuditListQuery({ role: 'x'.repeat(65) })).toThrow(ApiError);
   });

@@ -23,6 +23,8 @@ const querySchema = z.object({
   relatedDeadlineId: numeric,
   relatedProductionEventId: numeric,
   relatedUserId: numeric,
+  relatedEntityType: z.string().min(1).optional(),
+  relatedEntityId: numeric,
   requestId: z.string().min(1).optional(),
   createdFrom: z.string().datetime().optional(),
   createdTo: z.string().datetime().optional(),
