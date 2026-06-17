@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../database/database.types';
+import { computeListDiff } from '../../common/audit/audit-diff';
+import { insertRelatedEntities, type AuditRelatedEntity } from '../../common/audit/related-entities';
 import type {
   ProjectDto,
   ProjectListQuery,
@@ -562,7 +564,23 @@ async function writeProjectMembersAudit(
       }),
     ],
   );
-  return result.rows[0]?.audit_id ?? '';
+  const auditId = result.rows[0]?.audit_id ?? '';
+  if (auditId) {
+    const { added, removed } = computeListDiff(
+      input.before,
+      input.after,
+      (m) => 'user:' + m.userId,
+    );
+    const entities: AuditRelatedEntity[] = [];
+    for (const m of [...added, ...removed]) {
+      entities.push({ entityType: 'user', entityId: m.userId });
+      if (m.employeeId != null) {
+        entities.push({ entityType: 'employee', entityId: m.employeeId });
+      }
+    }
+    await insertRelatedEntities(tx, auditId, entities);
+  }
+  return auditId;
 }
 
 async function enqueueProjectMembersOutbox(

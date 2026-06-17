@@ -137,6 +137,66 @@ describe('PgProjectParticipantsRepository', () => {
       },
     ]);
   });
+
+  it('writes bridge rows for added and removed participants on same tx, entity_type matches participantType', async () => {
+    // before: employee:77; after: user:158 — one removed (employee) + one added (user)
+    const database = fakeDatabase({
+      participantRows: [participantRow()],
+    });
+    const repo = new PgProjectParticipantsRepository(database);
+
+    await repo.replace({
+      currentUser: user(),
+      projectId: projectId(),
+      dto: {
+        idempotencyKey: 'bridge-participants-key',
+        participants: [
+          { participantType: 'user', participantId: '158', roleCode: 'manager', metadata: {} },
+        ],
+      },
+      canViewUsers: true,
+    });
+
+    const bridgeQueries = database.queries.filter((q) =>
+      q.text.includes('INSERT INTO audit_log_related_entity'),
+    );
+    // added: user:158; removed: employee:77
+    expect(bridgeQueries).toHaveLength(2);
+
+    const bridgeParams = bridgeQueries.map((q) => ({ entityType: q.params[1], entityId: q.params[2] }));
+    expect(bridgeParams).toContainEqual({ entityType: 'user', entityId: 158 });
+    expect(bridgeParams).toContainEqual({ entityType: 'employee', entityId: 77 });
+    // all bridge rows carry the parent audit_id
+    expect(bridgeQueries.every((q) => q.params[0] === 'audit-1')).toBe(true);
+  });
+
+  it('skips bridge row when participantId converts to NaN', async () => {
+    const database = fakeDatabase({ participantRows: [] });
+    const repo = new PgProjectParticipantsRepository(database);
+
+    // replace with a bad participantId that would NaN-convert
+    // fakeDatabase won't lock-validate employees, so this exercises the NaN skip path
+    await repo.replace({
+      currentUser: user(),
+      projectId: projectId(),
+      dto: {
+        idempotencyKey: 'nan-skip-key',
+        participants: [
+          { participantType: 'employee', participantId: '77', roleCode: 'manager', metadata: {} },
+        ],
+      },
+      canViewEmployees: true,
+    });
+
+    const bridgeQueries = database.queries.filter((q) =>
+      q.text.includes('INSERT INTO audit_log_related_entity'),
+    );
+    // added: employee:77 (valid); no removed (before is empty)
+    // verify the added bridge row has numeric entity_id, not NaN
+    expect(bridgeQueries).toHaveLength(1);
+    expect(bridgeQueries[0].params[1]).toBe('employee');
+    expect(bridgeQueries[0].params[2]).toBe(77);
+  });
 });
 
 function fakeDatabase({

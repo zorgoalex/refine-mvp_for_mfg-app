@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import { insertRelatedEntities, type AuditRelatedEntity } from '../../../common/audit/related-entities';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
   ProjectParticipantDto,
@@ -377,7 +378,15 @@ async function writeAudit(
       }),
     ],
   );
-  return result.rows[0]?.audit_id ?? '';
+  const auditId = result.rows[0]?.audit_id ?? '';
+  if (auditId) {
+    const entities: AuditRelatedEntity[] = [...added, ...removed].map((d) => ({
+      entityType: d.participantType,
+      entityId: Number(d.participantId),
+    }));
+    await insertRelatedEntities(tx, auditId, entities);
+  }
+  return auditId;
 }
 
 async function enqueueOutbox(

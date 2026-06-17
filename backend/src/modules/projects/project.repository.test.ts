@@ -356,6 +356,9 @@ describe('PgProjectRepository', () => {
       { rows: [] },
       { rows: [projectMemberRow({ id: 'new-member-id', user_id: 7, role: 'manager' })] },
       { rows: [{ audit_id: 'audit-1' }] },
+      // bridge: user:5 (removed, no employee_id), user:7 (added, no employee_id)
+      { rows: [] },
+      { rows: [] },
       { rows: [] },
       { rows: [] },
     ]);
@@ -397,8 +400,55 @@ describe('PgProjectRepository', () => {
     expect(database.queries[5].params).toEqual(['11111111-1111-4111-8111-111111111111', 7, 'manager', '{}', 42]);
     expect(database.queries[6].text).toContain('INSERT INTO audit_log');
     expect(database.queries[6].params[0]).toBe('projects.members_changed');
-    expect(database.queries[7].text).toContain('INSERT INTO outbox_events');
-    expect(database.queries[8].text).toContain('UPDATE command_idempotency_keys');
+    // bridge inserts at [7] and [8] (user:5 removed, user:7 added)
+    expect(database.queries[9].text).toContain('INSERT INTO outbox_events');
+    expect(database.queries[10].text).toContain('UPDATE command_idempotency_keys');
+  });
+
+  it('writes bridge rows for added and removed members on the same tx, skipping null employee ids', async () => {
+    // before: user 5, employeeId 11 (has employee); after: user 7, employeeId null (no employee)
+    const database = new FakeProjectDatabase([
+      { rows: [{ idempotency_key: 'bridge-key', request_hash: 'hash', status: 'processing', response_json: null }] },
+      { rows: [projectRow({ id: '11111111-1111-4111-8111-111111111111' })] },
+      { rows: [projectMemberRow({ id: 'old-id', user_id: 5, employee_id: 11, role: 'manager' })] },
+      { rows: [{ user_id: 7 }] },
+      { rows: [] },
+      { rows: [projectMemberRow({ id: 'new-id', user_id: 7, employee_id: null, role: 'manager' })] },
+      { rows: [{ audit_id: 'audit-bridge' }] },
+      // bridge: user:5 (removed), employee:11 (removed), user:7 (added) — no employee row for user:7
+      { rows: [] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [] },
+    ]);
+    const repository = new PgProjectRepository(database);
+
+    await repository.replaceProjectMembers({
+      currentUser: currentUser(),
+      projectId: '11111111-1111-4111-8111-111111111111',
+      dto: {
+        idempotencyKey: 'bridge-key',
+        members: [{ userId: 7, role: 'manager' }],
+        reason: null,
+      },
+      requestId: 'req-bridge',
+    });
+
+    const bridgeQueries = database.queries.filter((q) =>
+      q.text.includes('INSERT INTO audit_log_related_entity'),
+    );
+    // removed member: user:5 + employee:11; added member: user:7 (employeeId null → no employee row)
+    expect(bridgeQueries).toHaveLength(3);
+
+    const bridgeParams = bridgeQueries.map((q) => ({ entityType: q.params[1], entityId: q.params[2] }));
+    expect(bridgeParams).toContainEqual({ entityType: 'user', entityId: 5 });
+    expect(bridgeParams).toContainEqual({ entityType: 'employee', entityId: 11 });
+    expect(bridgeParams).toContainEqual({ entityType: 'user', entityId: 7 });
+    // all bridge rows carry the parent audit_id
+    expect(bridgeQueries.every((q) => q.params[0] === 'audit-bridge')).toBe(true);
+    // no employee bridge row for user:7 (employeeId is null)
+    expect(bridgeParams.filter((p) => p.entityType === 'employee')).toHaveLength(1);
   });
 
   it('treats member metadata changes as temporal replacement instead of in-place rewrite', async () => {
