@@ -130,6 +130,49 @@ test.describe('Tabbed workspace', () => {
         await expect(workspaceTab(page, /Заказы/)).toBeVisible();
     });
 
+    test('tab-bar is compact and wraps to multiple rows on overflow', async ({ page }) => {
+        await page.setViewportSize({ width: 520, height: 900 });
+        await setupWorkflowMockApi(page);
+
+        // Seed many open tabs directly into the persisted tab store so the bar renders a
+        // deterministic overflow set (independent of which routes render). useTabStore
+        // rehydrates this on load.
+        const seeded = [
+            { key: '/orders', path: '/orders', label: 'Заказы', resource: 'orders_view', dirty: false },
+            ...Array.from({ length: 7 }, (_, i) => ({
+                key: `/orders/edit/${i + 1}`,
+                path: `/orders/edit/${i + 1}`,
+                label: `Заказ #${i + 1}`,
+                resource: 'orders_view',
+                dirty: false,
+            })),
+        ];
+        await page.addInitScript((tabs) => {
+            sessionStorage.setItem('workspace-tabs', JSON.stringify({ state: { tabs }, version: 0 }));
+        }, seeded);
+
+        await page.goto('/orders');
+        const tabs = workspaceTabs(page).locator('.ant-tabs-tab');
+        await expect(tabs.first()).toBeVisible({ timeout: 30_000 });
+        await expect.poll(() => tabs.count()).toBeGreaterThan(6);
+
+        // Compact: a tab is at most ~half the AntD card-tab default (~40px).
+        const firstBox = await tabs.first().boundingBox();
+        expect(firstBox!.height).toBeLessThanOrEqual(24);
+
+        // Multi-row: tabs occupy more than one row (distinct top offsets) instead of
+        // horizontally scrolling in a single row.
+        const count = await tabs.count();
+        const rows = new Set<number>();
+        for (let i = 0; i < count; i++) {
+            const b = await tabs.nth(i).boundingBox();
+            if (b) rows.add(Math.round(b.y / 6));
+        }
+        expect(rows.size).toBeGreaterThan(1);
+        // No horizontal-scroll operations control should be shown when wrapping.
+        await expect(workspaceTabs(page).locator('.ant-tabs-nav-operations')).toBeHidden();
+    });
+
     test('dirty non-order tab prompts on close but not on switch', async ({ page }) => {
         await setupWorkflowMockApi(page);
 

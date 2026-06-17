@@ -251,3 +251,46 @@
 .order-details-table .ant-table-tbody > tr.ant-table-row-selected:hover > td {
   background: #5cdbd3 !important;
 }
+
+/* ============================================================
+   Workspace top tab-bar (WorkspaceTabs): compact (~half height)
+   + wrap onto multiple rows instead of horizontal scrolling.
+   Scoped to .workspace-tabs so order-form / configuration inner
+   tabs keep their default sizing.
+   ============================================================ */
+.workspace-tabs .ant-tabs-nav {
+  margin: 0;
+}
+/* Let the nav grow vertically and stop AntD's transform-based scroll. */
+.workspace-tabs .ant-tabs-nav-wrap {
+  overflow: visible !important;
+  white-space: normal !important;
+  flex: 1 1 auto;
+}
+/* Constrain the list to the bar width so flex-wrap actually wraps. */
+.workspace-tabs .ant-tabs-nav-list {
+  width: 100%;
+  flex-wrap: wrap;
+  transform: none !important;
+}
+/* No "more"/scroll-arrows when tabs wrap. */
+.workspace-tabs .ant-tabs-nav-operations {
+  display: none !important;
+}
+/* Compact tabs: ~half the default card-tab height. */
+.workspace-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  height: 22px;
+  line-height: 20px;
+  padding: 0 8px !important;
+  margin: 2px 4px 0 0 !important;
+  font-size: 12px;
+}
+.workspace-tabs .ant-tabs-tab .ant-tabs-tab-btn {
+  line-height: 20px;
+  font-size: 12px;
+}
+.workspace-tabs .ant-tabs-tab .ant-tabs-tab-remove {
+  height: 20px;
+  margin-left: 4px;
+  font-size: 11px;
+}

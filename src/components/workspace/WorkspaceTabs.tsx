@@ -35,6 +35,7 @@ export const WorkspaceTabs: React.FC = () => {
   if (tabs.length === 0) return null;
   return (
     <Tabs
+      className="workspace-tabs"
       type="editable-card"
       hideAdd
       activeKey={activeKey}
