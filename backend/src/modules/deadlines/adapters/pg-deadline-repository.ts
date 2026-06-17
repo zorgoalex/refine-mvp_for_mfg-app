@@ -1,4 +1,5 @@
 import { ApiError } from '../../../common/errors/api-error';
+import { computeDiff } from '../../../common/audit/audit-diff';
 import type { DatabaseClient } from '../../../database/database.types';
 import type {
   DeadlineActionExecutionDto,
@@ -1645,10 +1646,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       ...(afterStatus ? { status: afterStatus } : {}),
       ...(afterDeadlineAt ? { deadlineAt: afterDeadlineAt } : {}),
     };
-    const diffJson = {
-      ...(afterStatus ? { status: { from: beforeStatus, to: afterStatus } } : {}),
-      ...(afterDeadlineAt ? { deadlineAt: { from: beforeDeadlineAt, to: afterDeadlineAt } } : {}),
-    };
+    const diffJson = computeDiff(beforeJson, afterJson);
 
     await this.database.query(
       `

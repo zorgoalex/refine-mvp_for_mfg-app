@@ -1909,6 +1909,44 @@ describe('PgDeadlineRepository', () => {
     expect(normalizeSql(query?.text ?? '')).toContain('LIMIT $2 FOR UPDATE SKIP LOCKED');
     expect(query?.params).toEqual(['2026-05-02T10:00:00.000Z', 25]);
   });
+
+  it('omits unchanged status from diff when only deadlineAt changes (computeDiff uniform behaviour)', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await repository.createDeadlineEvent({
+      deadlineId: '11111111-1111-4111-8111-111111111111',
+      eventType: 'DEADLINE_RESCHEDULED',
+      severity: 'info',
+      entityType: 'order',
+      entityId: '100',
+      orderId: 100,
+      clientId: 5,
+      deadlineAt: '2026-06-01T10:00:00.000Z',
+      eventAt: '2026-05-20T10:00:00.000Z',
+      payload: {
+        source: 'backend-deadline-command',
+        actorUserId: '42',
+        requestId: 'req-reschedule-1',
+        beforeStatus: 'active',
+        afterStatus: 'active',
+        beforeDeadlineAt: '2026-05-01T10:00:00.000Z',
+        afterDeadlineAt: '2026-06-01T10:00:00.000Z',
+      },
+    });
+
+    const audit = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    const diffJson = JSON.parse(String(audit?.params[10]));
+    // deadlineAt changed → must be present in diff
+    expect(diffJson.deadlineAt).toEqual({
+      from: '2026-05-01T10:00:00.000Z',
+      to: '2026-06-01T10:00:00.000Z',
+    });
+    // status unchanged → must be absent from diff (computeDiff omits equal fields)
+    expect(diffJson).not.toHaveProperty('status');
+  });
 });
 
 function createDatabase(
