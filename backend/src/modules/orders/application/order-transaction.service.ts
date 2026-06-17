@@ -54,6 +54,7 @@ export class OrderTransactionService {
         previousVersion: null,
         currentUser: command.currentUser,
       });
+      const afterSnapshot = await unitOfWork.loadOrderHeaderSnapshot(orderId);
       await unitOfWork.writeAuditEvent({
         action: 'orders.create',
         orderId,
@@ -61,6 +62,8 @@ export class OrderTransactionService {
         actorUsername: command.currentUser.username,
         actorRole: command.currentUser.role,
         clientId: prepared.order.header.clientId ?? null,
+        before: null,
+        after: afterSnapshot,
       });
 
       return this.readAndAssertVersion(unitOfWork, orderId, version, command);
@@ -101,6 +104,7 @@ export class OrderTransactionService {
         pathOrderId: command.orderId,
       });
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
+      const beforeSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
       await unitOfWork.assertChildOwnership(
         command.orderId,
         collectChildReferences(prepared.order),
@@ -118,6 +122,7 @@ export class OrderTransactionService {
         previousVersion: lockedOrder.version,
         currentUser: command.currentUser,
       });
+      const afterSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
       await unitOfWork.writeAuditEvent({
         action: 'orders.update',
         orderId: command.orderId,
@@ -125,6 +130,8 @@ export class OrderTransactionService {
         actorUsername: command.currentUser.username,
         actorRole: command.currentUser.role,
         clientId: prepared.order.header.clientId ?? null,
+        before: beforeSnapshot,
+        after: afterSnapshot,
       });
 
       return this.readAndAssertVersion(unitOfWork, command.orderId, version, command);

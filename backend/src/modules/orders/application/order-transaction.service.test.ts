@@ -347,6 +347,38 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     });
   }
 
+  async loadOrderHeaderSnapshot(orderId: number): Promise<Record<string, unknown> | null> {
+    this.call('loadOrderHeaderSnapshot');
+    const order = this.state.orders.get(orderId);
+    if (!order) return null;
+    return {
+      orderName: order.header.orderName,
+      clientId: order.header.clientId ?? null,
+      orderDate: order.header.orderDate,
+      priority: order.header.priority,
+      managerId: order.header.managerId ?? null,
+      orderStatusId: order.header.orderStatusId,
+      productionStatusId: order.header.productionStatusId ?? null,
+      plannedCompletionDate: order.header.plannedCompletionDate ?? null,
+      completionDate: order.header.completionDate ?? null,
+      issueDate: order.header.issueDate ?? null,
+      discount: order.totals.discount,
+      surcharge: order.totals.surcharge,
+      totalAmount: order.totals.totalAmount,
+      finalAmount: order.totals.finalAmount,
+      linkCuttingFile: order.header.linkCuttingFile ?? null,
+      linkCuttingImageFile: order.header.linkCuttingImageFile ?? null,
+      linkCadFile: order.header.linkCadFile ?? null,
+      linkPdfFile: order.header.linkPdfFile ?? null,
+      notes: order.header.notes ?? null,
+      materialId: order.header.materialId ?? null,
+      millingTypeId: order.header.millingTypeId ?? null,
+      edgeTypeId: order.header.edgeTypeId ?? null,
+      filmId: order.header.filmId ?? null,
+      refKey1c: order.header.refKey1c ?? null,
+    };
+  }
+
   async readOrder(orderId: number): Promise<OrderDto> {
     this.call('readOrder');
     return toOrderDto(this.getOrder(orderId));
@@ -397,9 +429,12 @@ describe('OrderTransactionService', () => {
       debtAmount: 6500,
     });
     expect(result.version).toBe(1);
-    expect(transactions.state.auditEvents).toEqual([
-      { action: 'orders.create', orderId: 100, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 },
+    expect(transactions.state.auditEvents).toMatchObject([
+      expect.objectContaining({ action: 'orders.create', orderId: 100, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 }),
     ]);
+    const createAuditEvent = transactions.state.auditEvents[0] as typeof transactions.state.auditEvents[0] & { before?: unknown; after?: unknown };
+    expect(createAuditEvent).toMatchObject({ before: null });
+    expect(createAuditEvent.after).toBeTruthy();
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
@@ -415,6 +450,7 @@ describe('OrderTransactionService', () => {
       'deleteDowelingLinks',
       'upsertDowelingLinks',
       'updateOrderTotalsAndVersion',
+      'loadOrderHeaderSnapshot',
       'writeAuditEvent',
       'readOrder',
       'commit',
@@ -506,13 +542,19 @@ describe('OrderTransactionService', () => {
     expect(result.details).toHaveLength(2);
     expect(result.payments).toHaveLength(0);
     expect(result.totals.totalAmount).toBe(10000);
-    expect(transactions.state.auditEvents).toEqual([
-      { action: 'orders.update', orderId: 42, actorUserId: 'user_admin', actorUsername: 'admin', actorRole: 'admin', clientId: 1001 },
+    expect(transactions.state.auditEvents).toMatchObject([
+      expect.objectContaining({ action: 'orders.update', orderId: 42, actorUserId: 'user_admin', actorUsername: 'admin', actorRole: 'admin', clientId: 1001 }),
     ]);
-    expect(transactions.calls.slice(0, 6)).toEqual([
+    const updateAuditEvent1 = transactions.state.auditEvents[0] as typeof transactions.state.auditEvents[0] & { before?: Record<string, unknown> | null; after?: Record<string, unknown> | null };
+    expect(updateAuditEvent1.before).toBeTruthy();
+    expect(updateAuditEvent1.after).toBeTruthy();
+    // after reflects the updated orderName
+    expect((updateAuditEvent1.after as Record<string, unknown>)?.orderName).toBe('Updated order');
+    expect(transactions.calls.slice(0, 7)).toEqual([
       'begin',
       'setSessionUser',
       'loadOrderForUpdate',
+      'loadOrderHeaderSnapshot',
       'assertChildOwnership',
       'updateOrderHeader',
       'upsertDetails',
@@ -648,8 +690,8 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls.indexOf('updateOrderTotalsAndVersion')).toBeGreaterThan(
       transactions.calls.indexOf('upsertDowelingLinks'),
     );
-    expect(transactions.state.auditEvents).toEqual([
-      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 },
+    expect(transactions.state.auditEvents).toMatchObject([
+      expect.objectContaining({ action: 'orders.update', orderId: 42, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 }),
     ]);
   });
 
@@ -693,8 +735,8 @@ describe('OrderTransactionService', () => {
 
     expect(result.version).toBe(1);
     expect(result.details[0].quantity).toBe(3);
-    expect(transactions.state.auditEvents).toEqual([
-      { action: 'orders.update', orderId: 42, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 },
+    expect(transactions.state.auditEvents).toMatchObject([
+      expect.objectContaining({ action: 'orders.update', orderId: 42, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 }),
     ]);
   });
 

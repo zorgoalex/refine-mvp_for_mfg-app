@@ -4,6 +4,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { auditService } from '../../../common/audit/audit.service';
+import { computeDiff } from '../../../common/audit/audit-diff';
 import { PgOrderReadRepository } from './pg-order-read-repository';
 import type {
   DeleteOrderCommand,
@@ -140,6 +141,28 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           managerUserId: toNullableString(row.manager_id),
         }
       : null;
+  }
+
+  async loadOrderHeaderSnapshot(orderId: number): Promise<Record<string, unknown> | null> {
+    const result = await this.tx.query<Record<string, unknown>>(
+      `
+      SELECT order_name AS "orderName", client_id AS "clientId", order_date AS "orderDate",
+             priority, manager_id AS "managerId", order_status_id AS "orderStatusId",
+             production_status_id AS "productionStatusId",
+             planned_completion_date AS "plannedCompletionDate",
+             completion_date AS "completionDate", issue_date AS "issueDate",
+             discount, surcharge, total_amount AS "totalAmount", final_amount AS "finalAmount",
+             link_cutting_file AS "linkCuttingFile",
+             link_cutting_image_file AS "linkCuttingImageFile",
+             link_cad_file AS "linkCadFile", link_pdf_file AS "linkPdfFile",
+             notes, material_id AS "materialId", milling_type_id AS "millingTypeId",
+             edge_type_id AS "edgeTypeId", film_id AS "filmId", ref_key_1c AS "refKey1c"
+      FROM orders
+      WHERE order_id = $1
+      `,
+      [orderId],
+    );
+    return result.rows[0] ?? null;
   }
 
   async assertChildOwnership(
@@ -648,6 +671,9 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       source: SOURCE,
       relatedOrderId: event.orderId,
       relatedClientId: event.clientId ?? null,
+      before: event.before ?? null,
+      after: event.after ?? null,
+      diff: computeDiff(event.before ?? null, event.after ?? null),
       metadata: { commandName: event.action },
     });
   }
@@ -854,8 +880,8 @@ function orderDeleteAfterJson(
 
 function orderDeleteDiffJson(previousVersion: number, nextVersion: number): Record<string, unknown> {
   return {
-    deleteFlag: { before: false, after: true },
-    version: { before: previousVersion, after: nextVersion },
+    deleteFlag: { from: false, to: true },
+    version: { from: previousVersion, to: nextVersion },
   };
 }
 

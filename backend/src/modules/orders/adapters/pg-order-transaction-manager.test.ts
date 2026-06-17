@@ -398,6 +398,76 @@ describe('PgOrderTransactionManager', () => {
     expect(audit!.params).toContain(77);
     expect(audit!.params).toContain(555);
   });
+
+  it('writes a non-null diff_json for orders.create audit when before/after snapshots are provided', async () => {
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+    const beforeSnap = null;
+    const afterSnap = { orderName: 'New Order', clientId: 5 };
+    await manager.runInTransaction(async (uow) => {
+      await uow.writeAuditEvent({
+        action: 'orders.create',
+        orderId: 77,
+        actorUserId: '9',
+        clientId: 5,
+        before: beforeSnap,
+        after: afterSnap,
+      });
+    });
+    const audit = queries.find((q) => /INSERT INTO audit_log/i.test(q.text));
+    expect(audit).toBeDefined();
+    // diff_json is param $22 (index 21). It must be a non-null JSON string containing {from,to} pairs
+    const diffJsonParam = audit!.params[21] as string | null;
+    expect(diffJsonParam).not.toBeNull();
+    const diff = JSON.parse(diffJsonParam!);
+    // create: before=null → all after keys appear as from:null, to:<value>
+    expect(diff.orderName).toEqual({ from: null, to: 'New Order' });
+    expect(diff.clientId).toEqual({ from: null, to: 5 });
+  });
+
+  it('loadOrderHeaderSnapshot runs the header SELECT and returns camelCase object', async () => {
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+    let snapshot: Record<string, unknown> | null = null;
+    await manager.runInTransaction(async (uow) => {
+      snapshot = await uow.loadOrderHeaderSnapshot(77);
+    });
+    // The SELECT must have been issued
+    const snapshotQuery = queries.find((q) => /order_name AS "orderName"/i.test(q.text));
+    expect(snapshotQuery).toBeDefined();
+    expect(snapshotQuery!.params).toContain(77);
+    // Fake tx returns a stub row — we just check the key shape is camelCase
+    expect(snapshot).not.toBeNull();
+    expect(snapshot).toHaveProperty('orderName');
+    expect(snapshot).toHaveProperty('clientId');
+  });
+
+  it('orderDeleteDiffJson uses {from,to} shape (not {before,after})', async () => {
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+    await manager.runInTransaction(async (uow) => {
+      const lockedOrder = await uow.loadOrderForDelete(100);
+      const nextVersion = await uow.softDeleteOrder({ orderId: 100, previousVersion: 2 });
+      await uow.writeOrderDeleteAudit({
+        currentUser: currentUser(),
+        requestId: 'req-del-1',
+        order: lockedOrder!,
+        nextVersion,
+      });
+    });
+    // writeOrderDeleteAudit uses its own INSERT with diff_json at $9 (index 8)
+    const audit = queries.find((q) => /INSERT INTO audit_log/i.test(q.text) && q.params.length < 15);
+    expect(audit).toBeDefined();
+    // $9 = diff_json (index 8 in the delete-specific INSERT)
+    const diffJsonParam = audit!.params[8] as string | null;
+    expect(diffJsonParam).not.toBeNull();
+    const diff = JSON.parse(diffJsonParam!);
+    expect(diff.deleteFlag).toEqual({ from: false, to: true });
+    expect(diff.version).toEqual({ from: 2, to: 3 });
+    // Must NOT use {before,after} keys
+    expect(diff.deleteFlag).not.toHaveProperty('before');
+    expect(diff.deleteFlag).not.toHaveProperty('after');
+  });
 });
 
 function createDatabase(
@@ -442,6 +512,38 @@ function createDatabase(
               status: 'completed',
             },
           ],
+          rowCount: 1,
+        };
+      }
+
+      if (normalized.startsWith('SELECT order_name AS "orderName"')) {
+        return {
+          rows: [{
+            orderName: 'A-100',
+            clientId: 5,
+            orderDate: '2026-05-01',
+            priority: 100,
+            managerId: 42,
+            orderStatusId: 1,
+            productionStatusId: null,
+            plannedCompletionDate: '2026-05-10',
+            completionDate: null,
+            issueDate: null,
+            discount: '0',
+            surcharge: '0',
+            totalAmount: '120',
+            finalAmount: '120',
+            linkCuttingFile: null,
+            linkCuttingImageFile: null,
+            linkCadFile: null,
+            linkPdfFile: null,
+            notes: null,
+            materialId: null,
+            millingTypeId: null,
+            edgeTypeId: null,
+            filmId: null,
+            refKey1c: null,
+          }],
           rowCount: 1,
         };
       }

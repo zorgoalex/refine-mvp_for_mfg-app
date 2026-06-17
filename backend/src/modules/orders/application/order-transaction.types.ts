@@ -73,6 +73,8 @@ export interface OrderSaveAuditEvent {
   actorRole?: string | null;
   clientId?: number | null;
   requestId?: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
 }
 
 export interface OrderDeleteAuditInput {
@@ -94,6 +96,7 @@ export interface OrderWriteUnitOfWork {
     idempotencyKey: string,
     response: DeleteOrderResponseDto,
   ): Promise<void>;
+  loadOrderHeaderSnapshot(orderId: number): Promise<Record<string, unknown> | null>;
   loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null>;
   loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null>;
   assertChildOwnership(orderId: number, refs: readonly OrderChildReference[]): Promise<void>;
