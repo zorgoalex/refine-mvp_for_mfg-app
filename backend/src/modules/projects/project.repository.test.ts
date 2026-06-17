@@ -104,17 +104,20 @@ describe('PgProjectRepository', () => {
       42,
     ]);
     expect(database.queries[1].text).toContain('INSERT INTO audit_log');
-    expect(database.queries[1].params).toEqual([
-      'projects.create',
-      '33333333-3333-4333-8333-333333333333',
-      42,
-      'admin_user',
-      'admin',
-      'req-create-project',
-      null,
-      expect.any(String),
-      expect.any(String),
-    ]);
+    expect(database.queries[1].text).toContain('source');
+    expect(database.queries[1].text).toContain('diff_json');
+    expect(database.queries[1].params[0]).toBe('projects.create');
+    expect(database.queries[1].params[1]).toBe('33333333-3333-4333-8333-333333333333');
+    expect(database.queries[1].params[2]).toBe(42);
+    expect(database.queries[1].params[3]).toBe('admin_user');
+    expect(database.queries[1].params[4]).toBe('admin');
+    expect(database.queries[1].params[5]).toBe('req-create-project');
+    expect(database.queries[1].params[6]).toBe('backend-projects-command');
+    expect(database.queries[1].params[7]).toBeNull(); // before_json (null on create)
+    expect(database.queries[1].params[8]).toEqual(expect.any(String)); // after_json
+    // diff_json for create: computeDiff(null, after) — non-empty since after has fields
+    const createDiff = JSON.parse(database.queries[1].params[9] as string);
+    expect(Object.keys(createDiff).length).toBeGreaterThan(0);
   });
 
   it('updates a project transactionally with before and after audit snapshots', async () => {
@@ -140,10 +143,16 @@ describe('PgProjectRepository', () => {
     expect(database.queries[1].text).toContain('status = $2');
     expect(database.queries[1].params).toEqual(['Updated project', 'paused', '00000000-0000-4000-8000-000000000000']);
     expect(database.queries[2].text).toContain('INSERT INTO audit_log');
+    expect(database.queries[2].text).toContain('source');
+    expect(database.queries[2].text).toContain('diff_json');
     expect(database.queries[2].params[0]).toBe('projects.update');
     expect(database.queries[2].params[5]).toBe('req-update-project');
-    expect(JSON.parse(database.queries[2].params[6] as string)).toMatchObject({ name: 'Old project' });
-    expect(JSON.parse(database.queries[2].params[7] as string)).toMatchObject({ name: 'Updated project' });
+    expect(database.queries[2].params[6]).toBe('backend-projects-command'); // source
+    expect(JSON.parse(database.queries[2].params[7] as string)).toMatchObject({ name: 'Old project' });
+    expect(JSON.parse(database.queries[2].params[8] as string)).toMatchObject({ name: 'Updated project' });
+    // diff_json: name and status changed
+    const updateDiff = JSON.parse(database.queries[2].params[9] as string);
+    expect(updateDiff.name).toEqual({ from: 'Old project', to: 'Updated project' });
   });
 
   it('rejects updates to archived projects before issuing UPDATE', async () => {
@@ -295,8 +304,11 @@ describe('PgProjectRepository', () => {
     expect(database.queries[1].text).toContain('archived_at = COALESCE(p.archived_at, now())');
     expect(database.queries[1].text).not.toMatch(/\bDELETE\s+FROM\b/i);
     expect(database.queries[2].text).toContain('INSERT INTO audit_log');
+    expect(database.queries[2].text).toContain('source');
+    expect(database.queries[2].text).toContain('diff_json');
     expect(database.queries[2].params[0]).toBe('projects.archive');
     expect(database.queries[2].params[5]).toBe('req-archive-project');
+    expect(database.queries[2].params[6]).toBe('backend-projects-command'); // source
   });
 
   it('lists current project members through user and employee read-model joins', async () => {
@@ -400,6 +412,13 @@ describe('PgProjectRepository', () => {
     expect(database.queries[5].params).toEqual(['11111111-1111-4111-8111-111111111111', 7, 'manager', '{}', 42]);
     expect(database.queries[6].text).toContain('INSERT INTO audit_log');
     expect(database.queries[6].params[0]).toBe('projects.members_changed');
+    // diff_json: {added,removed} not {memberCount}
+    const membersDiff = JSON.parse(database.queries[6].params[9] as string);
+    expect(membersDiff).not.toHaveProperty('memberCount');
+    expect(membersDiff).toHaveProperty('added');
+    expect(membersDiff).toHaveProperty('removed');
+    expect(membersDiff.added).toHaveLength(1); // user:7 added
+    expect(membersDiff.removed).toHaveLength(1); // user:5 removed
     // bridge inserts at [7] and [8] (user:5 removed, user:7 added)
     expect(database.queries[9].text).toContain('INSERT INTO outbox_events');
     expect(database.queries[10].text).toContain('UPDATE command_idempotency_keys');

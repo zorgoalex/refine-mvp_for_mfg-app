@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../database/database.types';
-import { computeListDiff } from '../../common/audit/audit-diff';
+import { computeDiff, computeListDiff } from '../../common/audit/audit-diff';
 import { insertRelatedEntities, type AuditRelatedEntity } from '../../common/audit/related-entities';
 import type {
   ProjectDto,
@@ -84,6 +84,7 @@ const PROJECT_SELECT = `
   FROM public.project_projects p
 `;
 
+const PROJECT_SOURCE = 'backend-projects-command';
 const PROJECT_MEMBERS_SOURCE = 'projects-members';
 
 export class PgProjectRepository implements ProjectRepositoryPort {
@@ -532,6 +533,11 @@ async function writeProjectMembersAudit(
     reason: string | null;
   },
 ): Promise<string> {
+  const memberDiff = computeListDiff(
+    input.before,
+    input.after,
+    (m) => 'user:' + m.userId,
+  );
   const result = await tx.query<AuditRow>(
     `
     INSERT INTO audit_log (
@@ -554,9 +560,7 @@ async function writeProjectMembersAudit(
       PROJECT_MEMBERS_SOURCE,
       JSON.stringify({ members: input.before }),
       JSON.stringify({ members: input.after }),
-      JSON.stringify({
-        memberCount: { from: input.before.length, to: input.after.length },
-      }),
+      JSON.stringify(memberDiff),
       JSON.stringify({
         source: PROJECT_MEMBERS_SOURCE,
         idempotencyKey: input.command.dto.idempotencyKey,
@@ -566,11 +570,7 @@ async function writeProjectMembersAudit(
   );
   const auditId = result.rows[0]?.audit_id ?? '';
   if (auditId) {
-    const { added, removed } = computeListDiff(
-      input.before,
-      input.after,
-      (m) => 'user:' + m.userId,
-    );
+    const { added, removed } = memberDiff;
     const entities: AuditRelatedEntity[] = [];
     for (const m of [...added, ...removed]) {
       entities.push({ entityType: 'user', entityId: m.userId });
@@ -745,9 +745,9 @@ async function writeProjectAudit(
     `
     INSERT INTO audit_log (
       event, entity_type, entity_id, user_id, username, role_code, role,
-      request_id, before_json, after_json, metadata_json
+      request_id, source, before_json, after_json, diff_json, metadata_json
     )
-    VALUES ($1, 'project', $2, $3, $4, $5, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb)
+    VALUES ($1, 'project', $2, $3, $4, $5, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb)
     `,
     [
       input.action,
@@ -756,8 +756,10 @@ async function writeProjectAudit(
       input.command.currentUser.username,
       input.command.currentUser.role,
       input.command.requestId ?? 'projects-command',
+      PROJECT_SOURCE,
       input.before ? JSON.stringify(input.before) : null,
       input.after ? JSON.stringify(input.after) : null,
+      JSON.stringify(computeDiff(input.before ?? null, input.after ?? null)),
       input.metadata ? JSON.stringify(input.metadata) : null,
     ],
   );
