@@ -235,7 +235,7 @@ export function OrderDeadlinePanel({ orderId }: OrderDeadlinePanelProps) {
 
   return (
     <>
-      <Collapse defaultActiveKey={['deadlines']} style={{ marginBottom: 4 }} className="compact-collapse">
+      <Collapse defaultActiveKey={[]} style={{ marginBottom: 4 }} className="compact-collapse">
         <Panel
           key="deadlines"
           header={<span style={{ fontSize: 12, fontWeight: 600, color: '#1677ff' }}>Дедлайны</span>}
