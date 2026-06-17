@@ -262,6 +262,31 @@ ensure_templates_if_missing() {
   fi
 }
 
+FREECUT_REPO_URL="${FREECUT_REPO_URL:-https://github.com/zorgoalex/freecut_api.git}"
+FREECUT_REPO_DIR_NAME="${FREECUT_REPO_DIR_NAME:-repo_freecut}"
+
+# The compose freecut service builds from a sibling checkout next to repo_erp
+# (FREECUT_BUILD_CONTEXT, default ./repo_freecut). Clone it if missing so a
+# fresh VPS can build the whole stack in one pass.
+ensure_freecut_repo_if_missing() {
+  local freecut_dir="$PROJECT_DIR/$FREECUT_REPO_DIR_NAME"
+
+  if [[ -d "$freecut_dir/.git" ]]; then
+    log "Freecut repo already present at $freecut_dir"
+    return 0
+  fi
+  if [[ -e "$freecut_dir" ]]; then
+    fail "Freecut path exists but is not a git checkout: $freecut_dir"
+  fi
+
+  log "Cloning freecut repo into $freecut_dir"
+  if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    sudo -u "$SUDO_USER" git clone "$FREECUT_REPO_URL" "$freecut_dir"
+  else
+    git clone "$FREECUT_REPO_URL" "$freecut_dir"
+  fi
+}
+
 run_check_env() {
   local args=(--env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE")
   if [[ "$RUN_DNS_CHECK" == "1" ]]; then
@@ -465,6 +490,7 @@ else
 fi
 
 ensure_templates_if_missing
+ensure_freecut_repo_if_missing
 
 if needs_env_edit; then
   print_next_env_steps

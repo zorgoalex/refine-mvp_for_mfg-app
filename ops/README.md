@@ -111,6 +111,45 @@ sudo ops/setup-vps.sh --yes
 - `run-vps-tests.sh` - installs npm dependencies in Docker volumes and runs
   backend Vitest, frontend/serverless Vitest, and Playwright e2e.
 
+## Freecut Optimization Service
+
+`freecut` is the Rust 2D cut-optimization service. It is built from the sibling
+`repo_freecut` checkout (set `FREECUT_BUILD_CONTEXT`, default `./repo_freecut`)
+and comes up automatically with the rest of the stack. It is **internal-only**:
+attached to the `back` network with no Traefik route and no public domain, so it
+is not reachable from the browser. A backend integration can later call it at
+`http://freecut:8088` over the internal network.
+
+The service is standalone (no DB/Hasura/Valkey dependency), so it has no
+`depends_on` and starts in parallel. Tuning knobs live in `.env` as
+`FREECUT_*` (body/instance/time/restart limits, `FREECUT_MAX_CONCURRENT_OPTIMIZE`,
+`FREECUT_CPUS`, `FREECUT_MEM_LIMIT`); none are secrets.
+
+Rebuild/recreate only freecut after a source or env change:
+
+```bash
+docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps freecut
+```
+
+Verify from inside the network (no host port is published):
+
+```bash
+docker compose exec freecut curl -fsS http://localhost:8088/health/live
+docker compose exec freecut curl -fsS http://localhost:8088/version
+```
+
+Note: the first build compiles the Rust release binary and can take several
+minutes. `repo_freecut` must be checked out next to `repo_erp` under the
+runtime root for the default build context to resolve; `setup-vps.sh` and
+`reset-test-vps.sh` clone it automatically when missing (override with
+`FREECUT_REPO_URL`).
+
+On an existing VPS that already has a `docker-compose.yml` copied before
+freecut was added, `setup-vps.sh` will not overwrite it (templates are copied
+only when missing). Add the freecut service from
+`templates/docker-compose.vps.yml` to the live compose file and clone
+`repo_freecut` next to `repo_erp` before recreating the stack.
+
 ## When Domains Are Needed
 
 Choose domains before the first `deploy-stack.sh` run.
@@ -151,6 +190,16 @@ mkdir -p ~/projects/erp_dev/spec_erp
 git clone <repo-url> ~/projects/erp_dev/repo_erp
 cd ~/projects/erp_dev/repo_erp
 sudo ops/setup-vps.sh
+```
+
+`setup-vps.sh` clones the sibling `repo_freecut` into
+`~/projects/erp_dev/repo_freecut` automatically when it is missing, so the
+freecut service can build in the same pass. Override the source with
+`FREECUT_REPO_URL` if needed. To pre-place or pin it manually:
+
+```bash
+git clone https://github.com/zorgoalex/freecut_api.git \
+  ~/projects/erp_dev/repo_freecut
 ```
 
 Fill `.env`:

@@ -222,6 +222,32 @@ services:
       - back
       - edge
 
+  freecut:
+    build:
+      context: ${FREECUT_BUILD_CONTEXT:-./repo_freecut}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8088"
+    environment:
+      PORT: "8088"
+      RUST_LOG: ${FREECUT_RUST_LOG:-info}
+      MAX_BODY_BYTES: ${FREECUT_MAX_BODY_BYTES:-5242880}
+      MAX_INSTANCES: ${FREECUT_MAX_INSTANCES:-5000}
+      DEFAULT_TIME_LIMIT_MS: ${FREECUT_DEFAULT_TIME_LIMIT_MS:-2000}
+      DEFAULT_RESTARTS: ${FREECUT_DEFAULT_RESTARTS:-10}
+      MAX_CONCURRENT_OPTIMIZE: ${FREECUT_MAX_CONCURRENT_OPTIMIZE:-1}
+    cpus: ${FREECUT_CPUS:-1.5}
+    mem_limit: ${FREECUT_MEM_LIMIT:-512m}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8088/health/live || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - back
+
 networks:
   edge:
     name: ${EDGE_NETWORK_NAME:-erp_edge}

@@ -248,6 +248,17 @@ cd "$CHECKOUT_PARENT"
 log "Cloning fresh checkout"
 run_as_target git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$CHECKOUT_DIR"
 
+# The compose freecut service builds from a sibling repo_freecut checkout next
+# to repo_erp. Clone it when missing so the reset VPS can build the full stack.
+FREECUT_REPO_URL="${FREECUT_REPO_URL:-https://github.com/zorgoalex/freecut_api.git}"
+FREECUT_CHECKOUT_DIR="$CHECKOUT_PARENT/repo_freecut"
+if [[ -d "$FREECUT_CHECKOUT_DIR/.git" ]]; then
+  log "Freecut repo already present at $FREECUT_CHECKOUT_DIR"
+else
+  log "Cloning freecut checkout"
+  run_as_target git clone "$FREECUT_REPO_URL" "$FREECUT_CHECKOUT_DIR"
+fi
+
 if [[ "$PRESERVE_ENV" == "1" ]]; then
   log "Restoring .env"
   cp "$backup_dir/.env" "$RUNTIME_DIR/.env"
