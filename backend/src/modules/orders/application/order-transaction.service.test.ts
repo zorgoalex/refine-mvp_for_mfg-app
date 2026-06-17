@@ -347,6 +347,10 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     });
   }
 
+  // Test simulation of the real DB snapshot query. Does NOT need to mirror the
+  // production SELECT column list 1:1 — focused assertions only depend on a
+  // subset of fields (e.g. orderName). Leave the projection intact so that
+  // before≠after is reliable for the update-path assertions.
   async loadOrderHeaderSnapshot(orderId: number): Promise<Record<string, unknown> | null> {
     this.call('loadOrderHeaderSnapshot');
     const order = this.state.orders.get(orderId);
@@ -434,7 +438,7 @@ describe('OrderTransactionService', () => {
     ]);
     const createAuditEvent = transactions.state.auditEvents[0] as typeof transactions.state.auditEvents[0] & { before?: unknown; after?: unknown };
     expect(createAuditEvent).toMatchObject({ before: null });
-    expect(createAuditEvent.after).toBeTruthy();
+    expect((createAuditEvent.after as Record<string, unknown>)?.orderName).toBe('Test order');
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
