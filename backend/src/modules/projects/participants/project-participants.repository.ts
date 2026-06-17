@@ -3,6 +3,7 @@ import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { insertRelatedEntities, type AuditRelatedEntity } from '../../../common/audit/related-entities';
+import { computeListDiff } from '../../../common/audit/audit-diff';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
   ProjectParticipantDto,
@@ -334,6 +335,13 @@ async function insertParticipant(
   return result.rows[0];
 }
 
+// Composite key for computeListDiff that reproduces the upstream delta semantics exactly.
+// A row differs if its identity, role, OR metadata changes — matching the metadataEqual logic
+// (sortForHash + JSON.stringify) used when computing input.added/input.removed.
+function participantDiffKey(row: ParticipantRow): string {
+  return `${row.participant_type}:${row.participant_id_text}:${row.role_code}:${JSON.stringify(sortForHash(parseMetadata(row.metadata)))}`;
+}
+
 async function writeAudit(
   tx: DatabaseClient,
   input: {
@@ -345,8 +353,12 @@ async function writeAudit(
     removed: ParticipantRow[];
   },
 ): Promise<string> {
-  const added = input.added.map(inputDimension);
-  const removed = input.removed.map(rowDimension);
+  // Express the diff via computeListDiff keyed on the full composite (identity+role+metadata),
+  // reproducing input.added/input.removed semantics for all three change kinds:
+  // pure add/remove, role change (same identity appears in both), metadata-only change.
+  const diff = computeListDiff(input.before, input.after, participantDiffKey);
+  const added = diff.added.map(rowDimension);
+  const removed = diff.removed.map(rowDimension);
   const result = await tx.query<AuditRow>(
     `
     INSERT INTO audit_log (

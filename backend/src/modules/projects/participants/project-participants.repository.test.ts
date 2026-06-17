@@ -197,6 +197,123 @@ describe('PgProjectParticipantsRepository', () => {
     expect(bridgeQueries[0].params[1]).toBe('employee');
     expect(bridgeQueries[0].params[2]).toBe(77);
   });
+
+  // --- diff_json semantics: pure add, pure remove, role-change-in-both, metadata-change-in-both ---
+
+  it('diff_json.added contains new participant, diff_json.removed empty on pure add', async () => {
+    // before: empty; after: employee:77/manager
+    const database = fakeDatabase({ participantRows: [] });
+    const repo = new PgProjectParticipantsRepository(database);
+
+    await repo.replace({
+      currentUser: user(),
+      projectId: projectId(),
+      dto: {
+        idempotencyKey: 'pure-add-key',
+        participants: [{ participantType: 'employee', participantId: '77', roleCode: 'manager', metadata: {} }],
+      },
+      canViewEmployees: true,
+    });
+
+    const auditQuery = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
+    const diffJson = JSON.parse(String(auditQuery?.params[8]));
+    expect(diffJson.added).toHaveLength(1);
+    expect(diffJson.added[0]).toMatchObject({ participantType: 'employee', participantId: '77', roleCode: 'manager' });
+    expect(diffJson.removed).toHaveLength(0);
+  });
+
+  it('diff_json.removed contains old participant, diff_json.added empty on pure remove', async () => {
+    // before: employee:77/manager; after: empty
+    const database = fakeDatabase({ participantRows: [participantRow()] });
+    // insertParticipant won't be called; we need to override it to return nothing
+    const repo = new PgProjectParticipantsRepository(database);
+
+    await repo.replace({
+      currentUser: user(),
+      projectId: projectId(),
+      dto: {
+        idempotencyKey: 'pure-remove-key',
+        participants: [],
+      },
+    });
+
+    const auditQuery = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
+    const diffJson = JSON.parse(String(auditQuery?.params[8]));
+    expect(diffJson.removed).toHaveLength(1);
+    expect(diffJson.removed[0]).toMatchObject({ participantType: 'employee', participantId: '77', roleCode: 'manager' });
+    expect(diffJson.added).toHaveLength(0);
+  });
+
+  it('diff_json shows role change in BOTH added (new role) and removed (old role)', async () => {
+    // before: employee:77/manager; after: employee:77/lead (role change)
+    // insertParticipant returns the new row with role_code='lead'
+    // Custom database: role 'lead' must pass validation; INSERT returns employee:77/lead
+    const database = fakeDatabase({ participantRows: [participantRow()] });
+    database.query = async function (text: string, params: readonly unknown[] = []) {
+      this.queries.push({ text, params });
+      if (text.includes('INSERT INTO command_idempotency_keys')) return { rows: [{ status: 'processing', request_hash: 'hash', response_json: null }] };
+      if (text.includes('SELECT request_hash, response_json, status FROM command_idempotency_keys')) return { rows: [] };
+      if (text.includes('SELECT id::text, code FROM public.project_projects')) return { rows: [{ id: projectId(), code: 'P1' }] };
+      if (text.includes('SELECT id FROM public.project_projects')) return { rows: [{ id: projectId() }] };
+      if (text.includes('FROM public.project_participant_roles') && text.includes('FOR KEY SHARE')) return { rows: [{ code: 'lead', label: 'Lead' }] };
+      if (text.includes('FROM public.employees') && text.includes('FOR KEY SHARE')) return { rows: [{ id: '77' }] };
+      if (text.includes('FROM public.users') && text.includes('FOR KEY SHARE')) return { rows: [{ id: '158' }] };
+      if (text.includes('FROM public.project_participants')) return { rows: [participantRow()] };
+      if (text.includes('INSERT INTO public.project_participants')) return { rows: [{ ...participantRow(), role_code: 'lead', role_label: 'Lead' }] };
+      if (text.includes('INSERT INTO audit_log')) return { rows: [{ audit_id: 'audit-1' }] };
+      return { rows: [] };
+    };
+
+    const repo = new PgProjectParticipantsRepository(database);
+
+    await repo.replace({
+      currentUser: user(),
+      projectId: projectId(),
+      dto: {
+        idempotencyKey: 'role-change-key',
+        participants: [{ participantType: 'employee', participantId: '77', roleCode: 'lead', metadata: {} }],
+      },
+      canViewEmployees: true,
+    });
+
+    const auditQuery = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
+    const diffJson = JSON.parse(String(auditQuery?.params[8]));
+    // Same participant (employee:77) must appear in BOTH added (new role) and removed (old role)
+    expect(diffJson.added).toHaveLength(1);
+    expect(diffJson.added[0]).toMatchObject({ participantType: 'employee', participantId: '77', roleCode: 'lead' });
+    expect(diffJson.removed).toHaveLength(1);
+    expect(diffJson.removed[0]).toMatchObject({ participantType: 'employee', participantId: '77', roleCode: 'manager' });
+  });
+
+  it('bridge rows and relatedUserIds/roleCodes are derived from diff_json added+removed (A3 intact)', async () => {
+    // before: employee:77/manager; after: user:158/manager
+    // bridge must have rows for both added (user:158) and removed (employee:77)
+    // metadata_json.relatedUserIds = ['158'], relatedEmployeeIds = ['77'], roleCodes = ['manager']
+    const database = fakeDatabase({ participantRows: [participantRow()] });
+    const repo = new PgProjectParticipantsRepository(database);
+
+    await repo.replace({
+      currentUser: user(),
+      projectId: projectId(),
+      dto: {
+        idempotencyKey: 'bridge-metadata-key',
+        participants: [{ participantType: 'user', participantId: '158', roleCode: 'manager', metadata: {} }],
+      },
+      canViewUsers: true,
+    });
+
+    const auditQuery = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
+    const metaJson = JSON.parse(String(auditQuery?.params[9]));
+    expect(metaJson.relatedUserIds).toEqual(['158']);
+    expect(metaJson.relatedEmployeeIds).toEqual(['77']);
+    expect(metaJson.roleCodes).toEqual(['manager']);
+
+    const bridgeQueries = database.queries.filter((q) => q.text.includes('INSERT INTO audit_log_related_entity'));
+    expect(bridgeQueries).toHaveLength(2);
+    const bridgeEntities = bridgeQueries.map((q) => ({ entityType: q.params[1], entityId: q.params[2] }));
+    expect(bridgeEntities).toContainEqual({ entityType: 'user', entityId: 158 });
+    expect(bridgeEntities).toContainEqual({ entityType: 'employee', entityId: 77 });
+  });
 });
 
 function fakeDatabase({
@@ -218,7 +335,28 @@ function fakeDatabase({
       if (text.includes('FROM public.employees') && text.includes('FOR KEY SHARE')) return { rows: [{ id: '77' }] };
       if (text.includes('FROM public.users') && text.includes('FOR KEY SHARE')) return { rows: [{ id: '158' }] };
       if (text.includes('FROM public.project_participants')) return { rows: participantRows };
-      if (text.includes('INSERT INTO public.project_participants')) return { rows: [participantRow()] };
+      if (text.includes('INSERT INTO public.project_participants')) {
+        // Return a row reflecting the actual inserted values from the params so that
+        // input.after correctly reflects the post-write state (needed for computeListDiff).
+        // INSERT params: [$1=projectId, $2=participant_type, $3=participant_id_text, $4=role_code, $5=metadata, $6=created_by]
+        const pType = String(params[1]);
+        const pId = String(params[2]);
+        const rCode = String(params[3]);
+        return {
+          rows: [{
+            id: '33333333-3333-4333-8333-333333333333',
+            participant_type: pType,
+            participant_id_text: pId,
+            user_display_name: pType === 'user' ? `User ${pId}` : null,
+            employee_display_name: pType === 'employee' ? `Employee ${pId}` : null,
+            role_code: rCode,
+            role_label: rCode.charAt(0).toUpperCase() + rCode.slice(1),
+            valid_from: '2026-06-04T00:00:00.000Z',
+            valid_to: null,
+            metadata: {},
+          }],
+        };
+      }
       if (text.includes('INSERT INTO audit_log')) return { rows: [{ audit_id: 'audit-1' }] };
       return { rows: [] };
     },
