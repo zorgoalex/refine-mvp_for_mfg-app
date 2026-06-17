@@ -91,6 +91,9 @@ describe('PgUserRepository', () => {
     expect(audit?.params[6]).toBe('req_users_create');     // $7 request_id
     expect(audit?.params[7]).toBe('backend-users-command'); // $8 source
     expect(audit?.params[20]).toContain('"username":"new_manager"'); // $21 after_json
+    // diff_json: create diff should show all fields from null
+    expect(audit?.params[21]).toContain('"username"');     // $22 diff_json has username key
+    expect(audit?.params[21]).toContain('"from":null');    // before is null on create
   });
 
   it('maps duplicate username/email violations to UserAlreadyExistsError', async () => {
@@ -122,6 +125,38 @@ describe('PgUserRepository', () => {
     } satisfies Partial<ApiError>);
   });
 
+  it('updates a user role and writes audit diff_json with only changed sanitized fields', async () => {
+    const database = new FakeUserDatabase([], [
+      // pre-image SELECT (getUserByIdInternal on tx)
+      { match: 'FROM users u', rows: [userRow({ user_id: 15, username: 'worker_user', role_id: 20, role_code: 'manager' })] },
+      // UPDATE users
+      { match: 'UPDATE users u', rows: [userRow({ user_id: 15, username: 'worker_user', role_id: 1, role_code: 'admin' })] },
+      // audit INSERT
+      { match: 'INSERT INTO audit_log', rows: [] },
+    ]);
+    const repository = new PgUserRepository(database);
+
+    const user = await repository.updateUser({
+      currentUser: currentUser('admin', '1'),
+      userId: 15,
+      requestId: 'req_update_role',
+      dto: { role: 'admin' },
+    });
+
+    expect(user).toMatchObject({ id: 15, role: 'admin' });
+
+    const audit = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
+    expect(audit?.params[0]).toBe('users.update');
+    // diff_json: only the changed field (role) should appear
+    const diffJson = audit?.params[21] as string;
+    expect(diffJson).toContain('"role"');
+    expect(diffJson).toContain('"from":"manager"');
+    expect(diffJson).toContain('"to":"admin"');
+    // unchanged fields (username, isActive, etc.) must NOT appear in diff
+    expect(diffJson).not.toContain('"username"');
+    expect(diffJson).not.toContain('"isActive"');
+  });
+
   it('changes password and revokes active sessions inside one transaction', async () => {
     const database = new FakeUserDatabase([], [
       { match: 'UPDATE users', rows: [{ user_id: 10 }] },
@@ -143,6 +178,18 @@ describe('PgUserRepository', () => {
     expect(database.queries[0].text).toContain('UPDATE users');
     expect(database.queries[1].text).toContain('UPDATE auth_sessions');
     expect(database.queries[2].params).toContain('users.change_password');
+
+    // SECURITY: no password_hash or bcrypt hash must appear in any audit param
+    const auditParams = database.queries[2].params;
+    const allParamsStr = JSON.stringify(auditParams);
+    expect(allParamsStr).not.toContain('password_hash');
+    expect(allParamsStr).not.toMatch(/\$2[aby]\$/);
+
+    // diff_json must contain static credentialChanged marker (key avoids "password" redaction trigger)
+    const diffJson = auditParams[21] as string;
+    expect(diffJson).toContain('"credentialChanged"');
+    expect(diffJson).toContain('"from":false');
+    expect(diffJson).toContain('"to":true');
   });
 
   it('routes createUser audit through AuditService contract with source column', async () => {
@@ -176,6 +223,8 @@ describe('PgUserRepository', () => {
 
   it('deactivates a user, revokes sessions, and writes audit metadata', async () => {
     const database = new FakeUserDatabase([], [
+      // pre-image SELECT (getUserByIdInternal on tx) — user is currently active
+      { match: 'FROM users u', rows: [userRow({ user_id: 10, is_active: true })] },
       { match: 'UPDATE users u', rows: [userRow({ user_id: 10, is_active: false })] },
       { match: 'WITH revoked_sessions', rows: [{ revoked_sessions: 1 }] },
       { match: 'INSERT INTO audit_log', rows: [] },
@@ -193,6 +242,11 @@ describe('PgUserRepository', () => {
     const audit = database.queries.find((query) => query.text.includes('INSERT INTO audit_log'));
     expect(audit?.params[0]).toBe('users.deactivate');
     expect(audit?.params[7]).toBe('backend-users-command'); // $8 source
+    // diff_json: isActive changed from true to false
+    const diffJson = audit?.params[21] as string;
+    expect(diffJson).toContain('"isActive"');
+    expect(diffJson).toContain('"from":true');
+    expect(diffJson).toContain('"to":false');
     expect(audit?.params[22]).toBe(JSON.stringify({ revokedSessions: 1 })); // $23 metadata_json
   });
 });

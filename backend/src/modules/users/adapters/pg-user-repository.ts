@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
+import { computeDiff } from '../../../common/audit/audit-diff';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import {
@@ -135,6 +136,7 @@ export class PgUserRepository implements UserRepositoryPort {
           action: 'users.create',
           entityId: user.id,
           after: sanitizeUserForAudit(user),
+          diff: computeDiff(null, sanitizeUserForAudit(user)),
         });
 
         return user;
@@ -146,6 +148,7 @@ export class PgUserRepository implements UserRepositoryPort {
 
   async updateUser(command: UpdateUserCommand): Promise<UserDto> {
     return this.database.transaction(async (tx) => {
+      const before = await this.getUserByIdInternal(tx, command.userId);
       const assignments: string[] = [];
       const params: unknown[] = [];
 
@@ -195,6 +198,7 @@ export class PgUserRepository implements UserRepositoryPort {
           action: 'users.update',
           entityId: user.id,
           after: sanitizeUserForAudit(user),
+          diff: computeDiff(before ? sanitizeUserForAudit(before) : null, sanitizeUserForAudit(user)),
         });
 
         return user;
@@ -230,6 +234,7 @@ export class PgUserRepository implements UserRepositoryPort {
         command,
         action: 'users.change_password',
         entityId: command.userId,
+        diff: { credentialChanged: { from: false, to: true } },
         metadata: { revokedSessions },
       });
 
@@ -251,6 +256,7 @@ export class PgUserRepository implements UserRepositoryPort {
     action: 'users.deactivate' | 'users.activate',
   ): Promise<UserDto> {
     return this.database.transaction(async (tx) => {
+      const before = await this.getUserByIdInternal(tx, command.userId);
       const updated = await tx.query<UserRow>(
         `
         UPDATE users u
@@ -276,6 +282,7 @@ export class PgUserRepository implements UserRepositoryPort {
         action,
         entityId: user.id,
         after: sanitizeUserForAudit(user),
+        diff: computeDiff(before ? sanitizeUserForAudit(before) : null, sanitizeUserForAudit(user)),
         metadata: { revokedSessions },
       });
 
@@ -426,6 +433,7 @@ async function writeUserAudit(
     action: string;
     entityId: string | number;
     after?: Record<string, unknown>;
+    diff?: Record<string, unknown> | null;
     metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
@@ -439,6 +447,7 @@ async function writeUserAudit(
     requestId: input.command.requestId ?? DEFAULT_REQUEST_ID,
     source: 'backend-users-command',
     after: input.after ?? null,
+    diff: input.diff ?? null,
     metadata: input.metadata ?? null,
   });
 }
