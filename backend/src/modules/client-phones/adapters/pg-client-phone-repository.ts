@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
+import { computeDiff } from '../../../common/audit/audit-diff';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
@@ -266,7 +267,7 @@ export class PgClientPhoneRepository implements ClientPhoneRepositoryPort {
         clientId: phone.clientId,
         beforeJson: mutablePhoneJson(phone),
         afterJson: null,
-        diffJson: { deleted: { before: false, after: true } },
+        diffJson: { deleted: { from: false, to: true } },
         metadataJson: metadataJson('delete', phone, requestId, []),
       });
       await enqueueOutbox(tx, {
@@ -573,7 +574,7 @@ async function writeDemotionAuditsAndOutbox(
       clientId: phone.clientId,
       beforeJson: { isPrimary: true, phoneId: phone.phoneId, clientId: phone.clientId },
       afterJson: { isPrimary: false, phoneId: phone.phoneId, clientId: phone.clientId },
-      diffJson: { isPrimary: { before: true, after: false } },
+      diffJson: { isPrimary: { from: true, to: false } },
       metadataJson: metadataJson('primary_demote', { ...phone, isPrimary: false }, input.requestId, []),
     });
     await enqueueOutbox(tx, {
@@ -703,22 +704,11 @@ function mutablePhoneJson(phone: ClientPhoneDto): Record<string, unknown> {
 }
 
 function createdDiff(phone: ClientPhoneDto): Record<string, unknown> {
-  const mutable = mutablePhoneJson(phone);
-  return Object.fromEntries(
-    Object.entries(mutable).map(([key, value]) => [key, { before: null, after: value }]),
-  );
+  return computeDiff(null, mutablePhoneJson(phone));
 }
 
 function diffJson(before: ClientPhoneDto, after: ClientPhoneDto): Record<string, unknown> {
-  const beforeJson = mutablePhoneJson(before);
-  const afterJson = mutablePhoneJson(after);
-  const diff: Record<string, unknown> = {};
-  for (const key of Object.keys(afterJson)) {
-    if (beforeJson[key] !== afterJson[key]) {
-      diff[key] = { before: beforeJson[key], after: afterJson[key] };
-    }
-  }
-  return diff;
+  return computeDiff(mutablePhoneJson(before), mutablePhoneJson(after));
 }
 
 function metadataJson(

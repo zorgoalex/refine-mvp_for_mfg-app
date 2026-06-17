@@ -41,6 +41,24 @@ describe('PgClientPhoneRepository', () => {
       'client_phone.primary_demoted',
     );
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+
+    // Audit diff shape: create uses {from,to} uniform shape
+    const createAuditQuery = database.queries.find(
+      (q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log') && q.params[0] === 'client_phones.create',
+    );
+    expect(createAuditQuery).toBeDefined();
+    const createDiff = JSON.parse(createAuditQuery!.params[8] as string);
+    expect(createDiff.phoneNumber).toEqual({ from: null, to: '+7 700 000 01 01' });
+    expect(createDiff).not.toHaveProperty('phoneNumber.before');
+    expect(createDiff).not.toHaveProperty('phoneNumber.after');
+
+    // primary_demote diff shape: {from,to}
+    const demoteAuditQuery = database.queries.find(
+      (q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log') && q.params[0] === 'client_phones.primary_demote',
+    );
+    expect(demoteAuditQuery).toBeDefined();
+    const demoteDiff = JSON.parse(demoteAuditQuery!.params[8] as string);
+    expect(demoteDiff).toEqual({ isPrimary: { from: true, to: false } });
   });
 
   it('returns stored idempotent response before touching client_phones', async () => {
@@ -114,12 +132,57 @@ describe('PgClientPhoneRepository', () => {
     });
     expect(normalizedSql(database.queries)).not.toContain('UPDATE client_phones SET');
   });
+
+  it('update audit diff uses {from,to} shape', async () => {
+    const database = createDatabase({ updatedPhoneNumber: '+7 700 000 99 99' });
+    const repository = new PgClientPhoneRepository(database.service);
+
+    await repository.updateClientPhone({
+      currentUser: currentUser(),
+      phoneId: 10,
+      dto: {
+        clientId: 1,
+        phoneNumber: '+7 700 000 99 99',
+        idempotencyKey: 'client-phone-update-key',
+      },
+      requestId: 'request-update',
+    });
+
+    const updateAuditQuery = database.queries.find(
+      (q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log') && q.params[0] === 'client_phones.update',
+    );
+    expect(updateAuditQuery).toBeDefined();
+    const updateDiff = JSON.parse(updateAuditQuery!.params[8] as string);
+    expect(updateDiff.phoneNumber).toEqual({ from: '+7 700 000 01 01', to: '+7 700 000 99 99' });
+    expect(updateDiff).not.toHaveProperty('phoneNumber.before');
+    expect(updateDiff).not.toHaveProperty('phoneNumber.after');
+  });
+
+  it('delete audit diff uses {from:false,to:true} for deleted field', async () => {
+    const database = createDatabase();
+    const repository = new PgClientPhoneRepository(database.service);
+
+    await repository.deleteClientPhone({
+      currentUser: currentUser(),
+      phoneId: 10,
+      dto: { idempotencyKey: 'client-phone-delete-key' },
+      requestId: 'request-delete',
+    });
+
+    const deleteAuditQuery = database.queries.find(
+      (q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log') && q.params[0] === 'client_phones.delete',
+    );
+    expect(deleteAuditQuery).toBeDefined();
+    const deleteDiff = JSON.parse(deleteAuditQuery!.params[8] as string);
+    expect(deleteDiff).toEqual({ deleted: { from: false, to: true } });
+  });
 });
 
 function createDatabase(options: {
   demotedPhoneId?: number | null;
   duplicatePhone?: boolean;
   idempotencyCompletedResponse?: unknown;
+  updatedPhoneNumber?: string;
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
@@ -191,7 +254,10 @@ function createDatabase(options: {
       }
 
       if (normalized.startsWith('UPDATE client_phones SET') && normalized.includes('WHERE phone_id = $1')) {
-        return { rows: [clientPhoneRow({ phone_id: params[0] as number })], rowCount: 1 };
+        return {
+          rows: [clientPhoneRow({ phone_id: params[0] as number, phone_number: options.updatedPhoneNumber ?? '+7 700 000 01 01' })],
+          rowCount: 1,
+        };
       }
 
       if (normalized.startsWith('INSERT INTO audit_log')) {
