@@ -16,6 +16,7 @@ interface AuditRow extends QueryResultRow {
   status_code: string | null; stage_code: string | null; request_id: string;
   ip_address: string | null; user_agent: string | null;
   before_json: unknown; after_json: unknown; diff_json: unknown; metadata_json: unknown;
+  related_entities: unknown;
   created_at: string | Date;
 }
 
@@ -24,7 +25,13 @@ const SELECT_COLUMNS = `
   related_order_id, related_client_id, related_payment_id, related_deadline_id, related_production_event_id,
   related_user_id,
   status_field, status_id, status_name, status_code, stage_code,
-  request_id, ip_address, user_agent, before_json, after_json, diff_json, metadata_json, created_at
+  request_id, ip_address, user_agent, before_json, after_json, diff_json, metadata_json,
+  COALESCE(
+    (SELECT json_agg(json_build_object('entityType', r.entity_type, 'entityId', r.entity_id))
+     FROM audit_log_related_entity r WHERE r.audit_id = audit_log.audit_id),
+    '[]'::json
+  ) AS related_entities,
+  created_at
 `;
 
 function buildWhere(filters: AuditLogFilters): { where: string; params: unknown[] } {
@@ -45,7 +52,24 @@ function buildWhere(filters: AuditLogFilters): { where: string; params: unknown[
   if (filters.relatedPaymentId != null) add('related_payment_id', '=', filters.relatedPaymentId);
   if (filters.relatedDeadlineId != null) add('related_deadline_id', '=', filters.relatedDeadlineId);
   if (filters.relatedProductionEventId != null) add('related_production_event_id', '=', filters.relatedProductionEventId);
-  if (filters.relatedUserId != null) add('related_user_id', '=', filters.relatedUserId);
+  if (filters.relatedUserId != null) {
+    params.push(filters.relatedUserId);
+    const p = params.length;
+    clauses.push(
+      `(related_user_id = $${p} OR EXISTS (SELECT 1 FROM audit_log_related_entity r ` +
+        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = 'user' AND r.entity_id = $${p}))`,
+    );
+  }
+  if (filters.relatedEntityType && filters.relatedEntityId != null) {
+    params.push(filters.relatedEntityType);
+    const pt = params.length;
+    params.push(filters.relatedEntityId);
+    const pid = params.length;
+    clauses.push(
+      `EXISTS (SELECT 1 FROM audit_log_related_entity r ` +
+        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = $${pt} AND r.entity_id = $${pid})`,
+    );
+  }
   if (filters.requestId) add('request_id', '=', filters.requestId);
   if (filters.createdFrom) add('created_at', '>=', filters.createdFrom);
   if (filters.createdTo) add('created_at', '<=', filters.createdTo);
@@ -86,6 +110,12 @@ function mapRow(row: AuditRow): AuditLogEventDto {
     after: row.after_json == null ? null : redactLogValue(row.after_json),
     diff: row.diff_json == null ? null : redactLogValue(row.diff_json),
     metadata: row.metadata_json == null ? null : redactLogValue(row.metadata_json),
+    relatedEntities: Array.isArray(row.related_entities)
+      ? (row.related_entities as Array<{ entityType: string; entityId: unknown }>).map((e) => ({
+          entityType: e.entityType,
+          entityId: num(e.entityId as string | number | null) ?? 0,
+        }))
+      : [],
     createdAt: typeof row.created_at === 'string' ? row.created_at : row.created_at.toISOString(),
   };
 }

@@ -1,3 +1,5 @@
+export interface AuditRelatedEntityDto { entityType: string; entityId: number }
+
 export interface AuditPaginationDto {
   page: number;
   pageSize: number;
@@ -32,6 +34,7 @@ export interface AuditLogEventDto {
   after: unknown;
   diff: unknown;
   metadata: unknown;
+  relatedEntities: AuditRelatedEntityDto[];
   createdAt: string;
 }
 

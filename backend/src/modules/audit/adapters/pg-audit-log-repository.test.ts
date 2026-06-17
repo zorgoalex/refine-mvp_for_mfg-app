@@ -95,4 +95,67 @@ describe('PgAuditLogRepository.list', () => {
     expect(calls[0].text).not.toMatch(/WHERE/i);
     expect(calls[1].params).toContain(25); // offset = (2-1)*25
   });
+
+  it('widens relatedUserId filter to also match bridge user rows (single bind)', async () => {
+    const { client, calls } = db([
+      { rows: [{ total: 1 }] },
+      { rows: [{
+        audit_id: 'a4', event: 'org.user_added', entity_type: 'org', entity_id: '1',
+        user_id: 1, username: 'admin', role: 'admin', source: 'backend-org-command',
+        related_order_id: null, related_client_id: null, related_payment_id: null,
+        related_deadline_id: null, related_production_event_id: null, related_user_id: null,
+        status_field: null, status_id: null, status_name: null, status_code: null, stage_code: null,
+        request_id: 'req4', ip_address: null, user_agent: null,
+        before_json: null, after_json: null, diff_json: null, metadata_json: null,
+        related_entities: [{ entityType: 'user', entityId: 7 }],
+        created_at: '2026-06-17T10:00:00.000Z',
+      }] },
+    ]);
+    const repo = new PgAuditLogRepository(client);
+    const res = await repo.list({ currentUser: undefined, filters: { relatedUserId: 7 }, page: 1, pageSize: 50, requestId: 'rq' });
+    // COUNT query
+    expect(calls[0].text).toMatch(/related_user_id = \$/);
+    expect(calls[0].text).toMatch(/audit_log_related_entity/);
+    // relatedUserId appears only once in params (single bind reused via $n reference)
+    expect(calls[0].params.filter((p) => p === 7)).toHaveLength(1);
+    // rows query same WHERE
+    expect(calls[1].text).toMatch(/related_user_id = \$/);
+    expect(calls[1].text).toMatch(/audit_log_related_entity/);
+    expect(calls[1].params.filter((p) => p === 7)).toHaveLength(1);
+    // relatedEntities mapped from related_entities column
+    expect(res.data[0].relatedEntities).toEqual([{ entityType: 'user', entityId: 7 }]);
+  });
+
+  it('filters by relatedEntityType + relatedEntityId via bridge EXISTS', async () => {
+    const { client, calls } = db([
+      { rows: [{ total: 2 }] },
+      { rows: [] },
+    ]);
+    const repo = new PgAuditLogRepository(client);
+    await repo.list({ currentUser: undefined, filters: { relatedEntityType: 'employee', relatedEntityId: 3 }, page: 1, pageSize: 50, requestId: 'rq' });
+    expect(calls[0].text).toMatch(/EXISTS/i);
+    expect(calls[0].text).toMatch(/audit_log_related_entity/);
+    expect(calls[0].params).toContain('employee');
+    expect(calls[0].params).toContain(3);
+  });
+
+  it('mapRow returns relatedEntities: [] when related_entities is absent or not an array', async () => {
+    const { client } = db([
+      { rows: [{ total: 1 }] },
+      { rows: [{
+        audit_id: 'a5', event: 'test.event', entity_type: null, entity_id: null,
+        user_id: null, username: null, role: null, source: null,
+        related_order_id: null, related_client_id: null, related_payment_id: null,
+        related_deadline_id: null, related_production_event_id: null, related_user_id: null,
+        status_field: null, status_id: null, status_name: null, status_code: null, stage_code: null,
+        request_id: 'req5', ip_address: null, user_agent: null,
+        before_json: null, after_json: null, diff_json: null, metadata_json: null,
+        // no related_entities key → undefined → must map to []
+        created_at: '2026-06-17T10:00:00.000Z',
+      }] },
+    ]);
+    const repo = new PgAuditLogRepository(client);
+    const res = await repo.list({ currentUser: undefined, filters: {}, page: 1, pageSize: 50, requestId: 'rq' });
+    expect(res.data[0].relatedEntities).toEqual([]);
+  });
 });

@@ -14,6 +14,8 @@ export interface AuditLogFilters {
   relatedPaymentId?: number;
   relatedDeadlineId?: number;
   relatedProductionEventId?: number;
+  relatedEntityType?: string;
+  relatedEntityId?: number;
   requestId?: string;
   createdFrom?: string;
   createdTo?: string;
