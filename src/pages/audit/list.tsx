@@ -21,7 +21,7 @@ import {
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { auditApi } from '../../api/auditApi';
-import type { AuditLogEventDto, AuditLogListQuery } from '../../api/types/auditApi.types';
+import type { AuditLogEventDto, AuditLogListQuery, AuditRelatedEntity } from '../../api/types/auditApi.types';
 import { ApiError } from '../../api/httpClient';
 import { featureFlags } from '../../config/featureFlags';
 import { authSession } from '../../api/authSession';
@@ -44,6 +44,8 @@ export interface FilterValues {
   relatedDeadlineId?: number;
   relatedProductionEventId?: number;
   relatedUserId?: number;
+  relatedEntityType?: string;
+  relatedEntityId?: number;
   requestId?: string;
   createdFrom?: Dayjs;
   createdTo?: Dayjs;
@@ -90,6 +92,8 @@ export function buildAuditQuery(values: FilterValues, pageSize: number): AuditLo
   if (values.relatedProductionEventId != null)
     next.relatedProductionEventId = values.relatedProductionEventId;
   if (values.relatedUserId != null) next.relatedUserId = values.relatedUserId;
+  if (values.relatedEntityType) next.relatedEntityType = values.relatedEntityType;
+  if (values.relatedEntityId != null) next.relatedEntityId = values.relatedEntityId;
   if (values.requestId) next.requestId = values.requestId;
   if (values.createdFrom) next.createdFrom = values.createdFrom.toISOString();
   if (values.createdTo) next.createdTo = values.createdTo.toISOString();
@@ -126,6 +130,15 @@ export function RelatedIds({ record }: { record: AuditLogEventDto }) {
     parts.push(<Tag key="prod" color="purple">Произв. #{record.relatedProductionEventId}</Tag>);
   if (record.relatedUserId != null)
     parts.push(<Tag key="user" color="cyan">Пользователь #{record.relatedUserId}</Tag>);
+  if (Array.isArray(record.relatedEntities)) {
+    for (const e of record.relatedEntities) {
+      parts.push(
+        <Tag key={`re-${e.entityType}-${e.entityId}`} color="magenta">
+          {e.entityType}#{e.entityId}
+        </Tag>,
+      );
+    }
+  }
   if (parts.length === 0) return <span style={{ color: '#bfbfbf' }}>—</span>;
   return <>{parts}</>;
 }
@@ -380,6 +393,16 @@ export const AuditList: React.FC = () => {
               </div>
               <div className="aff-item">
                 <Form.Item name="relatedUserId" label="Пользователь #">
+                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 90 }} />
+                </Form.Item>
+              </div>
+              <div className="aff-item">
+                <Form.Item name="relatedEntityType" label="Related тип">
+                  <Input allowClear placeholder="user / employee" size="small" style={{ width: 120 }} />
+                </Form.Item>
+              </div>
+              <div className="aff-item">
+                <Form.Item name="relatedEntityId" label="Related #">
                   <InputNumber min={1} placeholder="ID" size="small" style={{ width: 90 }} />
                 </Form.Item>
               </div>

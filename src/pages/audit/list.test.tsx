@@ -21,6 +21,7 @@ function event(overrides: Partial<AuditLogEventDto> = {}): AuditLogEventDto {
     relatedDeadlineId: null,
     relatedProductionEventId: null,
     relatedUserId: null,
+    relatedEntities: [],
     statusField: null,
     statusId: null,
     statusName: null,

@@ -132,6 +132,8 @@ function createAuditEvent(): AuditLogEventDto {
     relatedPaymentId: null,
     relatedDeadlineId: null,
     relatedProductionEventId: null,
+    relatedUserId: null,
+    relatedEntities: [],
     statusField: null,
     statusId: null,
     statusName: null,

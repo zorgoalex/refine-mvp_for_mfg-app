@@ -1,3 +1,8 @@
+export interface AuditRelatedEntity {
+  entityType: string;
+  entityId: number;
+}
+
 export interface AuditLogEventDto {
   auditId: string;
   event: string;
@@ -13,6 +18,7 @@ export interface AuditLogEventDto {
   relatedDeadlineId: number | null;
   relatedProductionEventId: number | null;
   relatedUserId: number | null;
+  relatedEntities: AuditRelatedEntity[];
   statusField: string | null;
   statusId: number | null;
   statusName: string | null;
@@ -56,6 +62,8 @@ export interface AuditLogListQuery {
   relatedDeadlineId?: number;
   relatedProductionEventId?: number;
   relatedUserId?: number;
+  relatedEntityType?: string;
+  relatedEntityId?: number;
   requestId?: string;
   createdFrom?: string;
   createdTo?: string;
