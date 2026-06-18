@@ -199,8 +199,8 @@ describe('buildFlatMenuItems', () => {
     };
     const items = buildFlatMenuItems(categories, Object.keys(categories), {}, navigate);
     expect(items).toHaveLength(2);
-    expect(items?.[0]).toMatchObject({ key: 'clients' });
-    expect(items?.[1]).toMatchObject({ key: 'payments' });
+    expect(items?.[0]).toMatchObject({ key: 'clients', title: 'Клиенты' });
+    expect(items?.[1]).toMatchObject({ key: 'payments', title: 'Платежи' });
 
     (items?.[0] as { onClick?: () => void }).onClick?.();
     expect(navigate).toHaveBeenCalledWith('/clients');

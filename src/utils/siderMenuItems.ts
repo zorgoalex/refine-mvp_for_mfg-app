@@ -134,6 +134,7 @@ export function buildFlatMenuItems(
       key: item.name,
       icon: resourceIcons[item.name],
       label: item.label,
+      title: item.label,
       onClick: () => onNavigate(item.route),
     }));
   });
@@ -203,6 +204,7 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
           key: 'orders_view',
           icon: resourceIcons['orders_view'],
           label: ordersLabel,
+          title: ordersLabel,
           onClick: () => push(ordersRoute),
         }
       : null,
@@ -211,6 +213,7 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
           key: 'calendar',
           icon: resourceIcons['calendar'],
           label: calendarLabel,
+          title: calendarLabel,
           onClick: () => push(calendarRoute),
         }
       : null,

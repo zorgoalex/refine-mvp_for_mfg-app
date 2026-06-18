@@ -1,5 +1,5 @@
 ﻿import React, { useMemo, useState } from "react";
-import { Layout as AntLayout, Menu, Collapse, Button, Typography } from "antd";
+import { Layout as AntLayout, Menu, Collapse, Button, Typography, Tooltip } from "antd";
 import {
   PlusOutlined,
   FileTextOutlined,
@@ -60,6 +60,12 @@ import {
 
 const { Panel } = Collapse;
 const { Title } = Typography;
+
+const menuLabelWithTooltip = (label: string) => (
+  <Tooltip title={label} placement="right" mouseEnterDelay={0.35}>
+    <span className="sidebar-menu-label">{label}</span>
+  </Tooltip>
+);
 
 const CATEGORY_ORDER = [
   "Контрагенты",
@@ -256,7 +262,8 @@ export const CustomSider: React.FC = () => {
               const categoryItems: MenuProps["items"] = items.map((item) => ({
                 key: item.name,
                 icon: RESOURCE_ICONS[item.name],
-                label: item.label,
+                label: menuLabelWithTooltip(item.label),
+                title: item.label,
                 onClick: () => push(item.route),
               }));
 
@@ -302,6 +309,7 @@ export const CustomSider: React.FC = () => {
         .sidebar-collapse .ant-collapse-header:hover { color: #90CAF9 !important; }
         .sidebar-collapse .ant-collapse-expand-icon { color: #E0E0E0 !important; }
         .sidebar-collapse .ant-menu-item { font-size: 0.98em; color: #E0E0E0 !important; letter-spacing: 1px !important; }
+        .sidebar-menu-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sidebar-collapse .ant-menu-item:hover { color: #90CAF9 !important; }
         .sidebar-collapse .ant-menu-item-selected { background-color: rgba(144, 202, 249, 0.2) !important; color: #90CAF9 !important; }
         .sidebar-collapse .ant-collapse-content { background: transparent !important; }
