@@ -1,0 +1,165 @@
+# Twenty CRM overlay (Phase 1 — isolated stand-up to evaluate before any data
+# integration with ERP). Combine it WITH the base stack so it shares the same
+# Traefik edge network instead of running standalone:
+#
+#   # Preflight 1: refuse to deploy while placeholders remain.
+#   grep -nE 'REPLACE_ME' .env && { echo "fill REPLACE_ME_* first"; exit 1; }
+#   # Preflight 2: the Twenty image runs as uid 1000, so the bind-mounted
+#   # upload dir must exist and be owned by 1000 or local-storage writes fail.
+#   mkdir -p data/twenty/server-storage && sudo chown -R 1000:1000 data/twenty/server-storage
+#
+#   docker compose \
+#     --project-directory ~/projects/erp_dev \
+#     -p ${COMPOSE_PROJECT_NAME} \
+#     --env-file .env \
+#     -f repo_erp/ops/templates/docker-compose.vps.yml \
+#     -f repo_erp/ops/templates/docker-compose.twenty.yml \
+#     up -d
+#
+# Teardown is SERVICE-SCOPED — never `down` the merged stack, that would stop
+# ERP too. Remove only the Twenty services (same -f set):
+#
+#   docker compose ... -f .../docker-compose.vps.yml -f .../docker-compose.twenty.yml \
+#     rm -sf twenty twenty_worker twenty_db twenty_redis
+#
+# Phase 1 is intentionally a separate overlay so a plain base `up -d` never
+# starts Twenty; the service-scoped teardown above removes the CRM without
+# touching ERP. Twenty owns its schema; it cannot read ERP tables as truth.
+# It therefore gets its own Postgres and Redis here. Data sync to ERP (Twenty
+# as a projection, ERP as master) is a separate later phase.
+#
+# Required vars are hard-enforced via ${VAR:?...}: an unset/blank value aborts
+# `up`/`config` instead of silently rendering an internet-facing service with
+# empty secrets. TWENTY_TAG must be an immutable release tag or digest — there
+# is no `latest` fallback, because the server owns DB migrations and a silent
+# image bump would auto-migrate Twenty's DB and break rollback.
+services:
+  twenty_db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${TWENTY_PG_DB:-default}
+      POSTGRES_USER: ${TWENTY_PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${TWENTY_PG_PASSWORD:?set TWENTY_PG_PASSWORD}
+      TZ: Asia/Almaty
+      PGTZ: Asia/Almaty
+    cpus: ${TWENTY_DB_CPUS:-0.5}
+    mem_limit: ${TWENTY_DB_MEM_LIMIT:-384m}
+    volumes:
+      - ./data/postgres/twenty:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TWENTY_PG_USER:-postgres} -d ${TWENTY_PG_DB:-default}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      - back
+
+  twenty_redis:
+    image: valkey/valkey:7.2-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    cpus: ${TWENTY_REDIS_CPUS:-0.25}
+    mem_limit: ${TWENTY_REDIS_MEM_LIMIT:-96m}
+    volumes:
+      - twenty_redis_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - back
+
+  twenty:
+    image: twentycrm/twenty:${TWENTY_TAG:?set immutable TWENTY_TAG (release tag or digest, not latest)}
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NODE_PORT: "3000"
+      SERVER_URL: ${TWENTY_SERVER_URL:?set TWENTY_SERVER_URL}
+      PG_DATABASE_URL: postgres://${TWENTY_PG_USER:-postgres}:${TWENTY_PG_PASSWORD:?set TWENTY_PG_PASSWORD}@twenty_db:5432/${TWENTY_PG_DB:-default}
+      REDIS_URL: redis://twenty_redis:6379
+      STORAGE_TYPE: ${TWENTY_STORAGE_TYPE:-local}
+      # Losing ENCRYPTION_KEY means losing access to every secret stored in
+      # Twenty's DB. Generate once with: openssl rand -base64 32
+      ENCRYPTION_KEY: ${TWENTY_ENCRYPTION_KEY:?set TWENTY_ENCRYPTION_KEY}
+      # Previous key during rotation; blank when not rotating.
+      FALLBACK_ENCRYPTION_KEY: ${TWENTY_FALLBACK_ENCRYPTION_KEY:-}
+      DISABLE_DB_MIGRATIONS: "false"
+      DISABLE_CRON_JOBS_REGISTRATION: "false"
+    cpus: ${TWENTY_CPUS:-1.5}
+    mem_limit: ${TWENTY_MEM_LIMIT:-1280m}
+    volumes:
+      # Bind local-storage uploads under ./data like the DB so backups and
+      # `down -v` behave consistently and uploads are not lost with the cache.
+      - ./data/twenty/server-storage:/app/packages/twenty-server/.local-storage
+    depends_on:
+      twenty_db:
+        condition: service_healthy
+      twenty_redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:3000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${EDGE_NETWORK_NAME:-erp_edge}
+      - traefik.http.routers.twenty.rule=Host(`${TWENTY_FQDN:?set TWENTY_FQDN}`)
+      - traefik.http.routers.twenty.entrypoints=websecure
+      - traefik.http.routers.twenty.tls.certresolver=letsencrypt
+      - traefik.http.services.twenty.loadbalancer.server.port=3000
+    networks:
+      - back
+      - edge
+
+  twenty_worker:
+    image: twentycrm/twenty:${TWENTY_TAG:?set immutable TWENTY_TAG (release tag or digest, not latest)}
+    restart: unless-stopped
+    command: ["yarn", "worker:prod"]
+    environment:
+      SERVER_URL: ${TWENTY_SERVER_URL:?set TWENTY_SERVER_URL}
+      PG_DATABASE_URL: postgres://${TWENTY_PG_USER:-postgres}:${TWENTY_PG_PASSWORD:?set TWENTY_PG_PASSWORD}@twenty_db:5432/${TWENTY_PG_DB:-default}
+      REDIS_URL: redis://twenty_redis:6379
+      STORAGE_TYPE: ${TWENTY_STORAGE_TYPE:-local}
+      ENCRYPTION_KEY: ${TWENTY_ENCRYPTION_KEY:?set TWENTY_ENCRYPTION_KEY}
+      FALLBACK_ENCRYPTION_KEY: ${TWENTY_FALLBACK_ENCRYPTION_KEY:-}
+      DISABLE_DB_MIGRATIONS: "true"
+      DISABLE_CRON_JOBS_REGISTRATION: "true"
+    # Upstream sizes the worker >= the server (background jobs/imports), so keep
+    # worker memory at least as high as the server to avoid OOM on jobs.
+    cpus: ${TWENTY_WORKER_CPUS:-1.0}
+    mem_limit: ${TWENTY_WORKER_MEM_LIMIT:-1280m}
+    volumes:
+      - ./data/twenty/server-storage:/app/packages/twenty-server/.local-storage
+    depends_on:
+      twenty_db:
+        condition: service_healthy
+      twenty:
+        condition: service_healthy
+    # No Traefik route and no outbound integrations in phase 1, so the worker
+    # stays on the internal-only "back" network and is NOT attached to the
+    # shared ingress "edge" network. Add a dedicated egress network later if
+    # outbound (email/webhooks) is enabled.
+    networks:
+      - back
+
+# Networks are declared identically to the base stack so that, when this file is
+# merged via an extra `-f`, the Twenty services attach to the same edge/back
+# networks instead of creating new ones.
+networks:
+  edge:
+    name: ${EDGE_NETWORK_NAME:-erp_edge}
+    driver: bridge
+  back:
+    driver: bridge
+    internal: true
+
+volumes:
+  twenty_redis_data:
