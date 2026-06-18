@@ -3,11 +3,14 @@ import {
   Alert,
   Button,
   Card,
+  Col,
   Form,
   Input,
   InputNumber,
   Modal,
   Popconfirm,
+  Radio,
+  Row,
   Space,
   Spin,
   Switch,
@@ -28,10 +31,16 @@ import {
 import { ApiError } from '../../../api/httpClient';
 import { can } from '../../../utils/permissions';
 import {
+  DEFAULT_PARAM_FORM,
+  type FreecutLayoutMode,
+  type FreecutObjective,
+  type FreecutRetryStrategy,
+  type ParamProfileForm,
   extractEligibilityCodes,
   findSetting,
+  formToParams,
+  paramsToForm,
   parseCodesCsv,
-  parseJsonObject,
   sheetSpecOnboardingHint,
 } from './cutConfigHelpers';
 
@@ -354,25 +363,28 @@ interface ProfileModalProps {
 const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onSaved }) => {
   const [name, setName] = useState('');
   const [isDefault, setIsDefault] = useState(false);
-  const [paramsText, setParamsText] = useState('{}');
+  const [params, setParams] = useState<ParamProfileForm>(DEFAULT_PARAM_FORM);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setName(editing?.name ?? '');
     setIsDefault(editing?.isDefault ?? false);
-    setParamsText(JSON.stringify(editing?.params ?? {}, null, 2));
+    setParams(editing ? paramsToForm(editing.params) : DEFAULT_PARAM_FORM);
   }, [open, editing]);
 
+  const setField = useCallback(<K extends keyof ParamProfileForm>(key: K, value: ParamProfileForm[K]) => {
+    setParams((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
   const submit = useCallback(async () => {
-    const parsed = parseJsonObject(paramsText);
-    if (!parsed.ok) {
-      message.error(`Параметры: ${parsed.error}`);
+    if (!name.trim()) {
+      message.error('Укажите название профиля');
       return;
     }
     setSaving(true);
     try {
-      const input = { name: name.trim(), params: parsed.value, isDefault };
+      const input = { name: name.trim(), params: formToParams(params), isDefault };
       if (editing) {
         await cutConfigApi.updateParamProfile(editing.cutParamProfileId, input, editing.version);
       } else {
@@ -385,7 +397,23 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
     } finally {
       setSaving(false);
     }
-  }, [editing, name, isDefault, paramsText, onSaved]);
+  }, [editing, name, isDefault, params, onSaved]);
+
+  const numberField = (key: NumKey) => {
+    const m = NUM_META[key];
+    return (
+      <Form.Item label={m.label} tooltip={m.tooltip} extra={m.short} style={{ marginBottom: 12 }}>
+        <InputNumber
+          min={m.min}
+          step={m.step}
+          keyboard
+          value={params[key] as number}
+          onChange={(v) => setField(key, Number(v ?? 0) as never)}
+          style={{ width: '100%' }}
+        />
+      </Form.Item>
+    );
+  };
 
   return (
     <Modal
@@ -396,20 +424,144 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
       onCancel={onClose}
       okText="Сохранить"
       cancelText="Отмена"
+      width={680}
     >
       <Form layout="vertical">
-        <Form.Item label="Название" required>
+        <Form.Item label="Название" required extra="Понятное имя профиля для выбора при раскрое">
           <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="МДФ быстрый" />
         </Form.Item>
-        <Form.Item label="Профиль по умолчанию">
+        <Form.Item
+          label="Профиль по умолчанию"
+          tooltip="Профиль, который применяется к раскрою, если другой не выбран. По умолчанию может быть только один."
+          extra="Применяется, если профиль не выбран явно"
+        >
           <Switch checked={isDefault} onChange={setIsDefault} />
         </Form.Item>
-        <Form.Item label="Параметры (JSON: kerf_mm, spacing_mm, trim_mm, objective, time_limit_ms, restarts, layout_mode, retry_strategy)">
-          <Input.TextArea value={paramsText} onChange={(e) => setParamsText(e.target.value)} rows={8} />
-        </Form.Item>
+
+        <Typography.Text type="secondary">Параметры реза, мм</Typography.Text>
+        <Row gutter={12}>
+          <Col span={12}>{numberField('kerf_mm')}</Col>
+          <Col span={12}>{numberField('spacing_mm')}</Col>
+        </Row>
+
+        <Typography.Text type="secondary">Обрезка кромки листа (trim), мм</Typography.Text>
+        <Row gutter={12}>
+          <Col span={6}>{numberField('trim_left')}</Col>
+          <Col span={6}>{numberField('trim_right')}</Col>
+          <Col span={6}>{numberField('trim_top')}</Col>
+          <Col span={6}>{numberField('trim_bottom')}</Col>
+        </Row>
+
+        <Typography.Text type="secondary">Оптимизация</Typography.Text>
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item label="Цель оптимизации" tooltip={OBJECTIVE_META.tooltip} extra={OBJECTIVE_META.short} style={{ marginBottom: 12 }}>
+              <Radio.Group
+                optionType="button"
+                buttonStyle="solid"
+                value={params.objective}
+                onChange={(e) => setField('objective', e.target.value as FreecutObjective)}
+                options={[
+                  { value: 'min_waste', label: 'Меньше отхода' },
+                  { value: 'min_sheets', label: 'Меньше листов' },
+                ]}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="Тип раскладки" tooltip={LAYOUT_META.tooltip} extra={LAYOUT_META.short} style={{ marginBottom: 12 }}>
+              <Radio.Group
+                optionType="button"
+                buttonStyle="solid"
+                value={params.layout_mode}
+                onChange={(e) => setField('layout_mode', e.target.value as FreecutLayoutMode)}
+                options={[
+                  { value: 'guillotine', label: 'Гильотинная' },
+                  { value: 'nested', label: 'Вложенная' },
+                ]}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={12}>
+          <Col span={8}>{numberField('time_limit_ms')}</Col>
+          <Col span={8}>{numberField('restarts')}</Col>
+          <Col span={8}>
+            <Form.Item label="Ретраи при таймауте" tooltip={RETRY_META.tooltip} extra={RETRY_META.short} style={{ marginBottom: 12 }}>
+              <Radio.Group
+                optionType="button"
+                buttonStyle="solid"
+                value={params.retry_strategy}
+                onChange={(e) => setField('retry_strategy', e.target.value as FreecutRetryStrategy)}
+                options={[
+                  { value: 'disabled', label: 'Отключены' },
+                  { value: 'smart', label: 'Умные' },
+                ]}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
       </Form>
     </Modal>
   );
+};
+
+type NumKey =
+  | 'kerf_mm'
+  | 'spacing_mm'
+  | 'trim_left'
+  | 'trim_right'
+  | 'trim_top'
+  | 'trim_bottom'
+  | 'time_limit_ms'
+  | 'restarts';
+
+const NUM_META: Record<NumKey, { label: string; short: string; tooltip: string; min: number; step: number }> = {
+  kerf_mm: {
+    label: 'Пропил (kerf), мм',
+    short: 'Ширина реза пилой',
+    tooltip: 'Толщина пропила пильного диска — на эту величину «съедается» материал между соседними деталями. Обычно 2–4 мм.',
+    min: 0,
+    step: 0.5,
+  },
+  spacing_mm: {
+    label: 'Зазор (spacing), мм',
+    short: 'Доп. отступ между деталями',
+    tooltip: 'Технологический зазор между соседними деталями сверх пропила. Обычно 0–2 мм.',
+    min: 0,
+    step: 0.5,
+  },
+  trim_left: { label: 'Слева', short: 'Обрез кромки', tooltip: 'Сколько мм обрезается с левого края листа перед раскроем (некондиционная кромка).', min: 0, step: 1 },
+  trim_right: { label: 'Справа', short: 'Обрез кромки', tooltip: 'Сколько мм обрезается с правого края листа перед раскроем (некондиционная кромка).', min: 0, step: 1 },
+  trim_top: { label: 'Сверху', short: 'Обрез кромки', tooltip: 'Сколько мм обрезается с верхнего края листа перед раскроем (некондиционная кромка).', min: 0, step: 1 },
+  trim_bottom: { label: 'Снизу', short: 'Обрез кромки', tooltip: 'Сколько мм обрезается с нижнего края листа перед раскроем (некондиционная кромка).', min: 0, step: 1 },
+  time_limit_ms: {
+    label: 'Лимит времени, мс',
+    short: 'Бюджет на расчёт раскроя',
+    tooltip: 'Максимум времени работы оптимизатора на одну группу. Больше времени — потенциально плотнее раскрой, но дольше. Прод-дефолт 1200 мс.',
+    min: 0,
+    step: 100,
+  },
+  restarts: {
+    label: 'Перезапуски',
+    short: 'Число попыток оптимизации',
+    tooltip: 'Сколько раз оптимизатор стартует заново с разных начальных точек и берёт лучший результат. Больше — качественнее и дольше.',
+    min: 0,
+    step: 1,
+  },
+};
+
+const OBJECTIVE_META = {
+  short: 'Что минимизировать',
+  tooltip: 'Меньше отхода — плотнее упаковка, меньше обрезков. Меньше листов — задействовать как можно меньше листов (может вырасти отход).',
+};
+const LAYOUT_META = {
+  short: 'Схема резов',
+  tooltip: 'Гильотинная — только сквозные резы от края до края (для форматно-раскроечного станка). Вложенная — произвольное размещение, плотнее, но требует другого оборудования.',
+};
+const RETRY_META = {
+  short: 'Поведение при нехватке времени',
+  tooltip: 'Отключены — вернуть лучший результат в рамках лимита времени (стабильно ~1.5 с). Умные — дополнительные попытки при таймауте слайса (может удлинить расчёт до ~3 с).',
 };
 
 interface PresetModalProps {

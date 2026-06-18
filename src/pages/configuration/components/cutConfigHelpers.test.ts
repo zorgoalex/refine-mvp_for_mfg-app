@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PARAM_FORM,
   extractEligibilityCodes,
   findSetting,
+  formToParams,
+  paramsToForm,
   parseCodesCsv,
-  parseJsonObject,
   sheetSpecOnboardingHint,
 } from './cutConfigHelpers';
 
@@ -33,10 +35,32 @@ describe('cutConfigHelpers', () => {
     expect(sheetSpecOnboardingHint(3)).toBeNull();
   });
 
-  it('parses a JSON object, rejecting non-objects and bad JSON', () => {
-    expect(parseJsonObject('{"kerf_mm":2}')).toEqual({ ok: true, value: { kerf_mm: 2 } });
-    expect(parseJsonObject('[]').ok).toBe(false);
-    expect(parseJsonObject('not json').ok).toBe(false);
-    expect(parseJsonObject('null').ok).toBe(false);
+  it('formToParams builds the freecut params shape (nested trim_mm, all 4 sides)', () => {
+    const params = formToParams({ ...DEFAULT_PARAM_FORM, kerf_mm: 3, trim_left: 5 });
+    expect(params).toMatchObject({
+      kerf_mm: 3,
+      spacing_mm: 1,
+      trim_mm: { left: 5, right: 10, top: 10, bottom: 10 },
+      objective: 'min_waste',
+      layout_mode: 'guillotine',
+      retry_strategy: 'disabled',
+    });
+  });
+
+  it('paramsToForm reads nested trim_mm + fills gaps with defaults; round-trips with formToParams', () => {
+    const form = paramsToForm({ kerf_mm: 4, trim_mm: { left: 7, right: 8, top: 9, bottom: 6 } });
+    expect(form.kerf_mm).toBe(4);
+    expect(form.trim_left).toBe(7);
+    expect(form.spacing_mm).toBe(DEFAULT_PARAM_FORM.spacing_mm); // gap filled
+    expect(form.objective).toBe('min_waste');
+    // round-trip
+    expect(paramsToForm(formToParams(form))).toEqual(form);
+  });
+
+  it('paramsToForm coerces unknown enum/non-number values to defaults', () => {
+    const form = paramsToForm({ objective: 'bogus', layout_mode: 'x', kerf_mm: 'NaN' as unknown as number });
+    expect(form.objective).toBe(DEFAULT_PARAM_FORM.objective);
+    expect(form.layout_mode).toBe(DEFAULT_PARAM_FORM.layout_mode);
+    expect(form.kerf_mm).toBe(DEFAULT_PARAM_FORM.kerf_mm);
   });
 });
