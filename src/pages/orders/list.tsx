@@ -46,6 +46,7 @@ import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearc
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { ProjectFilter } from "./components/projects/ProjectFilter";
+import { AddToCutModal } from "./components/AddToCutModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
 import "./list.css";
 
@@ -66,6 +67,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   // Получаем текущего пользователя для фильтра "Мои заказы"
   const currentUser = authStorage.getUser();
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
+  const useBackendCut = featureFlags.useBackendCut;
+  const [selectedCutOrderIds, setSelectedCutOrderIds] = useState<number[]>([]);
+  const [addToCutOpen, setAddToCutOpen] = useState(false);
   const canViewUsers = canQueryUsersResource(currentUser);
   // Keep-alive: when this /orders tab is hidden (another tab active) every data
   // hook is disabled so the cached list stops reacting to invalidateQueries.
@@ -824,6 +828,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 Загрузка JSON
               </Button>
             </Upload>
+            {useBackendCut && (
+              <Button
+                disabled={selectedCutOrderIds.length === 0}
+                onClick={() => setAddToCutOpen(true)}
+              >
+                Добавить в раскрой ({selectedCutOrderIds.length})
+              </Button>
+            )}
           </>
         )}
       >
@@ -1001,6 +1013,15 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           {...tableProps}
           rowKey="order_id"
           sticky
+          rowSelection={
+            useBackendCut
+              ? {
+                  selectedRowKeys: selectedCutOrderIds,
+                  onChange: (keys) => setSelectedCutOrderIds(keys.map(Number)),
+                  preserveSelectedRowKeys: true,
+                }
+              : undefined
+          }
           className="orders-table"
           scroll={{ x: "max-content", y: 600 }}
           showSorterTooltip={{ mouseEnterDelay: 1 }}
@@ -1336,6 +1357,15 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         open={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
       />
+
+      {useBackendCut && (
+        <AddToCutModal
+          open={addToCutOpen}
+          orderIds={selectedCutOrderIds}
+          onClose={() => setAddToCutOpen(false)}
+          onDone={() => setSelectedCutOrderIds([])}
+        />
+      )}
     </>
   );
 };

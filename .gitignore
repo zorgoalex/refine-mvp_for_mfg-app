@@ -76,3 +76,4 @@ node_modules/
 
 # worktree symlink to the backend package node_modules (never commit)
 backend/node_modules
+.superpowers/

@@ -23,6 +23,9 @@ describe('backend feature flags', () => {
       deadlineWorker: false,
       deadlineActions: false,
       deadlineNotifications: false,
+      cutJobs: false,
+      cutJobsReadOnly: true,
+      cutAutoTrigger: false,
     });
   });
 
@@ -46,6 +49,10 @@ describe('backend feature flags', () => {
           BACKEND_ENABLE_DEADLINE_WORKER: 'true',
           BACKEND_DEADLINE_ACTIONS_ENABLED: 'true',
           BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: 'true',
+          BACKEND_ENABLE_CUT_JOBS: 'true',
+          BACKEND_CUT_JOBS_READ_ONLY: 'false',
+          BACKEND_CUT_AUTO_TRIGGER: 'true',
+          FREECUT_BASE_URL: 'http://freecut:8088',
         }),
       ),
     ).toMatchObject({
@@ -62,6 +69,9 @@ describe('backend feature flags', () => {
       deadlineWorker: true,
       deadlineActions: true,
       deadlineNotifications: true,
+      cutJobs: true,
+      cutJobsReadOnly: false,
+      cutAutoTrigger: true,
     });
   });
 });

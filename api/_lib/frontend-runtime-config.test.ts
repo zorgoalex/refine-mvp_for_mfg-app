@@ -19,6 +19,7 @@ describe('frontend runtime config delivery', () => {
         backendUsers: false,
         backendVlm: false,
         backendReferences: false,
+        backendCut: false,
         enableLegacyHasura: true,
       },
     });
@@ -60,6 +61,7 @@ describe('frontend runtime config delivery', () => {
         backendUsers: true,
         backendVlm: true,
         backendReferences: false,
+        backendCut: false,
         enableLegacyHasura: false,
       },
     });

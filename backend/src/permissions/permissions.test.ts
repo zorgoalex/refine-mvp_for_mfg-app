@@ -49,6 +49,20 @@ describe('permissions foundation', () => {
     }
   });
 
+  it('assigns cut permissions: management to operator/manager/top_manager, view to production roles', () => {
+    expect(can('superadmin', 'cut.manage')).toBe(true);
+    expect(can('admin', 'cut.manage')).toBe(true);
+    expect(can('top_manager', 'cut.manage')).toBe(true);
+    expect(can('manager', 'cut.manage')).toBe(true);
+    expect(can('operator', 'cut.manage')).toBe(true);
+    expect(can('worker', 'cut.manage')).toBe(false);
+    expect(can('viewer', 'cut.manage')).toBe(false);
+
+    expect(can('operator', 'cut.view')).toBe(true);
+    expect(can('worker', 'cut.view')).toBe(true);
+    expect(can('viewer', 'cut.view')).toBe(true);
+  });
+
   it('assigns deadline permissions by role without giving worker controls to service admin', () => {
     expect(can('superadmin', 'deadlines.worker.manage')).toBe(true);
     expect(can('superadmin', 'deadlines.worker.schedule')).toBe(true);

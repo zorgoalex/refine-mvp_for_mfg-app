@@ -19,6 +19,9 @@ export interface BackendFeatureFlags {
   deadlineWorker: boolean;
   deadlineActions: boolean;
   deadlineNotifications: boolean;
+  cutJobs: boolean;
+  cutJobsReadOnly: boolean;
+  cutAutoTrigger: boolean;
 }
 
 export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
@@ -41,5 +44,8 @@ export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
     deadlineWorker: env.BACKEND_ENABLE_DEADLINE_WORKER,
     deadlineActions: env.BACKEND_DEADLINE_ACTIONS_ENABLED,
     deadlineNotifications: env.BACKEND_DEADLINE_NOTIFICATIONS_ENABLED,
+    cutJobs: env.BACKEND_ENABLE_CUT_JOBS,
+    cutJobsReadOnly: env.BACKEND_CUT_JOBS_READ_ONLY,
+    cutAutoTrigger: env.BACKEND_CUT_AUTO_TRIGGER,
   };
 }

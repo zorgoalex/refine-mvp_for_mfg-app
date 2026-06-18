@@ -4854,6 +4854,574 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs:
+    post:
+      tags:
+        - CutJobs
+      operationId: createCutJob
+      summary: Create a cut job
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags:
+        - CutJobs
+      operationId: listCutJobs
+      summary: List active cut jobs
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}:
+    get:
+      tags:
+        - CutJobs
+      operationId: getCutJob
+      summary: Get a cut job manifest
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - CutJobs
+      operationId: archiveCutJob
+      summary: Archive a cut job
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/eligible-details:
+    get:
+      tags:
+        - CutJobs
+      operationId: listEligibleDetails
+      summary: List eligible details
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/items:
+    post:
+      tags:
+        - CutJobs
+      operationId: addCutItems
+      summary: Add details to a cut job
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/items/{itemId}:
+    delete:
+      tags:
+        - CutJobs
+      operationId: removeCutItem
+      summary: Remove a cut job item
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/calculate:
+    post:
+      tags:
+        - CutJobs
+      operationId: calculateCutJob
+      summary: Calculate a cut job
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex.png}:
+    get:
+      tags:
+        - CutJobs
+      operationId: renderCutSheetPng
+      summary: Render a per-sheet PNG
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex.svg}:
+    get:
+      tags:
+        - CutJobs
+      operationId: renderCutSheetSvg
+      summary: Render a per-sheet SVG
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/export.pdf:
+    get:
+      tags:
+        - CutJobs
+      operationId: exportCutGroupPdf
+      summary: Export a per-group multi-page PDF (on-demand, cached)
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '202':
+          description: PDF render in progress (retry with Retry-After)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/export.pdf:
+    get:
+      tags:
+        - CutJobs
+      operationId: exportCutJobPdf
+      summary: Export a whole-job PDF (all groups; on-demand, cached, pre-warmed)
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '202':
+          description: PDF render in progress (retry with Retry-After)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config:
+    get:
+      tags:
+        - CutConfig
+      operationId: getCutConfig
+      summary: Read the cut configuration (settings + catalogs)
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/settings/{key}:
+    put:
+      tags:
+        - CutConfig
+      operationId: updateCutSetting
+      summary: Update a cut_settings rule set
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/sheet-material-types:
+    post:
+      tags:
+        - CutConfig
+      operationId: createCutSheetMaterialType
+      summary: Create a sheet material type
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/sheet-material-types/{id}:
+    put:
+      tags:
+        - CutConfig
+      operationId: updateCutSheetMaterialType
+      summary: Update a sheet material type
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - CutConfig
+      operationId: deleteCutSheetMaterialType
+      summary: Deactivate a sheet material type
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/param-profiles:
+    post:
+      tags:
+        - CutConfig
+      operationId: createCutParamProfile
+      summary: Create a freecut param profile
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/param-profiles/{id}:
+    put:
+      tags:
+        - CutConfig
+      operationId: updateCutParamProfile
+      summary: Update a freecut param profile
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - CutConfig
+      operationId: deleteCutParamProfile
+      summary: Deactivate a freecut param profile
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/render-presets:
+    post:
+      tags:
+        - CutConfig
+      operationId: createCutRenderPreset
+      summary: Create a render preset
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/render-presets/{id}:
+    put:
+      tags:
+        - CutConfig
+      operationId: updateCutRenderPreset
+      summary: Update a render preset
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - CutConfig
+      operationId: deleteCutRenderPreset
+      summary: Deactivate a render preset
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /health/live:
     get:
       tags:

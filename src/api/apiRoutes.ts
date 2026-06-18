@@ -53,6 +53,33 @@ export const apiRoutes = {
     list: backendApiPath('/payments'),
     byId: (paymentId: number) => backendApiPath(`/payments/${paymentId}`),
   },
+  cutJobs: {
+    list: backendApiPath('/cut-jobs'),
+    byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),
+    items: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/items`),
+    item: (cutJobId: number, itemId: number) =>
+      backendApiPath(`/cut-jobs/${cutJobId}/items/${itemId}`),
+    calculate: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/calculate`),
+    eligibleDetails: (cutJobId: number) =>
+      backendApiPath(`/cut-jobs/${cutJobId}/eligible-details`),
+    sheetPng: (cutJobId: number, groupId: number, sheetIndex: number) =>
+      backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/sheets/${sheetIndex}.png`),
+    sheetSvg: (cutJobId: number, groupId: number, sheetIndex: number) =>
+      backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/sheets/${sheetIndex}.svg`),
+    groupPdf: (cutJobId: number, groupId: number) =>
+      backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/export.pdf`),
+    jobPdf: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/export.pdf`),
+  },
+  cutConfig: {
+    root: backendApiPath('/cut-config'),
+    setting: (key: string) => backendApiPath(`/cut-config/settings/${encodeURIComponent(key)}`),
+    sheetMaterialTypes: backendApiPath('/cut-config/sheet-material-types'),
+    sheetMaterialType: (id: number) => backendApiPath(`/cut-config/sheet-material-types/${id}`),
+    paramProfiles: backendApiPath('/cut-config/param-profiles'),
+    paramProfile: (id: number) => backendApiPath(`/cut-config/param-profiles/${id}`),
+    renderPresets: backendApiPath('/cut-config/render-presets'),
+    renderPreset: (id: number) => backendApiPath(`/cut-config/render-presets/${id}`),
+  },
   clientPhones: {
     list: backendApiPath('/client-phones'),
     byId: (phoneId: number) => backendApiPath(`/client-phones/${phoneId}`),

@@ -135,6 +135,9 @@ export const PERMISSIONS = [
   'org.view',
   'org.manage',
 
+  'cut.view',
+  'cut.manage',
+
   'settings.view',
   'settings.manage',
   'audit.view',
@@ -216,6 +219,8 @@ export const ROLE_PERMISSIONS = {
     'work_centers.view',
     'work_centers.manage',
     'org.view',
+    'cut.view',
+    'cut.manage',
 
     'requirements.view',
     'requirements.create',
@@ -281,6 +286,8 @@ export const ROLE_PERMISSIONS = {
     'production.tasks.update',
     'workshops.view',
     'work_centers.view',
+    'cut.view',
+    'cut.manage',
 
     'requirements.view',
     'requirements.create',
@@ -331,6 +338,8 @@ export const ROLE_PERMISSIONS = {
     'production.tasks.update',
     'workshops.view',
     'work_centers.view',
+    'cut.view',
+    'cut.manage',
 
     'requirements.view',
     'requirements.create',
@@ -365,6 +374,7 @@ export const ROLE_PERMISSIONS = {
     'production.tasks.update',
     'workshops.view',
     'work_centers.view',
+    'cut.view',
 
     'requirements.view',
     'doweling.view',
@@ -393,6 +403,7 @@ export const ROLE_PERMISSIONS = {
     'production.tasks.view',
     'workshops.view',
     'work_centers.view',
+    'cut.view',
 
     'requirements.view',
     'doweling.view',

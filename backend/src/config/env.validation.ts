@@ -128,6 +128,9 @@ const envSchema = z
     BACKEND_DEADLINE_WORKER_ID: z.string().trim().min(1).default('backend-local'),
     BACKEND_DEADLINE_ACTIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
+    BACKEND_ENABLE_CUT_JOBS: booleanFromEnv.default(false),
+    BACKEND_CUT_JOBS_READ_ONLY: booleanFromEnv.default(true),
+    BACKEND_CUT_AUTO_TRIGGER: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
     BACKEND_NOTIFICATION_RULES_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE: booleanFromEnv.default(false),
@@ -136,6 +139,8 @@ const envSchema = z
     BACKEND_OUTBOX_RELAY_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(100),
     BACKEND_OUTBOX_RELAY_WORKER_ID: z.string().trim().min(1).default('backend-local'),
     BACKEND_OUTBOX_RELAY_MAX_ATTEMPTS: z.coerce.number().int().positive().max(100).default(10),
+    FREECUT_BASE_URL: optionalUrlFromEnv,
+    FREECUT_OPTIMIZE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     GAS_WEBAPP_URL: optionalUrlFromEnv,
     GAS_API_KEY: optionalTrimmedStringFromEnv,
     GAS_EXPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(55000),
@@ -169,6 +174,15 @@ const envSchema = z
         code: 'custom',
         message: 'CORS_ALLOWED_ORIGINS cannot contain * when CORS_ALLOW_CREDENTIALS is true',
         path: ['CORS_ALLOWED_ORIGINS'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_CUT_JOBS && !env.BACKEND_CUT_JOBS_READ_ONLY && !env.FREECUT_BASE_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'FREECUT_BASE_URL is required when BACKEND_ENABLE_CUT_JOBS is true and BACKEND_CUT_JOBS_READ_ONLY is false',
+        path: ['FREECUT_BASE_URL'],
       });
     }
 

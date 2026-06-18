@@ -12,6 +12,7 @@ export interface FrontendFeatureFlags {
   useBackendUsers: boolean;
   useBackendVlm: boolean;
   useBackendReferences: boolean;
+  useBackendCut: boolean;
   enableLegacyHasura: boolean;
 }
 
@@ -31,6 +32,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendUsers: string | boolean;
   backendVlm: string | boolean;
   backendReferences: string | boolean;
+  backendCut: string | boolean;
   enableLegacyHasura: string | boolean;
   legacyHasura: string | boolean;
 }>;
@@ -63,6 +65,7 @@ export function getFeatureFlags(
     useBackendUsers: readBooleanFlag(env.VITE_USE_BACKEND_USERS, false),
     useBackendVlm: readBooleanFlag(env.VITE_USE_BACKEND_VLM, false),
     useBackendReferences: readBooleanFlag(env.VITE_USE_BACKEND_REFERENCES, false),
+    useBackendCut: readBooleanFlag(env.VITE_USE_BACKEND_CUT, false),
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
   };
 
@@ -106,6 +109,7 @@ export function mergeRuntimeFeatureFlags(
     useBackendVlm: readOptionalBooleanFlag(runtimeFeatures.backendVlm) ?? fallback.useBackendVlm,
     useBackendReferences:
       readOptionalBooleanFlag(runtimeFeatures.backendReferences) ?? fallback.useBackendReferences,
+    useBackendCut: readOptionalBooleanFlag(runtimeFeatures.backendCut) ?? fallback.useBackendCut,
     enableLegacyHasura:
       readOptionalBooleanFlag(runtimeFeatures.enableLegacyHasura) ??
       readOptionalBooleanFlag(runtimeFeatures.legacyHasura) ??

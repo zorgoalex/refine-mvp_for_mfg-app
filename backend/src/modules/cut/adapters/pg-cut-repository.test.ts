@@ -1,0 +1,407 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { DatabaseService } from '../../../database/database.service';
+import type { CurrentUser } from '../../../permissions/current-user';
+import type { FreecutClient } from './freecut-client';
+import type { FreecutOptimizeResponse } from '../application/cut-freecut-mapping';
+import { PgCutRepository } from './pg-cut-repository';
+
+function currentUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
+  return {
+    id: '7',
+    username: 'cutter',
+    role: 'operator',
+    permissions: ['cut.view', 'cut.manage'],
+    ...overrides,
+  } as CurrentUser;
+}
+
+function normalize(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+interface FakeRow {
+  [key: string]: unknown;
+}
+
+interface FakeDbOptions {
+  /** rows returned for `SELECT ... FROM order_details ... WHERE detail_id` (detail resolution) */
+  detailRows?: Record<number, FakeRow>;
+  /** rows returned for the FOR UPDATE cut_job load */
+  cutJob?: FakeRow;
+  /** rows for the active-items+specs join used by calculate */
+  calcItems?: FakeRow[];
+  /** ready-status id resolution */
+  readyStatusIds?: number[];
+  /** throw 23505 on the next cut_job_item insert */
+  reserveConflict?: boolean;
+  /** rows for listEligibleDetails */
+  eligibleRows?: FakeRow[];
+}
+
+function createDatabase(options: FakeDbOptions = {}) {
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  let cutGroupSeq = 100;
+  let itemSeq = 500;
+  let jobVersion = (options.cutJob?.version as number | undefined) ?? 0;
+
+  const handle = (text: string, params: readonly unknown[]) => {
+    queries.push({ text, params });
+    const sql = normalize(text);
+
+    if (sql.startsWith('SELECT set_session_user')) return { rows: [], rowCount: 0 };
+
+    if (sql.startsWith('INSERT INTO cut_job (')) {
+      return { rows: [{ cut_job_id: 42 }], rowCount: 1 };
+    }
+
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
+      const base = options.cutJob ?? { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null };
+      return { rows: [{ ...base, version: jobVersion }], rowCount: 1 };
+    }
+
+    if (sql.startsWith('SELECT od.order_id, od.quantity, od.production_status_id, od.delete_flag')) {
+      const detailId = params[0] as number;
+      const row = options.detailRows?.[detailId];
+      if (!row) return { rows: [], rowCount: 0 };
+      // Eligibility defaults: ready status (1 ∈ readyStatusIds) + linked sheet spec,
+      // unless the test overrides them.
+      return {
+        rows: [
+          {
+            production_status_id: 1,
+            delete_flag: false,
+            sheet_material_type_id: 9,
+            ...row,
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+
+    if (sql.startsWith('INSERT INTO cut_job_item (')) {
+      if (options.reserveConflict) {
+        const error = new Error('duplicate key') as Error & { code?: string };
+        error.code = '23505';
+        throw error;
+      }
+      return { rows: [{ cut_job_item_id: ++itemSeq }], rowCount: 1 };
+    }
+
+    if (sql.startsWith('UPDATE cut_job_item SET is_active = false')) {
+      return { rows: [{ cut_job_item_id: params[0], order_id: 9, order_detail_id: 1 }], rowCount: 1 };
+    }
+
+    if (sql.startsWith('UPDATE cut_job SET')) {
+      if (sql.includes('version = version + 1')) jobVersion += 1;
+      return { rows: [], rowCount: 1 };
+    }
+
+    if (sql.startsWith('SELECT cji.cut_job_item_id')) {
+      return { rows: options.calcItems ?? [], rowCount: (options.calcItems ?? []).length };
+    }
+
+    if (sql.startsWith('SELECT production_status_id FROM production_statuses')) {
+      const ids = options.readyStatusIds ?? [1, 2, 3];
+      return { rows: ids.map((id) => ({ production_status_id: id })), rowCount: ids.length };
+    }
+
+    if (sql.startsWith('INSERT INTO cut_group (')) {
+      return { rows: [{ cut_group_id: ++cutGroupSeq }], rowCount: 1 };
+    }
+
+    if (sql.startsWith('INSERT INTO cut_group_sheet (')) return { rows: [], rowCount: 1 };
+    if (sql.startsWith('INSERT INTO outbox_events')) return { rows: [], rowCount: 1 };
+    if (sql.startsWith('INSERT INTO audit_log')) return { rows: [{ audit_id: 'aud-1' }], rowCount: 1 };
+    if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
+
+    // loadJob reads
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state FROM cut_job WHERE cut_job_id = $1')) {
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending' }], rowCount: 1 };
+    }
+    if (sql.startsWith('SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (sql.startsWith('SELECT cut_group_id, sheet_material_type_id, film_id, status, summary FROM cut_group')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (sql.startsWith('SELECT cut_group_sheet_id, cut_group_id, sheet_index, png_cache_key, placements FROM cut_group_sheet')) {
+      return { rows: [], rowCount: 0 };
+    }
+
+    if (sql.startsWith('SELECT od.detail_id')) {
+      return { rows: options.eligibleRows ?? [], rowCount: (options.eligibleRows ?? []).length };
+    }
+
+    return { rows: [], rowCount: 0 };
+  };
+
+  const client = { query: (text: string, params: readonly unknown[] = []) => Promise.resolve(handle(text, params)) };
+
+  const service = {
+    query: (text: string, params: readonly unknown[] = []) => Promise.resolve(handle(text, params)),
+    async transaction<T>(fn: (c: typeof client) => Promise<T>) {
+      return fn(client);
+    },
+  } as unknown as DatabaseService;
+
+  return { queries, service };
+}
+
+function fakeFreecut(response: FreecutOptimizeResponse): FreecutClient {
+  return { optimize: vi.fn().mockResolvedValue(response) } as unknown as FreecutClient;
+}
+
+/** Freecut stub that echoes one solution per request, referencing that request's
+ *  own stock + items (so multi-group fan-out maps each group's pieces back). */
+function echoFreecut(): FreecutClient {
+  return {
+    optimize: vi.fn().mockImplementation((req: { stock: Array<{ id: string; width_mm: number; height_mm: number }>; items: Array<{ id: string; width_mm: number; height_mm: number }> }) =>
+      Promise.resolve({
+        status: 'ok',
+        summary: { used_stock_count: 1, waste_percent: 5 },
+        solutions: [
+          {
+            stock_id: req.stock[0].id,
+            index: 0,
+            width_mm: req.stock[0].width_mm,
+            height_mm: req.stock[0].height_mm,
+            trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
+            placements: req.items.map((it, i) => ({
+              item_id: it.id,
+              instance: 1,
+              x_mm: i * 620,
+              y_mm: 0,
+              width_mm: it.width_mm,
+              height_mm: it.height_mm,
+              rotated: false,
+            })),
+          },
+        ],
+      }),
+    ),
+  } as unknown as FreecutClient;
+}
+
+const happyResponse: FreecutOptimizeResponse = {
+  status: 'ok',
+  summary: { used_stock_count: 1, waste_percent: 12 },
+  solutions: [
+    {
+      stock_id: 'smt-9',
+      index: 0,
+      width_mm: 2800,
+      height_mm: 2070,
+      trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
+      placements: [
+        { item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 600, height_mm: 400, rotated: false },
+      ],
+    },
+  ],
+};
+
+describe('PgCutRepository', () => {
+  it('creates a draft job, reserves explicit details, writes cut_job.created audit', async () => {
+    const db = createDatabase({ detailRows: { 1: { order_id: 9, quantity: 2 } } });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    await repo.createJob({
+      currentUser: currentUser(),
+      dto: { name: 'Тест job', detailIds: [1] },
+      requestId: 'req-c',
+    });
+
+    const sql = db.queries.map((q) => normalize(q.text));
+    expect(sql.some((s) => s.startsWith('INSERT INTO cut_job ('))).toBe(true);
+    expect(sql.some((s) => s.startsWith('INSERT INTO cut_job_item ('))).toBe(true);
+    const audit = db.queries.find((q) => /INSERT INTO audit_log/i.test(q.text));
+    expect(audit?.params[0]).toBe('cut_job.created');
+  });
+
+  it('surfaces a duplicate active reservation as 409 CUT_DETAIL_ALREADY_RESERVED', async () => {
+    const db = createDatabase({
+      detailRows: { 1: { order_id: 9, quantity: 1 } },
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      reserveConflict: true,
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    await expect(
+      repo.addItems({ currentUser: currentUser(), cutJobId: 42, version: 0, dto: { detailIds: [1] }, requestId: 'r' }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_DETAIL_ALREADY_RESERVED' });
+  });
+
+  it('rejects reserving a wrong-status detail with 422 CUT_DETAIL_NOT_ELIGIBLE (server-side eligibility)', async () => {
+    const db = createDatabase({ detailRows: { 1: { order_id: 9, quantity: 1, production_status_id: 99 } } });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+    await expect(
+      repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест', detailIds: [1] }, requestId: 'r' }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'CUT_DETAIL_NOT_ELIGIBLE' });
+  });
+
+  it('rejects reserving a detail with no sheet spec (no_sheet_spec)', async () => {
+    const db = createDatabase({ detailRows: { 1: { order_id: 9, quantity: 1, sheet_material_type_id: null } } });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+    await expect(
+      repo.addItems({ currentUser: currentUser(), cutJobId: 42, version: 0, dto: { detailIds: [1] }, requestId: 'r' }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'CUT_DETAIL_NOT_ELIGIBLE' });
+  });
+
+  it('rejects a stale version on addItems with 409', async () => {
+    const db = createDatabase({
+      detailRows: { 1: { order_id: 9, quantity: 1 } },
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 5, pdf_prewarm_state: 'pending', params: null },
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    await expect(
+      repo.addItems({ currentUser: currentUser(), cutJobId: 42, version: 0, dto: { detailIds: [1] }, requestId: 'r' }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_STALE_VERSION' });
+  });
+
+  it('removeItem rejects a non-mutable (archived) job with 409', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'archived', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+    await expect(
+      repo.removeItem({ currentUser: currentUser(), cutJobId: 42, cutJobItemId: 5, version: 0, requestId: 'r' }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_JOB_NOT_MUTABLE' });
+  });
+
+  it('calculate: single group happy path stores cut_group + sheets, ready, audit + outbox', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [
+        {
+          cut_job_item_id: 501,
+          order_detail_id: 1,
+          order_id: 9,
+          qty: 1,
+          width_mm: 600,
+          height_mm: 400,
+          sheet_material_type_id: 9,
+          film_id: null,
+          film_texture: null,
+          smt_width_mm: 2800,
+          smt_height_mm: 2070,
+        },
+      ],
+    });
+    const client = fakeFreecut(happyResponse);
+    const repo = new PgCutRepository(db.service, client);
+
+    await repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r' });
+
+    expect(client.optimize).toHaveBeenCalledTimes(1);
+    const sql = db.queries.map((q) => normalize(q.text));
+    expect(sql.some((s) => s.startsWith('INSERT INTO cut_group ('))).toBe(true);
+    expect(sql.some((s) => s.startsWith('INSERT INTO cut_group_sheet ('))).toBe(true);
+    const outbox = db.queries.find((q) => /INSERT INTO outbox_events/i.test(q.text));
+    expect(outbox).toBeDefined();
+    expect(String(outbox?.params[4])).toMatch(/^cut_job\.calculated:/);
+    const audit = db.queries.find((q) => /INSERT INTO audit_log\b/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculated'));
+    expect(audit).toBeDefined();
+  });
+
+  it('calculate: multi-material fans out to N groups (one freecut call + cut_group per cuttable key)', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [
+        { cut_job_item_id: 1, order_detail_id: 1, order_id: 9, qty: 1, width_mm: 600, height_mm: 400, material_id: 5, sheet_material_type_id: 9, film_id: null, film_texture: null, smt_width_mm: 2800, smt_height_mm: 2070 },
+        { cut_job_item_id: 2, order_detail_id: 2, order_id: 10, qty: 1, width_mm: 600, height_mm: 400, material_id: 6, sheet_material_type_id: 11, film_id: null, film_texture: null, smt_width_mm: 2070, smt_height_mm: 2800 },
+      ],
+    });
+    const client = echoFreecut();
+    const repo = new PgCutRepository(db.service, client);
+
+    await repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r' });
+
+    // One freecut optimize call per cuttable key.
+    expect(client.optimize).toHaveBeenCalledTimes(2);
+    const sql = db.queries.map((q) => normalize(q.text));
+    expect(sql.filter((s) => s.startsWith('INSERT INTO cut_group (')).length).toBe(2);
+    // Each group's items are assigned to that group (scoped by order_detail_id), not all-at-once.
+    // (Exclude the recalc-clear `SET cut_group_id = NULL`.)
+    const groupAssigns = db.queries.filter((q) => /UPDATE cut_job_item SET cut_group_id = \$1/i.test(q.text));
+    expect(groupAssigns.length).toBe(2);
+    expect(groupAssigns.every((q) => /order_detail_id = ANY/i.test(q.text))).toBe(true);
+    // Exactly one outbox row for the whole job calc (idempotency over the full item set).
+    const outbox = db.queries.filter((q) => /INSERT INTO outbox_events/i.test(q.text));
+    expect(outbox.length).toBe(1);
+    // The calculated audit carries both cut_group ids across all groups.
+    const audit = db.queries.find((q) => /INSERT INTO audit_log\b/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculated'));
+    expect(audit).toBeDefined();
+  });
+
+  it('calculate: a single group freecut failure fails the whole job (no cut_group persisted)', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [
+        { cut_job_item_id: 1, order_detail_id: 1, order_id: 9, qty: 1, width_mm: 600, height_mm: 400, material_id: 5, sheet_material_type_id: 9, film_id: null, film_texture: null, smt_width_mm: 2800, smt_height_mm: 2070 },
+        { cut_job_item_id: 2, order_detail_id: 2, order_id: 10, qty: 1, width_mm: 600, height_mm: 400, material_id: 6, sheet_material_type_id: 11, film_id: null, film_texture: null, smt_width_mm: 2070, smt_height_mm: 2800 },
+      ],
+    });
+    let call = 0;
+    const partialFail = {
+      optimize: vi.fn().mockImplementation(() => {
+        call += 1;
+        if (call === 2) {
+          return Promise.reject(Object.assign(new Error('boom'), { status: 422, code: 'FREECUT_CONSTRAINT_ERROR' }));
+        }
+        return Promise.resolve(happyResponse);
+      }),
+    } as unknown as FreecutClient;
+    const repo = new PgCutRepository(db.service, partialFail);
+
+    await expect(
+      repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r' }),
+    ).rejects.toMatchObject({ code: 'FREECUT_CONSTRAINT_ERROR' });
+
+    const sql = db.queries.map((q) => normalize(q.text));
+    expect(sql.some((s) => s.startsWith('INSERT INTO cut_group ('))).toBe(false);
+    const statusUpdate = db.queries.find((q) => /UPDATE cut_job SET status = 'failed'/i.test(q.text));
+    expect(statusUpdate).toBeDefined();
+    const failAudit = db.queries.find((q) => /INSERT INTO audit_log/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculate_failed'));
+    expect(failAudit).toBeDefined();
+  });
+
+  it('calculate: freecut failure persists status failed + cut_job.calculate_failed audit, then rethrows', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [
+        { cut_job_item_id: 1, order_detail_id: 1, order_id: 9, qty: 1, width_mm: 600, height_mm: 400, sheet_material_type_id: 9, film_id: null, film_texture: null, smt_width_mm: 2800, smt_height_mm: 2070 },
+      ],
+    });
+    const failing = {
+      optimize: vi.fn().mockRejectedValue(Object.assign(new Error('boom'), { status: 504, code: 'FREECUT_TIMEOUT' })),
+    } as unknown as FreecutClient;
+    const repo = new PgCutRepository(db.service, failing);
+
+    await expect(
+      repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r' }),
+    ).rejects.toMatchObject({ code: 'FREECUT_TIMEOUT' });
+
+    const audit = db.queries.find((q) => /INSERT INTO audit_log/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculate_failed'));
+    expect(audit).toBeDefined();
+    const statusUpdate = db.queries.find((q) => /UPDATE cut_job SET status = 'failed'/i.test(q.text));
+    expect(statusUpdate).toBeDefined();
+  });
+
+  it('listEligibleDetails classifies candidates and counts no_sheet_spec', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1, 2, 3],
+      eligibleRows: [
+        { detail_id: 1, order_id: 9, quantity: 2, material_id: 5, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false, already_reserved: false },
+        { detail_id: 2, order_id: 9, quantity: 1, material_id: 6, sheet_material_type_id: null, film_id: null, production_status_id: 1, delete_flag: false, already_reserved: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [9] }, requestId: 'r' });
+
+    expect(result.details).toHaveLength(2);
+    expect(result.details.find((d) => d.orderDetailId === 1)?.eligible).toBe(true);
+    expect(result.details.find((d) => d.orderDetailId === 2)?.ineligibleReason).toBe('no_sheet_spec');
+    expect(result.noSheetSpecCount).toBe(1);
+  });
+});

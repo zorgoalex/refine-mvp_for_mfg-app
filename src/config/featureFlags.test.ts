@@ -24,8 +24,17 @@ describe('featureFlags', () => {
       useBackendUsers: false,
       useBackendVlm: false,
       useBackendReferences: false,
+      useBackendCut: false,
       enableLegacyHasura: true,
     });
+  });
+
+  it('reads backend cut flag from env and runtime config with a safe default', () => {
+    expect(getFeatureFlags({}).useBackendCut).toBe(false);
+    expect(getFeatureFlags({ VITE_USE_BACKEND_CUT: 'true' }).useBackendCut).toBe(true);
+    expect(
+      getFeatureFlags({ VITE_USE_BACKEND_CUT: 'false' }, { backendCut: true }).useBackendCut,
+    ).toBe(true);
   });
 
   it('supports split read/write orders flags', () => {

@@ -12,13 +12,16 @@ import {
   ClockCircleOutlined,
   BellOutlined,
   ApartmentOutlined,
+  ScissorOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
+import { featureFlags } from '../../config/featureFlags';
 import { VlmConfigTab } from './VlmConfigTab';
 import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
 import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
 import { NotificationRulesConfig } from './components/NotificationRulesConfig';
 import { OrgStructureConfig } from './components/OrgStructureConfig';
+import { CutConfigTab } from './components/CutConfigTab';
 
 const { Text } = Typography;
 
@@ -455,6 +458,20 @@ export const ConfigurationPage: React.FC = () => {
       ),
       children: <VlmConfigTab />,
     },
+    ...(featureFlags.useBackendCut
+      ? [
+          {
+            key: 'cut',
+            label: (
+              <span>
+                <ScissorOutlined />
+                Раскрой
+              </span>
+            ),
+            children: <CutConfigTab />,
+          },
+        ]
+      : []),
   ];
 
   return (

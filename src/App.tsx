@@ -19,6 +19,7 @@ import { featureFlags } from "./config/featureFlags";
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
+const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const ProjectsPage = lazy(async () => ({ default: (await import("./pages/projects/ProjectsPage")).ProjectsPage }));
 const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/doweling_orders/edit")).DowelOrderEdit }));
 const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
@@ -222,6 +223,17 @@ const App = () => {
                         meta: {
                           idColumnName: "id",
                           label: "Проекты",
+                        },
+                      },
+                    ]
+                  : []),
+                ...(featureFlags.useBackendCut
+                  ? [
+                      {
+                        name: "cut-jobs",
+                        list: "/cut",
+                        meta: {
+                          label: "Раскрой",
                         },
                       },
                     ]
@@ -540,6 +552,11 @@ const App = () => {
                   {featureFlags.useBackendProjects && (
                     <Route path="/projects">
                       <Route index element={<ProjectsPage />} />
+                    </Route>
+                  )}
+                  {featureFlags.useBackendCut && (
+                    <Route path="/cut">
+                      <Route index element={<CutPage />} />
                     </Route>
                   )}
                   <Route path="/doweling-orders" >

@@ -54,6 +54,7 @@ describe('runtime-config handler', () => {
         backendUsers: false,
         backendVlm: false,
         backendReferences: false,
+        backendCut: false,
         enableLegacyHasura: true,
       },
     });

@@ -34,6 +34,8 @@ export type PermissionName =
   | 'settings.view'
   | 'settings.manage'
   | 'audit.view'
+  | 'cut.view'
+  | 'cut.manage'
   | string;
 
 export interface BackendUserIdentity {

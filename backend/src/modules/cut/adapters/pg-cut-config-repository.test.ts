@@ -1,0 +1,114 @@
+import { describe, expect, it } from 'vitest';
+import type { DatabaseService } from '../../../database/database.service';
+import {
+  DEFAULT_FREECUT_PARAMS,
+  DEFAULT_GRAIN_RULES,
+  DEFAULT_READY_STATUS_CODES,
+} from '../application/cut-config';
+import { PgCutConfigRepository } from './pg-cut-config-repository';
+
+function fakeDatabase(routes: Record<string, unknown[]>) {
+  return {
+    query: (text: string) => {
+      const sql = text.replace(/\s+/g, ' ').trim();
+      for (const [needle, rows] of Object.entries(routes)) {
+        if (sql.includes(needle)) return Promise.resolve({ rows, rowCount: rows.length });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    },
+  } as unknown as DatabaseService;
+}
+
+describe('PgCutConfigRepository', () => {
+  it('reads ready-to-cut status codes from cut_settings', async () => {
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({ "key = 'eligibility.statuses'": [{ value: { codes: ['drawn', 'cut'] } }] }),
+    );
+    expect(await repo.getReadyStatusCodes()).toEqual(['drawn', 'cut']);
+  });
+
+  it('falls back to the documented default codes when the settings row is absent', async () => {
+    const repo = new PgCutConfigRepository(fakeDatabase({}));
+    expect(await repo.getReadyStatusCodes()).toEqual([...DEFAULT_READY_STATUS_CODES]);
+  });
+
+  it('falls back to default codes when the stored codes array is empty', async () => {
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({ "key = 'eligibility.statuses'": [{ value: { codes: [] } }] }),
+    );
+    expect(await repo.getReadyStatusCodes()).toEqual([...DEFAULT_READY_STATUS_CODES]);
+  });
+
+  it('reads the default param profile and merges it over the freecut defaults', async () => {
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({ 'FROM cut_param_profiles': [{ params: { time_limit_ms: 3000, restarts: 9 } }] }),
+    );
+    const params = await repo.getDefaultParams();
+    expect(params.time_limit_ms).toBe(3000);
+    expect(params.restarts).toBe(9);
+    // unspecified keys fall back to the calibrated defaults
+    expect(params.kerf_mm).toBe(DEFAULT_FREECUT_PARAMS.kerf_mm);
+    expect(params.objective).toBe(DEFAULT_FREECUT_PARAMS.objective);
+  });
+
+  it('prefers the profile named in cut_settings.defaults.param_profile', async () => {
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({
+        "key = 'defaults'": [{ value: { param_profile: 'fast' } }],
+        'name = $1': [{ params: { time_limit_ms: 800 } }],
+      }),
+    );
+    const params = await repo.getDefaultParams();
+    expect(params.time_limit_ms).toBe(800);
+    expect(params.kerf_mm).toBe(DEFAULT_FREECUT_PARAMS.kerf_mm);
+  });
+
+  it('falls back to default freecut params when no default profile exists', async () => {
+    const repo = new PgCutConfigRepository(fakeDatabase({}));
+    expect(await repo.getDefaultParams()).toEqual(DEFAULT_FREECUT_PARAMS);
+  });
+
+  it('reads grain rules from cut_settings', async () => {
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({
+        "key = 'grain.rules'": [
+          {
+            value: {
+              textured: { rotation: 'forbid', pattern_direction: 'along_width' },
+              plain: { rotation: 'allow_90', pattern_direction: 'none' },
+            },
+          },
+        ],
+      }),
+    );
+    const rules = await repo.getGrainRules();
+    expect(rules.textured.pattern_direction).toBe('along_width');
+  });
+
+  it('falls back to default grain rules when absent', async () => {
+    const repo = new PgCutConfigRepository(fakeDatabase({}));
+    expect(await repo.getGrainRules()).toEqual(DEFAULT_GRAIN_RULES);
+  });
+
+  it('resolves render preset px from cut_render_presets, falling back to the built-in map', async () => {
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({ 'FROM cut_render_presets': [{ target_px: 999 }] }),
+    );
+    expect(await repo.getRenderPresetPx('screen')).toBe(999);
+    // Unknown preset with empty config falls back to the built-in 'screen' size.
+    const empty = new PgCutConfigRepository(fakeDatabase({}));
+    expect(await empty.getRenderPresetPx('totally-unknown')).toBe(1400);
+    expect(await empty.getRenderPresetPx('thumb')).toBe(360);
+  });
+
+  it('rejects an invalid stored grain rule rather than passing it to freecut', async () => {
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({
+        "key = 'grain.rules'": [
+          { value: { textured: { rotation: 'spin', pattern_direction: 'none' }, plain: { rotation: 'allow_90', pattern_direction: 'none' } } },
+        ],
+      }),
+    );
+    await expect(repo.getGrainRules()).rejects.toMatchObject({ code: 'CUT_INVALID_GRAIN_RULE' });
+  });
+});

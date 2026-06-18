@@ -91,7 +91,7 @@ async function download(
   path: string,
   options: RequestOptions = {},
   retryOnUnauthorized = true,
-): Promise<{ blob: Blob; fileName: string | null }> {
+): Promise<{ blob: Blob; fileName: string | null; status: number }> {
   const response = await fetch(buildApiUrl(path), buildRequestInit({ ...options, method: options.method ?? 'GET' }));
 
   if (response.status === 401 && retryOnUnauthorized && !options.skipAuthRefresh) {
@@ -112,6 +112,7 @@ async function download(
   return {
     blob: await response.blob(),
     fileName: parseContentDispositionFileName(response.headers.get('Content-Disposition')),
+    status: response.status,
   };
 }
 

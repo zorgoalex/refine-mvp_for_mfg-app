@@ -1,0 +1,123 @@
+import type { CurrentUser } from '../../../permissions/current-user';
+import type {
+  AddCutItemsRequestDto,
+  CreateCutJobRequestDto,
+  CutJobDto,
+  EligibleDetailsResponseDto,
+  CutSelectionCriteriaDto,
+} from '../dto/cut.dto';
+
+export interface CreateCutJobCommand {
+  currentUser: CurrentUser;
+  dto: CreateCutJobRequestDto;
+  requestId?: string;
+}
+
+export interface AddCutItemsCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  /** optimistic concurrency guard */
+  version: number;
+  dto: AddCutItemsRequestDto;
+  requestId?: string;
+}
+
+export interface RemoveCutItemCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  cutJobItemId: number;
+  version: number;
+  requestId?: string;
+}
+
+export interface CalculateCutJobCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  version: number;
+  requestId?: string;
+}
+
+export interface ArchiveCutJobCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  version: number;
+  requestId?: string;
+}
+
+export interface GetCutJobQuery {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  requestId?: string;
+}
+
+export interface ListCutJobsQuery {
+  currentUser: CurrentUser;
+  filters?: { status?: string; createdBy?: number };
+  requestId?: string;
+}
+
+export interface EligibleDetailsQuery {
+  currentUser: CurrentUser;
+  criteria: CutSelectionCriteriaDto;
+  requestId?: string;
+}
+
+export interface RenderSheetPngQuery {
+  currentUser: CurrentUser;
+  cutGroupId: number;
+  sheetIndex: number;
+  /** render preset NAME; px resolved from cut_render_presets config at render time */
+  preset: string;
+  requestId?: string;
+}
+
+export interface RenderSheetSvgQuery {
+  currentUser: CurrentUser;
+  cutGroupId: number;
+  sheetIndex: number;
+  requestId?: string;
+}
+
+export interface RenderGroupPdfQuery {
+  currentUser: CurrentUser;
+  cutGroupId: number;
+  requestId?: string;
+}
+
+export interface RenderJobPdfQuery {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  requestId?: string;
+}
+
+export interface SetPdfPrewarmStateQuery {
+  cutJobId: number;
+  /** version the render was kicked for; the UPDATE no-ops if the job moved on */
+  version: number;
+  state: 'pending' | 'ready' | 'failed';
+  reason?: string;
+}
+
+export interface CutPermissionDeniedInput {
+  currentUser: CurrentUser;
+  requiredPermissions: readonly string[];
+  requestId?: string;
+  cutJobId?: number;
+}
+
+export interface CutRepositoryPort {
+  createJob(command: CreateCutJobCommand): Promise<CutJobDto>;
+  recordPermissionDenied(input: CutPermissionDeniedInput): Promise<void>;
+  addItems(command: AddCutItemsCommand): Promise<CutJobDto>;
+  removeItem(command: RemoveCutItemCommand): Promise<CutJobDto>;
+  calculate(command: CalculateCutJobCommand): Promise<CutJobDto>;
+  archive(command: ArchiveCutJobCommand): Promise<CutJobDto>;
+  getJob(query: GetCutJobQuery): Promise<CutJobDto>;
+  listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
+  listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;
+  renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer>;
+  renderSheetSvg(query: RenderSheetSvgQuery): Promise<string>;
+  renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer>;
+  renderJobPdf(query: RenderJobPdfQuery): Promise<Buffer>;
+  setPdfPrewarmState(query: SetPdfPrewarmStateQuery): Promise<void>;
+}

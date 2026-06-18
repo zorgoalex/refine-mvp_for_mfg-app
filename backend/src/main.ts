@@ -10,10 +10,18 @@ import { toNestGlobalPrefix } from './config/api-prefix';
 import { createCorsRuntimeOptions, isOriginAllowed } from './config/cors';
 import type { BackendEnv } from './config/env.validation';
 import { setupSwagger } from './config/swagger';
+import { assertFontAvailable } from './modules/cut/render/sheet-png';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true, bodyParser: false });
   const config = app.get(ConfigService<BackendEnv, true>);
+
+  // Fail-fast if the cut-render font is missing while cut jobs are enabled:
+  // resvg silently drops <text> without it (plan §7 MINOR-16).
+  if (config.get('BACKEND_ENABLE_CUT_JOBS', { infer: true })) {
+    assertFontAvailable();
+  }
+
   const cors = createCorsRuntimeOptions({
     CORS_ALLOWED_ORIGINS: config.get('CORS_ALLOWED_ORIGINS', { infer: true }),
     CORS_ALLOW_CREDENTIALS: config.get('CORS_ALLOW_CREDENTIALS', { infer: true }),
