@@ -10,6 +10,12 @@ import { featureFlags } from "../config/featureFlags";
 import { isLegacyAdminUser, canViewNavigationResource, canViewSettingsCategory } from "../utils/navigationPermissions";
 import { can } from "../utils/permissions";
 import { useSiderMenuItems } from "../utils/siderMenuItems";
+import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
+import {
+  canViewResourceByRoleVisibility,
+  getCurrentUserRoleKey,
+  normalizeRoleVisibilityMatrix,
+} from "../utils/resourceVisibility";
 
 const { Title } = Typography;
 
@@ -63,10 +69,15 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
   const { push } = useNavigation();
   const location = useLocation();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const { getSetting } = useAppSettings();
 
   const currentUser = featureFlags.useBackendPermissions
     ? authSession.getUser()
     : authStorage.getUser();
+  const currentRoleKey = getCurrentUserRoleKey(currentUser);
+  const roleVisibilityMatrix = normalizeRoleVisibilityMatrix(
+    getSetting(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
+  );
   const legacyIsAdmin = React.useMemo(
     () => isLegacyAdminUser(currentUser, featureFlags.useBackendPermissions),
     [currentUser, featureFlags.useBackendPermissions],
@@ -93,7 +104,8 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     resourceLabels: RESOURCE_LABELS,
     resourceIcons: {},
     canViewNavigation: (name) =>
-      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions),
+      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
+      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,

@@ -171,6 +171,7 @@ export const SETTING_KEYS = {
   VLM_DEFAULTS: 'vlm.defaults',
   // Production workflow (production_status_events)
   PRODUCTION_WORKFLOW_DEFAULT: 'production.workflow.default',
+  RESOURCE_VISIBILITY_BY_ROLE: 'navigation.resource_visibility_by_role',
 } as const;
 
 // Types for specific settings

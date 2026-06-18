@@ -51,6 +51,12 @@ import {
 import { can } from "../utils/permissions";
 import { useSiderMenuItems } from "../utils/siderMenuItems";
 import { RESOURCE_LABELS } from "../utils/tabLabels";
+import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
+import {
+  canViewResourceByRoleVisibility,
+  getCurrentUserRoleKey,
+  normalizeRoleVisibilityMatrix,
+} from "../utils/resourceVisibility";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -138,8 +144,13 @@ export const CustomSider: React.FC = () => {
   const location = useLocation();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
+  const { getSetting } = useAppSettings();
 
   const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
+  const currentRoleKey = getCurrentUserRoleKey(currentUser);
+  const roleVisibilityMatrix = normalizeRoleVisibilityMatrix(
+    getSetting(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
+  );
   const legacyIsAdmin = useMemo(
     () => isLegacyAdminUser(currentUser, featureFlags.useBackendPermissions),
     [currentUser, featureFlags.useBackendPermissions],
@@ -167,7 +178,8 @@ export const CustomSider: React.FC = () => {
     resourceLabels: RESOURCE_LABELS,
     resourceIcons: RESOURCE_ICONS,
     canViewNavigation: (name) =>
-      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions),
+      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
+      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Tabs, Typography, Space, Empty, InputNumber, Input, Button, Tooltip, message, Spin } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, Tabs, Typography, Space, InputNumber, Input, Button, Tooltip, message, Spin, Table, Checkbox } from 'antd';
+import { useList, useResource } from '@refinedev/core';
 import {
   SettingOutlined,
   FileTextOutlined,
@@ -22,8 +23,23 @@ import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRu
 import { NotificationRulesConfig } from './components/NotificationRulesConfig';
 import { OrgStructureConfig } from './components/OrgStructureConfig';
 import { CutConfigTab } from './components/CutConfigTab';
+import {
+  buildInitialResourceVisibility,
+  getMenuResources,
+  normalizeRoleKey,
+  normalizeRoleVisibilityMatrix,
+  type RoleVisibilityMatrix,
+  type VisibilityRole,
+} from '../../utils/resourceVisibility';
+import { RESOURCE_LABELS } from '../../utils/tabLabels';
 
 const { Text } = Typography;
+
+interface RoleRow {
+  role_id: number | string;
+  role_name: string;
+  is_active?: boolean;
+}
 
 // ============================================================================
 // Компонент редактируемого поля настройки
@@ -352,20 +368,94 @@ const FinanceConfigTab: React.FC = () => {
 };
 
 // ============================================================================
-// Вкладка: Видимость ресурсов
+// Вкладка: Видимость таблиц для ролей
 // ============================================================================
-const ResourceVisibilityTab: React.FC = () => {
+const TableVisibilityByRoleTab: React.FC = () => {
+  const { resources } = useResource();
+  const { getSetting, saveSetting, isLoading: isSettingsLoading } = useAppSettings();
+  const { data: rolesData, isLoading: isRolesLoading } = useList<RoleRow>({
+    resource: 'roles',
+    pagination: { mode: 'off' },
+    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
+    queryOptions: { refetchOnWindowFocus: false },
+  });
+
+  const roles = useMemo(
+    () => (rolesData?.data ?? []).filter((role) => role.is_active !== false),
+    [rolesData],
+  );
+  const menuResources = useMemo(
+    () => getMenuResources(resources, RESOURCE_LABELS),
+    [resources],
+  );
+  const savedMatrix = normalizeRoleVisibilityMatrix(
+    getSetting<RoleVisibilityMatrix>(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
+  );
+  const matrix = useMemo(
+    () => buildInitialResourceVisibility(menuResources, roles, savedMatrix),
+    [menuResources, roles, savedMatrix],
+  );
+
+  const handleToggle = async (resourceName: string, role: VisibilityRole, checked: boolean) => {
+    const roleKey = normalizeRoleKey(role);
+    const nextMatrix: RoleVisibilityMatrix = {
+      ...matrix,
+      [resourceName]: {
+        ...(matrix[resourceName] ?? {}),
+        [roleKey]: checked,
+      },
+    };
+
+    await saveSetting(
+      SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE,
+      nextMatrix,
+      'Видимость пунктов меню по ролям',
+    );
+    message.success('Видимость обновлена');
+  };
+
+  const columns = [
+    {
+      title: 'Таблица / пункт меню',
+      dataIndex: 'label',
+      key: 'label',
+      fixed: 'left' as const,
+      width: 260,
+      render: (_: string, record: { name: string; label: string; route: string }) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{record.label}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{record.route}</Text>
+        </Space>
+      ),
+    },
+    ...roles.map((role) => {
+      const roleKey = normalizeRoleKey(role);
+      return {
+        title: role.role_name || roleKey,
+        dataIndex: roleKey,
+        key: roleKey,
+        align: 'center' as const,
+        width: 140,
+        render: (_: unknown, record: { name: string }) => (
+          <Checkbox
+            checked={matrix[record.name]?.[roleKey] ?? true}
+            onChange={(event) => handleToggle(record.name, role, event.target.checked)}
+          />
+        ),
+      };
+    }),
+  ];
+
   return (
     <div style={{ padding: '16px 0' }}>
-      <Empty
-        description={
-          <Space direction="vertical" size="small">
-            <Text type="secondary">Настройки видимости ресурсов</Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              В разработке
-            </Text>
-          </Space>
-        }
+      <Table
+        rowKey="name"
+        loading={isSettingsLoading || isRolesLoading}
+        dataSource={menuResources}
+        columns={columns}
+        pagination={false}
+        size="middle"
+        scroll={{ x: 'max-content' }}
       />
     </div>
   );
@@ -439,14 +529,14 @@ export const ConfigurationPage: React.FC = () => {
       children: <FinanceConfigTab />,
     },
     {
-      key: 'visibility',
+      key: 'table-visibility',
       label: (
         <span>
           <EyeOutlined />
-          Видимость ресурсов
+          Видимость таблиц для юзеров
         </span>
       ),
-      children: <ResourceVisibilityTab />,
+      children: <TableVisibilityByRoleTab />,
     },
     {
       key: 'vlm',
@@ -484,10 +574,12 @@ export const ConfigurationPage: React.FC = () => {
       }
     >
       <Tabs
+        className="configuration-tabs-wrap"
         activeKey={activeTab}
         onChange={setActiveTab}
         items={tabItems}
         type="card"
+        tabBarGutter={8}
       />
     </Card>
   );

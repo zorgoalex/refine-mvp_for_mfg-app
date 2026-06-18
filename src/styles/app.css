@@ -294,3 +294,23 @@
   margin-left: 4px;
   font-size: 11px;
 }
+
+/* Configuration page tabs: show every section, wrapping to new rows. */
+.configuration-tabs-wrap > .ant-tabs-nav .ant-tabs-nav-wrap {
+  overflow: visible !important;
+  white-space: normal !important;
+}
+
+.configuration-tabs-wrap > .ant-tabs-nav .ant-tabs-nav-list {
+  width: 100%;
+  flex-wrap: wrap;
+  transform: none !important;
+}
+
+.configuration-tabs-wrap > .ant-tabs-nav .ant-tabs-nav-operations {
+  display: none !important;
+}
+
+.configuration-tabs-wrap.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  margin: 2px 0 4px 0 !important;
+}
