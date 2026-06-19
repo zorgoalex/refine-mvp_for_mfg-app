@@ -160,10 +160,9 @@ const ADMIN_SERVICE_EXCLUDED_PERMISSIONS = [
   'system.superadmin',
   'deadlines.worker.manage',
   'deadlines.worker.schedule',
-  // sheet_materials: admin gets `view` (sees the «Листовые материалы» nav item + read;
-  // admin already reads sheet_material_types via Hasura) but NOT `manage` — writes stay
-  // with superadmin/top_manager/manager/operator (user decision 2026-06-19). worker has neither.
-  'sheet_materials.manage',
+  // sheet_materials: admin gets BOTH `view` and `manage` — full read + write of the
+  // «Листовые материалы» catalog (writes via backend /api/v1/sheet-material-types;
+  // user decision 2026-06-19). worker has neither.
 ] as const satisfies PermissionName[];
 
 const adminServiceExcludedPermissions = new Set<PermissionName>(ADMIN_SERVICE_EXCLUDED_PERMISSIONS);

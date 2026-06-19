@@ -6,11 +6,11 @@ describe('sheet_materials permissions (5-role alignment, user decision 2026-06-1
     expect(PERMISSIONS).toContain('sheet_materials.view');
     expect(PERMISSIONS).toContain('sheet_materials.manage');
   });
-  it('manage roles = superadmin/top_manager/manager/operator (NOT admin/worker/viewer)', () => {
-    for (const r of ['superadmin', 'top_manager', 'manager', 'operator'] as const) {
+  it('manage roles = superadmin/top_manager/manager/operator + admin (NOT worker/viewer)', () => {
+    for (const r of ['superadmin', 'top_manager', 'manager', 'operator', 'admin'] as const) {
       expect(can(r, 'sheet_materials.manage')).toBe(true);
     }
-    for (const r of ['admin', 'worker', 'viewer'] as const) {
+    for (const r of ['worker', 'viewer'] as const) {
       expect(can(r, 'sheet_materials.manage')).toBe(false);
     }
   });
