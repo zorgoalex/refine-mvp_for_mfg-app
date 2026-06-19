@@ -337,7 +337,56 @@ describe('TwentySyncConsumer.sync — order mapping failed/twentyId=null', () =>
 });
 
 // ---------------------------------------------------------------------------
-// Test 8: audit.requestId === event.outboxEventId
+// Test 8 (new): order upsert where CLIENT mapping status='failed' but twentyId is non-null
+//   → ensureCompany falls through (non-active), re-syncs client via PATCH (known id),
+//     pushes clientIntent (status='active'), NO second companies create, orderIntent follows
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — order upsert, client mapping failed with non-null twentyId', () => {
+  it('re-syncs client via PATCH, pushes clientIntent (active), no duplicate create', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty({
+      createRecord: vi.fn().mockResolvedValue({ id: 'should-not-be-called' }),
+      updateRecord: vi.fn().mockResolvedValue(undefined),
+      findIdByErpId: vi.fn().mockResolvedValue(null), // not needed — known id path used
+    });
+
+    // Client mapping: failed but twentyId is non-null (relay crashed before persisting 'active')
+    const failedClientMappingWithId: MappingRow = {
+      entityType: 'client',
+      erpId: 'c-1',
+      twentyObject: 'companies',
+      twentyId: 'cmp-1',
+      status: 'failed',
+      lastHash: null,
+    };
+    const mapping = makeMapping((entityType) => {
+      if (entityType === 'client') return failedClientMappingWithId;
+      return null; // no order mapping
+    });
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('order', 'o-1', 'upsert');
+    const intents = await consumer.sync(event);
+
+    // [clientIntent, orderIntent] — client must be re-synced first
+    expect(intents).toHaveLength(2);
+    expect(intents[0].mapping.entityType).toBe('client');
+    expect(intents[1].mapping.entityType).toBe('order');
+
+    // clientIntent must have status 'active' (mapping flipped)
+    expect(intents[0].mapping.status).toBe('active');
+    expect(intents[0].mapping.twentyId).toBe('cmp-1');
+
+    // NO duplicate create for companies — known-id PATCH path used
+    expect(twenty.createRecord).not.toHaveBeenCalledWith('companies', expect.anything());
+
+    // updateRecord was called for companies with the known id (PATCH)
+    expect(twenty.updateRecord).toHaveBeenCalledWith('companies', 'cmp-1', mapClient(CLIENT_ROW));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 9: audit.requestId === event.outboxEventId
 // ---------------------------------------------------------------------------
 describe('TwentySyncConsumer.sync — audit.requestId matches outboxEventId', () => {
   it('audit.requestId equals event.outboxEventId on emitted intents', async () => {

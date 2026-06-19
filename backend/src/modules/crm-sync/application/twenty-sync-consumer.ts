@@ -279,8 +279,8 @@ export class TwentySyncConsumer {
   ): Promise<string> {
     const cm = await this.mapping.get(this.db, 'client', clientId);
 
-    // Usable: mapping exists and has a valid twentyId
-    if (cm && cm.twentyId) {
+    // Usable: mapping exists, has a valid twentyId, AND is active (not failed/deleted)
+    if (cm && cm.twentyId && cm.status === 'active') {
       return cm.twentyId;
     }
 
