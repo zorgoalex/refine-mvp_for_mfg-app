@@ -24,20 +24,20 @@ describe('CrmSyncRuntimeConfigService', () => {
       BACKEND_ENABLE_TWENTY_SYNC: true,
       BACKEND_TWENTY_SYNC_RELAY_OWNER: 'in_process',
       BACKEND_TWENTY_SYNC_DRY_RUN: true,
-      BACKEND_TWENTY_SYNC_POLL_INTERVAL_MS: '30000',
-      BACKEND_TWENTY_SYNC_BATCH_SIZE: '50',
-      BACKEND_TWENTY_SYNC_MAX_ATTEMPTS: '5',
+      BACKEND_TWENTY_SYNC_POLL_INTERVAL_MS: 30000,
+      BACKEND_TWENTY_SYNC_BATCH_SIZE: 50,
+      BACKEND_TWENTY_SYNC_MAX_ATTEMPTS: 5,
       BACKEND_TWENTY_SYNC_WORKER_ID: 'worker-1',
-      BACKEND_TWENTY_SYNC_LEASE_MS: '120000',
+      BACKEND_TWENTY_SYNC_LEASE_MS: 120000,
     }).getFlags();
     expect(f.enabled).toBe(true);
     expect(f.relayOwner).toBe('in_process');
     expect(f.dryRun).toBe(true);
-    expect(f.pollIntervalMs).toBe('30000');
-    expect(f.batchSize).toBe('50');
-    expect(f.maxAttempts).toBe('5');
+    expect(f.pollIntervalMs).toBe(30000);
+    expect(f.batchSize).toBe(50);
+    expect(f.maxAttempts).toBe(5);
     expect(f.workerId).toBe('worker-1');
-    expect(f.leaseMs).toBe('120000');
+    expect(f.leaseMs).toBe(120000);
   });
 
   it('getTwenty returns null for missing config', () => {
