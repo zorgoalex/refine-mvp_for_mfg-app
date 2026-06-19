@@ -1,7 +1,7 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Table, Breadcrumb, message } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
 import { useEffect, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -520,9 +520,22 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
                     }}
                   >
-                    {tab.label}
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {tab.label}
+                    </span>
+                    {isActive ? <UpOutlined style={{ fontSize: 10 }} /> : <DownOutlined style={{ fontSize: 10 }} />}
                   </button>
                 );
               })}
@@ -578,7 +591,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </div>
                     
                     {/* Производство */}
-                    <div style={{ marginBottom: 8 }}>
+                    <div style={{ marginBottom: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#fa8c16', marginBottom: 3 }}>
                         Производство
                       </div>
@@ -593,7 +606,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </div>
 
                     {/* Присадки */}
-                    <div style={{ marginBottom: 8 }}>
+                    <div style={{ marginBottom: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#13c2c2', marginBottom: 3 }}>
                         Присадки
                       </div>
@@ -649,7 +662,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </div>
 
                     {/* Файлы */}
-                    <div style={{ marginBottom: 8 }}>
+                    <div style={{ marginBottom: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#722ed1', marginBottom: 3 }}>
                         Файлы
                       </div>
@@ -657,7 +670,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </div>
                     
                     {/* Служебная информация */}
-                    <div>
+                    <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#8c8c8c', marginBottom: 3 }}>
                         Служебная информация
                       </div>
