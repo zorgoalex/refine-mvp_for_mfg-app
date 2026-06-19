@@ -729,6 +729,121 @@ describe('TwentySyncConsumer.sync — invalid payload fails closed', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Test 18 (new): client delete — mapping EXISTS (status='failed', twentyId=null)
+//   AND findIdByErpId returns null → converge the mapping to 'deleted' WITHOUT any
+//   Twenty call. One tombstone intent, audit crm_sync.softdelete, twentyId null.
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — client delete, mapping exists but no Twenty record', () => {
+  it('tombstones the mapping (status=deleted, twentyId=null) with NO Twenty call', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty({
+      findIdByErpId: vi.fn().mockResolvedValue(null), // nothing in Twenty
+    });
+    // Mapping exists: a prior failed create left status='failed', twentyId=null
+    const failedMapping: MappingRow = {
+      entityType: 'client',
+      erpId: '1',
+      twentyObject: 'companies',
+      twentyId: null,
+      status: 'failed',
+      lastHash: null,
+    };
+    const mapping = makeMapping(() => failedMapping);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('client', '1', 'delete');
+    const intents = await consumer.sync(event);
+
+    // Converged to a single tombstone intent
+    expect(intents).toHaveLength(1);
+    expect(intents[0].mapping.entityType).toBe('client');
+    expect(intents[0].mapping.status).toBe('deleted');
+    expect(intents[0].mapping.twentyId).toBeNull();
+    expect(intents[0].audit.event).toBe('crm_sync.softdelete');
+    expect(intents[0].audit.relatedClientId).toBe(1);
+    expect(intents[0].audit.metadata).toEqual({ twentyId: null });
+
+    // NO Twenty mutation calls
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 19 (new): order delete — mapping EXISTS (status='failed', twentyId=null)
+//   AND findIdByErpId returns null → tombstone the mapping WITHOUT any Twenty call.
+//   audit.relatedClientId comes from payload.clientId.
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — order delete, mapping exists but no Twenty record', () => {
+  it('tombstones the mapping (status=deleted, twentyId=null) with NO Twenty call; relatedClientId from payload', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty({
+      findIdByErpId: vi.fn().mockResolvedValue(null), // nothing in Twenty
+    });
+    const failedMapping: MappingRow = {
+      entityType: 'order',
+      erpId: '2',
+      twentyObject: 'erpOrders',
+      twentyId: null,
+      status: 'failed',
+      lastHash: null,
+    };
+    const mapping = makeMapping((entityType) => {
+      if (entityType === 'order') return failedMapping;
+      return null;
+    });
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('order', '2', 'delete', { clientId: '42' });
+    const intents = await consumer.sync(event);
+
+    expect(intents).toHaveLength(1);
+    expect(intents[0].mapping.entityType).toBe('order');
+    expect(intents[0].mapping.status).toBe('deleted');
+    expect(intents[0].mapping.twentyId).toBeNull();
+    expect(intents[0].audit.event).toBe('crm_sync.softdelete');
+    expect(intents[0].audit.relatedOrderId).toBe(2);
+    expect(intents[0].audit.relatedClientId).toBe(42);
+    expect(intents[0].audit.metadata).toEqual({ twentyId: null });
+
+    // NO Twenty mutation calls
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 20 (new): client/order delete with NO mapping AND findIdByErpId null → [] (unchanged)
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — delete with no mapping and no Twenty record → []', () => {
+  it('client delete: no mapping, findIdByErpId null → returns []', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty({ findIdByErpId: vi.fn().mockResolvedValue(null) });
+    const mapping = makeMapping(() => null); // no mapping
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const intents = await consumer.sync(makeEvent('client', '1', 'delete'));
+
+    expect(intents).toHaveLength(0);
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+  });
+
+  it('order delete: no mapping, findIdByErpId null → returns []', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty({ findIdByErpId: vi.fn().mockResolvedValue(null) });
+    const mapping = makeMapping(() => null); // no mapping
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const intents = await consumer.sync(makeEvent('order', '2', 'delete', { clientId: '42' }));
+
+    expect(intents).toHaveLength(0);
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Test 17: concurrent first-create race — createRecord throws once (erpId unique
 //          conflict). findIdByErpId returns null on the PRE-create call but an id
 //          on the POST-conflict call → recover via updateRecord, resolve to intent.

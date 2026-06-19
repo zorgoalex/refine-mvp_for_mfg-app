@@ -149,10 +149,18 @@ export class TwentySyncConsumer {
   private async softDeleteClient(erpId: string, event: OutboxEventRecord): Promise<SyncIntent[]> {
     const m = await this.mapping.get(this.db, 'client', erpId);
     const existingId = m?.twentyId ?? await this.twenty.findIdByErpId('companies', erpId);
-    if (!existingId) return []; // genuinely nothing in Twenty
-
     const deleteBody = { erpStatus: 'deleted' };
-    await this.twenty.updateRecord('companies', existingId, deleteBody);
+
+    if (existingId) {
+      // A Twenty record exists → tombstone it (PATCH) and converge the mapping.
+      await this.twenty.updateRecord('companies', existingId, deleteBody);
+    } else if (!m) {
+      // No mapping row AND no Twenty record → entity was never synced/tracked; nothing to converge.
+      return [];
+    }
+    // else: a mapping row EXISTS but there is no Twenty record (e.g. a prior failed
+    // create left status='failed', twenty_id=null). Converge the mapping to 'deleted'
+    // and record the delete audit WITHOUT any Twenty call.
 
     const intent: SyncIntent = {
       mapping: {
@@ -234,10 +242,17 @@ export class TwentySyncConsumer {
   private async softDeleteOrder(erpId: string, event: OutboxEventRecord): Promise<SyncIntent[]> {
     const m = await this.mapping.get(this.db, 'order', erpId);
     const existingId = m?.twentyId ?? await this.twenty.findIdByErpId('erpOrders', erpId);
-    if (!existingId) return []; // genuinely nothing in Twenty
-
     const deleteBody = { erpStatus: 'deleted' };
-    await this.twenty.updateRecord('erpOrders', existingId, deleteBody);
+
+    if (existingId) {
+      // A Twenty record exists → tombstone it (PATCH) and converge the mapping.
+      await this.twenty.updateRecord('erpOrders', existingId, deleteBody);
+    } else if (!m) {
+      // No mapping row AND no Twenty record → entity was never synced/tracked; nothing to converge.
+      return [];
+    }
+    // else: a mapping row EXISTS but there is no Twenty record. Converge the mapping
+    // to 'deleted' and record the delete audit WITHOUT any Twenty call.
 
     // clientId is carried via the outbox payload (order row already gone on hard delete)
     const payload = event.payload as { clientId?: string | null };

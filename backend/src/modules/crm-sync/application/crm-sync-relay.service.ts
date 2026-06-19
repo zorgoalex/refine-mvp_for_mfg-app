@@ -67,10 +67,14 @@ export class CrmSyncRelayService {
   async runTick(opts?: { dryRun?: boolean }): Promise<RelayTickResult> {
     const flags = this.config.getFlags();
 
+    // Honor BOTH the explicit opts.dryRun AND the runtime BACKEND_TWENTY_SYNC_DRY_RUN
+    // flag (flags.dryRun). A direct runTick() with the env flag set must NOT do live sync.
+    const effectiveDryRun = opts?.dryRun === true || flags.dryRun;
+
     // ── Dry-run path ──────────────────────────────────────────────────────────
-    // Triggered by opts.dryRun === true, REGARDLESS of flags.dryRun.
+    // Triggered by opts.dryRun === true OR flags.dryRun, REGARDLESS of flags.enabled.
     // Uses peekPending (no claim/lock) + Noop consumer (zero real Twenty writes).
-    if (opts?.dryRun === true) {
+    if (effectiveDryRun) {
       const events = await this.outboxRepo.peekPending(this.db, flags.batchSize);
       for (const event of events) {
         try {
