@@ -277,9 +277,9 @@ describe('CrmSyncRelayService', () => {
     });
   });
 
-  // ── (c) consumer throws, markRetry → 1: markFailed called ───────────────────
+  // ── (c) consumer throws, markRetry → 1: markFailed called on SAME tx client ──
   describe('(c) consumer throws, markRetry=1', () => {
-    it('calls markRetry then markFailed', async () => {
+    it('runs markRetry then markFailed inside ONE tx, both on the tx client (not the pool)', async () => {
       const event = makeClaimedEvent();
       const outboxRepo = makeOutboxRepo({
         claimBatch: vi.fn().mockResolvedValue([event]),
@@ -287,24 +287,47 @@ describe('CrmSyncRelayService', () => {
       });
       const consumer = { sync: vi.fn().mockRejectedValue(new Error('Twenty API down')) };
       const mapping = makeMappingRepo();
-      const { db } = makeDb();
+      const { db, fakeTxClient } = makeDb();
+      db.transaction = vi.fn().mockImplementation((handler: (c: DatabaseClient) => Promise<unknown>) =>
+        handler(fakeTxClient),
+      );
 
       const relay = makeRelay({ outboxRepo, consumer, mapping, db });
       const result = await relay.runTick();
 
+      // The finalize must happen inside a single db.transaction call.
+      expect(db.transaction).toHaveBeenCalledTimes(1);
+
+      // markRetry must run on the TX client, NOT the pool.
       expect(outboxRepo.markRetry).toHaveBeenCalledWith(
-        db,
+        fakeTxClient,
         event.outboxEventId,
         event.lockToken,
         expect.any(String), // nextAttemptAt ISO string
         expect.any(Number), // maxAttempts
       );
+      // markFailed must also run on the SAME tx client (closes the reclaim window).
       expect(mapping.markFailed).toHaveBeenCalledWith(
-        db,
+        fakeTxClient,
         'client',
         '1',
         'companies',
         'Twenty API down',
+      );
+      // Never on the pool.
+      expect(outboxRepo.markRetry).not.toHaveBeenCalledWith(
+        db,
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(mapping.markFailed).not.toHaveBeenCalledWith(
+        db,
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
       );
       expect(result).toEqual({ claimed: 1, processed: 0, failed: 1 });
     });
@@ -312,7 +335,7 @@ describe('CrmSyncRelayService', () => {
 
   // ── (c2) consumer throws, markRetry → 0: markFailed NOT called ───────────────
   describe('(c2) consumer throws, markRetry=0 (reclaimed)', () => {
-    it('does NOT call markFailed when markRetry returns 0', async () => {
+    it('does NOT call markFailed when markRetry returns 0, even inside the tx', async () => {
       const event = makeClaimedEvent();
       const outboxRepo = makeOutboxRepo({
         claimBatch: vi.fn().mockResolvedValue([event]),
@@ -320,13 +343,108 @@ describe('CrmSyncRelayService', () => {
       });
       const consumer = { sync: vi.fn().mockRejectedValue(new Error('error')) };
       const mapping = makeMappingRepo();
-      const { db } = makeDb();
+      const { db, fakeTxClient } = makeDb();
+      db.transaction = vi.fn().mockImplementation((handler: (c: DatabaseClient) => Promise<unknown>) =>
+        handler(fakeTxClient),
+      );
 
       const relay = makeRelay({ outboxRepo, consumer, mapping, db });
       const result = await relay.runTick();
 
+      // markRetry still ran on the tx client (token-gated, returned 0).
+      expect(outboxRepo.markRetry).toHaveBeenCalledWith(
+        fakeTxClient,
+        event.outboxEventId,
+        event.lockToken,
+        expect.any(String),
+        expect.any(Number),
+      );
       expect(mapping.markFailed).not.toHaveBeenCalled();
       // Not counted as a failure either (we didn't own the row)
+      expect(result).toEqual({ claimed: 1, processed: 0, failed: 0 });
+    });
+  });
+
+  // ── (c3) RACE COVERAGE: markRetry + markFailed share ONE tx, markRetry FIRST ──
+  describe('(c3) error-path finalize is atomic (reclaim window closed)', () => {
+    it('invokes markRetry then markFailed through the SAME db.transaction handler, markRetry first', async () => {
+      const event = makeClaimedEvent();
+
+      // Capture which client each call received and the relative order.
+      const seenClients: unknown[] = [];
+      const callOrder: string[] = [];
+
+      const outboxRepo = makeOutboxRepo({
+        claimBatch: vi.fn().mockResolvedValue([event]),
+        markRetry: vi.fn().mockImplementation(async (client: unknown) => {
+          callOrder.push('markRetry');
+          seenClients.push(client);
+          return 1; // we still own the row
+        }),
+      });
+      const consumer = { sync: vi.fn().mockRejectedValue(new Error('boom')) };
+      const mapping = makeMappingRepo({
+        markFailed: vi.fn().mockImplementation(async (client: unknown) => {
+          callOrder.push('markFailed');
+          seenClients.push(client);
+        }),
+      });
+
+      // Track whether both calls happened strictly inside the tx handler scope.
+      const { db, fakeTxClient } = makeDb();
+      let insideTx = false;
+      let bothInsideTx = false;
+      db.transaction = vi.fn().mockImplementation(async (handler: (c: DatabaseClient) => Promise<unknown>) => {
+        insideTx = true;
+        const before = callOrder.length;
+        const out = await handler(fakeTxClient);
+        // Exactly markRetry + markFailed happened within this single handler invocation.
+        bothInsideTx = callOrder.slice(before).join(',') === 'markRetry,markFailed';
+        insideTx = false;
+        return out;
+      });
+
+      const relay = makeRelay({ outboxRepo, consumer, mapping, db });
+      const result = await relay.runTick();
+
+      // Single transaction wraps the whole finalize.
+      expect(db.transaction).toHaveBeenCalledTimes(1);
+      // markRetry ran first, markFailed second.
+      expect(callOrder).toEqual(['markRetry', 'markFailed']);
+      // Both used the SAME tx client → no reclaim can interleave between them.
+      expect(seenClients).toEqual([fakeTxClient, fakeTxClient]);
+      expect(bothInsideTx).toBe(true);
+      expect(insideTx).toBe(false);
+      expect(result).toEqual({ claimed: 1, processed: 0, failed: 1 });
+    });
+
+    it('rolls back without markFailed when markRetry returns 0 inside the tx (token stale)', async () => {
+      const event = makeClaimedEvent();
+      const callOrder: string[] = [];
+      const outboxRepo = makeOutboxRepo({
+        claimBatch: vi.fn().mockResolvedValue([event]),
+        markRetry: vi.fn().mockImplementation(async () => {
+          callOrder.push('markRetry');
+          return 0; // reclaimed → no side effects
+        }),
+      });
+      const consumer = { sync: vi.fn().mockRejectedValue(new Error('boom')) };
+      const mapping = makeMappingRepo({
+        markFailed: vi.fn().mockImplementation(async () => {
+          callOrder.push('markFailed');
+        }),
+      });
+      const { db, fakeTxClient } = makeDb();
+      db.transaction = vi.fn().mockImplementation((handler: (c: DatabaseClient) => Promise<unknown>) =>
+        handler(fakeTxClient),
+      );
+
+      const relay = makeRelay({ outboxRepo, consumer, mapping, db });
+      const result = await relay.runTick();
+
+      expect(db.transaction).toHaveBeenCalledTimes(1);
+      expect(callOrder).toEqual(['markRetry']); // markFailed never ran
+      expect(mapping.markFailed).not.toHaveBeenCalled();
       expect(result).toEqual({ claimed: 1, processed: 0, failed: 0 });
     });
   });

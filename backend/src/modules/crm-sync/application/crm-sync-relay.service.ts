@@ -129,32 +129,45 @@ export class CrmSyncRelayService {
         intents = await this.consumer.sync(event);
       } catch (err) {
         // consumer.sync threw → mark for retry (or failed if exhausted).
+        //
+        // Finalize ATOMICALLY in ONE tx, ownership-gated: markRetry token-gated FIRST,
+        // markFailed in the SAME tx only when markRetry affected a row. The markRetry
+        // UPDATE row-locks the outbox row until COMMIT, so another worker's claimBatch
+        // (FOR UPDATE SKIP LOCKED) cannot reclaim it during the window; by the time the
+        // row becomes pending+visible (post-commit), markFailed is already applied in the
+        // same commit. This closes the unsafe window where a reclaiming worker could
+        // upsertSuccess between a pooled markRetry and a pooled markFailed.
         const nextAttemptAt = this.nextAttemptAt(flags.pollIntervalMs);
-        const r = await this.outboxRepo.markRetry(
-          this.db,
-          event.outboxEventId,
-          event.lockToken,
-          nextAttemptAt,
-          flags.maxAttempts,
-        );
-        // Only update mapping if WE still owned the row (r > 0).
-        // If r === 0, the row was lease-reclaimed — skip markFailed too.
-        if (r > 0) {
-          const payload = event.payload as {
-            entity?: string;
-            id?: string;
-            op?: string;
-          };
-          const entityType = String(payload.entity ?? 'unknown');
-          const erpId = String(payload.id ?? event.aggregateId);
-          const twentyObject = entityType === 'client' ? 'companies' : 'erpOrders';
-          await this.mapping.markFailed(
-            this.db,
-            entityType,
-            erpId,
-            twentyObject,
-            err instanceof Error ? err.message : String(err),
+        const payload = event.payload as {
+          entity?: string;
+          id?: string;
+          op?: string;
+        };
+        const entityType = String(payload.entity ?? 'unknown');
+        const erpId = String(payload.id ?? event.aggregateId);
+        const twentyObject = entityType === 'client' ? 'companies' : 'erpOrders';
+        const errMsg = err instanceof Error ? err.message : String(err);
+
+        const didFail = await this.db.transaction(async (tx) => {
+          const r = await this.outboxRepo.markRetry(
+            tx,
+            event.outboxEventId,
+            event.lockToken,
+            nextAttemptAt,
+            flags.maxAttempts,
           );
+          // Only update mapping if WE still owned the row (r > 0).
+          // If r === 0, the row was lease-reclaimed — skip markFailed too.
+          // markFailed runs in the SAME tx, so the markRetry row-lock prevents any
+          // reclaim from interleaving between the two writes. If markFailed throws,
+          // the tx rolls back (markRetry undone → row stays 'processing' → reclaimed later).
+          if (r > 0) {
+            await this.mapping.markFailed(tx, entityType, erpId, twentyObject, errMsg);
+            return true;
+          }
+          return false;
+        });
+        if (didFail) {
           failed++;
         }
         continue;
