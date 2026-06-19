@@ -50,15 +50,17 @@ describeIntegration('PgCrmSyncMappingRepository (integration)', () => {
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 4 });
-    // Use a single dedicated client for schema setup to avoid search_path pool issues.
+    // Pin search_path for EVERY pooled connection (including the setup client).
+    // Must be registered before any pool.connect() / pool.query() call so that
+    // the very first connection also gets the correct search_path.
+    pool.on('connect', (c) => void c.query(`SET search_path TO ${schemaName}`));
+    // Use a single dedicated client for schema setup.
     const setupClient = await pool.connect();
     try {
       await createSchema(setupClient);
     } finally {
       setupClient.release();
     }
-    // Pin search_path for every pooled connection after schema creation.
-    pool.on('connect', (c) => void c.query(`SET search_path TO ${schemaName}`));
     repo = new PgCrmSyncMappingRepository();
     client = makeClient(pool);
   });
