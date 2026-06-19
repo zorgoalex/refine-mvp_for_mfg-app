@@ -19,6 +19,10 @@ const inputSchema = z.object({
   supplierArticle: z.string().trim().max(200).nullable().optional(),
   texture: z.boolean().nullable().optional(),
   color: z.string().trim().max(100).nullable().optional(),
+  refKey1c: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+    z.string().uuid().nullable().optional(),
+  ),
   isActive: z.boolean().optional(),
 });
 const createSchema = inputSchema.strict();

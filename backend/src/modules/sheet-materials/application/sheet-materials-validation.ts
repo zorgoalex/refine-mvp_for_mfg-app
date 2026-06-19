@@ -1,6 +1,8 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { SheetMaterialTypeInput } from './sheet-materials.types';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Server-side structural validation for sheet material types. Layered on top of
  * the controller Zod schema so non-HTTP callers cannot bypass it. Throws 422 with
@@ -35,6 +37,10 @@ export function validateSheetMaterialTypeInput(input: SheetMaterialTypeInput): v
   }
   if (input.texture != null && typeof input.texture !== 'boolean') {
     errors.push({ field: 'texture', message: 'texture must be boolean' });
+  }
+  // Optional 1C key: when present (non-null/non-empty) must be a valid UUID (column type uuid).
+  if (input.refKey1c != null && input.refKey1c !== '' && !UUID_RE.test(input.refKey1c)) {
+    errors.push({ field: 'refKey1c', message: 'refKey1c must be a valid UUID' });
   }
   if (errors.length > 0) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Sheet material payload validation failed', { errors });

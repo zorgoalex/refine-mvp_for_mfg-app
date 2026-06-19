@@ -13,6 +13,7 @@ export interface SheetMaterialTypeInput {
   supplierArticle?: string | null;
   texture?: boolean | null;
   color?: string | null;
+  refKey1c?: string | null;
   isActive?: boolean;
 }
 
@@ -29,6 +30,7 @@ export interface SheetMaterialTypeDto {
   supplierArticle: string | null;
   texture: boolean | null;
   color: string | null;
+  refKey1c: string | null;
   isActive: boolean;
   version: number;
 }

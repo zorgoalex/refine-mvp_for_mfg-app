@@ -40,4 +40,12 @@ describe('validateSheetMaterialTypeInput', () => {
   it('accepts null/omitted supplierId/vendorId', () => {
     expect(() => validateSheetMaterialTypeInput({ ...valid, supplierId: null, vendorId: null })).not.toThrow();
   });
+  it('rejects a non-UUID refKey1c', () => {
+    expect(failedFields({ ...valid, refKey1c: 'not-a-uuid' })).toContain('refKey1c');
+  });
+  it('accepts a valid UUID / null / empty refKey1c', () => {
+    expect(() => validateSheetMaterialTypeInput({ ...valid, refKey1c: '11111111-1111-1111-1111-111111111111' })).not.toThrow();
+    expect(() => validateSheetMaterialTypeInput({ ...valid, refKey1c: null })).not.toThrow();
+    expect(() => validateSheetMaterialTypeInput({ ...valid, refKey1c: '' })).not.toThrow();
+  });
 });

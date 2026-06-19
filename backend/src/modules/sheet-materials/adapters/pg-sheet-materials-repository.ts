@@ -25,7 +25,7 @@ import type {
 } from '../application/sheet-materials.types';
 
 const SELECT_COLUMNS = `sheet_material_type_id, name, material_type_id, unit_id, thickness_mm, width_mm, height_mm,
-  supplier_id, vendor_id, supplier_article, texture, color, is_active, version`;
+  supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c::text, is_active, version`;
 
 /**
  * Backend-owned sheet-material-type CRUD (SP1). Every write is audited in-tx
@@ -67,8 +67,8 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
         const inserted = await tx.query(
           `INSERT INTO sheet_material_types
              (name, material_type_id, unit_id, thickness_mm, width_mm, height_mm,
-              supplier_id, vendor_id, supplier_article, texture, color, is_active, created_by, edited_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12,true),$13,$13)
+              supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c, is_active, created_by, edited_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid,COALESCE($13,true),$14,$14)
            RETURNING ${SELECT_COLUMNS}`,
           [
             input.name,
@@ -82,6 +82,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             input.supplierArticle ?? null,
             input.texture ?? null,
             input.color ?? null,
+            input.refKey1c ?? null,
             input.isActive ?? null,
             numOrNull(command.currentUser.id),
           ],
@@ -123,8 +124,8 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
         const updated = await tx.query(
           `UPDATE sheet_material_types SET
              name=$2, material_type_id=$3, unit_id=$4, thickness_mm=$5, width_mm=$6, height_mm=$7,
-             supplier_id=$8, vendor_id=$9, supplier_article=$10, texture=$11, color=$12,
-             is_active=COALESCE($13, is_active), version=version+1, edited_by=$14, updated_at=now()
+             supplier_id=$8, vendor_id=$9, supplier_article=$10, texture=$11, color=$12, ref_key_1c=$13::uuid,
+             is_active=COALESCE($14, is_active), version=version+1, edited_by=$15, updated_at=now()
            WHERE sheet_material_type_id=$1
            RETURNING ${SELECT_COLUMNS}`,
           [
@@ -140,6 +141,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             input.supplierArticle ?? null,
             input.texture ?? null,
             input.color ?? null,
+            input.refKey1c ?? null,
             input.isActive ?? null,
             numOrNull(command.currentUser.id),
           ],
@@ -229,6 +231,7 @@ function mapRow(r: Record<string, unknown>): SheetMaterialTypeDto {
     supplierArticle: r.supplier_article == null ? null : String(r.supplier_article),
     texture: r.texture == null ? null : Boolean(r.texture),
     color: r.color == null ? null : String(r.color),
+    refKey1c: r.ref_key_1c == null ? null : String(r.ref_key_1c),
     isActive: Boolean(r.is_active),
     version: toNum(r.version),
   };
@@ -247,6 +250,7 @@ function diffShape(s: SheetMaterialTypeDto): Record<string, unknown> {
     supplierArticle: s.supplierArticle,
     texture: s.texture,
     color: s.color,
+    refKey1c: s.refKey1c,
     isActive: s.isActive,
   };
 }
