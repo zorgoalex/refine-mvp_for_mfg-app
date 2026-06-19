@@ -9,6 +9,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { NotificationsEngineModule } from './modules/notifications-engine/notifications-engine.module';
 import { HealthModule } from './modules/health/health.module';
 import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
+import { CrmSyncModule } from './modules/crm-sync/crm-sync.module';
 import { CutModule } from './modules/cut/cut.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -31,6 +32,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     AuditModule,
     AuthModule,
     ClientPhonesModule,
+    CrmSyncModule,
     CutModule,
     DeadlinesModule,
     NotificationsModule,
