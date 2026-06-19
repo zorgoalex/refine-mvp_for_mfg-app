@@ -1,0 +1,82 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import ExcelJS from 'exceljs';
+import { buildOrderExcelBuffer } from './generateOrderExcel';
+
+const templatePath = path.resolve(process.cwd(), 'public/templates/order_template.xlsx');
+
+function makeDetails(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    detail_id: index + 1,
+    length: 700 + index,
+    width: 400 + index,
+    quantity: (index % 3) + 1,
+    milling_cost_per_sqm: 1000 + index,
+    notes: `Позиция ${index + 1}`,
+    milling_type: { milling_type_name: `Фрезеровка ${index + 1}` },
+    edge_type: { edge_type_name: `Кромка ${index + 1}` },
+    film: { film_name: `Пленка ${index + 1}` },
+    material: { material_name: `Материал ${index + 1}` },
+  }));
+}
+
+async function buildWorkbook(detailCount: number) {
+  const template = await fs.readFile(templatePath);
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    arrayBuffer: async () => template.buffer.slice(
+      template.byteOffset,
+      template.byteOffset + template.byteLength,
+    ),
+  })));
+
+  const buffer = await buildOrderExcelBuffer({
+    order: {
+      order_id: 1000 + detailCount,
+      order_name: `E2E Excel ${detailCount}`,
+      order_date: '2026-06-19',
+    },
+    details: makeDetails(detailCount),
+    payments: [],
+    client: { client_name: 'Тестовый клиент' },
+    clientPhone: '+7 777 000 00 00',
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const worksheet = workbook.getWorksheet(1);
+  if (!worksheet) throw new Error('worksheet missing');
+  return worksheet;
+}
+
+describe('buildOrderExcelBuffer dynamic detail rows', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([60, 70, 95])('exports all %i order details beyond the 55-row template limit', async (detailCount) => {
+    const worksheet = await buildWorkbook(detailCount);
+    const lastDetailRow = 11 + detailCount;
+    const footerRow = lastDetailRow + 2;
+
+    expect(worksheet.getCell(`B${lastDetailRow}`).value).toBe(700 + detailCount - 1);
+    expect(worksheet.getCell(`C${lastDetailRow}`).value).toBe(400 + detailCount - 1);
+    expect(worksheet.getCell(`D${lastDetailRow}`).value).toBe(((detailCount - 1) % 3) + 1);
+    expect(worksheet.getCell(`H${lastDetailRow}`).value).toBe(`Позиция ${detailCount}`);
+    expect(worksheet.getCell(`K${lastDetailRow}`).value).toBe(`Пленка ${detailCount}`);
+
+    expect(worksheet.getCell(`A${lastDetailRow}`).value).toBe(detailCount);
+    expect(worksheet.getCell(`E${lastDetailRow}`).value).toEqual({
+      formula: `ROUNDUP((B${lastDetailRow}/1000)*(C${lastDetailRow}/1000)*D${lastDetailRow},2)`,
+    });
+    expect(worksheet.getCell(`J${lastDetailRow}`).value).toEqual({
+      formula: `E${lastDetailRow}*I${lastDetailRow}`,
+    });
+    expect(worksheet.getCell('J2').value).toEqual({ formula: `SUM(J12:J${lastDetailRow})` });
+    expect(worksheet.getCell('K8').value).toEqual({ formula: `SUM(E12:E${lastDetailRow})` });
+    expect(worksheet.getCell('M8').value).toEqual({ formula: `SUM(D12:D${lastDetailRow})` });
+    expect(String(worksheet.getCell(`A${footerRow}`).value)).toContain('С техническими');
+    expect(worksheet.pageSetup.printArea).toBe(`A1:M${lastDetailRow + 16}`);
+  });
+});

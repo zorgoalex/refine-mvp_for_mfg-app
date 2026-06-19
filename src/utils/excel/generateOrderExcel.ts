@@ -5,6 +5,12 @@
 import { formatDate } from '../printFormat';
 import { ExcelGenerationError } from './excelErrorHandler';
 
+const DETAIL_START_ROW = 12;
+const DETAIL_TEMPLATE_LAST_ROW = 66;
+const DETAIL_INSERT_BEFORE_ROW = 67;
+const DETAIL_TEMPLATE_CAPACITY = DETAIL_TEMPLATE_LAST_ROW - DETAIL_START_ROW + 1;
+const PRINT_AREA_TRAILING_ROWS = 16;
+
 // Типы для заказа, деталей и платежей
 interface OrderDetail {
   detail_id: number;
@@ -51,6 +57,49 @@ export interface GenerateOrderExcelParams {
   clientPhone?: string | null;
 }
 
+const cloneStyle = (style: any) => JSON.parse(JSON.stringify(style ?? {}));
+
+function applyDetailRowLayout(worksheet: any, rowNumber: number) {
+  const templateRow = worksheet.getRow(DETAIL_TEMPLATE_LAST_ROW);
+  const targetRow = worksheet.getRow(rowNumber);
+  targetRow.height = templateRow.height;
+
+  for (let column = 1; column <= 13; column += 1) {
+    const sourceCell = templateRow.getCell(column);
+    const targetCell = targetRow.getCell(column);
+    targetCell.style = cloneStyle(sourceCell.style);
+  }
+
+  targetRow.getCell(1).value = rowNumber - DETAIL_START_ROW + 1;
+  targetRow.getCell(5).value = {
+    formula: `ROUNDUP((B${rowNumber}/1000)*(C${rowNumber}/1000)*D${rowNumber},2)`,
+  };
+  targetRow.getCell(10).value = { formula: `E${rowNumber}*I${rowNumber}` };
+}
+
+function prepareDetailRows(worksheet: any, detailCount: number) {
+  const extraRows = Math.max(0, detailCount - DETAIL_TEMPLATE_CAPACITY);
+  if (extraRows > 0) {
+    worksheet.spliceRows(
+      DETAIL_INSERT_BEFORE_ROW,
+      0,
+      ...Array.from({ length: extraRows }, () => []),
+    );
+  }
+
+  const lastDetailRow = DETAIL_START_ROW + Math.max(detailCount, DETAIL_TEMPLATE_CAPACITY) - 1;
+  for (let rowNumber = DETAIL_START_ROW; rowNumber <= lastDetailRow; rowNumber += 1) {
+    applyDetailRowLayout(worksheet, rowNumber);
+  }
+
+  worksheet.getCell('J2').value = { formula: `SUM(J${DETAIL_START_ROW}:J${lastDetailRow})` };
+  worksheet.getCell('K8').value = { formula: `SUM(E${DETAIL_START_ROW}:E${lastDetailRow})` };
+  worksheet.getCell('M8').value = { formula: `SUM(D${DETAIL_START_ROW}:D${lastDetailRow})` };
+  worksheet.pageSetup.printArea = `A1:M${lastDetailRow + PRINT_AREA_TRAILING_ROWS}`;
+
+  return lastDetailRow;
+}
+
 /**
  * Генерация Excel буфера заказа на основе шаблона
  *
@@ -58,8 +107,9 @@ export interface GenerateOrderExcelParams {
  * (создание Blob, конвертация в base64, и т.д.)
  *
  * ⚠️ ВАЖНО: Ячейки с формулами НЕ заполняются программно!
- * Формулы: A12-A51 (№), E12-E51 (площадь), J12-J51 (сумма детали),
- *          K8 (общая площадь), M8 (кол-во деталей), J2 (общая сумма), K4 (остаток)
+ * Формулы: A/E/J в строках деталей, K8 (общая площадь),
+ *          M8 (кол-во деталей), J2 (общая сумма), K4 (остаток)
+ * Диапазон деталей расширяется динамически, если позиций больше 55.
  */
 export const buildOrderExcelBuffer = async ({
   order,
@@ -140,31 +190,29 @@ export const buildOrderExcelBuffer = async ({
     // - K4 (остаток оплаты) - рассчитывается формулой
 
     // 5. Заполнить детали (начиная со строки 12)
+    const lastDetailRow = prepareDetailRows(worksheet, details.length);
+
     details.forEach((detail, index) => {
-      const rowNumber = 12 + index;
+      const rowNumber = DETAIL_START_ROW + index;
       const row = worksheet.getRow(rowNumber);
 
-      // Заполняем ТОЛЬКО данные (7 колонок), НЕ формулы!
-      // row.getCell(1) - A: № → НЕ заполнять (формула автонумерации)
+      // Заполняем ТОЛЬКО данные, формулы/нумерацию ставит prepareDetailRows().
       row.getCell(2).value = detail.length || null; // B: Высота (мм)
       row.getCell(3).value = detail.width || null; // C: Ширина (мм)
       row.getCell(4).value = detail.quantity; // D: Кол-во
-      // row.getCell(5) - E: Площадь → НЕ заполнять (формула: B×C/1000000)
       row.getCell(6).value = detail.milling_type?.milling_type_name || ''; // F: Тип фрезеровки ⚠️
       row.getCell(7).value = detail.edge_type?.edge_type_name || ''; // G: Обкат/кромка
       row.getCell(8).value = detail.notes || ''; // H: Примечание
       row.getCell(9).value = detail.milling_cost_per_sqm || null; // I: Цена за кв.м.
-      // row.getCell(10) - J: Сумма → НЕ заполнять (формула: D×I×E)
       row.getCell(11).value = detail.film?.film_name || ''; // K: Пленка
 
       // Применить стиль строки (копировать из шаблона)
       row.commit();
     });
 
-    // 6. Очистить пустые строки (если деталей меньше 40)
+    // 6. Очистить пустые строки (если деталей меньше вместимости шаблона)
     // Очищаем только ДАННЫЕ, формулы Excel сохраняются (A, E, J)
-    for (let i = details.length; i < 40; i++) {
-      const rowNumber = 12 + i;
+    for (let rowNumber = DETAIL_START_ROW + details.length; rowNumber <= lastDetailRow; rowNumber += 1) {
       const row = worksheet.getRow(rowNumber);
 
       // Очистить данные (формулы в A, E, J останутся)
