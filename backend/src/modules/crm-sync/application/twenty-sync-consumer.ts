@@ -4,7 +4,7 @@ import type { DatabaseService } from '../../../database/database.service';
 import type { CrmSourcePort, MappingRow } from './crm-sync.types';
 import type { TwentyApiPort, TwentyObject } from '../adapters/twenty-api-client';
 import type { PgCrmSyncMappingRepository } from '../adapters/pg-crm-sync-mapping-repository';
-import { mapClient, mapOrder, hash } from './twenty-sync-mapper';
+import { mapClient, mapOrder, hash, erpStatusFor } from './twenty-sync-mapper';
 
 /** A persistence intent returned by TwentySyncConsumer. Persisted by the relay (Task 8). */
 export type SyncIntent = {
@@ -145,12 +145,13 @@ export class TwentySyncConsumer {
     const h = hash(body);
     const m = await this.mapping.get(this.db, 'client', erpId);
 
-    // No-op: already synced with the same hash
-    if (m && m.twentyId && m.status === 'active' && m.lastHash === h) {
+    // No-op: already synced with the same hash (active OR deleted; only 'failed' must re-sync)
+    if (m && m.twentyId && m.status !== 'failed' && m.lastHash === h) {
       return [];
     }
 
     const twentyId = await this.upsertRecord('companies', body, erpId, m?.twentyId ?? null);
+    const status = erpStatusFor(!row.isActive);
 
     const intent: SyncIntent = {
       mapping: {
@@ -158,7 +159,7 @@ export class TwentySyncConsumer {
         erpId,
         twentyObject: 'companies',
         twentyId,
-        status: 'active',
+        status,
         lastHash: h,
       },
       audit: {
@@ -234,7 +235,8 @@ export class TwentySyncConsumer {
     const m = await this.mapping.get(this.db, 'order', erpId);
 
     // No-op for the order itself (but still return any client intent already pushed)
-    if (m && m.twentyId && m.status === 'active' && m.lastHash === h) {
+    // 'failed' must always re-sync; 'active' or 'deleted' with matching hash → no-op
+    if (m && m.twentyId && m.status !== 'failed' && m.lastHash === h) {
       return intents;
     }
 
@@ -246,7 +248,7 @@ export class TwentySyncConsumer {
         erpId,
         twentyObject: 'erpOrders',
         twentyId,
-        status: 'active',
+        status: erpStatusFor(order.deleteFlag),
         lastHash: h,
       },
       audit: {
@@ -279,8 +281,10 @@ export class TwentySyncConsumer {
   ): Promise<string> {
     const cm = await this.mapping.get(this.db, 'client', clientId);
 
-    // Usable: mapping exists, has a valid twentyId, AND is active (not failed/deleted)
-    if (cm && cm.twentyId && cm.status === 'active') {
+    // Usable: mapping exists, has a valid twentyId, AND is not failed.
+    // A 'deleted' mapping still has a valid twentyId and is a valid relation target;
+    // only 'failed' or null twentyId requires re-sync.
+    if (cm && cm.twentyId && cm.status !== 'failed') {
       return cm.twentyId;
     }
 
@@ -302,7 +306,7 @@ export class TwentySyncConsumer {
         erpId: clientId,
         twentyObject: 'companies',
         twentyId: companyId,
-        status: 'active',
+        status: erpStatusFor(!clientRow.isActive),
         lastHash: h,
       },
       audit: {

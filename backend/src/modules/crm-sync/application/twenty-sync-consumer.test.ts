@@ -404,6 +404,103 @@ describe('TwentySyncConsumer.sync — audit.requestId matches outboxEventId', ()
 });
 
 // ---------------------------------------------------------------------------
+// Test 10: client upsert with isActive=false → mapping.status='deleted', erpStatus='deleted' in body
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — client upsert, isActive=false (soft-deleted)', () => {
+  it('returns intent with mapping.status=deleted and Twenty body erpStatus=deleted', async () => {
+    const inactiveClient: ClientRow = { ...CLIENT_ROW, isActive: false };
+    const source = makeSource({
+      getClientById: vi.fn().mockResolvedValue(inactiveClient),
+    });
+    const twenty = makeTwenty(); // createRecord returns 'twenty-new-id'
+    const mapping = makeMapping(() => null);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('client', 'c-1', 'upsert');
+    const intents = await consumer.sync(event);
+
+    expect(intents).toHaveLength(1);
+    expect(intents[0].mapping.status).toBe('deleted');
+    // The body sent to Twenty must have erpStatus='deleted'
+    expect(twenty.createRecord).toHaveBeenCalledWith(
+      'companies',
+      expect.objectContaining({ erpStatus: 'deleted' }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 11: stable soft-deleted mapping (status='deleted', hash match) → no-op []
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — no-op for stable soft-deleted mapping', () => {
+  it('returns [] when mapping status=deleted and lastHash matches current hash', async () => {
+    const inactiveClient: ClientRow = { ...CLIENT_ROW, isActive: false };
+    const source = makeSource({
+      getClientById: vi.fn().mockResolvedValue(inactiveClient),
+    });
+    const twenty = makeTwenty();
+    const currentHash = hash(mapClient(inactiveClient));
+    const deletedMapping: MappingRow = {
+      entityType: 'client',
+      erpId: 'c-1',
+      twentyObject: 'companies',
+      twentyId: 'existing-twenty-id',
+      status: 'deleted',
+      lastHash: currentHash,
+    };
+    const mapping = makeMapping(() => deletedMapping);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('client', 'c-1', 'upsert');
+    const intents = await consumer.sync(event);
+
+    expect(intents).toHaveLength(0);
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 12: order upsert with deleteFlag=true → mapping.status='deleted'
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — order upsert, deleteFlag=true', () => {
+  it('returns orderIntent with mapping.status=deleted', async () => {
+    const deletedOrder: OrderRow = { ...ORDER_ROW, deleteFlag: true };
+    const source = makeSource({
+      getOrderById: vi.fn().mockResolvedValue(deletedOrder),
+    });
+    const twenty = makeTwenty();
+    // Client mapping already active (so ensureCompany short-circuits)
+    const syncedClientMapping: MappingRow = {
+      entityType: 'client',
+      erpId: 'c-1',
+      twentyObject: 'companies',
+      twentyId: 'company-uuid',
+      status: 'active',
+      lastHash: 'some-hash',
+    };
+    const mapping = makeMapping((entityType) => {
+      if (entityType === 'client') return syncedClientMapping;
+      return null; // no order mapping
+    });
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('order', 'o-1', 'upsert');
+    const intents = await consumer.sync(event);
+
+    // Only orderIntent (client already synced)
+    expect(intents).toHaveLength(1);
+    expect(intents[0].mapping.entityType).toBe('order');
+    expect(intents[0].mapping.status).toBe('deleted');
+    // The body sent to Twenty must have erpStatus='deleted'
+    expect(twenty.createRecord).toHaveBeenCalledWith(
+      'erpOrders',
+      expect.objectContaining({ erpStatus: 'deleted' }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // supports()
 // ---------------------------------------------------------------------------
 describe('TwentySyncConsumer.supports', () => {
