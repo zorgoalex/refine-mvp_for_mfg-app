@@ -43,6 +43,7 @@ const CATEGORY_MAP: Record<string, string> = {
   doweling_orders_view: "Производство",
   films: "Материалы",
   materials: "Материалы",
+  sheet_material_types: "Материалы",
   employees: "Настройки",
   users: "Настройки",
   configuration: "Настройки",
@@ -57,6 +58,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   payments: "Платежи",
   materials: "Материалы",
   configuration: "Конфигурация",
+  sheet_material_types: "Листовые материалы",
 };
 
 export interface MobileSiderDrawerProps {

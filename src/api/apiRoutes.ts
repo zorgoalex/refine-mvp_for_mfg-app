@@ -73,12 +73,14 @@ export const apiRoutes = {
   cutConfig: {
     root: backendApiPath('/cut-config'),
     setting: (key: string) => backendApiPath(`/cut-config/settings/${encodeURIComponent(key)}`),
-    sheetMaterialTypes: backendApiPath('/cut-config/sheet-material-types'),
-    sheetMaterialType: (id: number) => backendApiPath(`/cut-config/sheet-material-types/${id}`),
     paramProfiles: backendApiPath('/cut-config/param-profiles'),
     paramProfile: (id: number) => backendApiPath(`/cut-config/param-profiles/${id}`),
     renderPresets: backendApiPath('/cut-config/render-presets'),
     renderPreset: (id: number) => backendApiPath(`/cut-config/render-presets/${id}`),
+  },
+  sheetMaterials: {
+    list: backendApiPath('/sheet-material-types'),
+    byId: (id: number) => backendApiPath(`/sheet-material-types/${id}`),
   },
   clientPhones: {
     list: backendApiPath('/client-phones'),

@@ -112,6 +112,7 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   doweling_orders_view: <AimOutlined />,
   configuration: <SettingOutlined />,
   audit: <AuditOutlined />,
+  sheet_material_types: <BorderOutlined />,
 };
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -138,6 +139,7 @@ const CATEGORY_MAP: Record<string, string> = {
   doweling_orders_view: "Производство",
   films: "Материалы",
   materials: "Материалы",
+  sheet_material_types: "Материалы",
   employees: "Настройки",
   users: "Настройки",
   configuration: "Настройки",

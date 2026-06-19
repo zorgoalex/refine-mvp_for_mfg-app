@@ -3,7 +3,6 @@ import { validateGrainRule } from './cut-freecut-mapping';
 import type {
   CutParamProfileInput,
   CutRenderPresetInput,
-  SheetMaterialTypeInput,
 } from './cut-config-admin.types';
 
 /** Editable cut_settings keys (bounded allowlist — rules-as-data, not arbitrary). */
@@ -114,15 +113,6 @@ function validateFreecutParams(params: Record<string, unknown>): void {
       }
     }
   }
-}
-
-export function validateSheetMaterialTypeInput(input: SheetMaterialTypeInput): SheetMaterialTypeInput {
-  if (!input.name || input.name.trim().length === 0) invalid('name', 'Укажите название');
-  if (!Number.isInteger(input.materialTypeId) || input.materialTypeId <= 0) invalid('materialTypeId', 'Укажите тип материала');
-  if (!(input.thicknessMm > 0)) invalid('thicknessMm', 'Толщина должна быть > 0');
-  if (!(input.widthMm > 0)) invalid('widthMm', 'Ширина должна быть > 0');
-  if (!(input.heightMm > 0)) invalid('heightMm', 'Высота должна быть > 0');
-  return { ...input, name: input.name.trim() };
 }
 
 export function validateParamProfileInput(input: CutParamProfileInput): CutParamProfileInput {

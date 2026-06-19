@@ -34,6 +34,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   doweling_orders_view: 'Присадка',
   configuration: 'Конфигурация',
   audit: 'Аудит',
+  sheet_material_types: 'Листовые материалы',
 };
 
 // First path segment → resource key for list routes.
@@ -48,6 +49,7 @@ const PATH_TO_RESOURCE: Record<string, string> = {
   'doweling-orders': 'doweling_orders_view',
   configuration: 'configuration',
   audit: 'audit',
+  'sheet-material-types': 'sheet_material_types',
 };
 
 export const resourceFromPath = (pathname: string): string | undefined => {

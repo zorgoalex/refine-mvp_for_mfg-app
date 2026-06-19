@@ -6,16 +6,6 @@ export interface CutSettingRow {
   value: unknown;
   version: number;
 }
-export interface SheetMaterialType {
-  sheetMaterialTypeId: number;
-  name: string;
-  materialTypeId: number;
-  thicknessMm: number;
-  widthMm: number;
-  heightMm: number;
-  isActive: boolean;
-  version: number;
-}
 export interface CutParamProfile {
   cutParamProfileId: number;
   name: string;
@@ -34,18 +24,8 @@ export interface CutRenderPreset {
 }
 export interface CutConfig {
   settings: CutSettingRow[];
-  sheetMaterialTypes: SheetMaterialType[];
   paramProfiles: CutParamProfile[];
   renderPresets: CutRenderPreset[];
-}
-
-export interface SheetMaterialTypeInput {
-  name: string;
-  materialTypeId: number;
-  thicknessMm: number;
-  widthMm: number;
-  heightMm: number;
-  isActive?: boolean;
 }
 
 export interface CutParamProfileInput {
@@ -74,18 +54,6 @@ export const cutConfigApi = {
 
   updateSetting(key: string, value: unknown, version: number): Promise<CutSettingRow> {
     return httpClient.put<CutSettingRow>(apiRoutes.cutConfig.setting(key), { value, version });
-  },
-
-  createSheetMaterialType(input: SheetMaterialTypeInput): Promise<SheetMaterialType> {
-    return httpClient.post<SheetMaterialType>(apiRoutes.cutConfig.sheetMaterialTypes, input);
-  },
-
-  updateSheetMaterialType(id: number, input: SheetMaterialTypeInput, version: number): Promise<SheetMaterialType> {
-    return httpClient.put<SheetMaterialType>(apiRoutes.cutConfig.sheetMaterialType(id), { ...input, version });
-  },
-
-  deleteSheetMaterialType(id: number, version: number): Promise<void> {
-    return deleteWithVersion(apiRoutes.cutConfig.sheetMaterialType(id), version);
   },
 
   createParamProfile(input: CutParamProfileInput): Promise<CutParamProfile> {

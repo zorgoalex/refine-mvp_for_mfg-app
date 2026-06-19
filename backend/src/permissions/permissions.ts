@@ -138,6 +138,9 @@ export const PERMISSIONS = [
   'cut.view',
   'cut.manage',
 
+  'sheet_materials.view',
+  'sheet_materials.manage',
+
   'settings.view',
   'settings.manage',
   'audit.view',
@@ -157,6 +160,11 @@ const ADMIN_SERVICE_EXCLUDED_PERMISSIONS = [
   'system.superadmin',
   'deadlines.worker.manage',
   'deadlines.worker.schedule',
+  // sheet_materials reads go through Hasura, where `admin` is not a role (only
+  // superadmin/top_manager/manager/operator/viewer are reference-read roles).
+  // Exclude admin so perm-set == Hasura-readable-set == usable-set (no split).
+  'sheet_materials.view',
+  'sheet_materials.manage',
 ] as const satisfies PermissionName[];
 
 const adminServiceExcludedPermissions = new Set<PermissionName>(ADMIN_SERVICE_EXCLUDED_PERMISSIONS);
@@ -221,6 +229,8 @@ export const ROLE_PERMISSIONS = {
     'org.view',
     'cut.view',
     'cut.manage',
+    'sheet_materials.view',
+    'sheet_materials.manage',
 
     'requirements.view',
     'requirements.create',
@@ -288,6 +298,8 @@ export const ROLE_PERMISSIONS = {
     'work_centers.view',
     'cut.view',
     'cut.manage',
+    'sheet_materials.view',
+    'sheet_materials.manage',
 
     'requirements.view',
     'requirements.create',
@@ -340,6 +352,8 @@ export const ROLE_PERMISSIONS = {
     'work_centers.view',
     'cut.view',
     'cut.manage',
+    'sheet_materials.view',
+    'sheet_materials.manage',
 
     'requirements.view',
     'requirements.create',
@@ -404,6 +418,7 @@ export const ROLE_PERMISSIONS = {
     'workshops.view',
     'work_centers.view',
     'cut.view',
+    'sheet_materials.view',
 
     'requirements.view',
     'doweling.view',

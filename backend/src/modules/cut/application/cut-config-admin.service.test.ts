@@ -10,10 +10,8 @@ function user(permissions: string[]): CurrentUser {
 function fakePort(): CutConfigAdminPort {
   return {
     recordPermissionDenied: vi.fn(async () => undefined),
-    getConfig: vi.fn(async () => ({ settings: [], sheetMaterialTypes: [], paramProfiles: [], renderPresets: [] })),
+    getConfig: vi.fn(async () => ({ settings: [], paramProfiles: [], renderPresets: [] })),
     updateSetting: vi.fn(async () => ({ key: 'grain.rules', value: {}, version: 1 })),
-    upsertSheetMaterialType: vi.fn(async () => ({ sheetMaterialTypeId: 1, name: 'x', materialTypeId: 1, thicknessMm: 16, widthMm: 2800, heightMm: 2070, isActive: true, version: 0 })),
-    deleteSheetMaterialType: vi.fn(async () => undefined),
     upsertParamProfile: vi.fn(async () => ({ cutParamProfileId: 1, name: 'x', params: {}, isDefault: false, isActive: true, version: 0 })),
     deleteParamProfile: vi.fn(async () => undefined),
     upsertRenderPreset: vi.fn(async () => ({ cutRenderPresetId: 1, name: 'x', targetPx: 360, background: '#fff', isActive: true, version: 0 })),
@@ -53,8 +51,6 @@ describe('CutConfigAdminService RBAC', () => {
     const service = new CutConfigAdminService({ config: port });
     const viewer = user(['cut.view']);
     await expect(service.updateSetting({ currentUser: viewer, key: 'defaults', value: {}, expectedVersion: 0 })).rejects.toMatchObject({ statusCode: 403 });
-    await expect(service.upsertSheetMaterialType({ currentUser: viewer, input: { name: 'x', materialTypeId: 1, thicknessMm: 16, widthMm: 2800, heightMm: 2070 } })).rejects.toMatchObject({ statusCode: 403 });
     await expect(service.deleteRenderPreset({ currentUser: viewer, id: 1, expectedVersion: 0 })).rejects.toMatchObject({ statusCode: 403 });
-    expect(port.upsertSheetMaterialType).not.toHaveBeenCalled();
   });
 });

@@ -56,6 +56,8 @@
     "projects-live-backfill:manifest": "node scripts/projects-live-backfill-manifest.js",
     "projects-live-backfill:proof-sql": "node scripts/projects-live-backfill-proof-sql.js",
     "projects-live-backfill:run": "node scripts/projects-live-backfill-run.js",
+    "sheet-materials:copy": "node backend/scripts/sheet-materials-copy/copy-cli.js",
+    "sheet-materials:copy-reverse": "node backend/scripts/sheet-materials-copy/reverse-cli.js",
     "projects-inference-backfill:preview": "node scripts/projects-inference-backfill-preview.js",
     "test:deadline-notification-action-fixture": "vitest run scripts/deadline-notification-action-fixture-lib.test.js",
     "test:deadline-status-transition-fixture": "vitest run scripts/deadline-status-transition-fixture-lib.test.js",
@@ -65,7 +67,8 @@
     "smoke:runtime-config": "node scripts/smoke-runtime-config.js",
     "smoke:staging-gates": "node scripts/smoke-staging-gates.js",
     "smoke:stage-cutover": "node scripts/stage-cutover-smoke.js",
-    "test:e2e:regression": "playwright test tests/regression tests/frontend-pages-smoke.spec.ts tests/frontend-runtime-config.spec.ts tests/order-workflows.spec.ts tests/reference-workflows.spec.ts --project=chromium"
+    "test:e2e:regression": "playwright test tests/regression tests/frontend-pages-smoke.spec.ts tests/frontend-runtime-config.spec.ts tests/order-workflows.spec.ts tests/reference-workflows.spec.ts --project=chromium",
+    "test:backend:sheet-integration": "vitest run --config vitest.sheet-materials-integration.config.ts"
   },
   "keywords": [],
   "author": "",

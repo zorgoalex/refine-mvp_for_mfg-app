@@ -9,7 +9,6 @@ import type {
   UpdateCutSettingCommand,
   UpsertCutParamProfileCommand,
   UpsertCutRenderPresetCommand,
-  UpsertSheetMaterialTypeCommand,
 } from './cut-config-admin.types';
 
 export interface CutConfigAdminServicePorts {
@@ -37,16 +36,6 @@ export class CutConfigAdminService {
   async updateSetting(command: UpdateCutSettingCommand) {
     this.require(command.currentUser, 'cut.manage', command.requestId);
     return this.ports.config.updateSetting(command);
-  }
-
-  async upsertSheetMaterialType(command: UpsertSheetMaterialTypeCommand) {
-    this.require(command.currentUser, 'cut.manage', command.requestId);
-    return this.ports.config.upsertSheetMaterialType(command);
-  }
-
-  async deleteSheetMaterialType(command: DeleteCatalogRowCommand) {
-    this.require(command.currentUser, 'cut.manage', command.requestId);
-    return this.ports.config.deleteSheetMaterialType(command);
   }
 
   async upsertParamProfile(command: UpsertCutParamProfileCommand) {

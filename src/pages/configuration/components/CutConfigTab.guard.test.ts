@@ -8,29 +8,37 @@ const apiSrc = readFileSync(new URL('../../../api/cutConfigApi.ts', import.meta.
 describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
   it('reads + writes only through the backend cut-config API (no Hasura)', () => {
     expect(tabSrc).toMatch(/cutConfigApi\.get/);
-    expect(tabSrc).toMatch(/cutConfigApi\.(create|update|delete)SheetMaterialType/);
     expect(tabSrc).not.toMatch(/import[\s\S]*dataProvider/);
     expect(tabSrc).not.toMatch(/gql`|mutation\s/);
   });
 
-  it('exposes full CRUD for every config surface (sheet specs, profiles, presets, settings)', () => {
+  it('no sheet-material card in cut config', () => {
+    expect(tabSrc).not.toMatch(/sheet_material_types/i);
+    expect(tabSrc).not.toMatch(/SheetModal/);
+  });
+
+  it('keeps eligibility + profiles + presets', () => {
+    expect(tabSrc).toMatch(/Профили параметров/);
+    expect(tabSrc).toMatch(/Пресеты рендера/);
+  });
+
+  it('exposes CRUD for param-profiles and render-presets (not sheet specs)', () => {
     for (const m of [
-      'updateSetting',
-      'createSheetMaterialType', 'updateSheetMaterialType', 'deleteSheetMaterialType',
       'createParamProfile', 'updateParamProfile', 'deleteParamProfile',
       'createRenderPreset', 'updateRenderPreset', 'deleteRenderPreset',
     ]) {
       expect(apiSrc, `cutConfigApi.${m} missing`).toMatch(new RegExp(`${m}\\(`));
     }
-    // The tab wires profile + preset CRUD (not just sheet specs).
+    // Sheet CRUD should no longer be in cutConfigApi
+    expect(apiSrc).not.toMatch(/createSheetMaterialType/);
+    expect(apiSrc).not.toMatch(/updateSheetMaterialType/);
+    expect(apiSrc).not.toMatch(/deleteSheetMaterialType/);
     expect(tabSrc).toMatch(/cutConfigApi\.(create|update|delete)ParamProfile/);
     expect(tabSrc).toMatch(/cutConfigApi\.(create|update|delete)RenderPreset/);
   });
 
   it('passes the optimistic version on every edit/delete (stale-safe writes)', () => {
-    // delete calls forward the row version; update calls forward editing.version.
     expect(apiSrc).toMatch(/deleteWithVersion\(/);
-    expect(tabSrc).toMatch(/editing\.version|row\.version/);
   });
 
   it('enforces cut.manage for writes in the UI and cut.view to view', () => {

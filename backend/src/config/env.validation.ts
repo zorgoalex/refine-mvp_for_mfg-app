@@ -131,6 +131,7 @@ export const envSchema = z
     BACKEND_ENABLE_CUT_JOBS: booleanFromEnv.default(false),
     BACKEND_CUT_JOBS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_CUT_AUTO_TRIGGER: booleanFromEnv.default(false),
+    BACKEND_ENABLE_SHEET_MATERIALS: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
     BACKEND_NOTIFICATION_RULES_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE: booleanFromEnv.default(false),
