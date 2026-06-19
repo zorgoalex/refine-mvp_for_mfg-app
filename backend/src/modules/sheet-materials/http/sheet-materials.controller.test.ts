@@ -16,4 +16,21 @@ describe('SheetMaterialsController', () => {
     const ctrl = new SheetMaterialsController(svc, rc);
     await expect(ctrl.create(reqUser, { name: '' })).rejects.toMatchObject({ statusCode: 422 });
   });
+
+  const validBody = { name: 'ЛДСП 16', materialTypeId: 2, unitId: 1, thicknessMm: 16, widthMm: 2800, heightMm: 2070 };
+
+  it('accepts a valid create body WITHOUT refKey1c (refKey1c is optional)', async () => {
+    const rc = { getFeatureFlags: () => ({ sheetMaterialsEnabled: true }) } as any;
+    svc.create.mockResolvedValueOnce({});
+    const ctrl = new SheetMaterialsController(svc, rc);
+    await expect(ctrl.create(reqUser, validBody)).resolves.toBeDefined();
+  });
+
+  it('accepts a non-RFC 1C-style UUID refKey1c, rejects a non-UUID with 422', async () => {
+    const rc = { getFeatureFlags: () => ({ sheetMaterialsEnabled: true }) } as any;
+    svc.create.mockResolvedValue({});
+    const ctrl = new SheetMaterialsController(svc, rc);
+    await expect(ctrl.create(reqUser, { ...validBody, refKey1c: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' })).resolves.toBeDefined();
+    await expect(ctrl.create(reqUser, { ...validBody, refKey1c: 'not-a-uuid' })).rejects.toMatchObject({ statusCode: 422 });
+  });
 });

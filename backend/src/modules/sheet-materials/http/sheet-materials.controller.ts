@@ -19,10 +19,15 @@ const inputSchema = z.object({
   supplierArticle: z.string().trim().max(200).nullable().optional(),
   texture: z.boolean().nullable().optional(),
   color: z.string().trim().max(100).nullable().optional(),
-  refKey1c: z.preprocess(
-    (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
-    z.string().uuid().nullable().optional(),
-  ),
+  // Postgres `uuid` accepts any 8-4-4-4-12 hex; 1C GUIDs are not always RFC-4122 (version/variant
+  // nibbles vary), so use the same lenient form as the column + the service validation, NOT z.uuid().
+  // Accept a valid hex UUID, an empty string (form clears -> normalized to null in the repo), null, or
+  // omitted (.nullish()). Avoids z.preprocess(), which Zod 4 treats as a required key.
+  refKey1c: z
+    .string()
+    .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, 'refKey1c must be a UUID')
+    .or(z.literal(''))
+    .nullish(),
   isActive: z.boolean().optional(),
 });
 const createSchema = inputSchema.strict();
