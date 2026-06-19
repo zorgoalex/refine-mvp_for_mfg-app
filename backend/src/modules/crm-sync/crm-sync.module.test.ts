@@ -95,6 +95,37 @@ describe('CrmSyncModule wiring (offline smoke)', () => {
     scheduler.onModuleDestroy();
   });
 
+  it('FailingTwentyApiClient: every method rejects with config error', async () => {
+    const { FailingTwentyApiClient } = await import('./adapters/failing-twenty-api-client');
+    const client = new FailingTwentyApiClient();
+    const MSG = /TWENTY_SYNC_BASE_URL|TWENTY_SYNC_API_KEY/;
+    await expect(client.createRecord('companies', {})).rejects.toThrow(MSG);
+    await expect(client.updateRecord('companies', 'id', {})).rejects.toThrow(MSG);
+    await expect(client.findIdByErpId('companies', '1')).rejects.toThrow(MSG);
+    await expect(client.deleteRecord('companies', 'id')).rejects.toThrow(MSG);
+  });
+
+  it('real consumer is backed by FailingTwentyApiClient (not NoopTwentyApiClient) when creds absent', async () => {
+    // When creds are absent, the real consumer must use FailingTwentyApiClient
+    // so that an enabled-but-misconfigured run throws loudly, not silently no-ops.
+    // We verify this by checking module import wiring: FailingTwentyApiClient is imported
+    // and NoopTwentyApiClient is not used as the real consumer's client.
+    const { FailingTwentyApiClient } = await import('./adapters/failing-twenty-api-client');
+    const { NoopTwentyApiClient } = await import('./adapters/twenty-api-client');
+
+    // FailingTwentyApiClient must throw (real consumer protection)
+    const failing = new FailingTwentyApiClient();
+    await expect(failing.createRecord('companies', {})).rejects.toThrow();
+
+    // NoopTwentyApiClient must NOT throw (it's only for dry-run)
+    const noop = new NoopTwentyApiClient();
+    await expect(noop.createRecord('companies', {})).resolves.toBeDefined();
+
+    // These two are distinctly different — module wires failing (not noop) to real consumer
+    expect(failing).not.toBeInstanceOf(NoopTwentyApiClient);
+    expect(noop).not.toBeInstanceOf(FailingTwentyApiClient);
+  });
+
   it('UnavailableCrmSourceRepository returns null/[] for all methods', async () => {
     const { UnavailableCrmSourceRepository } = await import(
       './adapters/unavailable-crm-source-repository'

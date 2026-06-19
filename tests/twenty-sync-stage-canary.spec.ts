@@ -352,7 +352,20 @@ function cleanupErpFixture(
     );
   }
 
-  // Remove crm_sync_outbox rows for these specific entity ids only
+  // Step 1: Delete ERP fixture rows FIRST — these fire the 025 triggers which
+  // enqueue fresh crm_sync_outbox delete events for the fixture ids.
+  psql(`
+    DELETE FROM orders
+    WHERE order_id = ${Number(orderId)}
+      AND client_id = ${Number(clientId)};
+
+    DELETE FROM clients
+    WHERE client_id = ${Number(clientId)}
+      AND client_name = '${sqlQuote(clientName)}';
+  `);
+
+  // Step 2: Purge crm-sync rows LAST — after the trigger-generated rows exist —
+  // so that assertZeroErpResidue finds nothing (no trigger-generated residue).
   psql(`
     DELETE FROM crm_sync_outbox
     WHERE aggregate_id = '${Number(clientId)}'
@@ -369,14 +382,6 @@ function cleanupErpFixture(
 
     DELETE FROM crm_sync_mapping
     WHERE entity_type = 'order' AND erp_id = '${Number(orderId)}';
-
-    DELETE FROM orders
-    WHERE order_id = ${Number(orderId)}
-      AND client_id = ${Number(clientId)};
-
-    DELETE FROM clients
-    WHERE client_id = ${Number(clientId)}
-      AND client_name = '${sqlQuote(clientName)}';
   `);
 }
 

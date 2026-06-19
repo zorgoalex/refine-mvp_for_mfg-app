@@ -380,6 +380,97 @@ describe('CrmSyncRelayService', () => {
     });
   });
 
+  // ── (f1) fail-closed: flags.enabled=false → no-op, claimBatch NOT called ────
+  describe('(f1) runTick with flags.enabled=false', () => {
+    it('returns {claimed:0,processed:0,failed:0} without calling claimBatch or any write', async () => {
+      const outboxRepo = makeOutboxRepo({
+        claimBatch: vi.fn().mockResolvedValue([makeClaimedEvent()]),
+      });
+      const consumer = makeConsumer([clientIntent()]);
+      const mapping = makeMappingRepo();
+      const audit = makeAudit();
+      const { db } = makeDb();
+      const config = makeConfig({ enabled: false, relayOwner: 'none' });
+
+      const relay = makeRelay({ outboxRepo, consumer, mapping, audit, db, config });
+      const result = await relay.runTick();
+
+      expect(outboxRepo.claimBatch).not.toHaveBeenCalled();
+      expect(outboxRepo.markProcessed).not.toHaveBeenCalled();
+      expect(outboxRepo.markRetry).not.toHaveBeenCalled();
+      expect(mapping.upsertSuccess).not.toHaveBeenCalled();
+      expect(mapping.markFailed).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(db.transaction).not.toHaveBeenCalled();
+      expect(result).toEqual({ claimed: 0, processed: 0, failed: 0 });
+    });
+  });
+
+  // ── (f2) fail-closed: relayOwner='none' (enabled=true) → no-op ───────────────
+  describe('(f2) runTick with relayOwner=none (enabled=true)', () => {
+    it('returns {claimed:0,processed:0,failed:0} without calling claimBatch or any write', async () => {
+      const outboxRepo = makeOutboxRepo({
+        claimBatch: vi.fn().mockResolvedValue([makeClaimedEvent()]),
+      });
+      const consumer = makeConsumer([clientIntent()]);
+      const mapping = makeMappingRepo();
+      const audit = makeAudit();
+      const { db } = makeDb();
+      const config = makeConfig({ enabled: true, relayOwner: 'none' });
+
+      const relay = makeRelay({ outboxRepo, consumer, mapping, audit, db, config });
+      const result = await relay.runTick();
+
+      expect(outboxRepo.claimBatch).not.toHaveBeenCalled();
+      expect(outboxRepo.markProcessed).not.toHaveBeenCalled();
+      expect(outboxRepo.markRetry).not.toHaveBeenCalled();
+      expect(mapping.upsertSuccess).not.toHaveBeenCalled();
+      expect(mapping.markFailed).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(db.transaction).not.toHaveBeenCalled();
+      expect(result).toEqual({ claimed: 0, processed: 0, failed: 0 });
+    });
+  });
+
+  // ── (f3) fail-closed: dry-run is NOT gated (still works when disabled) ────────
+  describe('(f3) dryRun=true with flags.enabled=false — dry-run still works', () => {
+    it('uses peekPending and dryRunConsumer even when flags.enabled=false', async () => {
+      const pendingEvent = {
+        outboxEventId: 'oe-f3',
+        eventType: 'crm.sync.client',
+        aggregateType: 'client',
+        aggregateId: '3',
+        payload: { entity: 'client', id: '3', op: 'upsert' },
+        attempts: 0,
+      };
+      const outboxRepo = makeOutboxRepo({
+        claimBatch: vi.fn().mockResolvedValue([]),
+        peekPending: vi.fn().mockResolvedValue([pendingEvent]),
+        markProcessed: vi.fn(),
+        markRetry: vi.fn(),
+      });
+      const realConsumer = makeConsumer([clientIntent()]);
+      const dryRunConsumer = makeDryRunConsumer([clientIntent()]);
+      const mapping = makeMappingRepo();
+      const audit = makeAudit();
+      const { db } = makeDb();
+      const config = makeConfig({ enabled: false, relayOwner: 'none' });
+
+      const relay = makeRelay({ outboxRepo, consumer: realConsumer, dryRunConsumer, mapping, audit, db, config });
+      const result = await relay.runTick({ dryRun: true });
+
+      // Dry-run must bypass the enabled guard
+      expect(outboxRepo.peekPending).toHaveBeenCalled();
+      expect(outboxRepo.claimBatch).not.toHaveBeenCalled();
+      expect(dryRunConsumer.sync).toHaveBeenCalled();
+      expect(realConsumer.sync).not.toHaveBeenCalled();
+      // No writes
+      expect(outboxRepo.markProcessed).not.toHaveBeenCalled();
+      expect(mapping.upsertSuccess).not.toHaveBeenCalled();
+      expect(result).toEqual({ claimed: 1, processed: 0, failed: 0 });
+    });
+  });
+
   // ── (e) stale processing row reclaimed: OLD token → 0 rows → no side effects ─
   describe('(e) stale lock_token (row reclaimed by another worker)', () => {
     it('markProcessed=0 → no upsertSuccess/audit.record; markRetry=0 → no markFailed', async () => {

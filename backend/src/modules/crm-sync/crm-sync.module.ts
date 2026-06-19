@@ -8,6 +8,7 @@ import { UnavailableCrmSourceRepository } from './adapters/unavailable-crm-sourc
 import { PgCrmSyncMappingRepository } from './adapters/pg-crm-sync-mapping-repository';
 import { PgCrmSyncOutboxRepository } from './adapters/pg-crm-sync-outbox-repository';
 import { TwentyApiClient, NoopTwentyApiClient } from './adapters/twenty-api-client';
+import { FailingTwentyApiClient } from './adapters/failing-twenty-api-client';
 import { TwentySyncConsumer } from './application/twenty-sync-consumer';
 import { CrmSyncRelayService } from './application/crm-sync-relay.service';
 import { CrmSyncRelaySchedulerService } from './application/crm-sync-relay-scheduler.service';
@@ -39,16 +40,18 @@ import { CrmSyncRelaySchedulerService } from './application/crm-sync-relay-sched
         const realTwenty =
           tw.baseUrl && tw.apiKey
             ? new TwentyApiClient(tw.baseUrl, tw.apiKey)
-            : null;
+            : new FailingTwentyApiClient();
 
-        // Noop client is always constructed — used for dryRunConsumer and as fallback.
+        // Noop client is always constructed — used for dryRunConsumer only.
         const noopTwenty = new NoopTwentyApiClient();
 
-        // Real consumer (uses live Twenty client, or Noop if creds absent — relay
-        // will be disabled by flags.enabled anyway).
+        // Real consumer — backed by live TwentyApiClient when creds present, or
+        // FailingTwentyApiClient when creds absent (throws loudly → markRetry, never
+        // silent-processed). NEVER backed by NoopTwentyApiClient.
+        // Note: runTick() fail-closed guard ensures disabled runs never reach this consumer.
         const consumer = new TwentySyncConsumer({
           source,
-          twenty: realTwenty ?? noopTwenty,
+          twenty: realTwenty,
           mapping,
           db: database,
         });

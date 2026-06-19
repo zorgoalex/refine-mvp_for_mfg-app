@@ -103,6 +103,11 @@ export class CrmSyncRelayService {
     }
 
     // ── Normal path ───────────────────────────────────────────────────────────
+    // Fail-closed: if sync is disabled or no relay owner, do nothing (zero writes).
+    if (!flags.enabled || flags.relayOwner === 'none') {
+      return { claimed: 0, processed: 0, failed: 0 };
+    }
+
     const claimed = await this.outboxRepo.claimBatch(
       this.db,
       flags.workerId,
