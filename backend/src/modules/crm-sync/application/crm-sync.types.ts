@@ -26,3 +26,12 @@ export interface CrmSourcePort {
   listClientIds(afterId: string, limit: number): Promise<string[]>;
   listOrderIds(afterId: string, limit: number): Promise<string[]>;
 }
+
+export interface MappingRow {
+  entityType: string;
+  erpId: string;
+  twentyObject: string;
+  twentyId: string | null;
+  status: string;
+  lastHash: string | null;
+}
