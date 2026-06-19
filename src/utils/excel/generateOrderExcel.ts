@@ -10,6 +10,15 @@ const DETAIL_TEMPLATE_LAST_ROW = 66;
 const DETAIL_INSERT_BEFORE_ROW = 67;
 const DETAIL_TEMPLATE_CAPACITY = DETAIL_TEMPLATE_LAST_ROW - DETAIL_START_ROW + 1;
 const PRINT_AREA_TRAILING_ROWS = 16;
+const FOOTER_TEMPLATE_START_ROW = 67;
+const FOOTER_TEMPLATE_END_ROW = 72;
+const FOOTER_TEMPLATE_COLUMN_COUNT = 17;
+
+const FOOTER_MERGES = [
+  { top: 68, left: 1, bottom: 69, right: 8 },
+  { top: 70, left: 1, bottom: 70, right: 9 },
+  { top: 71, left: 1, bottom: 72, right: 8 },
+];
 
 // Типы для заказа, деталей и платежей
 interface OrderDetail {
@@ -58,6 +67,82 @@ export interface GenerateOrderExcelParams {
 }
 
 const cloneStyle = (style: any) => JSON.parse(JSON.stringify(style ?? {}));
+const cloneValue = (value: any) => (
+  value && typeof value === 'object'
+    ? JSON.parse(JSON.stringify(value))
+    : value
+);
+
+function address(row: number, column: number) {
+  let columnName = '';
+  let columnNumber = column;
+
+  while (columnNumber > 0) {
+    const remainder = (columnNumber - 1) % 26;
+    columnName = String.fromCharCode(65 + remainder) + columnName;
+    columnNumber = Math.floor((columnNumber - 1) / 26);
+  }
+
+  return `${columnName}${row}`;
+}
+
+function mergeAddress(merge: { top: number; left: number; bottom: number; right: number }, rowOffset = 0) {
+  return `${address(merge.top + rowOffset, merge.left)}:${address(merge.bottom + rowOffset, merge.right)}`;
+}
+
+function safeUnmergeCells(worksheet: any, range: string) {
+  try {
+    worksheet.unMergeCells(range);
+  } catch {
+    // ExcelJS throws when the range is not currently merged.
+  }
+}
+
+function captureFooterTemplate(worksheet: any) {
+  const rows = [];
+
+  for (let rowNumber = FOOTER_TEMPLATE_START_ROW; rowNumber <= FOOTER_TEMPLATE_END_ROW; rowNumber += 1) {
+    const row = worksheet.getRow(rowNumber);
+    const cells = [];
+
+    for (let column = 1; column <= FOOTER_TEMPLATE_COLUMN_COUNT; column += 1) {
+      const cell = row.getCell(column);
+      cells.push({
+        value: cloneValue(cell.value),
+        style: cloneStyle(cell.style),
+      });
+    }
+
+    rows.push({
+      height: row.height,
+      cells,
+    });
+  }
+
+  return rows;
+}
+
+function restoreFooterTemplate(worksheet: any, footerTemplate: ReturnType<typeof captureFooterTemplate>, rowOffset: number) {
+  FOOTER_MERGES.forEach((merge) => {
+    safeUnmergeCells(worksheet, mergeAddress(merge));
+    safeUnmergeCells(worksheet, mergeAddress(merge, rowOffset));
+  });
+
+  footerTemplate.forEach((templateRow, rowIndex) => {
+    const targetRow = worksheet.getRow(FOOTER_TEMPLATE_START_ROW + rowOffset + rowIndex);
+    targetRow.height = templateRow.height;
+
+    templateRow.cells.forEach((templateCell, cellIndex) => {
+      const targetCell = targetRow.getCell(cellIndex + 1);
+      targetCell.value = cloneValue(templateCell.value);
+      targetCell.style = cloneStyle(templateCell.style);
+    });
+  });
+
+  FOOTER_MERGES.forEach((merge) => {
+    worksheet.mergeCells(mergeAddress(merge, rowOffset));
+  });
+}
 
 function applyDetailRowLayout(worksheet: any, rowNumber: number) {
   const templateRow = worksheet.getRow(DETAIL_TEMPLATE_LAST_ROW);
@@ -79,7 +164,10 @@ function applyDetailRowLayout(worksheet: any, rowNumber: number) {
 
 function prepareDetailRows(worksheet: any, detailCount: number) {
   const extraRows = Math.max(0, detailCount - DETAIL_TEMPLATE_CAPACITY);
+  const footerTemplate = captureFooterTemplate(worksheet);
+
   if (extraRows > 0) {
+    FOOTER_MERGES.forEach((merge) => safeUnmergeCells(worksheet, mergeAddress(merge)));
     worksheet.spliceRows(
       DETAIL_INSERT_BEFORE_ROW,
       0,
@@ -96,6 +184,7 @@ function prepareDetailRows(worksheet: any, detailCount: number) {
   worksheet.getCell('K8').value = { formula: `SUM(E${DETAIL_START_ROW}:E${lastDetailRow})` };
   worksheet.getCell('M8').value = { formula: `SUM(D${DETAIL_START_ROW}:D${lastDetailRow})` };
   worksheet.pageSetup.printArea = `A1:M${lastDetailRow + PRINT_AREA_TRAILING_ROWS}`;
+  restoreFooterTemplate(worksheet, footerTemplate, extraRows);
 
   return lastDetailRow;
 }

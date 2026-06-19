@@ -79,4 +79,47 @@ describe('buildOrderExcelBuffer dynamic detail rows', () => {
     expect(String(worksheet.getCell(`A${footerRow}`).value)).toContain('С техническими');
     expect(worksheet.pageSetup.printArea).toBe(`A1:M${lastDetailRow + 16}`);
   });
+
+  it('keeps footer signature rows merged and below expanded detail rows', async () => {
+    const worksheet = await buildWorkbook(70);
+    const shiftedFooterStartRow = 68 + (70 - 55);
+
+    expect(worksheet.getCell(`A${shiftedFooterStartRow}`).value).toBe(
+      'С техническими и технологическими особенностями ознакомлен, количество и размеры верны',
+    );
+    expect(worksheet.getCell(`A${shiftedFooterStartRow}`).isMerged).toBe(true);
+    expect(worksheet.getCell(`H${shiftedFooterStartRow + 1}`).isMerged).toBe(true);
+    expect(worksheet.getCell(`A${shiftedFooterStartRow + 1}`).style.alignment).toMatchObject({
+      horizontal: 'right',
+      vertical: 'middle',
+      wrapText: true,
+    });
+    expect(worksheet.getCell(`A${shiftedFooterStartRow + 1}`).style.font).toMatchObject({
+      italic: true,
+      size: 9,
+    });
+    expect(worksheet.getCell(`I${shiftedFooterStartRow}`).value).toBe('(фамилия)');
+
+    expect(worksheet.getCell(`A${shiftedFooterStartRow + 2}`).isMerged).toBe(true);
+    expect(worksheet.getCell(`I${shiftedFooterStartRow + 2}`).isMerged).toBe(true);
+
+    expect(worksheet.getCell(`A${shiftedFooterStartRow + 3}`).value).toBe(
+      'Техникалық және технологиялық ерекшелерімен таныстым, саны және өлшемі дұрыс',
+    );
+    expect(worksheet.getCell(`A${shiftedFooterStartRow + 3}`).isMerged).toBe(true);
+    expect(worksheet.getCell(`H${shiftedFooterStartRow + 4}`).isMerged).toBe(true);
+    expect(worksheet.getCell(`A${shiftedFooterStartRow + 4}`).style.alignment).toMatchObject({
+      horizontal: 'right',
+      vertical: 'middle',
+      wrapText: true,
+    });
+    expect(worksheet.getCell(`A${shiftedFooterStartRow + 4}`).style.font).toMatchObject({
+      italic: true,
+      size: 9,
+    });
+    expect(worksheet.getCell(`I${shiftedFooterStartRow + 3}`).value).toBe('(подпись)');
+
+    expect(worksheet.getCell('A68').isMerged).toBe(false);
+    expect(worksheet.getCell('H69').isMerged).toBe(false);
+  });
 });
