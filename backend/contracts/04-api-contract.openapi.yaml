@@ -5215,15 +5215,15 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/cut-config/sheet-material-types:
-    post:
+  /api/v1/sheet-material-types:
+    get:
       tags:
-        - CutConfig
-      operationId: createCutSheetMaterialType
-      summary: Create a sheet material type
+        - SheetMaterials
+      operationId: listSheetMaterialTypes
+      summary: List sheet material types
       security:
         - bearerAuth: []
-      x-permission: cut.manage
+      x-permission: sheet_materials.view
       responses:
         '200':
           description: OK
@@ -5231,6 +5231,27 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - SheetMaterials
+      operationId: createSheetMaterialType
+      summary: Create a sheet material type
+      security:
+        - bearerAuth: []
+      x-permission: sheet_materials.manage
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -5238,22 +5259,49 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/cut-config/sheet-material-types/{id}:
-    put:
+  /api/v1/sheet-material-types/{id}:
+    get:
       tags:
-        - CutConfig
-      operationId: updateCutSheetMaterialType
-      summary: Update a sheet material type
+        - SheetMaterials
+      operationId: getSheetMaterialType
+      summary: Get a sheet material type
       security:
         - bearerAuth: []
-      x-permission: cut.manage
+      x-permission: sheet_materials.view
       responses:
         '200':
           description: OK
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags:
+        - SheetMaterials
+      operationId: updateSheetMaterialType
+      summary: Update a sheet material type
+      security:
+        - bearerAuth: []
+      x-permission: sheet_materials.manage
+      responses:
+        '200':
+          description: OK
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -5264,21 +5312,27 @@ paths:
           $ref: '#/components/responses/InternalError'
     delete:
       tags:
-        - CutConfig
-      operationId: deleteCutSheetMaterialType
+        - SheetMaterials
+      operationId: deactivateSheetMaterialType
       summary: Deactivate a sheet material type
       security:
         - bearerAuth: []
-      x-permission: cut.manage
+      x-permission: sheet_materials.manage
       responses:
-        '200':
-          description: OK
+        '204':
+          description: No Content
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/FeatureDisabled'
         '500':
@@ -5861,6 +5915,30 @@ components:
                 details:
                   feature: deadlines
                 requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    NotFound:
+      description: Запрашиваемый ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            notFound:
+              value:
+                code: SHEET_MATERIAL_NOT_FOUND
+                message: Sheet material type not found
+                requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    Conflict:
+      description: Конфликт версии или уникальности
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            conflict:
+              value:
+                code: SHEET_MATERIAL_STALE_VERSION
+                message: Sheet material type version mismatch
+                requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
     InternalError:
       description: Внутренняя ошибка сервера
       content:
@@ -5946,6 +6024,8 @@ components:
         - users.activate
         - references.view
         - references.manage
+        - sheet_materials.view
+        - sheet_materials.manage
         - analytics.view
         - vlm.use
         - vlm.configure

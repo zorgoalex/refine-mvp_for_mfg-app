@@ -43,6 +43,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   configuration: ['settings.view', 'settings.manage'],
   audit: ['audit.view'],
   'cut-jobs': ['cut.view'],
+  sheet_material_types: ['sheet_materials.view'],
 };
 
 export interface LegacyPermissionCarrier extends PermissionCarrier {

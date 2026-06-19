@@ -13,17 +13,14 @@ import {
   type CutRenderPresetDto,
   type CutSettingRowDto,
   type DeleteCatalogRowCommand,
-  type SheetMaterialTypeDto,
   type UpdateCutSettingCommand,
   type UpsertCutParamProfileCommand,
   type UpsertCutRenderPresetCommand,
-  type UpsertSheetMaterialTypeCommand,
 } from '../application/cut-config-admin.types';
 import {
   validateParamProfileInput,
   validateRenderPresetInput,
   validateSettingValue,
-  validateSheetMaterialTypeInput,
 } from '../application/cut-config-validation';
 import { CutConfigRowNotFoundError, CutStaleVersionError } from '../errors/cut.errors';
 
@@ -31,8 +28,6 @@ const AUDIT_SOURCE = 'backend-cut-config';
 
 export const CUT_CONFIG_AUDIT_EVENTS = {
   settingUpdated: 'cut_config.setting_updated',
-  sheetMaterialTypeUpserted: 'cut_config.sheet_material_type_upserted',
-  sheetMaterialTypeDeleted: 'cut_config.sheet_material_type_deleted',
   paramProfileUpserted: 'cut_config.param_profile_upserted',
   paramProfileDeleted: 'cut_config.param_profile_deleted',
   renderPresetUpserted: 'cut_config.render_preset_upserted',
@@ -64,13 +59,9 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
   }
 
   async getConfig(_context: CutConfigContext): Promise<CutConfigDto> {
-    const [settings, sheets, profiles, presets] = await Promise.all([
+    const [settings, profiles, presets] = await Promise.all([
       this.database.query<{ key: string; value: unknown; version: number }>(
         `SELECT key, value, version FROM cut_settings ORDER BY key`,
-      ),
-      this.database.query(
-        `SELECT sheet_material_type_id, name, material_type_id, thickness_mm, width_mm, height_mm, is_active, version
-         FROM sheet_material_types ORDER BY name`,
       ),
       this.database.query(
         `SELECT cut_param_profile_id, name, params, is_default, is_active, version FROM cut_param_profiles ORDER BY name`,
@@ -82,7 +73,6 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
 
     return {
       settings: settings.rows.map((r) => ({ key: r.key, value: r.value, version: toNum(r.version) })),
-      sheetMaterialTypes: sheets.rows.map(mapSheet),
       paramProfiles: profiles.rows.map(mapProfile),
       renderPresets: presets.rows.map(mapPreset),
     };
@@ -115,74 +105,6 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
         requestId: command.requestId,
       });
       return { key: command.key, value: updated.rows[0].value, version: toNum(updated.rows[0].version) };
-    });
-  }
-
-  async upsertSheetMaterialType(command: UpsertSheetMaterialTypeCommand): Promise<SheetMaterialTypeDto> {
-    const input = validateSheetMaterialTypeInput(command.input);
-    return this.writeCatalog(() => this.database.transaction(async (tx) => {
-      await setSessionUser(tx, command.currentUser.id);
-      if (command.sheetMaterialTypeId === undefined) {
-        const inserted = await tx.query(
-          `INSERT INTO sheet_material_types (name, material_type_id, thickness_mm, width_mm, height_mm, is_active, created_by, edited_by)
-           VALUES ($1, $2, $3, $4, $5, COALESCE($6, true), $7, $7)
-           RETURNING sheet_material_type_id, name, material_type_id, thickness_mm, width_mm, height_mm, is_active, version`,
-          [input.name, input.materialTypeId, input.thicknessMm, input.widthMm, input.heightMm, input.isActive ?? null, numOrNull(command.currentUser.id)],
-        );
-        const row = mapSheet(inserted.rows[0]);
-        await this.audit(tx, command.currentUser, {
-          event: CUT_CONFIG_AUDIT_EVENTS.sheetMaterialTypeUpserted,
-          entityType: 'sheet_material_type',
-          entityId: row.sheetMaterialTypeId,
-          before: null,
-          after: { ...input },
-          requestId: command.requestId,
-          relatedSheetMaterialTypeId: row.sheetMaterialTypeId,
-        });
-        return row;
-      }
-
-      const existing = await tx.query(
-        `SELECT sheet_material_type_id, name, material_type_id, thickness_mm, width_mm, height_mm, is_active, version
-         FROM sheet_material_types WHERE sheet_material_type_id = $1 FOR UPDATE`,
-        [command.sheetMaterialTypeId],
-      );
-      if (existing.rowCount === 0) {
-        throw new CutConfigRowNotFoundError('sheet_material_types', command.sheetMaterialTypeId);
-      }
-      const before = mapSheet(existing.rows[0]);
-      assertVersion(before.version, command.expectedVersion ?? -1, String(command.sheetMaterialTypeId));
-
-      const updated = await tx.query(
-        `UPDATE sheet_material_types
-         SET name = $2, material_type_id = $3, thickness_mm = $4, width_mm = $5, height_mm = $6,
-             is_active = COALESCE($7, is_active), version = version + 1, edited_by = $8, updated_at = now()
-         WHERE sheet_material_type_id = $1
-         RETURNING sheet_material_type_id, name, material_type_id, thickness_mm, width_mm, height_mm, is_active, version`,
-        [command.sheetMaterialTypeId, input.name, input.materialTypeId, input.thicknessMm, input.widthMm, input.heightMm, input.isActive ?? null, numOrNull(command.currentUser.id)],
-      );
-      const after = mapSheet(updated.rows[0]);
-      await this.audit(tx, command.currentUser, {
-        event: CUT_CONFIG_AUDIT_EVENTS.sheetMaterialTypeUpserted,
-        entityType: 'sheet_material_type',
-        entityId: after.sheetMaterialTypeId,
-        before: catalogDiffShape(before),
-        after: catalogDiffShape(after),
-        requestId: command.requestId,
-        relatedSheetMaterialTypeId: after.sheetMaterialTypeId,
-      });
-      return after;
-    }));
-  }
-
-  deleteSheetMaterialType(command: DeleteCatalogRowCommand): Promise<void> {
-    return this.softDeleteCatalog({
-      table: 'sheet_material_types',
-      idColumn: 'sheet_material_type_id',
-      event: CUT_CONFIG_AUDIT_EVENTS.sheetMaterialTypeDeleted,
-      entityType: 'sheet_material_type',
-      command,
-      relatedSheetMaterialTypeId: command.id,
     });
   }
 
@@ -323,7 +245,6 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
     event: string;
     entityType: string;
     command: DeleteCatalogRowCommand;
-    relatedSheetMaterialTypeId?: number;
   }): Promise<void> {
     const { command } = opts;
     return this.database.transaction(async (tx) => {
@@ -348,7 +269,6 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
         before: { isActive: Boolean(existing.rows[0].is_active) },
         after: { isActive: false },
         requestId: command.requestId,
-        relatedSheetMaterialTypeId: opts.relatedSheetMaterialTypeId,
       });
     });
   }
@@ -376,7 +296,6 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
       before: Record<string, unknown> | null;
       after: Record<string, unknown> | null;
       requestId?: string;
-      relatedSheetMaterialTypeId?: number;
     },
   ): Promise<void> {
     const diff = input.before && input.after ? computeDiff(input.before, input.after) : null;
@@ -392,25 +311,10 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
       before: input.before,
       after: input.after,
       diff,
-      relatedEntities: input.relatedSheetMaterialTypeId
-        ? [{ entityType: 'sheet_material_type', entityId: input.relatedSheetMaterialTypeId }]
-        : [],
+      relatedEntities: [],
     };
     await auditService.record(tx, event);
   }
-}
-
-function mapSheet(r: Record<string, unknown>): SheetMaterialTypeDto {
-  return {
-    sheetMaterialTypeId: toNum(r.sheet_material_type_id),
-    name: String(r.name),
-    materialTypeId: toNum(r.material_type_id),
-    thicknessMm: Number(r.thickness_mm),
-    widthMm: Number(r.width_mm),
-    heightMm: Number(r.height_mm),
-    isActive: Boolean(r.is_active),
-    version: toNum(r.version),
-  };
 }
 
 function mapProfile(r: Record<string, unknown>): CutParamProfileDto {
@@ -432,17 +336,6 @@ function mapPreset(r: Record<string, unknown>): CutRenderPresetDto {
     background: String(r.background),
     isActive: Boolean(r.is_active),
     version: toNum(r.version),
-  };
-}
-
-function catalogDiffShape(s: SheetMaterialTypeDto): Record<string, unknown> {
-  return {
-    name: s.name,
-    materialTypeId: s.materialTypeId,
-    thicknessMm: s.thicknessMm,
-    widthMm: s.widthMm,
-    heightMm: s.heightMm,
-    isActive: s.isActive,
   };
 }
 

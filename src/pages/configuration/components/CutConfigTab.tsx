@@ -25,8 +25,6 @@ import {
   type CutConfig,
   type CutParamProfile,
   type CutRenderPreset,
-  type SheetMaterialType,
-  type SheetMaterialTypeInput,
 } from '../../../api/cutConfigApi';
 import { ApiError } from '../../../api/httpClient';
 import { can } from '../../../utils/permissions';
@@ -41,7 +39,6 @@ import {
   formToParams,
   paramsToForm,
   parseCodesCsv,
-  sheetSpecOnboardingHint,
 } from './cutConfigHelpers';
 
 const { Title, Text, Paragraph } = Typography;
@@ -56,8 +53,6 @@ export const CutConfigTab: React.FC = () => {
   const canManage = can('cut.manage');
   const [config, setConfig] = useState<CutConfig | null>(null);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<SheetMaterialType | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
   const [profileEdit, setProfileEdit] = useState<CutParamProfile | null>(null);
   const [profileCreate, setProfileCreate] = useState(false);
   const [presetEdit, setPresetEdit] = useState<CutRenderPreset | null>(null);
@@ -97,22 +92,6 @@ export const CutConfigTab: React.FC = () => {
       setBusy(false);
     }
   }, [config, eligibilityCsv, reload]);
-
-  const removeSheet = useCallback(
-    async (row: SheetMaterialType) => {
-      setBusy(true);
-      try {
-        await cutConfigApi.deleteSheetMaterialType(row.sheetMaterialTypeId, row.version);
-        message.success('Спецификация деактивирована');
-        await reload();
-      } catch (error) {
-        message.error(error instanceof ApiError ? error.message : 'Не удалось удалить спецификацию');
-      } finally {
-        setBusy(false);
-      }
-    },
-    [reload],
-  );
 
   const removeProfile = useCallback(
     async (row: CutParamProfile) => {
@@ -190,38 +169,6 @@ export const CutConfigTab: React.FC = () => {
     [canManage, removePreset],
   );
 
-  const sheetColumns: ColumnsType<SheetMaterialType> = useMemo(
-    () => [
-      { title: 'Название', dataIndex: 'name', key: 'name' },
-      { title: 'Тип', dataIndex: 'materialTypeId', key: 'type' },
-      { title: 'Толщина, мм', dataIndex: 'thicknessMm', key: 'thickness' },
-      { title: 'Ширина, мм', dataIndex: 'widthMm', key: 'width' },
-      { title: 'Высота, мм', dataIndex: 'heightMm', key: 'height' },
-      {
-        title: 'Активна',
-        key: 'active',
-        render: (_: unknown, row) => (row.isActive ? <Tag color="green">да</Tag> : <Tag>нет</Tag>),
-      },
-      {
-        title: 'Действия',
-        key: 'actions',
-        render: (_: unknown, row) => (
-          <Space>
-            <Button size="small" disabled={!canManage} onClick={() => setEditing(row)}>
-              Изменить
-            </Button>
-            <Popconfirm title="Деактивировать спецификацию?" onConfirm={() => removeSheet(row)} okText="Да" cancelText="Нет">
-              <Button size="small" danger disabled={!canManage || !row.isActive}>
-                Деактивировать
-              </Button>
-            </Popconfirm>
-          </Space>
-        ),
-      },
-    ],
-    [canManage, removeSheet],
-  );
-
   if (!can('cut.view')) {
     return <Alert type="error" showIcon message="Недостаточно прав для конфигурации раскроя" />;
   }
@@ -229,30 +176,9 @@ export const CutConfigTab: React.FC = () => {
     return <Spin />;
   }
 
-  const onboardingHint = sheetSpecOnboardingHint(config.sheetMaterialTypes.length);
-
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Title level={4}>Раскрой</Title>
-      {onboardingHint && <Alert type="warning" showIcon message={onboardingHint} />}
-
-      <Card
-        size="small"
-        title="Раскройные спецификации материалов (sheet_material_types)"
-        extra={
-          <Button type="primary" disabled={!canManage} onClick={() => setCreateOpen(true)}>
-            Добавить спецификацию
-          </Button>
-        }
-      >
-        <Table<SheetMaterialType>
-          size="small"
-          rowKey="sheetMaterialTypeId"
-          columns={sheetColumns}
-          dataSource={config.sheetMaterialTypes}
-          pagination={false}
-        />
-      </Card>
 
       <Card size="small" title="Статусы готовности к раскрою (eligibility.statuses)">
         <Paragraph type="secondary">
@@ -307,20 +233,6 @@ export const CutConfigTab: React.FC = () => {
           pagination={false}
         />
       </Card>
-
-      <SheetModal
-        open={createOpen || editing !== null}
-        editing={editing}
-        onClose={() => {
-          setCreateOpen(false);
-          setEditing(null);
-        }}
-        onSaved={async () => {
-          setCreateOpen(false);
-          setEditing(null);
-          await reload();
-        }}
-      />
 
       <ProfileModal
         open={profileCreate || profileEdit !== null}
@@ -631,78 +543,3 @@ const PresetModal: React.FC<PresetModalProps> = ({ open, editing, onClose, onSav
   );
 };
 
-interface SheetModalProps {
-  open: boolean;
-  editing: SheetMaterialType | null;
-  onClose: () => void;
-  onSaved: () => void | Promise<void>;
-}
-
-const SheetModal: React.FC<SheetModalProps> = ({ open, editing, onClose, onSaved }) => {
-  const [form] = Form.useForm<SheetMaterialTypeInput>();
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    if (editing) {
-      form.setFieldsValue({
-        name: editing.name,
-        materialTypeId: editing.materialTypeId,
-        thicknessMm: editing.thicknessMm,
-        widthMm: editing.widthMm,
-        heightMm: editing.heightMm,
-      });
-    } else {
-      form.resetFields();
-    }
-  }, [open, editing, form]);
-
-  const submit = useCallback(async () => {
-    setSaving(true);
-    try {
-      const values = await form.validateFields();
-      if (editing) {
-        await cutConfigApi.updateSheetMaterialType(editing.sheetMaterialTypeId, values, editing.version);
-      } else {
-        await cutConfigApi.createSheetMaterialType(values);
-      }
-      message.success('Спецификация сохранена');
-      await onSaved();
-    } catch (error) {
-      if (error && (error as { errorFields?: unknown }).errorFields) return;
-      message.error(error instanceof ApiError ? error.message : 'Не удалось сохранить спецификацию');
-    } finally {
-      setSaving(false);
-    }
-  }, [editing, form, onSaved]);
-
-  return (
-    <Modal
-      title={editing ? 'Изменить спецификацию' : 'Новая раскройная спецификация'}
-      open={open}
-      onOk={submit}
-      confirmLoading={saving}
-      onCancel={onClose}
-      okText="Сохранить"
-      cancelText="Отмена"
-    >
-      <Form form={form} layout="vertical">
-        <Form.Item name="name" label="Название" rules={[{ required: true, message: 'Укажите название' }]}>
-          <Input maxLength={200} placeholder="ЛДСП Egger H1234 16мм 2070x2800" />
-        </Form.Item>
-        <Form.Item name="materialTypeId" label="ID типа материала" rules={[{ required: true, message: 'Укажите тип материала' }]}>
-          <InputNumber min={1} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="thicknessMm" label="Толщина, мм" rules={[{ required: true, message: 'Укажите толщину' }]}>
-          <InputNumber min={0.01} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="widthMm" label="Ширина, мм" rules={[{ required: true, message: 'Укажите ширину' }]}>
-          <InputNumber min={0.01} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="heightMm" label="Высота, мм" rules={[{ required: true, message: 'Укажите высоту' }]}>
-          <InputNumber min={0.01} style={{ width: '100%' }} />
-        </Form.Item>
-      </Form>
-    </Modal>
-  );
-};

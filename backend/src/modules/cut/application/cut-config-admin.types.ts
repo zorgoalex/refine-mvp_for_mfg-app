@@ -7,17 +7,6 @@ export interface CutSettingRowDto {
   version: number;
 }
 
-export interface SheetMaterialTypeDto {
-  sheetMaterialTypeId: number;
-  name: string;
-  materialTypeId: number;
-  thicknessMm: number;
-  widthMm: number;
-  heightMm: number;
-  isActive: boolean;
-  version: number;
-}
-
 export interface CutParamProfileDto {
   cutParamProfileId: number;
   name: string;
@@ -38,7 +27,6 @@ export interface CutRenderPresetDto {
 
 export interface CutConfigDto {
   settings: CutSettingRowDto[];
-  sheetMaterialTypes: SheetMaterialTypeDto[];
   paramProfiles: CutParamProfileDto[];
   renderPresets: CutRenderPresetDto[];
 }
@@ -52,21 +40,6 @@ export interface UpdateCutSettingCommand extends CutConfigContext {
   key: string;
   value: unknown;
   expectedVersion: number;
-}
-
-export interface SheetMaterialTypeInput {
-  name: string;
-  materialTypeId: number;
-  thicknessMm: number;
-  widthMm: number;
-  heightMm: number;
-  isActive?: boolean;
-}
-
-export interface UpsertSheetMaterialTypeCommand extends CutConfigContext {
-  sheetMaterialTypeId?: number;
-  expectedVersion?: number;
-  input: SheetMaterialTypeInput;
 }
 
 export interface DeleteCatalogRowCommand extends CutConfigContext {
@@ -110,8 +83,6 @@ export interface CutConfigAdminPort {
   getConfig(context: CutConfigContext): Promise<CutConfigDto>;
   recordPermissionDenied(input: CutConfigPermissionDeniedInput): Promise<void>;
   updateSetting(command: UpdateCutSettingCommand): Promise<CutSettingRowDto>;
-  upsertSheetMaterialType(command: UpsertSheetMaterialTypeCommand): Promise<SheetMaterialTypeDto>;
-  deleteSheetMaterialType(command: DeleteCatalogRowCommand): Promise<void>;
   upsertParamProfile(command: UpsertCutParamProfileCommand): Promise<CutParamProfileDto>;
   deleteParamProfile(command: DeleteCatalogRowCommand): Promise<void>;
   upsertRenderPreset(command: UpsertCutRenderPresetCommand): Promise<CutRenderPresetDto>;

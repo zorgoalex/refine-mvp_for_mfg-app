@@ -12,12 +12,6 @@ export class UnavailableCutConfigAdminRepository implements CutConfigAdminPort {
   updateSetting() {
     return Promise.reject(unavailable());
   }
-  upsertSheetMaterialType() {
-    return Promise.reject(unavailable());
-  }
-  deleteSheetMaterialType() {
-    return Promise.reject(unavailable());
-  }
   upsertParamProfile() {
     return Promise.reject(unavailable());
   }

@@ -119,44 +119,7 @@ describeIntegration('PgCutConfigAdminRepository (integration)', () => {
   });
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE sheet_material_types, cut_param_profiles, cut_render_presets, audit_log, audit_log_related_entity RESTART IDENTITY CASCADE');
-  });
-
-  it('creates, updates and deactivates a sheet material type with audit + version', async () => {
-    const created = await repo.upsertSheetMaterialType({
-      currentUser: currentUser(),
-      input: { name: 'ЛДСП 16 2800x2070', materialTypeId: 1, thicknessMm: 16, widthMm: 2800, heightMm: 2070 },
-    });
-    expect(created.version).toBe(0);
-
-    const updated = await repo.upsertSheetMaterialType({
-      currentUser: currentUser(),
-      sheetMaterialTypeId: created.sheetMaterialTypeId,
-      expectedVersion: 0,
-      input: { name: 'ЛДСП 16 2800x2070', materialTypeId: 1, thicknessMm: 18, widthMm: 2800, heightMm: 2070 },
-    });
-    expect(updated.thicknessMm).toBe(18);
-    expect(updated.version).toBe(1);
-
-    // Stale version is rejected.
-    await expect(
-      repo.upsertSheetMaterialType({
-        currentUser: currentUser(),
-        sheetMaterialTypeId: created.sheetMaterialTypeId,
-        expectedVersion: 0,
-        input: { name: 'ЛДСП 16 2800x2070', materialTypeId: 1, thicknessMm: 20, widthMm: 2800, heightMm: 2070 },
-      }),
-    ).rejects.toMatchObject({ code: 'CUT_STALE_VERSION' });
-
-    await repo.deleteSheetMaterialType({ currentUser: currentUser(), id: created.sheetMaterialTypeId, expectedVersion: 1 });
-    const row = await pool.query('SELECT is_active FROM sheet_material_types WHERE sheet_material_type_id = $1', [created.sheetMaterialTypeId]);
-    expect(row.rows[0].is_active).toBe(false);
-
-    const audits = await pool.query(`SELECT event FROM audit_log ORDER BY audit_id`);
-    expect(audits.rows.map((r) => r.event)).toContain('cut_config.sheet_material_type_upserted');
-    expect(audits.rows.map((r) => r.event)).toContain('cut_config.sheet_material_type_deleted');
-    const bridge = await pool.query(`SELECT entity_type FROM audit_log_related_entity`);
-    expect(bridge.rows.map((r) => r.entity_type)).toContain('sheet_material_type');
+    await pool.query('TRUNCATE cut_param_profiles, cut_render_presets, audit_log, audit_log_related_entity RESTART IDENTITY CASCADE');
   });
 
   it('updates a setting with a version guard and rejects an invalid grain rule', async () => {
@@ -197,17 +160,11 @@ describeIntegration('PgCutConfigAdminRepository (integration)', () => {
     expect(audit.rows[0].diff_json).toHaveProperty('params');
   });
 
-  it('getConfig returns settings + all three catalogs with the expected columns', async () => {
-    await repo.upsertSheetMaterialType({
-      currentUser: currentUser(),
-      input: { name: 'ЛДСП 16 cfg', materialTypeId: 1, thicknessMm: 16, widthMm: 2800, heightMm: 2070 },
-    });
+  it('getConfig returns settings + param profiles and render presets', async () => {
     const config = await repo.getConfig({ currentUser: currentUser() });
     expect(config.settings.map((s) => s.key)).toContain('grain.rules');
-    expect(config.sheetMaterialTypes).toHaveLength(1);
-    // every sheet row exposes the optimistic version (regression: migration 024)
-    expect(config.sheetMaterialTypes[0]).toHaveProperty('version');
-    expect(typeof config.sheetMaterialTypes[0].version).toBe('number');
+    expect(config).toHaveProperty('paramProfiles');
+    expect(config).toHaveProperty('renderPresets');
   });
 
   it('maps a duplicate-name conflict to 409 (not a raw 500)', async () => {

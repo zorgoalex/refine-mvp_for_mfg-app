@@ -9,22 +9,10 @@ import type {
   CutParamProfileDto,
   CutRenderPresetDto,
   CutSettingRowDto,
-  SheetMaterialTypeDto,
 } from '../application/cut-config-admin.types';
 import { CutRuntimeConfigService } from './cut-runtime-config.service';
 
 const settingBodySchema = z.object({ value: z.unknown(), version: z.number().int().min(0) }).strict();
-
-const sheetInputSchema = z.object({
-  name: z.string().trim().min(1).max(200),
-  materialTypeId: z.number().int().positive(),
-  thicknessMm: z.number().positive(),
-  widthMm: z.number().positive(),
-  heightMm: z.number().positive(),
-  isActive: z.boolean().optional(),
-});
-const sheetCreateSchema = sheetInputSchema.strict();
-const sheetUpdateSchema = sheetInputSchema.extend({ version: z.number().int().min(0) }).strict();
 
 const profileInputSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -78,38 +66,6 @@ export class CutConfigController {
       expectedVersion: parsed.version,
       requestId: request.requestId,
     });
-  }
-
-  @ApiOperation({ operationId: 'createCutSheetMaterialType', summary: 'Create a sheet material type' })
-  @Post('sheet-material-types')
-  async createSheet(@Req() request: RequestWithCurrentUser, @Body() body: unknown): Promise<SheetMaterialTypeDto> {
-    const currentUser = this.requireMutation(request);
-    return this.config.upsertSheetMaterialType({ currentUser, input: parse(sheetCreateSchema, body), requestId: request.requestId });
-  }
-
-  @ApiOperation({ operationId: 'updateCutSheetMaterialType', summary: 'Update a sheet material type' })
-  @Put('sheet-material-types/:id')
-  async updateSheet(
-    @Req() request: RequestWithCurrentUser,
-    @Param('id') id: string,
-    @Body() body: unknown,
-  ): Promise<SheetMaterialTypeDto> {
-    const currentUser = this.requireMutation(request);
-    const { version, ...input } = parse(sheetUpdateSchema, body);
-    return this.config.upsertSheetMaterialType({
-      currentUser,
-      sheetMaterialTypeId: parseId(id),
-      expectedVersion: version,
-      input,
-      requestId: request.requestId,
-    });
-  }
-
-  @ApiOperation({ operationId: 'deleteCutSheetMaterialType', summary: 'Deactivate a sheet material type' })
-  @Delete('sheet-material-types/:id')
-  async deleteSheet(@Req() request: RequestWithCurrentUser, @Param('id') id: string, @Body() body: unknown): Promise<void> {
-    const currentUser = this.requireMutation(request);
-    await this.config.deleteSheetMaterialType({ currentUser, id: parseId(id), expectedVersion: parseVersion(body), requestId: request.requestId });
   }
 
   @ApiOperation({ operationId: 'createCutParamProfile', summary: 'Create a freecut param profile' })

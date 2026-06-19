@@ -170,6 +170,11 @@ const PaymentsAnalyticsShow = lazy(async () => ({ default: (await import("./page
 
 const AuditList = lazy(async () => ({ default: (await import("./pages/audit/list")).AuditList }));
 
+const SheetMaterialList = lazy(async () => ({ default: (await import('./pages/sheet-materials/list')).SheetMaterialList }));
+const SheetMaterialCreate = lazy(async () => ({ default: (await import('./pages/sheet-materials/create')).SheetMaterialCreate }));
+const SheetMaterialEdit = lazy(async () => ({ default: (await import('./pages/sheet-materials/edit')).SheetMaterialEdit }));
+const SheetMaterialShow = lazy(async () => ({ default: (await import('./pages/sheet-materials/show')).SheetMaterialShow }));
+
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 
 const App = () => {
@@ -245,6 +250,14 @@ const App = () => {
                   edit: "/materials/edit/:id",
                   show: "/materials/show/:id",
                   meta: { idColumnName: "material_id", label: "Материалы" },
+                },
+                {
+                  name: "sheet_material_types",
+                  list: "/sheet-material-types",
+                  create: "/sheet-material-types/create",
+                  edit: "/sheet-material-types/edit/:id",
+                  show: "/sheet-material-types/show/:id",
+                  meta: { idColumnName: "sheet_material_type_id", label: "Листовые материалы" },
                 },
                 {
                   name: "milling_types",
@@ -569,6 +582,12 @@ const App = () => {
                     <Route path="create" element={<MaterialCreate />} />
                     <Route path="edit/:id" element={<MaterialEdit />} />
                     <Route path="show/:id" element={<MaterialShow />} />
+                  </Route>
+                  <Route path="/sheet-material-types" >
+                    <Route index element={<SheetMaterialList />} />
+                    <Route path="create" element={<SheetMaterialCreate />} />
+                    <Route path="edit/:id" element={<SheetMaterialEdit />} />
+                    <Route path="show/:id" element={<SheetMaterialShow />} />
                   </Route>
                   <Route path="/milling-types" >
                     <Route index element={<MillingTypeList />} />

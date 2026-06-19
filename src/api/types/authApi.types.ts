@@ -36,6 +36,8 @@ export type PermissionName =
   | 'audit.view'
   | 'cut.view'
   | 'cut.manage'
+  | 'sheet_materials.view'
+  | 'sheet_materials.manage'
   | string;
 
 export interface BackendUserIdentity {

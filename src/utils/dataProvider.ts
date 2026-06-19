@@ -63,6 +63,7 @@ const ID_COLUMNS: Record<string, string> = {
   vlm_providers: "provider_id",
   vlm_provider_models: "provider_model_id",
   vlm_prompts: "prompt_id",
+  sheet_material_types: "sheet_material_type_id",
 };
 
 // Resources with is_active field - automatically filter by is_active = true in getList
@@ -98,6 +99,7 @@ const ACTIVE_FILTERED_RESOURCES = [
   "vlm_providers",
   "vlm_provider_models",
   "vlm_prompts",
+  "sheet_material_types",
 ];
 
 const RESOURCE_FIELDS: Record<string, string[]> = {
@@ -334,6 +336,17 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "edited_by",
     "created_at",
     "updated_at",
+  ],
+  sheet_material_types: [
+    "sheet_material_type_id", "name",
+    "material_type_id", "material_type { material_type_id material_type_name }",
+    "unit_id", "unit { unit_id unit_code unit_name unit_symbol }",
+    "supplier_id", "supplier { supplier_id supplier_name }",
+    "vendor_id", "vendor { vendor_id vendor_name }",
+    "supplier_article", "texture", "color",
+    "thickness_mm", "width_mm", "height_mm",
+    "is_active", "version", "ref_key_1c",
+    "created_by", "edited_by", "created_at", "updated_at",
   ],
   film_types: [
     "film_type_id",
@@ -1362,6 +1375,22 @@ function shouldUseBackendClientPhoneMutation(resource: string): boolean {
   return featureFlags.useBackendClientPhones && resource === 'client_phones';
 }
 
+// Resources whose writes are owned exclusively by the backend command API. The
+// generic Hasura mutation path must never be reachable for these (defense in
+// depth on top of Hasura select-only perms): all writes go through the dedicated
+// backend client (e.g. sheetMaterialsApi -> /api/v1/sheet-material-types), which
+// enforces RBAC, audit, optimistic version and the feature flag.
+const BACKEND_ONLY_WRITE_RESOURCES = new Set<string>(['sheet_material_types']);
+
+function assertNotBackendOnlyWrite(resource: string): void {
+  if (BACKEND_ONLY_WRITE_RESOURCES.has(resource)) {
+    throw {
+      message: `${resource} is written only through the backend API; Hasura writes are disabled`,
+      statusCode: 403,
+    };
+  }
+}
+
 function requireOrderDeleteVersion(meta?: AnyObject): number {
   const version = meta?.version ?? meta?.orderVersion;
 
@@ -1636,6 +1665,7 @@ export const dataProvider = (_apiUrl: string) => {
     },
 
     create: async ({ resource, variables, meta }: AnyObject) => {
+      assertNotBackendOnlyWrite(resource);
       const backendPayment = await createBackendPaymentIfEnabled(resource, variables, meta);
       if (backendPayment) {
         return backendPayment;
@@ -1712,6 +1742,7 @@ export const dataProvider = (_apiUrl: string) => {
     },
 
     update: async ({ resource, id, variables, meta }: AnyObject) => {
+      assertNotBackendOnlyWrite(resource);
       const backendPayment = await updateBackendPaymentIfEnabled(resource, id, variables, meta);
       if (backendPayment) {
         return backendPayment;
@@ -1750,6 +1781,7 @@ export const dataProvider = (_apiUrl: string) => {
     },
 
     deleteOne: async ({ resource, id, meta }: AnyObject) => {
+      assertNotBackendOnlyWrite(resource);
       const backendOrder = await deleteBackendOrderIfEnabled(resource, id, meta);
       if (backendOrder) {
         return backendOrder;

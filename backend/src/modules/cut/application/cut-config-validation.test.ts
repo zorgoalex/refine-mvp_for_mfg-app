@@ -3,7 +3,6 @@ import {
   validateParamProfileInput,
   validateRenderPresetInput,
   validateSettingValue,
-  validateSheetMaterialTypeInput,
 } from './cut-config-validation';
 
 describe('cut-config validation', () => {
@@ -41,14 +40,6 @@ describe('cut-config validation', () => {
 
   it('rejects an unknown setting key', () => {
     expect(() => validateSettingValue('totally.unknown', {})).toThrow();
-  });
-
-  it('validates sheet material type dimensions are positive', () => {
-    const ok = validateSheetMaterialTypeInput({ name: 'ЛДСП 16', materialTypeId: 1, thicknessMm: 16, widthMm: 2800, heightMm: 2070 });
-    expect(ok.widthMm).toBe(2800);
-    expect(() => validateSheetMaterialTypeInput({ name: '', materialTypeId: 1, thicknessMm: 16, widthMm: 2800, heightMm: 2070 })).toThrow();
-    expect(() => validateSheetMaterialTypeInput({ name: 'x', materialTypeId: 1, thicknessMm: 0, widthMm: 2800, heightMm: 2070 })).toThrow();
-    expect(() => validateSheetMaterialTypeInput({ name: 'x', materialTypeId: 1, thicknessMm: 16, widthMm: -1, heightMm: 2070 })).toThrow();
   });
 
   it('validates render preset target px is positive', () => {
