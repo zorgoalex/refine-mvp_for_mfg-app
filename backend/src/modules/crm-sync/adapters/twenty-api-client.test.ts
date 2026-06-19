@@ -1,11 +1,29 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TwentyApiClient, NoopTwentyApiClient } from './twenty-api-client';
+import { TwentyApiClient, NoopTwentyApiClient, type FetchFn } from './twenty-api-client';
 
 // Minimal Response-like mock factory
 function makeResponse(ok: boolean, status: number, body: unknown): Response {
   return {
     ok,
     status,
+    json: async () => body,
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+  } as unknown as Response;
+}
+
+// Response mock with a headers map (for Retry-After tests)
+function makeResponseWithHeaders(
+  ok: boolean,
+  status: number,
+  body: unknown,
+  headers: Record<string, string>,
+): Response {
+  const lower: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v;
+  return {
+    ok,
+    status,
+    headers: { get: (name: string) => lower[name.toLowerCase()] ?? null },
     json: async () => body,
     text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
   } as unknown as Response;
@@ -144,6 +162,169 @@ describe('TwentyApiClient', () => {
       expect(headers['Authorization']).toBe(`Bearer ${KEY}`);
       expect(headers['Content-Type']).toBe('application/json');
     });
+  });
+});
+
+describe('TwentyApiClient retry on 429', () => {
+  const BASE = 'http://twenty:3000';
+  const KEY = 'test-api-key';
+  const okBody = { data: { createCompany: { id: 'company-abc' } } };
+
+  function makeRetryClient(
+    fetchFn: FetchFn,
+    sleeps: number[],
+    overrides: Record<string, unknown> = {},
+  ): TwentyApiClient {
+    return new TwentyApiClient(BASE, KEY, fetchFn, {
+      maxRetries: 3,
+      baseDelayMs: 1000,
+      maxDelayMs: 30000,
+      sleepFn: async (ms: number) => {
+        sleeps.push(ms);
+      },
+      randomFn: () => 1, // full jitter → exactly the capped delay (deterministic)
+      ...overrides,
+    });
+  }
+
+  it('retries a 429 then succeeds on the next attempt', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(makeResponse(false, 429, { statusCode: 429 }))
+      .mockResolvedValueOnce(makeResponse(true, 200, okBody));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps);
+
+    const result = await client.createRecord('companies', { name: 'Acme' });
+    expect(result).toEqual({ id: 'company-abc' });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(sleeps).toHaveLength(1);
+  });
+
+  it('honors a numeric Retry-After header (seconds → ms)', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeResponseWithHeaders(false, 429, { statusCode: 429 }, { 'Retry-After': '2' }),
+      )
+      .mockResolvedValueOnce(makeResponse(true, 200, okBody));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps);
+
+    await client.createRecord('companies', {});
+    expect(sleeps).toEqual([2000]);
+  });
+
+  it('honors a Retry-After LARGER than the exponential backoff cap (not clamped to maxDelayMs)', async () => {
+    // Twenty's LONG bucket can ask for 60s; clamping to maxDelayMs(30s) would
+    // retry early, re-429, and burn the retry budget. Server header is authoritative.
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeResponseWithHeaders(false, 429, {}, { 'Retry-After': '60' }),
+      )
+      .mockResolvedValueOnce(makeResponse(true, 200, okBody));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps, {
+      maxDelayMs: 30000,
+      maxRetryAfterMs: 120000,
+    });
+    await client.createRecord('companies', {});
+    expect(sleeps).toEqual([60000]); // honored fully, NOT clamped to 30000
+  });
+
+  it('caps a pathologically large Retry-After at maxRetryAfterMs', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValue(makeResponseWithHeaders(false, 429, {}, { 'Retry-After': '99999' }));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps, {
+      maxRetries: 1,
+      maxRetryAfterMs: 120000,
+    });
+    await expect(client.createRecord('companies', {})).rejects.toThrow(/429/);
+    expect(sleeps).toEqual([120000]); // 99999s clamped to 120s
+  });
+
+  it('parses an HTTP-date Retry-After header', async () => {
+    const aboutTenSeconds = new Date(Date.now() + 10_000).toUTCString();
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeResponseWithHeaders(false, 429, {}, { 'Retry-After': aboutTenSeconds }),
+      )
+      .mockResolvedValueOnce(makeResponse(true, 200, okBody));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps);
+    await client.createRecord('companies', {});
+    expect(sleeps).toHaveLength(1);
+    // ~10s, allow scheduling slack (HTTP-date has 1s resolution + test timing)
+    expect(sleeps[0]).toBeGreaterThanOrEqual(8000);
+    expect(sleeps[0]).toBeLessThanOrEqual(11000);
+  });
+
+  it('uses exponential backoff when no Retry-After header is present', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(makeResponse(false, 429, {}))
+      .mockResolvedValueOnce(makeResponse(false, 429, {}))
+      .mockResolvedValueOnce(makeResponse(true, 200, okBody));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps);
+
+    await client.createRecord('companies', {});
+    // base*2^0=1000, base*2^1=2000 (randomFn=()=>1 → exactly the capped value)
+    expect(sleeps).toEqual([1000, 2000]);
+  });
+
+  it('caps the backoff delay at maxDelayMs', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValue(makeResponse(false, 429, {}));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps, {
+      maxRetries: 6,
+      baseDelayMs: 10000,
+      maxDelayMs: 30000,
+    });
+    await expect(client.createRecord('companies', {})).rejects.toThrow(/429/);
+    // 10000, 20000, then capped at 30000 thereafter
+    expect(sleeps.every((d) => d <= 30000)).toBe(true);
+    expect(sleeps).toContain(30000);
+  });
+
+  it('throws after exhausting maxRetries on persistent 429', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(false, 429, 'rate limited'));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps);
+
+    await expect(client.createRecord('companies', {})).rejects.toThrow(/429/);
+    // maxRetries=3 → 1 initial + 3 retries = 4 calls, 3 sleeps
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+    expect(sleeps).toHaveLength(3);
+  });
+
+  it('does NOT retry a non-429 error (e.g. 500)', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(false, 500, 'Server Error'));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps);
+
+    await expect(client.createRecord('companies', {})).rejects.toThrow(/500/);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(sleeps).toHaveLength(0);
+  });
+
+  it('retries 429 on all verbs (findIdByErpId)', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(makeResponse(false, 429, {}))
+      .mockResolvedValueOnce(makeResponse(true, 200, { data: { companies: [{ id: 'x' }] } }));
+    const sleeps: number[] = [];
+    const client = makeRetryClient(mockFetch as unknown as FetchFn, sleeps);
+
+    const id = await client.findIdByErpId('companies', 'ERP-1');
+    expect(id).toBe('x');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });
 
