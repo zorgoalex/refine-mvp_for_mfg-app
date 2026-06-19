@@ -467,6 +467,10 @@ describeIntegration('CRM sync pipeline end-to-end (integration)', () => {
     );
     expect(mapping.rows[0].status).toBe('deleted');
 
+    // Stub Company record must have received erpStatus='deleted'
+    const stubCompany = stub.records.get(mapping.rows[0].twenty_id);
+    expect(stubCompany?.erpStatus).toBe('deleted');
+
     // No new create — existing twenty_id reused via updateRecord
     expect(stub.createCalls).toBe(beforeCreateCalls);
     expect(mapping.rows[0].twenty_id).toBeTruthy();
@@ -492,6 +496,7 @@ describeIntegration('CRM sync pipeline end-to-end (integration)', () => {
     // The relay processes the event but no new create is called
     expect(stub.createCalls).toBe(beforeCreate);
     expect(result.failed).toBe(0);
+    expect(result.processed).toBeGreaterThanOrEqual(1);
   });
 
   // ── Scenario 5: Forced Twenty error → mapping.status='failed' ────────────
