@@ -36,28 +36,51 @@ const twentyApiKey = process.env.TWENTY_SYNC_API_KEY;
 
 // ── Host safety checks ────────────────────────────────────────────────────────
 
-/** True if the backend URL is safe to use (backend-test only). */
+/**
+ * True if the backend URL is safe to use (backend-test only).
+ * Parses the hostname and requires an EXACT or anchored prefix match.
+ * NOTE: do NOT call this at module top-level — URL parsing fails when the env
+ * var is missing or malformed and would crash the module on load.
+ */
 function isBackendTestHost(url: string): boolean {
-  if (/prod|production|live/i.test(url)) return false;
-  return url.includes('backend-test');
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  if (/prod|production|live/i.test(host)) return false;
+  return host === 'backend-test.mebelkz.app' || /^backend-test\./.test(host);
 }
 
 /**
  * True if the Twenty REST base URL is safe to use (test CRM only).
+ * Parses the hostname and requires an EXACT or anchored prefix match.
  * NOTE: this MUST be the host-facing URL (e.g. https://crm-test.mebelkz.app),
  * never the internal docker URL (http://twenty:3000) which is unreachable from
  * the host shell. We deliberately do NOT fall back to TWENTY_SYNC_BASE_URL.
+ * NOTE: do NOT call this at module top-level — URL parsing fails when the env
+ * var is missing or malformed and would crash the module on load.
  */
 function isTwentyTestHost(url: string): boolean {
-  if (/prod|production|live/i.test(url)) return false;
-  // Prefer 'crm-test', but accept any 'test' marker as a floor.
-  return url.includes('crm-test') || url.includes('test');
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  if (/prod|production|live/i.test(host)) return false;
+  return host === 'crm-test.mebelkz.app' || /^crm-test\./.test(host);
 }
 
-/** True if the postgres container name is safe to target (test only). */
+/**
+ * True if the postgres container name is safe to target (test only).
+ * Uses an ANCHORED allowlist regex — accepts ONLY the expected test container
+ * pattern, not any arbitrary string containing 'test'.
+ */
 function isTestPostgresContainer(name: string): boolean {
   if (/prod|production|live/i.test(name)) return false;
-  return name.includes('test');
+  return /^erp_test-postgresdb(-\d+)?$/.test(name);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -406,22 +429,22 @@ test.describe('Twenty sync stage canary', () => {
   // Fail-closed guard 1: explicit flag
   test.skip(!canaryEnabled, 'Run with TWENTY_SYNC_STAGE_CANARY=true');
 
-  // Fail-closed guard 2: backend host must contain 'backend-test' and must NOT be prod
+  // Fail-closed guard 2: backend host must be backend-test.mebelkz.app (anchored) and must NOT be prod
   test.skip(
     canaryEnabled && !isBackendTestHost(backendApiUrl),
-    `Backend host must contain 'backend-test' and must not be prod/production/live. Got: [REDACTED]`,
+    `Backend host must be 'backend-test.mebelkz.app' (anchored) and must not be prod/production/live. Got: [REDACTED]`,
   );
 
-  // Fail-closed guard 3: Twenty REST base URL must be a test CRM and must NOT be prod
+  // Fail-closed guard 3: Twenty REST base URL must be crm-test.mebelkz.app (anchored) and must NOT be prod
   test.skip(
     canaryEnabled && !isTwentyTestHost(twentyBaseUrl),
-    `Twenty URL must contain 'crm-test' (or 'test') and must not be prod/production/live. Got: [REDACTED]`,
+    `Twenty URL must be 'crm-test.mebelkz.app' (anchored) and must not be prod/production/live. Got: [REDACTED]`,
   );
 
-  // Fail-closed guard 4: postgres container name must be a test container and must exist
+  // Fail-closed guard 4: postgres container name must match anchored allowlist pattern and must exist
   test.skip(
     canaryEnabled && !isTestPostgresContainer(postgresContainer),
-    `Postgres container name must contain 'test' and must not be prod/production/live. Got: [REDACTED]`,
+    `Postgres container name must match /^erp_test-postgresdb(-\\d+)?$/ and must not be prod/production/live. Got: [REDACTED]`,
   );
 
   // Fail-closed guard 5: postgres container must exist
@@ -475,15 +498,47 @@ test.describe('Twenty sync stage canary', () => {
   test(
     'seeds fixture → syncs to Twenty → no duplicate → soft-delete syncs → zero residue cleanup',
     async () => {
-      // Hard reject: must be impossible to hit prod even if env is misconfigured
-      if (!isBackendTestHost(backendApiUrl)) {
-        throw new Error('HARD REJECT: backend host does not satisfy backend-test requirement');
+      // Hard reject: must be impossible to hit prod even if env is misconfigured.
+      // Parse hostnames here (inside the test) to avoid module-load side effects.
+      {
+        let backendHost: string;
+        try {
+          backendHost = new URL(backendApiUrl).hostname;
+        } catch {
+          throw new Error('HARD REJECT: backendApiUrl is not a valid URL');
+        }
+        if (
+          /prod|production|live/i.test(backendHost) ||
+          (backendHost !== 'backend-test.mebelkz.app' && !/^backend-test\./.test(backendHost))
+        ) {
+          throw new Error(
+            'HARD REJECT: backend host does not satisfy anchored backend-test requirement',
+          );
+        }
       }
-      if (!isTwentyTestHost(twentyBaseUrl)) {
-        throw new Error('HARD REJECT: Twenty URL does not satisfy crm-test requirement');
+      {
+        let twentyHost: string;
+        try {
+          twentyHost = new URL(twentyBaseUrl).hostname;
+        } catch {
+          throw new Error('HARD REJECT: twentyBaseUrl is not a valid URL');
+        }
+        if (
+          /prod|production|live/i.test(twentyHost) ||
+          (twentyHost !== 'crm-test.mebelkz.app' && !/^crm-test\./.test(twentyHost))
+        ) {
+          throw new Error(
+            'HARD REJECT: Twenty URL does not satisfy anchored crm-test requirement',
+          );
+        }
       }
-      if (!isTestPostgresContainer(postgresContainer)) {
-        throw new Error('HARD REJECT: postgres container name does not satisfy test requirement');
+      if (
+        /prod|production|live/i.test(postgresContainer) ||
+        !/^erp_test-postgresdb(-\d+)?$/.test(postgresContainer)
+      ) {
+        throw new Error(
+          'HARD REJECT: postgres container name does not match anchored allowlist /^erp_test-postgresdb(-\\d+)?$/',
+        );
       }
 
       const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -125,79 +127,22 @@ async function bootstrapSchema(pool: Pool): Promise<void> {
   `);
 
   // ── 3. Migration 025: crm_sync_mapping, crm_sync_outbox, trigger function ─
-  await pool.query(`
-    CREATE TABLE ${schemaName}.crm_sync_mapping (
-      entity_type   TEXT NOT NULL CHECK (entity_type IN ('client','order')),
-      erp_id        TEXT NOT NULL,
-      twenty_object TEXT NOT NULL,
-      twenty_id     TEXT,
-      status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','deleted','failed')),
-      attempts      INTEGER NOT NULL DEFAULT 0,
-      last_hash     TEXT,
-      last_error    TEXT,
-      last_synced_at TIMESTAMPTZ,
-      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-      CONSTRAINT pk_crm_sync_mapping PRIMARY KEY (entity_type, erp_id),
-      CONSTRAINT uq_crm_sync_mapping_twenty UNIQUE (entity_type, twenty_id)
-    );
-
-    CREATE TABLE ${schemaName}.crm_sync_outbox (
-      outbox_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      event_type      TEXT NOT NULL,
-      aggregate_type  TEXT NOT NULL,
-      aggregate_id    TEXT NOT NULL,
-      payload_json    JSONB NOT NULL,
-      status          TEXT NOT NULL DEFAULT 'pending',
-      attempts        INTEGER NOT NULL DEFAULT 0,
-      next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      locked_at       TIMESTAMPTZ,
-      locked_by       TEXT,
-      lock_token      TEXT,
-      idempotency_key TEXT,
-      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-      processed_at    TIMESTAMPTZ,
-      CONSTRAINT chk_crm_sync_outbox_status CHECK (status IN ('pending','processing','processed','failed'))
-    );
-
-    CREATE INDEX idx_crm_outbox_pending_${schemaName.replace(/-/g, '_')}
-      ON ${schemaName}.crm_sync_outbox (next_attempt_at, created_at) WHERE status = 'pending';
-
-    CREATE INDEX idx_crm_outbox_key_pending_${schemaName.replace(/-/g, '_')}
-      ON ${schemaName}.crm_sync_outbox (idempotency_key) WHERE status = 'pending';
-  `);
-
-  // Trigger function scoped to this schema
-  await pool.query(`
-    CREATE OR REPLACE FUNCTION ${schemaName}.crm_sync_enqueue() RETURNS trigger AS $$
-    DECLARE
-      v_entity TEXT := TG_ARGV[0];
-      v_op TEXT;
-      v_id TEXT;
-      v_key TEXT;
-    BEGIN
-      IF TG_OP = 'DELETE' THEN
-        v_op := 'delete'; v_id := (CASE v_entity WHEN 'client' THEN OLD.client_id ELSE OLD.order_id END)::text;
-      ELSE
-        v_op := 'upsert'; v_id := (CASE v_entity WHEN 'client' THEN NEW.client_id ELSE NEW.order_id END)::text;
-      END IF;
-      v_key := v_entity || ':' || v_id;
-      DELETE FROM ${schemaName}.crm_sync_outbox WHERE idempotency_key = v_key AND status = 'pending';
-      INSERT INTO ${schemaName}.crm_sync_outbox (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
-      VALUES ('crm.sync.' || v_entity || '.' || v_op, 'crm_sync', v_id,
-              jsonb_build_object('entity', v_entity, 'id', v_id, 'op', v_op), v_key);
-      RETURN NULL;
-    END;
-    $$ LANGUAGE plpgsql;
-
-    CREATE TRIGGER trg_crm_sync_clients
-      AFTER INSERT OR UPDATE OR DELETE ON ${schemaName}.clients
-      FOR EACH ROW EXECUTE FUNCTION ${schemaName}.crm_sync_enqueue('client');
-
-    CREATE TRIGGER trg_crm_sync_orders
-      AFTER INSERT OR UPDATE OR DELETE ON ${schemaName}.orders
-      FOR EACH ROW EXECUTE FUNCTION ${schemaName}.crm_sync_enqueue('order');
-  `);
+  // Execute the REAL migration SQL verbatim using a dedicated client with the
+  // throwaway schema in search_path, so the unqualified DDL lands in the right
+  // schema and never touches the default public schema.
+  // SAFETY: use a dedicated client, set search_path FIRST, then execute — never
+  // run 025 SQL on a connection without search_path pinned to this schema.
+  const migration025Sql = readFileSync(
+    join(__dirname, '../../../../db/migrations/025_twenty_crm_sync.sql'),
+    'utf8',
+  );
+  const migration025Client = await pool.connect();
+  try {
+    await migration025Client.query(`SET search_path TO ${schemaName}`);
+    await migration025Client.query(migration025Sql);
+  } finally {
+    migration025Client.release();
+  }
 }
 
 // ── Stub TwentyApiPort ────────────────────────────────────────────────────────
@@ -564,5 +509,179 @@ describeIntegration('CRM sync pipeline end-to-end (integration)', () => {
     );
     // Trigger coalesces: DELETE old pending then INSERT new → exactly 1 pending row
     expect(pending.rows[0].count).toBe('1');
+  });
+
+  // ── Order scenarios ──────────────────────────────────────────────────────────
+  // Variables shared across the order sub-scenarios (SC-7..SC-10).
+  // All mutations are guarded with the fixture client/order ids so they cannot
+  // accidentally affect client rows from previous scenarios.
+
+  let orderScenarioClientId: string;
+  let orderScenarioOrderId: string;
+  let orderScenarioCompanyTwentyId: string;
+
+  // ── Scenario 7: INSERT order → outbox → tick → mapping + audit + relation ──
+
+  it('SC-7: INSERT order → tick → order mapping has twenty_id, audit row has request_id + related_client_id, stub erpOrder.companyId set', async () => {
+    // Insert a dedicated client for order scenarios
+    const clientRes = await pool.query<{ client_id: string }>(
+      `INSERT INTO ${schemaName}.clients (client_name, is_active)
+       VALUES ('Тест Клиент Заказ', true)
+       RETURNING client_id`,
+    );
+    orderScenarioClientId = String(clientRes.rows[0].client_id);
+
+    // Drain the client INSERT outbox event first so we start with a clean client mapping
+    await relay.runTick();
+
+    // Verify the client mapping was created
+    const clientMapping = await pool.query<{ twenty_id: string }>(
+      `SELECT twenty_id FROM ${schemaName}.crm_sync_mapping
+        WHERE entity_type = 'client' AND erp_id = $1`,
+      [orderScenarioClientId],
+    );
+    expect(clientMapping.rows).toHaveLength(1);
+    expect(clientMapping.rows[0].twenty_id).toBeTruthy();
+    orderScenarioCompanyTwentyId = clientMapping.rows[0].twenty_id;
+
+    // Insert an order for this client — trigger enqueues an outbox event
+    const orderRes = await pool.query<{ order_id: string }>(
+      `INSERT INTO ${schemaName}.orders (order_name, client_id, delete_flag)
+       VALUES ('Тест Заказ А', $1, false)
+       RETURNING order_id`,
+      [orderScenarioClientId],
+    );
+    orderScenarioOrderId = String(orderRes.rows[0].order_id);
+
+    // Exactly one pending outbox row for the order
+    const outboxBefore = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM ${schemaName}.crm_sync_outbox
+        WHERE aggregate_id = $1 AND status = 'pending'`,
+      [orderScenarioOrderId],
+    );
+    expect(outboxBefore.rows[0].count).toBe('1');
+
+    const createCallsBefore = stub.createCalls;
+    const result = await relay.runTick();
+    expect(result.processed).toBeGreaterThanOrEqual(1);
+    expect(result.failed).toBe(0);
+
+    // crm_sync_mapping must have an order row with a non-null twenty_id
+    const orderMapping = await pool.query<{ entity_type: string; twenty_id: string | null; status: string }>(
+      `SELECT entity_type, twenty_id, status
+         FROM ${schemaName}.crm_sync_mapping
+        WHERE entity_type = 'order' AND erp_id = $1`,
+      [orderScenarioOrderId],
+    );
+    expect(orderMapping.rows).toHaveLength(1);
+    expect(orderMapping.rows[0].twenty_id).toBeTruthy();
+    expect(orderMapping.rows[0].status).toBe('active');
+
+    // audit_log must have a row for the order with non-null request_id AND correct related_client_id
+    const auditRow = await pool.query<{ request_id: string | null; related_client_id: string | null }>(
+      `SELECT request_id, related_client_id
+         FROM ${schemaName}.audit_log
+        WHERE entity_type = 'order' AND entity_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [orderScenarioOrderId],
+    );
+    expect(auditRow.rows).toHaveLength(1);
+    expect(auditRow.rows[0].request_id).not.toBeNull();
+    expect(auditRow.rows[0].request_id).toBeTruthy();
+    expect(String(auditRow.rows[0].related_client_id)).toBe(orderScenarioClientId);
+
+    // outbox row for the order should be 'processed'
+    const outboxAfter = await pool.query<{ status: string }>(
+      `SELECT status FROM ${schemaName}.crm_sync_outbox
+        WHERE aggregate_id = $1
+        ORDER BY created_at DESC LIMIT 1`,
+      [orderScenarioOrderId],
+    );
+    expect(outboxAfter.rows[0]?.status).toBe('processed');
+
+    // The stub erpOrders record must exist and have companyId = client's Twenty company id
+    const orderTwentyId = orderMapping.rows[0].twenty_id as string;
+    const stubOrderRecord = stub.records.get(orderTwentyId);
+    expect(stubOrderRecord).toBeTruthy();
+    expect(stubOrderRecord?.companyId).toBe(orderScenarioCompanyTwentyId);
+
+    // At least one createRecord call was made for the order (new record)
+    expect(stub.createCalls).toBeGreaterThan(createCallsBefore);
+  });
+
+  // ── Scenario 8: Idempotent re-run → no duplicate createRecord for order ────
+
+  it('SC-8: re-trigger same order with no real change → createRecord NOT called again', async () => {
+    const createCallsBefore = stub.createCalls;
+
+    // Inject a fresh pending outbox row for the same order (simulates retriggering)
+    await pool.query(
+      `INSERT INTO ${schemaName}.crm_sync_outbox
+         (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key, next_attempt_at)
+       VALUES ('crm.sync.order.upsert', 'crm_sync', $1,
+               jsonb_build_object('entity', 'order', 'id', $1, 'op', 'upsert', 'clientId', $2),
+               $3, now() - interval '1 second')`,
+      [orderScenarioOrderId, orderScenarioClientId, `order:${orderScenarioOrderId}:rerun-${randomUUID()}`],
+    );
+
+    const result = await relay.runTick();
+    expect(result.processed).toBeGreaterThanOrEqual(1);
+    expect(result.failed).toBe(0);
+
+    // createRecord must NOT have been called again (hash matched → no-op)
+    expect(stub.createCalls).toBe(createCallsBefore);
+  });
+
+  // ── Scenario 9: ORDER soft-delete → tick → mapping.status='deleted' + stub erpStatus ─
+
+  it('SC-9: UPDATE orders SET delete_flag=true → tick → mapping.status=deleted, stub erpOrder erpStatus=deleted', async () => {
+    await pool.query(
+      `UPDATE ${schemaName}.orders SET delete_flag = true WHERE order_id = $1`,
+      [orderScenarioOrderId],
+    );
+
+    const result = await relay.runTick();
+    expect(result.processed).toBeGreaterThanOrEqual(1);
+    expect(result.failed).toBe(0);
+
+    const mapping = await pool.query<{ status: string; twenty_id: string }>(
+      `SELECT status, twenty_id FROM ${schemaName}.crm_sync_mapping
+        WHERE entity_type = 'order' AND erp_id = $1`,
+      [orderScenarioOrderId],
+    );
+    expect(mapping.rows[0].status).toBe('deleted');
+
+    const stubOrderRecord = stub.records.get(mapping.rows[0].twenty_id);
+    expect(stubOrderRecord?.erpStatus).toBe('deleted');
+  });
+
+  // ── Scenario 10: ORDER hard-delete → payload.clientId survives → audit.related_client_id set ─
+
+  it('SC-10: DELETE FROM orders → tick → audit_log row has related_client_id (clientId-in-payload path)', async () => {
+    // Hard-delete the order row — the trigger fires op='delete' and carries clientId in payload
+    // (the real 025 trigger sets v_client_id from OLD.client_id on DELETE)
+    await pool.query(
+      `DELETE FROM ${schemaName}.orders WHERE order_id = $1`,
+      [orderScenarioOrderId],
+    );
+
+    const result = await relay.runTick();
+    expect(result.processed).toBeGreaterThanOrEqual(1);
+    expect(result.failed).toBe(0);
+
+    // The softDeleteOrder path must have populated related_client_id from payload.clientId
+    const auditRow = await pool.query<{ related_client_id: string | null; event: string }>(
+      `SELECT related_client_id, event
+         FROM ${schemaName}.audit_log
+        WHERE entity_type = 'order' AND entity_id = $1
+          AND event = 'crm_sync.softdelete'
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [orderScenarioOrderId],
+    );
+    expect(auditRow.rows).toHaveLength(1);
+    expect(auditRow.rows[0].related_client_id).not.toBeNull();
+    expect(String(auditRow.rows[0].related_client_id)).toBe(orderScenarioClientId);
   });
 });
