@@ -62,6 +62,26 @@ export class TwentySyncConsumer {
     if (op !== 'upsert' && op !== 'delete') {
       throw new Error(`crm-sync: unknown op '${op}' in event ${event.outboxEventId}`);
     }
+    // The id must be a structurally-valid ERP id (positive bigint as string).
+    // A missing/garbled id would otherwise resolve to null in getClientById/getOrderById,
+    // hit `if (!row) return []`, and be PERMANENTLY marked processed (silent drop).
+    // Throwing routes it through the relay's markRetry/markFailed (retryable/visible).
+    // NOTE: a well-formed id whose ERP row no longer exists is still a legitimate []
+    // no-op handled downstream; this only rejects STRUCTURALLY-malformed payloads.
+    if (typeof id !== 'string' || !/^\d+$/.test(id)) {
+      throw new Error(`crm-sync: invalid id '${id}' in event ${event.outboxEventId}`);
+    }
+    // clientId is carried in the payload for order events (the order row may be gone
+    // on hard delete). A null/absent clientId stays allowed (relatedClientId → null);
+    // a present-but-non-numeric clientId is malformed and must fail closed.
+    if (
+      payload.clientId != null &&
+      (typeof payload.clientId !== 'string' || !/^\d+$/.test(payload.clientId))
+    ) {
+      throw new Error(
+        `crm-sync: invalid clientId '${payload.clientId}' in event ${event.outboxEventId}`,
+      );
+    }
 
     if (entity === 'client') {
       return this.syncClient(id, op, event);

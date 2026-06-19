@@ -11,17 +11,17 @@ import { mapClient, mapOrder, hash } from './twenty-sync-mapper';
 // Fixtures
 // ---------------------------------------------------------------------------
 const CLIENT_ROW: ClientRow = {
-  clientId: 'c-1',
+  clientId: '1',
   clientName: 'Acme Corp',
   notes: null,
   isActive: true,
 };
 
 const ORDER_ROW: OrderRow = {
-  orderId: 'o-1',
+  orderId: '2',
   orderNumber: 'ORD-1',
   orderName: 'Order One',
-  clientId: 'c-1',
+  clientId: '1',
   totalAmount: 500,
   finalAmount: 400,
   paidAmount: 200,
@@ -93,13 +93,13 @@ describe('TwentySyncConsumer.sync — client upsert, no mapping', () => {
     const mapping = makeMapping(() => null);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
     const intents = await consumer.sync(event);
 
     expect(intents).toHaveLength(1);
     const intent = intents[0];
     expect(intent.mapping.entityType).toBe('client');
-    expect(intent.mapping.erpId).toBe('c-1');
+    expect(intent.mapping.erpId).toBe('1');
     expect(intent.mapping.twentyObject).toBe('companies');
     expect(intent.mapping.twentyId).toBe('twenty-new-id');
     expect(intent.mapping.status).toBe('active');
@@ -120,7 +120,7 @@ describe('TwentySyncConsumer.sync — client upsert, existing mapping, changed h
     const twenty = makeTwenty();
     const existingMapping: MappingRow = {
       entityType: 'client',
-      erpId: 'c-1',
+      erpId: '1',
       twentyObject: 'companies',
       twentyId: 'existing-twenty-id',
       status: 'active',
@@ -129,7 +129,7 @@ describe('TwentySyncConsumer.sync — client upsert, existing mapping, changed h
     const mapping = makeMapping(() => existingMapping);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
     const intents = await consumer.sync(event);
 
     expect(intents).toHaveLength(1);
@@ -150,7 +150,7 @@ describe('TwentySyncConsumer.sync — client delete, mapped', () => {
     const twenty = makeTwenty();
     const existingMapping: MappingRow = {
       entityType: 'client',
-      erpId: 'c-1',
+      erpId: '1',
       twentyObject: 'companies',
       twentyId: 'existing-twenty-id',
       status: 'active',
@@ -159,7 +159,7 @@ describe('TwentySyncConsumer.sync — client delete, mapped', () => {
     const mapping = makeMapping(() => existingMapping);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'delete');
+    const event = makeEvent('client', '1', 'delete');
     const intents = await consumer.sync(event);
 
     expect(intents).toHaveLength(1);
@@ -181,7 +181,7 @@ describe('TwentySyncConsumer.sync — no-op (hash unchanged)', () => {
     const currentHash = hash(mapClient(CLIENT_ROW));
     const noopMapping: MappingRow = {
       entityType: 'client',
-      erpId: 'c-1',
+      erpId: '1',
       twentyObject: 'companies',
       twentyId: 'existing-twenty-id',
       status: 'active',
@@ -190,7 +190,7 @@ describe('TwentySyncConsumer.sync — no-op (hash unchanged)', () => {
     const mapping = makeMapping(() => noopMapping);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
     const intents = await consumer.sync(event);
 
     expect(intents).toHaveLength(0);
@@ -217,7 +217,7 @@ describe('TwentySyncConsumer.sync — order upsert, client unsynced', () => {
     const mapping = makeMapping(() => null);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('order', 'o-1', 'upsert');
+    const event = makeEvent('order', '2', 'upsert');
     const intents = await consumer.sync(event);
 
     // [clientIntent, orderIntent]
@@ -250,7 +250,7 @@ describe('TwentySyncConsumer.sync — order upsert, client mapping exists but tw
     // Client mapping exists but twentyId=null (prior failure)
     const failedClientMapping: MappingRow = {
       entityType: 'client',
-      erpId: 'c-1',
+      erpId: '1',
       twentyObject: 'companies',
       twentyId: null,
       status: 'failed',
@@ -262,7 +262,7 @@ describe('TwentySyncConsumer.sync — order upsert, client mapping exists but tw
     });
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('order', 'o-1', 'upsert');
+    const event = makeEvent('order', '2', 'upsert');
     const intents = await consumer.sync(event);
 
     // Both intents returned
@@ -272,7 +272,7 @@ describe('TwentySyncConsumer.sync — order upsert, client mapping exists but tw
     expect(intents[1].mapping.entityType).toBe('order');
 
     // findIdByErpId was called for companies (recovery)
-    expect(twenty.findIdByErpId).toHaveBeenCalledWith('companies', 'c-1');
+    expect(twenty.findIdByErpId).toHaveBeenCalledWith('companies', '1');
     // No second create for companies (findIdByErpId returned a value)
     expect(twenty.createRecord).not.toHaveBeenCalledWith('companies', expect.anything());
     // updateRecord called for the recovered company
@@ -298,7 +298,7 @@ describe('TwentySyncConsumer.sync — order mapping failed/twentyId=null', () =>
     // Client mapping exists and is synced
     const syncedClientMapping: MappingRow = {
       entityType: 'client',
-      erpId: 'c-1',
+      erpId: '1',
       twentyObject: 'companies',
       twentyId: 'company-uuid',
       status: 'active',
@@ -307,7 +307,7 @@ describe('TwentySyncConsumer.sync — order mapping failed/twentyId=null', () =>
     // Order mapping exists but twentyId=null (prior failure)
     const failedOrderMapping: MappingRow = {
       entityType: 'order',
-      erpId: 'o-1',
+      erpId: '2',
       twentyObject: 'erpOrders',
       twentyId: null,
       status: 'failed',
@@ -320,7 +320,7 @@ describe('TwentySyncConsumer.sync — order mapping failed/twentyId=null', () =>
     });
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('order', 'o-1', 'upsert');
+    const event = makeEvent('order', '2', 'upsert');
     const intents = await consumer.sync(event);
 
     // Only orderIntent (client already synced → no clientIntent pushed)
@@ -329,7 +329,7 @@ describe('TwentySyncConsumer.sync — order mapping failed/twentyId=null', () =>
     expect(intents[0].mapping.twentyId).toBe('recovered-order-id');
 
     // findIdByErpId was called for erpOrders (recovery)
-    expect(twenty.findIdByErpId).toHaveBeenCalledWith('erpOrders', 'o-1');
+    expect(twenty.findIdByErpId).toHaveBeenCalledWith('erpOrders', '2');
     // No create for erpOrders (findIdByErpId returned a value)
     expect(twenty.createRecord).not.toHaveBeenCalledWith('erpOrders', expect.anything());
     // updateRecord called for the recovered order
@@ -354,7 +354,7 @@ describe('TwentySyncConsumer.sync — order upsert, client mapping failed with n
     // Client mapping: failed but twentyId is non-null (relay crashed before persisting 'active')
     const failedClientMappingWithId: MappingRow = {
       entityType: 'client',
-      erpId: 'c-1',
+      erpId: '1',
       twentyObject: 'companies',
       twentyId: 'cmp-1',
       status: 'failed',
@@ -366,7 +366,7 @@ describe('TwentySyncConsumer.sync — order upsert, client mapping failed with n
     });
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('order', 'o-1', 'upsert');
+    const event = makeEvent('order', '2', 'upsert');
     const intents = await consumer.sync(event);
 
     // [clientIntent, orderIntent] — client must be re-synced first
@@ -396,7 +396,7 @@ describe('TwentySyncConsumer.sync — audit.requestId matches outboxEventId', ()
     const mapping = makeMapping(() => null);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
     const intents = await consumer.sync(event);
 
     expect(intents).toHaveLength(1);
@@ -417,7 +417,7 @@ describe('TwentySyncConsumer.sync — client upsert, isActive=false (soft-delete
     const mapping = makeMapping(() => null);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
     const intents = await consumer.sync(event);
 
     expect(intents).toHaveLength(1);
@@ -443,7 +443,7 @@ describe('TwentySyncConsumer.sync — no-op for stable soft-deleted mapping', ()
     const currentHash = hash(mapClient(inactiveClient));
     const deletedMapping: MappingRow = {
       entityType: 'client',
-      erpId: 'c-1',
+      erpId: '1',
       twentyObject: 'companies',
       twentyId: 'existing-twenty-id',
       status: 'deleted',
@@ -452,7 +452,7 @@ describe('TwentySyncConsumer.sync — no-op for stable soft-deleted mapping', ()
     const mapping = makeMapping(() => deletedMapping);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
     const intents = await consumer.sync(event);
 
     expect(intents).toHaveLength(0);
@@ -474,7 +474,7 @@ describe('TwentySyncConsumer.sync — order upsert, deleteFlag=true', () => {
     // Client mapping already active (so ensureCompany short-circuits)
     const syncedClientMapping: MappingRow = {
       entityType: 'client',
-      erpId: 'c-1',
+      erpId: '1',
       twentyObject: 'companies',
       twentyId: 'company-uuid',
       status: 'active',
@@ -486,7 +486,7 @@ describe('TwentySyncConsumer.sync — order upsert, deleteFlag=true', () => {
     });
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('order', 'o-1', 'upsert');
+    const event = makeEvent('order', '2', 'upsert');
     const intents = await consumer.sync(event);
 
     // Only orderIntent (client already synced)
@@ -547,7 +547,7 @@ describe('TwentySyncConsumer.sync — client delete, no mapping twentyId but fin
     // Mapping exists but twentyId is null (prior failure)
     const noIdMapping: MappingRow = {
       entityType: 'client',
-      erpId: 'c-1',
+      erpId: '1',
       twentyObject: 'companies',
       twentyId: null,
       status: 'failed',
@@ -556,7 +556,7 @@ describe('TwentySyncConsumer.sync — client delete, no mapping twentyId but fin
     const mapping = makeMapping(() => noIdMapping);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'delete');
+    const event = makeEvent('client', '1', 'delete');
     const intents = await consumer.sync(event);
 
     // Must NOT return [] — recovery succeeded
@@ -566,7 +566,7 @@ describe('TwentySyncConsumer.sync — client delete, no mapping twentyId but fin
     expect(intents[0].mapping.entityType).toBe('client');
 
     // findIdByErpId called for companies
-    expect(twenty.findIdByErpId).toHaveBeenCalledWith('companies', 'c-1');
+    expect(twenty.findIdByErpId).toHaveBeenCalledWith('companies', '1');
     // updateRecord called with the recovered id
     expect(twenty.updateRecord).toHaveBeenCalledWith('companies', foundId, { erpStatus: 'deleted' });
   });
@@ -590,7 +590,7 @@ describe('TwentySyncConsumer.sync — order delete, no mapping but findIdByErpId
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
     // payload includes clientId (as the trigger would set it)
-    const event = makeEvent('order', 'o-1', 'delete', { clientId: '42' });
+    const event = makeEvent('order', '2', 'delete', { clientId: '42' });
     const intents = await consumer.sync(event);
 
     expect(intents).toHaveLength(1);
@@ -599,14 +599,14 @@ describe('TwentySyncConsumer.sync — order delete, no mapping but findIdByErpId
     expect(intents[0].mapping.entityType).toBe('order');
 
     // findIdByErpId called for erpOrders
-    expect(twenty.findIdByErpId).toHaveBeenCalledWith('erpOrders', 'o-1');
+    expect(twenty.findIdByErpId).toHaveBeenCalledWith('erpOrders', '2');
     // updateRecord called with recovered id
     expect(twenty.updateRecord).toHaveBeenCalledWith('erpOrders', foundOrderId, { erpStatus: 'deleted' });
 
-    // relatedClientId populated from payload.clientId
+    // relatedClientId populated from payload.clientId (numeric dimension)
     expect(intents[0].audit.relatedClientId).toBe(42);
-    // relatedOrderId is Number(erpId) = Number('o-1') = NaN (erpId is a non-numeric string in test)
-    expect(intents[0].audit.relatedOrderId).toBeNaN();
+    // relatedOrderId is Number(erpId) → a real numeric audit dimension
+    expect(intents[0].audit.relatedOrderId).toBe(2);
   });
 });
 
@@ -619,7 +619,7 @@ describe('TwentySyncConsumer.sync — order delete, mapping has twentyId, relate
     const twenty = makeTwenty();
     const existingMapping: MappingRow = {
       entityType: 'order',
-      erpId: 'o-1',
+      erpId: '2',
       twentyObject: 'erpOrders',
       twentyId: 'existing-order-twenty-id',
       status: 'active',
@@ -631,15 +631,15 @@ describe('TwentySyncConsumer.sync — order delete, mapping has twentyId, relate
     });
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('order', 'o-1', 'delete', { clientId: '99' });
+    const event = makeEvent('order', '2', 'delete', { clientId: '99' });
     const intents = await consumer.sync(event);
 
     expect(intents).toHaveLength(1);
     expect(intents[0].mapping.status).toBe('deleted');
     expect(intents[0].mapping.twentyId).toBe('existing-order-twenty-id');
     expect(intents[0].audit.event).toBe('crm_sync.softdelete');
-    // relatedOrderId is Number(erpId) = Number('o-1') = NaN in this test fixture
-    expect(intents[0].audit.relatedOrderId).toBeNaN();
+    // relatedOrderId is Number(erpId) → a real numeric audit dimension
+    expect(intents[0].audit.relatedOrderId).toBe(2);
     // relatedClientId comes from payload, not the row (row is gone on hard delete)
     expect(intents[0].audit.relatedClientId).toBe(99);
     expect(twenty.updateRecord).toHaveBeenCalledWith('erpOrders', 'existing-order-twenty-id', { erpStatus: 'deleted' });
@@ -658,7 +658,7 @@ describe('TwentySyncConsumer.sync — invalid payload fails closed', () => {
     const mapping = makeMapping(() => null);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
     // Corrupt the payload entity after construction
     (event.payload as Record<string, unknown>).entity = 'bogus';
 
@@ -674,10 +674,55 @@ describe('TwentySyncConsumer.sync — invalid payload fails closed', () => {
     const mapping = makeMapping(() => null);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
     (event.payload as Record<string, unknown>).op = 'archive';
 
     await expect(consumer.sync(event)).rejects.toThrow(/unknown op 'archive'/);
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+  });
+
+  it('rejects when payload.id is empty (structurally-malformed id)', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty();
+    const mapping = makeMapping(() => null);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('client', '1', 'upsert');
+    (event.payload as Record<string, unknown>).id = '';
+
+    await expect(consumer.sync(event)).rejects.toThrow(/invalid id ''/);
+    // Must NOT silently resolve to [] (which the relay would mark processed → drop)
+    expect(source.getClientById).not.toHaveBeenCalled();
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+  });
+
+  it('rejects when payload.id is non-numeric', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty();
+    const mapping = makeMapping(() => null);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('order', '2', 'upsert');
+    (event.payload as Record<string, unknown>).id = 'o-1';
+
+    await expect(consumer.sync(event)).rejects.toThrow(/invalid id 'o-1'/);
+    expect(source.getOrderById).not.toHaveBeenCalled();
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+  });
+
+  it('rejects an order event when payload.clientId is non-numeric', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty();
+    const mapping = makeMapping(() => null);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    // valid id, but clientId carried in the payload is garbled
+    const event = makeEvent('order', '2', 'delete', { clientId: 'c-99' });
+
+    await expect(consumer.sync(event)).rejects.toThrow(/invalid clientId 'c-99'/);
     expect(twenty.createRecord).not.toHaveBeenCalled();
     expect(twenty.updateRecord).not.toHaveBeenCalled();
   });
@@ -705,7 +750,7 @@ describe('TwentySyncConsumer.sync — concurrent first-create conflict recovers'
     const mapping = makeMapping(() => null); // no mapping → create path
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
 
     // Resolves (no rethrow) to a single intent pointing at the winner's id
     const intents = await consumer.sync(event);
@@ -730,7 +775,7 @@ describe('TwentySyncConsumer.sync — concurrent first-create conflict recovers'
     const mapping = makeMapping(() => null);
 
     const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
-    const event = makeEvent('client', 'c-1', 'upsert');
+    const event = makeEvent('client', '1', 'upsert');
 
     await expect(consumer.sync(event)).rejects.toThrow(/boom — real failure/);
   });
