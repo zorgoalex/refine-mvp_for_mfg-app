@@ -54,7 +54,7 @@ function isPostgresUrl(value: string): boolean {
   }
 }
 
-const envSchema = z
+export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
     APP_NAME: z.string().trim().min(1).default('erp-backend'),
@@ -159,6 +159,16 @@ const envSchema = z
       .trim()
       .min(1)
       .default('image/jpeg,image/png,image/webp'),
+    BACKEND_ENABLE_TWENTY_SYNC: booleanFromEnv.default(false),
+    BACKEND_TWENTY_SYNC_RELAY_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
+    BACKEND_TWENTY_SYNC_DRY_RUN: booleanFromEnv.default(false),
+    BACKEND_TWENTY_SYNC_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
+    BACKEND_TWENTY_SYNC_BATCH_SIZE: z.coerce.number().int().positive().default(100),
+    BACKEND_TWENTY_SYNC_MAX_ATTEMPTS: z.coerce.number().int().positive().default(10),
+    BACKEND_TWENTY_SYNC_WORKER_ID: z.string().default('crm-sync-local'),
+    BACKEND_TWENTY_SYNC_LEASE_MS: z.coerce.number().int().positive().default(300000),
+    TWENTY_SYNC_BASE_URL: z.string().url().optional(),
+    TWENTY_SYNC_API_KEY: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && !env.FRONTEND_ORIGIN) {
@@ -377,6 +387,15 @@ const envSchema = z
             path: [key],
           });
         }
+      }
+    }
+
+    if (env.BACKEND_ENABLE_TWENTY_SYNC) {
+      if (!env.TWENTY_SYNC_BASE_URL) {
+        ctx.addIssue({ code: 'custom', path: ['TWENTY_SYNC_BASE_URL'], message: 'required when BACKEND_ENABLE_TWENTY_SYNC=true' });
+      }
+      if (!env.TWENTY_SYNC_API_KEY) {
+        ctx.addIssue({ code: 'custom', path: ['TWENTY_SYNC_API_KEY'], message: 'required when BACKEND_ENABLE_TWENTY_SYNC=true' });
       }
     }
   })
