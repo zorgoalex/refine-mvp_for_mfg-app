@@ -391,6 +391,13 @@ export const envSchema = z
     }
 
     if (env.BACKEND_ENABLE_TWENTY_SYNC) {
+      if (!env.DATABASE_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['DATABASE_URL'],
+          message: 'DATABASE_URL is required when BACKEND_ENABLE_TWENTY_SYNC is true',
+        });
+      }
       if (!env.TWENTY_SYNC_BASE_URL) {
         ctx.addIssue({ code: 'custom', path: ['TWENTY_SYNC_BASE_URL'], message: 'required when BACKEND_ENABLE_TWENTY_SYNC=true' });
       }

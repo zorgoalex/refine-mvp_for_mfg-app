@@ -527,4 +527,26 @@ describe('backend env validation', () => {
       BACKEND_ENABLE_NOTIFICATION_ENGINE: true,
     });
   });
+
+  it('requires DATABASE_URL when Twenty sync is enabled', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_TWENTY_SYNC: 'true',
+        TWENTY_SYNC_BASE_URL: 'http://twenty:3000',
+        TWENTY_SYNC_API_KEY: 'k',
+        // DATABASE_URL omitted on purpose
+      }),
+    ).toThrow(/DATABASE_URL is required when BACKEND_ENABLE_TWENTY_SYNC is true/);
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_TWENTY_SYNC: 'true',
+        TWENTY_SYNC_BASE_URL: 'http://twenty:3000',
+        TWENTY_SYNC_API_KEY: 'k',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_TWENTY_SYNC: true,
+    });
+  });
 });
