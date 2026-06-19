@@ -92,12 +92,13 @@ describe('envSchema superRefine: BACKEND_ENABLE_TWENTY_SYNC guards', () => {
     expect(() => envSchema.parse({})).not.toThrow();
   });
 
-  it('does not throw when BACKEND_ENABLE_TWENTY_SYNC=true and both vars are set', () => {
+  it('does not throw when BACKEND_ENABLE_TWENTY_SYNC=true and base/key/DATABASE_URL are set', () => {
     expect(() =>
       envSchema.parse({
         BACKEND_ENABLE_TWENTY_SYNC: true,
         TWENTY_SYNC_BASE_URL: 'https://crm-test.mebelkz.app',
         TWENTY_SYNC_API_KEY: 'secret-key',
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
       }),
     ).not.toThrow();
   });
