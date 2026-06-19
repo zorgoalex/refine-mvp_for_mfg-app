@@ -146,6 +146,24 @@ describe('mapOrder', () => {
     const result = mapOrder(fullOrder, COMPANY_ID);
     expect(result.companyId).toBe(COMPANY_ID);
   });
+
+  // Regression lock (2026-06-19): the projected date-time MUST be a strict ISO
+  // string Twenty accepts ('YYYY-MM-DDTHH:mm:ssZ'), never a Date.toString().
+  const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+
+  it('projects strict ISO date-time for non-null dates', () => {
+    const result = mapOrder(fullOrder, COMPANY_ID);
+    expect(result.orderDate).toMatch(ISO_DATETIME);
+    expect(result.completionDate).toMatch(ISO_DATETIME);
+  });
+
+  it('fails fast when orderDate is a non-date string (e.g. a leaked Date.toString())', () => {
+    const leaked: OrderRow = {
+      ...fullOrder,
+      orderDate: 'Fri Jun 19 2026 00:00:00 GMT+0000 (Coordinated Universal Time)',
+    };
+    expect(() => mapOrder(leaked, COMPANY_ID)).toThrow(/YYYY-MM-DD/);
+  });
 });
 
 // ---------------------------------------------------------------------------

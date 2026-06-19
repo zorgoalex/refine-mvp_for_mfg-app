@@ -2,6 +2,32 @@ import type { DatabaseService } from '../../../database/database.service';
 import type { ClientRow, CrmSourcePort, OrderRow } from '../application/crm-sync.types';
 
 /**
+ * Serialize an ERP DATE value to a date-only 'YYYY-MM-DD' string.
+ *
+ * node-postgres parses a DATE column (OID 1082) into a JS `Date` built at LOCAL
+ * midnight, so a naive `String(v)` yields a `Date.prototype.toString()` value
+ * ("Fri Jun 19 2026 00:00:00 GMT+0000 (Coordinated Universal Time)") that the
+ * Twenty mapper then turns into a non-ISO string Twenty rejects with HTTP 400.
+ *
+ * Because pg constructs the Date from local Y/M/D components, reading the local
+ * getters round-trips the stored DATE exactly, independent of the process
+ * timezone (using `toISOString()` would shift the day in non-UTC zones).
+ * A string input (e.g. a custom type parser) is normalized to its date prefix.
+ */
+export function toErpDateString(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) {
+    const year = v.getFullYear();
+    const month = String(v.getMonth() + 1).padStart(2, '0');
+    const day = String(v.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  const s = String(v);
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return match ? match[1] : s;
+}
+
+/**
  * Pool-only ERP source read adapter for CRM sync.
  * All four methods use db.query (the pool) — never a transaction client.
  * This is intentional: reads run OUTSIDE any persistence tx (brief §3).
@@ -37,7 +63,7 @@ export class PgCrmSourceRepository implements CrmSourcePort {
     if (!rows.length) return null;
     const r = rows[0];
     const num = (v: unknown): number | null => (v == null ? null : Number(v));
-    const dat = (v: unknown): string | null => (v == null ? null : String(v));
+    const dat = toErpDateString;
     return {
       orderId: String(r.order_id),
       orderNumber: String(r.order_id),

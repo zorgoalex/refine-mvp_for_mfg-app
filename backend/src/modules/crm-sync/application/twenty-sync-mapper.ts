@@ -12,9 +12,18 @@ export function erpStatusFor(isDeleted: boolean): 'active' | 'deleted' {
 /**
  * Convert an ERP DATE string ('YYYY-MM-DD') to a Twenty DATE_TIME ISO string.
  * Returns null when the value is null.
+ *
+ * Fails fast on any non date-only input. This is a regression guard: a leaked
+ * `Date.toString()` (see PgCrmSourceRepository) used to slip through here and
+ * produce a malformed string Twenty rejected with HTTP 400. Throwing makes the
+ * order fail mapping (and surface as a failed sync) instead of silently
+ * projecting garbage.
  */
 function toDateTime(d: string | null): string | null {
   if (d === null) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    throw new Error(`toDateTime: expected a YYYY-MM-DD date, got ${JSON.stringify(d)}`);
+  }
   return `${d}T00:00:00.000Z`;
 }
 

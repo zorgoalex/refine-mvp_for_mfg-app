@@ -147,7 +147,10 @@ describeIntegration('PgCrmSourceRepository (integration)', () => {
     expect(row!.paidAmount).toBe(7250);
     expect(row!.orderStatusName).toBe('Новый');
     expect(row!.paymentStatusName).toBe('Частично оплачен');
-    expect(typeof row!.orderDate).toBe('string');
+    // Regression lock (2026-06-19): a pg DATE must serialize to a date-only
+    // 'YYYY-MM-DD' string, NOT a leaked Date.toString(). order_date='2026-01-15'.
+    expect(row!.orderDate).toBe('2026-01-15');
+    expect(row!.completionDate).toBe('2026-02-28');
     expect(row!.deleteFlag).toBe(false);
   });
 
