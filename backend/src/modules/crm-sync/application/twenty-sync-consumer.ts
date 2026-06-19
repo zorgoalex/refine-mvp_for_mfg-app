@@ -53,13 +53,20 @@ export class TwentySyncConsumer {
     const payload = event.payload as { entity: 'client' | 'order'; id: string; op: 'upsert' | 'delete'; clientId?: string | null };
     const { entity, id, op } = payload;
 
+    // Fail-closed validation: a malformed/unknown event must throw so the relay's
+    // catch runs markRetry (retryable → eventually 'failed' and visible) instead of
+    // silently marking the row 'processed' and dropping the event forever.
+    if (entity !== 'client' && entity !== 'order') {
+      throw new Error(`crm-sync: unknown entity '${entity}' in event ${event.outboxEventId}`);
+    }
+    if (op !== 'upsert' && op !== 'delete') {
+      throw new Error(`crm-sync: unknown op '${op}' in event ${event.outboxEventId}`);
+    }
+
     if (entity === 'client') {
       return this.syncClient(id, op, event);
     }
-    if (entity === 'order') {
-      return this.syncOrder(id, op, event);
-    }
-    return [];
+    return this.syncOrder(id, op, event);
   }
 
   // ---------------------------------------------------------------------------
@@ -88,8 +95,20 @@ export class TwentySyncConsumer {
       await this.twenty.updateRecord(object, found, body);
       return found;
     }
-    const { id } = await this.twenty.createRecord(object, body);
-    return id;
+    // Create, recovering from a concurrent create (erpId unique conflict). In a
+    // relay/backfill overlap two workers can both find null then both create; the
+    // loser hits a uniqueness conflict. Re-resolve and update instead of failing.
+    try {
+      const { id } = await this.twenty.createRecord(object, body);
+      return id;
+    } catch (createErr) {
+      const conflictId = await this.twenty.findIdByErpId(object, erpId);
+      if (conflictId) {
+        await this.twenty.updateRecord(object, conflictId, body);
+        return conflictId;
+      }
+      throw createErr; // genuine failure, not a race
+    }
   }
 
   // ---------------------------------------------------------------------------

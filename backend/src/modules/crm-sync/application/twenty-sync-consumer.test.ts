@@ -645,3 +645,93 @@ describe('TwentySyncConsumer.sync — order delete, mapping has twentyId, relate
     expect(twenty.updateRecord).toHaveBeenCalledWith('erpOrders', 'existing-order-twenty-id', { erpStatus: 'deleted' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Test 16: invalid payload — unknown entity / unknown op → sync() REJECTS (throws)
+//          This proves the relay would mark the event retry/failed (visible),
+//          NOT silently mark it processed.
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — invalid payload fails closed', () => {
+  it('rejects when payload.entity is unknown', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty();
+    const mapping = makeMapping(() => null);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('client', 'c-1', 'upsert');
+    // Corrupt the payload entity after construction
+    (event.payload as Record<string, unknown>).entity = 'bogus';
+
+    await expect(consumer.sync(event)).rejects.toThrow(/unknown entity 'bogus'/);
+    // No Twenty side effects on a rejected malformed event
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+  });
+
+  it('rejects when payload.op is unknown (valid entity)', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty();
+    const mapping = makeMapping(() => null);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('client', 'c-1', 'upsert');
+    (event.payload as Record<string, unknown>).op = 'archive';
+
+    await expect(consumer.sync(event)).rejects.toThrow(/unknown op 'archive'/);
+    expect(twenty.createRecord).not.toHaveBeenCalled();
+    expect(twenty.updateRecord).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 17: concurrent first-create race — createRecord throws once (erpId unique
+//          conflict). findIdByErpId returns null on the PRE-create call but an id
+//          on the POST-conflict call → recover via updateRecord, resolve to intent.
+//          Distinct from Test 6 (sequential re-run, found BEFORE create).
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — concurrent first-create conflict recovers', () => {
+  it('on create conflict, re-resolves via findIdByErpId and updates (no rethrow, no duplicate)', async () => {
+    const source = makeSource();
+    let findCalls = 0;
+    const twenty = makeTwenty({
+      // First create throws (uniqueness conflict from the racing winner)
+      createRecord: vi.fn().mockRejectedValue(new Error('erpId unique conflict')),
+      // PRE-create resolve → null; POST-conflict resolve → the winner's id
+      findIdByErpId: vi.fn().mockImplementation(() => {
+        findCalls += 1;
+        return Promise.resolve(findCalls === 1 ? null : 'race-winner-id');
+      }),
+    });
+    const mapping = makeMapping(() => null); // no mapping → create path
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('client', 'c-1', 'upsert');
+
+    // Resolves (no rethrow) to a single intent pointing at the winner's id
+    const intents = await consumer.sync(event);
+    expect(intents).toHaveLength(1);
+    expect(intents[0].mapping.entityType).toBe('client');
+    expect(intents[0].mapping.twentyId).toBe('race-winner-id');
+
+    // create was attempted once, then conflict recovery kicked in
+    expect(twenty.createRecord).toHaveBeenCalledTimes(1);
+    // findIdByErpId called twice: once pre-create (null), once post-conflict (id)
+    expect(twenty.findIdByErpId).toHaveBeenCalledTimes(2);
+    // recovered via update with the found id
+    expect(twenty.updateRecord).toHaveBeenCalledWith('companies', 'race-winner-id', mapClient(CLIENT_ROW));
+  });
+
+  it('rethrows when create fails and post-conflict resolve still finds nothing (genuine failure)', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty({
+      createRecord: vi.fn().mockRejectedValue(new Error('boom — real failure')),
+      findIdByErpId: vi.fn().mockResolvedValue(null), // never resolves to an id
+    });
+    const mapping = makeMapping(() => null);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('client', 'c-1', 'upsert');
+
+    await expect(consumer.sync(event)).rejects.toThrow(/boom — real failure/);
+  });
+});
