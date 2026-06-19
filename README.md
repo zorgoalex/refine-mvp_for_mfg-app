@@ -346,6 +346,10 @@ Audit:
   диапазону дат, пагинацией и маскированием чувствительных полей. Доступ к
   общему эндпоинту требует права `audit.view`.
 
+## Twenty CRM sync
+
+Backend поддерживает одностороннюю проекцию ERP→Twenty CRM: клиенты синхронизируются как Company, заказы — как ErpOrder. Синхронизация fail-closed по умолчанию и включается флагом `BACKEND_ENABLE_TWENTY_SYNC=true` на бэкенде. Дополнительные флаги управляют relay-owner (`BACKEND_TWENTY_SYNC_RELAY_OWNER`), dry-run режимом (`BACKEND_TWENTY_SYNC_DRY_RUN=true`) и параметрами воркера (интервал, batch size, lease). Для первоначальной синхронизации существующих данных запустить `npm run crm-sync:backfill` внутри пакета `backend/` (поддерживает `--dry-run`). Переменные `TWENTY_SYNC_BASE_URL` и `TWENTY_SYNC_API_KEY` настраиваются в `ops/templates/env.vps.example`; реальный ключ никогда не коммитится.
+
 ## Установка и запуск
 
 ```bash
