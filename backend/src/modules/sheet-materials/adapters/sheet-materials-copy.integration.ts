@@ -58,8 +58,8 @@ async function createSchema(client: PoolClient): Promise<void> {
   `);
   await client.query(migration('021_sheet_material_types.sql'));
   await client.query(migration('024_sheet_material_type_version.sql'));
-  await client.query(migration('025_sheet_material_types_reference_columns.sql'));
-  await client.query(migration('026_sheet_material_copy_runs.sql'));
+  await client.query(migration('026_sheet_material_types_reference_columns.sql'));
+  await client.query(migration('027_sheet_material_copy_runs.sql'));
   // One PRE-EXISTING sheet row (e.g. manually created earlier) that the copy must NOT delete on reverse.
   await client.query(`INSERT INTO sheet_material_types (name, material_type_id, unit_id, thickness_mm, width_mm, height_mm) VALUES ('PREEXISTING ручной лист', 2, 1, 10, 2440, 1220);`);
   // 3 eligible (2 МДФ + 1 ЛДСП), 1 inactive, 1 non-sheet 'нд'.
@@ -95,7 +95,7 @@ const cfg = (mode: 'dry-run' | 'write', runId = 'it-run') => ({
 });
 const reverseOpts = { actor: 'it', expectedDbName: 'postgres' };
 
-describeIf('SP2 sheet-materials copy (real migration chain 021→024→025→026)', () => {
+describeIf('SP2 sheet-materials copy (real migration chain 021→024→026→027)', () => {
   it('dry-run plans 3 inserts + 3 links, writes nothing', async () => {
     const s = await runSheetCopy(pool, cfg('dry-run'));
     expect(s).toMatchObject({ mode: 'dry-run', inserted: 3, linked: 3, skipped: 2 });

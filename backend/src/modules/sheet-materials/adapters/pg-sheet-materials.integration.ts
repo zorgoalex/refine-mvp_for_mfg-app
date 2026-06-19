@@ -109,7 +109,7 @@ async function createSchema(client: PoolClient): Promise<void> {
   // Apply the REAL migration chain in order (each file carries its own BEGIN/COMMIT).
   await client.query(migration('021_sheet_material_types.sql'));
   await client.query(migration('024_sheet_material_type_version.sql'));
-  await client.query(migration('025_sheet_material_types_reference_columns.sql'));
+  await client.query(migration('026_sheet_material_types_reference_columns.sql'));
 }
 
 function makeDatabase(pool: Pool): DatabaseService {

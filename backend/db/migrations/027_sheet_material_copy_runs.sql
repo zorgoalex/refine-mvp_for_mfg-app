@@ -1,4 +1,4 @@
--- 026_sheet_material_copy_runs.sql
+-- 027_sheet_material_copy_runs.sql
 -- Additive ledger for the one-time SP2 materials -> sheet_material_types data copy.
 -- Each write run records, in the SAME transaction as its copy/link writes, the rows it
 -- created, the links it set, and operator/source/target provenance, so `reverse --run-id`

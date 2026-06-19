@@ -1,4 +1,4 @@
--- 025_sheet_material_types_reference_columns.sql
+-- 026_sheet_material_types_reference_columns.sql
 -- Additive: extend sheet_material_types into a full reference catalog (SP1).
 -- Table is empty in all environments -> SET NOT NULL on unit_id is safe.
 -- Rollback: ALTER TABLE ... DROP COLUMN for each column below + DROP the FK constraints.
