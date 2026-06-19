@@ -145,10 +145,21 @@ export class CrmSyncRelayService {
         };
         const entityType = String(payload.entity ?? 'unknown');
         const erpId = String(payload.id ?? event.aggregateId);
-        const twentyObject = entityType === 'client' ? 'companies' : 'erpOrders';
         const errMsg = err instanceof Error ? err.message : String(err);
 
+        // Only a STRUCTURALLY VALID payload may write a mapping row:
+        //  - entityType must be one of the entity_type CHECK values (client|order, migration 025);
+        //    a malformed payload (e.g. 'unknown'/'bogus') would violate the CHECK and roll back the tx.
+        //  - erpId must be a numeric id; an invalid id (e.g. 'abc') would write a junk mapping row.
+        const validEntity = entityType === 'client' || entityType === 'order';
+        const validId = typeof erpId === 'string' && /^\d+$/.test(erpId);
+        // twentyObject only matters when validEntity (client→companies, order→erpOrders).
+        const twentyObject = entityType === 'client' ? 'companies' : 'erpOrders';
+
         const didFail = await this.db.transaction(async (tx) => {
+          // markRetry FIRST, token-gated: advances attempts and (when exhausted) flips the row
+          // to 'failed'. It MUST commit regardless of payload validity so a malformed event
+          // eventually fails closed and becomes a visible 'failed' row instead of looping forever.
           const r = await this.outboxRepo.markRetry(
             tx,
             event.outboxEventId,
@@ -156,16 +167,18 @@ export class CrmSyncRelayService {
             nextAttemptAt,
             flags.maxAttempts,
           );
-          // Only update mapping if WE still owned the row (r > 0).
-          // If r === 0, the row was lease-reclaimed — skip markFailed too.
-          // markFailed runs in the SAME tx, so the markRetry row-lock prevents any
-          // reclaim from interleaving between the two writes. If markFailed throws,
-          // the tx rolls back (markRetry undone → row stays 'processing' → reclaimed later).
-          if (r > 0) {
-            await this.mapping.markFailed(tx, entityType, erpId, twentyObject, errMsg);
-            return true;
+          // r === 0 → row was lease-reclaimed; skip ALL side effects (no markFailed).
+          if (r === 0) {
+            return false;
           }
-          return false;
+          // markFailed runs in the SAME tx (markRetry row-lock prevents reclaim interleave),
+          // but ONLY for a structurally valid payload so it never violates the entity_type
+          // CHECK or writes a junk mapping row for a bad id. For a malformed payload we still
+          // commit markRetry (no mapping write) → the outbox row advances toward 'failed'.
+          if (validEntity && validId) {
+            await this.mapping.markFailed(tx, entityType, erpId, twentyObject, errMsg);
+          }
+          return true;
         });
         if (didFail) {
           failed++;

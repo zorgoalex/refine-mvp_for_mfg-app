@@ -449,6 +449,79 @@ describe('CrmSyncRelayService', () => {
     });
   });
 
+  // ── (c4) malformed payload.entity → markRetry commits, markFailed NOT called ──
+  describe('(c4) consumer throws on malformed payload.entity (fail-closed)', () => {
+    it('runs markRetry (commits, advances attempts → failed) but does NOT call markFailed for an invalid entity', async () => {
+      // payload.entity is 'bogus' → would coerce to a non-(client|order) entity_type and
+      // violate the entity_type CHECK if markFailed ran → tx rollback → row loops forever.
+      const event = makeClaimedEvent({
+        payload: { entity: 'bogus', id: '1', op: 'upsert' },
+      });
+      const outboxRepo = makeOutboxRepo({
+        claimBatch: vi.fn().mockResolvedValue([event]),
+        markRetry: vi.fn().mockResolvedValue(1),
+      });
+      // consumer.sync throws (it correctly rejects a malformed payload).
+      const consumer = { sync: vi.fn().mockRejectedValue(new Error('unsupported entity: bogus')) };
+      const mapping = makeMappingRepo();
+      const { db, fakeTxClient } = makeDb();
+      db.transaction = vi.fn().mockImplementation((handler: (c: DatabaseClient) => Promise<unknown>) =>
+        handler(fakeTxClient),
+      );
+
+      const relay = makeRelay({ outboxRepo, consumer, mapping, db });
+      const result = await relay.runTick();
+
+      // markRetry IS called on the tx client and returns > 0 → attempts advance.
+      expect(outboxRepo.markRetry).toHaveBeenCalledWith(
+        fakeTxClient,
+        event.outboxEventId,
+        event.lockToken,
+        expect.any(String),
+        expect.any(Number),
+      );
+      // No mapping write for an invalid entity → no entity_type CHECK violation, no rollback.
+      expect(mapping.markFailed).not.toHaveBeenCalled();
+      // markRetry committed → counted as a failure (row advances toward visible 'failed').
+      expect(result).toEqual({ claimed: 1, processed: 0, failed: 1 });
+    });
+  });
+
+  // ── (c5) valid entity but invalid id → markRetry commits, markFailed NOT called ─
+  describe('(c5) consumer throws, valid entity but non-numeric id (fail-closed)', () => {
+    it('runs markRetry (commits) but does NOT call markFailed for an invalid (non-numeric) id', async () => {
+      // entity 'order' is valid, but id 'abc' is not a numeric erp id → no junk mapping row.
+      const event = makeClaimedEvent({
+        payload: { entity: 'order', id: 'abc', op: 'upsert' },
+      });
+      const outboxRepo = makeOutboxRepo({
+        claimBatch: vi.fn().mockResolvedValue([event]),
+        markRetry: vi.fn().mockResolvedValue(1),
+      });
+      const consumer = { sync: vi.fn().mockRejectedValue(new Error('bad order id')) };
+      const mapping = makeMappingRepo();
+      const { db, fakeTxClient } = makeDb();
+      db.transaction = vi.fn().mockImplementation((handler: (c: DatabaseClient) => Promise<unknown>) =>
+        handler(fakeTxClient),
+      );
+
+      const relay = makeRelay({ outboxRepo, consumer, mapping, db });
+      const result = await relay.runTick();
+
+      // markRetry still commits (token-gated, returns > 0).
+      expect(outboxRepo.markRetry).toHaveBeenCalledWith(
+        fakeTxClient,
+        event.outboxEventId,
+        event.lockToken,
+        expect.any(String),
+        expect.any(Number),
+      );
+      // Invalid id → no mapping write.
+      expect(mapping.markFailed).not.toHaveBeenCalled();
+      expect(result).toEqual({ claimed: 1, processed: 0, failed: 1 });
+    });
+  });
+
   // ── (d) dryRun=true: uses peekPending + dryRunConsumer, zero DB/Twenty writes ─
   describe('(d) runTick({dryRun:true})', () => {
     it('uses peekPending (NOT claimBatch), calls dryRunConsumer, no markProcessed/markRetry/tx', async () => {
