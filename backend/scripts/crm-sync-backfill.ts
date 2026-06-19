@@ -16,6 +16,7 @@ import { runBackfill } from '../src/modules/crm-sync/application/crm-sync-backfi
 import type { TransactionClient } from '../src/database/database.types';
 import type { DatabaseService } from '../src/database/database.service';
 import type { SyncIntent } from '../src/modules/crm-sync/application/twenty-sync-consumer';
+import { resolveTwentyCreds } from './crm-sync-backfill-creds';
 
 // ---------------------------------------------------------------------------
 // Parse CLI args
@@ -38,13 +39,14 @@ if (!enabled) {
 // ---------------------------------------------------------------------------
 // Validate Twenty credentials (required even for dry-run)
 // ---------------------------------------------------------------------------
-const baseUrl = process.env.TWENTY_SYNC_BASE_URL ?? null;
-const apiKey = process.env.TWENTY_SYNC_API_KEY ?? null;
+// Trim + treat blank (missing or whitespace-only) as absent so a config typo
+// hard-refuses instead of building a live client with an empty bearer token.
+const creds = resolveTwentyCreds(process.env);
 
-if (!dryRun && (!baseUrl || !apiKey)) {
+if (!dryRun && !creds) {
   process.stderr.write(
     '[crm-sync-backfill] ERROR: TWENTY_SYNC_BASE_URL and TWENTY_SYNC_API_KEY must be set ' +
-    'for a live (non-dry-run) backfill.\n',
+    '(non-blank) for a live (non-dry-run) backfill.\n',
   );
   process.exit(1);
 }
@@ -118,7 +120,7 @@ const audit = new AuditService();
 
 const twenty = dryRun
   ? new NoopTwentyApiClient((msg) => console.log(msg))
-  : new TwentyApiClient(baseUrl!, apiKey!);  // credentials validated above
+  : new TwentyApiClient(creds!.baseUrl, creds!.apiKey);  // credentials validated above
 
 const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: dbShim });
 
