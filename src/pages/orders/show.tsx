@@ -1,7 +1,7 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Table, Breadcrumb, message } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
+import { Button, Table, Breadcrumb, message, Dropdown, Tooltip } from "antd";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined } from "@ant-design/icons";
 import { useEffect, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -449,22 +449,51 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           >
             Печать
           </Button>
-          <Button
-            icon={<FileExcelOutlined />}
-            onClick={handleExportExcel}
-            loading={isExporting}
-            disabled={!record || details.length === 0 || isClientResolving}
+          <Tooltip title="Экспорт в Excel">
+            <Button
+              aria-label="Экспорт в Excel"
+              icon={<FileExcelOutlined />}
+              onClick={handleExportExcel}
+              loading={isExporting}
+              disabled={!record || details.length === 0 || isClientResolving}
+            />
+          </Tooltip>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                {
+                  key: 'pdf',
+                  icon: <FilePdfOutlined />,
+                  label: 'Экспорт в PDF',
+                  disabled: !record || details.length === 0,
+                },
+                {
+                  key: 'json',
+                  icon: <FileTextOutlined />,
+                  label: 'JSON snapshot',
+                  disabled: !record || isSnapshotExporting,
+                },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'pdf') {
+                  handlePrint();
+                }
+                if (key === 'json') {
+                  void handleExportSnapshot();
+                }
+              },
+            }}
           >
-            Экспорт в Excel
-          </Button>
-          <Button
-            icon={<DownloadOutlined />}
-            onClick={handleExportSnapshot}
-            loading={isSnapshotExporting}
-            disabled={!record}
-          >
-            JSON snapshot
-          </Button>
+            <Tooltip title="Другие экспорты">
+              <Button
+                aria-label="Другие экспорты"
+                icon={isSnapshotExporting ? <DownloadOutlined /> : <MoreOutlined />}
+                loading={isSnapshotExporting}
+                disabled={!record}
+              />
+            </Tooltip>
+          </Dropdown>
         </>
       )}
     >
