@@ -50,6 +50,7 @@ const { TextArea } = Input;
 
 interface OrderDeadlinePanelProps {
   orderId: number | null | undefined;
+  embedded?: boolean;
 }
 
 interface DeadlinePanelState {
@@ -84,7 +85,7 @@ interface OverrideModalState {
   title: string;
 }
 
-export function OrderDeadlinePanel({ orderId }: OrderDeadlinePanelProps) {
+export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlinePanelProps) {
   const { data: identity } = useGetIdentity<UserIdentity>();
   const [state, setState] = useState<DeadlinePanelState>(initialState);
   const [reloadKey, setReloadKey] = useState(0);
@@ -233,14 +234,9 @@ export function OrderDeadlinePanel({ orderId }: OrderDeadlinePanelProps) {
     }
   };
 
-  return (
+  const content = (
     <>
-      <Collapse defaultActiveKey={[]} style={{ marginBottom: 4 }} className="compact-collapse">
-        <Panel
-          key="deadlines"
-          header={<span style={{ fontSize: 12, fontWeight: 600, color: '#1677ff' }}>Дедлайны</span>}
-        >
-          {state.loading ? (
+      {state.loading ? (
             <Spin />
           ) : state.error ? (
             <Alert type="error" message="Ошибка загрузки дедлайнов" description={state.error} showIcon />
@@ -506,8 +502,23 @@ export function OrderDeadlinePanel({ orderId }: OrderDeadlinePanelProps) {
               )}
             </Space>
           )}
-        </Panel>
-      </Collapse>
+    </>
+  );
+
+  return (
+    <>
+      {embedded ? (
+        content
+      ) : (
+        <Collapse defaultActiveKey={[]} style={{ marginBottom: 4 }} className="compact-collapse">
+          <Panel
+            key="deadlines"
+            header={<span style={{ fontSize: 12, fontWeight: 600, color: '#1677ff' }}>Дедлайны</span>}
+          >
+            {content}
+          </Panel>
+        </Collapse>
+      )}
       <Modal
         title={overrideModal?.title}
         open={!!overrideModal}

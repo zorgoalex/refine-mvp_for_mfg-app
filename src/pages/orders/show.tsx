@@ -1,6 +1,6 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Collapse, Table, Breadcrumb, message } from "antd";
+import { Button, Table, Breadcrumb, message } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined } from "@ant-design/icons";
 import { useEffect, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -24,12 +24,19 @@ import { ordersApi } from "../../api/ordersApi";
 import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { ProjectLinksEditor } from "./components/projects/ProjectLinksEditor";
 
-const { Panel } = Collapse;
+type OrderInfoPanelKey = 'deadlines' | 'finance' | 'additional';
+
+const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
+  { key: 'deadlines', label: 'Дедлайны', color: '#1677ff' },
+  { key: 'finance', label: 'Финансы', color: '#faad14' },
+  { key: 'additional', label: 'Дополнительная информация', color: '#595959' },
+];
 
 
 
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
+  const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
 
   const { queryResult } = useShow({
     meta: {
@@ -480,128 +487,173 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             />
           )}
 
-          <OrderDeadlinePanel orderId={record.order_id} />
-          
-          {/* Финансы */}
-          <Collapse
-            defaultActiveKey={[]}
-            style={{ marginBottom: 4 }}
-            className="compact-collapse"
-          >
-            <Panel
-              header={<span style={{ fontSize: 12, fontWeight: 600, color: '#faad14' }}>Финансы</span>}
-              key="finance"
+          <div style={{ marginBottom: 16 }}>
+            <div
+              role="tablist"
+              aria-label="Секции заказа"
+              style={{
+                display: 'flex',
+                flexWrap: 'nowrap',
+                width: '100%',
+                borderBottom: '1px solid #d9d9d9',
+                overflow: 'hidden',
+              }}
             >
+              {orderInfoTabs.map((tab) => {
+                const isActive = activeInfoPanel === tab.key;
+
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    title={tab.label}
+                    onClick={() => setActiveInfoPanel(isActive ? null : tab.key)}
+                    style={{
+                      flex: '1 1 0',
+                      minWidth: 0,
+                      height: 30,
+                      padding: '4px 8px',
+                      border: '1px solid #d9d9d9',
+                      borderBottom: isActive ? '1px solid #fff' : '1px solid #d9d9d9',
+                      borderRadius: '6px 6px 0 0',
+                      background: isActive ? '#fff' : '#fafafa',
+                      color: isActive ? tab.color : '#595959',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      marginBottom: -1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeInfoPanel && (
               <div
-                onDoubleClick={() => {
-                  if (record?.order_id) {
-                    navigate(`/orders/edit/${record.order_id}?tab=finance`);
-                  }
+                role="tabpanel"
+                style={{
+                  border: '1px solid #d9d9d9',
+                  borderTop: 'none',
+                  padding: 12,
+                  background: '#fff',
                 }}
-                style={{ cursor: 'pointer' }}
               >
-                <OrderFinanceBlock record={record} payments={payments} />
-              </div>
-            </Panel>
-          </Collapse>
+                {activeInfoPanel === 'deadlines' && (
+                  <OrderDeadlinePanel orderId={record.order_id} embedded />
+                )}
 
-          {/* Дополнительная информация - схлопнутый блок */}
-          <Collapse
-            defaultActiveKey={[]}
-            style={{ marginBottom: 16 }}
-            className="compact-collapse"
-          >
-            <Panel
-              header={<span style={{ fontSize: 12, fontWeight: 600 }}>Дополнительная информация</span>}
-              key="additional"
-            >
-              {/* Даты */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#52c41a', marginBottom: 8 }}>
-                  Даты
-                </div>
-                <OrderDatesBlock record={record} />
-              </div>
-              
-              {/* Производство */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#fa8c16', marginBottom: 8 }}>
-                  Производство
-                </div>
-                <OrderProductionBlock
-                  record={record}
-                  details={details}
-                  millingTypesMap={millingTypesMap}
-                  edgeTypesMap={edgeTypesMap}
-                  filmsMap={filmsMap}
-                />
-              </div>
+                {activeInfoPanel === 'finance' && (
+                  <div
+                    onDoubleClick={() => {
+                      if (record?.order_id) {
+                        navigate(`/orders/edit/${record.order_id}?tab=finance`);
+                      }
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <OrderFinanceBlock record={record} payments={payments} />
+                  </div>
+                )}
 
-              {/* Присадки */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#13c2c2', marginBottom: 8 }}>
-                  Присадки
-                </div>
-                {dowelingLinks.length > 0 ? (
-                  <Table
-                    dataSource={dowelingLinks}
-                    rowKey="order_doweling_link_id"
-                    size="small"
-                    pagination={false}
-                    bordered
-                    style={{ fontSize: 12 }}
-                    columns={[
-                      {
-                        title: 'Номер присадки',
-                        key: 'name',
-                        render: (_, link: any) => {
-                          const dowelingOrderId =
-                            link.doweling_order?.doweling_order_id ?? link.doweling_order_id;
-                          const dowelingOrderName =
-                            link.doweling_order?.doweling_order_name ||
-                            link.doweling_order_name ||
-                            (dowelingOrderId ? String(dowelingOrderId) : '—');
-                          const showPath = getDowelingOrderShowPath(dowelingOrderId);
+                {activeInfoPanel === 'additional' && (
+                  <>
+                    {/* Даты */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#52c41a', marginBottom: 8 }}>
+                        Даты
+                      </div>
+                      <OrderDatesBlock record={record} />
+                    </div>
+                    
+                    {/* Производство */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#fa8c16', marginBottom: 8 }}>
+                        Производство
+                      </div>
+                      <OrderProductionBlock
+                        record={record}
+                        details={details}
+                        millingTypesMap={millingTypesMap}
+                        edgeTypesMap={edgeTypesMap}
+                        filmsMap={filmsMap}
+                      />
+                    </div>
 
-                          return showPath ? (
-                            <Link to={showPath}>{dowelingOrderName}</Link>
-                          ) : (
-                            dowelingOrderName
-                          );
-                        },
-                      },
-                      {
-                        title: 'Конструктор',
-                        key: 'engineer',
-                        render: (_, link: any) => {
-                          const engineerId = link.doweling_order?.design_engineer_id;
-                          return engineerId ? employeesMap.get(engineerId) || '—' : '—';
-                        },
-                      },
-                    ]}
-                  />
-                ) : (
-                  <span style={{ color: '#8c8c8c', fontStyle: 'italic' }}>Нет связанных присадок</span>
+                    {/* Присадки */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#13c2c2', marginBottom: 8 }}>
+                        Присадки
+                      </div>
+                      {dowelingLinks.length > 0 ? (
+                        <Table
+                          dataSource={dowelingLinks}
+                          rowKey="order_doweling_link_id"
+                          size="small"
+                          pagination={false}
+                          bordered
+                          style={{ fontSize: 12 }}
+                          columns={[
+                            {
+                              title: 'Номер присадки',
+                              key: 'name',
+                              render: (_, link: any) => {
+                                const dowelingOrderId =
+                                  link.doweling_order?.doweling_order_id ?? link.doweling_order_id;
+                                const dowelingOrderName =
+                                  link.doweling_order?.doweling_order_name ||
+                                  link.doweling_order_name ||
+                                  (dowelingOrderId ? String(dowelingOrderId) : '—');
+                                const showPath = getDowelingOrderShowPath(dowelingOrderId);
+
+                                return showPath ? (
+                                  <Link to={showPath}>{dowelingOrderName}</Link>
+                                ) : (
+                                  dowelingOrderName
+                                );
+                              },
+                            },
+                            {
+                              title: 'Конструктор',
+                              key: 'engineer',
+                              render: (_, link: any) => {
+                                const engineerId = link.doweling_order?.design_engineer_id;
+                                return engineerId ? employeesMap.get(engineerId) || '—' : '—';
+                              },
+                            },
+                          ]}
+                        />
+                      ) : (
+                        <span style={{ color: '#8c8c8c', fontStyle: 'italic' }}>Нет связанных присадок</span>
+                      )}
+                    </div>
+
+                    {/* Файлы */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#722ed1', marginBottom: 8 }}>
+                        Файлы
+                      </div>
+                      <OrderFilesBlock record={record} />
+                    </div>
+                    
+                    {/* Служебная информация */}
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#8c8c8c', marginBottom: 8 }}>
+                        Служебная информация
+                      </div>
+                      <OrderMetaBlock record={record} />
+                    </div>
+                  </>
                 )}
               </div>
-
-              {/* Файлы */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#722ed1', marginBottom: 8 }}>
-                  Файлы
-                </div>
-                <OrderFilesBlock record={record} />
-              </div>
-              
-              {/* Служебная информация */}
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#8c8c8c', marginBottom: 8 }}>
-                  Служебная информация
-                </div>
-                <OrderMetaBlock record={record} />
-              </div>
-            </Panel>
-          </Collapse>
+            )}
+          </div>
 
           {/* Детали заказа - компактная таблица */}
           <div style={{ marginBottom: 16 }}>
