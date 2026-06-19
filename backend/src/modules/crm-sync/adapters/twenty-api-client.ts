@@ -47,10 +47,13 @@ export class TwentyApiClient implements TwentyApiPort {
     if (!res.ok) {
       throw new Error(`Twenty create ${object} failed: ${res.status} ${await res.text()}`);
     }
-    const json = await res.json();
+    const json = (await res.json()) as { data?: Record<string, { id?: string } | undefined> };
     const envelopeKey = CREATE_KEY_MAP[object];
-    const id: string = json.data[envelopeKey].id;
-    return { id };
+    const record = json.data?.[envelopeKey];
+    if (!record?.id) {
+      throw new Error(`Twenty create ${object}: unexpected response shape ${JSON.stringify(json)}`);
+    }
+    return { id: record.id };
   }
 
   async updateRecord(object: TwentyObject, id: string, body: Record<string, unknown>): Promise<void> {
@@ -74,9 +77,8 @@ export class TwentyApiClient implements TwentyApiPort {
     if (!res.ok) {
       throw new Error(`Twenty findIdByErpId ${object} failed: ${res.status} ${await res.text()}`);
     }
-    const json = await res.json();
-    const items: Array<{ id: string }> = json.data[object];
-    return items[0]?.id ?? null;
+    const json = (await res.json()) as { data?: Record<string, Array<{ id?: string }> | undefined> };
+    return json.data?.[object]?.[0]?.id ?? null;
   }
 
   async deleteRecord(object: TwentyObject, id: string): Promise<void> {

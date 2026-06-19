@@ -52,6 +52,16 @@ describe('TwentyApiClient', () => {
       const client = new TwentyApiClient(BASE, KEY, mockFetch);
       await expect(client.createRecord('companies', {})).rejects.toThrow(/422/);
     });
+
+    it('throws a clear error when 200 response has unexpected shape (malformed body)', async () => {
+      const mockFetch = vi.fn().mockResolvedValue(
+        makeResponse(true, 200, { data: {} }),
+      );
+      const client = new TwentyApiClient(BASE, KEY, mockFetch);
+      await expect(client.createRecord('companies', {})).rejects.toThrow(
+        /unexpected response shape/,
+      );
+    });
   });
 
   describe('updateRecord', () => {
