@@ -36,13 +36,14 @@ function makeEvent(
   entity: 'client' | 'order',
   id: string,
   op: 'upsert' | 'delete',
+  extra?: Record<string, unknown>,
 ): OutboxEventRecord {
   return {
     outboxEventId: `evt-${entity}-${id}-${op}`,
     eventType: 'crm.sync.entity',
     aggregateType: entity,
     aggregateId: id,
-    payload: { entity, id, op },
+    payload: { entity, id, op, ...extra },
     attempts: 0,
   };
 }
@@ -526,5 +527,121 @@ describe('TwentySyncConsumer.supports', () => {
     expect(consumer.supports('payment.created')).toBe(false);
     expect(consumer.supports('crm.other')).toBe(false);
     expect(consumer.supports('')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 13: client delete — mapping has NO twentyId but findIdByErpId returns an id
+//          → soft-delete intent returned (NOT []), updateRecord('companies', foundId) called
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — client delete, no mapping twentyId but findIdByErpId recovers', () => {
+  it('returns soft-delete intent when mapping has no twentyId but findIdByErpId returns an id', async () => {
+    const source = makeSource();
+    const foundId = 'recovered-company-id';
+    const twenty = makeTwenty({
+      findIdByErpId: vi.fn().mockImplementation((object: string) => {
+        if (object === 'companies') return Promise.resolve(foundId);
+        return Promise.resolve(null);
+      }),
+    });
+    // Mapping exists but twentyId is null (prior failure)
+    const noIdMapping: MappingRow = {
+      entityType: 'client',
+      erpId: 'c-1',
+      twentyObject: 'companies',
+      twentyId: null,
+      status: 'failed',
+      lastHash: null,
+    };
+    const mapping = makeMapping(() => noIdMapping);
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('client', 'c-1', 'delete');
+    const intents = await consumer.sync(event);
+
+    // Must NOT return [] — recovery succeeded
+    expect(intents).toHaveLength(1);
+    expect(intents[0].mapping.status).toBe('deleted');
+    expect(intents[0].mapping.twentyId).toBe(foundId);
+    expect(intents[0].mapping.entityType).toBe('client');
+
+    // findIdByErpId called for companies
+    expect(twenty.findIdByErpId).toHaveBeenCalledWith('companies', 'c-1');
+    // updateRecord called with the recovered id
+    expect(twenty.updateRecord).toHaveBeenCalledWith('companies', foundId, { erpStatus: 'deleted' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 14: order delete — mapping is null (no twentyId) but findIdByErpId returns an id
+//          → soft-delete intent; updateRecord('erpOrders', foundId); audit.relatedClientId populated
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — order delete, no mapping but findIdByErpId recovers', () => {
+  it('returns soft-delete intent with relatedClientId from payload when findIdByErpId recovers', async () => {
+    const source = makeSource();
+    const foundOrderId = 'recovered-order-id';
+    const twenty = makeTwenty({
+      findIdByErpId: vi.fn().mockImplementation((object: string) => {
+        if (object === 'erpOrders') return Promise.resolve(foundOrderId);
+        return Promise.resolve(null);
+      }),
+    });
+    const mapping = makeMapping(() => null); // no mapping at all
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    // payload includes clientId (as the trigger would set it)
+    const event = makeEvent('order', 'o-1', 'delete', { clientId: '42' });
+    const intents = await consumer.sync(event);
+
+    expect(intents).toHaveLength(1);
+    expect(intents[0].mapping.status).toBe('deleted');
+    expect(intents[0].mapping.twentyId).toBe(foundOrderId);
+    expect(intents[0].mapping.entityType).toBe('order');
+
+    // findIdByErpId called for erpOrders
+    expect(twenty.findIdByErpId).toHaveBeenCalledWith('erpOrders', 'o-1');
+    // updateRecord called with recovered id
+    expect(twenty.updateRecord).toHaveBeenCalledWith('erpOrders', foundOrderId, { erpStatus: 'deleted' });
+
+    // relatedClientId populated from payload.clientId
+    expect(intents[0].audit.relatedClientId).toBe(42);
+    // relatedOrderId is Number(erpId) = Number('o-1') = NaN (erpId is a non-numeric string in test)
+    expect(intents[0].audit.relatedOrderId).toBeNaN();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 15: order delete (normal — mapping has twentyId) → audit.relatedClientId from payload
+// ---------------------------------------------------------------------------
+describe('TwentySyncConsumer.sync — order delete, mapping has twentyId, relatedClientId from payload', () => {
+  it('sets audit.relatedClientId from payload.clientId on normal order soft-delete', async () => {
+    const source = makeSource();
+    const twenty = makeTwenty();
+    const existingMapping: MappingRow = {
+      entityType: 'order',
+      erpId: 'o-1',
+      twentyObject: 'erpOrders',
+      twentyId: 'existing-order-twenty-id',
+      status: 'active',
+      lastHash: 'some-hash',
+    };
+    const mapping = makeMapping((entityType) => {
+      if (entityType === 'order') return existingMapping;
+      return null;
+    });
+
+    const consumer = new TwentySyncConsumer({ source, twenty, mapping, db: MOCK_DB });
+    const event = makeEvent('order', 'o-1', 'delete', { clientId: '99' });
+    const intents = await consumer.sync(event);
+
+    expect(intents).toHaveLength(1);
+    expect(intents[0].mapping.status).toBe('deleted');
+    expect(intents[0].mapping.twentyId).toBe('existing-order-twenty-id');
+    expect(intents[0].audit.event).toBe('crm_sync.softdelete');
+    // relatedOrderId is Number(erpId) = Number('o-1') = NaN in this test fixture
+    expect(intents[0].audit.relatedOrderId).toBeNaN();
+    // relatedClientId comes from payload, not the row (row is gone on hard delete)
+    expect(intents[0].audit.relatedClientId).toBe(99);
+    expect(twenty.updateRecord).toHaveBeenCalledWith('erpOrders', 'existing-order-twenty-id', { erpStatus: 'deleted' });
   });
 });

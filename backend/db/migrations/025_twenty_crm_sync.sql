@@ -48,11 +48,17 @@ DECLARE
   v_op TEXT;
   v_id TEXT;
   v_key TEXT;
+  v_client_id TEXT;
 BEGIN
   IF TG_OP = 'DELETE' THEN
     v_op := 'delete'; v_id := (CASE v_entity WHEN 'client' THEN OLD.client_id ELSE OLD.order_id END)::text;
   ELSE
     v_op := 'upsert'; v_id := (CASE v_entity WHEN 'client' THEN NEW.client_id ELSE NEW.order_id END)::text;
+  END IF;
+  -- carry clientId in the payload so the consumer can populate relatedClientId on hard-delete
+  -- (the order row is gone by then; payload is the only source of truth for clientId)
+  IF v_entity = 'order' THEN
+    v_client_id := (CASE WHEN TG_OP = 'DELETE' THEN OLD.client_id ELSE NEW.client_id END)::text;
   END IF;
   v_key := v_entity || ':' || v_id;
   -- coalesce: drop any still-pending event for this entity, then enqueue the latest.
@@ -62,7 +68,7 @@ BEGIN
   DELETE FROM crm_sync_outbox WHERE idempotency_key = v_key AND status = 'pending';
   INSERT INTO crm_sync_outbox (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
   VALUES ('crm.sync.' || v_entity || '.' || v_op, 'crm_sync', v_id,
-          jsonb_build_object('entity', v_entity, 'id', v_id, 'op', v_op), v_key);
+          jsonb_build_object('entity', v_entity, 'id', v_id, 'op', v_op, 'clientId', v_client_id), v_key);
   RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

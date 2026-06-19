@@ -50,7 +50,7 @@ export class TwentySyncConsumer {
    * Throws on unrecoverable errors so the relay can mark the event as failed.
    */
   async sync(event: OutboxEventRecord): Promise<SyncIntent[]> {
-    const payload = event.payload as { entity: 'client' | 'order'; id: string; op: 'upsert' | 'delete' };
+    const payload = event.payload as { entity: 'client' | 'order'; id: string; op: 'upsert' | 'delete'; clientId?: string | null };
     const { entity, id, op } = payload;
 
     if (entity === 'client') {
@@ -109,17 +109,18 @@ export class TwentySyncConsumer {
 
   private async softDeleteClient(erpId: string, event: OutboxEventRecord): Promise<SyncIntent[]> {
     const m = await this.mapping.get(this.db, 'client', erpId);
-    if (!m?.twentyId) return [];
+    const existingId = m?.twentyId ?? await this.twenty.findIdByErpId('companies', erpId);
+    if (!existingId) return []; // genuinely nothing in Twenty
 
     const deleteBody = { erpStatus: 'deleted' };
-    await this.twenty.updateRecord('companies', m.twentyId, deleteBody);
+    await this.twenty.updateRecord('companies', existingId, deleteBody);
 
     const intent: SyncIntent = {
       mapping: {
         entityType: 'client',
         erpId,
         twentyObject: 'companies',
-        twentyId: m.twentyId,
+        twentyId: existingId,
         status: 'deleted',
         lastHash: hash(deleteBody),
       },
@@ -131,7 +132,7 @@ export class TwentySyncConsumer {
         source: 'crm-sync',
         actorUserId: null,
         relatedClientId: Number(erpId),
-        metadata: { twentyId: m.twentyId },
+        metadata: { twentyId: existingId },
       },
     };
     return [intent];
@@ -193,17 +194,22 @@ export class TwentySyncConsumer {
 
   private async softDeleteOrder(erpId: string, event: OutboxEventRecord): Promise<SyncIntent[]> {
     const m = await this.mapping.get(this.db, 'order', erpId);
-    if (!m?.twentyId) return [];
+    const existingId = m?.twentyId ?? await this.twenty.findIdByErpId('erpOrders', erpId);
+    if (!existingId) return []; // genuinely nothing in Twenty
 
     const deleteBody = { erpStatus: 'deleted' };
-    await this.twenty.updateRecord('erpOrders', m.twentyId, deleteBody);
+    await this.twenty.updateRecord('erpOrders', existingId, deleteBody);
+
+    // clientId is carried via the outbox payload (order row already gone on hard delete)
+    const payload = event.payload as { clientId?: string | null };
+    const clientId = payload.clientId != null ? payload.clientId : null;
 
     const intent: SyncIntent = {
       mapping: {
         entityType: 'order',
         erpId,
         twentyObject: 'erpOrders',
-        twentyId: m.twentyId,
+        twentyId: existingId,
         status: 'deleted',
         lastHash: hash(deleteBody),
       },
@@ -215,7 +221,8 @@ export class TwentySyncConsumer {
         source: 'crm-sync',
         actorUserId: null,
         relatedOrderId: Number(erpId),
-        metadata: { twentyId: m.twentyId },
+        relatedClientId: clientId != null ? Number(clientId) : null,
+        metadata: { twentyId: existingId },
       },
     };
     return [intent];

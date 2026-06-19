@@ -65,6 +65,20 @@ describe('025_twenty_crm_sync migration', () => {
     expect(sql).toMatch(/crm_sync_enqueue\('order'\)/i);
   });
 
+  it('declares v_client_id TEXT variable in crm_sync_enqueue', () => {
+    expect(sql).toMatch(/v_client_id\s+TEXT/i);
+  });
+
+  it('sets v_client_id for order entity using OLD.client_id on DELETE and NEW.client_id otherwise', () => {
+    expect(sql).toMatch(/IF v_entity = 'order'/i);
+    expect(sql).toMatch(/OLD\.client_id[\s\S]*?NEW\.client_id|NEW\.client_id[\s\S]*?OLD\.client_id/i);
+  });
+
+  it("payload jsonb_build_object includes 'clientId' key", () => {
+    expect(sql).toMatch(/'clientId'/i);
+    expect(sql).toMatch(/jsonb_build_object[\s\S]*?'clientId'[\s\S]*?v_client_id/i);
+  });
+
   it('trigger function uses client_id for client entity', () => {
     expect(sql).toMatch(/WHEN 'client' THEN (OLD|NEW)\.client_id|'client' THEN OLD\.client_id[\s\S]*?'client' THEN NEW\.client_id/i);
   });
