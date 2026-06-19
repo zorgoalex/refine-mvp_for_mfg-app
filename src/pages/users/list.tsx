@@ -2,6 +2,7 @@
 import { useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
+import { DISPLAY_DATE_TIME_FORMAT } from "../../utils/dateFormat";
 
 export const UserList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -51,7 +52,7 @@ export const UserList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="last_login_at"
           title="Последний вход"
-          render={(value) => value && <DateField value={value} format="YYYY-MM-DD HH:mm" />}
+          render={(value) => value && <DateField value={value} format={DISPLAY_DATE_TIME_FORMAT} />}
         />
         <Table.Column
           title="Действия"

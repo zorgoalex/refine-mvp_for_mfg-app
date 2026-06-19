@@ -1,6 +1,7 @@
 import { IResourceComponentsProps, useShow } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
+import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
@@ -56,7 +57,7 @@ export const UserShow: React.FC<IResourceComponentsProps> = () => {
         <Col span={8}>
           <Title level={5}>Последний вход</Title>
           {record?.last_login_at ? (
-            <DateField value={record.last_login_at} format="YYYY-MM-DD HH:mm:ss" />
+            <DateField value={record.last_login_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
           ) : (
             <TextField value="-" />
           )}
@@ -68,11 +69,11 @@ export const UserShow: React.FC<IResourceComponentsProps> = () => {
       <Row gutter={[16, 16]}>
         <Col span={8}>
           <Title level={5}>Создано</Title>
-          <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
+          <DateField value={record?.created_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
         </Col>
         <Col span={8}>
           <Title level={5}>Обновлено</Title>
-          <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
+          <DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
         </Col>
       </Row>
     </Show>

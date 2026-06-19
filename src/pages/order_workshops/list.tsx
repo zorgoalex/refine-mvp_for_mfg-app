@@ -2,6 +2,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
 import { Space, Table } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
+import { DISPLAY_DATE_FORMAT, DISPLAY_DATE_TIME_FORMAT } from "../../utils/dateFormat";
 
 export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -31,22 +32,22 @@ export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="received_date"
           title="Дата поступления в цех"
-          render={(value) => value && <DateField value={value} format="YYYY-MM-DD HH:mm" />}
+          render={(value) => value && <DateField value={value} format={DISPLAY_DATE_TIME_FORMAT} />}
         />
         <Table.Column
           dataIndex="started_date"
           title="Дата начала работ"
-          render={(value) => value && <DateField value={value} format="YYYY-MM-DD HH:mm" />}
+          render={(value) => value && <DateField value={value} format={DISPLAY_DATE_TIME_FORMAT} />}
         />
         <Table.Column
           dataIndex="completed_date"
           title="Дата завершения"
-          render={(value) => value && <DateField value={value} format="YYYY-MM-DD HH:mm" />}
+          render={(value) => value && <DateField value={value} format={DISPLAY_DATE_TIME_FORMAT} />}
         />
         <Table.Column
           dataIndex="planned_completion_date"
           title="Плановая дата завершения"
-          render={(value) => value && <DateField value={value} format="YYYY-MM-DD" />}
+          render={(value) => value && <DateField value={value} format={DISPLAY_DATE_FORMAT} />}
         />
         <Table.Column
           title="Действия"

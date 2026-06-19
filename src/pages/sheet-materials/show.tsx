@@ -4,6 +4,7 @@ import { Show, TextField, DateField, EditButton } from '@refinedev/antd';
 import { Typography, Badge, Row, Col, Divider, Tag } from 'antd';
 import { useParams } from 'react-router-dom';
 import { can } from '../../utils/permissions';
+import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useRecordTabTitle } from '../../utils/recordTitle';
 
 const { Title } = Typography;
@@ -71,8 +72,8 @@ export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
       </Row>
       <Divider />
       <Row gutter={[16, 16]}>
-        <Col span={8}><Title level={5}>Создано</Title><DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" /></Col>
-        <Col span={8}><Title level={5}>Обновлено</Title><DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" /></Col>
+        <Col span={8}><Title level={5}>Создано</Title><DateField value={record?.created_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} /></Col>
+        <Col span={8}><Title level={5}>Обновлено</Title><DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} /></Col>
       </Row>
     </Show>
   );

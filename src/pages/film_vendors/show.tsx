@@ -1,6 +1,7 @@
 import { useShow, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge } from "antd";
+import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
@@ -29,9 +30,9 @@ export const FilmVendorShow: React.FC<IResourceComponentsProps> = () => {
       <Title level={5}>Изменён</Title>
       <TextField value={record?.edited_by || "-"} />
       <Title level={5}>Создано</Title>
-      <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
+      <DateField value={record?.created_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
       <Title level={5}>Обновлено</Title>
-      <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
+      <DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
     </Show>
   );
 };

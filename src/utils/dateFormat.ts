@@ -4,12 +4,16 @@ import "dayjs/locale/ru";
 // Устанавливаем русскую локаль по умолчанию
 dayjs.locale("ru");
 
+export const DISPLAY_DATE_FORMAT = "DD.MM.YYYY";
+export const DISPLAY_DATE_TIME_FORMAT = `${DISPLAY_DATE_FORMAT} HH:mm`;
+export const DISPLAY_DATE_TIME_SECONDS_FORMAT = `${DISPLAY_DATE_TIME_FORMAT}:ss`;
+
 /**
  * Форматирование даты в формате дд.мм.гггг
  */
 export const formatDate = (date: string | null | undefined): string => {
   if (!date) return "—";
-  return dayjs(date).format("DD.MM.YYYY");
+  return dayjs(date).format(DISPLAY_DATE_FORMAT);
 };
 
 /**
@@ -17,7 +21,7 @@ export const formatDate = (date: string | null | undefined): string => {
  */
 export const formatDateTime = (date: string | null | undefined): string => {
   if (!date) return "—";
-  return dayjs(date).format("DD.MM.YYYY HH:mm");
+  return dayjs(date).format(DISPLAY_DATE_TIME_FORMAT);
 };
 
 /**
@@ -25,5 +29,5 @@ export const formatDateTime = (date: string | null | undefined): string => {
  */
 export const formatDateTimeFull = (date: string | null | undefined): string => {
   if (!date) return "—";
-  return dayjs(date).format("DD.MM.YYYY HH:mm:ss");
+  return dayjs(date).format(DISPLAY_DATE_TIME_SECONDS_FORMAT);
 };

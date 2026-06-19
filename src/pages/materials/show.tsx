@@ -1,6 +1,7 @@
 import { useShow, IResourceComponentsProps, useOne } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
+import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
@@ -113,11 +114,11 @@ export const MaterialShow: React.FC<IResourceComponentsProps> = () => {
       <Row gutter={[16, 16]}>
         <Col span={8}>
           <Title level={5}>Создано</Title>
-          <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
+          <DateField value={record?.created_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
         </Col>
         <Col span={8}>
           <Title level={5}>Обновлено</Title>
-          <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
+          <DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
         </Col>
       </Row>
     </Show>

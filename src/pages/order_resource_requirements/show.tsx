@@ -1,6 +1,7 @@
 import { IResourceComponentsProps, useShow } from "@refinedev/core";
 import { Show, TextField, DateField, NumberField } from "@refinedev/antd";
 import { Typography, Badge } from "antd";
+import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
@@ -45,9 +46,9 @@ export const OrderResourceRequirementShow: React.FC<IResourceComponentsProps> = 
       <Title level={5}>Warehouse ID</Title>
       <TextField value={record?.warehouse_id} />
       <Title level={5}>Reserved At</Title>
-      <DateField value={record?.reserved_at} format="YYYY-MM-DD HH:mm:ss" />
+      <DateField value={record?.reserved_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
       <Title level={5}>Consumed At</Title>
-      <DateField value={record?.consumed_at} format="YYYY-MM-DD HH:mm:ss" />
+      <DateField value={record?.consumed_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
       <Title level={5}>Notes</Title>
       <TextField value={record?.notes} />
       <Title level={5}>Calculation Details</Title>
@@ -60,9 +61,9 @@ export const OrderResourceRequirementShow: React.FC<IResourceComponentsProps> = 
         text={record?.is_active ? "Активен" : "Неактивен"}
       />
       <Title level={5}>Created At</Title>
-      <DateField value={record?.created_at} format="YYYY-MM-DD HH:mm:ss" />
+      <DateField value={record?.created_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
       <Title level={5}>Updated At</Title>
-      <DateField value={record?.updated_at} format="YYYY-MM-DD HH:mm:ss" />
+      <DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
     </Show>
   );
 };
