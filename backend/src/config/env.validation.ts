@@ -167,8 +167,8 @@ export const envSchema = z
     BACKEND_TWENTY_SYNC_MAX_ATTEMPTS: z.coerce.number().int().positive().default(10),
     BACKEND_TWENTY_SYNC_WORKER_ID: z.string().default('crm-sync-local'),
     BACKEND_TWENTY_SYNC_LEASE_MS: z.coerce.number().int().positive().default(300000),
-    TWENTY_SYNC_BASE_URL: z.string().url().optional(),
-    TWENTY_SYNC_API_KEY: z.string().optional(),
+    TWENTY_SYNC_BASE_URL: optionalUrlFromEnv,
+    TWENTY_SYNC_API_KEY: optionalTrimmedStringFromEnv,
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && !env.FRONTEND_ORIGIN) {

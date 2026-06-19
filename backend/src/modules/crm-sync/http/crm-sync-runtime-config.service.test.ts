@@ -45,6 +45,14 @@ describe('CrmSyncRuntimeConfigService', () => {
     expect(t.baseUrl).toBeNull();
     expect(t.apiKey).toBeNull();
   });
+
+  it('getTwenty maps whitespace-only API key to null (fail-closed)', () => {
+    const t = svc({
+      TWENTY_SYNC_BASE_URL: 'https://crm-test.mebelkz.app',
+      TWENTY_SYNC_API_KEY: '   ',
+    }).getTwenty();
+    expect(t.apiKey).toBeNull();
+  });
 });
 
 describe('envSchema superRefine: BACKEND_ENABLE_TWENTY_SYNC guards', () => {
@@ -57,6 +65,16 @@ describe('envSchema superRefine: BACKEND_ENABLE_TWENTY_SYNC guards', () => {
       envSchema.parse({
         BACKEND_ENABLE_TWENTY_SYNC: true,
         TWENTY_SYNC_API_KEY: 'secret-key',
+      }),
+    ).toThrow();
+  });
+
+  it('throws when BACKEND_ENABLE_TWENTY_SYNC=true and API key is whitespace-only (treated as absent)', () => {
+    expect(() =>
+      envSchema.parse({
+        BACKEND_ENABLE_TWENTY_SYNC: true,
+        TWENTY_SYNC_BASE_URL: 'https://crm-test.mebelkz.app',
+        TWENTY_SYNC_API_KEY: '   ',
       }),
     ).toThrow();
   });

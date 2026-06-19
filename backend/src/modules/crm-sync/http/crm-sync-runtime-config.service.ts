@@ -20,9 +20,17 @@ export class CrmSyncRuntimeConfigService {
   }
 
   getTwenty() {
+    // Normalize blank/whitespace-only values to null so the module's
+    // `tw.baseUrl && tw.apiKey` guard refuses to build a live client with
+    // empty credentials (fail-closed).
+    const rawBaseUrl = this.config.get('TWENTY_SYNC_BASE_URL', { infer: true });
+    const rawApiKey = this.config.get('TWENTY_SYNC_API_KEY', { infer: true });
+    const baseUrl = rawBaseUrl?.trim();
+    const apiKey = rawApiKey?.trim();
+
     return {
-      baseUrl: this.config.get('TWENTY_SYNC_BASE_URL', { infer: true }) ?? null,
-      apiKey: this.config.get('TWENTY_SYNC_API_KEY', { infer: true }) ?? null,
+      baseUrl: baseUrl ? baseUrl : null,
+      apiKey: apiKey ? apiKey : null,
     };
   }
 }
