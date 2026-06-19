@@ -52,9 +52,17 @@ const PATH_TO_RESOURCE: Record<string, string> = {
   'sheet-material-types': 'sheet_material_types',
 };
 
+const ACTION_LABELS: Record<string, string> = {
+  create: 'Создание',
+  show: 'Просмотр',
+  edit: 'Редактирование',
+};
+
+const resourceKeyFromSegment = (seg: string): string => PATH_TO_RESOURCE[seg] ?? seg.replace(/-/g, '_');
+
 export const resourceFromPath = (pathname: string): string | undefined => {
   const seg = pathname.split('/').filter(Boolean)[0];
-  return seg ? PATH_TO_RESOURCE[seg] ?? seg : undefined;
+  return seg ? resourceKeyFromSegment(seg) : undefined;
 };
 
 export const resolveTabLabel = (pathname: string): string => {
@@ -62,6 +70,15 @@ export const resolveTabLabel = (pathname: string): string => {
   const orderId = pathname.match(/^\/orders\/(?:edit|show)\/(\d+)/)?.[1];
   if (orderId) return `Заказ #${orderId}`;
   const resource = resourceFromPath(pathname);
-  if (resource && RESOURCE_LABELS[resource]) return RESOURCE_LABELS[resource];
+  const resourceLabel = resource ? RESOURCE_LABELS[resource] : undefined;
+  if (resourceLabel) {
+    const action = segs[1];
+    const actionLabel = action ? ACTION_LABELS[action] : undefined;
+    if (actionLabel) {
+      const id = segs[2];
+      return id ? `${resourceLabel} · ${actionLabel} #${id}` : `${resourceLabel} · ${actionLabel}`;
+    }
+    return resourceLabel;
+  }
   return segs[segs.length - 1] ?? 'Заказы';
 };
