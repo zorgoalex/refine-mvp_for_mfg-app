@@ -42,6 +42,24 @@ function isBackendTestHost(url: string): boolean {
   return url.includes('backend-test');
 }
 
+/**
+ * True if the Twenty REST base URL is safe to use (test CRM only).
+ * NOTE: this MUST be the host-facing URL (e.g. https://crm-test.mebelkz.app),
+ * never the internal docker URL (http://twenty:3000) which is unreachable from
+ * the host shell. We deliberately do NOT fall back to TWENTY_SYNC_BASE_URL.
+ */
+function isTwentyTestHost(url: string): boolean {
+  if (/prod|production|live/i.test(url)) return false;
+  // Prefer 'crm-test', but accept any 'test' marker as a floor.
+  return url.includes('crm-test') || url.includes('test');
+}
+
+/** True if the postgres container name is safe to target (test only). */
+function isTestPostgresContainer(name: string): boolean {
+  if (/prod|production|live/i.test(name)) return false;
+  return name.includes('test');
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function trimTrailingSlash(value: string): string {
@@ -394,13 +412,25 @@ test.describe('Twenty sync stage canary', () => {
     `Backend host must contain 'backend-test' and must not be prod/production/live. Got: [REDACTED]`,
   );
 
-  // Fail-closed guard 3: postgres container must exist
+  // Fail-closed guard 3: Twenty REST base URL must be a test CRM and must NOT be prod
+  test.skip(
+    canaryEnabled && !isTwentyTestHost(twentyBaseUrl),
+    `Twenty URL must contain 'crm-test' (or 'test') and must not be prod/production/live. Got: [REDACTED]`,
+  );
+
+  // Fail-closed guard 4: postgres container name must be a test container and must exist
+  test.skip(
+    canaryEnabled && !isTestPostgresContainer(postgresContainer),
+    `Postgres container name must contain 'test' and must not be prod/production/live. Got: [REDACTED]`,
+  );
+
+  // Fail-closed guard 5: postgres container must exist
   test.skip(
     canaryEnabled && !dockerContainerExists(postgresContainer),
     `Stage postgres container ${postgresContainer} is required for twenty-sync stage canary.`,
   );
 
-  // Fail-closed guard 4: Twenty API key must be present
+  // Fail-closed guard 6: Twenty API key must be present
   test.skip(
     canaryEnabled && !twentyApiKey,
     'TWENTY_SYNC_API_KEY is required for twenty-sync stage canary.',
@@ -418,13 +448,16 @@ test.describe('Twenty sync stage canary', () => {
   test.afterEach(async () => {
     // Best-effort cleanup on failure — mirrors client-phones-stage-canary pattern
     try {
-      if (companyTwentyId) {
-        await deleteRecord('companies', companyTwentyId).catch(() => {});
-        companyTwentyId = null;
-      }
+      // Delete erpOrders BEFORE companies to mirror the test-body deletion
+      // order (referential safety: avoids leaving an order behind if a
+      // company-first delete is constrained).
       if (orderTwentyId) {
         await deleteRecord('erpOrders', orderTwentyId).catch(() => {});
         orderTwentyId = null;
+      }
+      if (companyTwentyId) {
+        await deleteRecord('companies', companyTwentyId).catch(() => {});
+        companyTwentyId = null;
       }
     } catch {
       // ignore cleanup errors
@@ -445,6 +478,12 @@ test.describe('Twenty sync stage canary', () => {
       // Hard reject: must be impossible to hit prod even if env is misconfigured
       if (!isBackendTestHost(backendApiUrl)) {
         throw new Error('HARD REJECT: backend host does not satisfy backend-test requirement');
+      }
+      if (!isTwentyTestHost(twentyBaseUrl)) {
+        throw new Error('HARD REJECT: Twenty URL does not satisfy crm-test requirement');
+      }
+      if (!isTestPostgresContainer(postgresContainer)) {
+        throw new Error('HARD REJECT: postgres container name does not satisfy test requirement');
       }
 
       const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
