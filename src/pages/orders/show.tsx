@@ -24,9 +24,10 @@ import { ordersApi } from "../../api/ordersApi";
 import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { ProjectLinksEditor } from "./components/projects/ProjectLinksEditor";
 
-type OrderInfoPanelKey = 'deadlines' | 'finance' | 'additional';
+type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'additional';
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
+  { key: 'projects', label: 'Проекты', color: '#722ed1' },
   { key: 'deadlines', label: 'Дедлайны', color: '#1677ff' },
   { key: 'finance', label: 'Финансы', color: '#faad14' },
   { key: 'additional', label: 'Дополнительная информация', color: '#595959' },
@@ -479,14 +480,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             />
           </div>
 
-          {useBackendOrdersRead && featureFlags.useBackendProjects && record?.order_id && (
-            <ProjectLinksEditor
-              orderId={record.order_id}
-              version={record.version ?? backendOrder?.version ?? 0}
-              initialProjects={record.projects ?? backendOrder?.projects ?? []}
-            />
-          )}
-
           <div style={{ marginBottom: 16 }}>
             <div
               role="tablist"
@@ -541,10 +534,22 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 style={{
                   border: '1px solid #d9d9d9',
                   borderTop: 'none',
-                  padding: 12,
+                  padding: activeInfoPanel === 'additional' ? 8 : 12,
                   background: '#fff',
                 }}
               >
+                {activeInfoPanel === 'projects' && (
+                  useBackendOrdersRead && featureFlags.useBackendProjects && record?.order_id ? (
+                    <ProjectLinksEditor
+                      orderId={record.order_id}
+                      version={record.version ?? backendOrder?.version ?? 0}
+                      initialProjects={record.projects ?? backendOrder?.projects ?? []}
+                    />
+                  ) : (
+                    <span style={{ color: '#8c8c8c', fontStyle: 'italic' }}>Проекты недоступны</span>
+                  )
+                )}
+
                 {activeInfoPanel === 'deadlines' && (
                   <OrderDeadlinePanel orderId={record.order_id} embedded />
                 )}
@@ -565,16 +570,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 {activeInfoPanel === 'additional' && (
                   <>
                     {/* Даты */}
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#52c41a', marginBottom: 8 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#52c41a', marginBottom: 3 }}>
                         Даты
                       </div>
-                      <OrderDatesBlock record={record} />
+                      <OrderDatesBlock record={record} compact />
                     </div>
                     
                     {/* Производство */}
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#fa8c16', marginBottom: 8 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#fa8c16', marginBottom: 3 }}>
                         Производство
                       </div>
                       <OrderProductionBlock
@@ -583,12 +588,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         millingTypesMap={millingTypesMap}
                         edgeTypesMap={edgeTypesMap}
                         filmsMap={filmsMap}
+                        compact
                       />
                     </div>
 
                     {/* Присадки */}
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#13c2c2', marginBottom: 8 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#13c2c2', marginBottom: 3 }}>
                         Присадки
                       </div>
                       {dowelingLinks.length > 0 ? (
@@ -599,6 +605,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           pagination={false}
                           bordered
                           style={{ fontSize: 12 }}
+                          components={{
+                            header: {
+                              cell: (props: any) => <th {...props} style={{ ...props.style, padding: '2px 6px', fontSize: 11 }} />,
+                            },
+                            body: {
+                              cell: (props: any) => <td {...props} style={{ ...props.style, padding: '2px 6px', fontSize: 12 }} />,
+                            },
+                          }}
                           columns={[
                             {
                               title: 'Номер присадки',
@@ -635,19 +649,19 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </div>
 
                     {/* Файлы */}
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#722ed1', marginBottom: 8 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#722ed1', marginBottom: 3 }}>
                         Файлы
                       </div>
-                      <OrderFilesBlock record={record} />
+                      <OrderFilesBlock record={record} compact />
                     </div>
                     
                     {/* Служебная информация */}
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#8c8c8c', marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#8c8c8c', marginBottom: 3 }}>
                         Служебная информация
                       </div>
-                      <OrderMetaBlock record={record} />
+                      <OrderMetaBlock record={record} compact />
                     </div>
                   </>
                 )}

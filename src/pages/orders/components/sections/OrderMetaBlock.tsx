@@ -12,9 +12,10 @@ const { Text } = Typography;
 
 interface OrderMetaBlockProps {
   record: any;
+  compact?: boolean;
 }
 
-export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
+export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record, compact = false }) => {
   const canViewUsers = canQueryUsersResource(authStorage.getUser());
 
   const formatDate = (date?: string | Date | null) => {
@@ -45,78 +46,78 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record }) => {
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: 16,
-        padding: '10px 16px',
+        gap: compact ? 8 : 16,
+        padding: compact ? '4px 8px' : '10px 16px',
       }}
     >
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             ID заказа
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {record?.order_id || '—'}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Ссылка 1C
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {record?.ref_key_1c || '—'}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Версия
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {record?.version || '—'}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Удалён
           </Text>
-          <Tag color={record?.delete_flag ? 'red' : 'green'} style={{ marginTop: 2 }}>
+          <Tag color={record?.delete_flag ? 'red' : 'green'} style={{ marginTop: compact ? 0 : 2 }}>
             {record?.delete_flag ? 'Да' : 'Нет'}
           </Tag>
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Создан
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {formatDate(record?.created_at)}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Изменён
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {formatDate(record?.updated_at)}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Создал
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {createdByUser?.data?.username || record?.created_by || '—'}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Изменил
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {editedByUser?.data?.username || record?.edited_by || '—'}
           </Text>
         </div>

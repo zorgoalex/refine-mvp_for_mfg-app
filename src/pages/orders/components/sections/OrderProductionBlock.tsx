@@ -12,6 +12,7 @@ interface OrderProductionBlockProps {
   millingTypesMap?: Map<number, string>;
   edgeTypesMap?: Map<number, string>;
   filmsMap?: Map<number, string>;
+  compact?: boolean;
 }
 
 export const OrderProductionBlock: React.FC<OrderProductionBlockProps> = ({ 
@@ -20,6 +21,7 @@ export const OrderProductionBlock: React.FC<OrderProductionBlockProps> = ({
   millingTypesMap = new Map(),
   edgeTypesMap = new Map(),
   filmsMap = new Map(),
+  compact = false,
 }) => {
   // Вычисляем общие значения для всех деталей
   const commonValues = useMemo(() => {
@@ -60,37 +62,37 @@ export const OrderProductionBlock: React.FC<OrderProductionBlockProps> = ({
   }, [details, millingTypesMap, edgeTypesMap, filmsMap]);
 
   return (
-    <div style={{ padding: '10px 16px' }}>
+    <div style={{ padding: compact ? '4px 8px' : '10px 16px' }}>
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 16,
+          gap: compact ? 8 : 16,
         }}
       >
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Фрезеровка
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {commonValues.millingTypeName}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Обкат
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {commonValues.edgeTypeName}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Плёнка
           </Text>
-          <Text style={{ fontSize: 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
             {commonValues.filmName}
           </Text>
         </div>

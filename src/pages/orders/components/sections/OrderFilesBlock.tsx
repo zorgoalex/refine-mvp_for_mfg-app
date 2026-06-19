@@ -9,18 +9,19 @@ const { Text, Link } = Typography;
 
 interface OrderFilesBlockProps {
   record: any;
+  compact?: boolean;
 }
 
-export const OrderFilesBlock: React.FC<OrderFilesBlockProps> = ({ record }) => {
+export const OrderFilesBlock: React.FC<OrderFilesBlockProps> = ({ record, compact = false }) => {
   const renderLink = (url?: string | null, label?: string) => {
-    if (!url) return <Text style={{ fontSize: 13, color: '#8c8c8c' }}>—</Text>;
+    if (!url) return <Text style={{ fontSize: compact ? 12 : 13, color: '#8c8c8c' }}>—</Text>;
     
     return (
       <Link 
         href={url} 
         target="_blank" 
         rel="noopener noreferrer"
-        style={{ fontSize: 13 }}
+        style={{ fontSize: compact ? 12 : 13 }}
       >
         <LinkOutlined style={{ marginRight: 4 }} />
         {label || 'Открыть файл'}
@@ -29,37 +30,37 @@ export const OrderFilesBlock: React.FC<OrderFilesBlockProps> = ({ record }) => {
   };
 
   return (
-    <div style={{ padding: '10px 16px' }}>
+    <div style={{ padding: compact ? '4px 8px' : '10px 16px' }}>
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: 16,
+          gap: compact ? 8 : 16,
         }}
       >
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Файл раскроя
           </Text>
           {renderLink(record?.link_cutting_file)}
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Изображение раскроя
           </Text>
           {renderLink(record?.link_cutting_image_file)}
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             CAD файл
           </Text>
           {renderLink(record?.link_cad_file)}
         </div>
 
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
             PDF файл
           </Text>
           {renderLink(record?.link_pdf_file)}
