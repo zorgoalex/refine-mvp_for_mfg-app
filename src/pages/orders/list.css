@@ -43,6 +43,38 @@
   max-width: 45px;
 }
 
+.orders-table .ant-pagination {
+  margin: 6px 0;
+}
+
+.orders-table .ant-pagination .ant-pagination-item,
+.orders-table .ant-pagination .ant-pagination-prev,
+.orders-table .ant-pagination .ant-pagination-next,
+.orders-table .ant-pagination .ant-pagination-jump-prev,
+.orders-table .ant-pagination .ant-pagination-jump-next {
+  min-width: 16px;
+  height: 16px;
+  line-height: 14px;
+  font-size: 10px;
+}
+
+.orders-table .ant-pagination .ant-pagination-item a,
+.orders-table .ant-pagination .ant-pagination-prev button,
+.orders-table .ant-pagination .ant-pagination-next button {
+  min-width: 16px;
+  height: 16px;
+  line-height: 14px;
+  padding: 0;
+  font-size: 10px;
+}
+
+.orders-table .ant-pagination .ant-pagination-options,
+.orders-table .ant-pagination .ant-select-selector {
+  min-height: 18px !important;
+  height: 18px !important;
+  font-size: 10px;
+}
+
 /* Подсветка найденной строки */
 .orders-table .highlighted-row > td {
   background-color: #fffbe6 !important;

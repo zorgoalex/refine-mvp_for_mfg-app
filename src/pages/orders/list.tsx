@@ -424,6 +424,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   // Количество записей
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
+  const ordersCompactPagination = useMemo(() => ({
+    ...(tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination : {}),
+    position: ['topRight', 'bottomRight'],
+    size: 'small',
+  }), [tableProps?.pagination]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -1023,6 +1028,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               : undefined
           }
           className="orders-table"
+          pagination={ordersCompactPagination}
           scroll={{ x: "max-content", y: 600 }}
           showSorterTooltip={{ mouseEnterDelay: 1 }}
           rowClassName={(record) =>
