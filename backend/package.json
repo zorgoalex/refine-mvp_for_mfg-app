@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
     "smoke:db-cutover": "node scripts/smoke-db-cutover-readiness.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "crm-sync:backfill": "tsx scripts/crm-sync-backfill.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.19",
