@@ -352,9 +352,19 @@ function cleanupErpFixture(
     );
   }
 
-  // Step 1: Delete ERP fixture rows FIRST — these fire the 025 triggers which
-  // enqueue fresh crm_sync_outbox delete events for the fixture ids.
+  // Single transaction so the relay cannot interleave between the trigger-firing
+  // ERP deletes and the crm-sync/audit purges. Order matters:
+  //   1. Delete ERP fixture rows FIRST — these fire the 025 triggers which
+  //      enqueue fresh crm_sync_outbox delete events for the fixture ids.
+  //   2. Purge crm_sync_outbox + crm_sync_mapping — after the trigger-generated
+  //      rows exist — so that assertZeroErpResidue finds nothing.
+  //   3. Purge audit residue written by the sync (source='crm-sync'): delete the
+  //      bridge rows FIRST (FK-safe even though the FK is ON DELETE CASCADE),
+  //      then the audit_log rows. audit_log.entity_id is TEXT;
+  //      audit_log_related_entity.entity_id is BIGINT.
   psql(`
+    BEGIN;
+
     DELETE FROM orders
     WHERE order_id = ${Number(orderId)}
       AND client_id = ${Number(clientId)};
@@ -362,11 +372,7 @@ function cleanupErpFixture(
     DELETE FROM clients
     WHERE client_id = ${Number(clientId)}
       AND client_name = '${sqlQuote(clientName)}';
-  `);
 
-  // Step 2: Purge crm-sync rows LAST — after the trigger-generated rows exist —
-  // so that assertZeroErpResidue finds nothing (no trigger-generated residue).
-  psql(`
     DELETE FROM crm_sync_outbox
     WHERE aggregate_id = '${Number(clientId)}'
       AND aggregate_type = 'crm_sync'
@@ -382,6 +388,21 @@ function cleanupErpFixture(
 
     DELETE FROM crm_sync_mapping
     WHERE entity_type = 'order' AND erp_id = '${Number(orderId)}';
+
+    DELETE FROM audit_log_related_entity
+    WHERE audit_id IN (
+      SELECT audit_id FROM audit_log
+      WHERE source = 'crm-sync'
+        AND entity_type IN ('client', 'order')
+        AND entity_id IN ('${Number(clientId)}', '${Number(orderId)}')
+    );
+
+    DELETE FROM audit_log
+    WHERE source = 'crm-sync'
+      AND entity_type IN ('client', 'order')
+      AND entity_id IN ('${Number(clientId)}', '${Number(orderId)}');
+
+    COMMIT;
   `);
 }
 
@@ -398,6 +419,8 @@ function assertZeroErpResidue(
     orderExists: boolean;
     mappingCount: number;
     outboxCount: number;
+    auditCount: number;
+    auditBridgeCount: number;
   }>(
     `
     SELECT json_build_object(
@@ -414,6 +437,19 @@ function assertZeroErpResidue(
                AND aggregate_type = 'crm_sync')
            OR (aggregate_id = '${Number(orderId)}' AND payload_json->>'entity' = 'order'
                AND aggregate_type = 'crm_sync')
+      ),
+      'auditCount', (
+        SELECT count(*) FROM audit_log
+        WHERE source = 'crm-sync'
+          AND entity_type IN ('client', 'order')
+          AND entity_id IN ('${Number(clientId)}', '${Number(orderId)}')
+      ),
+      'auditBridgeCount', (
+        SELECT count(*) FROM audit_log_related_entity
+        WHERE entity_id IN (${Number(clientId)}, ${Number(orderId)})
+          AND audit_id IN (
+            SELECT audit_id FROM audit_log WHERE source = 'crm-sync'
+          )
       )
     )::text;
     `,
@@ -424,6 +460,8 @@ function assertZeroErpResidue(
   expect(result.orderExists, `Order ${orderId} should not exist after cleanup`).toBe(false);
   expect(Number(result.mappingCount), 'crm_sync_mapping residue').toBe(0);
   expect(Number(result.outboxCount), 'crm_sync_outbox residue').toBe(0);
+  expect(Number(result.auditCount), 'audit_log (crm-sync) residue').toBe(0);
+  expect(Number(result.auditBridgeCount), 'audit_log_related_entity residue').toBe(0);
 
   void clientName; // referenced for isTestData check upstream
 }
