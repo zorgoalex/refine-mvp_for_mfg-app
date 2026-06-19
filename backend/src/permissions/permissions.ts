@@ -160,10 +160,9 @@ const ADMIN_SERVICE_EXCLUDED_PERMISSIONS = [
   'system.superadmin',
   'deadlines.worker.manage',
   'deadlines.worker.schedule',
-  // sheet_materials reads go through Hasura, where `admin` is not a role (only
-  // superadmin/top_manager/manager/operator/viewer are reference-read roles).
-  // Exclude admin so perm-set == Hasura-readable-set == usable-set (no split).
-  'sheet_materials.view',
+  // sheet_materials: admin gets `view` (sees the «Листовые материалы» nav item + read;
+  // admin already reads sheet_material_types via Hasura) but NOT `manage` — writes stay
+  // with superadmin/top_manager/manager/operator (user decision 2026-06-19). worker has neither.
   'sheet_materials.manage',
 ] as const satisfies PermissionName[];
 

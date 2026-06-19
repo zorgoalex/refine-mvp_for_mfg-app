@@ -14,12 +14,10 @@ describe('sheet_materials permissions (5-role alignment, user decision 2026-06-1
       expect(can(r, 'sheet_materials.manage')).toBe(false);
     }
   });
-  it('view roles = the 5 Hasura roles +viewer (NOT admin/worker)', () => {
-    for (const r of ['superadmin', 'top_manager', 'manager', 'operator', 'viewer'] as const) {
+  it('view roles = the 5 Hasura roles + admin (NOT worker)', () => {
+    for (const r of ['superadmin', 'top_manager', 'manager', 'operator', 'viewer', 'admin'] as const) {
       expect(can(r, 'sheet_materials.view')).toBe(true);
     }
-    for (const r of ['admin', 'worker'] as const) {
-      expect(can(r, 'sheet_materials.view')).toBe(false);
-    }
+    expect(can('worker', 'sheet_materials.view')).toBe(false);
   });
 });
