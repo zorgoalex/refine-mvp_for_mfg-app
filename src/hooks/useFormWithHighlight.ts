@@ -1,5 +1,7 @@
 import { useForm as useRefineForm, UseFormProps, UseFormReturnType } from "@refinedev/antd";
 import { BaseRecord, HttpError } from "@refinedev/core";
+import { RESOURCE_LABELS } from "../utils/tabLabels";
+import { useRecordTabTitle } from "../utils/recordTitle";
 
 /**
  * Extended useForm hook that adds automatic navigation with highlight support
@@ -44,6 +46,14 @@ export const useFormWithHighlight = <
         }
       }
     },
+  });
+
+  useRecordTabTitle({
+    resourceLabel: RESOURCE_LABELS[resource] ?? resource,
+    actionLabel: "Редактирование",
+    record: formReturn.queryResult?.data?.data,
+    fallbackId: formReturn.id,
+    enabled: action === "edit",
   });
 
   return formReturn;

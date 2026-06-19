@@ -13,6 +13,7 @@ import {
 import { useNavigate, useLocation } from "react-router-dom";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
+import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title, Text, Link } = Typography;
 
@@ -25,6 +26,8 @@ export const ClientsAnalyticsShow: React.FC<IResourceComponentsProps> = () => {
   const { data, isLoading } = queryResult;
 
   const record = data?.data;
+
+  useCurrentRecordTabTitle(record);
 
   // Текущий URL для возврата
   const currentUrl = location.pathname + location.search;

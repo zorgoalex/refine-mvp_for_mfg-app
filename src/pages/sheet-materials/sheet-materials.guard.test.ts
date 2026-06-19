@@ -7,6 +7,8 @@ const nav = readFileSync(new URL('../../utils/navigationPermissions.ts', import.
 const sider = readFileSync(new URL('../../components/CustomSider.tsx', import.meta.url), 'utf8');
 const mobile = readFileSync(new URL('../../components/MobileSiderDrawer.tsx', import.meta.url), 'utf8');
 const create = readFileSync(new URL('./create.tsx', import.meta.url), 'utf8');
+const show = readFileSync(new URL('./show.tsx', import.meta.url), 'utf8');
+const edit = readFileSync(new URL('./edit.tsx', import.meta.url), 'utf8');
 
 describe('sheet-materials resource wiring', () => {
   it('registers resource', () => expect(app).toMatch(/name:\s*["']sheet_material_types["']/));
@@ -40,5 +42,14 @@ describe('sheet-materials resource wiring', () => {
     const list = readFileSync(new URL('./list.tsx', import.meta.url), 'utf8');
     expect(list).toMatch(/sheet_materials\.manage/);   // create/edit buttons gated
     expect(create).toMatch(/sheet_materials\.manage/);  // create page guards on manage
+  });
+
+  it('show/edit tabs are enriched with the loaded sheet material name', () => {
+    expect(show).toMatch(/useRecordTabTitle/);
+    expect(show).toMatch(/actionLabel:\s*['"]Просмотр['"]/);
+    expect(show).toMatch(/preferredFields:\s*\[\s*['"]name['"]\s*\]/);
+    expect(edit).toMatch(/useRecordTabTitle/);
+    expect(edit).toMatch(/actionLabel:\s*['"]Редактирование['"]/);
+    expect(edit).toMatch(/preferredFields:\s*\[\s*['"]name['"]\s*\]/);
   });
 });

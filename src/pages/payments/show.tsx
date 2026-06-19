@@ -2,6 +2,7 @@ import { useShow, IResourceComponentsProps, useOne } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Row, Col, Divider } from "antd";
 import { formatNumber } from "../../utils/numberFormat";
+import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
 
@@ -9,6 +10,8 @@ export const PaymentShow: React.FC<IResourceComponentsProps> = () => {
   const { queryResult } = useShow({ meta: { idColumnName: "payment_id" } });
   const { data, isLoading } = queryResult;
   const record = data?.data;
+
+  useCurrentRecordTabTitle(record);
 
   const { data: orderOne } = useOne({
     resource: "orders",

@@ -2,15 +2,26 @@ import React from 'react';
 import { useShow, IResourceComponentsProps, useOne } from '@refinedev/core';
 import { Show, TextField, DateField, EditButton } from '@refinedev/antd';
 import { Typography, Badge, Row, Col, Divider, Tag } from 'antd';
+import { useParams } from 'react-router-dom';
 import { can } from '../../utils/permissions';
+import { useRecordTabTitle } from '../../utils/recordTitle';
 
 const { Title } = Typography;
 
 export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
+  const { id } = useParams<{ id: string }>();
   const { queryResult } = useShow({ meta: { idColumnName: 'sheet_material_type_id' } });
   const { data, isLoading } = queryResult;
   const record = data?.data;
+
+  useRecordTabTitle({
+    resourceLabel: 'Листовые материалы',
+    actionLabel: 'Просмотр',
+    record,
+    fallbackId: id,
+    preferredFields: ['name'],
+  });
 
   const { data: typeOne } = useOne({ resource: 'material_types', id: record?.material_type_id, queryOptions: { enabled: !!record?.material_type_id } });
   const { data: unitOne } = useOne({ resource: 'units', id: record?.unit_id, queryOptions: { enabled: !!record?.unit_id } });

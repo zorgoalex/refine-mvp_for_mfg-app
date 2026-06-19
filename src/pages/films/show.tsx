@@ -1,6 +1,7 @@
 import { useShow, IResourceComponentsProps, useOne } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
+import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
 
@@ -11,6 +12,8 @@ export const FilmShow: React.FC<IResourceComponentsProps> = () => {
   const { data, isLoading } = queryResult;
 
   const record = data?.data;
+
+  useCurrentRecordTabTitle(record);
   const { data: typeOne } = useOne({
     resource: "film_types",
     id: record?.film_type_id,

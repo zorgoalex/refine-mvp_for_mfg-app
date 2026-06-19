@@ -1,6 +1,7 @@
 import { useShow, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
+import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
 
@@ -10,6 +11,8 @@ export const OrderStatusShow: React.FC<IResourceComponentsProps> = () => {
   });
   const { data, isLoading } = queryResult;
   const record = data?.data;
+
+  useCurrentRecordTabTitle(record);
 
   return (
     <Show isLoading={isLoading} title="Просмотр Статуса заказа">

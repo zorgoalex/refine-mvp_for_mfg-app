@@ -3,6 +3,7 @@ import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Row, Col, Divider, Tag } from "antd";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
+import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title, Text } = Typography;
 
@@ -12,6 +13,8 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
   });
   const { data, isLoading } = queryResult;
   const record = data?.data;
+
+  useCurrentRecordTabTitle(record);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";

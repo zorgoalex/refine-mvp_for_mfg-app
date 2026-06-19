@@ -3,6 +3,7 @@ import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider, Table, Tag, Space } from "antd";
 import { PhoneOutlined, StarFilled } from "@ant-design/icons";
 import { ClientPhone, PhoneType, PHONE_TYPE_LABELS } from "../../types/clients";
+import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title, Text } = Typography;
 
@@ -13,6 +14,8 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
   const { data, isLoading } = queryResult;
 
   const record = data?.data;
+
+  useCurrentRecordTabTitle(record);
 
   // Fetch client phones
   const { data: phonesData, isLoading: phonesLoading } = useList<ClientPhone>({

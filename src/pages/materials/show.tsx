@@ -1,6 +1,7 @@
 import { useShow, IResourceComponentsProps, useOne } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
+import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
 
@@ -11,6 +12,8 @@ export const MaterialShow: React.FC<IResourceComponentsProps> = () => {
   const { data, isLoading } = queryResult;
 
   const record = data?.data;
+
+  useCurrentRecordTabTitle(record);
   const { data: typeOne } = useOne({
     resource: "material_types",
     id: record?.material_type_id,

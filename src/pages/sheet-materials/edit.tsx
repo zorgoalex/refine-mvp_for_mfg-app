@@ -5,6 +5,7 @@ import { Form, Input, Select, InputNumber, Switch, Button, message, Space, Alert
 import { useNavigate, useParams } from 'react-router-dom';
 import { can } from '../../utils/permissions';
 import { sheetMaterialsApi, type SheetMaterialTypeInput } from '../../api/sheetMaterialsApi';
+import { useRecordTabTitle } from '../../utils/recordTitle';
 
 export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
@@ -20,6 +21,14 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
     meta: { idColumnName: 'sheet_material_type_id' },
   });
   const record = data?.data;
+
+  useRecordTabTitle({
+    resourceLabel: 'Листовые материалы',
+    actionLabel: 'Редактирование',
+    record,
+    fallbackId: id,
+    preferredFields: ['name'],
+  });
 
   useEffect(() => {
     if (record) {

@@ -1,6 +1,7 @@
 import { useShow, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge } from "antd";
+import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
 
@@ -8,6 +9,8 @@ export const FilmVendorShow: React.FC<IResourceComponentsProps> = () => {
   const { queryResult } = useShow({ meta: { idColumnName: "film_vendor_id" } });
   const { data, isLoading } = queryResult;
   const record = data?.data;
+
+  useCurrentRecordTabTitle(record);
 
   return (
     <Show isLoading={isLoading}>

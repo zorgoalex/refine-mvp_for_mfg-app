@@ -1,6 +1,7 @@
 import { useShow, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField } from "@refinedev/antd";
 import { Typography, Row, Col, Divider } from "antd";
+import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title } = Typography;
 
@@ -8,6 +9,8 @@ export const UnitShow: React.FC<IResourceComponentsProps> = () => {
   const { queryResult } = useShow({ meta: { idColumnName: "unit_id" } });
   const { data, isLoading } = queryResult;
   const record = data?.data;
+
+  useCurrentRecordTabTitle(record);
 
   return (
     <Show isLoading={isLoading} title="Просмотр Единицы измерения">
