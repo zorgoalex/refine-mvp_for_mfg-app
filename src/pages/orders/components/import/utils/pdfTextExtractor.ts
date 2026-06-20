@@ -383,7 +383,8 @@ function extractTableRowsForHeader(
   lines: PdfTextLine[],
   pageItems: PdfTextItem[],
   headerLine: PdfTextLine,
-  tableBottomY: number
+  tableBottomY: number,
+  materialOverride?: string
 ): PdfDetailRaw[] {
   const columns = getTableColumns(headerLine);
   const sectionItems = pageItems.filter(item => item.y < headerLine.y - 4 && item.y > tableBottomY);
@@ -396,7 +397,7 @@ function extractTableRowsForHeader(
     line.y < headerLine.y &&
     line.y > tableBottomY
   );
-  const material = findMaterialForTable(lines, headerLine);
+  const material = materialOverride ?? findMaterialForTable(lines, headerLine);
   const details: PdfDetailRaw[] = [];
 
   for (let i = 0; i < anchors.length; i++) {
@@ -462,8 +463,42 @@ function extractTableRowsFromPage(lines: PdfTextLine[]): PdfDetailRaw[] {
   return details;
 }
 
+function extractContinuationTableRowsFromPage(lines: PdfTextLine[], material?: string): PdfDetailRaw[] {
+  const pageItems = lines.flatMap(line => line.items);
+  const anchors = findTableRowAnchors(pageItems, Number.POSITIVE_INFINITY, BASIS_TABLE_COLUMNS);
+  if (anchors.length === 0) return [];
+
+  const rowStep = estimateRowStep(anchors);
+  const syntheticHeaderLine: PdfTextLine = {
+    y: anchors[0].item.y + rowStep,
+    items: [],
+    text: '',
+  };
+
+  return extractTableRowsForHeader(lines, pageItems, syntheticHeaderLine, TABLE_FOOTER_MIN_Y, material);
+}
+
 function parseDetailsFromTableGeometry(pageLines: PdfTextLine[][]): PdfDetailRaw[] {
-  return pageLines.flatMap(lines => extractTableRowsFromPage(lines));
+  const details: PdfDetailRaw[] = [];
+  let inheritedMaterial: string | undefined;
+
+  for (const lines of pageLines) {
+    const headerLines = lines.filter(isTableHeaderLine).sort((a, b) => b.y - a.y);
+    if (headerLines.length > 0) {
+      const pageDetails = extractTableRowsFromPage(lines);
+      details.push(...pageDetails);
+      const lastMaterial = [...pageDetails].reverse().find(detail => detail.material)?.material;
+      if (lastMaterial) {
+        inheritedMaterial = lastMaterial;
+      }
+      continue;
+    }
+
+    const continuationDetails = extractContinuationTableRowsFromPage(lines, inheritedMaterial);
+    details.push(...continuationDetails);
+  }
+
+  return details;
 }
 
 /**

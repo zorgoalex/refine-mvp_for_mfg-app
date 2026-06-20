@@ -186,6 +186,12 @@ describe('parsePdfContent PDF fixtures', () => {
     { fixture: 'mdf_wrong2.pdf', positionsCount: 45, totalQuantity: 48, expectedTotalCount: 48 },
     { fixture: 'mdf_wrong3.pdf', positionsCount: 38, totalQuantity: 39, expectedTotalCount: 39 },
     { fixture: 'mdf_wrong4.pdf', positionsCount: 32, totalQuantity: 36, expectedTotalCount: 36 },
+    {
+      fixture: 'teststaff/мдф-5pages.pdf',
+      positionsCount: 64,
+      totalQuantity: 68,
+      expectedTotalCount: 68,
+    },
   ];
   const availableFixtureCases = fixtureCases.filter(({ fixture }) => fs.existsSync(path.resolve(PDF_FIXTURE_DIR, fixture)));
   const hasAllTrickyFixtures = ['mdf_ex2.pdf', 'mdf_wrong.pdf', 'mdf_wrong2.pdf'].every(fixture =>
