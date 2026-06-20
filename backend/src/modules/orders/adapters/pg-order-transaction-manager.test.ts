@@ -253,9 +253,11 @@ describe('PgOrderTransactionManager', () => {
     expect(updateQuery).toBeDefined();
     // Flag must NOT appear in the SQL
     expect(normalizeSql(updateQuery!.text)).not.toContain('production_status_from_details_enabled');
-    // Params: $1=orderId + 24 SET fields = 25 total; highest placeholder is $25
-    expect(updateQuery!.params).toHaveLength(25);
+    // Params: $1=orderId + 25 SET fields = 26 total; highest placeholder is $26
+    // (SP3 added sheet_material_type_id = $26).
+    expect(updateQuery!.params).toHaveLength(26);
     expect(normalizeSql(updateQuery!.text)).toContain('ref_key_1c = $25');
+    expect(normalizeSql(updateQuery!.text)).toContain('sheet_material_type_id = $26');
     // Flag value (false) must not appear in bind params (boolean false could be ambiguous, check no flag column)
   });
 

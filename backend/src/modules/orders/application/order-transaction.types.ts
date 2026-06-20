@@ -65,6 +65,22 @@ export interface OrderChildReference {
   id: number;
 }
 
+/** Stable-keyed detail sheet-id snapshot for audit metadata (detailId/tempKey, never detailNumber). */
+export interface DetailSheetAuditRef {
+  detailId?: number;
+  tempKey?: string;
+  sheetMaterialTypeId: number | null;
+}
+
+export interface OrderSaveAuditMetadata {
+  commandName: string;
+  requestId?: string;
+  detailSheetMaterialTypeIds?: {
+    before: DetailSheetAuditRef[];
+    after: DetailSheetAuditRef[];
+  };
+}
+
 export interface OrderSaveAuditEvent {
   action: 'orders.create' | 'orders.update';
   orderId: number;
@@ -75,6 +91,35 @@ export interface OrderSaveAuditEvent {
   requestId?: string;
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
+  metadata?: OrderSaveAuditMetadata;
+}
+
+/** Transaction-scoped context threaded into shadow-material audit writes. */
+export interface SaveContext {
+  actorUserId: number | null;
+  requestId?: string;
+  source: string;
+  clientId?: number | null;
+}
+
+/** Stored SP3 sheet state of an existing order (for new-only/no-clear + permission gate). */
+export interface StoredOrderSheetState {
+  sheetEligible: boolean;
+  headerSheetMaterialTypeId: number | null;
+  detailSheetIds: Array<{ detailId: number; sheetMaterialTypeId: number | null }>;
+}
+
+/** Header + detail sheet/material refs handed to the tx-scoped sheet reference validator. */
+export interface SheetReferenceValidationInput {
+  header: { sheetMaterialTypeId: number | null; materialId: number | null };
+  details: ReadonlyArray<{
+    label: string;
+    detailId?: number;
+    sheetMaterialTypeId: number | null;
+    materialId: number | null;
+    height: number;
+    width: number;
+  }>;
 }
 
 export interface OrderDeleteAuditInput {
@@ -91,6 +136,12 @@ export interface OrderDeleteOutboxInput extends OrderDeleteAuditInput {
 
 export interface OrderWriteUnitOfWork {
   setSessionUser(userId: string): Promise<void>;
+  /** SP3: transaction-scoped context for shadow-material audit attribution. */
+  setSaveContext(context: SaveContext): void;
+  /** SP3: stored sheet state of an existing order (new-only/no-clear + permission gate). */
+  loadStoredOrderSheetState(orderId: number): Promise<StoredOrderSheetState>;
+  /** SP3: tx-scoped existence + dimension + anti-injection validation (422 on violation). */
+  validateSheetReferences(input: SheetReferenceValidationInput): Promise<void>;
   reconcileOrderDeleteIdempotency(command: DeleteOrderCommand): Promise<OrderDeleteIdempotencyResult>;
   completeOrderDeleteIdempotency(
     idempotencyKey: string,

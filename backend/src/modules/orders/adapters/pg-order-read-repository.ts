@@ -89,6 +89,11 @@ interface OrderHeaderRow extends QueryResultRow {
   edited_by: string | number | null;
   version: string | number;
   ref_key_1c: string | null;
+  sheet_material_type_id: string | number | null;
+  sheet_eligible: boolean | null;
+  material_name: string | null;
+  header_material_name: string | null;
+  header_sheet_material_type_id: string | number | null;
   material_ids: unknown[] | null;
   material_names: unknown[] | null;
   milling_type_id: string | number | null;
@@ -110,6 +115,8 @@ interface OrderDetailRow extends QueryResultRow {
   quantity: string | number;
   area: string | number;
   material_id: string | number;
+  sheet_material_type_id: string | number | null;
+  material_name: string | null;
   milling_type_id: string | number;
   edge_type_id: string | number;
   film_id: string | number | null;
@@ -278,12 +285,16 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           o.discount, o.surcharge, o.notes, o.manager_id,
           o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
           o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
-          o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c
+          o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
+          o.sheet_material_type_id AS header_sheet_material_type_id,
+          COALESCE(hsmt.name, hm.material_name) AS header_material_name
         FROM orders o
         LEFT JOIN clients c ON c.client_id = o.client_id
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
         LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
+        LEFT JOIN materials hm ON hm.material_id = o.material_id
+        LEFT JOIN sheet_material_types hsmt ON hsmt.sheet_material_type_id = o.sheet_material_type_id
         ${where}
         ORDER BY ${orderBy} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
         LIMIT $${limitIndex} OFFSET $${offsetIndex}
@@ -307,13 +318,14 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         FROM (
           SELECT
             od.material_id,
-            m.material_name,
+            COALESCE(smt.name, m.material_name) AS material_name,
             MIN(od.detail_number) AS first_detail_number,
             MIN(od.detail_id) AS first_detail_id
           FROM order_details od
           LEFT JOIN materials m ON m.material_id = od.material_id
+          LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
           WHERE od.order_id = o.order_id AND od.delete_flag = false AND od.material_id IS NOT NULL
-          GROUP BY od.material_id, m.material_name
+          GROUP BY od.material_id, COALESCE(smt.name, m.material_name)
         ) materials
       ) material_projection ON true
       LEFT JOIN LATERAL (
@@ -398,12 +410,16 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.discount, o.surcharge, o.notes, o.manager_id,
         o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
         o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
-        o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c
+        o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
+        o.sheet_material_type_id, o.sheet_eligible,
+        COALESCE(smt.name, m.material_name) AS material_name
       FROM orders o
       LEFT JOIN clients c ON c.client_id = o.client_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
       LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
+      LEFT JOIN materials m ON m.material_id = o.material_id
+      LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = o.sheet_material_type_id
       WHERE o.order_id = $1 AND o.delete_flag = false
       `,
       [command.orderId],
@@ -414,12 +430,17 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       return null;
     }
 
+    // Server-resolved per-detail material name (COALESCE sheet/material) so the caller
+    // needs no sheet_materials.view; sheet_material_type_id carried for FE hydration.
     const details = await this.database.query<OrderDetailRow>(
       `
-      SELECT *
-      FROM order_details
-      WHERE order_id = $1 AND delete_flag = false
-      ORDER BY detail_number ASC, detail_id ASC
+      SELECT od.*,
+             COALESCE(smt.name, m.material_name) AS material_name
+      FROM order_details od
+      LEFT JOIN materials m ON m.material_id = od.material_id
+      LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+      WHERE od.order_id = $1 AND od.delete_flag = false
+      ORDER BY od.detail_number ASC, od.detail_id ASC
       `,
       [command.orderId],
     );
@@ -846,6 +867,9 @@ function mapOrderDto(
       linkPdfFile: row.link_pdf_file,
       notes: row.notes,
       refKey1c: row.ref_key_1c,
+      sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
+      sheetEligible: row.sheet_eligible ?? false,
+      materialName: row.material_name ?? null,
       createdAt: toIsoString(row.created_at),
       updatedAt: toIsoString(row.updated_at),
       createdBy: toNullableNumber(row.created_by),
@@ -906,6 +930,8 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
     notes: row.notes,
     materialIds: toNumberArray(row.material_ids),
     materialNames: toStringArray(row.material_names),
+    headerMaterialName: row.header_material_name ?? null,
+    headerSheetMaterialTypeId: toNullableNumber(row.header_sheet_material_type_id),
     millingTypeId: toNullableNumber(row.milling_type_id),
     millingTypeName: row.milling_type_name,
     dowelingOrderId: toNullableNumber(row.latest_doweling_order_id),
@@ -932,6 +958,8 @@ function mapDetail(row: OrderDetailRow) {
     quantity: toNumber(row.quantity),
     area: toNumber(row.area),
     materialId: toNumber(row.material_id),
+    sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
+    materialName: row.material_name ?? null,
     millingTypeId: toNumber(row.milling_type_id),
     edgeTypeId: toNumber(row.edge_type_id),
     filmId: toNullableNumber(row.film_id),

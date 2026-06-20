@@ -31,6 +31,7 @@ function header(overrides: Partial<NormalizedSaveOrderHeaderDto> = {}): Normaliz
     linkPdfFile: null,
     notes: null,
     materialId: null,
+    sheetMaterialTypeId: null,
     millingTypeId: null,
     edgeTypeId: null,
     filmId: null,
@@ -68,14 +69,21 @@ describe('pg-order-snapshot orderHeaderInsertParams', () => {
     expect(params[8]).toBe(false);
   });
 
-  it('returns 30 elements matching INSERT columns ($1..$30)', () => {
+  it('returns 31 elements matching INSERT columns ($1..$31, with sheet_material_type_id as $31)', () => {
     const params = insertParams(header(), totals());
-    expect(params).toHaveLength(30);
+    expect(params).toHaveLength(31);
   });
 
-  it('places refKey1c last (index 29)', () => {
-    const params = insertParams(header({ refKey1c: 'snap-key' }), totals());
+  it('places refKey1c at index 29 and sheetMaterialTypeId last (index 30)', () => {
+    const params = insertParams(header({ refKey1c: 'snap-key', sheetMaterialTypeId: null }), totals());
     expect(params[29]).toBe('snap-key');
+    expect(params[30]).toBeNull(); // sheetMaterialTypeId
+  });
+
+  it('forces materialId to null when sheetMaterialTypeId is set (header invariant)', () => {
+    const params = insertParams(header({ materialId: 5, sheetMaterialTypeId: 42 }), totals());
+    expect(params[25]).toBeNull(); // materialId forced null
+    expect(params[30]).toBe(42);  // sheetMaterialTypeId
   });
 });
 
@@ -88,16 +96,23 @@ describe('pg-order-snapshot orderHeaderUpdateParams', () => {
     expect(params[8]).toBe('2026-06-01'); // plannedCompletionDate — was $11 before, now $10 (index 8)
   });
 
-  it('returns 29 elements (one fewer than insert params)', () => {
+  it('returns 30 elements (one fewer than insert params — no productionStatusFromDetailsEnabled)', () => {
     const insert = insertParams(header(), totals());
     const update = updateParams(header(), totals());
     expect(update).toHaveLength(insert.length - 1);
-    expect(update).toHaveLength(29);
+    expect(update).toHaveLength(30);
   });
 
-  it('places refKey1c last (index 28) matching placeholder $30 in UPDATE SQL', () => {
-    const params = updateParams(header({ refKey1c: 'update-key' }), totals());
+  it('places refKey1c at index 28 and sheetMaterialTypeId last (index 29) matching $30/$31 in UPDATE SQL', () => {
+    const params = updateParams(header({ refKey1c: 'update-key', sheetMaterialTypeId: null }), totals());
     expect(params[28]).toBe('update-key');
+    expect(params[29]).toBeNull(); // sheetMaterialTypeId
+  });
+
+  it('forces materialId to null when sheetMaterialTypeId is set (header invariant — update path)', () => {
+    const params = updateParams(header({ materialId: 7, sheetMaterialTypeId: 99 }), totals());
+    expect(params[24]).toBeNull(); // materialId forced null (index 24 = $26 with orderId $1 prefix)
+    expect(params[29]).toBe(99);  // sheetMaterialTypeId at end
   });
 
   it('passing productionStatusFromDetailsEnabled=false does not appear in returned array', () => {
@@ -112,5 +127,11 @@ describe('pg-order-snapshot orderHeaderUpdateParams', () => {
     // where $1=orderId, $2=orderName, …, since updateOrderHeader binds [orderId, ...updateParams])
     const params = updateParams(header(), totals({ discount: 15 }));
     expect(params[12]).toBe(15); // discount
+  });
+
+  it('sheetMaterialTypeId=null passes through correctly in update path', () => {
+    const params = updateParams(header({ sheetMaterialTypeId: null, materialId: 3 }), totals());
+    expect(params[24]).toBe(3);    // materialId stays when sheetMaterialTypeId is null
+    expect(params[29]).toBeNull(); // sheetMaterialTypeId
   });
 });

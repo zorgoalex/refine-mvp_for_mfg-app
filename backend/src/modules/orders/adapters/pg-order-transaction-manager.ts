@@ -17,7 +17,16 @@ import type {
   OrderSaveAuditEvent,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
+  SaveContext,
+  SheetReferenceValidationInput,
+  StoredOrderSheetState,
 } from '../application/order-transaction.types';
+import {
+  buildShadowMaterialAuditEvent,
+  resolveShadowMaterialId,
+  type ShadowContext,
+} from './shadow-material';
+import { validateSheetReferences as validateSheetReferencesShared } from '../domain/sheet-order-validation';
 import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
@@ -73,7 +82,47 @@ export class PgOrderTransactionManager implements OrderTransactionManagerPort {
 }
 
 class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
+  private saveContext: SaveContext | null = null;
+
   constructor(private readonly tx: TransactionClient) {}
+
+  setSaveContext(context: SaveContext): void {
+    this.saveContext = context;
+  }
+
+  async loadStoredOrderSheetState(orderId: number): Promise<StoredOrderSheetState> {
+    const header = await this.tx.query<{
+      sheet_material_type_id: number | string | null;
+      sheet_eligible: boolean | null;
+    }>(
+      `SELECT sheet_material_type_id, sheet_eligible FROM orders WHERE order_id = $1`,
+      [orderId],
+    );
+    const details = await this.tx.query<{
+      detail_id: number | string;
+      sheet_material_type_id: number | string | null;
+    }>(
+      `SELECT detail_id, sheet_material_type_id FROM order_details
+        WHERE order_id = $1 AND delete_flag = false`,
+      [orderId],
+    );
+    return {
+      sheetEligible: header.rows[0]?.sheet_eligible === true,
+      headerSheetMaterialTypeId:
+        header.rows[0]?.sheet_material_type_id == null
+          ? null
+          : Number(header.rows[0].sheet_material_type_id),
+      detailSheetIds: details.rows.map((row) => ({
+        detailId: Number(row.detail_id),
+        sheetMaterialTypeId:
+          row.sheet_material_type_id == null ? null : Number(row.sheet_material_type_id),
+      })),
+    };
+  }
+
+  async validateSheetReferences(input: SheetReferenceValidationInput): Promise<void> {
+    await validateSheetReferencesShared(this.tx, input.header, input.details);
+  }
 
   async setSessionUser(userId: string): Promise<void> {
     await this.tx.query('SELECT set_session_user($1)', [userId]);
@@ -156,7 +205,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
              link_cutting_image_file AS "linkCuttingImageFile",
              link_cad_file AS "linkCadFile", link_pdf_file AS "linkPdfFile",
              notes, material_id AS "materialId", milling_type_id AS "millingTypeId",
-             edge_type_id AS "edgeTypeId", film_id AS "filmId", ref_key_1c AS "refKey1c"
+             edge_type_id AS "edgeTypeId", film_id AS "filmId", ref_key_1c AS "refKey1c",
+             sheet_material_type_id AS "sheetMaterialTypeId", sheet_eligible AS "sheetEligible"
       FROM orders
       WHERE order_id = $1
       `,
@@ -207,7 +257,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         planned_completion_date, completion_date, issue_date, payment_date,
         discount, surcharge, total_amount, final_amount, paid_amount, parts_count, total_area,
         link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file,
-        notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c, version
+        notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c,
+        sheet_material_type_id, version
       )
       VALUES (
         $1, $2, $3, $4, $5,
@@ -216,7 +267,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         $10, $11, $12, $13,
         $14, $15, $16, $17, $18, $19, $20,
         $21, $22, $23, $24,
-        $25, $26, $27, $28, $29, $30, 1
+        $25, $26, $27, $28, $29, $30, $31, 1
       )
       RETURNING order_id
       `,
@@ -246,11 +297,14 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.linkCadFile ?? null,
         input.header.linkPdfFile ?? null,
         input.header.notes ?? null,
-        input.header.materialId ?? null,
+        // Header invariant (§13): a sheet header forces material_id NULL so legacy
+        // material_id consumers never read a material that disagrees with the sheet.
+        input.header.sheetMaterialTypeId != null ? null : input.header.materialId ?? null,
         input.header.millingTypeId ?? null,
         input.header.edgeTypeId ?? null,
         input.header.filmId ?? null,
         input.header.refKey1c ?? null,
+        input.header.sheetMaterialTypeId ?? null,
       ],
     );
 
@@ -291,7 +345,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           milling_type_id = $22,
           edge_type_id = $23,
           film_id = $24,
-          ref_key_1c = $25
+          ref_key_1c = $25,
+          sheet_material_type_id = $26
       WHERE order_id = $1 AND delete_flag = false
       `,
       [
@@ -315,18 +370,44 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.linkCadFile ?? null,
         input.header.linkPdfFile ?? null,
         input.header.notes ?? null,
-        input.header.materialId ?? null,
+        // Header invariant (§13): a sheet header forces material_id NULL.
+        input.header.sheetMaterialTypeId != null ? null : input.header.materialId ?? null,
         input.header.millingTypeId ?? null,
         input.header.edgeTypeId ?? null,
         input.header.filmId ?? null,
         input.header.refKey1c ?? null,
+        input.header.sheetMaterialTypeId ?? null,
       ],
     );
   }
 
   async upsertDetails(orderId: number, details: readonly CalculatedOrderDetailDto[]): Promise<void> {
     for (const detail of details) {
-      if (detail.id) {
+      // Variant A: a sheet detail resolves (creates/syncs) its dedicated synthetic shadow
+      // material INSIDE this tx and OVERRIDES material_id with it (order_details.material_id
+      // is NOT NULL). Legacy details keep their provided material_id unchanged.
+      let effective: CalculatedOrderDetailDto = detail;
+      if (detail.sheetMaterialTypeId != null) {
+        const ctx = this.saveContext;
+        const shadowContext: ShadowContext = {
+          actorUserId: ctx?.actorUserId ?? null,
+          requestId: ctx?.requestId,
+          source: ctx?.source ?? SOURCE,
+          clientId: ctx?.clientId ?? null,
+          orderId,
+        };
+        const materialId = await resolveShadowMaterialId(
+          this.tx,
+          detail.sheetMaterialTypeId,
+          shadowContext,
+          async (auditInput) => {
+            await auditService.record(this.tx, buildShadowMaterialAuditEvent(auditInput, shadowContext));
+          },
+        );
+        effective = { ...detail, materialId };
+      }
+
+      if (effective.id) {
         await this.tx.query(
           `
           UPDATE order_details
@@ -335,10 +416,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
               film_id = $12, milling_cost_per_sqm = $13, detail_cost = $14, priority = $15,
               production_status_id = $16, joint_order_id = $17, note = $18,
               link_cutting_file = $19, link_cutting_image_file = $20, link_cad_file = $21,
-              link_pdf_file = $22, ref_key_1c = $23
+              link_pdf_file = $22, ref_key_1c = $23, sheet_material_type_id = $24
           WHERE detail_id = $1 AND order_id = $2
           `,
-          detailParams(detail.id, orderId, detail),
+          detailParams(effective.id, orderId, effective),
         );
       } else {
         await this.tx.query(
@@ -347,11 +428,12 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
             order_id, detail_number, detail_name, height, width, quantity, area,
             material_id, milling_type_id, edge_type_id, film_id, milling_cost_per_sqm,
             detail_cost, priority, production_status_id, joint_order_id, note,
-            link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file, ref_key_1c
+            link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file, ref_key_1c,
+            sheet_material_type_id
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
           `,
-          detailParamsForInsert(orderId, detail),
+          detailParamsForInsert(orderId, effective),
         );
       }
     }
@@ -674,7 +756,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       before: event.before ?? null,
       after: event.after ?? null,
       diff: computeDiff(event.before ?? null, event.after ?? null),
-      metadata: { commandName: event.action },
+      metadata: (event.metadata ?? { commandName: event.action }) as unknown as Record<
+        string,
+        unknown
+      >,
     });
   }
 
@@ -964,6 +1049,7 @@ function detailParamsForInsertValues(detail: CalculatedOrderDetailDto) {
     detail.linkCadFile,
     detail.linkPdfFile,
     detail.refKey1c,
+    detail.sheetMaterialTypeId ?? null,
   ];
 }
 

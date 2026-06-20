@@ -42,6 +42,7 @@ export interface SaveOrderHeaderDto {
   notes?: string | null;
   refKey1c?: string | null;
   materialId?: number | null;
+  sheetMaterialTypeId?: number | null;
   millingTypeId?: number | null;
   edgeTypeId?: number | null;
   filmId?: number | null;
@@ -56,6 +57,7 @@ export interface SaveOrderDetailDto {
   width: number;
   quantity: number;
   materialId: number;
+  sheetMaterialTypeId?: number | null;
   millingTypeId: number;
   edgeTypeId: number;
   filmId?: number | null;

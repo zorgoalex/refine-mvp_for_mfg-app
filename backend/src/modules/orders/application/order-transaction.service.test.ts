@@ -28,6 +28,9 @@ import type {
   OrderSaveAuditEvent,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
+  SaveContext,
+  SheetReferenceValidationInput,
+  StoredOrderSheetState,
 } from './order-transaction.types';
 import { collectChildReferences, OrderTransactionService } from './order-transaction.service';
 
@@ -128,6 +131,19 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
 
   async setSessionUser(): Promise<void> {
     this.call('setSessionUser');
+  }
+
+  setSaveContext(_context: SaveContext): void {
+    this.call('setSaveContext');
+  }
+
+  async loadStoredOrderSheetState(_orderId: number): Promise<StoredOrderSheetState> {
+    this.call('loadStoredOrderSheetState');
+    return { sheetEligible: false, headerSheetMaterialTypeId: null, detailSheetIds: [] };
+  }
+
+  async validateSheetReferences(_input: SheetReferenceValidationInput): Promise<void> {
+    this.call('validateSheetReferences');
   }
 
   async reconcileOrderDeleteIdempotency(): Promise<OrderDeleteIdempotencyResult> {

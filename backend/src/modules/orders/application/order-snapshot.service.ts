@@ -12,6 +12,7 @@ import type {
 import type {
   ImportOrderSnapshotBatchResponseDto,
   ImportOrderSnapshotResponseDto,
+  OrderSnapshotDetailDto,
 } from '../dto/order-snapshot.dto';
 import type { OrderPermissionCheckerPort } from './order-transaction.types';
 
@@ -44,6 +45,10 @@ export class OrderSnapshotService {
   importOrderSnapshot(command: ImportOrderSnapshotCommand): Promise<ImportOrderSnapshotResponseDto> {
     this.require(command, 'orders.import');
     this.requireFinanceImportPermissions(command);
+    this.requireSheetMaterialPermissionIfNeeded(command.currentUser, [
+      command.snapshot.data.order,
+      ...command.snapshot.data.details,
+    ]);
     return this.ports.snapshots.importOrderSnapshot(command);
   }
 
@@ -52,6 +57,10 @@ export class OrderSnapshotService {
   ): Promise<ImportOrderSnapshotBatchResponseDto> {
     this.require(command, 'orders.import');
     this.requireFinanceImportPermissions(command);
+    // Batch: we cannot pre-read stored state here, so we gate on incoming sheet ids.
+    // The adapter-tx will enforce sheet guards per-order during the import.
+    // If ANY snapshot in the batch contains a sheet id, require sheet_materials.view.
+    // (ZIP contents are not yet parsed here; the per-snapshot gate in the adapter catches the rest.)
     return this.ports.snapshots.importOrderSnapshotBatch(command);
   }
 
@@ -90,6 +99,26 @@ export class OrderSnapshotService {
           requiredPermissions: [permission],
         });
       }
+    }
+  }
+
+  /**
+   * Gate: if the incoming payload (single snapshot) contains any sheet material type id, the user
+   * must hold `sheet_materials.view`. The adapter-tx enforces this for stored-state-only sheet orders
+   * (already has a sheet detail but the incoming payload doesn't — caught by assertSheetEligibilityAndNoClear).
+   * Placed in the service layer so it is enforced before any DB write, consistent with the
+   * order-transaction.service requireSheetMaterials pattern.
+   */
+  private requireSheetMaterialPermissionIfNeeded(
+    currentUser: ImportOrderSnapshotCommand['currentUser'],
+    items: Array<{ sheetMaterialTypeId?: number | null }>,
+  ): void {
+    const touchesSheet = items.some((item) => item.sheetMaterialTypeId != null);
+    if (!touchesSheet) return;
+    if (!this.permissions.canUser(currentUser, 'sheet_materials.view')) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['sheet_materials.view'],
+      });
     }
   }
 }

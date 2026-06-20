@@ -93,6 +93,7 @@ const saveOrderHeaderSwaggerSchema = {
     notes: nullableStringSwaggerSchema,
     refKey1c: nullableStringSwaggerSchema,
     materialId: nullableIntegerSwaggerSchema,
+    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'SP3 sheet material type; when set, materialId is resolved server-side to the sheet shadow and must be omitted or null' },
     millingTypeId: nullableIntegerSwaggerSchema,
     edgeTypeId: nullableIntegerSwaggerSchema,
     filmId: nullableIntegerSwaggerSchema,
@@ -101,7 +102,7 @@ const saveOrderHeaderSwaggerSchema = {
 
 const saveOrderDetailSwaggerSchema = {
   type: 'object',
-  required: ['height', 'width', 'quantity', 'materialId', 'millingTypeId', 'edgeTypeId'],
+  required: ['height', 'width', 'quantity', 'millingTypeId', 'edgeTypeId'],
   properties: {
     id: { type: 'integer' },
     clientKey: { type: 'string' },
@@ -110,7 +111,8 @@ const saveOrderDetailSwaggerSchema = {
     height: { type: 'number' },
     width: { type: 'number' },
     quantity: { type: 'integer' },
-    materialId: { type: 'integer' },
+    materialId: { ...nullableIntegerSwaggerSchema, description: 'Required only when sheetMaterialTypeId is absent; omit or set null for sheet details — the server resolves the shadow material' },
+    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'SP3 sheet material type id; when set, materialId is resolved server-side to the sheet shadow' },
     millingTypeId: { type: 'integer' },
     edgeTypeId: { type: 'integer' },
     filmId: nullableIntegerSwaggerSchema,
@@ -238,6 +240,7 @@ const orderDetailResponseSwaggerSchema = {
     width: { type: 'number' },
     quantity: { type: 'integer' },
     materialId: { type: 'integer' },
+    sheetMaterialTypeId: nullableIntegerSwaggerSchema,
     millingTypeId: { type: 'integer' },
     edgeTypeId: { type: 'integer' },
     filmId: nullableIntegerSwaggerSchema,
@@ -456,6 +459,7 @@ const orderHeaderResponseSwaggerSchema = {
     notes: nullableStringSwaggerSchema,
     refKey1c: nullableStringSwaggerSchema,
     materialId: nullableIntegerSwaggerSchema,
+    sheetMaterialTypeId: nullableIntegerSwaggerSchema,
     millingTypeId: nullableIntegerSwaggerSchema,
     edgeTypeId: nullableIntegerSwaggerSchema,
     filmId: nullableIntegerSwaggerSchema,

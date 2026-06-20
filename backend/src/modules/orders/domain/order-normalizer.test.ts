@@ -171,3 +171,62 @@ describe('normalizeSaveOrderDto', () => {
     expect(() => normalizeSaveOrderDto(invalid)).toThrow(OrderValidationError);
   });
 });
+
+describe('normalizeSaveOrderDto sheetMaterialTypeId (SP3)', () => {
+  it('normalizes detail sheetMaterialTypeId (optional)', () => {
+    const out = normalizeSaveOrderDto(
+      createRawOrder({
+        details: [
+          {
+            detailName: 'x',
+            height: 1,
+            width: 1,
+            quantity: 1,
+            materialId: 5,
+            millingTypeId: 1,
+            edgeTypeId: 1,
+            sheetMaterialTypeId: 7,
+          } as unknown as SaveOrderDto['details'][number],
+        ],
+      }),
+    );
+
+    expect(out.details[0].sheetMaterialTypeId).toBe(7);
+  });
+
+  it('defaults missing detail sheetMaterialTypeId to null', () => {
+    const out = normalizeSaveOrderDto(
+      createRawOrder({
+        details: [
+          {
+            detailName: 'x',
+            height: 1,
+            width: 1,
+            quantity: 1,
+            materialId: 5,
+            millingTypeId: 1,
+            edgeTypeId: 1,
+          } as unknown as SaveOrderDto['details'][number],
+        ],
+      }),
+    );
+
+    expect(out.details[0].sheetMaterialTypeId ?? null).toBeNull();
+  });
+
+  it('normalizes header sheetMaterialTypeId', () => {
+    const out = normalizeSaveOrderDto(
+      createRawOrder({
+        header: {
+          orderName: 'Test order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          sheetMaterialTypeId: 9,
+        },
+      }),
+    );
+
+    expect(out.header.sheetMaterialTypeId).toBe(9);
+  });
+});

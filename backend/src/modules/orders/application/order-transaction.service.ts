@@ -5,8 +5,10 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
   CreateOrderCommand,
   DeleteOrderCommand,
+  DetailSheetAuditRef,
   OrderDeadlineSyncPort,
   OrderChildReference,
+  OrderSaveAuditMetadata,
   LockedOrderRow,
   OrderPermissionCheckerPort,
   OrderTransactionManagerPort,
@@ -14,9 +16,72 @@ import type {
   UpdateOrderCommand,
 } from './order-transaction.types';
 import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
-import type { NormalizedSaveOrderDto, PreparedOrderSave } from '../dto/save-order.dto';
+import type {
+  CalculatedOrderDetailDto,
+  NormalizedSaveOrderDto,
+  PreparedOrderSave,
+} from '../dto/save-order.dto';
+import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderNotFoundError, OrderVersionConflictError } from '../errors/order.errors';
 import { prepareOrderSave } from '../domain/order-save-preparer';
+import {
+  assertSheetEligibilityAndNoClear,
+  orderTouchesSheet,
+  type SheetValidationDetail,
+  type SheetValidationHeader,
+} from '../domain/sheet-order-validation';
+
+interface StoredSheetSummary {
+  eligible: boolean;
+  headerSheetId: number | null;
+  detailSheetIds: ReadonlyArray<{ detailId: number; sheetMaterialTypeId: number | null }>;
+}
+
+function actorUserIdOf(currentUser: CurrentUser): number | null {
+  const parsed = Number(currentUser.id);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function numOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toSheetHeader(order: NormalizedSaveOrderDto): SheetValidationHeader {
+  return {
+    sheetMaterialTypeId: order.header.sheetMaterialTypeId ?? null,
+    materialId: order.header.materialId ?? null,
+  };
+}
+
+function toSheetDetails(details: readonly CalculatedOrderDetailDto[]): SheetValidationDetail[] {
+  return details.map((detail, index) => ({
+    label: `details[${index}]`,
+    detailId: detail.id,
+    sheetMaterialTypeId: detail.sheetMaterialTypeId ?? null,
+    materialId: detail.materialId ?? null,
+    height: detail.height,
+    width: detail.width,
+  }));
+}
+
+function toAfterDetailRefs(details: readonly CalculatedOrderDetailDto[]): DetailSheetAuditRef[] {
+  return details.map((detail) => ({
+    detailId: detail.id,
+    tempKey: detail.id === undefined ? detail.clientKey : undefined,
+    sheetMaterialTypeId: detail.sheetMaterialTypeId ?? null,
+  }));
+}
+
+function toBeforeDetailRefs(
+  stored: ReadonlyArray<{ detailId: number; sheetMaterialTypeId: number | null }>,
+): DetailSheetAuditRef[] {
+  return stored.map((row) => ({
+    detailId: row.detailId,
+    sheetMaterialTypeId: row.sheetMaterialTypeId,
+  }));
+}
 
 export interface OrderTransactionServicePorts {
   transactions: OrderTransactionManagerPort;
@@ -41,6 +106,13 @@ export class OrderTransactionService {
       this.requirePermission(command, 'orders.view_financials');
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
 
+      // New orders are SP3-era (sheet_eligible default true): eligible, no stored sheet state.
+      const touchesSheet = await this.enforceSheetGuards(unitOfWork, command, prepared, {
+        eligible: true,
+        headerSheetId: null,
+        detailSheetIds: [],
+      });
+
       const orderId = await unitOfWork.createOrderHeader({
         header: prepared.order.header,
         totals: prepared.totals,
@@ -62,8 +134,14 @@ export class OrderTransactionService {
         actorUsername: command.currentUser.username,
         actorRole: command.currentUser.role,
         clientId: prepared.order.header.clientId ?? null,
+        requestId: command.requestId,
         before: null,
         after: afterSnapshot,
+        metadata: this.buildSaveMetadata(
+          'orders.create',
+          command.requestId,
+          touchesSheet ? { before: [], after: toAfterDetailRefs(prepared.details) } : undefined,
+        ),
       });
 
       return this.readAndAssertVersion(unitOfWork, orderId, version, command);
@@ -105,6 +183,28 @@ export class OrderTransactionService {
       });
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
       const beforeSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
+
+      // SP3 stored sheet state. Only sheet-eligible orders can carry sheet details, so
+      // read stored details ONLY when eligible — legacy updates take no extra query and
+      // skip the sheet path entirely.
+      const storedEligible = (beforeSnapshot as Record<string, unknown> | null)?.sheetEligible === true;
+      const storedHeaderSheetId = numOrNull(
+        (beforeSnapshot as Record<string, unknown> | null)?.sheetMaterialTypeId,
+      );
+      let storedDetailSheetIds: ReadonlyArray<{
+        detailId: number;
+        sheetMaterialTypeId: number | null;
+      }> = [];
+      if (storedEligible) {
+        const storedState = await unitOfWork.loadStoredOrderSheetState(command.orderId);
+        storedDetailSheetIds = storedState.detailSheetIds;
+      }
+      const touchesSheet = await this.enforceSheetGuards(unitOfWork, command, prepared, {
+        eligible: storedEligible,
+        headerSheetId: storedHeaderSheetId,
+        detailSheetIds: storedDetailSheetIds,
+      });
+
       await unitOfWork.assertChildOwnership(
         command.orderId,
         collectChildReferences(prepared.order),
@@ -130,8 +230,16 @@ export class OrderTransactionService {
         actorUsername: command.currentUser.username,
         actorRole: command.currentUser.role,
         clientId: prepared.order.header.clientId ?? null,
+        requestId: command.requestId,
         before: beforeSnapshot,
         after: afterSnapshot,
+        metadata: this.buildSaveMetadata(
+          'orders.update',
+          command.requestId,
+          touchesSheet
+            ? { before: toBeforeDetailRefs(storedDetailSheetIds), after: toAfterDetailRefs(prepared.details) }
+            : undefined,
+        ),
       });
 
       return this.readAndAssertVersion(unitOfWork, command.orderId, version, command);
@@ -262,6 +370,61 @@ export class OrderTransactionService {
         requiredPermissions: [permission],
       });
     }
+  }
+
+  /**
+   * SP3 sheet guards. Runs ONLY when the save touches the sheet path (incoming OR stored
+   * sheet id) so legacy orders are untouched. Order: permission → eligibility/no-clear →
+   * tx-scoped reference validation → save-context for shadow audit. Returns whether the
+   * sheet path is active (drives audit metadata).
+   */
+  private async enforceSheetGuards(
+    unitOfWork: OrderWriteUnitOfWork,
+    command: { currentUser: CurrentUser; requestId?: string },
+    prepared: PreparedOrderSave,
+    stored: StoredSheetSummary,
+  ): Promise<boolean> {
+    const header = toSheetHeader(prepared.order);
+    const details = toSheetDetails(prepared.details);
+    const touchesSheet = orderTouchesSheet({
+      header,
+      details,
+      storedHeaderSheetId: stored.headerSheetId,
+      storedDetailSheetIds: stored.detailSheetIds,
+    });
+    if (!touchesSheet) {
+      return false;
+    }
+    // SECURITY: any incoming OR stored sheet id requires sheet_materials.view (FE gating
+    // is not a boundary). Reject BEFORE any write.
+    this.requirePermission(command, 'sheet_materials.view');
+    assertSheetEligibilityAndNoClear({
+      eligible: stored.eligible,
+      storedHeaderSheetId: stored.headerSheetId,
+      storedDetailSheetIds: stored.detailSheetIds,
+      header,
+      details,
+    });
+    await unitOfWork.validateSheetReferences({ header, details });
+    unitOfWork.setSaveContext({
+      actorUserId: actorUserIdOf(command.currentUser),
+      requestId: command.requestId,
+      source: 'backend-orders-command',
+      clientId: prepared.order.header.clientId ?? null,
+    });
+    return true;
+  }
+
+  private buildSaveMetadata(
+    commandName: 'orders.create' | 'orders.update',
+    requestId: string | undefined,
+    detailSheetMaterialTypeIds?: { before: DetailSheetAuditRef[]; after: DetailSheetAuditRef[] },
+  ): OrderSaveAuditMetadata {
+    return {
+      commandName,
+      ...(requestId ? { requestId } : {}),
+      ...(detailSheetMaterialTypeIds ? { detailSheetMaterialTypeIds } : {}),
+    };
   }
 
   private requireFinancePermissionForPaymentMutations(

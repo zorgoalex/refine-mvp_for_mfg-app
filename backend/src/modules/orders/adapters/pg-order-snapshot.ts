@@ -46,11 +46,24 @@ import type {
 } from '../dto/save-order.dto';
 import { prepareOrderSave } from '../domain/order-save-preparer';
 import { OrderNotFoundError } from '../errors/order.errors';
+import {
+  buildShadowMaterialAuditEvent,
+  resolveShadowMaterialId,
+  type ShadowContext,
+} from './shadow-material';
+import {
+  assertSheetEligibilityAndNoClear,
+  validateSheetReferences,
+  type SheetValidationDetail,
+  type SheetValidationHeader,
+  type StoredSheetDetail,
+} from '../domain/sheet-order-validation';
 
 type AnyRow = QueryResultRow & Record<string, unknown>;
 type ImportStatus = 'created' | 'updated' | 'noop';
 
 const SOURCE = 'backend-orders-command';
+const SNAPSHOT_IMPORT_SOURCE = 'backend-orders-snapshot-import';
 
 const SNAPSHOT_ENTITY_TYPES = {
   order: 'order',
@@ -153,7 +166,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
 
       const runId = await startImportRun(tx, snapshot, payloadHash, command);
       try {
-        const result = await importSnapshotInTransaction(tx, snapshot, payloadHash, runId);
+        const result = await importSnapshotInTransaction(tx, snapshot, payloadHash, runId, command);
         await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
         await writeAudit(
           tx,
@@ -373,6 +386,7 @@ async function importSnapshotInTransaction(
   snapshot: OrderSnapshotDto,
   payloadHash: string,
   importRunId: string,
+  command: ImportOrderSnapshotCommand,
 ): Promise<Omit<ImportOrderSnapshotResponseDto, 'importRunId'>> {
   const source = snapshot.source.sourceInstanceId;
   const orderSourceId = snapshot.identity.order.sourceId;
@@ -385,10 +399,49 @@ async function importSnapshotInTransaction(
   }
 
   const clientId = await upsertClient(tx, snapshot, payloadHash);
+
+  // SP3: pre-read stored sheet state BEFORE writing (same as order-transaction.service).
+  // For brand-new orders (no localOrderId yet), stored state = empty + eligible=true.
+  const existingOrderMapForSheet = await getMap(tx, source, SNAPSHOT_ENTITY_TYPES.order, orderSourceId);
+  const localOrderIdForSheet = existingOrderMapForSheet
+    ? Number(existingOrderMapForSheet.local_entity_id)
+    : await findOrderForSnapshot(tx, snapshot, clientId);
+  const storedSheet = await readStoredSheetState(tx, localOrderIdForSheet);
+
+  // Build the validation header/details from incoming snapshot data.
+  const snapshotHeader: SheetValidationHeader = {
+    sheetMaterialTypeId: snapshot.data.order.sheetMaterialTypeId ?? null,
+    materialId: snapshot.data.order.materialId ?? null,
+  };
+  const snapshotDetails: SheetValidationDetail[] = snapshot.data.details.map((d, i) => {
+    // detailId will be resolved from the import map if the detail already exists.
+    const mappedDetailId = storedSheet.detailSheetIds.find(
+      (sd) => sd.detailId === Number(d.sourceId),
+    )?.detailId;
+    return {
+      label: `details[${i}]`,
+      detailId: mappedDetailId,
+      sheetMaterialTypeId: d.sheetMaterialTypeId ?? null,
+      materialId: d.materialId ?? null,
+      height: d.height,
+      width: d.width,
+    };
+  });
+
+  // Validate sheet references + eligibility/no-clear guards (same invariants as command path).
+  await validateSheetReferences(tx, snapshotHeader, snapshotDetails);
+  assertSheetEligibilityAndNoClear({
+    eligible: storedSheet.eligible,
+    storedHeaderSheetId: storedSheet.headerSheetId,
+    storedDetailSheetIds: storedSheet.detailSheetIds,
+    header: snapshotHeader,
+    details: snapshotDetails,
+  });
+
   const orderId = await upsertOrderHeader(tx, snapshot, clientId, payloadHash);
   await upsertClientPhones(tx, snapshot, clientId, orderId, payloadHash);
   const dowelingOrderIds = await upsertDowelingOrders(tx, snapshot, orderId, payloadHash);
-  await upsertOrderChildren(tx, snapshot, orderId, dowelingOrderIds, payloadHash);
+  await upsertOrderChildren(tx, snapshot, orderId, dowelingOrderIds, payloadHash, command);
   await upsertProductionEvents(tx, snapshot, orderId, payloadHash);
   await upsertDeadlines(tx, snapshot, orderId, payloadHash);
   await upsertMap(tx, {
@@ -486,6 +539,7 @@ async function upsertOrderChildren(
   orderId: number,
   dowelingOrderIds: Map<string, number>,
   payloadHash: string,
+  command: ImportOrderSnapshotCommand,
 ): Promise<void> {
   const source = snapshot.source.sourceInstanceId;
   const detailIds = await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.detail, snapshot.data.details);
@@ -517,7 +571,7 @@ async function upsertOrderChildren(
   const savedDetails = new Set<string>();
   for (const detail of prepared.details) {
     const sourceId = requiredString(detail.clientKey, 'detail clientKey');
-    const id = await upsertDetail(tx, orderId, detail);
+    const id = await upsertDetail(tx, orderId, detail, command);
     savedDetails.add(sourceId);
     await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.detail, sourceId, localId: String(id), localOrderId: orderId, payloadHash });
   }
@@ -692,6 +746,7 @@ function mapOrderHeaderSnapshot(row: AnyRow) {
     notes: toNullableString(row.notes),
     refKey1c: toNullableString(row.ref_key_1c),
     materialId: toNullableNumber(row.material_id),
+    sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
     millingTypeId: toNullableNumber(row.milling_type_id),
     edgeTypeId: toNullableNumber(row.edge_type_id),
     filmId: toNullableNumber(row.film_id),
@@ -721,6 +776,7 @@ function mapDetailSnapshot(row: AnyRow): OrderSnapshotDetailDto {
     linkCuttingImageFile: toNullableString(row.link_cutting_image_file),
     linkCadFile: toNullableString(row.link_cad_file),
     linkPdfFile: toNullableString(row.link_pdf_file),
+    sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
     refKey1c: toNullableString(row.ref_key_1c),
   };
 }
@@ -846,7 +902,8 @@ async function insertOrderHeader(
       planned_completion_date, completion_date, issue_date, payment_date,
       discount, surcharge, total_amount, final_amount, paid_amount, parts_count, total_area,
       link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file,
-      notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c, version
+      notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c,
+      sheet_material_type_id, version
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -854,7 +911,8 @@ async function insertOrderHeader(
       $10, $11, $12, $13,
       $14, $15, $16, $17, $18, $19, $20,
       $21, $22, $23, $24,
-      $25, $26, $27, $28, $29, $30, 1
+      $25, $26, $27, $28, $29, $30,
+      $31, 1
     )
     RETURNING order_id AS id
     `,
@@ -902,7 +960,8 @@ async function updateOrderHeader(
         milling_type_id = $27,
         edge_type_id = $28,
         film_id = $29,
-        ref_key_1c = $30
+        ref_key_1c = $30,
+        sheet_material_type_id = $31
     WHERE order_id = $1 AND delete_flag = false
     `,
     [orderId, ...orderHeaderUpdateParams(header, totals)],
@@ -910,7 +969,7 @@ async function updateOrderHeader(
   return orderId;
 }
 
-/** Params for INSERT — includes production_status_from_details_enabled ($9). */
+/** Params for INSERT — includes production_status_from_details_enabled ($9) and sheet_material_type_id ($31). */
 function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTotalsDto) {
   return [
     header.orderName,
@@ -938,17 +997,22 @@ function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTo
     header.linkCadFile,
     header.linkPdfFile,
     header.notes,
-    header.materialId,
+    // Header invariant (§13): a sheet header forces material_id NULL so legacy
+    // material_id consumers never read a material that disagrees with the sheet.
+    // keep in sync with pg-order-transaction-manager.ts createOrderHeader.
+    header.sheetMaterialTypeId != null ? null : (header.materialId ?? null),
     header.millingTypeId,
     header.edgeTypeId,
     header.filmId,
     header.refKey1c,
+    header.sheetMaterialTypeId ?? null,
   ];
 }
 
 /**
  * Params for UPDATE — same as orderHeaderParams but WITHOUT production_status_from_details_enabled.
  * The flag is owned exclusively by the production-status-mode backend commands (audit/outbox/version).
+ * Includes sheet_material_type_id ($31 in UPDATE, $30 without orderId prefix removed by caller).
  * NOTE: pg-order-transaction-manager.ts has its own equivalent inline order UPDATE (different column
  * subset) that also omits this flag — keep both in sync if order header columns change.
  */
@@ -978,11 +1042,14 @@ function orderHeaderUpdateParams(header: NormalizedSaveOrderHeaderDto, totals: O
     header.linkCadFile,
     header.linkPdfFile,
     header.notes,
-    header.materialId,
+    // Header invariant (§13): a sheet header forces material_id NULL.
+    // keep in sync with pg-order-transaction-manager.ts updateOrderHeader.
+    header.sheetMaterialTypeId != null ? null : (header.materialId ?? null),
     header.millingTypeId,
     header.edgeTypeId,
     header.filmId,
     header.refKey1c,
+    header.sheetMaterialTypeId ?? null,
   ];
 }
 
@@ -990,8 +1057,31 @@ async function upsertDetail(
   tx: TransactionClient,
   orderId: number,
   detail: CalculatedOrderDetailDto,
+  command: ImportOrderSnapshotCommand,
 ): Promise<number> {
-  if (detail.id) {
+  // Variant A: a sheet detail resolves (creates/syncs) its dedicated synthetic shadow material
+  // INSIDE this tx and OVERRIDES material_id with it. Mirrors pg-order-transaction-manager.ts.
+  let effective: CalculatedOrderDetailDto = detail;
+  if (detail.sheetMaterialTypeId != null) {
+    const ctx: ShadowContext = {
+      actorUserId: toNullableUserId(command.currentUser.id),
+      requestId: command.requestId,
+      source: SNAPSHOT_IMPORT_SOURCE,
+      clientId: null, // clientId not yet known at this point; orderId is known from outer scope
+      orderId,
+    };
+    const materialId = await resolveShadowMaterialId(
+      tx,
+      detail.sheetMaterialTypeId,
+      ctx,
+      async (auditInput) => {
+        await auditService.record(tx, buildShadowMaterialAuditEvent(auditInput, ctx));
+      },
+    );
+    effective = { ...detail, materialId };
+  }
+
+  if (effective.id) {
     await tx.query(
       `
       UPDATE order_details
@@ -1000,12 +1090,12 @@ async function upsertDetail(
           film_id = $12, milling_cost_per_sqm = $13, detail_cost = $14, priority = $15,
           production_status_id = $16, joint_order_id = $17, note = $18,
           link_cutting_file = $19, link_cutting_image_file = $20, link_cad_file = $21,
-          link_pdf_file = $22, ref_key_1c = $23, delete_flag = false
+          link_pdf_file = $22, ref_key_1c = $23, sheet_material_type_id = $24, delete_flag = false
       WHERE detail_id = $1 AND order_id = $2
       `,
-      [detail.id, orderId, ...detailValues(detail)],
+      [effective.id, orderId, ...detailValues(effective)],
     );
-    return detail.id;
+    return effective.id;
   }
 
   const result = await tx.query<IdRow>(
@@ -1014,12 +1104,13 @@ async function upsertDetail(
       order_id, detail_number, detail_name, height, width, quantity, area,
       material_id, milling_type_id, edge_type_id, film_id, milling_cost_per_sqm,
       detail_cost, priority, production_status_id, joint_order_id, note,
-      link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file, ref_key_1c
+      link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file, ref_key_1c,
+      sheet_material_type_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
     RETURNING detail_id AS id
     `,
-    [orderId, ...detailValues(detail)],
+    [orderId, ...detailValues(effective)],
   );
   return Number(result.rows[0].id);
 }
@@ -1047,6 +1138,7 @@ function detailValues(detail: CalculatedOrderDetailDto) {
     detail.linkCadFile,
     detail.linkPdfFile,
     detail.refKey1c,
+    detail.sheetMaterialTypeId ?? null,
   ];
 }
 
@@ -2022,6 +2114,52 @@ function sanitizeFilePart(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9а-яА-ЯёЁ._-]+/g, '_').slice(0, 80) || 'order';
 }
 
+interface StoredSheetStateResult {
+  eligible: boolean;
+  headerSheetId: number | null;
+  detailSheetIds: StoredSheetDetail[];
+}
+
+/**
+ * Read the stored sheet state for a local order (for validation pre-read before import writes).
+ * If orderId is null (brand-new order, not yet in the DB), returns eligible=true + empty stored ids,
+ * matching the snapshot path for new orders (SP3-era → eligible by default).
+ */
+async function readStoredSheetState(
+  tx: TransactionClient,
+  orderId: number | null,
+): Promise<StoredSheetStateResult> {
+  if (orderId === null) {
+    return { eligible: true, headerSheetId: null, detailSheetIds: [] };
+  }
+  const headerRow = await tx.query<{
+    sheet_material_type_id: number | string | null;
+    sheet_eligible: boolean | null;
+  }>(
+    `SELECT sheet_material_type_id, sheet_eligible FROM orders WHERE order_id = $1`,
+    [orderId],
+  );
+  const detailRows = await tx.query<{
+    detail_id: number | string;
+    sheet_material_type_id: number | string | null;
+  }>(
+    `SELECT detail_id, sheet_material_type_id FROM order_details WHERE order_id = $1 AND delete_flag = false`,
+    [orderId],
+  );
+  // sheet_eligible=NULL (pre-SP3) → treat as false (legacy order, not eligible)
+  const eligible = headerRow.rows[0]?.sheet_eligible === true;
+  const headerSheetId =
+    headerRow.rows[0]?.sheet_material_type_id == null
+      ? null
+      : Number(headerRow.rows[0].sheet_material_type_id);
+  const detailSheetIds: StoredSheetDetail[] = detailRows.rows.map((row) => ({
+    detailId: Number(row.detail_id),
+    sheetMaterialTypeId:
+      row.sheet_material_type_id == null ? null : Number(row.sheet_material_type_id),
+  }));
+  return { eligible, headerSheetId, detailSheetIds };
+}
+
 async function readSourceInstanceId(tx: TransactionClient): Promise<string> {
   const result = await tx.query<SourceInstanceRow>(
     "SELECT 'erp-backend:' || current_database() AS source_instance_id",
@@ -2209,4 +2347,7 @@ function jsonOrNull(value: unknown): string | null {
 export {
   orderHeaderParams as _testOnlyOrderHeaderInsertParams,
   orderHeaderUpdateParams as _testOnlyOrderHeaderUpdateParams,
+  mapOrderHeaderSnapshot as _testOnlyMapOrderHeaderSnapshot,
+  mapDetailSnapshot as _testOnlyMapDetailSnapshot,
+  detailValues as _testOnlyDetailValues,
 };

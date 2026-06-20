@@ -104,6 +104,9 @@ export interface OrderListItemDto {
   notes: string | null;
   materialIds: number[];
   materialNames: string[];
+  // SP3: header material-name fallback for header-only/no-details sheet orders (backend-read).
+  headerMaterialName: string | null;
+  headerSheetMaterialTypeId: number | null;
   millingTypeId: number | null;
   millingTypeName: string | null;
   dowelingOrderId: number | null;
@@ -132,11 +135,16 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   createdBy: number | null;
   editedBy: number | null;
   version: number;
+  // SP3: server-resolved COALESCE(sheet,material) name + durable era marker for FE picker gating.
+  materialName?: string | null;
+  sheetEligible?: boolean;
 };
 
 export type OrderDetailDto = CalculatedOrderDetailDto & {
   id: number;
   orderId: number;
+  // SP3: server-resolved COALESCE(sheet,material) display name (no sheet_materials.view needed).
+  materialName?: string | null;
 };
 
 export type OrderPaymentDto = NormalizedSaveOrderPaymentDto & {
