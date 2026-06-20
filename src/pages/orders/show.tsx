@@ -101,15 +101,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }
   }, [record?.order_id, record?.order_name, location.pathname, setTabTitle]);
 
-  useEffect(() => {
-    if (!cutSelectMode) setCutSelectedDetailIds([]);
-  }, [cutSelectMode]);
-
-  useEffect(() => {
-    setCutSelectMode(false);
-    setCutSelectedDetailIds([]);
-  }, [record?.order_id]);
-
   const { data: clientData, isLoading: clientLoading } = useOne({
     resource: "clients",
     id: record?.client_id,
@@ -265,6 +256,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
   const [cutModalOpen, setCutModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!cutSelectMode) setCutSelectedDetailIds([]);
+  }, [cutSelectMode]);
+
+  useEffect(() => {
+    setCutSelectMode(false);
+    setCutSelectedDetailIds([]);
+  }, [record?.order_id]);
 
   // Hook for updating order
   const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
