@@ -483,6 +483,55 @@ describeIntegration('Migration 029: order-side sheet material link (integration,
     }
   });
 
+  it('8b. Legacy parity: views return materials.material_name when sheet_material_type_id IS NULL', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query(`SET search_path TO ${schemaName}`);
+
+      // A real material, no sheet type anywhere (pure legacy / pre-SP3 shape).
+      const mat = await client.query<{ material_id: number }>(
+        `INSERT INTO materials (material_name, unit_id) VALUES ('ЛДСП Дуб ТЕСТ', 1) RETURNING material_id`,
+      );
+      const matId = mat.rows[0].material_id;
+
+      const ord = await client.query<{ order_id: number }>(
+        `INSERT INTO orders (order_name, material_id) VALUES ('Тест-SP3-Legacy', $1) RETURNING order_id`,
+        [matId],
+      );
+      const orderId = ord.rows[0].order_id;
+
+      // sheet_material_type_id intentionally omitted → NULL (legacy detail).
+      await client.query(
+        `INSERT INTO order_details (order_id, detail_name, material_id)
+         VALUES ($1, 'Деталь-Legacy', $2)`,
+        [orderId, matId],
+      );
+
+      // order_details_view must return the materials name unchanged (COALESCE falls through).
+      const detailView = await client.query<{ material_name: string; sheet_material_type_id: number | null }>(
+        `SELECT material_name, sheet_material_type_id FROM order_details_view WHERE order_id = $1`,
+        [orderId],
+      );
+      expect(detailView.rowCount).toBe(1);
+      expect(detailView.rows[0].sheet_material_type_id).toBeNull();
+      expect(detailView.rows[0].material_name).toBe('ЛДСП Дуб ТЕСТ');
+
+      // orders_view header material_name must equal the materials name for a legacy order.
+      const headerView = await client.query<{ material_name: string }>(
+        `SELECT material_name FROM orders_view WHERE order_id = $1`,
+        [orderId],
+      );
+      expect(headerView.rowCount).toBe(1);
+      expect(headerView.rows[0].material_name).toBe('ЛДСП Дуб ТЕСТ');
+
+      await client.query(`DELETE FROM order_details WHERE order_id = $1`, [orderId]);
+      await client.query(`DELETE FROM orders WHERE order_id = $1`, [orderId]);
+      await client.query(`DELETE FROM materials WHERE material_id = $1`, [matId]);
+    } finally {
+      client.release();
+    }
+  });
+
   it('9. Soft-delete exclusion: order_details_view excludes details of delete_flag=true orders', async () => {
     const client = await pool.connect();
     try {

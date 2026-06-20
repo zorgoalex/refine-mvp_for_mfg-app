@@ -99,6 +99,78 @@ describe('PgOrderExporter', () => {
     expect(metadata).toMatchObject({ target: 'google-drive' });
   });
 
+  // SP3 Task 12: backend Google Drive/XLSX export parity. A sheet order must
+  // export the COALESCE'd sheet name (never the synthetic shadow), a legacy order
+  // is unchanged, and a header-only sheet order falls back to its header material.
+  describe('SP3 export parity', () => {
+    async function runExport(headerOverrides: Partial<QueryResultRow>, detailRows: QueryResultRow[]) {
+      const captured: Array<{ url: string; body: Record<string, unknown> }> = [];
+      const database = new FakeExportDatabase(
+        [{ match: 'INSERT INTO audit_log', rows: [{ audit_id: 'aud-x' }] }],
+        [
+          { match: 'FROM orders o', rows: [headerRow(headerOverrides)] },
+          { match: 'FROM order_details od', rows: detailRows },
+          { match: 'FROM payments p', rows: [] },
+          { match: 'FROM doweling_orders d', rows: [dowelingRow()] },
+          { match: 'INSERT INTO audit_log', rows: [{ audit_id: 'aud-s' }] },
+        ],
+      );
+      const exporter = new PgOrderExporter(database, {
+        gasWebappUrl: 'https://script.google.com/macros/s/test/exec',
+        gasApiKey: 'gas-secret',
+        timeoutMs: 1000,
+        fetchImpl: async (url, init) => {
+          captured.push({ url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+          return response({ success: true, fileName: 'f.xlsx', folder: 'ERP', xlsxUrl: 'https://drive/f' });
+        },
+      });
+      await exporter.exportToGoogleDrive({
+        currentUser: manager(),
+        orderId: 42,
+        requestId: 'req_export',
+        request: { format: 'xlsx', fileName: null },
+      });
+      return { body: captured[0]?.body, database };
+    }
+
+    it('detail SQL resolves COALESCE(sheet name, material name) via a sheet-type join', async () => {
+      const { database } = await runExport({}, [detailRow({ material_name: 'МДФ 16 мм' })]);
+      const detailQuery = database.queries.find((q) => q.text.includes('FROM order_details od'));
+      expect(detailQuery).toBeDefined();
+      expect(detailQuery!.text).toContain('LEFT JOIN sheet_material_types');
+      expect(detailQuery!.text).toMatch(/COALESCE\(\s*smt\.name\s*,\s*m\.material_name\s*\)/);
+    });
+
+    it('header SQL resolves COALESCE(sheet name, material name) for the order header', async () => {
+      const { database } = await runExport({}, [detailRow()]);
+      const headerQuery = database.queries.find((q) => q.text.includes('FROM orders o'));
+      expect(headerQuery).toBeDefined();
+      expect(headerQuery!.text).toContain('LEFT JOIN sheet_material_types hsmt');
+      expect(headerQuery!.text).toMatch(/COALESCE\(\s*hsmt\.name\s*,\s*hm\.material_name\s*\)/);
+    });
+
+    it('sheet order exports the sheet name in the material summary (never the shadow)', async () => {
+      const { body } = await runExport({ material_name: 'МДФ 16 мм' }, [
+        detailRow({ detail_number: 1, material_name: 'МДФ 16 мм' }),
+        detailRow({ detail_number: 2, material_name: 'МДФ 16 мм' }),
+      ]);
+      expect(body.materialSummary).toBe('МДФ 16 мм');
+    });
+
+    it('legacy order export is unchanged (material name from the materials join)', async () => {
+      const { body } = await runExport({ material_name: 'ЛДСП Дуб' }, [
+        detailRow({ material_name: 'ЛДСП Дуб' }),
+      ]);
+      expect(body.materialSummary).toBe('ЛДСП Дуб');
+    });
+
+    it('header-only sheet order (no details) exports the header sheet material', async () => {
+      const { body } = await runExport({ material_name: 'МДФ 18 мм' }, []);
+      expect(body.materialSummary).toBe('МДФ 18 мм');
+      expect(body.items).toEqual([]);
+    });
+  });
+
   it('rejects unknown orders before calling GAS', async () => {
     const database = new FakeExportDatabase([], [{ match: 'FROM orders o', rows: [] }]);
     let fetchCalled = false;
