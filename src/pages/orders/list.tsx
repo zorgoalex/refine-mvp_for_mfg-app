@@ -512,7 +512,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     pagination: { pageSize: 10000 },
     meta: { fields: ["detail_id", "material_name"] },
     queryOptions: {
-      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead,
+      enabled:
+        isActive && orderIds.length > 0 && !useBackendOrdersRead && featureFlags.sheetMaterialsReads,
     },
   });
 

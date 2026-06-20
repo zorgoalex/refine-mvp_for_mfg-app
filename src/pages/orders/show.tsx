@@ -136,7 +136,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     pagination: { pageSize: 1000 },
     meta: { fields: ["detail_id", "material_name"] },
     queryOptions: {
-      enabled: !!record?.order_id && !useBackendOrdersRead,
+      enabled: !!record?.order_id && !useBackendOrdersRead && featureFlags.sheetMaterialsReads,
     },
   });
   const resolvedNameByDetailId = useMemo(() => {

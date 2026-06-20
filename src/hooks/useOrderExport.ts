@@ -179,16 +179,19 @@ export const useOrderExport = (): UseOrderExportResult => {
           pagination: { current: 1, pageSize: 1000 },
           sorters: [{ field: 'payment_date', order: 'asc' }],
         }),
-        // SP3: server-resolved per-detail COALESCE(sheet, material) name. Defensive:
-        // an empty/untracked view falls back to the materials map below.
-        dataProvider().getList({
-          resource: 'order_details_view',
-          filters: [
-            { field: 'order_id', operator: 'eq', value: order.order_id },
-          ],
-          pagination: { current: 1, pageSize: 1000 },
-          meta: { fields: ['detail_id', 'material_name'] },
-        } as any).catch(() => ({ data: [] as any[] })),
+        // SP3: server-resolved per-detail COALESCE(sheet, material) name. Gated on
+        // sheetMaterialsReads (migration 029 Hasura metadata present); otherwise
+        // the legacy materials map below resolves the name.
+        featureFlags.sheetMaterialsReads
+          ? dataProvider().getList({
+              resource: 'order_details_view',
+              filters: [
+                { field: 'order_id', operator: 'eq', value: order.order_id },
+              ],
+              pagination: { current: 1, pageSize: 1000 },
+              meta: { fields: ['detail_id', 'material_name'] },
+            } as any).catch(() => ({ data: [] as any[] }))
+          : Promise.resolve({ data: [] as any[] }),
       ]);
 
       console.log('[useOrderExport] DB response detailsResult:', detailsResult);

@@ -131,6 +131,7 @@ VITE_USE_BACKEND_VLM=false
 VITE_USE_BACKEND_DEADLINES=false
 VITE_USE_BACKEND_PROJECTS=false
 VITE_USE_BACKEND_REFERENCES=false
+VITE_SHEET_MATERIALS_READS=false
 VITE_ENABLE_LEGACY_HASURA=true
 VITE_RUNTIME_CONFIG_URL=/runtime-config.json
 ```
@@ -166,6 +167,16 @@ Backend orders cutover mode за `VITE_USE_BACKEND_ORDERS_READ=true` и
 `VITE_USE_BACKEND_ORDERS_WRITE=true` использует versioned `/api/v1/orders` для list/show/edit
 load и create/update. Dual-write для заказов не используется: при выключенном write flag
 остаётся legacy save path.
+
+Листовые материалы в заказах (sheet materials) читаются из Hasura-схемы, которая
+появляется только после применения соответствующей миграции и обновления Hasura
+metadata. Frontend-флаг `VITE_SHEET_MATERIALS_READS` (runtime-config
+`sheetMaterials`/`sheetMaterialsReads`, по умолчанию `false`) гейтит ВСЕ такие
+чтения: дополнительные поля `sheet_material_type_id`/`sheet_eligible`, view
+`order_details_view`, фильтр `materials.is_sheet_shadow` и сам picker. Порядок
+включения строгий: сначала применить миграцию и Hasura metadata/permissions,
+только потом поднимать флаг. Пока флаг `false`, заказы/календарь читаются как до
+фичи, без обращения к новым колонкам.
 
 Backend users/export/VLM cutover mode за `VITE_USE_BACKEND_USERS=true`,
 `VITE_USE_BACKEND_ORDER_EXPORT=true` и `VITE_USE_BACKEND_VLM=true` использует versioned

@@ -5,6 +5,7 @@ import { groupOrdersByDate } from '../utils/groupOrdersByDate';
 import { formatDateForApi } from '../utils/dateUtils';
 import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
 import { resolveDetailMaterialName } from '../../../utils/materialDisplayName';
+import { featureFlags } from '../../../config/featureFlags';
 import { buildProductionStagesDisplayConfig } from '../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../types/productionWorkflow';
 
@@ -97,7 +98,7 @@ export const useCalendarData = (
     pagination: { pageSize: 10000 },
     meta: { fields: ['detail_id', 'material_name'] },
     queryOptions: {
-      enabled: orderIds.length > 0,
+      enabled: orderIds.length > 0 && featureFlags.sheetMaterialsReads,
       staleTime: 30000,
     },
   });

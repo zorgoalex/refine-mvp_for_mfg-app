@@ -29,9 +29,11 @@ describe('toSheetSelectOptions', () => {
 describe('useSheetMaterialOptions gating (source guard)', () => {
   const src = readFileSync(new URL('./useSheetMaterialOptions.ts', import.meta.url), 'utf8');
 
-  it('gates the picker on backend write AND sheet_materials.view', () => {
+  it('gates the picker on backend write AND sheet_materials.view AND the SP3 schema flag', () => {
     expect(src).toContain("can('sheet_materials.view')");
     expect(src).toMatch(/featureFlags\.useBackendOrdersWrite\s*&&\s*canViewSheetMaterials/);
+    // SP3: the picker must also require the migration 029 Hasura schema flag.
+    expect(src).toContain('featureFlags.sheetMaterialsReads');
   });
 
   it('does not fire a Hasura sheet read unless enabled and not using backend refs', () => {

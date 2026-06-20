@@ -13,6 +13,12 @@ export interface FrontendFeatureFlags {
   useBackendVlm: boolean;
   useBackendReferences: boolean;
   useBackendCut: boolean;
+  // SP3: gates all reads that depend on migration 029 Hasura schema
+  // (order_details_view, orders/orders_view/order_details.sheet_material_type_id,
+  // orders.sheet_eligible, materials.is_sheet_shadow). MUST stay false until the
+  // Hasura metadata for migration 029 is applied, else legacy Hasura reads fail
+  // with "field not found". Deploy order: migration + Hasura metadata, THEN flip.
+  sheetMaterialsReads: boolean;
   enableLegacyHasura: boolean;
 }
 
@@ -33,6 +39,8 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendVlm: string | boolean;
   backendReferences: string | boolean;
   backendCut: string | boolean;
+  sheetMaterialsReads: string | boolean;
+  sheetMaterials: string | boolean;
   enableLegacyHasura: string | boolean;
   legacyHasura: string | boolean;
 }>;
@@ -66,6 +74,7 @@ export function getFeatureFlags(
     useBackendVlm: readBooleanFlag(env.VITE_USE_BACKEND_VLM, false),
     useBackendReferences: readBooleanFlag(env.VITE_USE_BACKEND_REFERENCES, false),
     useBackendCut: readBooleanFlag(env.VITE_USE_BACKEND_CUT, false),
+    sheetMaterialsReads: readBooleanFlag(env.VITE_SHEET_MATERIALS_READS, false),
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
   };
 
@@ -110,6 +119,10 @@ export function mergeRuntimeFeatureFlags(
     useBackendReferences:
       readOptionalBooleanFlag(runtimeFeatures.backendReferences) ?? fallback.useBackendReferences,
     useBackendCut: readOptionalBooleanFlag(runtimeFeatures.backendCut) ?? fallback.useBackendCut,
+    sheetMaterialsReads:
+      readOptionalBooleanFlag(runtimeFeatures.sheetMaterialsReads) ??
+      readOptionalBooleanFlag(runtimeFeatures.sheetMaterials) ??
+      fallback.sheetMaterialsReads,
     enableLegacyHasura:
       readOptionalBooleanFlag(runtimeFeatures.enableLegacyHasura) ??
       readOptionalBooleanFlag(runtimeFeatures.legacyHasura) ??

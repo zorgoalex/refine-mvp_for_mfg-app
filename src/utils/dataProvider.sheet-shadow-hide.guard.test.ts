@@ -21,6 +21,24 @@ describe('dataProvider hides is_sheet_shadow materials from user-facing reads', 
   });
 });
 
+describe('dataProvider gates all SP3 schema reads on the sheetMaterialsReads flag', () => {
+  it('only adds the is_sheet_shadow filter when the SP3 schema flag is on', () => {
+    // the migration-029 column must not be referenced in a where-clause before the
+    // Hasura metadata is applied, else legacy materials reads 400 ("field not found")
+    expect(src).toMatch(
+      /resource === ['"]materials['"]\s*&&\s*featureFlags\.sheetMaterialsReads/,
+    );
+  });
+
+  it('strips migration-029 sheet columns from the selection when the flag is off', () => {
+    expect(src).toContain('SHEET_SCHEMA_FIELDS');
+    expect(src).toMatch(/if\s*\(\s*!featureFlags\.sheetMaterialsReads\s*\)/);
+    // the gated columns include the order/orders_view/order_details sheet link
+    expect(src).toMatch(/sheet_material_type_id/);
+    expect(src).toMatch(/sheet_eligible/);
+  });
+});
+
 describe('dataProvider strips backend-owned SP3 control columns from legacy writes', () => {
   const controlColumns = [
     'sheet_eligible',

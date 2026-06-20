@@ -1600,9 +1600,25 @@ function isUserRole(value: unknown): value is UserRole {
   );
 }
 
+// SP3: columns that only exist once migration 029 Hasura metadata is applied.
+// When sheetMaterialsReads is off, they must NOT be selected, or legacy Hasura
+// reads of these resources fail with "field not found in type".
+const SHEET_SCHEMA_FIELDS: Record<string, string[]> = {
+  orders: ["sheet_material_type_id", "sheet_eligible"],
+  orders_view: ["sheet_material_type_id"],
+  order_details: ["sheet_material_type_id"],
+};
+
 const fieldsFor = (resource: string) => {
   const fields = RESOURCE_FIELDS[resource];
   if (!fields) return "";
+  if (!featureFlags.sheetMaterialsReads) {
+    const sheetFields = SHEET_SCHEMA_FIELDS[resource];
+    if (sheetFields) {
+      const hidden = new Set(sheetFields);
+      return fields.filter((f) => !hidden.has(f)).join(" \n");
+    }
+  }
   return fields.join(" \n");
 };
 
@@ -1651,7 +1667,7 @@ export const dataProvider = (_apiUrl: string) => {
       // mirroring the is_active pattern. Internal callers may opt in by passing an
       // explicit is_sheet_shadow filter. Save/read/export internals query materials
       // directly by material_id (getOne / filtered IN), not via this default list.
-      if (resource === "materials") {
+      if (resource === "materials" && featureFlags.sheetMaterialsReads) {
         const hasShadowFilter = enhancedFilters.some((f: any) => f.field === "is_sheet_shadow");
         if (!hasShadowFilter) {
           enhancedFilters = [...enhancedFilters, { field: "is_sheet_shadow", operator: "eq", value: false }];

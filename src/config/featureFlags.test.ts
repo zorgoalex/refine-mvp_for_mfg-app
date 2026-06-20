@@ -25,8 +25,22 @@ describe('featureFlags', () => {
       useBackendVlm: false,
       useBackendReferences: false,
       useBackendCut: false,
+      sheetMaterialsReads: false,
       enableLegacyHasura: true,
     });
+  });
+
+  it('reads the SP3 sheetMaterialsReads flag from env and runtime config, default off', () => {
+    expect(getFeatureFlags({}).sheetMaterialsReads).toBe(false);
+    expect(getFeatureFlags({ VITE_SHEET_MATERIALS_READS: 'true' }).sheetMaterialsReads).toBe(true);
+    // runtime override (both the canonical key and the short alias)
+    expect(getFeatureFlags({}, { sheetMaterialsReads: true }).sheetMaterialsReads).toBe(true);
+    expect(getFeatureFlags({}, { sheetMaterials: true }).sheetMaterialsReads).toBe(true);
+    // env true but runtime explicitly off -> off
+    expect(
+      getFeatureFlags({ VITE_SHEET_MATERIALS_READS: 'true' }, { sheetMaterials: false })
+        .sheetMaterialsReads,
+    ).toBe(false);
   });
 
   it('reads backend cut flag from env and runtime config with a safe default', () => {

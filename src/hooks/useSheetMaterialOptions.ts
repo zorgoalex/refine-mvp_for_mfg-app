@@ -26,7 +26,11 @@ export interface UseSheetMaterialOptionsResult {
  */
 export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
   const canViewSheetMaterials = can('sheet_materials.view');
-  const enabled = featureFlags.useBackendOrdersWrite && canViewSheetMaterials;
+  // SP3: the picker also requires the migration 029 schema (sheetMaterialsReads)
+  // so the selected sheet_material_type_id round-trips through order_details and
+  // the resolved name view; never render it before the Hasura metadata is applied.
+  const enabled =
+    featureFlags.useBackendOrdersWrite && canViewSheetMaterials && featureFlags.sheetMaterialsReads;
 
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;

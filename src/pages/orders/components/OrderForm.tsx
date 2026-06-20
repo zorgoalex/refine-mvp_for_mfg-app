@@ -209,7 +209,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     pagination: { pageSize: 1000 },
     meta: { fields: ['detail_id', 'material_name', 'sheet_material_type_id'] },
     queryOptions: {
-      enabled: shouldLoadDetails,
+      enabled: shouldLoadDetails && featureFlags.sheetMaterialsReads,
     },
   });
 
@@ -219,7 +219,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     id: orderId,
     meta: { fields: ['order_id', 'material_name', 'sheet_material_type_id'] },
     queryOptions: {
-      enabled: shouldLoadOrder,
+      enabled: shouldLoadOrder && featureFlags.sheetMaterialsReads,
     },
   });
 
