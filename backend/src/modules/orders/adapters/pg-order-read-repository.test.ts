@@ -195,6 +195,47 @@ describe('PgOrderReadRepository', () => {
   });
 });
 
+// SP3 tier2 finding 4: backend order reads must be deployable BEFORE migration 029.
+// With sheetOrdersReads=false the generated SQL must reference NO migration-029 schema
+// (sheet_material_type_id / sheet_eligible / is_sheet_shadow / sheet_material_types joins),
+// so order list/show/form-data work against a pre-029 database.
+describe('PgOrderReadRepository sheetOrdersReads gate', () => {
+  const SHEET_029_TOKENS = [
+    'o.sheet_material_type_id',
+    'od.sheet_material_type_id',
+    'o.sheet_eligible',
+    'is_sheet_shadow = false',
+    'sheet_material_types hsmt',
+    'sheet_material_types smt',
+  ];
+
+  async function collectSql(sheetOrdersReads: boolean): Promise<string> {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service, sheetOrdersReads);
+    await repository.listOrders({ currentUser: currentUser('42'), query: { page: 1, pageSize: 10 } });
+    await repository.getOrderById({ currentUser: currentUser('42'), orderId: 100 });
+    await repository.getOrderFormData({ currentUser: currentUser('42') });
+    return database.queries.map((q) => q.text).join('\n');
+  }
+
+  it('omits ALL migration-029 sheet schema when the flag is off', async () => {
+    const sql = await collectSql(false);
+    for (const token of SHEET_029_TOKENS) {
+      expect(sql).not.toContain(token);
+    }
+    // legacy material name still resolved from materials only
+    expect(sql).toContain('m.material_name AS material_name');
+  });
+
+  it('includes migration-029 sheet schema when the flag is on', async () => {
+    const sql = await collectSql(true);
+    expect(sql).toContain('o.sheet_material_type_id');
+    expect(sql).toContain('o.sheet_eligible');
+    expect(sql).toContain('is_sheet_shadow = false');
+    expect(sql).toContain('COALESCE(smt.name, m.material_name)');
+  });
+});
+
 function createDatabase() {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const service = {

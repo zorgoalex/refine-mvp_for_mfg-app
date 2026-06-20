@@ -132,6 +132,12 @@ export const envSchema = z
     BACKEND_CUT_JOBS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_CUT_AUTO_TRIGGER: booleanFromEnv.default(false),
     BACKEND_ENABLE_SHEET_MATERIALS: booleanFromEnv.default(false),
+    // SP3: gate the migration-029-dependent sheet columns in backend ORDER reads
+    // (sheet_material_type_id / sheet_eligible / is_sheet_shadow + COALESCE joins).
+    // Default OFF so backend code is safe to deploy BEFORE migration 029 is applied;
+    // operator enables it in the SAME window as the migration. Distinct from
+    // BACKEND_ENABLE_SHEET_MATERIALS (SP1 reference module, already live without 029).
+    BACKEND_SHEET_ORDERS_READS: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
     BACKEND_NOTIFICATION_RULES_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE: booleanFromEnv.default(false),

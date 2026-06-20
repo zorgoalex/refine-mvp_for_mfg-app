@@ -22,6 +22,8 @@ export interface BackendFeatureFlags {
   cutJobs: boolean;
   cutJobsReadOnly: boolean;
   cutAutoTrigger: boolean;
+  /** SP3: include migration-029 sheet columns in backend order reads (off pre-migration). */
+  sheetOrdersReads: boolean;
 }
 
 export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
@@ -47,5 +49,6 @@ export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
     cutJobs: env.BACKEND_ENABLE_CUT_JOBS,
     cutJobsReadOnly: env.BACKEND_CUT_JOBS_READ_ONLY,
     cutAutoTrigger: env.BACKEND_CUT_AUTO_TRIGGER,
+    sheetOrdersReads: env.BACKEND_SHEET_ORDERS_READS,
   };
 }

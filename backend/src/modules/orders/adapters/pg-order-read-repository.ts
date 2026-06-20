@@ -257,7 +257,14 @@ interface UnitLookupRow extends QueryResultRow {
 }
 
 export class PgOrderReadRepository implements OrderReadRepositoryPort {
-  constructor(private readonly database: DatabaseClient) {}
+  // SP3: sheetOrdersReads gates the migration-029 sheet columns/joins in order reads.
+  // Defaults true so direct instantiations (tests) keep full sheet reads; the orders
+  // module + tx-manager pass the env flag (BACKEND_SHEET_ORDERS_READS, default false) so
+  // backend code is safe before migration 029 is applied.
+  constructor(
+    private readonly database: DatabaseClient,
+    private readonly sheetOrdersReads: boolean = true,
+  ) {}
 
   async listOrders(command: ListOrdersCommand): Promise<OrderListResponseDto> {
     const params: unknown[] = [];
@@ -265,6 +272,24 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const orderBy = SORT_COLUMNS[command.query.sortBy];
     const limitIndex = params.push(command.query.pageSize);
     const offsetIndex = params.push((command.query.page - 1) * command.query.pageSize);
+    // SP3: migration-029 sheet columns/joins gated so backend list reads work pre-migration.
+    const headerSheetSelect = this.sheetOrdersReads
+      ? `o.sheet_material_type_id AS header_sheet_material_type_id,
+          COALESCE(hsmt.name, hm.material_name) AS header_material_name`
+      : `NULL::bigint AS header_sheet_material_type_id,
+          hm.material_name AS header_material_name`;
+    const headerSheetJoin = this.sheetOrdersReads
+      ? 'LEFT JOIN sheet_material_types hsmt ON hsmt.sheet_material_type_id = o.sheet_material_type_id'
+      : '';
+    const listDetailNameSelect = this.sheetOrdersReads
+      ? 'COALESCE(smt.name, m.material_name) AS material_name'
+      : 'm.material_name AS material_name';
+    const listDetailSheetJoin = this.sheetOrdersReads
+      ? 'LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id'
+      : '';
+    const listDetailNameGroupBy = this.sheetOrdersReads
+      ? 'GROUP BY od.material_id, COALESCE(smt.name, m.material_name)'
+      : 'GROUP BY od.material_id, m.material_name';
     const count = await this.database.query<CountRow>(
       `
       SELECT COUNT(*)::int AS total
@@ -292,15 +317,14 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
           o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
           o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
-          o.sheet_material_type_id AS header_sheet_material_type_id,
-          COALESCE(hsmt.name, hm.material_name) AS header_material_name
+          ${headerSheetSelect}
         FROM orders o
         LEFT JOIN clients c ON c.client_id = o.client_id
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
         LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
         LEFT JOIN materials hm ON hm.material_id = o.material_id
-        LEFT JOIN sheet_material_types hsmt ON hsmt.sheet_material_type_id = o.sheet_material_type_id
+        ${headerSheetJoin}
         ${where}
         ORDER BY ${orderBy} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
         LIMIT $${limitIndex} OFFSET $${offsetIndex}
@@ -324,14 +348,14 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         FROM (
           SELECT
             od.material_id,
-            COALESCE(smt.name, m.material_name) AS material_name,
+            ${listDetailNameSelect},
             MIN(od.detail_number) AS first_detail_number,
             MIN(od.detail_id) AS first_detail_id
           FROM order_details od
           LEFT JOIN materials m ON m.material_id = od.material_id
-          LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+          ${listDetailSheetJoin}
           WHERE od.order_id = o.order_id AND od.delete_flag = false AND od.material_id IS NOT NULL
-          GROUP BY od.material_id, COALESCE(smt.name, m.material_name)
+          ${listDetailNameGroupBy}
         ) materials
       ) material_projection ON true
       LEFT JOIN LATERAL (
@@ -403,6 +427,21 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
   }
 
   async getOrderById(command: GetOrderByIdCommand): Promise<OrderDto | null> {
+    // SP3: gate migration-029 sheet columns/joins so single-order reads work pre-migration.
+    const headerSheetCols = this.sheetOrdersReads
+      ? `o.sheet_material_type_id, o.sheet_eligible,
+        COALESCE(smt.name, m.material_name) AS material_name`
+      : `NULL::bigint AS sheet_material_type_id, false AS sheet_eligible,
+        m.material_name AS material_name`;
+    const headerSheetJoin = this.sheetOrdersReads
+      ? 'LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = o.sheet_material_type_id'
+      : '';
+    const detailSheetName = this.sheetOrdersReads
+      ? 'COALESCE(smt.name, m.material_name) AS material_name'
+      : 'm.material_name AS material_name';
+    const detailSheetJoin = this.sheetOrdersReads
+      ? 'LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id'
+      : '';
     const headerResult = await this.database.query<OrderHeaderRow>(
       `
       SELECT
@@ -417,15 +456,14 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
         o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
         o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
-        o.sheet_material_type_id, o.sheet_eligible,
-        COALESCE(smt.name, m.material_name) AS material_name
+        ${headerSheetCols}
       FROM orders o
       LEFT JOIN clients c ON c.client_id = o.client_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
       LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
       LEFT JOIN materials m ON m.material_id = o.material_id
-      LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = o.sheet_material_type_id
+      ${headerSheetJoin}
       WHERE o.order_id = $1 AND o.delete_flag = false
       `,
       [command.orderId],
@@ -441,10 +479,10 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const details = await this.database.query<OrderDetailRow>(
       `
       SELECT od.*,
-             COALESCE(smt.name, m.material_name) AS material_name
+             ${detailSheetName}
       FROM order_details od
       LEFT JOIN materials m ON m.material_id = od.material_id
-      LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+      ${detailSheetJoin}
       WHERE od.order_id = $1 AND od.delete_flag = false
       ORDER BY od.detail_number ASC, od.detail_id ASC
       `,
@@ -584,7 +622,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         FROM materials
         -- SP3 Task 10b: never offer synthetic sheet-shadow materials in the order
         -- form's material dropdown (sheet materials are picked via their own field).
-        WHERE is_active = true AND is_sheet_shadow = false
+        -- The is_sheet_shadow column only exists after migration 029; the filter is gated
+        -- so this lookup works pre-migration (no shadows can exist before 029 anyway).
+        WHERE is_active = true${this.sheetOrdersReads ? ' AND is_sheet_shadow = false' : ''}
         ORDER BY material_name ASC, material_id ASC
         `,
       ),

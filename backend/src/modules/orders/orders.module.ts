@@ -61,7 +61,10 @@ export function shouldEnableOrderDeadlineSync(input: {
       useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
         new OrderTransactionService({
           transactions: database.isConfigured
-            ? new PgOrderTransactionManager(database)
+            ? new PgOrderTransactionManager(
+                database,
+                config.get('BACKEND_SHEET_ORDERS_READS', { infer: true }),
+              )
             : new UnavailableOrderTransactionManager(),
           deadlineSync:
             shouldEnableOrderDeadlineSync({
@@ -77,13 +80,16 @@ export function shouldEnableOrderDeadlineSync(input: {
     },
     {
       provide: OrderQueryService,
-      useFactory: (database: DatabaseService) =>
+      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
         new OrderQueryService({
           reader: database.isConfigured
-            ? new PgOrderReadRepository(database)
+            ? new PgOrderReadRepository(
+                database,
+                config.get('BACKEND_SHEET_ORDERS_READS', { infer: true }),
+              )
             : new UnavailableOrderReadRepository(),
         }),
-      inject: [DatabaseService],
+      inject: [DatabaseService, ConfigService],
     },
     {
       provide: OrderProjectLinkService,

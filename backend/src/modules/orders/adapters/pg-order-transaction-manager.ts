@@ -77,17 +77,27 @@ interface AuditRow {
 }
 
 export class PgOrderTransactionManager implements OrderTransactionManagerPort {
-  constructor(private readonly database: DatabaseService) {}
+  // SP3: sheetOrdersReads (BACKEND_SHEET_ORDERS_READS, default false in the module) gates
+  // the migration-029 sheet columns in the post-save read-back so saves work pre-migration.
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly sheetOrdersReads: boolean = true,
+  ) {}
 
   runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
-    return this.database.transaction((tx) => handler(new PgOrderWriteUnitOfWork(tx)));
+    return this.database.transaction((tx) =>
+      handler(new PgOrderWriteUnitOfWork(tx, this.sheetOrdersReads)),
+    );
   }
 }
 
 class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   private saveContext: SaveContext | null = null;
 
-  constructor(private readonly tx: TransactionClient) {}
+  constructor(
+    private readonly tx: TransactionClient,
+    private readonly sheetOrdersReads: boolean = true,
+  ) {}
 
   setSaveContext(context: SaveContext): void {
     this.saveContext = context;
@@ -779,7 +789,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   readOrder(orderId: number): Promise<OrderDto> {
-    const reader = new PgOrderReadRepository(this.tx);
+    const reader = new PgOrderReadRepository(this.tx, this.sheetOrdersReads);
     return reader
       .getOrderById({
         orderId,
