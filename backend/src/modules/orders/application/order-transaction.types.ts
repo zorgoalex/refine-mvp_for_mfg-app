@@ -142,6 +142,11 @@ export interface OrderWriteUnitOfWork {
   loadStoredOrderSheetState(orderId: number): Promise<StoredOrderSheetState>;
   /** SP3: tx-scoped existence + dimension + anti-injection validation (422 on violation). */
   validateSheetReferences(input: SheetReferenceValidationInput): Promise<void>;
+  /**
+   * SP3: shadow-material anti-injection only — runs on EVERY save (legacy included) so a
+   * payload can't smuggle a shadow material_id with a null sheet id. 422 on violation.
+   */
+  validateNoShadowInjection(input: SheetReferenceValidationInput): Promise<void>;
   reconcileOrderDeleteIdempotency(command: DeleteOrderCommand): Promise<OrderDeleteIdempotencyResult>;
   completeOrderDeleteIdempotency(
     idempotencyKey: string,

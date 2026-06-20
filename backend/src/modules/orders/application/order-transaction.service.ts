@@ -393,6 +393,11 @@ export class OrderTransactionService {
       storedDetailSheetIds: stored.detailSheetIds,
     });
     if (!touchesSheet) {
+      // SECURITY: even a legacy-looking save must not smuggle a shadow material_id with a
+      // null sheet id (would forge Variant-A sheet semantics outside the command boundary).
+      // Anti-injection runs on EVERY save; the full sheet path (existence/dim/eligibility)
+      // stays gated below.
+      await unitOfWork.validateNoShadowInjection({ header, details });
       return false;
     }
     // SECURITY: any incoming OR stored sheet id requires sheet_materials.view (FE gating

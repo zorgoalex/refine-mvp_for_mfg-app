@@ -26,7 +26,10 @@ import {
   resolveShadowMaterialId,
   type ShadowContext,
 } from './shadow-material';
-import { validateSheetReferences as validateSheetReferencesShared } from '../domain/sheet-order-validation';
+import {
+  validateSheetReferences as validateSheetReferencesShared,
+  validateNoShadowInjection as validateNoShadowInjectionShared,
+} from '../domain/sheet-order-validation';
 import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
@@ -122,6 +125,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
 
   async validateSheetReferences(input: SheetReferenceValidationInput): Promise<void> {
     await validateSheetReferencesShared(this.tx, input.header, input.details);
+  }
+
+  async validateNoShadowInjection(input: SheetReferenceValidationInput): Promise<void> {
+    await validateNoShadowInjectionShared(this.tx, input.header, input.details);
   }
 
   async setSessionUser(userId: string): Promise<void> {

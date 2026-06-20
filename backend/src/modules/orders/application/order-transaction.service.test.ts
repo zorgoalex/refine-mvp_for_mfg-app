@@ -146,6 +146,10 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.call('validateSheetReferences');
   }
 
+  async validateNoShadowInjection(_input: SheetReferenceValidationInput): Promise<void> {
+    this.call('validateNoShadowInjection');
+  }
+
   async reconcileOrderDeleteIdempotency(): Promise<OrderDeleteIdempotencyResult> {
     this.call('reconcileOrderDeleteIdempotency');
     return this.owner.completedDeleteResponse
@@ -458,6 +462,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'validateNoShadowInjection',
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',
@@ -575,9 +580,9 @@ describe('OrderTransactionService', () => {
       'setSessionUser',
       'loadOrderForUpdate',
       'loadOrderHeaderSnapshot',
+      'validateNoShadowInjection',
       'assertChildOwnership',
       'updateOrderHeader',
-      'upsertDetails',
     ]);
   });
 
@@ -1193,6 +1198,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'validateNoShadowInjection',
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',

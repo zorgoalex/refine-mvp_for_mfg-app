@@ -140,6 +140,92 @@ function num(value: number | string): number {
 }
 
 /**
+ * Anti-injection: a legacy ref (sheetMaterialTypeId null) must NOT point at a shadow
+ * material; a sheet ref's supplied material_id must not belong to a DIFFERENT sheet's
+ * shadow. Returns the collected field errors (does not throw) so callers can merge them.
+ *
+ * SECURITY: this MUST run on EVERY save — including legacy-looking ones that don't touch
+ * the sheet path — so a payload can't smuggle a shadow `material_id` with a null sheet id
+ * (which would create Variant-A sheet semantics without the backend command boundary).
+ */
+async function collectShadowInjectionErrors(
+  tx: TransactionClient,
+  header: SheetValidationHeader,
+  details: readonly SheetValidationDetail[],
+): Promise<OrderFieldError[]> {
+  const errors: OrderFieldError[] = [];
+  const materialIds = new Set<number>();
+  if (header.materialId != null && header.sheetMaterialTypeId == null) {
+    materialIds.add(header.materialId);
+  }
+  for (const detail of details) {
+    if (detail.materialId != null && detail.materialId !== 0) {
+      materialIds.add(detail.materialId);
+    }
+  }
+  if (materialIds.size === 0) return errors;
+
+  const flags = await tx.query<ShadowFlagRow>(
+    `SELECT material_id, is_sheet_shadow, shadow_of_sheet_material_type_id
+       FROM materials WHERE material_id = ANY($1::bigint[])`,
+    [[...materialIds]],
+  );
+  const flagById = new Map<number, ShadowFlagRow>();
+  for (const row of flags.rows) {
+    flagById.set(num(row.material_id), row);
+  }
+  const isShadow = (materialId: number): boolean =>
+    flagById.get(materialId)?.is_sheet_shadow === true;
+
+  if (header.sheetMaterialTypeId == null && header.materialId != null && isShadow(header.materialId)) {
+    errors.push({
+      field: 'header.materialId',
+      message: 'material_id references a hidden sheet shadow material',
+    });
+  }
+  details.forEach((detail) => {
+    if (detail.materialId == null || detail.materialId === 0) return;
+    if (detail.sheetMaterialTypeId == null) {
+      if (isShadow(detail.materialId)) {
+        errors.push({
+          field: `${detail.label}.materialId`,
+          message: 'material_id references a hidden sheet shadow material',
+        });
+      }
+    } else {
+      // sheet detail with a supplied shadow material_id belonging to a DIFFERENT sheet.
+      const flag = flagById.get(detail.materialId);
+      if (
+        flag?.is_sheet_shadow === true &&
+        flag.shadow_of_sheet_material_type_id != null &&
+        num(flag.shadow_of_sheet_material_type_id) !== detail.sheetMaterialTypeId
+      ) {
+        errors.push({
+          field: `${detail.label}.materialId`,
+          message: 'material_id is a shadow of a different sheet material',
+        });
+      }
+    }
+  });
+  return errors;
+}
+
+/**
+ * Standalone shadow anti-injection guard, runnable on EVERY save (legacy included).
+ * Throws OrderValidationError (422) on violation.
+ */
+export async function validateNoShadowInjection(
+  tx: TransactionClient,
+  header: SheetValidationHeader,
+  details: readonly SheetValidationDetail[],
+): Promise<void> {
+  const errors = await collectShadowInjectionErrors(tx, header, details);
+  if (errors.length > 0) {
+    throw new OrderValidationError(errors);
+  }
+}
+
+/**
  * Tx-scoped reference validation: existence of referenced sheet types, dimension fit of
  * each sheet detail against the sheet spec (both orientations), and anti-injection of
  * shadow `material_id`s. Throws OrderValidationError (422) — never a raw 500/FK error.
@@ -197,66 +283,8 @@ export async function validateSheetReferences(
     }
   });
 
-  // 2. Anti-injection: a legacy ref (sheetMaterialTypeId null) must NOT point at a
-  // shadow material; a sheet ref's supplied material_id must not belong to a different
-  // sheet's shadow. Look up the shadow flags of every referenced material_id once.
-  const materialIds = new Set<number>();
-  if (header.materialId != null && header.sheetMaterialTypeId == null) {
-    materialIds.add(header.materialId);
-  }
-  for (const detail of details) {
-    if (detail.materialId != null && detail.materialId !== 0) {
-      materialIds.add(detail.materialId);
-    }
-  }
-  if (materialIds.size > 0) {
-    const flags = await tx.query<ShadowFlagRow>(
-      `SELECT material_id, is_sheet_shadow, shadow_of_sheet_material_type_id
-         FROM materials WHERE material_id = ANY($1::bigint[])`,
-      [[...materialIds]],
-    );
-    const flagById = new Map<number, ShadowFlagRow>();
-    for (const row of flags.rows) {
-      flagById.set(num(row.material_id), row);
-    }
-    const isShadow = (materialId: number): boolean =>
-      flagById.get(materialId)?.is_sheet_shadow === true;
-
-    if (
-      header.sheetMaterialTypeId == null &&
-      header.materialId != null &&
-      isShadow(header.materialId)
-    ) {
-      errors.push({
-        field: 'header.materialId',
-        message: 'material_id references a hidden sheet shadow material',
-      });
-    }
-    details.forEach((detail) => {
-      if (detail.materialId == null || detail.materialId === 0) return;
-      if (detail.sheetMaterialTypeId == null) {
-        if (isShadow(detail.materialId)) {
-          errors.push({
-            field: `${detail.label}.materialId`,
-            message: 'material_id references a hidden sheet shadow material',
-          });
-        }
-      } else {
-        // sheet detail with a supplied shadow material_id belonging to a DIFFERENT sheet.
-        const flag = flagById.get(detail.materialId);
-        if (
-          flag?.is_sheet_shadow === true &&
-          flag.shadow_of_sheet_material_type_id != null &&
-          num(flag.shadow_of_sheet_material_type_id) !== detail.sheetMaterialTypeId
-        ) {
-          errors.push({
-            field: `${detail.label}.materialId`,
-            message: 'material_id is a shadow of a different sheet material',
-          });
-        }
-      }
-    });
-  }
+  // 2. Anti-injection of shadow material_ids (shared with the always-run guard).
+  errors.push(...(await collectShadowInjectionErrors(tx, header, details)));
 
   if (errors.length > 0) {
     throw new OrderValidationError(errors);

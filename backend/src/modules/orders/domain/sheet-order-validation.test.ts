@@ -2,9 +2,40 @@ import { describe, expect, it } from 'vitest';
 import {
   assertSheetEligibilityAndNoClear,
   orderTouchesSheet,
+  validateNoShadowInjection,
   type SheetValidationDetail,
+  type SheetValidationHeader,
 } from './sheet-order-validation';
 import { OrderValidationError } from '../errors/order.errors';
+import type { TransactionClient } from '../../../database/database.types';
+
+interface ShadowRow {
+  material_id: number;
+  is_sheet_shadow: boolean;
+  shadow_of_sheet_material_type_id: number | null;
+}
+
+function fakeTx(shadowRows: ShadowRow[]): TransactionClient {
+  return {
+    query: async () => ({ rows: shadowRows }),
+  } as unknown as TransactionClient;
+}
+
+async function injectionFields(
+  rows: ShadowRow[],
+  header: SheetValidationHeader,
+  details: SheetValidationDetail[],
+): Promise<string[]> {
+  try {
+    await validateNoShadowInjection(fakeTx(rows), header, details);
+    return [];
+  } catch (error) {
+    if (error instanceof OrderValidationError) {
+      return ((error.details?.errors ?? []) as Array<{ field: string }>).map((e) => e.field);
+    }
+    throw error;
+  }
+}
 
 function detail(over: Partial<SheetValidationDetail> = {}): SheetValidationDetail {
   return {
@@ -163,5 +194,55 @@ describe('assertSheetEligibilityAndNoClear', () => {
         details: [detail({ detailId: undefined, sheetMaterialTypeId: 7 })],
       }),
     ).not.toThrow();
+  });
+});
+
+// SP3 invariant 4/2 (Variant A pairing): a shadow material_id must never be written with a
+// null sheet id — even on a legacy-looking save that does not touch the sheet path. This is
+// the regression guard for the tier2 BLOCKER (anti-injection was gated behind orderTouchesSheet).
+describe('validateNoShadowInjection', () => {
+  it('rejects a legacy header (null sheet) whose material_id is a shadow', async () => {
+    const fields = await injectionFields(
+      [{ material_id: 99, is_sheet_shadow: true, shadow_of_sheet_material_type_id: 7 }],
+      { sheetMaterialTypeId: null, materialId: 99 },
+      [],
+    );
+    expect(fields).toContain('header.materialId');
+  });
+
+  it('rejects a legacy detail (null sheet) whose material_id is a shadow', async () => {
+    const fields = await injectionFields(
+      [{ material_id: 99, is_sheet_shadow: true, shadow_of_sheet_material_type_id: 7 }],
+      { sheetMaterialTypeId: null, materialId: null },
+      [detail({ detailId: undefined, sheetMaterialTypeId: null, materialId: 99 })],
+    );
+    expect(fields).toContain('details[0].materialId');
+  });
+
+  it('allows a legacy detail with a normal (non-shadow) material_id', async () => {
+    const fields = await injectionFields(
+      [{ material_id: 5, is_sheet_shadow: false, shadow_of_sheet_material_type_id: null }],
+      { sheetMaterialTypeId: null, materialId: null },
+      [detail({ detailId: undefined, sheetMaterialTypeId: null, materialId: 5 })],
+    );
+    expect(fields).toEqual([]);
+  });
+
+  it('rejects a sheet detail carrying a shadow material_id of a DIFFERENT sheet', async () => {
+    const fields = await injectionFields(
+      [{ material_id: 99, is_sheet_shadow: true, shadow_of_sheet_material_type_id: 8 }],
+      { sheetMaterialTypeId: null, materialId: null },
+      [detail({ detailId: undefined, sheetMaterialTypeId: 7, materialId: 99 })],
+    );
+    expect(fields).toContain('details[0].materialId');
+  });
+
+  it('allows a sheet detail carrying its own resolved shadow material_id', async () => {
+    const fields = await injectionFields(
+      [{ material_id: 99, is_sheet_shadow: true, shadow_of_sheet_material_type_id: 7 }],
+      { sheetMaterialTypeId: null, materialId: null },
+      [detail({ detailId: undefined, sheetMaterialTypeId: 7, materialId: 99 })],
+    );
+    expect(fields).toEqual([]);
   });
 });
