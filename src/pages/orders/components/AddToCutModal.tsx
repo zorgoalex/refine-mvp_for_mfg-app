@@ -3,36 +3,48 @@ import { Alert, Form, Input, Modal, Radio, Select, Space, message } from 'antd';
 import { cutApi } from '../../../api/cutApi';
 import { ApiError } from '../../../api/httpClient';
 import type { CutJobDto } from '../../../api/types/cutApi.types';
-import { noSheetSpecMessage, selectableDetailIds } from '../../cut/cutPageHelpers';
+import { noSheetSpecMessage, restrictDetailIds, selectableDetailIds } from '../../cut/cutPageHelpers';
 
 interface AddToCutModalProps {
   open: boolean;
   orderIds: number[];
+  /** Detail-level mode: when non-empty, only these chosen details (∩ eligible) are added. */
+  detailIds?: number[];
   onClose: () => void;
   onDone?: (job: CutJobDto) => void;
 }
 
 /**
  * Orders-list "add to cut" command (plan §9). Backend-owned: it only calls
- * `/api/v1/cut-jobs` (create + eligible-details + items) — no page-level Hasura
- * write. The operator picks an existing draft job or creates a new one; the
- * selected orders' eligible details are resolved on the backend and reserved.
+ * `/api/v1/cut-jobs` (create + eligible-details + items). The operator picks
+ * an existing draft job or creates a new one; the selected orders' eligible
+ * details are resolved on the backend and reserved.
  */
-export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, onClose, onDone }) => {
+export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, detailIds, onClose, onDone }) => {
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [name, setName] = useState('');
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
   const [targetJobId, setTargetJobId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // A provided detailIds array (even empty) means detail-level mode: an empty
+  // selection must yield an empty intersection (warning, nothing added) — never
+  // a fall-through that adds the whole order's eligible details.
+  const detailMode = Array.isArray(detailIds);
+
   useEffect(() => {
     if (!open) return;
-    setName(`Раскрой ${orderIds.join(', ')}`.slice(0, 200));
+    setName(
+      (detailMode
+        ? `Раскрой заказ ${orderIds.join(', ')} (детали)`
+        : `Раскрой ${orderIds.join(', ')}`
+      ).slice(0, 200),
+    );
     cutApi
       .list()
       .then((list) => setJobs(list.filter((j) => j.status === 'draft')))
       .catch(() => setJobs([]));
-  }, [open, orderIds]);
+  }, [open, orderIds, detailMode]);
 
   const submit = useCallback(async () => {
     if (orderIds.length === 0) return;
@@ -44,13 +56,25 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, on
           : await resolveExistingJob(targetJobId);
 
       const eligible = await cutApi.listEligibleDetails(job.cutJobId, { orderIds });
-      const detailIds = selectableDetailIds(eligible.details);
-      if (detailIds.length === 0) {
-        message.warning(noSheetSpecMessage(eligible.noSheetSpecCount) ?? 'Нет подходящих деталей для раскроя');
+      const selectable = selectableDetailIds(eligible.details);
+      const finalIds = detailMode ? restrictDetailIds(selectable, detailIds!) : selectable;
+      if (finalIds.length === 0) {
+        // Don't leave an empty draft behind: a job created above for a brand-new
+        // raskroi must be rolled back (archived) when nothing eligible was added.
+        // If rollback fails, tell the operator the empty draft remains (no silent orphan).
+        let warningText = noSheetSpecMessage(eligible.noSheetSpecCount) ?? 'Нет подходящих деталей для раскроя';
+        if (mode === 'new') {
+          try {
+            await cutApi.archive(job.cutJobId, job.version);
+          } catch {
+            warningText += ` Пустой раскрой #${job.cutJobId} не удалён — удалите его вручную.`;
+          }
+        }
+        message.warning(warningText);
         return;
       }
-      const updated = await cutApi.addItems(job.cutJobId, { detailIds, version: job.version });
-      message.success(`Добавлено деталей в раскрой #${updated.cutJobId}: ${detailIds.length}`);
+      const updated = await cutApi.addItems(job.cutJobId, { detailIds: finalIds, version: job.version });
+      message.success(`Добавлено деталей в раскрой #${updated.cutJobId}: ${finalIds.length}`);
       onDone?.(updated);
       onClose();
     } catch (error) {
@@ -58,11 +82,11 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, on
     } finally {
       setBusy(false);
     }
-  }, [mode, name, orderIds, targetJobId, onClose, onDone]);
+  }, [mode, name, orderIds, detailMode, detailIds, targetJobId, onClose, onDone]);
 
   return (
     <Modal
-      title={`Добавить в раскрой (${orderIds.length} заказ(ов))`}
+      title={detailMode ? `Добавить детали в раскрой (${detailIds!.length})` : `Добавить в раскрой (${orderIds.length} заказ(ов))`}
       open={open}
       onOk={submit}
       confirmLoading={busy}
@@ -98,7 +122,11 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, on
         <Alert
           type="info"
           showIcon
-          message="Будут добавлены только детали выбранных заказов, готовые к раскрою (с раскройной спецификацией материала)."
+          message={
+            detailMode
+              ? 'Будут добавлены только выбранные детали, готовые к раскрою (с раскройной спецификацией материала).'
+              : 'Будут добавлены только детали выбранных заказов, готовые к раскрою (с раскройной спецификацией материала).'
+          }
         />
       </Space>
     </Modal>

@@ -23,6 +23,12 @@ import type {
 } from '../../api/types/cutApi.types';
 import { can } from '../../utils/permissions';
 import {
+  CUT_JOB_STATUS_FILTER_ALL,
+  CUT_JOB_STATUS_FILTER_OPTIONS,
+  cutJobCounts,
+  cutJobSourceLabel,
+  cutJobStatusLabel,
+  filterJobsByStatus,
   formatGroupSummary,
   noSheetSpecMessage,
   parseIdCsv,
@@ -47,6 +53,14 @@ const INELIGIBLE_LABELS: Record<string, string> = {
   no_sheet_spec: 'Нет спецификации',
 };
 
+const STATUS_TAG_COLORS: Record<string, string> = {
+  draft: 'default',
+  calculating: 'processing',
+  ready: 'green',
+  failed: 'red',
+  archived: 'default',
+};
+
 /**
  * Backend-owned /cut page (CLAUDE.md principle 2/3): all reads and commands go
  * through cutApi (`/api/v1/cut-jobs`); the read-layer is never written from here.
@@ -64,6 +78,9 @@ export const CutPage: React.FC = () => {
   const [sheetImages, setSheetImages] = useState<Record<string, string>>({});
   const [preset, setPreset] = useState<string>('screen');
   const [presetOptions, setPresetOptions] = useState(DEFAULT_PRESET_OPTIONS);
+  const [jobs, setJobs] = useState<CutJobDto[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
 
   // Render presets are config-driven (/configuration "Раскрой"): load the active
   // names from the backend, falling back to the built-ins.
@@ -93,6 +110,65 @@ export const CutPage: React.FC = () => {
     message.error(text);
   }, []);
 
+  const loadJobs = useCallback(async () => {
+    setJobsLoading(true);
+    try {
+      setJobs(await cutApi.list());
+    } catch (error) {
+      handleError(error, 'Не удалось загрузить список раскроев');
+    } finally {
+      setJobsLoading(false);
+    }
+  }, [handleError]);
+
+  // Load the existing (non-archived) jobs on mount so an operator can reopen a
+  // job created earlier — including jobs staged from the Orders "Добавить в
+  // раскрой" action, which previously had no surface to be reopened on.
+  useEffect(() => {
+    if (can('cut.view')) void loadJobs();
+  }, [loadJobs]);
+
+  const openJob = useCallback(
+    async (cutJobId: number) => {
+      setBusy(true);
+      try {
+        const fresh = await cutApi.get(cutJobId);
+        setJob(fresh);
+        setEligible(null);
+        setSelected([]);
+        setSheetImages({});
+      } catch (error) {
+        handleError(error, 'Не удалось открыть раскрой');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [handleError],
+  );
+
+  const archiveJob = useCallback(
+    async (target: CutJobDto) => {
+      setBusy(true);
+      try {
+        const fresh = await cutApi.get(target.cutJobId);
+        await cutApi.archive(fresh.cutJobId, fresh.version);
+        message.success('Раскрой архивирован');
+        if (job?.cutJobId === target.cutJobId) {
+          setJob(null);
+          setEligible(null);
+          setSelected([]);
+          setSheetImages({});
+        }
+        await loadJobs();
+      } catch (error) {
+        handleError(error, 'Не удалось архивировать раскрой');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [job, loadJobs, handleError],
+  );
+
   const createJob = useCallback(async () => {
     setBusy(true);
     try {
@@ -102,13 +178,14 @@ export const CutPage: React.FC = () => {
       setEligible(null);
       setSelected([]);
       message.success('Раскрой создан');
+      await loadJobs();
     } catch (error) {
       if (error && (error as { errorFields?: unknown }).errorFields) return; // antd validation
       handleError(error, 'Не удалось создать раскрой');
     } finally {
       setBusy(false);
     }
-  }, [form, criteriaFromForm, handleError]);
+  }, [form, criteriaFromForm, loadJobs, handleError]);
 
   const loadEligible = useCallback(async () => {
     if (!job) return;
@@ -132,12 +209,13 @@ export const CutPage: React.FC = () => {
       const updated = await cutApi.addItems(job.cutJobId, { detailIds: selected, version: job.version });
       setJob(updated);
       message.success('Детали добавлены в раскрой');
+      await loadJobs();
     } catch (error) {
       handleError(error, 'Не удалось добавить детали');
     } finally {
       setBusy(false);
     }
-  }, [job, selected, handleError]);
+  }, [job, selected, loadJobs, handleError]);
 
   const calculate = useCallback(async () => {
     if (!job) return;
@@ -147,12 +225,13 @@ export const CutPage: React.FC = () => {
       setJob(calculated);
       setSheetImages({});
       message.success('Раскрой рассчитан');
+      await loadJobs();
     } catch (error) {
       handleError(error, 'Не удалось рассчитать раскрой');
     } finally {
       setBusy(false);
     }
-  }, [job, handleError]);
+  }, [job, loadJobs, handleError]);
 
   const loadSheet = useCallback(
     async (group: CutGroupDto, sheetIndex: number) => {
@@ -210,6 +289,59 @@ export const CutPage: React.FC = () => {
     }
   }, [job, handleError]);
 
+  const filteredJobs = useMemo(() => filterJobsByStatus(jobs, statusFilter), [jobs, statusFilter]);
+
+  const jobColumns: ColumnsType<CutJobDto> = useMemo(
+    () => [
+      { title: '#', dataIndex: 'cutJobId', key: 'id', width: 70 },
+      { title: 'Название', dataIndex: 'name', key: 'name' },
+      {
+        title: 'Статус',
+        key: 'status',
+        width: 120,
+        render: (_: unknown, row: CutJobDto) => (
+          <Tag color={STATUS_TAG_COLORS[row.status] ?? 'default'}>{cutJobStatusLabel(row.status)}</Tag>
+        ),
+      },
+      {
+        title: 'Источник',
+        key: 'source',
+        width: 100,
+        render: (_: unknown, row: CutJobDto) => cutJobSourceLabel(row.source),
+      },
+      {
+        title: 'Детали',
+        key: 'items',
+        width: 80,
+        render: (_: unknown, row: CutJobDto) => cutJobCounts(row).items,
+      },
+      {
+        title: 'Группы',
+        key: 'groups',
+        width: 80,
+        render: (_: unknown, row: CutJobDto) => cutJobCounts(row).groups,
+      },
+      {
+        title: 'Действия',
+        key: 'actions',
+        width: 200,
+        render: (_: unknown, row: CutJobDto) => (
+          <Space>
+            <Button size="small" type="link" onClick={() => openJob(row.cutJobId)} disabled={busy}>
+              Открыть
+            </Button>
+            {canManage && (
+              <Button size="small" type="link" danger onClick={() => archiveJob(row)} disabled={busy}>
+                Архивировать
+              </Button>
+            )}
+          </Space>
+        ),
+      },
+    ],
+    [busy, canManage, openJob, archiveJob],
+  );
+
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
     () => [
       { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detail' },
@@ -259,6 +391,35 @@ export const CutPage: React.FC = () => {
             </Button>
           </Form.Item>
         </Form>
+      </Card>
+
+      <Card
+        size="small"
+        title="Раскрои"
+        extra={
+          <Space>
+            <Select<string>
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[...CUT_JOB_STATUS_FILTER_OPTIONS]}
+              style={{ width: 160 }}
+            />
+            <Button onClick={loadJobs} loading={jobsLoading}>
+              Обновить
+            </Button>
+          </Space>
+        }
+      >
+        <Table<CutJobDto>
+          size="small"
+          rowKey="cutJobId"
+          columns={jobColumns}
+          dataSource={filteredJobs}
+          loading={jobsLoading}
+          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          locale={{ emptyText: 'Нет раскроев' }}
+          rowClassName={(row) => (row.cutJobId === job?.cutJobId ? 'ant-table-row-selected' : '')}
+        />
       </Card>
 
       {job && (

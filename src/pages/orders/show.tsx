@@ -1,6 +1,6 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Table, Breadcrumb, message, Dropdown, Tooltip } from "antd";
+import { Button, Table, Breadcrumb, message, Dropdown, Tooltip, Space } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -24,6 +24,8 @@ import { resolveOrderExportClientName, toOrderExportClient } from "./utils/order
 import { ordersApi } from "../../api/ordersApi";
 import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { ProjectLinksEditor } from "./components/projects/ProjectLinksEditor";
+import { AddToCutModal } from "./components/AddToCutModal";
+import { can } from "../../utils/permissions";
 
 type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'additional';
 
@@ -248,6 +250,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Состояние для экспорта
   const [isExporting, setIsExporting] = useState(false);
   const [isSnapshotExporting, setIsSnapshotExporting] = useState(false);
+
+  // Состояние для выбора деталей в раскрой
+  const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
+  const [cutSelectMode, setCutSelectMode] = useState(false);
+  const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
+  const [cutModalOpen, setCutModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!cutSelectMode) setCutSelectedDetailIds([]);
+  }, [cutSelectMode]);
+
+  useEffect(() => {
+    setCutSelectMode(false);
+    setCutSelectedDetailIds([]);
+  }, [record?.order_id]);
 
   // Hook for updating order
   const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
@@ -749,12 +766,53 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
           {/* Детали заказа - компактная таблица */}
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff', marginBottom: 8 }}>
-              Детали заказа
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
+                Детали заказа
+              </div>
+              {cutEnabled && details.length > 0 && (
+                <Space size="small">
+                  <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
+                    {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+                  </Button>
+                  {cutSelectMode && (
+                    <>
+                      <Button
+                        size="small"
+                        onClick={() =>
+                          setCutSelectedDetailIds(
+                            cutSelectedDetailIds.length === details.length
+                              ? []
+                              : details.map((d: any) => d.detail_id),
+                          )
+                        }
+                      >
+                        {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
+                      </Button>
+                      <Button
+                        size="small"
+                        type="primary"
+                        disabled={cutSelectedDetailIds.length === 0}
+                        onClick={() => setCutModalOpen(true)}
+                      >
+                        Добавить выбранные в раскрой ({cutSelectedDetailIds.length})
+                      </Button>
+                    </>
+                  )}
+                </Space>
+              )}
             </div>
             <Table
               dataSource={details}
               rowKey="detail_id"
+              rowSelection={
+                cutSelectMode
+                  ? {
+                      selectedRowKeys: cutSelectedDetailIds,
+                      onChange: (keys) => setCutSelectedDetailIds(keys.map(Number)),
+                    }
+                  : undefined
+              }
               size="small"
               pagination={false}
               bordered
@@ -949,6 +1007,19 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             }))}
             client={exportClient ?? undefined}
           />
+          {cutEnabled && record?.order_id && (
+            <AddToCutModal
+              open={cutModalOpen}
+              orderIds={[record.order_id]}
+              detailIds={cutSelectedDetailIds}
+              onClose={() => setCutModalOpen(false)}
+              onDone={() => {
+                setCutModalOpen(false);
+                setCutSelectMode(false);
+                setCutSelectedDetailIds([]);
+              }}
+            />
+          )}
         </>
       )}
     </Show>
