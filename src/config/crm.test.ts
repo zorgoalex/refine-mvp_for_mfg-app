@@ -30,27 +30,37 @@ function makeFakeDoc() {
 }
 
 describe('getCrmMenuConfig', () => {
-  it('defaults to the crm-test URL and "CRM" label when env is empty', () => {
+  it('defaults to the crm-test Orders deep link and "CRM" label when env is empty', () => {
     expect(getCrmMenuConfig({})).toEqual({
-      url: 'https://crm-test.mebelkz.app',
+      url: 'https://crm-test.mebelkz.app/objects/erpOrders',
       label: 'CRM',
     });
   });
 
-  it('honors VITE_CRM_URL override', () => {
+  it('honors VITE_CRM_URL override (origin) + default Orders path', () => {
     expect(getCrmMenuConfig({ VITE_CRM_URL: 'https://crm.mebelkz.app' })).toEqual({
-      url: 'https://crm.mebelkz.app',
+      url: 'https://crm.mebelkz.app/objects/erpOrders',
       label: 'CRM',
     });
+  });
+
+  it('honors VITE_CRM_PATH override', () => {
+    expect(getCrmMenuConfig({ VITE_CRM_PATH: '/objects/companies' })?.url).toBe(
+      'https://crm-test.mebelkz.app/objects/companies',
+    );
+  });
+
+  it('opens the CRM root when VITE_CRM_PATH is empty', () => {
+    expect(getCrmMenuConfig({ VITE_CRM_PATH: '' })?.url).toBe('https://crm-test.mebelkz.app');
   });
 
   it('honors VITE_CRM_LABEL override', () => {
     expect(getCrmMenuConfig({ VITE_CRM_LABEL: 'Twenty CRM' })?.label).toBe('Twenty CRM');
   });
 
-  it('trims surrounding whitespace from the URL', () => {
-    expect(getCrmMenuConfig({ VITE_CRM_URL: '  https://crm.mebelkz.app  ' })?.url).toBe(
-      'https://crm.mebelkz.app',
+  it('trims whitespace and avoids double slashes when joining base + path', () => {
+    expect(getCrmMenuConfig({ VITE_CRM_URL: '  https://crm.mebelkz.app/  ' })?.url).toBe(
+      'https://crm.mebelkz.app/objects/erpOrders',
     );
   });
 

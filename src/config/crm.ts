@@ -15,9 +15,14 @@ type EnvSource = Record<string, string | undefined>;
 
 const DEFAULT_CRM_URL = 'https://crm-test.mebelkz.app';
 const DEFAULT_CRM_LABEL = 'CRM';
+// Deep-link straight to the Orders (ErpOrder) records view so CRM opens on
+// Заказы instead of Twenty's default (Companies / last visited). Set
+// VITE_CRM_PATH='' to open the CRM root instead.
+const DEFAULT_CRM_PATH = '/objects/erpOrders';
 
 /**
  * Resolve the CRM menu config from the environment.
+ * The opened URL is VITE_CRM_URL (origin) + VITE_CRM_PATH (deep link).
  * Returns null when no usable URL is configured (link hidden):
  *  - VITE_CRM_URL explicitly empty, or
  *  - the value is not an http(s) URL.
@@ -25,10 +30,13 @@ const DEFAULT_CRM_LABEL = 'CRM';
 export function getCrmMenuConfig(
   env: EnvSource = ((import.meta as { env?: EnvSource }).env ?? {}),
 ): CrmMenuConfig | null {
-  const raw = env.VITE_CRM_URL;
-  const url = (raw ?? DEFAULT_CRM_URL).trim();
-  if (!url) return null; // explicitly disabled
-  if (!/^https?:\/\//i.test(url)) return null; // guard against a malformed value
+  const base = (env.VITE_CRM_URL ?? DEFAULT_CRM_URL).trim();
+  if (!base) return null; // explicitly disabled
+  if (!/^https?:\/\//i.test(base)) return null; // guard against a malformed value
+  const path = (env.VITE_CRM_PATH ?? DEFAULT_CRM_PATH).trim();
+  const url = path
+    ? `${base.replace(/\/+$/, '')}${path.startsWith('/') ? path : `/${path}`}`
+    : base;
   const label = (env.VITE_CRM_LABEL ?? '').trim() || DEFAULT_CRM_LABEL;
   return { url, label };
 }
