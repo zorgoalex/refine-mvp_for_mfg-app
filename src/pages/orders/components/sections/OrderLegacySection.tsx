@@ -6,6 +6,10 @@ import { Form, Row, Col, Collapse, Select } from 'antd';
 import { useSelect } from '@refinedev/antd';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
+import {
+  useSheetMaterialOptions,
+  toSheetSelectOptions,
+} from '../../../../hooks/useSheetMaterialOptions';
 
 const { Panel } = Collapse;
 
@@ -14,15 +18,30 @@ export const OrderLegacySection: React.FC = () => {
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
 
+  // SP3: sheet picker is backend-write + sheet_materials.view gated, and only for
+  // SP3-era orders (create, or a loaded order whose sheet_eligible !== false).
+  const sheetMaterials = useSheetMaterialOptions();
+  const sheetEligible = header.sheet_eligible !== false;
+  const showSheetPicker = sheetMaterials.enabled && sheetEligible;
+  const hasSheetHeader =
+    typeof header.sheet_material_type_id === 'number' && header.sheet_material_type_id > 0;
+
   // Check if any legacy fields are filled
   const hasLegacyFields = useMemo(() => {
     return !!(
       header.material_id ||
+      header.sheet_material_type_id ||
       header.milling_type_id ||
       header.edge_type_id ||
       header.film_id
     );
-  }, [header.material_id, header.milling_type_id, header.edge_type_id, header.film_id]);
+  }, [
+    header.material_id,
+    header.sheet_material_type_id,
+    header.milling_type_id,
+    header.edge_type_id,
+    header.film_id,
+  ]);
 
   // Load references
   const { selectProps: materialProps } = useSelect({
@@ -83,12 +102,40 @@ export const OrderLegacySection: React.FC = () => {
                   placeholder="Выберите материал"
                   allowClear
                   showSearch
+                  // SP3: a sheet material on the header authoritatively nulls
+                  // material_id on the backend — disable the legacy picker to
+                  // avoid a contradictory pair.
+                  disabled={hasSheetHeader}
                   filterOption={(input, option) =>
                     (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
                   }
                 />
               </Form.Item>
             </Col>
+
+            {showSheetPicker && (
+              <Col span={6}>
+                <Form.Item label="Листовой материал">
+                  <Select
+                    value={header.sheet_material_type_id ?? undefined}
+                    options={toSheetSelectOptions(
+                      sheetMaterials.options,
+                      header.sheet_material_type_id,
+                    )}
+                    loading={sheetMaterials.isLoading}
+                    onChange={(value) =>
+                      updateHeaderField('sheet_material_type_id', value ?? null)
+                    }
+                    placeholder="Выберите листовой материал"
+                    // No-clear once a sheet id is set: sheet->legacy revert is out
+                    // of SP3 scope and the backend rejects it. Switch among sheets only.
+                    allowClear={!hasSheetHeader}
+                    showSearch
+                    optionFilterProp="label"
+                  />
+                </Form.Item>
+              </Col>
+            )}
 
             <Col span={6}>
               <Form.Item label="Тип фрезеровки">

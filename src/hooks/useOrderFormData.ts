@@ -8,6 +8,15 @@ export interface ReferenceOption {
   value: number;
 }
 
+// SP3: richer option for the sheet-material picker — carries dimensions (FE
+// dimension mirror) and is_active (disable, not drop, a deactivated-but-selected
+// sheet). Absent entirely when the caller lacks sheet_materials.view.
+export interface SheetMaterialTypeOption extends ReferenceOption {
+  widthMm: number | null;
+  heightMm: number | null;
+  isActive: boolean;
+}
+
 export interface OrderFormDataReferences {
   clients: ReferenceOption[];
   materials: ReferenceOption[];
@@ -21,6 +30,8 @@ export interface OrderFormDataReferences {
   workshops: ReferenceOption[];
   employees: ReferenceOption[];
   units: ReferenceOption[];
+  // SP3: empty array when the response omitted it (no sheet_materials.view).
+  sheetMaterialTypes: SheetMaterialTypeOption[];
   defaultOrderStatus: number | undefined;
   defaultPaymentStatus: number | undefined;
   defaultProductionStatus: number | undefined;
@@ -115,6 +126,16 @@ export function mapOrderFormDataToReferences(
   const workshops = data ? toOptions(data.workshops, (item) => item.name) : empty;
   const employees = data ? toOptions(data.employees, (item) => item.fullName) : empty;
   const units = data ? toOptions(data.units, (item) => item.name) : empty;
+  // Absent field (no sheet_materials.view) maps to [] — the picker is hidden anyway.
+  const sheetMaterialTypes: SheetMaterialTypeOption[] = data?.sheetMaterialTypes
+    ? data.sheetMaterialTypes.map((item) => ({
+        label: item.name,
+        value: item.id,
+        widthMm: item.widthMm ?? null,
+        heightMm: item.heightMm ?? null,
+        isActive: item.isActive,
+      }))
+    : [];
 
   return {
     clients,
@@ -129,6 +150,7 @@ export function mapOrderFormDataToReferences(
     workshops,
     employees,
     units,
+    sheetMaterialTypes,
     defaultOrderStatus: orderStatuses[0]?.value,
     defaultPaymentStatus: paymentStatuses[0]?.value,
     defaultProductionStatus: productionStatuses[0]?.value,

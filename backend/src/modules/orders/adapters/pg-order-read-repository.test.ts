@@ -172,12 +172,19 @@ describe('PgOrderReadRepository', () => {
       workshops: [{ id: 90, name: 'Main workshop' }],
       employees: [{ id: 100, fullName: 'Test Employee' }],
       units: [{ id: 110, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
+      // SP3: repo always returns sheet types (dumb); the service masks by perm.
+      sheetMaterialTypes: [
+        { id: 200, name: 'МДФ 16', widthMm: 2800, heightMm: 2070, isActive: true },
+      ],
     });
 
-    const referenceQueries = database.queries.slice(-12).map((query) => query.text);
+    const referenceQueries = database.queries.slice(-13).map((query) => query.text);
     expect(referenceQueries.join('\n')).toContain('FROM clients');
     expect(referenceQueries.join('\n')).toContain('FROM payment_statuses');
+    expect(referenceQueries.join('\n')).toContain('FROM sheet_material_types');
     expect(referenceQueries.join('\n')).not.toContain('payment_status_code');
+    // sheet_material_types is fetched WITHOUT an is_active filter (active+inactive),
+    // so the is_active query count stays 11.
     expect(referenceQueries.filter((query) => query.includes('WHERE is_active = true'))).toHaveLength(
       11,
     );
@@ -380,6 +387,14 @@ function createDatabase() {
 
       if (text.includes('FROM units')) {
         return { rows: [{ id: '110', code: 'pcs', name: 'Pieces', symbol: 'pcs' }] };
+      }
+
+      if (text.includes('FROM sheet_material_types')) {
+        return {
+          rows: [
+            { id: '200', name: 'МДФ 16', width_mm: '2800.00', height_mm: '2070.00', is_active: true },
+          ],
+        };
       }
 
       return { rows: [] };

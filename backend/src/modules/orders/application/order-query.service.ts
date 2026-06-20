@@ -88,13 +88,24 @@ export class OrderQueryService {
     this.requireViewPermission(command);
     const response = await this.ports.reader.getOrderFormData(command);
 
+    // SP3: the picker reference is gated on sheet_materials.view. The repo always
+    // returns the rows (dumb); the service omits them for callers without the perm
+    // (e.g. a worker with orders.view only) so the form-data response never leaks
+    // the sheet catalog. omit = drop the key, not an empty array, per the contract.
+    const withSheet: OrderFormDataResponseDto = this.permissions.canUser(
+      command.currentUser,
+      'sheet_materials.view',
+    )
+      ? response
+      : { ...response, sheetMaterialTypes: undefined };
+
     if (this.canViewFinancials(command)) {
-      return response;
+      return withSheet;
     }
 
     return {
-      ...response,
-      millingTypes: response.millingTypes.map((millingType) => ({
+      ...withSheet,
+      millingTypes: withSheet.millingTypes.map((millingType) => ({
         ...millingType,
         costPerSqm: null,
       })),

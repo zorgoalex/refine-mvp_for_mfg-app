@@ -233,6 +233,12 @@ interface MillingTypeLookupRow extends IdNameLookupRow {
   cost_per_sqm: string | number | null;
 }
 
+interface SheetMaterialTypeLookupRow extends IdNameLookupRow {
+  width_mm: string | number | null;
+  height_mm: string | number | null;
+  is_active: boolean;
+}
+
 interface StatusLookupRow extends IdNameLookupRow {
   code: string | null;
   color: string | null;
@@ -562,6 +568,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       workshops,
       employees,
       units,
+      sheetMaterialTypes,
     ] = await Promise.all([
       this.database.query<IdNameLookupRow>(
         `
@@ -658,6 +665,16 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         ORDER BY unit_code ASC, unit_id ASC
         `,
       ),
+      // SP3: ALL sheet types (active + inactive) — repo stays dumb; the service
+      // decides whether to attach them (sheet_materials.view) and the FE disables
+      // inactive non-current options so a deactivated-but-selected sheet still edits.
+      this.database.query<SheetMaterialTypeLookupRow>(
+        `
+        SELECT sheet_material_type_id AS id, name, width_mm, height_mm, is_active
+        FROM sheet_material_types
+        ORDER BY is_active DESC, name ASC, sheet_material_type_id ASC
+        `,
+      ),
     ]);
 
     return {
@@ -673,6 +690,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       workshops: workshops.rows.map(mapIdNameLookup),
       employees: employees.rows.map(mapEmployeeLookup),
       units: units.rows.map(mapUnitLookup),
+      sheetMaterialTypes: sheetMaterialTypes.rows.map(mapSheetMaterialTypeLookup),
     };
   }
 
@@ -790,6 +808,16 @@ function mapStatusLookup(row: StatusLookupRow) {
     name: row.name,
     code: row.code,
     color: row.color,
+  };
+}
+
+function mapSheetMaterialTypeLookup(row: SheetMaterialTypeLookupRow) {
+  return {
+    id: toNumber(row.id),
+    name: row.name,
+    widthMm: toNullableNumber(row.width_mm),
+    heightMm: toNullableNumber(row.height_mm),
+    isActive: row.is_active,
   };
 }
 

@@ -73,6 +73,29 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
 
       // Legacy rollback path for useBackendOrdersWrite=false. Backend-enabled
       // order saves return above through saveOrderViaBackend with one order command.
+      //
+      // SP3 hard backstop: sheet materials are a backend-owned field (the shadow
+      // material_id is resolved inside the NestJS command). The legacy Hasura save
+      // path cannot resolve the shadow and must NOT page-level write the field
+      // (principle 3). So if the draft OR the loaded order carries ANY non-null
+      // sheet_material_type_id (header or any detail), refuse to save through the
+      // legacy path — a sheet order is read/display-only until backend orders
+      // read+write is on.
+      const draftHasSheetMaterial =
+        (typeof values.header.sheet_material_type_id === 'number' &&
+          values.header.sheet_material_type_id > 0) ||
+        (values.details ?? []).some(
+          (detail) =>
+            typeof detail.sheet_material_type_id === 'number' &&
+            detail.sheet_material_type_id > 0,
+        );
+      if (draftHasSheetMaterial) {
+        throw new Error(
+          'Листовые материалы требуют включённого backend-режима заказов (чтение и запись). ' +
+            'Заказ с листовым материалом нельзя сохранить через устаревший путь.',
+        );
+      }
+
       // ========== STEP 1: Save/Update orders (header) ==========
       if (isEdit && values.header.order_id) {
         // Update existing order

@@ -20,6 +20,10 @@ import { formatNumber, currencySmartFormatter, numberParser } from '../../../../
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
+import {
+  useSheetMaterialOptions,
+  toSheetSelectOptions,
+} from '../../../../hooks/useSheetMaterialOptions';
 import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
 import {
   validateMaterialDimensions,
@@ -160,9 +164,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   highlightedRowKey = null,
   onDragSelectionPending,
 }, ref) => {
-  const { details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
+  const { header, details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
+
+  // SP3: sheet picker gating (backend write + sheet_materials.view) + order-era
+  // eligibility (create OR loaded order's sheet_eligible !== false).
+  const sheetMaterials = useSheetMaterialOptions();
+  const sheetEligible = header.sheet_eligible !== false;
+  const showSheetPicker = sheetMaterials.enabled && sheetEligible;
 
   // Ref for table scroll container (for auto-scroll)
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -253,6 +263,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const watchedMaterialId = Form.useWatch('material_id', form);
   const watchedMillingTypeId = Form.useWatch('milling_type_id', form);
   const watchedEdgeTypeId = Form.useWatch('edge_type_id', form);
+  const watchedSheetId = Form.useWatch('sheet_material_type_id', form) as
+    | number
+    | null
+    | undefined;
+  const hasSheetSelected =
+    typeof watchedSheetId === 'number' && watchedSheetId > 0;
 
   // Style for empty required fields - red bottom border
   const getRequiredFieldStyle = (value: any): React.CSSProperties => {
@@ -506,6 +522,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       quantity: record.quantity,
       area: record.area,
       material_id: record.material_id,
+      sheet_material_type_id: record.sheet_material_type_id ?? null,
       milling_type_id: record.milling_type_id,
       edge_type_id: record.edge_type_id,
       film_id: record.film_id ?? null,
@@ -875,14 +892,20 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       sorter: (a, b) => (a.material_id || 0) - (b.material_id || 0),
       render: (materialId, record) =>
         isEditing(record) ? (
-          <Form.Item name="material_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item
+            name="material_id"
+            style={{ margin: 0, padding: '0 4px' }}
+            // SP3: a sheet-only detail needs no legacy material — drop required.
+            rules={hasSheetSelected ? [] : [{ required: true }]}
+          >
             <Select
               {...resolvedMaterialSelectProps}
               placeholder="Материал"
               showSearch
+              disabled={hasSheetSelected}
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
-              style={{ minWidth: 180, textAlign: 'left', ...getRequiredFieldStyle(watchedMaterialId) }}
+              style={{ minWidth: 180, textAlign: 'left', ...(hasSheetSelected ? {} : getRequiredFieldStyle(watchedMaterialId)) }}
               onChange={handleMaterialChange}
             />
           </Form.Item>
@@ -894,6 +917,39 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           />
         ),
     },
+    ...(showSheetPicker
+      ? [{
+          title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Листовой материал</div>,
+          dataIndex: 'sheet_material_type_id',
+          key: 'sheet_material_type_id',
+          width: 120,
+          align: 'center' as const,
+          render: (sheetId: number | null | undefined, record: OrderDetail) =>
+            isEditing(record) ? (
+              <Form.Item name="sheet_material_type_id" style={{ margin: 0, padding: '0 4px' }}>
+                <Select
+                  options={toSheetSelectOptions(sheetMaterials.options, watchedSheetId)}
+                  loading={sheetMaterials.isLoading}
+                  placeholder="Лист"
+                  // No-clear once a row carries a stored sheet id (sheet->legacy
+                  // revert is out of SP3 scope and the backend rejects it).
+                  allowClear={
+                    !(typeof record.sheet_material_type_id === 'number' &&
+                      record.sheet_material_type_id > 0)
+                  }
+                  showSearch
+                  optionFilterProp="label"
+                  dropdownMatchSelectWidth={false}
+                  style={{ minWidth: 160, textAlign: 'left' }}
+                />
+              </Form.Item>
+            ) : (
+              <span style={{ fontSize: '90%' }}>
+                {sheetId ? (sheetMaterials.byId.get(sheetId)?.label ?? '') : ''}
+              </span>
+            ),
+        }]
+      : []),
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Примечание</div>,
       dataIndex: 'note',

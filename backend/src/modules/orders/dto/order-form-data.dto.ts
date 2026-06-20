@@ -11,6 +11,16 @@ export interface MillingTypeLookupDto extends IdNameLookupDto {
   costPerSqm: number | null;
 }
 
+// SP3: sheet-material picker option. Carries dimensions for the FE dimension
+// mirror and is_active so the picker can disable (not drop) a deactivated
+// currently-selected sheet type. Only attached when the caller has
+// sheet_materials.view (masked at the service layer).
+export interface SheetMaterialTypeLookupDto extends IdNameLookupDto {
+  widthMm: number | null;
+  heightMm: number | null;
+  isActive: boolean;
+}
+
 export interface StatusLookupDto extends IdNameLookupDto {
   code?: string | null;
   color?: string | null;
@@ -41,4 +51,6 @@ export interface OrderFormDataResponseDto {
   workshops: IdNameLookupDto[];
   employees: EmployeeLookupDto[];
   units: UnitLookupDto[];
+  // SP3: present ONLY when the caller has sheet_materials.view (service-masked).
+  sheetMaterialTypes?: SheetMaterialTypeLookupDto[];
 }

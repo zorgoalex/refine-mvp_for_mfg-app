@@ -638,6 +638,19 @@ const statusLookupSwaggerSchema = {
   },
 } as const;
 
+// SP3: only present for callers with sheet_materials.view (service-masked).
+const sheetMaterialTypeLookupSwaggerSchema = {
+  type: 'object',
+  required: ['id', 'name', 'widthMm', 'heightMm', 'isActive'],
+  properties: {
+    id: { type: 'integer' },
+    name: { type: 'string' },
+    widthMm: nullableNumberSwaggerSchema,
+    heightMm: nullableNumberSwaggerSchema,
+    isActive: { type: 'boolean' },
+  },
+} as const;
+
 const orderFormDataResponseSwaggerSchema = {
   type: 'object',
   required: [
@@ -667,6 +680,8 @@ const orderFormDataResponseSwaggerSchema = {
     workshops: { type: 'array', items: lookupSwaggerSchema },
     employees: { type: 'array', items: { type: 'object', required: ['id', 'fullName'], properties: { id: { type: 'integer' }, fullName: { type: 'string' } } } },
     units: { type: 'array', items: { type: 'object', required: ['id', 'code', 'name'], properties: { id: { type: 'integer' }, code: { type: 'string' }, name: { type: 'string' }, symbol: { type: 'string' } } } },
+    // SP3: optional — omitted entirely for callers without sheet_materials.view.
+    sheetMaterialTypes: { type: 'array', items: sheetMaterialTypeLookupSwaggerSchema },
   },
 } as const;
 

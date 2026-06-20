@@ -2,7 +2,7 @@
 // Modal for bulk editing multiple order details at once
 
 import React, { useEffect, useState } from 'react';
-import { Modal, Form, Input, InputNumber, Row, Col, Select, Checkbox, Alert, Divider, Typography } from 'antd';
+import { Modal, Form, Input, InputNumber, Row, Col, Select, Checkbox, Alert, Divider, Typography, Tooltip } from 'antd';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { numberParser } from '../../../../utils/numberFormat';
@@ -16,6 +16,10 @@ interface BulkEditModalProps {
   open: boolean;
   selectedCount: number;
   totalCount: number;
+  // SP3: true when the in-scope selection contains any sheet-material row. The
+  // bulk legacy-material change is disabled for those (the backend re-resolves
+  // material_id from the sheet, so a bulk change would be a misleading no-op).
+  selectionHasSheet?: boolean;
   onApply: (changes: Partial<OrderDetail>, applyToAll: boolean) => void;
   onCancel: () => void;
 }
@@ -54,6 +58,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   open,
   selectedCount,
   totalCount,
+  selectionHasSheet = false,
   onApply,
   onCancel,
 }) => {
@@ -340,12 +345,21 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
           <Col span={12}>
             <Form.Item
               label={
-                <Checkbox
-                  checked={enabledFields.material_id}
-                  onChange={() => toggleField('material_id')}
+                <Tooltip
+                  title={
+                    selectionHasSheet
+                      ? 'Недоступно для листовых деталей'
+                      : undefined
+                  }
                 >
-                  Материал
-                </Checkbox>
+                  <Checkbox
+                    checked={enabledFields.material_id && !selectionHasSheet}
+                    disabled={selectionHasSheet}
+                    onChange={() => toggleField('material_id')}
+                  >
+                    Материал
+                  </Checkbox>
+                </Tooltip>
               }
             >
               <Form.Item name="material_id" noStyle>
@@ -356,7 +370,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                   filterOption={(input, option) =>
                     ((option?.label as string) || '').toLowerCase().includes(input.toLowerCase())
                   }
-                  disabled={!enabledFields.material_id}
+                  disabled={!enabledFields.material_id || selectionHasSheet}
                   style={{ width: '100%' }}
                 />
               </Form.Item>

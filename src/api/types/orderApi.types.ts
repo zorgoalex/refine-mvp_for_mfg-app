@@ -144,6 +144,13 @@ export interface MillingTypeLookup extends IdNameLookup {
   costPerSqm: number | null;
 }
 
+// SP3: present only when the caller has sheet_materials.view (service-masked).
+export interface SheetMaterialTypeLookup extends IdNameLookup {
+  widthMm: number | null;
+  heightMm: number | null;
+  isActive: boolean;
+}
+
 export interface StatusLookup extends IdNameLookup {
   code?: string | null;
   color?: string | null;
@@ -174,6 +181,8 @@ export interface OrderFormDataResponse {
   workshops: IdNameLookup[];
   employees: EmployeeLookup[];
   units: UnitLookup[];
+  // SP3: optional — omitted when the caller lacks sheet_materials.view.
+  sheetMaterialTypes?: SheetMaterialTypeLookup[];
 }
 
 export interface SaveOrderHeaderDto {

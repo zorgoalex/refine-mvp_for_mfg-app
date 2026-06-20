@@ -363,6 +363,16 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
         // Build update object
         const updateData: Partial<OrderDetail> = { ...changes };
 
+        // SP3: a sheet row's material_id is re-resolved from sheet_material_type_id
+        // by the backend command, so a bulk legacy-material change would be a
+        // misleading no-op. Scope it out (other bulk fields still apply).
+        const isSheetRow =
+          typeof detail.sheet_material_type_id === 'number' &&
+          detail.sheet_material_type_id > 0;
+        if (isSheetRow && 'material_id' in updateData) {
+          delete updateData.material_id;
+        }
+
         // Calculate new dimensions (use new value if changed, otherwise keep existing)
         const newHeight = changes.height ?? detail.height ?? 0;
         const newWidth = changes.width ?? detail.width ?? 0;
@@ -524,6 +534,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           open={bulkEditModalOpen}
           selectedCount={selectedRowKeys.length}
           totalCount={details.length}
+          selectionHasSheet={(selectedRowKeys.length > 0
+            ? details.filter((d) => selectedRowKeys.includes(d.temp_id || d.detail_id || 0))
+            : details
+          ).some(
+            (d) =>
+              typeof d.sheet_material_type_id === 'number' && d.sheet_material_type_id > 0,
+          )}
           onApply={handleBulkEditApply}
           onCancel={() => setBulkEditModalOpen(false)}
         />

@@ -126,6 +126,34 @@ export function validateMaterialDimensions(
 }
 
 /**
+ * SP3 UX-parity mirror: validate a detail's dimensions against a SHEET material's
+ * own width_mm/height_mm. Same orientation-agnostic rule as the legacy material
+ * check (a detail must fit within the sheet in some orientation). This is a
+ * non-blocking UX hint only — the AUTHORITATIVE check is backend command-side.
+ */
+export function validateSheetDimensions(
+  height: number | null | undefined,
+  width: number | null | undefined,
+  sheet: { name?: string; widthMm: number | null; heightMm: number | null } | null,
+): DimensionValidationResult {
+  if (!height || !width || !sheet || !sheet.widthMm || !sheet.heightMm) {
+    return { isValid: true };
+  }
+  const sheetMax = Math.max(sheet.widthMm, sheet.heightMm);
+  const sheetMin = Math.min(sheet.widthMm, sheet.heightMm);
+  const detailMax = Math.max(height, width);
+  const detailMin = Math.min(height, width);
+
+  if (detailMax > sheetMax || detailMin > sheetMin) {
+    return {
+      isValid: false,
+      errorMessage: `Размер детали ${detailMax}×${detailMin} мм не помещается на лист ${sheetMax}×${sheetMin} мм${sheet.name ? ` (${sheet.name})` : ''}`,
+    };
+  }
+  return { isValid: true };
+}
+
+/**
  * Генерирует человекочитаемое описание ограничений для материала
  */
 export function getMaterialDimensionDescription(material: MaterialInfo | null): string | null {

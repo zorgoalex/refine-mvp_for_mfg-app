@@ -470,6 +470,65 @@ describe('OrderQueryService', () => {
       paymentTypes: [],
     });
   });
+
+  it('omits sheetMaterialTypes for a caller without sheet_materials.view', async () => {
+    const response = createOrderFormDataResponse();
+    const service = new OrderQueryService({
+      reader: {
+        async listOrders() {
+          throw new Error('list should not be called');
+        },
+        async getOrderById() {
+          throw new Error('get should not be called');
+        },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
+        },
+        async getOrderFormData() {
+          return response;
+        },
+      },
+    });
+
+    // orders.view + finance but NOT sheet_materials.view (e.g. a worker scope).
+    const result = await service.getFormData({
+      currentUser: userWithPermissions('worker', ['orders.view', 'orders.view_financials']),
+    });
+    expect(result.sheetMaterialTypes).toBeUndefined();
+    // finance not masked here, so the rest is intact
+    expect(result.materials.length).toBeGreaterThan(0);
+  });
+
+  it('attaches sheetMaterialTypes for a caller with sheet_materials.view', async () => {
+    const response = createOrderFormDataResponse();
+    const service = new OrderQueryService({
+      reader: {
+        async listOrders() {
+          throw new Error('list should not be called');
+        },
+        async getOrderById() {
+          throw new Error('get should not be called');
+        },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
+        },
+        async getOrderFormData() {
+          return response;
+        },
+      },
+    });
+
+    const result = await service.getFormData({
+      currentUser: userWithPermissions('manager', [
+        'orders.view',
+        'orders.view_financials',
+        'sheet_materials.view',
+      ]),
+    });
+    expect(result.sheetMaterialTypes).toEqual([
+      { id: 20, name: 'МДФ 16 мм', widthMm: 2800, heightMm: 2070, isActive: true },
+    ]);
+  });
 });
 
 function currentUser(role: CurrentUser['role'] = 'manager'): CurrentUser {
@@ -554,6 +613,9 @@ function createOrderFormDataResponse(): OrderFormDataResponseDto {
     workshops: [{ id: 10, name: 'Workshop' }],
     employees: [{ id: 11, fullName: 'Employee' }],
     units: [{ id: 12, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
+    sheetMaterialTypes: [
+      { id: 20, name: 'МДФ 16 мм', widthMm: 2800, heightMm: 2070, isActive: true },
+    ],
   };
 }
 
