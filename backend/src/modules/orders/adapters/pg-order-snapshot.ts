@@ -413,20 +413,18 @@ async function importSnapshotInTransaction(
     sheetMaterialTypeId: snapshot.data.order.sheetMaterialTypeId ?? null,
     materialId: snapshot.data.order.materialId ?? null,
   };
-  const snapshotDetails: SheetValidationDetail[] = snapshot.data.details.map((d, i) => {
-    // detailId will be resolved from the import map if the detail already exists.
-    const mappedDetailId = storedSheet.detailSheetIds.find(
-      (sd) => sd.detailId === Number(d.sourceId),
-    )?.detailId;
-    return {
-      label: `details[${i}]`,
-      detailId: mappedDetailId,
-      sheetMaterialTypeId: d.sheetMaterialTypeId ?? null,
-      materialId: d.materialId ?? null,
-      height: d.height,
-      width: d.width,
-    };
-  });
+  // SP3 invariant 5 (no-flip / no-clear) on import: resolve each snapshot detail's LOCAL
+  // detail_id through the import map (order_import_entity_map) — the same resolution
+  // upsertOrderChildren uses — NOT by assuming source detail id == local detail id. With a
+  // remapped/cross-instance sourceId the raw match left detailId undefined, so an existing
+  // legacy detail was wrongly treated as new and could flip NULL→sheet on import.
+  const detailLocalIds = await localIdsFor(
+    tx,
+    source,
+    SNAPSHOT_ENTITY_TYPES.detail,
+    snapshot.data.details,
+  );
+  const snapshotDetails = buildSheetValidationDetails(snapshot.data.details, detailLocalIds);
 
   // Validate sheet references + eligibility/no-clear guards (same invariants as command path).
   await validateSheetReferences(tx, snapshotHeader, snapshotDetails);
@@ -1793,6 +1791,32 @@ async function upsertMap(
     `,
     [input.source, input.entityType, input.sourceId, input.localId, input.localOrderId, input.payloadHash],
   );
+}
+
+/**
+ * SP3: build the {@link SheetValidationDetail} list for the snapshot import guards. Each
+ * detail's existing LOCAL detail_id is resolved through the import map (sourceId → localId),
+ * NOT by assuming the source detail id equals the local detail id. A remapped/cross-instance
+ * sourceId that has no local mapping yields detailId=undefined (treated as a new row).
+ */
+export function buildSheetValidationDetails(
+  details: ReadonlyArray<{
+    sourceId: string;
+    sheetMaterialTypeId?: number | null;
+    materialId?: number | null;
+    height: number;
+    width: number;
+  }>,
+  detailLocalIds: Map<string, number>,
+): SheetValidationDetail[] {
+  return details.map((d, i) => ({
+    label: `details[${i}]`,
+    detailId: detailLocalIds.get(d.sourceId),
+    sheetMaterialTypeId: d.sheetMaterialTypeId ?? null,
+    materialId: d.materialId ?? null,
+    height: d.height,
+    width: d.width,
+  }));
 }
 
 async function localIdsFor<T extends { sourceId: string }>(

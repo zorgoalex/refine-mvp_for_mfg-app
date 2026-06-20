@@ -23,7 +23,9 @@ import {
   _testOnlyOrderHeaderInsertParams as insertParams,
   _testOnlyOrderHeaderUpdateParams as updateParams,
   _testOnlyDetailValues as detailValues,
+  buildSheetValidationDetails,
 } from './pg-order-snapshot';
+import { assertSheetEligibilityAndNoClear } from '../domain/sheet-order-validation';
 
 // ── Helper builders ────────────────────────────────────────────────────────
 
@@ -351,6 +353,57 @@ function minimalSnapshotWithSheet(sheetMaterialTypeId: number | null = null) {
     references: {},
   };
 }
+
+// ── buildSheetValidationDetails (SP3 no-flip on import, tier2 R2 finding 3) ──
+// The import no-flip/no-clear guard must resolve each snapshot detail's LOCAL detail_id
+// through the import map (sourceId → localId), NOT by assuming source id == local id. With a
+// remapped/cross-instance sourceId the old code left detailId undefined → an existing legacy
+// detail was treated as new and could flip NULL→sheet on import.
+describe('buildSheetValidationDetails — import detail identity resolution', () => {
+  it('resolves detailId from the import map even when sourceId != local detail_id', () => {
+    const map = new Map<string, number>([['SRC-9', 1]]); // source "SRC-9" maps to local detail 1
+    const result = buildSheetValidationDetails(
+      [{ sourceId: 'SRC-9', sheetMaterialTypeId: 7, materialId: null, height: 100, width: 100 }],
+      map,
+    );
+    expect(result[0].detailId).toBe(1);
+  });
+
+  it('leaves detailId undefined for an unmapped (brand-new) source detail', () => {
+    const result = buildSheetValidationDetails(
+      [{ sourceId: 'NEW-1', sheetMaterialTypeId: 7, materialId: null, height: 100, width: 100 }],
+      new Map(),
+    );
+    expect(result[0].detailId).toBeUndefined();
+  });
+
+  it('BLOCKS a NULL→sheet flip on import for a remapped existing legacy detail', () => {
+    // Local detail 1 is stored legacy (sheet id NULL). The snapshot detail has a DIFFERENT
+    // source id "SRC-9" that maps to local 1. With correct resolution the flip is caught.
+    const map = new Map<string, number>([['SRC-9', 1]]);
+    const details = buildSheetValidationDetails(
+      [{ sourceId: 'SRC-9', sheetMaterialTypeId: 7, materialId: null, height: 100, width: 100 }],
+      map,
+    );
+    let caught: unknown;
+    try {
+      assertSheetEligibilityAndNoClear({
+        eligible: true,
+        storedHeaderSheetId: null,
+        storedDetailSheetIds: [{ detailId: 1, sheetMaterialTypeId: null }],
+        header: { sheetMaterialTypeId: null, materialId: 5 },
+        details,
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect((caught as ApiError | undefined) ?? null).not.toBeNull();
+    const fields = (((caught as { details?: { errors?: Array<{ field: string }> } })?.details?.errors) ?? []).map(
+      (x) => x.field,
+    );
+    expect(fields).toContain('details[0].sheetMaterialTypeId');
+  });
+});
 
 describe('OrderSnapshotService — sheet_materials.view gate on import', () => {
   it('allows import of non-sheet snapshot even without sheet_materials.view', async () => {
