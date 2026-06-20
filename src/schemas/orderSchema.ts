@@ -53,6 +53,7 @@ export const orderHeaderSchema = z
 
     // Legacy fields (for compatibility)
     material_id: z.number().nullable().optional(),
+    sheet_material_type_id: z.number().nullable().optional(),
     milling_type_id: z.number().nullable().optional(),
     edge_type_id: z.number().nullable().optional(),
     film_id: z.number().nullable().optional(),
@@ -165,7 +166,10 @@ export const orderDetailSchema = z.object({
   area: z.number().min(0, "Площадь должна быть >= 0"),
 
   // Materials and processing
-  material_id: z.number().min(0, "Выберите материал"),
+  // A detail satisfies the material requirement with EITHER a legacy material
+  // OR a sheet material (SP3). Cross-field check in the superRefine below.
+  material_id: z.number().min(0, "Выберите материал").optional(),
+  sheet_material_type_id: z.number().nullable().optional(),
   milling_type_id: z.number().min(0, "Выберите тип фрезеровки"),
   edge_type_id: z.number().min(0, "Выберите тип кромки"),
   film_id: z.number().nullable().optional(),
@@ -203,6 +207,13 @@ export const orderDetailSchema = z.object({
   created_at: z.date().optional().or(z.string().optional()),
   updated_at: z.date().optional().or(z.string().optional()),
   temp_id: z.number().optional(),
+}).superRefine((d, ctx) => {
+  // A detail must carry EITHER a legacy material OR a sheet material (SP3).
+  const hasLegacy = typeof d.material_id === 'number' && d.material_id > 0;
+  const hasSheet = typeof d.sheet_material_type_id === 'number' && d.sheet_material_type_id > 0;
+  if (!hasLegacy && !hasSheet) {
+    ctx.addIssue({ code: 'custom', path: ['material_id'], message: 'Выберите материал или листовой материал' });
+  }
 });
 
 // ============================================================================

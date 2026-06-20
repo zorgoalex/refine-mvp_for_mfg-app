@@ -46,6 +46,7 @@ export interface Order {
   edge_type_id?: number | null;
   film_id?: number | null;
   material_id?: number | null;
+  sheet_material_type_id?: number | null;
 
   // File links
   link_cutting_file?: string | null;
@@ -94,6 +95,7 @@ export interface OrderDetail {
 
   // Materials and processing
   material_id: number;
+  sheet_material_type_id?: number | null;
   milling_type_id: number;
   edge_type_id: number;
   film_id?: number | null;
