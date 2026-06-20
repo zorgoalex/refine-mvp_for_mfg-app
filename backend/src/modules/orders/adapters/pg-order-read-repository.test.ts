@@ -183,6 +183,10 @@ describe('PgOrderReadRepository', () => {
     expect(referenceQueries.join('\n')).toContain('FROM payment_statuses');
     expect(referenceQueries.join('\n')).toContain('FROM sheet_material_types');
     expect(referenceQueries.join('\n')).not.toContain('payment_status_code');
+    // SP3 Task 10b: the form material dropdown never offers synthetic shadow rows.
+    expect(referenceQueries.find((query) => query.includes('FROM materials'))).toContain(
+      'is_sheet_shadow = false',
+    );
     // sheet_material_types is fetched WITHOUT an is_active filter (active+inactive),
     // so the is_active query count stays 11.
     expect(referenceQueries.filter((query) => query.includes('WHERE is_active = true'))).toHaveLength(

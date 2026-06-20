@@ -582,7 +582,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         `
         SELECT material_id AS id, material_name AS name, unit_id
         FROM materials
-        WHERE is_active = true
+        -- SP3 Task 10b: never offer synthetic sheet-shadow materials in the order
+        -- form's material dropdown (sheet materials are picked via their own field).
+        WHERE is_active = true AND is_sheet_shadow = false
         ORDER BY material_name ASC, material_id ASC
         `,
       ),

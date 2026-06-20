@@ -1646,6 +1646,18 @@ export const dataProvider = (_apiUrl: string) => {
         }
       }
 
+      // SP3 Task 10b: hide synthetic sheet-shadow materials from user-facing reads
+      // (the /materials catalog AND every useSelect({resource:'materials'}) picker),
+      // mirroring the is_active pattern. Internal callers may opt in by passing an
+      // explicit is_sheet_shadow filter. Save/read/export internals query materials
+      // directly by material_id (getOne / filtered IN), not via this default list.
+      if (resource === "materials") {
+        const hasShadowFilter = enhancedFilters.some((f: any) => f.field === "is_sheet_shadow");
+        if (!hasShadowFilter) {
+          enhancedFilters = [...enhancedFilters, { field: "is_sheet_shadow", operator: "eq", value: false }];
+        }
+      }
+
       const where = buildWhere(enhancedFilters);
       const selection = fieldsFor(resource);
       // For aggregate, remove leading comma from where clause
@@ -1728,6 +1740,13 @@ export const dataProvider = (_apiUrl: string) => {
         edited_by: _editedBy,
         created_at: _createdAt,
         updated_at: _updatedAt,
+        // SP3 Task 10b: backend-owned control columns must never be set through a
+        // legacy Hasura write (sheet write is backend-only, new-only). Stripped here
+        // like audit fields — defense-in-depth with the Hasura write-isolation perms.
+        sheet_eligible: _sheetEligible,
+        sheet_material_type_id: _sheetMaterialTypeId,
+        is_sheet_shadow: _isSheetShadow,
+        shadow_of_sheet_material_type_id: _shadowOf,
         ...restVars
       } = variables || {};
       // console.log('[dataProvider.create] after omitting PK:', restVars);
@@ -1801,6 +1820,12 @@ export const dataProvider = (_apiUrl: string) => {
         edited_by,
         created_at,
         updated_at,
+        // SP3 Task 10b: backend-owned control columns are never set via a legacy
+        // Hasura write (sheet write is backend-only). Stripped like audit fields.
+        sheet_eligible: _sheetEligibleU,
+        sheet_material_type_id: _sheetMaterialTypeIdU,
+        is_sheet_shadow: _isSheetShadowU,
+        shadow_of_sheet_material_type_id: _shadowOfU,
         ...rest
       } = variables || {};
       const payloadForUpdate = rest;
