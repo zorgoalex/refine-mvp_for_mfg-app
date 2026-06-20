@@ -292,6 +292,10 @@ async function applyMigration029(client: PoolClient): Promise<void> {
   await client.query(migration('029_order_sheet_material_type.sql'));
 }
 
+async function applyMigration030(client: PoolClient): Promise<void> {
+  await client.query(migration('030_order_detail_shadow_pairing_trigger.sql'));
+}
+
 async function getViewColumns(pool: Pool, viewName: string): Promise<string[]> {
   const result = await pool.query<{ column_name: string }>(
     `SELECT column_name FROM information_schema.columns
@@ -313,6 +317,7 @@ describeIntegration('Migration 029: order-side sheet material link (integration,
       await client.query(`SET search_path TO ${schemaName}`);
       await createSchema(client);
       await applyMigration029(client);
+      await applyMigration030(client);
     } finally {
       client.release();
     }
@@ -562,5 +567,90 @@ describeIntegration('Migration 029: order-side sheet material link (integration,
     } finally {
       client.release();
     }
+  });
+
+  // Migration 030: DB-boundary shadow-pairing trigger (tier2 critic finding 1). Proves a
+  // direct write (bypassing the backend command) cannot inject a shadow material_id with a
+  // null/mismatched sheet id, while legitimate legacy + sheet rows still insert.
+  describe('Migration 030: shadow-pairing trigger', () => {
+    let sheetId: number;
+    let otherSheetId: number;
+    let shadowId: number;
+    let legacyId: number;
+
+    beforeAll(async () => {
+      const client = await pool.connect();
+      try {
+        await client.query(`SET search_path TO ${schemaName}`);
+        const smt = await client.query<{ sheet_material_type_id: number }>(
+          `INSERT INTO sheet_material_types (name, width_mm, height_mm)
+           VALUES ('МДФ-030-ТЕСТ', 2800, 2070) RETURNING sheet_material_type_id`,
+        );
+        sheetId = smt.rows[0].sheet_material_type_id;
+        const smt2 = await client.query<{ sheet_material_type_id: number }>(
+          `INSERT INTO sheet_material_types (name, width_mm, height_mm)
+           VALUES ('МДФ-030-ДРУГОЙ', 2800, 2070) RETURNING sheet_material_type_id`,
+        );
+        otherSheetId = smt2.rows[0].sheet_material_type_id;
+        const shadow = await client.query<{ material_id: number }>(
+          `INSERT INTO materials (material_name, unit_id, is_sheet_shadow, shadow_of_sheet_material_type_id)
+           VALUES ('МДФ-030-ТЕСТ [лист]', 1, true, $1) RETURNING material_id`,
+          [sheetId],
+        );
+        shadowId = shadow.rows[0].material_id;
+        const legacy = await client.query<{ material_id: number }>(
+          `INSERT INTO materials (material_name, unit_id) VALUES ('ЛДСП-030-ТЕСТ', 1) RETURNING material_id`,
+        );
+        legacyId = legacy.rows[0].material_id;
+      } finally {
+        client.release();
+      }
+    });
+
+    async function insertDetail(materialId: number, sheetMaterialTypeId: number | null): Promise<void> {
+      const client = await pool.connect();
+      try {
+        await client.query(`SET search_path TO ${schemaName}`);
+        const ord = await client.query<{ order_id: number }>(
+          `INSERT INTO orders (order_name) VALUES ('Тест-030') RETURNING order_id`,
+        );
+        const orderId = ord.rows[0].order_id;
+        try {
+          await client.query(
+            `INSERT INTO order_details (order_id, detail_name, material_id, sheet_material_type_id)
+             VALUES ($1, 'Деталь-030', $2, $3)`,
+            [orderId, materialId, sheetMaterialTypeId],
+          );
+        } finally {
+          await client.query(`DELETE FROM order_details WHERE order_id = $1`, [orderId]);
+          await client.query(`DELETE FROM orders WHERE order_id = $1`, [orderId]);
+        }
+      } finally {
+        client.release();
+      }
+    }
+
+    it('allows a legacy detail (non-shadow material_id, NULL sheet id)', async () => {
+      await expect(insertDetail(legacyId, null)).resolves.toBeUndefined();
+    });
+
+    it('allows a sheet detail whose shadow material_id matches its sheet id', async () => {
+      await expect(insertDetail(shadowId, sheetId)).resolves.toBeUndefined();
+    });
+
+    it('BLOCKS a shadow material_id with a NULL sheet id (injection)', async () => {
+      await expect(insertDetail(shadowId, null)).rejects.toThrow(/hidden sheet shadow/);
+    });
+
+    it('BLOCKS a shadow material_id with a DIFFERENT sheet id', async () => {
+      await expect(insertDetail(shadowId, otherSheetId)).rejects.toThrow(/hidden sheet shadow/);
+    });
+
+    afterAll(async () => {
+      await pool.query(`DELETE FROM materials WHERE material_id = ANY($1::bigint[])`, [[shadowId, legacyId]]);
+      await pool.query(`DELETE FROM sheet_material_types WHERE sheet_material_type_id = ANY($1::bigint[])`, [
+        [sheetId, otherSheetId],
+      ]);
+    });
   });
 });
