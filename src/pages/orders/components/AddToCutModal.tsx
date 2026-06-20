@@ -56,6 +56,15 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
       const selectable = selectableDetailIds(eligible.details);
       const finalIds = detailMode ? restrictDetailIds(selectable, detailIds!) : selectable;
       if (finalIds.length === 0) {
+        // Don't leave an empty draft behind: a job created above for a brand-new
+        // raskroi must be rolled back (archived) when nothing eligible was added.
+        if (mode === 'new') {
+          try {
+            await cutApi.archive(job.cutJobId, job.version);
+          } catch {
+            /* best-effort cleanup; the warning below is the user-facing signal */
+          }
+        }
         message.warning(noSheetSpecMessage(eligible.noSheetSpecCount) ?? 'Нет подходящих деталей для раскроя');
         return;
       }

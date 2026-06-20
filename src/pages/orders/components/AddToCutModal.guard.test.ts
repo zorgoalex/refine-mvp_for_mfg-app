@@ -39,4 +39,8 @@ describe('AddToCutModal detail-level mode', () => {
     expect(modalSrc).toContain('detailIds');
     expect(modalSrc).toContain('restrictDetailIds');
   });
+
+  it('rolls back an empty new draft via archive (no orphan job)', () => {
+    expect(modalSrc).toContain('cutApi.archive');
+  });
 });
