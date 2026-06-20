@@ -1,3 +1,4 @@
+import JSZip from 'jszip';
 import { ApiError } from '../../../common/errors/api-error';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
@@ -55,13 +56,16 @@ export class OrderSnapshotService {
   importOrderSnapshotBatch(
     command: ImportOrderSnapshotBatchCommand,
   ): Promise<ImportOrderSnapshotBatchResponseDto> {
+    // Sync permission throws first (kept synchronous so callers see them immediately).
     this.require(command, 'orders.import');
     this.requireFinanceImportPermissions(command);
-    // Batch: we cannot pre-read stored state here, so we gate on incoming sheet ids.
-    // The adapter-tx will enforce sheet guards per-order during the import.
-    // If ANY snapshot in the batch contains a sheet id, require sheet_materials.view.
-    // (ZIP contents are not yet parsed here; the per-snapshot gate in the adapter catches the rest.)
-    return this.ports.snapshots.importOrderSnapshotBatch(command);
+    // The adapter batch dispatches to its own internal importOrderSnapshot, which does NOT
+    // re-run the service permission gate, so the sheet_materials.view check MUST be enforced
+    // here before dispatch — otherwise a batch ZIP could import sheet-bearing orders without
+    // the permission a single-file import requires. (Async because it parses the ZIP.)
+    return this.requireSheetMaterialPermissionForBatch(command).then(() =>
+      this.ports.snapshots.importOrderSnapshotBatch(command),
+    );
   }
 
   private require(
@@ -119,6 +123,42 @@ export class OrderSnapshotService {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: ['sheet_materials.view'],
       });
+    }
+  }
+
+  /**
+   * Batch sheet gate: pre-scan the ZIP members so a batch import enforces `sheet_materials.view`
+   * exactly like the single-file path (the adapter batch loops to its own internal import and
+   * never re-applies this service-layer gate). If ANY member's order header or detail carries a
+   * sheet_material_type_id, require the permission before any DB write. Malformed members are
+   * skipped here and surface as per-file errors during the adapter import.
+   */
+  private async requireSheetMaterialPermissionForBatch(
+    command: ImportOrderSnapshotBatchCommand,
+  ): Promise<void> {
+    const zip = await JSZip.loadAsync(Buffer.from(command.zipBase64, 'base64'));
+    const files = Object.values(zip.files).filter(
+      (file) => !file.dir && file.name.toLowerCase().endsWith('.json'),
+    );
+    for (const file of files) {
+      let parsed: { data?: { order?: { sheetMaterialTypeId?: number | null }; details?: Array<{ sheetMaterialTypeId?: number | null }> } };
+      try {
+        parsed = JSON.parse(await file.async('string'));
+      } catch {
+        continue; // malformed member → adapter reports it per-file; not a gate bypass
+      }
+      const items: Array<{ sheetMaterialTypeId?: number | null }> = [
+        ...(parsed.data?.order ? [parsed.data.order] : []),
+        ...(parsed.data?.details ?? []),
+      ];
+      if (items.some((item) => item.sheetMaterialTypeId != null)) {
+        if (!this.permissions.canUser(command.currentUser, 'sheet_materials.view')) {
+          throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+            requiredPermissions: ['sheet_materials.view'],
+          });
+        }
+        return; // one sheet-bearing member is enough to require the permission
+      }
     }
   }
 }

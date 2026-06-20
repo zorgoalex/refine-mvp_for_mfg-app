@@ -9,6 +9,7 @@
  *  - OrderSnapshotService.importOrderSnapshot gates on sheet_materials.view when
  *    the incoming snapshot payload contains a sheetMaterialTypeId
  */
+import JSZip from 'jszip';
 import { describe, expect, it, vi } from 'vitest';
 import type { NormalizedSaveOrderHeaderDto, OrderTotalsDto, CalculatedOrderDetailDto } from '../dto/save-order.dto';
 import type { OrderSnapshotPort } from '../application/order-snapshot.types';
@@ -451,7 +452,7 @@ describe('OrderSnapshotService — sheet_materials.view gate on import', () => {
     expect(snapshots.importOrderSnapshot).toHaveBeenCalled();
   });
 
-  it('gate checks header sheetMaterialTypeId in snapshot.data.order', async () => {
+  it('gate checks header sheetMaterialTypeId in snapshot.data.order (single)', async () => {
     const snapshots = fakeSnapshots();
     const user = makeUser({});
     const service = new OrderSnapshotService({
@@ -463,5 +464,61 @@ describe('OrderSnapshotService — sheet_materials.view gate on import', () => {
     let caught: unknown;
     try { await service.importOrderSnapshot({ currentUser: user, snapshot }); } catch (e) { caught = e; }
     expect((caught as ApiError)?.code).toBe('PERMISSION_DENIED');
+  });
+});
+
+// ── OrderSnapshotService — BATCH sheet_materials.view gate (tier2 R3 finding 1) ──
+// The batch path must enforce sheet_materials.view exactly like single-file import; the
+// adapter batch loops to its own internal import and never re-applies the service gate.
+async function zipBase64Of(...snapshots: unknown[]): Promise<string> {
+  const zip = new JSZip();
+  snapshots.forEach((s, i) => zip.file(`order-${i}.erp-order.json`, JSON.stringify(s)));
+  const buf = await zip.generateAsync({ type: 'nodebuffer' });
+  return buf.toString('base64');
+}
+
+describe('OrderSnapshotService — sheet_materials.view gate on BATCH import', () => {
+  it('denies a batch containing a sheet-bearing snapshot without sheet_materials.view', async () => {
+    const snapshots = fakeSnapshots();
+    const service = new OrderSnapshotService({
+      snapshots,
+      permissions: mockPermissions(financeImportAllow(false)),
+    });
+    const zipBase64 = await zipBase64Of(minimalSnapshotWithSheet(null), minimalSnapshotWithSheet(5));
+    let caught: unknown;
+    try {
+      await service.importOrderSnapshotBatch({ currentUser: makeUser({}), zipBase64 });
+    } catch (e) {
+      caught = e;
+    }
+    expect((caught as ApiError)?.code).toBe('PERMISSION_DENIED');
+    expect((caught as ApiError)?.details).toMatchObject({ requiredPermissions: ['sheet_materials.view'] });
+    expect(snapshots.importOrderSnapshotBatch).not.toHaveBeenCalled();
+  });
+
+  it('allows a sheet-bearing batch when the user has sheet_materials.view', async () => {
+    const snapshots = fakeSnapshots();
+    const service = new OrderSnapshotService({
+      snapshots,
+      permissions: mockPermissions(financeImportAllow(true)),
+    });
+    const zipBase64 = await zipBase64Of(minimalSnapshotWithSheet(5));
+    await expect(
+      service.importOrderSnapshotBatch({ currentUser: makeUser({}), zipBase64 }),
+    ).resolves.toMatchObject({ success: true });
+    expect(snapshots.importOrderSnapshotBatch).toHaveBeenCalled();
+  });
+
+  it('allows a non-sheet batch without sheet_materials.view', async () => {
+    const snapshots = fakeSnapshots();
+    const service = new OrderSnapshotService({
+      snapshots,
+      permissions: mockPermissions(financeImportAllow(false)),
+    });
+    const zipBase64 = await zipBase64Of(minimalSnapshotWithSheet(null), minimalSnapshotWithSheet(null));
+    await expect(
+      service.importOrderSnapshotBatch({ currentUser: makeUser({}), zipBase64 }),
+    ).resolves.toMatchObject({ success: true });
+    expect(snapshots.importOrderSnapshotBatch).toHaveBeenCalled();
   });
 });
