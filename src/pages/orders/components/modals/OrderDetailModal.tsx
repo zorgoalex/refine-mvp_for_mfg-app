@@ -55,15 +55,22 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const { header } = useOrderFormStore();
   const sheetMaterials = useSheetMaterialOptions();
   const sheetEligible = header.sheet_eligible !== false;
-  const showSheetPicker = sheetMaterials.enabled && sheetEligible;
+  // SP3 invariant 5 (detail-level new-only): an EXISTING detail saved as legacy
+  // (persisted detail_id, no stored sheet id) must not flip to a sheet detail. Hide the
+  // picker for such rows so the UI never offers a choice the backend rejects with 422.
+  // Brand-new rows (no detail_id) and existing sheet rows still show the picker.
+  const isExistingDetail = typeof detail?.detail_id === 'number' && detail.detail_id > 0;
+  const detailHasStoredSheetId =
+    typeof detail?.sheet_material_type_id === 'number' && detail.sheet_material_type_id > 0;
+  const isExistingLegacyDetail = isExistingDetail && !detailHasStoredSheetId;
+  const showSheetPicker = sheetMaterials.enabled && sheetEligible && !isExistingLegacyDetail;
   const selectedSheetId = Form.useWatch('sheet_material_type_id', form) as
     | number
     | null
     | undefined;
   const hasSheetSelected = typeof selectedSheetId === 'number' && selectedSheetId > 0;
   // A row that already carries a STORED sheet id cannot revert to legacy (no-clear).
-  const hasStoredSheetId =
-    typeof detail?.sheet_material_type_id === 'number' && detail.sheet_material_type_id > 0;
+  const hasStoredSheetId = detailHasStoredSheetId;
 
   // Load reference data with search
   const { selectProps: materialSelectProps } = useSelect({

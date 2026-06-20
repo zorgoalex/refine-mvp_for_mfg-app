@@ -136,4 +136,32 @@ describe('assertSheetEligibilityAndNoClear', () => {
       }),
     ).not.toThrow();
   });
+
+  // SP3 invariant 5 (detail-level new-only): an EXISTING detail saved as legacy
+  // (stored sheet id NULL) must not be flipped to a sheet detail, even on an eligible
+  // order — it would strand a shadow bridge on a legacy-era row and break rollback/parity.
+  it('forbids flipping an existing legacy detail NULL→sheet (matched by detailId)', () => {
+    const fields = errorFields(() =>
+      assertSheetEligibilityAndNoClear({
+        eligible: true,
+        storedHeaderSheetId: null,
+        storedDetailSheetIds: [{ detailId: 1, sheetMaterialTypeId: null }],
+        header: { sheetMaterialTypeId: null, materialId: 5 },
+        details: [detail({ detailId: 1, sheetMaterialTypeId: 7 })],
+      }),
+    );
+    expect(fields).toContain('details[0].sheetMaterialTypeId');
+  });
+
+  it('still allows a brand-new (no detailId) detail NULL→sheet on an eligible order', () => {
+    expect(() =>
+      assertSheetEligibilityAndNoClear({
+        eligible: true,
+        storedHeaderSheetId: null,
+        storedDetailSheetIds: [],
+        header: { sheetMaterialTypeId: null, materialId: null },
+        details: [detail({ detailId: undefined, sheetMaterialTypeId: 7 })],
+      }),
+    ).not.toThrow();
+  });
 });

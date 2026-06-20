@@ -926,7 +926,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           width: 120,
           align: 'center' as const,
           render: (sheetId: number | null | undefined, record: OrderDetail) =>
-            isEditing(record) ? (
+            // SP3 invariant 5: an EXISTING detail saved as legacy (persisted detail_id,
+            // no stored sheet id) cannot flip to a sheet detail — show it read-only so the
+            // inline picker is never offered. New rows + existing sheet rows still edit.
+            isEditing(record) &&
+            !(
+              typeof record.detail_id === 'number' &&
+              record.detail_id > 0 &&
+              !(typeof record.sheet_material_type_id === 'number' &&
+                record.sheet_material_type_id > 0)
+            ) ? (
               <Form.Item name="sheet_material_type_id" style={{ margin: 0, padding: '0 4px' }}>
                 <Select
                   options={toSheetSelectOptions(sheetMaterials.options, watchedSheetId)}

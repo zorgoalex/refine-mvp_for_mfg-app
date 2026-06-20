@@ -32,6 +32,8 @@ export interface StoredSheetDetail {
 const NEW_ONLY_MESSAGE = 'Листовые материалы доступны только для заказов, созданных в SP3';
 const NO_CLEAR_MESSAGE =
   'Нельзя убрать листовой материал из позиции в SP3 (возврат к обычному материалу вне области)';
+const NO_FLIP_MESSAGE =
+  'Нельзя перевести существующую обычную позицию на листовой материал (доступно только для новых позиций)';
 
 export function collectSheetTypeIds(
   header: SheetValidationHeader,
@@ -103,9 +105,16 @@ export function assertSheetEligibilityAndNoClear(input: {
   }
   input.details.forEach((detail) => {
     if (detail.detailId == null) return;
-    const storedSheetId = storedById.get(detail.detailId);
+    if (!storedById.has(detail.detailId)) return;
+    const storedSheetId = storedById.get(detail.detailId) ?? null;
     if (storedSheetId != null && detail.sheetMaterialTypeId == null) {
       errors.push({ field: `${detail.label}.sheetMaterialTypeId`, message: NO_CLEAR_MESSAGE });
+    }
+    // NO-FLIP (detail-level new-only): an existing detail stored as legacy (NULL) must not
+    // become a sheet detail. Brand-new rows (no detailId, or detailId absent from stored)
+    // may set a sheet id freely on an eligible order.
+    if (storedSheetId == null && detail.sheetMaterialTypeId != null) {
+      errors.push({ field: `${detail.label}.sheetMaterialTypeId`, message: NO_FLIP_MESSAGE });
     }
   });
 
