@@ -115,6 +115,19 @@ services:
       - traefik.http.routers.twenty.entrypoints=websecure
       - traefik.http.routers.twenty.tls.certresolver=letsencrypt
       - traefik.http.services.twenty.loadbalancer.server.port=3000
+      # gzip/brotli for the heavy SPA bundle (~2.7MB → ~0.6MB)
+      - traefik.http.middlewares.twenty-compress.compress=true
+      - traefik.http.routers.twenty.middlewares=twenty-compress
+      # Hashed build assets (/assets/*) are immutable; cache them forever so the
+      # SPA bundle is fetched once, not re-validated on every visit (Twenty serves
+      # them with max-age=0). index.html stays uncached so new hashes are picked up.
+      - traefik.http.middlewares.twenty-assets-cache.headers.customresponseheaders.Cache-Control=public, max-age=31536000, immutable
+      - traefik.http.routers.twenty-assets.rule=Host(`${TWENTY_FQDN:?set TWENTY_FQDN}`) && PathPrefix(`/assets`)
+      - traefik.http.routers.twenty-assets.entrypoints=websecure
+      - traefik.http.routers.twenty-assets.tls.certresolver=letsencrypt
+      - traefik.http.routers.twenty-assets.service=twenty
+      - traefik.http.routers.twenty-assets.priority=100
+      - traefik.http.routers.twenty-assets.middlewares=twenty-compress,twenty-assets-cache
     networks:
       - back
       - edge
