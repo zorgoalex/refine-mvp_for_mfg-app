@@ -86,6 +86,14 @@ test.describe('Order UI full form coverage', () => {
         await detailDialog.locator('#width').fill('410');
         await detailDialog.locator('#quantity').fill('2');
         await selectAntdOption(page, formItem(detailDialog, 'Материал'), 'МДФ 16мм');
+        // SP3: also exercise the "Листовой материал" sheet picker when it is rendered
+        // (only post-operator-window: backend write + sheet_materials.view +
+        // sheetMaterialsReads). Selecting a sheet supersedes the legacy material for
+        // this detail (Variant A). Guarded no-op pre-window.
+        const sheetDetailMaterial = await trySelectSheetMaterial(page, detailDialog);
+        if (sheetDetailMaterial) {
+            await screenshot(page, testInfo, 'detail-sheet-material');
+        }
         await selectAntdOption(page, formItem(detailDialog, 'Пленка'));
         await selectAntdOption(page, formItem(detailDialog, 'Тип фрезеровки'), 'модерн');
         await selectAntdOption(page, formItem(detailDialog, 'Тип обката'), 'р-1');
@@ -122,6 +130,8 @@ test.describe('Order UI full form coverage', () => {
         await clickOrderTab(orderDialog, 'Дополнительно');
         await orderDialog.getByText('Legacy поля (для совместимости)').click();
         await selectAntdOption(page, formItem(orderDialog, 'Материал'), 'МДФ 16мм');
+        // SP3: mirror the sheet picker on the order header when rendered (post-window).
+        const sheetHeaderMaterial = await trySelectSheetMaterial(page, orderDialog);
         await selectAntdOption(page, formItem(orderDialog, 'Тип фрезеровки'), 'модерн');
         await selectAntdOption(page, formItem(orderDialog, 'Тип кромки'));
         await selectAntdOption(page, formItem(orderDialog, 'Пленка'));
@@ -163,6 +173,25 @@ test.describe('Order UI full form coverage', () => {
         await page.getByRole('button', { name: 'Просмотр' }).click();
         await page.waitForURL(new RegExp(`/orders/show/${orderId}`), { timeout: 30000 });
         await verifyShowPage(page, testInfo, orderId, orderName, note, paymentNote);
+
+        // SP3: if the sheet picker was exercised (post-operator-window), the saved
+        // order must DISPLAY the server-resolved sheet name on the show page and the
+        // sheet picker must round-trip on re-open. Pre-window this is a documented
+        // skip (the picker was absent, so both vars are null).
+        if (sheetDetailMaterial || sheetHeaderMaterial) {
+            const sheetName = (sheetDetailMaterial ?? sheetHeaderMaterial) as string;
+            await expect(page.getByText(sheetName, { exact: false }).first()).toBeVisible({ timeout: 30000 });
+            await screenshot(page, testInfo, 'show-sheet-material');
+            await page.goto(`${frontendUrl}/orders/edit/${orderId}`, { waitUntil: 'domcontentloaded' });
+            await expect(page.getByText(orderName, { exact: true }).first()).toBeVisible({ timeout: 30000 });
+            await expect(page.getByText(sheetName, { exact: false }).first()).toBeVisible({ timeout: 30000 });
+        } else {
+            testInfo.annotations.push({
+                type: 'skip-reason',
+                description:
+                    'SP3 sheet picker not rendered — requires operator window (migration 029 + Hasura metadata + VITE_SHEET_MATERIALS_READS/backend write/sheet_materials.view). Sheet path deferred to post-cutover canary.',
+            });
+        }
 
         await page.goto(`${frontendUrl}/orders`, { waitUntil: 'domcontentloaded' });
         await expect(page.getByText(orderName, { exact: true }).first()).toBeVisible({ timeout: 30000 });
@@ -444,6 +473,28 @@ async function selectAntdOption(page: Page, item: Locator, optionText?: string) 
         : dropdown.locator('.ant-select-item-option:not(.ant-select-item-option-disabled)').first();
     await expect(option).toBeVisible({ timeout: 15000 });
     await option.click();
+}
+
+// SP3: select the first available "Листовой материал" (sheet) option in a scope,
+// returning its label. Returns null when the picker is not rendered — it only
+// renders post-operator-window (backend write + sheet_materials.view +
+// sheetMaterialsReads / migration 029 Hasura metadata). Guarded so the durable
+// coverage spec stays green both before and after the SP3 cutover.
+async function trySelectSheetMaterial(page: Page, scope: Locator): Promise<string | null> {
+    const item = formItem(scope, 'Листовой материал');
+    if ((await item.count()) === 0) return null;
+    const select = item.locator('.ant-select').first();
+    if ((await select.count()) === 0) return null;
+    await select.click();
+    const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
+    const option = dropdown.locator('.ant-select-item-option:not(.ant-select-item-option-disabled)').first();
+    if ((await option.count()) === 0) {
+        await page.keyboard.press('Escape');
+        return null;
+    }
+    const label = (await option.innerText()).trim();
+    await option.click();
+    return label || null;
 }
 
 async function fillNumber(item: Locator, value: string) {
