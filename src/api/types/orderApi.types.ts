@@ -198,6 +198,7 @@ export interface SaveOrderHeaderDto {
   managerId?: number | null;
 
   materialId?: number | null;
+  sheetMaterialTypeId?: number | null;
   millingTypeId?: number | null;
   edgeTypeId?: number | null;
   filmId?: number | null;
@@ -222,7 +223,11 @@ export interface SaveOrderDetailDto {
   width: number;
   quantity: number;
 
+  // SP3: a detail carries EITHER a legacy material OR a sheet material. When a
+  // sheet material is set the backend authoritatively resolves materialId (shadow
+  // row), so the FE may send materialId 0/omitted for a sheet-only detail.
   materialId: number;
+  sheetMaterialTypeId?: number | null;
   millingTypeId: number;
   edgeTypeId: number;
   filmId?: number | null;
@@ -354,6 +359,7 @@ export interface OrderHeaderDto {
   discount?: number | null;
   surcharge?: number | null;
   materialId?: number | null;
+  sheetMaterialTypeId?: number | null;
   millingTypeId?: number | null;
   edgeTypeId?: number | null;
   filmId?: number | null;
@@ -381,6 +387,7 @@ export interface OrderDetailDto {
   quantity: number;
   area?: number | null;
   materialId: number;
+  sheetMaterialTypeId?: number | null;
   millingTypeId: number;
   edgeTypeId: number;
   filmId?: number | null;

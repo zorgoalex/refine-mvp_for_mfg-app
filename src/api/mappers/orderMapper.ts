@@ -90,6 +90,7 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
       managerId: optionalNumber(header.manager_id),
 
       materialId: optionalNumber(header.material_id),
+      sheetMaterialTypeId: optionalNumber(header.sheet_material_type_id),
       millingTypeId: optionalNumber(header.milling_type_id),
       edgeTypeId: optionalNumber(header.edge_type_id),
       filmId: optionalNumber(header.film_id),
@@ -160,6 +161,7 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     manager_id: optionalNumber(order.header.managerId),
 
     material_id: optionalNumber(order.header.materialId),
+    sheet_material_type_id: optionalNumber(order.header.sheetMaterialTypeId),
     milling_type_id: optionalNumber(order.header.millingTypeId),
     edge_type_id: optionalNumber(order.header.edgeTypeId),
     film_id: optionalNumber(order.header.filmId),
@@ -349,7 +351,13 @@ function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
       width: requiredNumber(detail.width, 'detail.width'),
       quantity: requiredNumber(detail.quantity, 'detail.quantity'),
 
-      materialId: requiredNumber(detail.material_id, 'detail.material_id'),
+      // SP3: a sheet-only detail may have no legacy material_id — the backend
+      // resolves the shadow materialId authoritatively. Emit 0 in that case; a
+      // legacy detail still requires a real material_id.
+      materialId: isSheetDetail(detail)
+        ? (optionalNumber(detail.material_id) ?? 0)
+        : requiredNumber(detail.material_id, 'detail.material_id'),
+      sheetMaterialTypeId: optionalNumber(detail.sheet_material_type_id),
       millingTypeId: requiredNumber(detail.milling_type_id, 'detail.milling_type_id'),
       edgeTypeId: requiredNumber(detail.edge_type_id, 'detail.edge_type_id'),
       filmId: optionalNumber(detail.film_id),
@@ -458,6 +466,7 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     quantity: detail.quantity,
     area: detail.area ?? calculateArea(detail.height, detail.width, detail.quantity),
     material_id: detail.materialId,
+    sheet_material_type_id: detail.sheetMaterialTypeId ?? null,
     milling_type_id: detail.millingTypeId,
     edge_type_id: detail.edgeTypeId,
     film_id: detail.filmId ?? null,
@@ -567,6 +576,11 @@ function normalizeDeletedIds(ids?: number[]): number[] {
     .filter((id) => Number.isInteger(id) && id > 0);
 
   return Array.from(new Set(normalized));
+}
+
+function isSheetDetail(detail: OrderDetail): boolean {
+  const sheetId = optionalNumber(detail.sheet_material_type_id);
+  return sheetId !== null && sheetId > 0;
 }
 
 function isNewEmptyDetail(detail: OrderDetail): boolean {
