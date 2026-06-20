@@ -204,6 +204,12 @@ test.describe('Order UI full form coverage', () => {
             const addToCut = page.getByRole('button', { name: /Добавить выбранные в раскрой/ });
             await expect(addToCut).toBeEnabled({ timeout: 30000 });
             await screenshot(page, testInfo, 'show-cut-detail-picker');
+            await addToCut.click();
+            const cutModal = page.getByRole('dialog').filter({ hasText: /Добавить детали в раскрой/ });
+            await expect(cutModal).toBeVisible({ timeout: 30000 });
+            await screenshot(page, testInfo, 'show-cut-modal-detail-mode');
+            await cutModal.getByRole('button', { name: 'Отмена' }).click();
+            await expect(cutModal).toBeHidden({ timeout: 30000 });
         } else {
             testInfo.annotations.push({
                 type: 'skip-reason',

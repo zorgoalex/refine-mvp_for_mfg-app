@@ -150,7 +150,8 @@ export const CutPage: React.FC = () => {
     async (target: CutJobDto) => {
       setBusy(true);
       try {
-        await cutApi.archive(target.cutJobId, target.version);
+        const fresh = await cutApi.get(target.cutJobId);
+        await cutApi.archive(fresh.cutJobId, fresh.version);
         message.success('Раскрой архивирован');
         if (job?.cutJobId === target.cutJobId) {
           setJob(null);
@@ -177,7 +178,7 @@ export const CutPage: React.FC = () => {
       setEligible(null);
       setSelected([]);
       message.success('Раскрой создан');
-      void loadJobs();
+      await loadJobs();
     } catch (error) {
       if (error && (error as { errorFields?: unknown }).errorFields) return; // antd validation
       handleError(error, 'Не удалось создать раскрой');
@@ -208,7 +209,7 @@ export const CutPage: React.FC = () => {
       const updated = await cutApi.addItems(job.cutJobId, { detailIds: selected, version: job.version });
       setJob(updated);
       message.success('Детали добавлены в раскрой');
-      void loadJobs();
+      await loadJobs();
     } catch (error) {
       handleError(error, 'Не удалось добавить детали');
     } finally {
@@ -224,7 +225,7 @@ export const CutPage: React.FC = () => {
       setJob(calculated);
       setSheetImages({});
       message.success('Раскрой рассчитан');
-      void loadJobs();
+      await loadJobs();
     } catch (error) {
       handleError(error, 'Не удалось рассчитать раскрой');
     } finally {
