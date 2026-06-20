@@ -5,8 +5,10 @@ import {
   buildFlatMenuItems,
   buildTopMenuItems,
   computeSelectedKey,
+  makeCrmOpener,
   resolveCalendarRoute,
   resolveOrdersRoute,
+  CRM_WINDOW_NAME,
 } from './siderMenuItems';
 
 function makeResource(name: string, list: string, label?: string): IResourceItem {
@@ -281,5 +283,47 @@ describe('buildTopMenuItems', () => {
       openExternal: () => {},
     });
     expect(items.map((i) => (i as { key: string }).key)).toEqual(['orders_view', 'crm']);
+  });
+});
+
+describe('makeCrmOpener', () => {
+  const URL = 'https://crm-test.mebelkz.app';
+
+  it('opens a named tab on the first call', () => {
+    const win = { open: vi.fn().mockReturnValue({ closed: false, focus: vi.fn() }) };
+    const open = makeCrmOpener(() => win);
+    open(URL);
+    expect(win.open).toHaveBeenCalledWith(URL, CRM_WINDOW_NAME);
+  });
+
+  it('FOCUSES the existing tab on repeat calls instead of re-navigating (no reload)', () => {
+    const focus = vi.fn();
+    const tab = { closed: false, focus };
+    const win = { open: vi.fn().mockReturnValue(tab) };
+    const open = makeCrmOpener(() => win);
+
+    open(URL); // first: opens
+    open(URL); // repeat: must focus, NOT open again
+    open(URL);
+
+    expect(win.open).toHaveBeenCalledTimes(1);
+    expect(focus).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens a fresh tab again after the user closed it', () => {
+    const tab = { closed: false, focus: vi.fn() };
+    const win = { open: vi.fn().mockReturnValue(tab) };
+    const open = makeCrmOpener(() => win);
+
+    open(URL);
+    tab.closed = true; // user closed the CRM tab
+    open(URL);
+
+    expect(win.open).toHaveBeenCalledTimes(2);
+  });
+
+  it('no-ops when there is no window (SSR/tests)', () => {
+    const open = makeCrmOpener(() => undefined);
+    expect(() => open(URL)).not.toThrow();
   });
 });

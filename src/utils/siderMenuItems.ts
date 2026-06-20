@@ -48,20 +48,49 @@ export interface UseSiderMenuItemsInput {
 }
 
 /**
- * Stable target name so repeat clicks REUSE (and focus) the same CRM tab
- * instead of spawning a new one each time. We deliberately do NOT pass
- * `noopener`/`noreferrer`: those force every open into a fresh browsing-context
- * group, which defeats name-based reuse (the cause of the "new tab every click"
- * bug). Twenty is a trusted first-party target, so the retained `window.opener`
- * is an acceptable trade for a single, warm, reused CRM tab.
+ * Stable target name so the CRM tab is reused instead of spawning a new one.
+ * We deliberately do NOT pass `noopener`/`noreferrer`: those force every open
+ * into a fresh browsing-context group, which defeats name-based reuse. Twenty
+ * is a trusted first-party target, so the retained `window.opener` is acceptable.
  */
 export const CRM_WINDOW_NAME = 'erpCrmWindow';
 
-function defaultOpenExternal(url: string): void {
-  if (typeof window !== 'undefined') {
-    window.open(url, CRM_WINDOW_NAME);
-  }
+/** Minimal window surface used by the opener (eases testing). */
+interface OpenerWindow {
+  open(url: string, target: string): WindowProxyLike | null;
 }
+interface WindowProxyLike {
+  closed: boolean;
+  focus(): void;
+}
+
+/**
+ * Build a CRM opener that keeps ONE warm tab.
+ *
+ * Calling `window.open(url, name)` with a URL re-navigates (reloads) an existing
+ * named tab every time — the SPA blanks and refetches, costing seconds. So we
+ * retain a reference to the opened window and, while it is still open, just
+ * `focus()` it WITHOUT passing a URL (no reload). We only open a fresh tab when
+ * none exists yet or the user closed it. The reference lives in module scope and
+ * survives ERP's in-app route changes (it is a single-page app).
+ */
+export function makeCrmOpener(
+  getWindow: () => OpenerWindow | undefined = () =>
+    (typeof window !== 'undefined' ? (window as unknown as OpenerWindow) : undefined),
+): (url: string) => void {
+  let ref: WindowProxyLike | null = null;
+  return (url: string) => {
+    const w = getWindow();
+    if (!w) return;
+    if (ref && !ref.closed) {
+      ref.focus(); // reuse the warm tab — do NOT re-navigate
+      return;
+    }
+    ref = w.open(url, CRM_WINDOW_NAME);
+  };
+}
+
+const defaultOpenExternal = makeCrmOpener();
 
 /**
  * Pure helper: build the top menu items (Orders, Calendar, and an optional
