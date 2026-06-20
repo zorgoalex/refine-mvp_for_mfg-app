@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUT_JOB_STATUS_FILTER_ALL,
+  cutJobCounts,
+  cutJobSourceLabel,
+  cutJobStatusLabel,
+  filterJobsByStatus,
   formatGroupSummary,
   noSheetSpecMessage,
   parseIdCsv,
@@ -55,5 +60,35 @@ describe('cutPageHelpers', () => {
     await expect(
       pollPdf(async () => ({ pending: true }), { maxAttempts: 2, delayMs: 1, sleep: async () => {} }),
     ).rejects.toThrow(/PDF/);
+  });
+
+  it('maps cut job status codes to Russian labels, passing unknown through', () => {
+    expect(cutJobStatusLabel('draft')).toBe('Черновик');
+    expect(cutJobStatusLabel('ready')).toBe('Готов');
+    expect(cutJobStatusLabel('archived')).toBe('Архив');
+    expect(cutJobStatusLabel('weird')).toBe('weird');
+  });
+
+  it('maps cut job source codes to Russian labels, passing unknown through', () => {
+    expect(cutJobSourceLabel('manual')).toBe('Ручной');
+    expect(cutJobSourceLabel('api')).toBe('API');
+    expect(cutJobSourceLabel('other')).toBe('other');
+  });
+
+  it('filters jobs by status, with "all" returning a copy of the list', () => {
+    const jobs = [
+      { status: 'draft' },
+      { status: 'ready' },
+      { status: 'draft' },
+    ];
+    expect(filterJobsByStatus(jobs, 'draft')).toEqual([{ status: 'draft' }, { status: 'draft' }]);
+    expect(filterJobsByStatus(jobs, CUT_JOB_STATUS_FILTER_ALL)).toEqual(jobs);
+    expect(filterJobsByStatus(jobs, CUT_JOB_STATUS_FILTER_ALL)).not.toBe(jobs);
+    expect(filterJobsByStatus(jobs, '')).toEqual(jobs);
+  });
+
+  it('counts job items and groups defensively', () => {
+    expect(cutJobCounts({ items: [1, 2], groups: [1] })).toEqual({ items: 2, groups: 1 });
+    expect(cutJobCounts({})).toEqual({ items: 0, groups: 0 });
   });
 });
