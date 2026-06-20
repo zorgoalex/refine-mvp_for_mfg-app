@@ -47,9 +47,19 @@ export interface UseSiderMenuItemsInput {
   openExternal?: (url: string) => void;
 }
 
+/**
+ * Stable target name so repeat clicks REUSE (and focus) the same CRM tab
+ * instead of spawning a new one each time. We deliberately do NOT pass
+ * `noopener`/`noreferrer`: those force every open into a fresh browsing-context
+ * group, which defeats name-based reuse (the cause of the "new tab every click"
+ * bug). Twenty is a trusted first-party target, so the retained `window.opener`
+ * is an acceptable trade for a single, warm, reused CRM tab.
+ */
+export const CRM_WINDOW_NAME = 'erpCrmWindow';
+
 function defaultOpenExternal(url: string): void {
   if (typeof window !== 'undefined') {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(url, CRM_WINDOW_NAME);
   }
 }
 

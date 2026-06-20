@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { Layout as AntLayout, Menu, Collapse, Button, Typography, Tooltip } from "antd";
 import {
   PlusOutlined,
@@ -51,7 +51,7 @@ import {
 } from "../utils/navigationPermissions";
 import { can } from "../utils/permissions";
 import { useSiderMenuItems } from "../utils/siderMenuItems";
-import { crmMenuConfig } from "../config/crm";
+import { crmMenuConfig, ensureCrmResourceHints } from "../config/crm";
 import { RESOURCE_LABELS } from "../utils/tabLabels";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
 import {
@@ -155,6 +155,12 @@ export const CustomSider: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const { getSetting } = useAppSettings();
+
+  // Warm DNS/TLS to the CRM origin while the user works in ERP, so the first
+  // CRM open is a touch faster (repeat opens reuse the named tab).
+  useEffect(() => {
+    if (crmMenuConfig) ensureCrmResourceHints(crmMenuConfig.url);
+  }, []);
 
   const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
   const currentRoleKey = getCurrentUserRoleKey(currentUser);

@@ -34,3 +34,41 @@ export function getCrmMenuConfig(
 }
 
 export const crmMenuConfig = getCrmMenuConfig();
+
+/** Minimal DOM surface needed to inject resource hints (eases testing). */
+type HintDocument = Pick<Document, 'head' | 'createElement' | 'querySelector'>;
+
+/**
+ * Inject one-time resource hints so the first CRM open is a little faster while
+ * the user is already in ERP: warm DNS/TLS to the CRM origin (preconnect) and
+ * prefetch its document. Idempotent — re-calling does nothing once the hints
+ * exist. Cross-origin limits how much can be prewarmed (the heavy hashed JS
+ * lives on another origin), so this trims connection setup, not the SPA parse.
+ */
+export function ensureCrmResourceHints(
+  url: string,
+  doc: HintDocument | undefined = typeof document !== 'undefined' ? document : undefined,
+): void {
+  if (!doc || !url) return;
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return;
+  }
+  const hints: Array<{ rel: string; href: string; crossOrigin?: boolean; as?: string }> = [
+    { rel: 'dns-prefetch', href: origin },
+    { rel: 'preconnect', href: origin, crossOrigin: true },
+    { rel: 'prefetch', href: url, as: 'document' },
+  ];
+  for (const hint of hints) {
+    if (doc.querySelector(`link[data-crm-hint="${hint.rel}"]`)) continue;
+    const link = doc.createElement('link');
+    link.rel = hint.rel;
+    link.href = hint.href;
+    if (hint.crossOrigin) link.crossOrigin = '';
+    if (hint.as) link.setAttribute('as', hint.as);
+    link.setAttribute('data-crm-hint', hint.rel);
+    doc.head.appendChild(link);
+  }
+}
