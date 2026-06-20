@@ -3,6 +3,7 @@ import type { IResourceItem } from '@refinedev/core';
 import {
   buildCategorizedResources,
   buildFlatMenuItems,
+  buildTopMenuItems,
   computeSelectedKey,
   resolveCalendarRoute,
   resolveOrdersRoute,
@@ -218,5 +219,67 @@ describe('buildFlatMenuItems', () => {
     };
     const items = buildFlatMenuItems(categories, Object.keys(categories), {}, navigate);
     expect(items).toEqual([]);
+  });
+});
+
+describe('buildTopMenuItems', () => {
+  const baseArgs = {
+    canViewNavigation: () => true,
+    resourceIcons: {},
+    ordersRoute: '/orders',
+    ordersLabel: 'Заказы',
+    calendarRoute: '/calendar',
+    calendarLabel: 'Календарь',
+    push: () => {},
+  };
+
+  it('returns Orders then Calendar when no CRM is configured', () => {
+    const items = buildTopMenuItems(baseArgs);
+    expect(items.map((i) => (i as { key: string }).key)).toEqual(['orders_view', 'calendar']);
+  });
+
+  it('renders the CRM link directly BELOW Calendar', () => {
+    const items = buildTopMenuItems({
+      ...baseArgs,
+      crm: { url: 'https://crm-test.mebelkz.app', label: 'CRM' },
+      openExternal: () => {},
+    });
+    expect(items.map((i) => (i as { key: string }).key)).toEqual([
+      'orders_view',
+      'calendar',
+      'crm',
+    ]);
+  });
+
+  it('CRM item opens the external URL (not the router) on click', () => {
+    const push = vi.fn();
+    const openExternal = vi.fn();
+    const items = buildTopMenuItems({
+      ...baseArgs,
+      push,
+      crm: { url: 'https://crm-test.mebelkz.app', label: 'CRM' },
+      openExternal,
+    });
+    const crmItem = items.find((i) => (i as { key: string }).key === 'crm');
+    (crmItem as { onClick?: () => void }).onClick?.();
+    expect(openExternal).toHaveBeenCalledWith('https://crm-test.mebelkz.app');
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('omits the CRM item when crm is null/undefined', () => {
+    expect(buildTopMenuItems({ ...baseArgs, crm: null }).map((i) => (i as { key: string }).key)).toEqual([
+      'orders_view',
+      'calendar',
+    ]);
+  });
+
+  it('still shows CRM after Orders when Calendar is not viewable', () => {
+    const items = buildTopMenuItems({
+      ...baseArgs,
+      canViewNavigation: (name) => name !== 'calendar',
+      crm: { url: 'https://crm-test.mebelkz.app', label: 'CRM' },
+      openExternal: () => {},
+    });
+    expect(items.map((i) => (i as { key: string }).key)).toEqual(['orders_view', 'crm']);
   });
 });

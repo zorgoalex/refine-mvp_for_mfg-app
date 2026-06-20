@@ -22,6 +22,13 @@ export interface SiderMenuData {
   handleNewOrder: () => void;
 }
 
+/** External CRM (Twenty) link rendered in the top menu, below Calendar. */
+export interface TopMenuCrmInput {
+  url: string;
+  label: string;
+  icon?: React.ReactNode;
+}
+
 export interface UseSiderMenuItemsInput {
   resources: SiderResource[];
   pathname: string;
@@ -34,6 +41,65 @@ export interface UseSiderMenuItemsInput {
   canViewSettings: boolean;
   canCreateOrders: boolean;
   setIsCreateModalOpen: (open: boolean) => void;
+  /** Optional external CRM link shown below Calendar; omit/null to hide. */
+  crm?: TopMenuCrmInput | null;
+  /** Injectable external-link opener (default: window.open in a new tab). */
+  openExternal?: (url: string) => void;
+}
+
+function defaultOpenExternal(url: string): void {
+  if (typeof window !== 'undefined') {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
+/**
+ * Pure helper: build the top menu items (Orders, Calendar, and an optional
+ * external CRM link rendered directly below Calendar). The CRM item navigates
+ * out of the SPA via `openExternal` rather than the router `push`.
+ */
+export function buildTopMenuItems(args: {
+  canViewNavigation: (resourceName: string) => boolean;
+  resourceIcons: Record<string, React.ReactNode>;
+  ordersRoute: string;
+  ordersLabel: string;
+  calendarRoute: string;
+  calendarLabel: string;
+  push: (route: string) => void;
+  crm?: TopMenuCrmInput | null;
+  openExternal?: (url: string) => void;
+}): NonNullable<MenuProps['items']> {
+  const openExternal = args.openExternal ?? defaultOpenExternal;
+  const items: MenuProps['items'] = [
+    args.canViewNavigation('orders_view')
+      ? {
+          key: 'orders_view',
+          icon: args.resourceIcons['orders_view'],
+          label: args.ordersLabel,
+          title: args.ordersLabel,
+          onClick: () => args.push(args.ordersRoute),
+        }
+      : null,
+    args.canViewNavigation('calendar')
+      ? {
+          key: 'calendar',
+          icon: args.resourceIcons['calendar'],
+          label: args.calendarLabel,
+          title: args.calendarLabel,
+          onClick: () => args.push(args.calendarRoute),
+        }
+      : null,
+    args.crm
+      ? {
+          key: 'crm',
+          icon: args.crm.icon,
+          label: args.crm.label,
+          title: args.crm.label,
+          onClick: () => openExternal(args.crm!.url),
+        }
+      : null,
+  ];
+  return items.filter(Boolean) as NonNullable<MenuProps['items']>;
 }
 
 /**
@@ -159,6 +225,8 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,
+    crm,
+    openExternal,
   } = input;
 
   const selectedKey = useMemo(
@@ -198,26 +266,17 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     setIsCreateModalOpen(true);
   };
 
-  const topMenuItems: NonNullable<MenuProps['items']> = [
-    canViewNavigation('orders_view')
-      ? {
-          key: 'orders_view',
-          icon: resourceIcons['orders_view'],
-          label: ordersLabel,
-          title: ordersLabel,
-          onClick: () => push(ordersRoute),
-        }
-      : null,
-    canViewNavigation('calendar')
-      ? {
-          key: 'calendar',
-          icon: resourceIcons['calendar'],
-          label: calendarLabel,
-          title: calendarLabel,
-          onClick: () => push(calendarRoute),
-        }
-      : null,
-  ].filter(Boolean) as NonNullable<MenuProps['items']>;
+  const topMenuItems = buildTopMenuItems({
+    canViewNavigation,
+    resourceIcons,
+    ordersRoute,
+    ordersLabel,
+    calendarRoute,
+    calendarLabel,
+    push,
+    crm,
+    openExternal,
+  });
 
   const flatMenuItems = useMemo(
     () => buildFlatMenuItems(categorizedResources, categoryOrder, resourceIcons, handleNavigate),

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Drawer, Menu, Button, Typography, Space } from "antd";
-import { CloseOutlined, PlusOutlined } from "@ant-design/icons";
+import { CloseOutlined, PlusOutlined, ContactsOutlined } from "@ant-design/icons";
 import { useResource, useNavigation } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
 import { OrderCreateModal } from "../pages/orders/components/OrderCreateModal";
@@ -10,6 +10,7 @@ import { featureFlags } from "../config/featureFlags";
 import { isLegacyAdminUser, canViewNavigationResource, canViewSettingsCategory } from "../utils/navigationPermissions";
 import { can } from "../utils/permissions";
 import { useSiderMenuItems } from "../utils/siderMenuItems";
+import { crmMenuConfig } from "../config/crm";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
 import {
   canViewResourceByRoleVisibility,
@@ -111,6 +112,7 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,
+    crm: crmMenuConfig ? { ...crmMenuConfig, icon: <ContactsOutlined /> } : null,
   });
 
   return (

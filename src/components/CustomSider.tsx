@@ -35,6 +35,7 @@ import {
   WalletOutlined,
   ProjectOutlined,
   AuditOutlined,
+  ContactsOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -50,6 +51,7 @@ import {
 } from "../utils/navigationPermissions";
 import { can } from "../utils/permissions";
 import { useSiderMenuItems } from "../utils/siderMenuItems";
+import { crmMenuConfig } from "../config/crm";
 import { RESOURCE_LABELS } from "../utils/tabLabels";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
 import {
@@ -191,6 +193,7 @@ export const CustomSider: React.FC = () => {
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,
+    crm: crmMenuConfig ? { ...crmMenuConfig, icon: <ContactsOutlined /> } : null,
   });
 
   return (
