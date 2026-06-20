@@ -914,6 +914,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             materialId={materialId}
             namesById={materialNameById}
             loading={referencesLoading}
+            resolvedName={record?.material_name_resolved}
           />
         ),
     },
@@ -1880,7 +1881,15 @@ const MaterialCell: React.FC<{
   materialId: number;
   namesById: Map<number, string>;
   loading: boolean;
-}> = ({ materialId, namesById, loading }) => {
+  resolvedName?: string | null;
+}> = ({ materialId, namesById, loading, resolvedName }) => {
+  // SP3: prefer the server-resolved COALESCE(sheet, material) name from the store
+  // (Task 8 hydration) so a saved sheet detail shows the sheet name, never the
+  // hidden shadow/disambiguated material. Legacy details resolve to the same name.
+  if (resolvedName && String(resolvedName).trim()) {
+    const color = getMaterialColor(String(resolvedName));
+    return <span style={{ color }}>{resolvedName}</span>;
+  }
   if (materialId === null || materialId === undefined) return <span style={{ color: '#999' }}>—</span>;
   const materialName = resolveReferenceLabel(materialId, namesById);
   if (!materialName && loading) return <span style={{ color: '#999' }}>Загрузка...</span>;

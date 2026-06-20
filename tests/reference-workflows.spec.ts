@@ -799,6 +799,11 @@ const nonReferenceCrudResources = new Set([
     'users',
     'order_workshops',
     'order_resource_requirements',
+    // SP1: sheet_material_types is a CRUD resource in App but uses a bespoke form
+    // (3-column grid, lenient-UUID ref_key_1c, dimensions) and is gated behind the
+    // sheet_materials.view permission, so it is not covered by the generic catalog
+    // harness here. Full CRUD coverage is tracked as separate SP1 reference debt.
+    'sheet_material_types',
 ]);
 
 test.describe('Reference workflows', () => {

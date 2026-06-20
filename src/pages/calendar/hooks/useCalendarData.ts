@@ -4,6 +4,7 @@ import { CalendarOrder, CalendarDataResult } from '../types/calendar';
 import { groupOrdersByDate } from '../utils/groupOrdersByDate';
 import { formatDateForApi } from '../utils/dateUtils';
 import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
+import { resolveDetailMaterialName } from '../../../utils/materialDisplayName';
 import { buildProductionStagesDisplayConfig } from '../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../types/productionWorkflow';
 
@@ -87,6 +88,20 @@ export const useCalendarData = (
     },
   });
 
+  // SP3: server-resolved per-detail material name = COALESCE(sheet name, material
+  // name) from order_details_view. Additive fetch; an empty/untracked view falls
+  // back to the materials map below → legacy calendar display unchanged.
+  const { data: detailNamesData } = useList({
+    resource: 'order_details_view',
+    filters: [{ field: 'order_id', operator: 'in', value: orderIds }],
+    pagination: { pageSize: 10000 },
+    meta: { fields: ['detail_id', 'material_name'] },
+    queryOptions: {
+      enabled: orderIds.length > 0,
+      staleTime: 30000,
+    },
+  });
+
   // Загружаем справочник milling_types
   const { data: millingTypesData } = useList({
     resource: 'milling_types',
@@ -161,6 +176,15 @@ export const useCalendarData = (
     });
     return map;
   }, [materialsData]);
+
+  // SP3: detail_id -> server-resolved COALESCE(sheet, material) name.
+  const resolvedNameByDetailId = useMemo(() => {
+    const map = new Map<number, string | null>();
+    (detailNamesData?.data || []).forEach((row: any) => {
+      if (row?.detail_id != null) map.set(row.detail_id, row.material_name ?? null);
+    });
+    return map;
+  }, [detailNamesData]);
 
   // Создаём Map для быстрого поиска названия статуса производства
   const productionStatusesMap = useMemo(() => {
@@ -262,9 +286,10 @@ export const useCalendarData = (
         milling_type: detail.milling_type_id
           ? { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' }
           : undefined,
-        material: detail.material_id
-          ? { material_name: materialsMap.get(detail.material_id) || '' }
-          : undefined,
+        material: (() => {
+          const name = resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap);
+          return name ? { material_name: name } : undefined;
+        })(),
         production_status_id: detail.production_status_id,
         production_status_name: detail.production_status_id
           ? productionStatusesMap.get(detail.production_status_id)
@@ -272,7 +297,7 @@ export const useCalendarData = (
       });
     });
     return map;
-  }, [detailsData, millingTypesMap, materialsMap, productionStatusesMap]);
+  }, [detailsData, millingTypesMap, materialsMap, resolvedNameByDetailId, productionStatusesMap]);
 
   // Группируем заказы по датам и добавляем order_details + doweling_order_name + production_status_name
   const ordersByDate = useMemo(() => {

@@ -36,6 +36,7 @@ import { formatNumber } from "../../utils/numberFormat";
 import { OrderCreateModal } from "./components/OrderCreateModal";
 import { authStorage } from "../../utils/auth";
 import { getMaterialTextColor } from "../calendar/utils/statusColors";
+import { resolveDetailMaterialName } from "../../utils/materialDisplayName";
 import { ProductionStagesDisplay, getPassedCodesFromStatusName } from "../../components/ProductionStagesDisplay";
 import { useAppSettings, SETTING_KEYS } from "../../hooks/useAppSettings";
 import { buildProductionStagesDisplayConfig } from "../../utils/productionWorkflow";
@@ -501,6 +502,20 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     },
   });
 
+  // SP3: server-resolved per-detail material name = COALESCE(sheet name,
+  // material name) from order_details_view. Additive parallel fetch (Hasura mode
+  // only); a missing/untracked view just yields an empty map and the legacy
+  // materials map below remains the fallback, so legacy display is unchanged.
+  const { data: detailNamesData } = useList({
+    resource: "order_details_view",
+    filters: [{ field: "order_id", operator: "in", value: orderIds }],
+    pagination: { pageSize: 10000 },
+    meta: { fields: ["detail_id", "material_name"] },
+    queryOptions: {
+      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead,
+    },
+  });
+
   // Загружаем справочники
   const { data: materialsData } = useList({
     resource: "materials",
@@ -675,6 +690,15 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     return map;
   }, [materialsData]);
 
+  // SP3: detail_id -> server-resolved COALESCE(sheet, material) name (order_details_view).
+  const resolvedNameByDetailId = useMemo(() => {
+    const map = new Map<number, string | null>();
+    (detailNamesData?.data || []).forEach((row: any) => {
+      if (row?.detail_id != null) map.set(row.detail_id, row.material_name ?? null);
+    });
+    return map;
+  }, [detailNamesData]);
+
   const millingTypesMap = useMemo(() => {
     const map: Record<string | number, string> = {};
     (millingTypesData?.data || []).forEach((m: any) => {
@@ -735,12 +759,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     let materialNames: string[] = [];
 
     if (details.length > 0) {
-      const materialIds = details
-        .map((d) => d.material_id)
-        .filter((v) => v !== null && v !== undefined);
-
-      const uniqueMaterialIds = Array.from(new Set(materialIds));
-      materialNames = uniqueMaterialIds.map((id) => materialsMap[id]).filter(Boolean);
+      // SP3: per detail prefer the server-resolved COALESCE name; legacy rows fall
+      // back to the materials map (unchanged). Dedupe by resolved display name.
+      const names = details
+        .map((d) => resolveDetailMaterialName(d, resolvedNameByDetailId, materialsMap))
+        .filter((v): v is string => Boolean(v));
+      materialNames = Array.from(new Set(names));
     } else if (Array.isArray(record?.material_names)) {
       materialNames = record.material_names;
     } else if (record?.material_name) {

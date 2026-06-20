@@ -6,6 +6,7 @@ import { Row, Col, Table, Typography } from 'antd';
 import { useList } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
+import { resolveDetailMaterialName } from '../../../../utils/materialDisplayName';
 
 const { Text } = Typography;
 
@@ -67,7 +68,11 @@ export const OrderMaterialsTab: React.FC = () => {
       if (!aggregation[materialId]) {
         aggregation[materialId] = {
           id: materialId,
-          name: materialsMap[materialId] || `ID: ${materialId}`,
+          // SP3: server-resolved COALESCE(sheet, material) name from the store;
+          // legacy details fall back to the materials map (unchanged).
+          name:
+            resolveDetailMaterialName(detail, undefined, materialsMap) ||
+            `ID: ${materialId}`,
           totalArea: 0,
           detailsCount: 0,
         };

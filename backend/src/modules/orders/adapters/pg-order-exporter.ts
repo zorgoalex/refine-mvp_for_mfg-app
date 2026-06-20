@@ -35,6 +35,7 @@ interface OrderExportHeaderRow extends QueryResultRow {
   production_status_name: string | null;
   manager_id: string | number | null;
   created_by: string | number | null;
+  material_name: string | null;
 }
 
 interface OrderExportDetailRow extends QueryResultRow {
@@ -155,7 +156,11 @@ export class PgOrderExporter implements OrderExportPort {
       millingSummary: commonValue(details, (detail) => detail.milling_type_name),
       edgeSummary: commonValue(details, (detail) => detail.edge_type_name),
       filmSummary: commonValue(details, (detail) => detail.film_name),
-      materialSummary: commonValue(details, (detail) => detail.material_name),
+      // SP3: header-only sheet order (no details) falls back to the header material.
+      materialSummary:
+        details.length > 0
+          ? commonValue(details, (detail) => detail.material_name)
+          : header.material_name ?? '',
       orderYear: orderDate.getFullYear(),
       orderMonth: orderDate.getMonth() + 1,
       items: details.map((detail) => ({
@@ -255,12 +260,17 @@ async function readHeader(
       o.total_area, o.planned_completion_date,
       os.order_status_name, ps.payment_status_name,
       o.issue_date, prod.production_status_name,
-      o.manager_id, o.created_by
+      o.manager_id, o.created_by,
+      -- SP3: order header material = COALESCE(sheet name, material name) so a
+      -- header-only sheet order exports its header material.
+      COALESCE(hsmt.name, hm.material_name) AS material_name
     FROM orders o
     LEFT JOIN clients c ON c.client_id = o.client_id
     LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
     LEFT JOIN payment_statuses ps ON ps.payment_status_id = o.payment_status_id
     LEFT JOIN production_statuses prod ON prod.production_status_id = o.production_status_id
+    LEFT JOIN materials hm ON hm.material_id = o.material_id
+    LEFT JOIN sheet_material_types hsmt ON hsmt.sheet_material_type_id = o.sheet_material_type_id
     LEFT JOIN LATERAL (
       SELECT COALESCE(
         MAX(cp.phone_number) FILTER (WHERE cp.is_primary = true),
@@ -283,12 +293,17 @@ async function readDetails(database: DatabaseClient, orderId: number): Promise<O
     SELECT
       od.detail_number, od.height, od.width, od.quantity, od.note,
       od.milling_cost_per_sqm,
-      mt.milling_type_name, et.edge_type_name, f.film_name, m.material_name
+      mt.milling_type_name, et.edge_type_name, f.film_name,
+      -- SP3: server-resolved display name = COALESCE(sheet name, material name).
+      -- Runs as the backend (no RBAC issue); a sheet detail exports the sheet
+      -- name, never the hidden synthetic shadow material name.
+      COALESCE(smt.name, m.material_name) AS material_name
     FROM order_details od
     LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
     LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
     LEFT JOIN films f ON f.film_id = od.film_id
     LEFT JOIN materials m ON m.material_id = od.material_id
+    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
     WHERE od.order_id = $1 AND od.delete_flag = false
     ORDER BY od.detail_number ASC, od.detail_id ASC
     `,

@@ -2,10 +2,11 @@ import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Table, Breadcrumb, message, Dropdown, Tooltip } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined } from "@ant-design/icons";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
+import { resolveDetailMaterialName } from "../../utils/materialDisplayName";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
 import { handleExcelError } from "../../utils/excel/excelErrorHandler";
@@ -60,6 +61,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         "order_status_name",
         "payment_status_name",
         "manager_id",
+        "material_name",
         "milling_type_name",
         "edge_type_name",
         "film_name",
@@ -124,6 +126,26 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       enabled: !!record?.order_id && !useBackendOrdersRead,
     },
   });
+
+  // SP3: server-resolved per-detail material name = COALESCE(sheet name, material
+  // name) from order_details_view. Additive Hasura-mode fetch; an empty/untracked
+  // view falls back to the materials map → legacy display unchanged.
+  const { data: detailNamesData } = useList({
+    resource: "order_details_view",
+    filters: [{ field: "order_id", operator: "eq", value: record?.order_id }],
+    pagination: { pageSize: 1000 },
+    meta: { fields: ["detail_id", "material_name"] },
+    queryOptions: {
+      enabled: !!record?.order_id && !useBackendOrdersRead,
+    },
+  });
+  const resolvedNameByDetailId = useMemo(() => {
+    const map = new Map<number, string | null>();
+    (detailNamesData?.data || []).forEach((row: any) => {
+      if (row?.detail_id != null) map.set(row.detail_id, row.material_name ?? null);
+    });
+    return map;
+  }, [detailNamesData]);
 
   const details = (
     backendOrder?.details ??
@@ -207,6 +229,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const paymentTypesMap = new Map(
     (paymentTypesData?.data || []).map((item: any) => [item.type_paid_id, item.type_paid_name])
   );
+
+  // SP3: unique server-resolved display material names for the show header summary.
+  const headerMaterialNames = useMemo(() => {
+    const names = (details || [])
+      .map((d: any) => resolveDetailMaterialName(d, resolvedNameByDetailId, materialsMap))
+      .filter((v): v is string => Boolean(v));
+    return Array.from(new Set(names));
+  }, [details, resolvedNameByDetailId, materialsData]);
+  // Header-only/no-details order: the order's own material (orders_view COALESCE
+  // in Hasura mode / backend header COALESCE name).
+  const headerMaterialName =
+    record?.material_name ?? backendOrder?.header?.materialName ?? null;
 
   // Ref для печати
   const printRef = useRef<HTMLDivElement>(null);
@@ -375,7 +409,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             milling_type: { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' },
             edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
             film: { film_name: filmsMap.get(detail.film_id) || '' },
-            material: { material_name: materialsMap.get(detail.material_id) || '' },
+            material: { material_name: resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '' },
           })),
           payments: sortedPayments.map((payment: any) => ({
             payment_id: payment.payment_id,
@@ -506,6 +540,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               details={details}
               dowelingLinks={dowelingLinks}
               disableLegacyOrderReads={useBackendOrdersRead}
+              detailMaterialNames={headerMaterialNames}
+              headerMaterialName={headerMaterialName}
             />
           </div>
 
@@ -798,7 +834,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   key: 'material',
                   width: 77,
                   render: (_, record) => {
-                    const materialName = materialsMap.get(record.material_id) || '—';
+                    const materialName =
+                      resolveDetailMaterialName(record, resolvedNameByDetailId, materialsMap) || '—';
                     return <span style={{ fontSize: '0.86em' }}>{materialName}</span>;
                   },
                 },

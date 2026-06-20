@@ -10,6 +10,7 @@ import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
+import { resolveDetailMaterialName, resolveHeaderMaterialName } from '../../../../utils/materialDisplayName';
 import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../../components/ProductionStagesDisplay';
 import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
@@ -240,14 +241,27 @@ export const OrderHeaderSummary: React.FC = () => {
     },
   });
 
+  // SP3: prefer the store's server-resolved COALESCE(sheet, material) names (Task 8
+  // hydration) so saved sheet details show the sheet name, never the hidden shadow.
+  // Falls back to the materials fetch for legacy/just-picked details, and to the
+  // header's own material for a header-only order.
+  const materialsMap = useMemo(
+    () => new Map((materialsData?.data || []).map((m: any) => [m.material_id, m.material_name])),
+    [materialsData],
+  );
+  const resolvedMaterialNames = useMemo(() => {
+    const names = (details || [])
+      .map((d: any) => resolveDetailMaterialName(d, undefined, materialsMap))
+      .filter((v): v is string => Boolean(v));
+    if (names.length > 0) return Array.from(new Set(names));
+    const headerName = resolveHeaderMaterialName(header);
+    return headerName ? [headerName] : [];
+  }, [details, materialsMap, header]);
+
   // Create materials summary string
-  const materialsSummary = useMemo(() => {
-    if (!materialsData?.data || materialsData.data.length === 0) return '—';
-    return materialsData.data
-      .map(m => m.material_name)
-      .filter(Boolean)
-      .join(', ');
-  }, [materialsData]);
+  const materialsSummary = resolvedMaterialNames.length > 0
+    ? resolvedMaterialNames.join(', ')
+    : '—';
 
   // Load milling types, edge types, films для lookup
   const { data: millingTypesData } = useList({
@@ -621,15 +635,14 @@ export const OrderHeaderSummary: React.FC = () => {
         {/* Materials */}
         <div style={{ flex: 1 }}>
           <Text style={{ fontSize: 12, color: '#6B7280' }}>Материал: </Text>
-          {materialsSummary === '—' ? (
+          {resolvedMaterialNames.length === 0 ? (
             <Text style={{ fontSize: 12, color: '#6B7280' }}>—</Text>
           ) : (
-            materialsData?.data?.map((material, index) => {
-              const materialName = material.material_name || '';
+            resolvedMaterialNames.map((materialName, index) => {
               const color = getMaterialColor(materialName);
 
               return (
-                <React.Fragment key={material.material_id}>
+                <React.Fragment key={`${materialName}-${index}`}>
                   {index > 0 && <Text style={{ fontSize: 12, color: '#6B7280' }}>, </Text>}
                   <Text strong style={{ fontSize: 12, color }}>
                     {materialName}

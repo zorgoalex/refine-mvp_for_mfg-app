@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
+import { resolveHeaderMaterialName } from '../../../../utils/materialDisplayName';
 import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../../components/ProductionStagesDisplay';
 import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
@@ -24,6 +25,11 @@ interface OrderShowHeaderProps {
   details: any[]; // order details array
   dowelingLinks?: any[]; // doweling links with nested doweling_order
   disableLegacyOrderReads?: boolean;
+  // SP3: server-resolved COALESCE(sheet, material) display names from the parent
+  // (order_details_view per detail / orders_view header). Preferred over the
+  // internal materials fetch so sheet orders never show the (hidden) shadow name.
+  detailMaterialNames?: string[];
+  headerMaterialName?: string | null;
 }
 
 export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
@@ -31,6 +37,8 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   details,
   dowelingLinks = [],
   disableLegacyOrderReads = false,
+  detailMaterialNames,
+  headerMaterialName,
 }) => {
   const navigate = useNavigate();
   const { getSetting } = useAppSettings();
@@ -134,14 +142,28 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     return phoneNumber ? formatPhone(phoneNumber) : null;
   }, [clientPhonesData]);
 
+  // SP3: prefer the server-resolved COALESCE names from the parent; fall back to
+  // the order header's own material (header-only orders), then to the internal
+  // materials fetch (legacy safety). Never resolves the hidden shadow name.
+  const resolvedMaterialNames = useMemo(() => {
+    const fromParent = (detailMaterialNames || [])
+      .map(n => (n == null ? '' : String(n).trim()))
+      .filter(Boolean);
+    if (fromParent.length > 0) return Array.from(new Set(fromParent));
+    const headerName = resolveHeaderMaterialName({
+      material_name_resolved: headerMaterialName ?? undefined,
+      material_name: record?.material_name,
+    });
+    if (headerName) return [headerName];
+    return (materialsData?.data || [])
+      .map((m: any) => m.material_name)
+      .filter(Boolean);
+  }, [detailMaterialNames, headerMaterialName, record?.material_name, materialsData]);
+
   // Create materials summary string
-  const materialsSummary = useMemo(() => {
-    if (!materialsData?.data || materialsData.data.length === 0) return '—';
-    return materialsData.data
-      .map(m => m.material_name)
-      .filter(Boolean)
-      .join(', ');
-  }, [materialsData]);
+  const materialsSummary = resolvedMaterialNames.length > 0
+    ? resolvedMaterialNames.join(', ')
+    : '—';
 
   // Load production status events for this order (all recorded statuses)
   const { data: productionEventsData } = useList({
@@ -518,15 +540,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         {/* Materials */}
         <div style={{ flex: 1 }}>
           <Text style={{ fontSize: 12, color: '#6B7280' }}>Материал: </Text>
-          {materialsSummary === '—' ? (
+          {resolvedMaterialNames.length === 0 ? (
             <Text style={{ fontSize: 12, color: '#6B7280' }}>—</Text>
           ) : (
-            materialsData?.data?.map((material, index) => {
-              const materialName = material.material_name || '';
+            resolvedMaterialNames.map((materialName, index) => {
               const color = getMaterialColor(materialName);
 
               return (
-                <React.Fragment key={material.material_id}>
+                <React.Fragment key={`${materialName}-${index}`}>
                   {index > 0 && <Text style={{ fontSize: 12, color: '#6B7280' }}>, </Text>}
                   <Text strong style={{ fontSize: 12, color }}>
                     {materialName}

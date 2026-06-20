@@ -13,6 +13,7 @@ import { isApiError } from '../api/apiError';
 import { featureFlags } from '../config/featureFlags';
 import { uploadOrderExcelToApi, handleUploadError } from '../utils/excel/uploadToApi';
 import { generateOrderFileName } from '../utils/excel/fileNameGenerator';
+import { resolveDetailMaterialName, resolveHeaderMaterialName } from '../utils/materialDisplayName';
 
 interface Order {
   order_id: number;
@@ -123,6 +124,8 @@ export const useOrderExport = (): UseOrderExportResult => {
         payment_status_name: orderView.payment_status_name || '',
         issue_date: orderView.issue_date || null,
         production_status_name: orderView.production_status_name || '',
+        // SP3: server-resolved header material name (COALESCE sheet/material).
+        material_name: orderView.material_name || '',
       };
 
       console.log('[useOrderExport] Full order loaded:', fullOrder);
@@ -159,7 +162,7 @@ export const useOrderExport = (): UseOrderExportResult => {
 
       // 2. Загрузить детали заказа и платежи параллельно
       console.log('[useOrderExport] Fetching order_details and payments from DB...');
-      const [detailsResult, paymentsResult] = await Promise.all([
+      const [detailsResult, paymentsResult, detailNamesResult] = await Promise.all([
         dataProvider().getList({
           resource: 'order_details',
           filters: [
@@ -176,11 +179,25 @@ export const useOrderExport = (): UseOrderExportResult => {
           pagination: { current: 1, pageSize: 1000 },
           sorters: [{ field: 'payment_date', order: 'asc' }],
         }),
+        // SP3: server-resolved per-detail COALESCE(sheet, material) name. Defensive:
+        // an empty/untracked view falls back to the materials map below.
+        dataProvider().getList({
+          resource: 'order_details_view',
+          filters: [
+            { field: 'order_id', operator: 'eq', value: order.order_id },
+          ],
+          pagination: { current: 1, pageSize: 1000 },
+          meta: { fields: ['detail_id', 'material_name'] },
+        } as any).catch(() => ({ data: [] as any[] })),
       ]);
 
       console.log('[useOrderExport] DB response detailsResult:', detailsResult);
       const details = detailsResult.data || [];
       const payments = paymentsResult.data || [];
+      const resolvedNameByDetailId = new Map<number, string | null>();
+      (detailNamesResult?.data || []).forEach((row: any) => {
+        if (row?.detail_id != null) resolvedNameByDetailId.set(row.detail_id, row.material_name ?? null);
+      });
       console.log('[useOrderExport] Extracted details array length:', details.length);
       console.log('[useOrderExport] Extracted payments array length:', payments.length);
       console.log('[useOrderExport] Details full data:', details);
@@ -189,10 +206,15 @@ export const useOrderExport = (): UseOrderExportResult => {
         console.log('[useOrderExport] Detail fields:', Object.keys(details[0]));
       }
 
-      // Проверка наличия деталей
-      if (details.length === 0) {
-        console.warn(`[useOrderExport] No details found for order ${order.order_id}`);
-        console.warn('[useOrderExport] Skipping export - no details to export');
+      // SP3 (Critic round 26): a header-only sheet order has no detail rows but a
+      // header material — it must still export. Only skip a genuinely empty order
+      // (no details AND no header material).
+      const headerMaterialName = resolveHeaderMaterialName({
+        material_name: fullOrder._viewData?.material_name,
+      });
+      if (details.length === 0 && !headerMaterialName) {
+        console.warn(`[useOrderExport] No details and no header material for order ${order.order_id}`);
+        console.warn('[useOrderExport] Skipping export - nothing to export');
         // Не показываем ошибку пользователю, просто пропускаем экспорт
         return;
       }
@@ -297,6 +319,10 @@ export const useOrderExport = (): UseOrderExportResult => {
       const materialsMap = new Map(
         (materialsResult.data || []).map((m: any) => [m.material_id, { material_name: m.material_name }])
       );
+      // SP3: string material_id -> name fallback for the COALESCE name resolver.
+      const materialNameById = new Map<number, string>(
+        (materialsResult.data || []).map((m: any) => [m.material_id, m.material_name])
+      );
       const millingTypesMap = new Map(
         (millingTypesResult.data || []).map((mt: any) => [mt.milling_type_id, { milling_type_name: mt.milling_type_name }])
       );
@@ -329,9 +355,10 @@ export const useOrderExport = (): UseOrderExportResult => {
         film: detail.film_id
           ? filmsMap.get(detail.film_id) || null
           : null,
-        material: detail.material_id
-          ? materialsMap.get(detail.material_id) || null
-          : null,
+        material: (() => {
+          const name = resolveDetailMaterialName(detail, resolvedNameByDetailId, materialNameById);
+          return name ? { material_name: name } : null;
+        })(),
       }));
 
       // 7. Маппинг платежей с названиями типов оплаты
