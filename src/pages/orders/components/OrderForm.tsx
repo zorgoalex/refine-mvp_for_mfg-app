@@ -153,6 +153,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         'edge_type_id',
         'film_id',
         'material_id',
+        // SP3: header sheet material + durable SP3-era eligibility marker
+        'sheet_material_type_id',
+        'sheet_eligible',
         'link_cutting_file',
         'link_cutting_image_file',
         'link_cad_file',
@@ -194,6 +197,29 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     pagination: { pageSize: 1000 },
     queryOptions: {
       enabled: shouldLoadDetails,
+    },
+  });
+
+  // SP3: server-resolved per-detail material name (COALESCE sheet/material) from
+  // order_details_view, merged into the store as material_name_resolved so the edit
+  // workspace shows the sheet name in mixed read mode without a shadow materials row.
+  const { data: detailNamesData, isLoading: detailNamesLoading } = useList({
+    resource: 'order_details_view',
+    filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
+    pagination: { pageSize: 1000 },
+    meta: { fields: ['detail_id', 'material_name', 'sheet_material_type_id'] },
+    queryOptions: {
+      enabled: shouldLoadDetails,
+    },
+  });
+
+  // SP3: server-resolved header material name (COALESCE sheet/material) from orders_view.
+  const { data: headerNameData, isLoading: headerNameLoading } = useOne({
+    resource: 'orders_view',
+    id: orderId,
+    meta: { fields: ['order_id', 'material_name', 'sheet_material_type_id'] },
+    queryOptions: {
+      enabled: shouldLoadOrder,
     },
   });
 
@@ -313,13 +339,29 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       return;
     }
     if (mode === 'edit' && orderData?.data) {
-      // Wait for details and payments only if they should be loaded
+      // Wait for details and payments only if they should be loaded.
+      // SP3 view loads (resolved names) gate on !loading only — never on data — so an
+      // untracked/errored view (mixed mode before Hasura metadata) cannot deadlock the
+      // edit form; the resolved name is best-effort and falls back to the materials map.
       const detailsReady = !shouldLoadDetails || (!detailsLoading && detailsData);
       const paymentsReady = !shouldLoadPayments || (!paymentsLoading && paymentsData);
+      const detailNamesReady = !shouldLoadDetails || !detailNamesLoading;
+      const headerNameReady = !shouldLoadOrder || !headerNameLoading;
 
-      if (detailsReady && paymentsReady) {
+      if (detailsReady && paymentsReady && detailNamesReady && headerNameReady) {
+        // SP3: detail_id -> server-resolved COALESCE(sheet, material) name.
+        const resolvedNameByDetailId = new Map<number, string | null>();
+        (detailNamesData?.data || []).forEach((row: any) => {
+          if (row?.detail_id != null) {
+            resolvedNameByDetailId.set(row.detail_id, row.material_name ?? null);
+          }
+        });
+
         // Auto-calculate empty detail_cost before loading into store
         const processedDetails = (detailsData?.data || []).map((detail: any) => {
+          const material_name_resolved = resolvedNameByDetailId.has(detail.detail_id)
+            ? resolvedNameByDetailId.get(detail.detail_id)
+            : undefined;
           // If detail_cost is null/undefined but area and price are available, calculate it
           if (!detail.detail_cost && detail.area && detail.milling_cost_per_sqm) {
             const calculatedCost = Number((detail.area * detail.milling_cost_per_sqm).toFixed(2));
@@ -331,9 +373,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             return {
               ...detail,
               detail_cost: calculatedCost,
+              material_name_resolved,
             };
           }
-          return detail;
+          return { ...detail, material_name_resolved };
         });
 
         // Extract doweling links from relationship (many-to-many via order_doweling_links)
@@ -347,6 +390,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           doweling_order_id: firstLink?.doweling_order?.doweling_order_id || null,
           doweling_order_name: firstLink?.doweling_order?.doweling_order_name || null,
           doweling_links: dowelingLinks,
+          // SP3: server-resolved header material name (COALESCE sheet/material).
+          material_name_resolved: (headerNameData?.data as any)?.material_name ?? undefined,
         };
 
         loadOrder({
@@ -372,6 +417,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     paymentsLoading,
     shouldLoadDetails,
     shouldLoadPayments,
+    shouldLoadOrder,
+    detailNamesData,
+    detailNamesLoading,
+    headerNameData,
+    headerNameLoading,
   ]);
 
   const isOrderDataLoading =

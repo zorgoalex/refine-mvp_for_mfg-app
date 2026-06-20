@@ -47,6 +47,14 @@ export interface Order {
   film_id?: number | null;
   material_id?: number | null;
   sheet_material_type_id?: number | null;
+  // SP3: durable SP3-era marker (orders.sheet_eligible). Existing pre-SP3 orders
+  // are false and can never gain sheet rows; orders created at/after migration 029
+  // are true. Drives FE picker eligibility (Task 9).
+  sheet_eligible?: boolean;
+  // SP3: server-resolved header material name = COALESCE(sheet name, material name)
+  // from orders_view. Used by the edit workspace in mixed read mode so it never
+  // depends on a (hidden) shadow materials row.
+  material_name_resolved?: string | null;
 
   // File links
   link_cutting_file?: string | null;
@@ -96,6 +104,9 @@ export interface OrderDetail {
   // Materials and processing
   material_id: number;
   sheet_material_type_id?: number | null;
+  // SP3: server-resolved per-detail material name = COALESCE(sheet name, material
+  // name) from order_details_view. Edit workspace reads this, not a materials map.
+  material_name_resolved?: string | null;
   milling_type_id: number;
   edge_type_id: number;
   film_id?: number | null;
