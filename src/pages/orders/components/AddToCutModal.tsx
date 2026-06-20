@@ -27,7 +27,10 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
   const [targetJobId, setTargetJobId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const detailMode = Array.isArray(detailIds) && detailIds.length > 0;
+  // A provided detailIds array (even empty) means detail-level mode: an empty
+  // selection must yield an empty intersection (warning, nothing added) — never
+  // a fall-through that adds the whole order's eligible details.
+  const detailMode = Array.isArray(detailIds);
 
   useEffect(() => {
     if (!open) return;
@@ -58,14 +61,16 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
       if (finalIds.length === 0) {
         // Don't leave an empty draft behind: a job created above for a brand-new
         // raskroi must be rolled back (archived) when nothing eligible was added.
+        // If rollback fails, tell the operator the empty draft remains (no silent orphan).
+        let warningText = noSheetSpecMessage(eligible.noSheetSpecCount) ?? 'Нет подходящих деталей для раскроя';
         if (mode === 'new') {
           try {
             await cutApi.archive(job.cutJobId, job.version);
           } catch {
-            /* best-effort cleanup; the warning below is the user-facing signal */
+            warningText += ` Пустой раскрой #${job.cutJobId} не удалён — удалите его вручную.`;
           }
         }
-        message.warning(noSheetSpecMessage(eligible.noSheetSpecCount) ?? 'Нет подходящих деталей для раскроя');
+        message.warning(warningText);
         return;
       }
       const updated = await cutApi.addItems(job.cutJobId, { detailIds: finalIds, version: job.version });
