@@ -24,6 +24,23 @@ export function selectableDetailIds(details: ReadonlyArray<{ orderDetailId: numb
   return details.filter((d) => d.eligible).map((d) => d.orderDetailId);
 }
 
+/**
+ * Detail-level "add to cut": keep only the operator-chosen detail ids that are
+ * also eligible. Order follows `selectableEligible`; result is distinct.
+ */
+export function restrictDetailIds(selectableEligible: number[], chosen: number[]): number[] {
+  const chosenSet = new Set(chosen);
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const id of selectableEligible) {
+    if (chosenSet.has(id) && !seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
 export type PdfFetchResult = { pending: true } | { pending: false; blob: Blob; fileName: string | null };
 
 export interface PollPdfOptions {

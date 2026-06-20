@@ -9,6 +9,7 @@ import {
   noSheetSpecMessage,
   parseIdCsv,
   pollPdf,
+  restrictDetailIds,
   selectableDetailIds,
 } from './cutPageHelpers';
 
@@ -90,5 +91,12 @@ describe('cutPageHelpers', () => {
   it('counts job items and groups defensively', () => {
     expect(cutJobCounts({ items: [1, 2], groups: [1] })).toEqual({ items: 2, groups: 1 });
     expect(cutJobCounts({})).toEqual({ items: 0, groups: 0 });
+  });
+
+  it('restrictDetailIds intersects eligible with chosen (eligible order, distinct)', () => {
+    expect(restrictDetailIds([3, 1, 2], [2, 3])).toEqual([3, 2]);
+    expect(restrictDetailIds([1, 2, 3], [])).toEqual([]);
+    expect(restrictDetailIds([1, 2], [5, 6])).toEqual([]);
+    expect(restrictDetailIds([1, 1, 2], [1, 2])).toEqual([1, 2]);
   });
 });
