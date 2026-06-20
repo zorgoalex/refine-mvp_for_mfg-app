@@ -26,3 +26,21 @@ describe('AddToCutModal wiring (backend-owned, flag-guarded)', () => {
     expect(listSrc).toMatch(/rowSelection=\{[\s\S]*useBackendCut/);
   });
 });
+
+describe('AddToCutModal detail-level mode', () => {
+  it('is backend-owned (cutApi only, no Hasura/graphql/fetch)', () => {
+    expect(modalSrc).toContain("from '../../../api/cutApi'");
+    expect(modalSrc).not.toMatch(/hasura/i);
+    expect(modalSrc).not.toMatch(/graphql/i);
+    expect(modalSrc).not.toMatch(/\bfetch\(/);
+  });
+
+  it('restricts chosen ids to eligible via restrictDetailIds', () => {
+    expect(modalSrc).toContain('detailIds');
+    expect(modalSrc).toContain('restrictDetailIds');
+  });
+
+  it('rolls back an empty new draft via archive (no orphan job)', () => {
+    expect(modalSrc).toContain('cutApi.archive');
+  });
+});

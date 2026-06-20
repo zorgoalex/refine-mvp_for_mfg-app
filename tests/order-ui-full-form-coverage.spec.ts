@@ -193,6 +193,31 @@ test.describe('Order UI full form coverage', () => {
             });
         }
 
+        // Cut (раскрой) detail picker on the show page: toggle per-detail
+        // checkboxes and add selected details to a cut job. The whole surface is
+        // gated by VITE_USE_BACKEND_CUT + cut.manage, so it only renders when the
+        // cut feature flag is enabled in the env under test.
+        const cutToggle = page.getByRole('button', { name: 'Выделить детали для раскроя' });
+        if ((await cutToggle.count()) > 0) {
+            await cutToggle.first().click();
+            await page.getByRole('button', { name: 'Выделить все' }).click();
+            const addToCut = page.getByRole('button', { name: /Добавить выбранные в раскрой/ });
+            await expect(addToCut).toBeEnabled({ timeout: 30000 });
+            await screenshot(page, testInfo, 'show-cut-detail-picker');
+            await addToCut.click();
+            const cutModal = page.getByRole('dialog').filter({ hasText: /Добавить детали в раскрой/ });
+            await expect(cutModal).toBeVisible({ timeout: 30000 });
+            await screenshot(page, testInfo, 'show-cut-modal-detail-mode');
+            await cutModal.getByRole('button', { name: 'Отмена' }).click();
+            await expect(cutModal).toBeHidden({ timeout: 30000 });
+        } else {
+            testInfo.annotations.push({
+                type: 'skip-reason',
+                description:
+                    'Cut detail picker not rendered — gated by VITE_USE_BACKEND_CUT + cut.manage (frontend cut flag OFF on stage). Detail-level add-to-cut deferred to post flag-flip canary.',
+            });
+        }
+
         await page.goto(`${frontendUrl}/orders`, { waitUntil: 'domcontentloaded' });
         await expect(page.getByText(orderName, { exact: true }).first()).toBeVisible({ timeout: 30000 });
         const row = page.getByRole('row', { name: new RegExp(orderName) }).first();
