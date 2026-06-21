@@ -222,8 +222,21 @@ test.describe('Order UI full form coverage', () => {
         }
 
         await page.goto(`${frontendUrl}/orders`, { waitUntil: 'domcontentloaded' });
-        await expect(page.getByText(orderName, { exact: true }).first()).toBeVisible({ timeout: 30000 });
+        // Tabbed workspace: the just-created order's tab stays active after navigating, so
+        // the "Заказы" list is a separate (hidden) keep-alive tab. Activate it, then assert
+        // the order ROW (a page-wide getByText would also match the order's tab label, which
+        // carries a "Заказ #<id> · " prefix and isn't an exact match anyway).
+        if (hasWorkspaceTabs) {
+            await workspaceTabs(page).getByRole('tab', { name: /Заказы/ }).first().click();
+        }
+        // The list default-sorts by order_date desc and the order uses a back-dated
+        // orderDate, so it isn't on page 1. Search by order name to surface it
+        // deterministically instead of relying on sort/pagination.
+        const orderSearch = page.getByPlaceholder('Поиск по номеру заказа').first();
+        await orderSearch.fill(orderName);
+        await page.getByRole('button', { name: /Найти/ }).first().click();
         const row = page.getByRole('row', { name: new RegExp(orderName) }).first();
+        await expect(row).toBeVisible({ timeout: 30000 });
         await expect(row).toContainText(username);
         await screenshot(page, testInfo, 'orders-list-created-by');
 
@@ -249,7 +262,7 @@ test.describe('Order UI full form coverage', () => {
         // Закрыть on a dirty order prompts; confirming closes the tab and leaves the edit route.
         const tabsBefore = await workspaceTabs(page).getByRole('tab').count();
         await editForm.getByRole('button', { name: 'Закрыть' }).click();
-        await expect(page.getByText('Несохраненные изменения')).toBeVisible();
+        await expect(page.getByText('Несохраненные изменения').first()).toBeVisible();
         await page.getByRole('button', { name: 'Покинуть' }).click();
         await expect(page).not.toHaveURL(new RegExp(`/orders/edit/${orderId}`), { timeout: 30000 });
         await expect(workspaceTabs(page).getByRole('tab')).toHaveCount(tabsBefore - 1);
