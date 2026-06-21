@@ -57,20 +57,35 @@ export function useDragSelection<T>({
   const [endIndex, setEndIndex] = useState<number | null>(null);
   const [pendingKeys, setPendingKeys] = useState<React.Key[]>([]);
   const startIndexRef = useRef<number | null>(null);
+  const isDraggingRef = useRef(false);
+  const pendingKeysRef = useRef<React.Key[]>([]);
 
   // Auto-scroll
   const autoScrollRef = useRef<number | null>(null);
+  const lastMouseXRef = useRef<number>(0);
   const lastMouseYRef = useRef<number>(0);
 
   // Build key-to-index map for quick lookups
   const keyToIndexMap = useRef<Map<React.Key, number>>(new Map());
+  const domKeyToRowKeyMap = useRef<Map<string, React.Key>>(new Map());
 
   useEffect(() => {
     keyToIndexMap.current.clear();
+    domKeyToRowKeyMap.current.clear();
     items.forEach((item, index) => {
-      keyToIndexMap.current.set(getRowKey(item), index);
+      const rowKey = getRowKey(item);
+      keyToIndexMap.current.set(rowKey, index);
+      domKeyToRowKeyMap.current.set(String(rowKey), rowKey);
     });
   }, [items, getRowKey]);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
+
+  useEffect(() => {
+    pendingKeysRef.current = pendingKeys;
+  }, [pendingKeys]);
 
   // Calculate pending keys based on start/end indices
   const calculatePendingKeys = useCallback((start: number, end: number): React.Key[] => {
@@ -85,6 +100,35 @@ export function useDragSelection<T>({
     }
     return keys;
   }, [items, getRowKey]);
+
+  const updatePendingToIndex = useCallback((index: number) => {
+    const dragStartIndex = startIndexRef.current ?? startIndex;
+    if (!isDraggingRef.current || dragStartIndex === null) return;
+
+    if (index === dragStartIndex) {
+      setEndIndex(index);
+      setPendingKeys([]);
+      return;
+    }
+
+    setEndIndex(index);
+    setPendingKeys(calculatePendingKeys(dragStartIndex, index));
+  }, [calculatePendingKeys, startIndex]);
+
+  const updatePendingFromPoint = useCallback((x: number, y: number) => {
+    const element = document.elementFromPoint(x, y);
+    const row = element?.closest?.('tr[data-row-key]');
+    const domKey = row?.getAttribute('data-row-key');
+    if (!domKey) return;
+
+    const rowKey = domKeyToRowKeyMap.current.get(domKey);
+    if (rowKey === undefined) return;
+
+    const index = keyToIndexMap.current.get(rowKey);
+    if (index === undefined) return;
+
+    updatePendingToIndex(index);
+  }, [updatePendingToIndex]);
 
   // Auto-scroll logic
   const performAutoScroll = useCallback(() => {
@@ -116,11 +160,15 @@ export function useDragSelection<T>({
 
     if (scrollDelta !== 0) {
       container.scrollTop += scrollDelta;
+      updatePendingFromPoint(
+        Math.min(Math.max(lastMouseXRef.current, rect.left + 1), rect.right - 1),
+        Math.min(Math.max(mouseY, rect.top + 1), rect.bottom - 1)
+      );
     }
 
     // Continue animation
     autoScrollRef.current = requestAnimationFrame(performAutoScroll);
-  }, [scrollContainerRef, isDragging, autoScrollZone, autoScrollSpeed]);
+  }, [scrollContainerRef, isDragging, autoScrollZone, autoScrollSpeed, updatePendingFromPoint]);
 
   // Start auto-scroll when dragging starts
   useEffect(() => {
@@ -145,13 +193,15 @@ export function useDragSelection<T>({
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
       if (!isDragging) return;
+      lastMouseXRef.current = e.clientX;
       lastMouseYRef.current = e.clientY;
+      updatePendingFromPoint(e.clientX, e.clientY);
     };
 
     const handleGlobalMouseUp = () => {
       if (isDragging) {
         setIsDragging(false);
-        if (pendingKeys.length === 0) {
+        if (pendingKeysRef.current.length === 0) {
           setStartIndex(null);
           setEndIndex(null);
           startIndexRef.current = null;
@@ -169,7 +219,7 @@ export function useDragSelection<T>({
       document.removeEventListener('mousemove', handleGlobalMouseMove);
       document.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [isDragging, pendingKeys.length]);
+  }, [isDragging, updatePendingFromPoint]);
 
   // Handle mouse down on row - start drag
   const handleMouseDown = useCallback((rowKey: React.Key, event: React.MouseEvent) => {
@@ -199,6 +249,7 @@ export function useDragSelection<T>({
     setStartIndex(index);
     startIndexRef.current = index;
     setEndIndex(index);
+    lastMouseXRef.current = event.clientX;
     lastMouseYRef.current = event.clientY;
 
     // Do not create a one-row pending selection on mouse down. Double-click
@@ -208,23 +259,10 @@ export function useDragSelection<T>({
 
   // Handle mouse enter on row - extend selection
   const handleMouseEnter = useCallback((rowKey: React.Key) => {
-    const dragStartIndex = startIndexRef.current ?? startIndex;
-    if (!isDragging || dragStartIndex === null) return;
-
     const index = keyToIndexMap.current.get(rowKey);
     if (index === undefined) return;
-    if (index === dragStartIndex) {
-      setEndIndex(index);
-      setPendingKeys([]);
-      return;
-    }
-
-    setEndIndex(index);
-
-    // Calculate new pending keys
-    const newPendingKeys = calculatePendingKeys(dragStartIndex, index);
-    setPendingKeys(newPendingKeys);
-  }, [isDragging, startIndex, calculatePendingKeys]);
+    updatePendingToIndex(index);
+  }, [updatePendingToIndex]);
 
   // Confirm pending selection - merge with existing
   const confirmSelection = useCallback(() => {
