@@ -102,6 +102,8 @@ async function createSchema(pool: Pool): Promise<void> {
       request_hash TEXT,
       pdf_prewarm_state TEXT NOT NULL DEFAULT 'pending',
       pdf_prewarm_failure_reason TEXT,
+      failure_code TEXT,
+      failure_reason TEXT,
       created_by BIGINT,
       version INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT now(),
@@ -413,6 +415,33 @@ describeIntegration('PgCutRepository (integration)', () => {
     expect((await pool.query('SELECT status FROM cut_job WHERE cut_job_id = $1', [job.cutJobId])).rows[0].status).toBe('failed');
   });
 
+  it('a Phase 1 failure after a ready run also clears the prior layout (no stale groups)', async () => {
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест p1clear', detailIds: [1] }, requestId: 'p1' });
+    const ready = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'p2' });
+    expect(ready.status).toBe('ready');
+    expect((await pool.query('SELECT count(*)::int AS n FROM cut_group WHERE cut_job_id = $1', [job.cutJobId])).rows[0].n).toBe(1);
+
+    // Empty the basket, then recalc -> Phase 1 CUT_NO_ITEMS, whose prep tx rolls
+    // back (it does NOT drop the old groups). markCalcFailed must still clear them.
+    const afterRemove = await repo.removeItem({
+      currentUser: currentUser(),
+      cutJobId: job.cutJobId,
+      cutJobItemId: ready.items[0].cutJobItemId,
+      version: ready.version,
+      requestId: 'p3',
+    });
+    await expect(
+      repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: afterRemove.version, requestId: 'p4' }),
+    ).rejects.toMatchObject({ code: 'CUT_NO_ITEMS', statusCode: 422 });
+
+    const row = await pool.query('SELECT status, failure_code FROM cut_job WHERE cut_job_id = $1', [job.cutJobId]);
+    expect(row.rows[0].status).toBe('failed');
+    expect(row.rows[0].failure_code).toBe('CUT_NO_ITEMS');
+    // Invariant: a failed job carries NO stale layout, even via the Phase 1 path.
+    expect((await pool.query('SELECT count(*)::int AS n FROM cut_group WHERE cut_job_id = $1', [job.cutJobId])).rows[0].n).toBe(0);
+  });
+
   it('refuses to reserve an ineligible detail (no_sheet_spec) server-side', async () => {
     const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
     // detail 3 -> material 2 -> no sheet_material_type.
@@ -586,21 +615,41 @@ describeIntegration('PgCutRepository (integration)', () => {
     expect(outbox.rows[0].n).toBe(2);
   });
 
-  it('freecut failure persists status=failed + cut_job.calculate_failed and rethrows', async () => {
-    const repo = new PgCutRepository(
+  it('freecut failure persists status=failed + reason + audit, and a failed job is recalculable', async () => {
+    const failRepo = new PgCutRepository(
       database,
       stubFreecut(() => Promise.reject(new ApiError(504, 'FREECUT_TIMEOUT', 'timeout'))),
     );
-    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест', detailIds: [1] }, requestId: 'r1' });
+    const job = await failRepo.createJob({ currentUser: currentUser(), dto: { name: 'Тест', detailIds: [1] }, requestId: 'r1' });
 
     await expect(
-      repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'r2' }),
+      failRepo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'r2' }),
     ).rejects.toMatchObject({ code: 'FREECUT_TIMEOUT' });
 
-    const status = await pool.query('SELECT status FROM cut_job WHERE cut_job_id = $1', [job.cutJobId]);
-    expect(status.rows[0].status).toBe('failed');
+    const row = await pool.query(
+      'SELECT status, failure_code, failure_reason FROM cut_job WHERE cut_job_id = $1',
+      [job.cutJobId],
+    );
+    expect(row.rows[0].status).toBe('failed');
+    expect(row.rows[0].failure_code).toBe('FREECUT_TIMEOUT');
+    expect(String(row.rows[0].failure_reason)).toMatch(/не успел/i);
     const failAudit = await pool.query(`SELECT count(*)::int AS n FROM audit_log WHERE event = 'cut_job.calculate_failed'`);
     expect(failAudit.rows[0].n).toBe(1);
+
+    // The failed job is mutable again: a fresh calculate (happy freecut) recovers
+    // it to ready on the SAME job and clears the persisted failure reason.
+    const failed = await failRepo.getJob({ currentUser: currentUser(), cutJobId: job.cutJobId });
+    expect(failed.failureReason).toMatch(/не успел/i);
+    const okRepo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const recovered = await okRepo.calculate({
+      currentUser: currentUser(),
+      cutJobId: job.cutJobId,
+      version: failed.version,
+      requestId: 'r3',
+    });
+    expect(recovered.status).toBe('ready');
+    expect(recovered.failureCode).toBeNull();
+    expect(recovered.failureReason).toBeNull();
   });
 
   it('listEligibleDetails surfaces no_sheet_spec for an unlinked material', async () => {

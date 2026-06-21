@@ -51,6 +51,10 @@ export interface CutJobDto {
   source: string;
   version: number;
   pdfPrewarmState: string;
+  /** Stable failure code when status === 'failed' (else null). */
+  failureCode: string | null;
+  /** Operator-facing Russian explanation when status === 'failed' (else null). */
+  failureReason: string | null;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;

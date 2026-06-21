@@ -115,8 +115,8 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
 
     // loadJob reads
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state FROM cut_job WHERE cut_job_id = $1')) {
-      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending' }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason FROM cut_job WHERE cut_job_id = $1')) {
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item')) {
       return { rows: [], rowCount: 0 };
@@ -358,12 +358,16 @@ describe('PgCutRepository', () => {
 
     await expect(
       repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r' }),
-    ).rejects.toMatchObject({ code: 'FREECUT_CONSTRAINT_ERROR' });
+      // Friendly rethrow preserves the freecut HTTP status (duck-typed `status`).
+    ).rejects.toMatchObject({ code: 'FREECUT_CONSTRAINT_ERROR', statusCode: 422 });
 
     const sql = db.queries.map((q) => normalize(q.text));
     expect(sql.some((s) => s.startsWith('INSERT INTO cut_group ('))).toBe(false);
-    const statusUpdate = db.queries.find((q) => /UPDATE cut_job SET status = 'failed'/i.test(q.text));
+    const statusUpdate = db.queries.find((q) => /UPDATE cut_job SET status = 'failed'/i.test(normalize(q.text)));
     expect(statusUpdate).toBeDefined();
+    // The failure persists a stable code + human-readable Russian reason.
+    expect(statusUpdate?.params?.[2]).toBe('FREECUT_CONSTRAINT_ERROR');
+    expect(String(statusUpdate?.params?.[3])).toMatch(/не помещаются на лист/i);
     const failAudit = db.queries.find((q) => /INSERT INTO audit_log/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculate_failed'));
     expect(failAudit).toBeDefined();
   });
@@ -382,12 +386,82 @@ describe('PgCutRepository', () => {
 
     await expect(
       repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r' }),
-    ).rejects.toMatchObject({ code: 'FREECUT_TIMEOUT' });
+    ).rejects.toMatchObject({ code: 'FREECUT_TIMEOUT', statusCode: 504 });
 
     const audit = db.queries.find((q) => /INSERT INTO audit_log/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculate_failed'));
     expect(audit).toBeDefined();
-    const statusUpdate = db.queries.find((q) => /UPDATE cut_job SET status = 'failed'/i.test(q.text));
+    const statusUpdate = db.queries.find((q) => /UPDATE cut_job SET status = 'failed'/i.test(normalize(q.text)));
     expect(statusUpdate).toBeDefined();
+    expect(statusUpdate?.params?.[2]).toBe('FREECUT_TIMEOUT');
+    expect(String(statusUpdate?.params?.[3])).toMatch(/не успел/i);
+  });
+
+  it('calculate: a Phase 1 validation failure (no items) also marks failed + persists a reason', async () => {
+    // A failed job retried with an emptied basket: the prep phase rejects with
+    // CUT_NO_ITEMS BEFORE any freecut call — it must still refresh the durable
+    // reason (never leave a stale one) and rethrow a friendly 422.
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'failed', source: 'manual', version: 3, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [],
+    });
+    const repo = new PgCutRepository(db.service, { optimize: vi.fn() } as unknown as FreecutClient);
+
+    await expect(
+      repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 3, requestId: 'r' }),
+    ).rejects.toMatchObject({ code: 'CUT_NO_ITEMS', statusCode: 422 });
+
+    const statusUpdate = db.queries.find((q) => /UPDATE cut_job SET status = 'failed'/i.test(normalize(q.text)));
+    expect(statusUpdate).toBeDefined();
+    // Phase 1 guards on the version the calc STARTED with (command.version), not a
+    // re-read — so a concurrent mutation that advanced the version is not clobbered.
+    expect(statusUpdate?.params?.[1]).toBe(3);
+    expect(statusUpdate?.params?.[2]).toBe('CUT_NO_ITEMS');
+    expect(String(statusUpdate?.params?.[3])).toMatch(/нет деталей/i);
+    const failAudit = db.queries.find((q) => /INSERT INTO audit_log/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculate_failed'));
+    expect(failAudit).toBeDefined();
+  });
+
+  it('calculate: a no-sheet-spec group persists CUT_NO_SHEET_SPEC (not a false "no items")', async () => {
+    // Forced/legacy job with an active item whose material has no sheet spec: the
+    // durable reason must name the real cause, not "В раскрое нет деталей".
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 2, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [
+        { cut_job_item_id: 1, order_detail_id: 1, order_id: 9, qty: 1, width_mm: 600, height_mm: 400, material_id: 5, sheet_material_type_id: 9, film_id: null, film_texture: null, smt_width_mm: null, smt_height_mm: null },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, { optimize: vi.fn() } as unknown as FreecutClient);
+
+    await expect(
+      repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 2, requestId: 'r' }),
+    ).rejects.toMatchObject({ code: 'CUT_NO_SHEET_SPEC', statusCode: 422 });
+
+    const statusUpdate = db.queries.find((q) => /UPDATE cut_job SET status = 'failed'/i.test(normalize(q.text)));
+    expect(statusUpdate?.params?.[2]).toBe('CUT_NO_SHEET_SPEC');
+    expect(String(statusUpdate?.params?.[3])).toMatch(/раскройной спецификации/i);
+    // The Phase 1 failure audit keeps query/report-ready related dimensions
+    // (order/material/sheet) captured from the grouped items — not an empty set.
+    const relatedPairs = db.queries
+      .filter((q) => /INSERT INTO audit_log_related_entity/i.test(q.text))
+      .map((q) => `${q.params?.[1]}:${q.params?.[2]}`);
+    expect(relatedPairs).toContain('order:9');
+    expect(relatedPairs).toContain('material:5');
+    expect(relatedPairs).toContain('sheet_material_type:9');
+  });
+
+  it('calculate: a stale-version precondition does NOT mark the job failed', async () => {
+    // CUT_STALE_VERSION is a concurrency rejection, not a calculation outcome.
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 5, pdf_prewarm_state: 'pending', params: null },
+    });
+    const repo = new PgCutRepository(db.service, { optimize: vi.fn() } as unknown as FreecutClient);
+
+    await expect(
+      repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r' }),
+    ).rejects.toMatchObject({ code: 'CUT_STALE_VERSION', statusCode: 409 });
+
+    const statusUpdate = db.queries.find((q) => /UPDATE cut_job SET status = 'failed'/i.test(normalize(q.text)));
+    expect(statusUpdate).toBeUndefined();
   });
 
   it('listEligibleDetails classifies candidates and counts no_sheet_spec', async () => {

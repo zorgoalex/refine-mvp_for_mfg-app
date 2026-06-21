@@ -34,7 +34,7 @@ export class CutOrderDetailNotFoundError extends ApiError {
 /** Optimistic-concurrency guard (plan §8 — stale version on a mutating op). */
 export class CutStaleVersionError extends ApiError {
   constructor(cutJobId: number, expected: number, actual: number) {
-    super(409, 'CUT_STALE_VERSION', 'Cut job was modified by another operation', {
+    super(409, 'CUT_STALE_VERSION', 'Раскрой изменился в другой вкладке или сессии — обновите страницу и повторите.', {
       cutJobId,
       expectedVersion: expected,
       actualVersion: actual,
@@ -64,6 +64,14 @@ export class CutJobNotMutableError extends ApiError {
 export class CutNoItemsError extends ApiError {
   constructor(cutJobId: number) {
     super(422, 'CUT_NO_ITEMS', 'В раскрое нет активных деталей для расчёта', { cutJobId });
+  }
+}
+
+/** A group cannot be cut because its material has no sheet spec (size). Distinct
+ *  from CUT_NO_ITEMS so the persisted/durable reason names the real cause. */
+export class CutNoSheetSpecError extends ApiError {
+  constructor(cutJobId: number) {
+    super(422, 'CUT_NO_SHEET_SPEC', 'У материала детали нет раскройной спецификации (размеров листа)', { cutJobId });
   }
 }
 
