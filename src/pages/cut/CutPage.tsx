@@ -48,7 +48,6 @@ const { Title, Text } = Typography;
 
 const INELIGIBLE_LABELS: Record<string, string> = {
   deleted: 'Удалена',
-  already_reserved: 'Уже в раскрое',
   wrong_status: 'Неподходящий статус',
   no_sheet_spec: 'Нет спецификации',
 };

@@ -829,12 +829,15 @@ export class PgCutRepository implements CutRepositoryPort {
     }
     const orderId = toNum(row.order_id);
     const quantity = toNum(row.quantity);
-    // Placement is non-exclusive (migration 031): the same detail may be added to
-    // multiple jobs, so there is no unique-violation path to translate here.
+    // Placement is non-exclusive across jobs (migration 031): the same detail may be
+    // in many jobs. WITHIN one job it is unique-and-idempotent — re-adding the same
+    // detail is a no-op (ON CONFLICT on the per-job partial unique index), so the
+    // requested cut quantity is never silently doubled.
     await tx.query(
       `
       INSERT INTO cut_job_item (cut_job_id, order_detail_id, order_id, qty, is_active, freecut_item_id)
       VALUES ($1, $2, $3, $4, true, $5)
+      ON CONFLICT (cut_job_id, order_detail_id) WHERE is_active = true DO NOTHING
       `,
       [cutJobId, detailId, orderId, quantity, freecutItemId(detailId)],
     );

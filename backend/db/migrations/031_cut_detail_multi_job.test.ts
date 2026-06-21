@@ -9,11 +9,16 @@ describe('031 cut detail multi-job migration text', () => {
     expect(sql).toMatch(/DROP INDEX IF EXISTS uq_cut_job_item_active_detail/);
   });
 
+  it('keeps a PER-JOB unique guard (detail at most once active per job)', () => {
+    expect(sql).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS uq_cut_job_item_active_job_detail/);
+    expect(sql).toMatch(/ON cut_job_item\s*\(\s*cut_job_id\s*,\s*order_detail_id\s*\)/);
+    expect(sql).toMatch(/WHERE is_active = true/);
+  });
+
   it('adds a NON-unique lookup index on active cut_job_item by order_detail_id', () => {
     expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS idx_cut_job_item_active_order_detail/);
     expect(sql).toMatch(/ON cut_job_item\s*\(\s*order_detail_id\s*\)/);
-    expect(sql).toMatch(/WHERE is_active = true/);
-    // must NOT recreate a UNIQUE index (that would keep exclusivity)
+    // the order_detail_id lookup index must NOT be unique (that is the global guard we dropped)
     expect(sql).not.toMatch(/CREATE UNIQUE INDEX[^\n]*idx_cut_job_item_active_order_detail/);
   });
 

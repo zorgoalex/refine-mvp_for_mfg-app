@@ -131,8 +131,9 @@ async function createSchema(pool: Pool): Promise<void> {
       created_at TIMESTAMP NOT NULL DEFAULT now(),
       updated_at TIMESTAMP NOT NULL DEFAULT now()
     );
-    -- migration 031: placement is non-exclusive (NO unique index); a detail may be
-    -- in any number of active jobs. Non-unique lookup index mirrors production.
+    -- migration 031: non-exclusive ACROSS jobs, but unique-and-idempotent WITHIN a
+    -- job (per-job partial unique index) + a non-unique lookup index for placements.
+    CREATE UNIQUE INDEX uq_cut_job_item_active_job_detail ON cut_job_item (cut_job_id, order_detail_id) WHERE is_active = true;
     CREATE INDEX idx_cut_job_item_active_order_detail ON cut_job_item (order_detail_id) WHERE is_active = true;
 
     CREATE TABLE cut_group_sheet (
@@ -277,6 +278,39 @@ describeIntegration('PgCutRepository (integration)', () => {
     const placements = await repo.listDetailPlacements({ currentUser: currentUser(), detailIds: [1], requestId: 'rp' });
     expect(placements.jobs.map((j) => j.cutJobId).sort((a, b) => a - b)).toEqual(
       [job1.cutJobId, job2.cutJobId].sort((a, b) => a - b),
+    );
+    expect(placements.hasArchived).toBe(false);
+  });
+
+  it('re-adding the SAME detail to the SAME job is idempotent (no qty doubling)', async () => {
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест idem', detailIds: [1] }, requestId: 'ri1' });
+    // add the same detail again to the SAME job
+    const after = await repo.addItems({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, dto: { detailIds: [1] }, requestId: 'ri2' });
+    expect(after.items.filter((i) => i.orderDetailId === 1)).toHaveLength(1);
+    const active = await pool.query(
+      'SELECT count(*)::int AS n FROM cut_job_item WHERE cut_job_id = $1 AND order_detail_id = 1 AND is_active = true',
+      [job.cutJobId],
+    );
+    expect(active.rows[0].n).toBe(1);
+  });
+
+  it('placements: archived placement sets hasArchived (and is NOT listed in active jobs)', async () => {
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест arch', detailIds: [1] }, requestId: 'ra1' });
+    await repo.archive({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'ra2' });
+    const placements = await repo.listDetailPlacements({ currentUser: currentUser(), detailIds: [1], requestId: 'ra3' });
+    expect(placements.jobs).toHaveLength(0);
+    expect(placements.hasArchived).toBe(true);
+  });
+
+  it('placements: aggregates distinct active jobs across multiple details', async () => {
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const jobA = await repo.createJob({ currentUser: currentUser(), dto: { name: 'A', detailIds: [1] }, requestId: 'ag1' });
+    const jobB = await repo.createJob({ currentUser: currentUser(), dto: { name: 'B', detailIds: [4] }, requestId: 'ag2' });
+    const placements = await repo.listDetailPlacements({ currentUser: currentUser(), detailIds: [1, 4], requestId: 'ag3' });
+    expect(placements.jobs.map((j) => j.cutJobId).sort((a, b) => a - b)).toEqual(
+      [jobA.cutJobId, jobB.cutJobId].sort((a, b) => a - b),
     );
     expect(placements.hasArchived).toBe(false);
   });
