@@ -8,6 +8,7 @@ import type {
   CalculateCutJobCommand,
   CreateCutJobCommand,
   CutRepositoryPort,
+  DetailPlacementsQuery,
   EligibleDetailsQuery,
   GetCutJobQuery,
   ListCutJobsQuery,
@@ -74,6 +75,11 @@ export class CutService {
   async listEligibleDetails(query: EligibleDetailsQuery) {
     this.require(query.currentUser, 'cut.view', { requestId: query.requestId });
     return this.ports.cut.listEligibleDetails(query);
+  }
+
+  async listDetailPlacements(query: DetailPlacementsQuery) {
+    this.require(query.currentUser, 'cut.view', { requestId: query.requestId });
+    return this.ports.cut.listDetailPlacements(query);
   }
 
   async renderSheetPng(query: RenderSheetPngQuery) {

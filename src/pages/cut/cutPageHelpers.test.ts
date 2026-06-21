@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildCutAddWarning,
+  formatPlacementsMessage,
   CUT_JOB_STATUS_FILTER_ALL,
   cutJobCounts,
   cutJobSourceLabel,
@@ -86,6 +88,29 @@ describe('cutPageHelpers', () => {
     expect(filterJobsByStatus(jobs, CUT_JOB_STATUS_FILTER_ALL)).toEqual(jobs);
     expect(filterJobsByStatus(jobs, CUT_JOB_STATUS_FILTER_ALL)).not.toBe(jobs);
     expect(filterJobsByStatus(jobs, '')).toEqual(jobs);
+  });
+
+  it('builds a reason-aware add-to-cut warning (no_sheet_spec / wrong_status counts)', () => {
+    expect(buildCutAddWarning([{ eligible: false, ineligibleReason: 'no_sheet_spec' }])).toMatch(/специфика/);
+    const mixed = buildCutAddWarning([
+      { eligible: false, ineligibleReason: 'no_sheet_spec' },
+      { eligible: false, ineligibleReason: 'wrong_status' },
+    ]);
+    expect(mixed).toMatch(/без раскройной спецификации материала: 1/);
+    expect(mixed).toMatch(/неподходящий статус: 1/);
+    expect(buildCutAddWarning([])).toBe('Нет подходящих деталей для раскроя');
+  });
+
+  it('formats an informational placements message (never blocking)', () => {
+    expect(
+      formatPlacementsMessage({ jobs: [{ cutJobId: 1, name: 'Раскрой A' }, { cutJobId: 5, name: 'B' }], hasArchived: false }),
+    ).toMatch(/#1 Раскрой A.*#5 B/);
+    const archived = formatPlacementsMessage({ jobs: [], hasArchived: true });
+    expect(archived).toMatch(/архивных заданиях/);
+    expect(formatPlacementsMessage({ jobs: [], hasArchived: false })).toBeNull();
+    expect(
+      formatPlacementsMessage({ jobs: [{ cutJobId: 1, name: 'A' }], hasArchived: false }),
+    ).toMatch(/не ограничено/);
   });
 
   it('counts job items and groups defensively', () => {

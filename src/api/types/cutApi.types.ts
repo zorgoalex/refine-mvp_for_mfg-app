@@ -69,7 +69,13 @@ export interface CutJobDto {
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;
 }
 
-export type CutIneligibleReason = 'deleted' | 'already_reserved' | 'wrong_status' | 'no_sheet_spec';
+export type CutIneligibleReason = 'deleted' | 'wrong_status' | 'no_sheet_spec';
+
+/** A cut job a detail is placed in (informational; placement is non-exclusive). */
+export interface CutJobRef {
+  cutJobId: number;
+  name: string;
+}
 
 export interface EligibleDetailDto {
   orderDetailId: number;
@@ -80,11 +86,23 @@ export interface EligibleDetailDto {
   filmId: number | null;
   eligible: boolean;
   ineligibleReason: CutIneligibleReason | null;
+  /** active (non-archived) cut jobs this detail is already placed in */
+  activeJobs: CutJobRef[];
+  /** true when this detail also exists in at least one archived cut job */
+  inArchivedJob: boolean;
 }
 
 export interface EligibleDetailsResponse {
   details: EligibleDetailDto[];
   noSheetSpecCount: number;
+}
+
+/** Where a detail/order set is already placed (informational, multi-job). */
+export interface CutDetailPlacements {
+  /** distinct active (non-archived) jobs containing ANY of the requested details */
+  jobs: CutJobRef[];
+  /** true when ANY requested detail also exists in an archived job */
+  hasArchived: boolean;
 }
 
 export type CutRenderPreset = 'thumb' | 'screen' | 'print';

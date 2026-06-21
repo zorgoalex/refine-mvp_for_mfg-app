@@ -3,6 +3,7 @@ import { httpClient } from './httpClient';
 import type {
   AddCutItemsRequest,
   CreateCutJobRequest,
+  CutDetailPlacements,
   CutJobDto,
   CutSelectionCriteria,
   EligibleDetailsResponse,
@@ -48,6 +49,18 @@ export const cutApi = {
       body: JSON.stringify({ version }),
       headers: { 'Content-Type': 'application/json' },
     });
+  },
+
+  /**
+   * Where the given details/orders are already placed (informational, non-exclusive).
+   * Pass detailIds (detail-level) or orderIds (whole order). No job id needed.
+   */
+  async listPlacements(params: { detailIds?: number[]; orderIds?: number[] }): Promise<CutDetailPlacements> {
+    const query = new URLSearchParams();
+    if (params.detailIds && params.detailIds.length > 0) query.append('detailIds', params.detailIds.join(','));
+    if (params.orderIds && params.orderIds.length > 0) query.append('orderIds', params.orderIds.join(','));
+    const qs = query.toString();
+    return httpClient.get<CutDetailPlacements>(qs ? `${apiRoutes.cutJobs.placements}?${qs}` : apiRoutes.cutJobs.placements);
   },
 
   async listEligibleDetails(

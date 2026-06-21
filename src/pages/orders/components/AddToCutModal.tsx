@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Form, Input, Modal, Radio, Select, Space, message } from 'antd';
 import { cutApi } from '../../../api/cutApi';
 import { ApiError } from '../../../api/httpClient';
-import type { CutJobDto } from '../../../api/types/cutApi.types';
-import { noSheetSpecMessage, restrictDetailIds, selectableDetailIds } from '../../cut/cutPageHelpers';
+import type { CutDetailPlacements, CutJobDto } from '../../../api/types/cutApi.types';
+import { buildCutAddWarning, formatPlacementsMessage, restrictDetailIds, selectableDetailIds } from '../../cut/cutPageHelpers';
 
 interface AddToCutModalProps {
   open: boolean;
@@ -26,6 +26,7 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
   const [targetJobId, setTargetJobId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [placements, setPlacements] = useState<CutDetailPlacements | null>(null);
 
   // A provided detailIds array (even empty) means detail-level mode: an empty
   // selection must yield an empty intersection (warning, nothing added) — never
@@ -44,7 +45,13 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
       .list()
       .then((list) => setJobs(list.filter((j) => j.status === 'draft')))
       .catch(() => setJobs([]));
-  }, [open, orderIds, detailMode]);
+    // Informational only: show where the chosen details already live. Never blocks.
+    setPlacements(null);
+    cutApi
+      .listPlacements(detailMode ? { detailIds: detailIds ?? [] } : { orderIds })
+      .then(setPlacements)
+      .catch(() => setPlacements(null));
+  }, [open, orderIds, detailMode, detailIds]);
 
   const submit = useCallback(async () => {
     if (orderIds.length === 0) return;
@@ -62,7 +69,10 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
         // Don't leave an empty draft behind: a job created above for a brand-new
         // raskroi must be rolled back (archived) when nothing eligible was added.
         // If rollback fails, tell the operator the empty draft remains (no silent orphan).
-        let warningText = noSheetSpecMessage(eligible.noSheetSpecCount) ?? 'Нет подходящих деталей для раскроя';
+        const candidates = detailMode
+          ? eligible.details.filter((d) => detailIds!.includes(d.orderDetailId))
+          : eligible.details;
+        let warningText = buildCutAddWarning(candidates);
         if (mode === 'new') {
           try {
             await cutApi.archive(job.cutJobId, job.version);
@@ -117,6 +127,10 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
             onChange={setTargetJobId}
             options={jobs.map((j) => ({ value: j.cutJobId, label: `#${j.cutJobId} — ${j.name}` }))}
           />
+        )}
+
+        {placements && formatPlacementsMessage(placements) && (
+          <Alert type="warning" showIcon message={formatPlacementsMessage(placements)} />
         )}
 
         <Alert

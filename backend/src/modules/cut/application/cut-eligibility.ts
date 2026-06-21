@@ -6,7 +6,6 @@
  */
 export type IneligibleReason =
   | 'deleted'
-  | 'already_reserved'
   | 'wrong_status'
   | 'no_sheet_spec';
 
@@ -16,8 +15,6 @@ export interface DetailEligibilityCandidate {
   productionStatusId: number | null;
   /** resolved via detail -> material -> sheet_material_type (null = unlinked) */
   sheetMaterialTypeId: number | null;
-  /** true when the detail is already in another ACTIVE cut_job_item */
-  alreadyReserved: boolean;
 }
 
 export interface CutEligibilityConfig {
@@ -43,9 +40,9 @@ export function classifyDetailEligibility(
   if (candidate.deleteFlag) {
     return ineligible('deleted');
   }
-  if (candidate.alreadyReserved) {
-    return ineligible('already_reserved');
-  }
+  // NOTE: being already placed in another cut job is NOT an ineligibility — a
+  // detail may belong to any number of jobs (placement is informational only,
+  // surfaced separately via listDetailPlacements). See migration 031.
   if (
     candidate.productionStatusId === null ||
     !config.readyStatusIds.includes(candidate.productionStatusId)

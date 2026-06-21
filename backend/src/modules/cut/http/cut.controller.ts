@@ -6,6 +6,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CutService } from '../application/cut.service';
 import type {
+  CutDetailPlacementsResponseDto,
   CutJobDto,
   CutSelectionCriteriaDto,
   EligibleDetailsResponseDto,
@@ -71,6 +72,25 @@ export class CutController {
   async list(@Req() request: RequestWithCurrentUser): Promise<CutJobDto[]> {
     const currentUser = this.requireRead(request);
     return this.cut.listJobs({ currentUser, requestId: request.requestId });
+  }
+
+  @ApiOperation({
+    operationId: 'cutDetailPlacements',
+    summary: 'List active jobs (and an archived flag) a detail/order set is already placed in',
+  })
+  @Get('placements')
+  async detailPlacements(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, string>,
+  ): Promise<CutDetailPlacementsResponseDto> {
+    // Registered BEFORE ':cutJobId' so the literal path is not captured as an id.
+    const currentUser = this.requireRead(request);
+    return this.cut.listDetailPlacements({
+      currentUser,
+      detailIds: parseCsvIds(query.detailIds),
+      orderIds: parseCsvIds(query.orderIds),
+      requestId: request.requestId,
+    });
   }
 
   @ApiOperation({ operationId: 'getCutJob', summary: 'Get a cut job manifest' })

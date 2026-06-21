@@ -55,6 +55,7 @@ export const apiRoutes = {
   },
   cutJobs: {
     list: backendApiPath('/cut-jobs'),
+    placements: backendApiPath('/cut-jobs/placements'),
     byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),
     items: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/items`),
     item: (cutJobId: number, itemId: number) =>

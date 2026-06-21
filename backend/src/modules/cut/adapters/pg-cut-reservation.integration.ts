@@ -2,21 +2,21 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// Reservation guard race test (plan §4.2, BLOCKER-1). Proves the partial UNIQUE
-// INDEX `uq_cut_job_item_active_detail` is the ONLY enforcement needed: under two
-// concurrent transactions inserting the SAME order_detail_id active, exactly one
-// commits and the other raises 23505 — NOT relying on an app-layer pre-check.
+// Non-exclusive placement test (migration 031). Proves the OLD partial UNIQUE
+// reservation guard is gone: the SAME order_detail_id may be active in any number
+// of cut_job_item rows (i.e. placed in many jobs at once). The non-unique lookup
+// index `idx_cut_job_item_active_order_detail` keeps "which jobs is this detail in"
+// fast WITHOUT enforcing exclusivity.
 //
 // Gated on CUT_INTEGRATION_DATABASE_URL (falls back to TEST_DATABASE_URL); skips
-// cleanly when no database is configured (mirrors the deadline/outbox integration
-// pattern). Run: `npm run test:backend:cut-integration` with the env var set.
+// cleanly when no database is configured. Run: `npm run test:backend:cut-integration`.
 const databaseUrl =
   process.env.CUT_INTEGRATION_DATABASE_URL ?? process.env.TEST_DATABASE_URL;
 const describeIntegration = databaseUrl ? describe : describe.skip;
 
 const schemaName = `cut_reservation_${randomUUID().replaceAll('-', '_')}`;
 
-// Mirrors migration 022's cut_job_item reservation columns + partial unique index.
+// Mirrors migration 022 columns + migration 031 NON-unique lookup index.
 async function createMinimalSchema(pool: Pool): Promise<void> {
   await pool.query(`
     CREATE TABLE cut_job_item (
@@ -24,13 +24,13 @@ async function createMinimalSchema(pool: Pool): Promise<void> {
       order_detail_id BIGINT NOT NULL,
       is_active BOOLEAN NOT NULL DEFAULT true
     );
-    CREATE UNIQUE INDEX uq_cut_job_item_active_detail
+    CREATE INDEX idx_cut_job_item_active_order_detail
       ON cut_job_item (order_detail_id)
       WHERE is_active = true;
   `);
 }
 
-describeIntegration('cut reservation partial unique index', () => {
+describeIntegration('cut placement is non-exclusive (migration 031)', () => {
   let pool: Pool;
 
   beforeAll(async () => {
@@ -47,33 +47,10 @@ describeIntegration('cut reservation partial unique index', () => {
     }
   });
 
-  it('rejects a duplicate active reservation in the same transaction (23505)', async () => {
+  it('allows the same detail active in multiple rows (no unique violation)', async () => {
     const detailId = 1001;
-    await pool.query('BEGIN');
-    try {
-      await pool.query(
-        `INSERT INTO ${schemaName}.cut_job_item (order_detail_id, is_active) VALUES ($1, true)`,
-        [detailId],
-      );
-      await expect(
-        pool.query(
-          `INSERT INTO ${schemaName}.cut_job_item (order_detail_id, is_active) VALUES ($1, true)`,
-          [detailId],
-        ),
-      ).rejects.toMatchObject({ code: '23505' });
-    } finally {
-      await pool.query('ROLLBACK');
-    }
-  });
-
-  it('allows re-reservation after release (is_active=false leaves the partial index)', async () => {
-    const detailId = 1002;
     await pool.query(
       `INSERT INTO ${schemaName}.cut_job_item (order_detail_id, is_active) VALUES ($1, true)`,
-      [detailId],
-    );
-    await pool.query(
-      `UPDATE ${schemaName}.cut_job_item SET is_active = false WHERE order_detail_id = $1`,
       [detailId],
     );
     await expect(
@@ -82,9 +59,15 @@ describeIntegration('cut reservation partial unique index', () => {
         [detailId],
       ),
     ).resolves.toBeTruthy();
+
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM ${schemaName}.cut_job_item WHERE order_detail_id = $1 AND is_active = true`,
+      [detailId],
+    );
+    expect(rows[0].n).toBe(2);
   });
 
-  it('two concurrent transactions: exactly one commits, the other gets a unique violation', async () => {
+  it('two concurrent transactions: BOTH commit the same active detail', async () => {
     const detailId = 2002;
     const racePool = new Pool({ connectionString: databaseUrl, max: 2 });
     const clientA = await racePool.connect();
@@ -95,32 +78,18 @@ describeIntegration('cut reservation partial unique index', () => {
       await clientA.query('BEGIN');
       await clientB.query('BEGIN');
 
-      // A takes the index lock first.
-      await clientA.query(
-        'INSERT INTO cut_job_item (order_detail_id, is_active) VALUES ($1, true)',
-        [detailId],
-      );
-
-      // B inserts the same detail; it blocks on the index until A resolves.
-      const bInsert = clientB
-        .query('INSERT INTO cut_job_item (order_detail_id, is_active) VALUES ($1, true)', [
-          detailId,
-        ])
-        .then(() => null)
-        .catch((error: unknown) => error);
+      await clientA.query('INSERT INTO cut_job_item (order_detail_id, is_active) VALUES ($1, true)', [detailId]);
+      // B inserts the same detail concurrently; with no unique index it does NOT block.
+      await clientB.query('INSERT INTO cut_job_item (order_detail_id, is_active) VALUES ($1, true)', [detailId]);
 
       await clientA.query('COMMIT');
-      const bError = (await bInsert) as { code?: string } | null;
-
-      expect(bError).not.toBeNull();
-      expect(bError?.code).toBe('23505');
-      await clientB.query('ROLLBACK');
+      await clientB.query('COMMIT');
 
       const { rows } = await clientA.query(
         'SELECT count(*)::int AS n FROM cut_job_item WHERE order_detail_id = $1 AND is_active = true',
         [detailId],
       );
-      expect(rows[0].n).toBe(1);
+      expect(rows[0].n).toBe(2);
     } finally {
       clientA.release();
       clientB.release();

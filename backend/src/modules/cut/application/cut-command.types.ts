@@ -2,6 +2,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type {
   AddCutItemsRequestDto,
   CreateCutJobRequestDto,
+  CutDetailPlacementsResponseDto,
   CutJobDto,
   EligibleDetailsResponseDto,
   CutSelectionCriteriaDto,
@@ -105,6 +106,15 @@ export interface CutPermissionDeniedInput {
   cutJobId?: number;
 }
 
+export interface DetailPlacementsQuery {
+  currentUser: CurrentUser;
+  /** explicit detail ids (detail-level mode); takes precedence over orderIds */
+  detailIds?: number[];
+  /** order ids whose non-deleted details are resolved when detailIds is empty */
+  orderIds?: number[];
+  requestId?: string;
+}
+
 export interface CutRepositoryPort {
   createJob(command: CreateCutJobCommand): Promise<CutJobDto>;
   recordPermissionDenied(input: CutPermissionDeniedInput): Promise<void>;
@@ -115,6 +125,7 @@ export interface CutRepositoryPort {
   getJob(query: GetCutJobQuery): Promise<CutJobDto>;
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;
+  listDetailPlacements(query: DetailPlacementsQuery): Promise<CutDetailPlacementsResponseDto>;
   renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer>;
   renderSheetSvg(query: RenderSheetSvgQuery): Promise<string>;
   renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer>;

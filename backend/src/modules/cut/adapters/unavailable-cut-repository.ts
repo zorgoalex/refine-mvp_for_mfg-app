@@ -40,6 +40,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
     return Promise.reject(unavailable());
   }
 
+  listDetailPlacements() {
+    return Promise.reject(unavailable());
+  }
+
   renderSheetPng() {
     return Promise.reject(unavailable());
   }
