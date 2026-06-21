@@ -22,6 +22,13 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/Пресеты рендера/);
   });
 
+  it('eligibility statuses use a multiselect from the production-statuses reference (no free text)', () => {
+    expect(tabSrc).toMatch(/resource: 'production_statuses'/);
+    expect(tabSrc).toMatch(/mode="multiple"/);
+    // free-text CSV entry for eligibility codes is gone
+    expect(tabSrc).not.toMatch(/parseCodesCsv/);
+  });
+
   it('exposes CRUD for param-profiles and render-presets (not sheet specs)', () => {
     for (const m of [
       'createParamProfile', 'updateParamProfile', 'deleteParamProfile',
