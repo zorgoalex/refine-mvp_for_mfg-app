@@ -785,8 +785,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
           notification.error({
             message: '⚠️ Не удалось сохранить заказ',
+            className: 'order-save-validation-notification',
             description: (
               <div style={{ fontSize: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                  <Button size="small" onClick={() => notification.destroy()}>
+                    Закрыть все
+                  </Button>
+                </div>
                 {generalDetailErrors.length === 0 && (headerErrors.length > 0 || detailErrors.size > 0) && (
                   <p style={{ marginBottom: '12px', fontWeight: 'bold', color: '#ff4d4f' }}>
                     Пожалуйста, заполните обязательные поля:
