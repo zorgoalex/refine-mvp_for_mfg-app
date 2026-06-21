@@ -440,7 +440,9 @@ async function verifyShowPage(
     await page.getByRole('button', { name: 'Экспорт в Excel' }).first().click();
     await expect(page.getByText(/Excel файл успешно сгенерирован|Ошибка/)).toBeVisible({ timeout: 30000 });
 
-    await page.getByRole('button', { name: 'JSON snapshot' }).click();
+    // "JSON snapshot" is a menu item inside the "Другие экспорты" (⋮) dropdown, not a button.
+    await page.getByRole('button', { name: 'Другие экспорты' }).first().click();
+    await page.getByRole('menuitem', { name: 'JSON snapshot' }).click();
     await expect(page.getByText(/JSON snapshot заказа выгружен|Не удалось выгрузить JSON snapshot/)).toBeVisible({ timeout: 30000 });
 
     // The show page exposes two "Изменить" controls (top EditButton link + an inline
