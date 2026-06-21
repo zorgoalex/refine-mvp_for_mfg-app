@@ -144,17 +144,13 @@ export function useDragSelection<T>({
     const rect = container.getBoundingClientRect();
     const mouseY = lastMouseYRef.current;
 
-    // Check if mouse is near top or bottom edge
-    const distanceFromTop = mouseY - rect.top;
-    const distanceFromBottom = rect.bottom - mouseY;
-
     let scrollDelta = 0;
 
-    if (distanceFromTop < autoScrollZone && distanceFromTop > 0) {
-      // Near top - scroll up
+    if (mouseY <= rect.top + autoScrollZone) {
+      const distanceFromTop = Math.max(mouseY - rect.top, 0);
       scrollDelta = -autoScrollSpeed * (1 - distanceFromTop / autoScrollZone);
-    } else if (distanceFromBottom < autoScrollZone && distanceFromBottom > 0) {
-      // Near bottom - scroll down
+    } else if (mouseY >= rect.bottom - autoScrollZone) {
+      const distanceFromBottom = Math.max(rect.bottom - mouseY, 0);
       scrollDelta = autoScrollSpeed * (1 - distanceFromBottom / autoScrollZone);
     }
 
