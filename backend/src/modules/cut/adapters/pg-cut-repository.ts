@@ -565,7 +565,8 @@ export class PgCutRepository implements CutRepositoryPort {
     const result = await this.database.query<EligibleRow>(
       `
       SELECT od.detail_id, od.order_id, od.quantity, od.material_id,
-             m.sheet_material_type_id, od.film_id, od.production_status_id, od.delete_flag,
+             COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id,
+             od.film_id, od.production_status_id, od.delete_flag,
              EXISTS (
                SELECT 1 FROM cut_job_item cji
                WHERE cji.order_detail_id = od.detail_id AND cji.is_active = true
@@ -727,7 +728,8 @@ export class PgCutRepository implements CutRepositoryPort {
       delete_flag: boolean;
       sheet_material_type_id: string | number | null;
     }>(
-      `SELECT od.order_id, od.quantity, od.production_status_id, od.delete_flag, m.sheet_material_type_id
+      `SELECT od.order_id, od.quantity, od.production_status_id, od.delete_flag,
+              COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id
        FROM order_details od
        JOIN materials m ON m.material_id = od.material_id
        WHERE od.detail_id = $1`,
@@ -884,12 +886,12 @@ async function loadCalcItems(tx: TransactionClient, cutJobId: number): Promise<C
     `
     SELECT cji.cut_job_item_id, cji.order_detail_id, cji.order_id, cji.qty,
            od.width AS width_mm, od.height AS height_mm, od.material_id,
-           m.sheet_material_type_id, od.film_id, f.film_texture,
+           COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id, od.film_id, f.film_texture,
            smt.width_mm AS smt_width_mm, smt.height_mm AS smt_height_mm
     FROM cut_job_item cji
     JOIN order_details od ON od.detail_id = cji.order_detail_id
     JOIN materials m ON m.material_id = od.material_id
-    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = m.sheet_material_type_id
+    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = COALESCE(od.sheet_material_type_id, m.sheet_material_type_id)
     LEFT JOIN films f ON f.film_id = od.film_id
     WHERE cji.cut_job_id = $1 AND cji.is_active = true
     ORDER BY cji.cut_job_item_id
