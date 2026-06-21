@@ -1086,7 +1086,12 @@ const buildWhere = (filters?: any[]) => {
   if (!filters || filters.length === 0) return "";
   const andParts = filters.map((f) => {
     const op = mapOperator(f.operator);
-    const val = normalizeContains(f.operator, f.value);
+    let val = normalizeContains(f.operator, f.value);
+    // Drop null/undefined from `_in` arrays — Hasura rejects `_in: [null]` for
+    // non-null typed columns ("unexpected null value for type 'smallint'").
+    if (op === "_in" && Array.isArray(val)) {
+      val = val.filter((v) => v !== null && v !== undefined);
+    }
     return `{ ${f.field}: { ${op}: ${escapeValue(val)} } }`;
   });
   return `, where: { _and: [${andParts.join(", ")}] }`;
@@ -1898,9 +1903,18 @@ export const dataProvider = (_apiUrl: string) => {
 
       const idCol = ID_COLUMNS[resource] ?? "id";
       const selection = fieldsFor(resource);
+      // Strip null/undefined ids: an `_in: [null]` is rejected by Hasura for non-null
+      // typed columns ("unexpected null value for type 'smallint'"). Callers may pass a
+      // null id (e.g. a sheet-shadow material's null default_supplier_id/vendor_id).
+      const cleanIds = ((ids as unknown[]) ?? []).filter(
+        (v) => v !== null && v !== undefined,
+      );
+      if (cleanIds.length === 0) {
+        return { data: [] };
+      }
       const query = `
         query {
-          ${resource}(where: { ${idCol}: { _in: [${ids.map(escapeValue).join(",")}] } }) {
+          ${resource}(where: { ${idCol}: { _in: [${cleanIds.map(escapeValue).join(",")}] } }) {
             ${selection}
           }
         }
