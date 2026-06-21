@@ -9,13 +9,12 @@ function candidate(overrides: Record<string, unknown> = {}) {
     deleteFlag: false,
     productionStatusId: 10,
     sheetMaterialTypeId: 99,
-    alreadyReserved: false,
     ...overrides,
   };
 }
 
 describe('cut eligibility classification (§5)', () => {
-  it('marks a ready, linked, unreserved detail eligible (no reason)', () => {
+  it('marks a ready, linked detail eligible (no reason)', () => {
     expect(classifyDetailEligibility(candidate(), config)).toEqual({
       eligible: true,
       reason: null,
@@ -28,10 +27,9 @@ describe('cut eligibility classification (§5)', () => {
     );
   });
 
-  it('flags already-reserved details', () => {
-    expect(
-      classifyDetailEligibility(candidate({ alreadyReserved: true }), config).reason,
-    ).toBe('already_reserved');
+  it('placement in another job is NOT an ineligibility (multi-job allowed)', () => {
+    // A detail already in other jobs stays eligible; placement is informational.
+    expect(classifyDetailEligibility(candidate(), config)).toEqual({ eligible: true, reason: null });
   });
 
   it('flags a status not in the configured ready set', () => {

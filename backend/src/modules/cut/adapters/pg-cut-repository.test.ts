@@ -217,7 +217,10 @@ describe('PgCutRepository', () => {
     expect(audit?.params[0]).toBe('cut_job.created');
   });
 
-  it('surfaces a duplicate active reservation as 409 CUT_DETAIL_ALREADY_RESERVED', async () => {
+  it('does NOT translate a DB error into a reservation conflict (placement is non-exclusive, migration 031)', async () => {
+    // The exclusivity unique index is gone, so there is no 23505→409 reservation
+    // mapping anymore: a raw DB error must propagate untranslated (no swallowing
+    // into a misleading CUT_DETAIL_ALREADY_RESERVED).
     const db = createDatabase({
       detailRows: { 1: { order_id: 9, quantity: 1 } },
       cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
@@ -227,7 +230,7 @@ describe('PgCutRepository', () => {
 
     await expect(
       repo.addItems({ currentUser: currentUser(), cutJobId: 42, version: 0, dto: { detailIds: [1] }, requestId: 'r' }),
-    ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_DETAIL_ALREADY_RESERVED' });
+    ).rejects.toMatchObject({ code: '23505' });
   });
 
   it('rejects reserving a wrong-status detail with 422 CUT_DETAIL_NOT_ELIGIBLE (server-side eligibility)', async () => {

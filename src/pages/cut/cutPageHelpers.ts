@@ -25,6 +25,49 @@ export function selectableDetailIds(details: ReadonlyArray<{ orderDetailId: numb
 }
 
 /**
+ * Reason-aware warning when nothing can be added to a cut job. Instead of a flat
+ * "нет подходящих деталей", it explains WHY each candidate was rejected (notably
+ * "уже в раскрое" for already-reserved details), counting per reason.
+ */
+export function buildCutAddWarning(
+  candidates: ReadonlyArray<{ eligible: boolean; ineligibleReason: string | null }>,
+): string {
+  const ineligible = candidates.filter((c) => !c.eligible);
+  const count = (reason: string) => ineligible.filter((c) => c.ineligibleReason === reason).length;
+  const parts: string[] = [];
+  const noSpec = count('no_sheet_spec');
+  const wrongStatus = count('wrong_status');
+  const deleted = count('deleted');
+  if (noSpec) parts.push(`без раскройной спецификации материала: ${noSpec}`);
+  if (wrongStatus) parts.push(`неподходящий статус: ${wrongStatus}`);
+  if (deleted) parts.push(`удалены: ${deleted}`);
+  if (parts.length === 0) return 'Нет подходящих деталей для раскроя';
+  return `Нет деталей, готовых к раскрою (${parts.join(', ')})`;
+}
+
+/**
+ * Informational note for the add-to-cut modal: where the chosen details are ALREADY
+ * placed. Placement never blocks adding (multi-job allowed) — this only informs.
+ * Active jobs are listed by #id + name; archived placements collapse to one note.
+ * Returns null when the details are not in any job.
+ */
+export function formatPlacementsMessage(
+  placements: { jobs: ReadonlyArray<{ cutJobId: number; name: string }>; hasArchived: boolean },
+): string | null {
+  const segments: string[] = [];
+  if (placements.jobs.length > 0) {
+    const list = placements.jobs.map((j) => `#${j.cutJobId} ${j.name}`).join(', ');
+    segments.push(`Эти детали уже есть в заданиях: ${list}.`);
+  }
+  if (placements.hasArchived) {
+    segments.push('Часть деталей в архивных заданиях.');
+  }
+  if (segments.length === 0) return null;
+  segments.push('Добавление не ограничено — деталь может быть в нескольких заданиях.');
+  return segments.join(' ');
+}
+
+/**
  * Detail-level "add to cut": keep only the operator-chosen detail ids that are
  * also eligible. Order follows `selectableEligible`; result is distinct.
  */

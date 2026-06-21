@@ -29,6 +29,7 @@ import type {
   CalculateCutJobCommand,
   CreateCutJobCommand,
   CutRepositoryPort,
+  DetailPlacementsQuery,
   EligibleDetailsQuery,
   GetCutJobQuery,
   ListCutJobsQuery,
@@ -40,8 +41,10 @@ import type {
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
+  CutDetailPlacementsResponseDto,
   CutGroupDto,
   CutJobDto,
+  CutJobRefDto,
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
@@ -58,7 +61,6 @@ import {
   CutOrderDetailNotFoundError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
-import { CutDetailAlreadyReservedError } from '../errors/cut.errors';
 
 const AUDIT_SOURCE = 'backend-cut-command';
 
@@ -160,9 +162,13 @@ export class PgCutRepository implements CutRepositoryPort {
 
       const readyStatusIds = await this.resolveReadyStatusIds();
       const reservedOrderIds: number[] = [];
+      let insertedCount = 0;
       for (const detailId of command.dto.detailIds ?? []) {
-        const orderId = await this.reserveDetail(tx, cutJobId, detailId, readyStatusIds);
-        reservedOrderIds.push(orderId);
+        const { orderId, inserted } = await this.reserveDetail(tx, cutJobId, detailId, readyStatusIds);
+        if (inserted) {
+          reservedOrderIds.push(orderId);
+          insertedCount += 1;
+        }
       }
 
       await this.audit(tx, command.currentUser, {
@@ -170,7 +176,7 @@ export class PgCutRepository implements CutRepositoryPort {
         cutJobId,
         requestId: command.requestId,
         related: { orderIds: reservedOrderIds },
-        metadata: { detailCount: command.dto.detailIds?.length ?? 0 },
+        metadata: { detailCount: insertedCount },
       });
 
       return loadJob(tx, cutJobId);
@@ -186,8 +192,20 @@ export class PgCutRepository implements CutRepositoryPort {
 
       const readyStatusIds = await this.resolveReadyStatusIds();
       const reservedOrderIds: number[] = [];
+      const insertedDetailIds: number[] = [];
       for (const detailId of command.dto.detailIds) {
-        reservedOrderIds.push(await this.reserveDetail(tx, command.cutJobId, detailId, readyStatusIds));
+        const { orderId, inserted } = await this.reserveDetail(tx, command.cutJobId, detailId, readyStatusIds);
+        if (inserted) {
+          reservedOrderIds.push(orderId);
+          insertedDetailIds.push(detailId);
+        }
+      }
+
+      // No NEW rows (every requested detail was already in this job): no-op — skip the
+      // version bump and the itemAdded audit so a same-job re-add neither churns the
+      // optimistic version nor writes a misleading audit row (Critic AUDIT-DEBT).
+      if (insertedDetailIds.length === 0) {
+        return loadJob(tx, command.cutJobId);
       }
 
       await bumpVersion(tx, command.cutJobId);
@@ -196,7 +214,7 @@ export class PgCutRepository implements CutRepositoryPort {
         cutJobId: command.cutJobId,
         requestId: command.requestId,
         related: { orderIds: reservedOrderIds },
-        metadata: { detailIds: command.dto.detailIds },
+        metadata: { detailIds: insertedDetailIds },
       });
 
       return loadJob(tx, command.cutJobId);
@@ -467,7 +485,11 @@ export class PgCutRepository implements CutRepositoryPort {
             sheetMaterialTypeIds: allSheetMaterialTypeIds,
             requestHash,
           }),
-          `${CUT_AUDIT_EVENTS.calculated}:${requestHash}`,
+          // Scope the outbox idempotency key to the JOB: after migration 031 two
+          // DIFFERENT jobs can legitimately share an identical detail set / params
+          // (and thus requestHash). Without cutJobId the global dedupe would swallow
+          // the second job's calculated event. Same-job re-calc still dedupes.
+          `${CUT_AUDIT_EVENTS.calculated}:${command.cutJobId}:${requestHash}`,
         ],
       );
 
@@ -566,11 +588,7 @@ export class PgCutRepository implements CutRepositoryPort {
       `
       SELECT od.detail_id, od.order_id, od.quantity, od.material_id,
              COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id,
-             od.film_id, od.production_status_id, od.delete_flag,
-             EXISTS (
-               SELECT 1 FROM cut_job_item cji
-               WHERE cji.order_detail_id = od.detail_id AND cji.is_active = true
-             ) AS already_reserved
+             od.film_id, od.production_status_id, od.delete_flag
       FROM order_details od
       JOIN materials m ON m.material_id = od.material_id
       WHERE ${conditions.join(' AND ')}
@@ -580,6 +598,14 @@ export class PgCutRepository implements CutRepositoryPort {
       params,
     );
 
+    // Placement is informational, not exclusive (migration 031): a detail may be
+    // in any number of jobs. Resolve where each candidate is already placed so the
+    // UI can SHOW it without ever blocking the add.
+    const placements = await this.loadDetailPlacements(
+      this.database,
+      result.rows.map((row) => toNum(row.detail_id)),
+    );
+
     let noSheetSpecCount = 0;
     const details: EligibleDetailDto[] = result.rows.map((row) => {
       const candidate: DetailEligibilityCandidate = {
@@ -587,12 +613,12 @@ export class PgCutRepository implements CutRepositoryPort {
         deleteFlag: Boolean(row.delete_flag),
         productionStatusId: row.production_status_id === null ? null : toNum(row.production_status_id),
         sheetMaterialTypeId: row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id),
-        alreadyReserved: Boolean(row.already_reserved),
       };
       const { eligible, reason } = classifyDetailEligibility(candidate, { readyStatusIds });
       if (reason === 'no_sheet_spec') {
         noSheetSpecCount += 1;
       }
+      const placement = placements.get(candidate.detailId);
       return {
         orderDetailId: candidate.detailId,
         orderId: toNum(row.order_id),
@@ -602,10 +628,109 @@ export class PgCutRepository implements CutRepositoryPort {
         filmId: row.film_id === null ? null : toNum(row.film_id),
         eligible,
         ineligibleReason: reason,
+        activeJobs: placement?.activeJobs ?? [],
+        inArchivedJob: placement?.inArchivedJob ?? false,
       };
     });
 
     return { details, noSheetSpecCount };
+  }
+
+  /**
+   * Per-detail cut-job placement (informational; migration 031 dropped exclusivity).
+   * Returns, for each requested detail id, the distinct ACTIVE (non-archived) jobs
+   * it sits in plus whether it also exists in any archived job.
+   */
+  private async loadDetailPlacements(
+    client: DatabaseClient,
+    detailIds: readonly number[],
+  ): Promise<Map<number, { activeJobs: CutJobRefDto[]; inArchivedJob: boolean }>> {
+    const map = new Map<number, { activeJobs: CutJobRefDto[]; inArchivedJob: boolean }>();
+    if (detailIds.length === 0) return map;
+    const rows = await client.query<{
+      order_detail_id: string | number;
+      cut_job_id: string | number;
+      name: string;
+      status: string;
+      is_active: boolean;
+    }>(
+      `
+      SELECT cji.order_detail_id, cj.cut_job_id, cj.name, cj.status, cji.is_active
+      FROM cut_job_item cji
+      JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+      WHERE cji.order_detail_id = ANY($1::bigint[])
+      ORDER BY cj.cut_job_id
+      `,
+      [[...detailIds]],
+    );
+    for (const row of rows.rows) {
+      const detailId = toNum(row.order_detail_id);
+      const entry = map.get(detailId) ?? { activeJobs: [], inArchivedJob: false };
+      const isArchived = row.status === 'archived';
+      if (isArchived) {
+        entry.inArchivedJob = true;
+      } else if (row.is_active) {
+        // a detail can appear once per active job; ORDER BY keeps these stable
+        if (!entry.activeJobs.some((j) => j.cutJobId === toNum(row.cut_job_id))) {
+          entry.activeJobs.push({ cutJobId: toNum(row.cut_job_id), name: row.name });
+        }
+      }
+      map.set(detailId, entry);
+    }
+    return map;
+  }
+
+  /**
+   * Subset of the given detail ids that are eligible to be added (same rule as the
+   * add path: not deleted, ready production status, resolvable sheet type). Used to
+   * keep placements precise — only details that WOULD be added are reported.
+   */
+  private async filterEligibleDetailIds(detailIds: readonly number[]): Promise<number[]> {
+    if (detailIds.length === 0) return [];
+    const readyStatusIds = await this.resolveReadyStatusIds();
+    if (readyStatusIds.length === 0) return [];
+    const result = await this.database.query<{ detail_id: string | number }>(
+      `
+      SELECT od.detail_id
+      FROM order_details od
+      JOIN materials m ON m.material_id = od.material_id
+      WHERE od.detail_id = ANY($1::bigint[])
+        AND od.delete_flag = false
+        AND od.production_status_id = ANY($2::smallint[])
+        AND COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) IS NOT NULL
+      `,
+      [[...detailIds], readyStatusIds],
+    );
+    return result.rows.map((row) => toNum(row.detail_id));
+  }
+
+  async listDetailPlacements(query: DetailPlacementsQuery): Promise<CutDetailPlacementsResponseDto> {
+    // Resolve the target detail set: explicit detailIds win; else all non-deleted
+    // details of the given orders.
+    let detailIds = query.detailIds ?? [];
+    if (detailIds.length === 0 && (query.orderIds?.length ?? 0) > 0) {
+      const resolved = await this.database.query<{ detail_id: string | number }>(
+        `SELECT detail_id FROM order_details WHERE order_id = ANY($1::bigint[]) AND delete_flag = false`,
+        [[...(query.orderIds ?? [])]],
+      );
+      detailIds = resolved.rows.map((row) => toNum(row.detail_id));
+    }
+    // Show placements only for details that would actually be ADDED — i.e. the
+    // eligible subset (ready status + sheet spec). Otherwise an order with a few
+    // wrong-status / no-sheet-spec details would warn about placements for details
+    // that the add path silently drops (Critic false-positive).
+    const eligibleIds = await this.filterEligibleDetailIds(detailIds);
+    const placements = await this.loadDetailPlacements(this.database, eligibleIds);
+    const jobsById = new Map<number, CutJobRefDto>();
+    let hasArchived = false;
+    for (const entry of placements.values()) {
+      for (const job of entry.activeJobs) {
+        if (!jobsById.has(job.cutJobId)) jobsById.set(job.cutJobId, job);
+      }
+      if (entry.inArchivedJob) hasArchived = true;
+    }
+    const jobs = [...jobsById.values()].sort((a, b) => a.cutJobId - b.cutJobId);
+    return { jobs, hasArchived };
   }
 
   async renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer> {
@@ -716,11 +841,10 @@ export class PgCutRepository implements CutRepositoryPort {
     cutJobId: number,
     detailId: number,
     readyStatusIds: readonly number[],
-  ): Promise<number> {
+  ): Promise<{ orderId: number; inserted: boolean }> {
     // Resolve the detail WITH its eligibility inputs (status + sheet spec) so the
     // backend enforces eligibility itself — never trusting the frontend's list
-    // (Critic BLOCKER). delete_flag / wrong_status / no_sheet_spec are rejected
-    // here; already_reserved is enforced by the partial unique index below (409).
+    // (Critic BLOCKER). delete_flag / wrong_status / no_sheet_spec are rejected here.
     const detail = await tx.query<{
       order_id: string | number;
       quantity: string | number;
@@ -745,7 +869,6 @@ export class PgCutRepository implements CutRepositoryPort {
         deleteFlag: row.delete_flag,
         productionStatusId: row.production_status_id === null ? null : toNum(row.production_status_id),
         sheetMaterialTypeId: row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id),
-        alreadyReserved: false,
       },
       { readyStatusIds },
     );
@@ -754,21 +877,21 @@ export class PgCutRepository implements CutRepositoryPort {
     }
     const orderId = toNum(row.order_id);
     const quantity = toNum(row.quantity);
-    try {
-      await tx.query(
-        `
-        INSERT INTO cut_job_item (cut_job_id, order_detail_id, order_id, qty, is_active, freecut_item_id)
-        VALUES ($1, $2, $3, $4, true, $5)
-        `,
-        [cutJobId, detailId, orderId, quantity, freecutItemId(detailId)],
-      );
-    } catch (error) {
-      if ((error as { code?: string })?.code === '23505') {
-        throw new CutDetailAlreadyReservedError(detailId);
-      }
-      throw error;
-    }
-    return orderId;
+    // Placement is non-exclusive across jobs (migration 031): the same detail may be
+    // in many jobs. WITHIN one job it is unique-and-idempotent — re-adding the same
+    // detail is a no-op (ON CONFLICT on the per-job partial unique index), so the
+    // requested cut quantity is never silently doubled. `inserted` reports whether a
+    // NEW row was actually written, so callers can avoid version/audit churn on no-ops.
+    const insert = await tx.query(
+      `
+      INSERT INTO cut_job_item (cut_job_id, order_detail_id, order_id, qty, is_active, freecut_item_id)
+      VALUES ($1, $2, $3, $4, true, $5)
+      ON CONFLICT (cut_job_id, order_detail_id) WHERE is_active = true DO NOTHING
+      RETURNING cut_job_item_id
+      `,
+      [cutJobId, detailId, orderId, quantity, freecutItemId(detailId)],
+    );
+    return { orderId, inserted: (insert.rowCount ?? 0) > 0 };
   }
 
   private async resolveReadyStatusIds(): Promise<number[]> {
@@ -830,7 +953,6 @@ interface EligibleRow extends QueryResultRow {
   film_id: string | number | null;
   production_status_id: string | number | null;
   delete_flag: boolean;
-  already_reserved: boolean;
 }
 
 interface CuttableGroup {

@@ -56,6 +56,12 @@ export interface CutJobDto {
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;
 }
 
+/** A cut job a detail is placed in (informational, not exclusive). */
+export interface CutJobRefDto {
+  cutJobId: number;
+  name: string;
+}
+
 export interface EligibleDetailDto {
   orderDetailId: number;
   orderId: number;
@@ -65,10 +71,22 @@ export interface EligibleDetailDto {
   filmId: number | null;
   eligible: boolean;
   ineligibleReason: IneligibleReason | null;
+  /** active (non-archived) cut jobs this detail is already placed in */
+  activeJobs: CutJobRefDto[];
+  /** true when this detail also exists in at least one archived cut job */
+  inArchivedJob: boolean;
 }
 
 export interface EligibleDetailsResponseDto {
   details: EligibleDetailDto[];
   /** count of details blocked only because their material has no sheet spec */
   noSheetSpecCount: number;
+}
+
+/** Where a set of details/orders are already placed (informational, multi-job). */
+export interface CutDetailPlacementsResponseDto {
+  /** distinct active (non-archived) jobs containing ANY of the requested details */
+  jobs: CutJobRefDto[];
+  /** true when ANY requested detail also exists in an archived job */
+  hasArchived: boolean;
 }
