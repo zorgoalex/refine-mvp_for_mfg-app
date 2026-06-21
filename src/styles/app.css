@@ -1,5 +1,24 @@
 /* Fixed sidebar with independent scrolling for content area */
 
+/* Keep large Ant Design notifications usable on small screens. Validation
+   errors can include many order-detail rows; scroll inside the toast instead
+   of letting it cover the whole application. */
+.ant-notification .ant-notification-notice {
+  max-width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  overflow: hidden;
+}
+
+.ant-notification .ant-notification-notice-description {
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.order-save-validation-notification .ant-notification-notice-description {
+  max-height: min(520px, calc(100vh - 180px));
+}
+
 /* Make the main layout container full height */
 .ant-layout {
   min-height: 100vh;
