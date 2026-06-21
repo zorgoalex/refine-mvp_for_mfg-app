@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Radio,
   Row,
+  Select,
   Space,
   Spin,
   Switch,
@@ -20,6 +21,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { useList } from '@refinedev/core';
 import {
   cutConfigApi,
   type CutConfig,
@@ -38,7 +40,6 @@ import {
   findSetting,
   formToParams,
   paramsToForm,
-  parseCodesCsv,
 } from './cutConfigHelpers';
 
 const { Title, Text, Paragraph } = Typography;
@@ -57,15 +58,33 @@ export const CutConfigTab: React.FC = () => {
   const [profileCreate, setProfileCreate] = useState(false);
   const [presetEdit, setPresetEdit] = useState<CutRenderPreset | null>(null);
   const [presetCreate, setPresetCreate] = useState(false);
-  const [eligibilityCsv, setEligibilityCsv] = useState('');
+  const [eligibilityCodes, setEligibilityCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+
+  // Production statuses come from the retained Hasura reference layer (lookup/select,
+  // CLAUDE.md principle 1) — same read path as the production workflow tab. Includes
+  // inactive statuses so a previously-saved code still renders as a selected chip.
+  const { data: statusesData } = useList({
+    resource: 'production_statuses',
+    pagination: { pageSize: 200 },
+    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
+    sorters: [{ field: 'sort_order', order: 'asc' }],
+  });
+  const statusOptions = useMemo(
+    () =>
+      (statusesData?.data ?? []).map((s: any) => ({
+        value: s.production_status_code as string,
+        label: `${s.production_status_name} (${s.production_status_code})`,
+      })),
+    [statusesData],
+  );
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
       const data = await cutConfigApi.get();
       setConfig(data);
-      setEligibilityCsv(extractEligibilityCodes(data.settings).join(', '));
+      setEligibilityCodes(extractEligibilityCodes(data.settings));
     } catch (error) {
       message.error(error instanceof ApiError ? error.message : 'Не удалось загрузить конфигурацию раскроя');
     } finally {
@@ -83,7 +102,7 @@ export const CutConfigTab: React.FC = () => {
     if (!row) return;
     setBusy(true);
     try {
-      await cutConfigApi.updateSetting('eligibility.statuses', { codes: parseCodesCsv(eligibilityCsv) }, row.version);
+      await cutConfigApi.updateSetting('eligibility.statuses', { codes: eligibilityCodes }, row.version);
       message.success('Статусы готовности к раскрою сохранены');
       await reload();
     } catch (error) {
@@ -91,7 +110,7 @@ export const CutConfigTab: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [config, eligibilityCsv, reload]);
+  }, [config, eligibilityCodes, reload]);
 
   const removeProfile = useCallback(
     async (row: CutParamProfile) => {
@@ -184,12 +203,15 @@ export const CutConfigTab: React.FC = () => {
         <Paragraph type="secondary">
           Коды производственных статусов, при которых деталь считается готовой к раскрою.
         </Paragraph>
-        <Space>
-          <Input
-            value={eligibilityCsv}
-            onChange={(e) => setEligibilityCsv(e.target.value)}
-            placeholder="new, drawn, film_purchase"
-            style={{ width: 320 }}
+        <Space align="start">
+          <Select
+            mode="multiple"
+            value={eligibilityCodes}
+            onChange={setEligibilityCodes}
+            options={statusOptions}
+            optionFilterProp="label"
+            placeholder="Выберите производственные статусы"
+            style={{ minWidth: 360 }}
             disabled={!canManage}
           />
           <Button type="primary" disabled={!canManage} loading={busy} onClick={saveEligibility}>
