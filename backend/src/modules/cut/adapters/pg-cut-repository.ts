@@ -21,6 +21,12 @@ import {
   type SheetPlacementsJson,
 } from '../application/cut-freecut-mapping';
 import { computeRequestHash } from '../application/cut-request-hash';
+import {
+  describeCutFailure,
+  extractCutFailureStatus,
+  shouldMarkCutFailed,
+} from '../application/cut-failure-reason';
+import { ApiError } from '../../../common/errors/api-error';
 import { type CutConfigPort } from '../application/cut-config';
 import { PgCutConfigRepository } from './pg-cut-config-repository';
 import type {
@@ -58,6 +64,7 @@ import {
   CutDetailNotEligibleError,
   CutJobNotMutableError,
   CutNoItemsError,
+  CutNoSheetSpecError,
   CutOrderDetailNotFoundError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
@@ -70,8 +77,21 @@ const AUDIT_SOURCE = 'backend-cut-command';
  * documented in-code fallback when the config is empty (see cut-config.ts).
  */
 
-/** Reservation is active (and the job mutable) only in these states. */
-const MUTABLE_STATUSES = new Set(['draft', 'calculating', 'ready']);
+/**
+ * Reservation is active (and the job mutable) only in these states. `failed` is
+ * mutable so an operator can fix the basket and RE-RUN the calculation on the
+ * same job instead of being forced to create a new one (a failed calc persists
+ * no groups but keeps its reserved items). `archived` stays terminal.
+ */
+const MUTABLE_STATUSES = new Set(['draft', 'calculating', 'ready', 'failed']);
+
+/** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
+interface CalcRelatedDimensions {
+  orderIds: number[];
+  materialIds: number[];
+  sheetMaterialTypeIds: number[];
+}
+const EMPTY_RELATED: CalcRelatedDimensions = { orderIds: [], materialIds: [], sheetMaterialTypeIds: [] };
 
 interface FreecutClientLike {
   optimize: (
@@ -256,8 +276,18 @@ export class PgCutRepository implements CutRepositoryPort {
 
   async calculate(command: CalculateCutJobCommand): Promise<CutJobDto> {
     // Phase 1 — read + validate + build request under a short lock (NOT held
-    // across the external freecut call).
-    const prep = await this.database.transaction(async (tx) => {
+    // across the external freecut call). A validation failure here (no items, no
+    // sheet spec, instance/body limit) is a calculation outcome too: persist a
+    // matching reason so the durable "Ошибка" never lingers stale from a prior
+    // attempt (and never mismatches the live toast).
+    // Captured as soon as Phase 1 has loaded+grouped the items, so a Phase 1
+    // validation failure (no sheet spec / instance|body limit / grain) still
+    // audits the affected order/material/sheet dimensions (query/report-ready),
+    // not an empty related set. A throw before grouping (empty basket) leaves it
+    // empty, which is correct — there are no affected entities to record.
+    let phase1Related: CalcRelatedDimensions = EMPTY_RELATED;
+    const prep = await this.database
+      .transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, command.version);
@@ -280,6 +310,13 @@ export class PgCutRepository implements CutRepositoryPort {
       // cuttable key (sheet_material_type_id, film_id). Slice-2 removes the
       // single-group 422 — a mixed-material job fans out to N groups.
       const groups = [...groupByCuttableKey(items).values()];
+      phase1Related = {
+        orderIds: groups.flatMap((g) => g.orderIds),
+        materialIds: groups.flatMap((g) => g.materialIds),
+        sheetMaterialTypeIds: groups
+          .map((g) => g.sheetMaterialTypeId)
+          .filter((id): id is number => id !== null),
+      };
       // Use the job's params snapshot (taken at createJob) — never the CURRENT
       // config defaults — so a config edit after creation can't retro-mutate this
       // calculation (§4a). Legacy jobs without a snapshot fall back to defaults.
@@ -294,7 +331,8 @@ export class PgCutRepository implements CutRepositoryPort {
         if (group.sheetMaterialTypeId === null || group.smtWidthMm === null || group.smtHeightMm === null) {
           // A group whose material has no sheet spec cannot be cut; eligibility
           // surfaces this as no_sheet_spec before add, but fail closed here too.
-          throw new CutNoItemsError(command.cutJobId);
+          // Distinct error so the durable reason names the real cause (not "no items").
+          throw new CutNoSheetSpecError(command.cutJobId);
         }
         const freecutItems: FreecutItem[] = group.items.map((item) => ({
           id: freecutItemId(item.orderDetailId),
@@ -324,13 +362,21 @@ export class PgCutRepository implements CutRepositoryPort {
       await tx.query(
         `UPDATE cut_job
          SET status = 'calculating', version = version + 1,
-             pdf_prewarm_state = 'pending', pdf_prewarm_failure_reason = NULL, updated_at = now()
+             pdf_prewarm_state = 'pending', pdf_prewarm_failure_reason = NULL,
+             failure_code = NULL, failure_reason = NULL, updated_at = now()
          WHERE cut_job_id = $1`,
         [command.cutJobId],
       );
 
       return { groupPreps, params, expectedVersion: job.version + 1 };
-    });
+      })
+      // A Phase 1 validation failure (no items / no sheet spec / instance|body
+      // limit) is a calculation outcome: persist a matching reason. Guard on the
+      // version the calc STARTED with (prep rolled back, so it is unchanged) — if a
+      // concurrent archive/add/remove committed in the gap, the version no longer
+      // matches and the failure write is skipped (supersede-safe, no clobber).
+      // Concurrency / precondition errors pass through unchanged (markCalcFailed).
+      .catch((error) => this.markCalcFailed(error, command, phase1Related, command.version));
 
     // Related dimensions aggregated across ALL groups (audit query/report-ready).
     const allOrderIds = prep.groupPreps.flatMap((p) => p.group.orderIds);
@@ -348,31 +394,15 @@ export class PgCutRepository implements CutRepositoryPort {
         responses.push({ group: groupPrep.group, response: await this.freecut.optimize(groupPrep.request) });
       }
     } catch (error) {
-      await this.database.transaction(async (tx) => {
-        await setSessionUser(tx, command.currentUser.id);
-        // Only mark THIS calculation's version as failed. If a newer calculate /
-        // mutation bumped the version while freecut was in flight, the stale
-        // failure must NOT clobber the newer result (skip status + audit).
-        const failed = await tx.query(
-          `UPDATE cut_job SET status = 'failed', version = version + 1, updated_at = now()
-           WHERE cut_job_id = $1 AND version = $2`,
-          [command.cutJobId, prep.expectedVersion],
-        );
-        if (failed.rowCount === 0) {
-          return;
-        }
-        await this.audit(tx, command.currentUser, {
-          event: CUT_AUDIT_EVENTS.calculateFailed,
-          cutJobId: command.cutJobId,
-          requestId: command.requestId,
-          related: { orderIds: allOrderIds, materialIds: allMaterialIds, sheetMaterialTypeIds: allSheetMaterialTypeIds },
-          metadata: {
-            error: error instanceof Error ? error.message : 'freecut error',
-            code: (error as { code?: string })?.code ?? null,
-          },
-        });
-      });
-      throw error;
+      // A freecut failure fails the WHOLE job. Guard the status write on THIS
+      // calculation's version so a newer calculate/mutation in flight is not
+      // clobbered (supersede-safe).
+      await this.markCalcFailed(
+        error,
+        command,
+        { orderIds: allOrderIds, materialIds: allMaterialIds, sheetMaterialTypeIds: allSheetMaterialTypeIds },
+        prep.expectedVersion,
+      );
     }
 
     // Phase 3 — persist ALL groups + a single audit + a single outbox row.
@@ -494,6 +524,77 @@ export class PgCutRepository implements CutRepositoryPort {
       );
 
       return loadJob(tx, command.cutJobId);
+    });
+  }
+
+  /**
+   * Persist a calculation failure (Phase 1 validation or Phase 2 freecut) as a
+   * durable code + operator reason, audit it, and re-throw a friendly ApiError
+   * whose message matches the persisted reason. Precondition/concurrency errors
+   * (stale version, not-mutable, not-found) pass through unchanged. Always throws.
+   *
+   * @param guardVersion the version this calc owns — Phase 2 passes the bumped
+   *   `calculating` version (prep.expectedVersion); Phase 1 passes the original
+   *   `command.version` (its prep tx rolled back, leaving the version unchanged).
+   *   Either way the status write is guarded `WHERE version = guardVersion`, so a
+   *   concurrent mutation that advanced the version is NOT clobbered (rowCount 0
+   *   → the failure write is skipped). Both phases are supersede-safe.
+   */
+  private async markCalcFailed(
+    error: unknown,
+    command: CalculateCutJobCommand,
+    related: CalcRelatedDimensions,
+    guardVersion: number,
+  ): Promise<never> {
+    if (!shouldMarkCutFailed(error)) {
+      // Not a calculation outcome — leave status/reason untouched.
+      throw error;
+    }
+    const failure = describeCutFailure(error);
+    const originalCode = (error as { code?: unknown })?.code;
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const failed = await tx.query(
+        `UPDATE cut_job
+         SET status = 'failed', failure_code = $3, failure_reason = $4,
+             pdf_prewarm_state = 'pending', pdf_prewarm_failure_reason = NULL,
+             version = version + 1, updated_at = now()
+         WHERE cut_job_id = $1 AND version = $2`,
+        [command.cutJobId, guardVersion, failure.code, failure.reason],
+      );
+      if (failed.rowCount === 0) {
+        return; // superseded by a newer version — skip status + audit.
+      }
+      // A failed job must carry NO layout (invariant: never a stale group/PDF on
+      // an "Ошибка" job). Phase 2's prep already dropped the prior result set, but
+      // a Phase 1 failure rolled its prep back — so clear here for BOTH paths
+      // uniformly (no-op when there is nothing to drop). cut_group_sheet cascades;
+      // items stay active/reserved (FK ON DELETE SET NULL), unlinked for clarity.
+      await tx.query(
+        `UPDATE cut_job_item SET cut_group_id = NULL WHERE cut_job_id = $1 AND cut_group_id IS NOT NULL`,
+        [command.cutJobId],
+      );
+      await tx.query(`DELETE FROM cut_group WHERE cut_job_id = $1`, [command.cutJobId]);
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.calculateFailed,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        related,
+        metadata: {
+          // Raw technical message + original code for diagnostics, plus the
+          // mapped code/reason the operator actually saw.
+          error: error instanceof Error ? error.message : 'cut calculation error',
+          code: typeof originalCode === 'string' ? originalCode : null,
+          failureCode: failure.code,
+          failureReason: failure.reason,
+        },
+      });
+    });
+    // Surface the friendly reason; preserve the original HTTP status (422/413/504/
+    // ...) when the error carried one (duck-typed), else 500.
+    throw new ApiError(extractCutFailureStatus(error), failure.code, failure.reason, {
+      cutJobId: command.cutJobId,
+      ...(typeof originalCode === 'string' ? { originalCode } : {}),
     });
   }
 
@@ -1075,6 +1176,8 @@ interface JobRow extends QueryResultRow {
   source: string;
   version: string | number;
   pdf_prewarm_state: string;
+  failure_code: string | null;
+  failure_reason: string | null;
 }
 
 interface ItemRow extends QueryResultRow {
@@ -1103,7 +1206,7 @@ interface SheetRow extends QueryResultRow {
 
 async function loadJob(client: DatabaseClient, cutJobId: number): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
@@ -1153,6 +1256,8 @@ async function loadJob(client: DatabaseClient, cutJobId: number): Promise<CutJob
     source: jobRow.source,
     version: toNum(jobRow.version),
     pdfPrewarmState: jobRow.pdf_prewarm_state,
+    failureCode: jobRow.failure_code,
+    failureReason: jobRow.failure_reason,
     items: itemsResult.rows.map((row) => ({
       cutJobItemId: toNum(row.cut_job_item_id),
       orderDetailId: toNum(row.order_detail_id),

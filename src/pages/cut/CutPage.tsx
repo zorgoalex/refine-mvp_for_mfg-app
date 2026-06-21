@@ -9,6 +9,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -227,6 +228,15 @@ export const CutPage: React.FC = () => {
       await loadJobs();
     } catch (error) {
       handleError(error, 'Не удалось рассчитать раскрой');
+      // Reload so the now-failed job shows its persisted reason (Alert) and a
+      // fresh version for an immediate retry — the failure bumped the version
+      // server-side, so the stale in-memory job would otherwise 409 on retry.
+      try {
+        setJob(await cutApi.get(job.cutJobId));
+        await loadJobs();
+      } catch {
+        // best-effort refresh; the toast already explained the failure
+      }
     } finally {
       setBusy(false);
     }
@@ -298,9 +308,16 @@ export const CutPage: React.FC = () => {
         title: 'Статус',
         key: 'status',
         width: 120,
-        render: (_: unknown, row: CutJobDto) => (
-          <Tag color={STATUS_TAG_COLORS[row.status] ?? 'default'}>{cutJobStatusLabel(row.status)}</Tag>
-        ),
+        render: (_: unknown, row: CutJobDto) => {
+          const tag = <Tag color={STATUS_TAG_COLORS[row.status] ?? 'default'}>{cutJobStatusLabel(row.status)}</Tag>;
+          // A failed job carries a human-readable reason — surface it on hover so
+          // the bare red "Ошибка" tag is never an unexplained dead end.
+          return row.status === 'failed' && row.failureReason ? (
+            <Tooltip title={row.failureReason}>{tag}</Tooltip>
+          ) : (
+            tag
+          );
+        },
       },
       {
         title: 'Источник',
@@ -425,8 +442,19 @@ export const CutPage: React.FC = () => {
         <Card
           size="small"
           title={`Раскрой #${job.cutJobId} — ${job.name}`}
-          extra={<Tag>{job.status}</Tag>}
+          extra={
+            <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
+          }
         >
+          {job.status === 'failed' && job.failureReason && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="Не удалось рассчитать раскрой"
+              description={job.failureReason}
+            />
+          )}
           <Space>
             <Button onClick={loadEligible} loading={busy}>
               Загрузить подходящие детали
@@ -435,7 +463,7 @@ export const CutPage: React.FC = () => {
               Добавить выбранные ({selected.length})
             </Button>
             <Button type="primary" onClick={calculate} disabled={!canManage || job.items.length === 0} loading={busy}>
-              Рассчитать
+              {job.status === 'failed' ? 'Повторить расчёт' : 'Рассчитать'}
             </Button>
             <Select<string>
               value={preset}

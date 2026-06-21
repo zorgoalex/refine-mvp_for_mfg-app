@@ -24,4 +24,21 @@ describe('CutPage source guards', () => {
     expect(source).toContain("can('cut.manage')");
     expect(source).toContain("can('cut.view')");
   });
+
+  it('explains a failed cut instead of a bare status: Alert + reason + retry', () => {
+    // Durable failure reason shown prominently (Alert) and on the list tag (Tooltip).
+    expect(source).toContain('job.failureReason');
+    expect(source).toContain('row.failureReason');
+    expect(source).toContain('Tooltip');
+    // A failed job is recoverable on the same job: the action re-labels to retry.
+    expect(source).toContain('Повторить расчёт');
+  });
+
+  it('refreshes the job after a failed calculate so the reason + fresh version show', () => {
+    // The calculate catch must reload the job (persisted reason + bumped version),
+    // otherwise the Alert never renders and a retry would 409 on a stale version.
+    const calc = source.slice(source.indexOf('const calculate'));
+    const body = calc.slice(0, calc.indexOf('}, [job'));
+    expect(body).toMatch(/catch[\s\S]*cutApi\.get\(/);
+  });
 });
