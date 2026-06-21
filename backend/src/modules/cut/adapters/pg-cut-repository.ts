@@ -485,7 +485,11 @@ export class PgCutRepository implements CutRepositoryPort {
             sheetMaterialTypeIds: allSheetMaterialTypeIds,
             requestHash,
           }),
-          `${CUT_AUDIT_EVENTS.calculated}:${requestHash}`,
+          // Scope the outbox idempotency key to the JOB: after migration 031 two
+          // DIFFERENT jobs can legitimately share an identical detail set / params
+          // (and thus requestHash). Without cutJobId the global dedupe would swallow
+          // the second job's calculated event. Same-job re-calc still dedupes.
+          `${CUT_AUDIT_EVENTS.calculated}:${command.cutJobId}:${requestHash}`,
         ],
       );
 

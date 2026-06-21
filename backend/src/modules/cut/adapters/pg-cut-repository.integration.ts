@@ -553,6 +553,39 @@ describeIntegration('PgCutRepository (integration)', () => {
     expect(outbox2.rows[0].n).toBe(1);
   });
 
+  it('two DIFFERENT jobs with the SAME detail set both emit an outbox row (key scoped by job)', async () => {
+    const echo = {
+      optimize: (req: { stock: Array<{ id: string; width_mm: number; height_mm: number }>; items: Array<{ id: string; width_mm: number; height_mm: number }> }) =>
+        Promise.resolve({
+          status: 'ok' as const,
+          summary: { used_stock_count: 1, waste_percent: 5 },
+          solutions: [
+            {
+              stock_id: req.stock[0].id,
+              index: 0,
+              width_mm: req.stock[0].width_mm,
+              height_mm: req.stock[0].height_mm,
+              trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
+              placements: req.items.map((it, i) => ({
+                item_id: it.id, instance: 1, x_mm: i * 620, y_mm: 0, width_mm: it.width_mm, height_mm: it.height_mm, rotated: false,
+              })),
+            },
+          ],
+        }),
+    };
+    const repo = new PgCutRepository(database, echo);
+    // identical detail set [1] in two separate jobs (allowed post-031) => identical
+    // requestHash; the calculated outbox key must be scoped by cutJobId so BOTH emit.
+    const jobA = await repo.createJob({ currentUser: currentUser(), dto: { name: 'A', detailIds: [1] }, requestId: 'xa1' });
+    const jobB = await repo.createJob({ currentUser: currentUser(), dto: { name: 'B', detailIds: [1] }, requestId: 'xb1' });
+    const cA = await repo.calculate({ currentUser: currentUser(), cutJobId: jobA.cutJobId, version: jobA.version, requestId: 'xa2' });
+    const cB = await repo.calculate({ currentUser: currentUser(), cutJobId: jobB.cutJobId, version: jobB.version, requestId: 'xb2' });
+    expect(cA.status).toBe('ready');
+    expect(cB.status).toBe('ready');
+    const outbox = await pool.query(`SELECT count(*)::int AS n FROM outbox_events WHERE event_type = 'cut_job.calculated'`);
+    expect(outbox.rows[0].n).toBe(2);
+  });
+
   it('freecut failure persists status=failed + cut_job.calculate_failed and rethrows', async () => {
     const repo = new PgCutRepository(
       database,
