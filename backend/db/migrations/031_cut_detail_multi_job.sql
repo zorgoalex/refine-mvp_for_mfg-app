@@ -19,10 +19,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_cut_job_item_active_job_detail
   ON cut_job_item (cut_job_id, order_detail_id)
   WHERE is_active = true;
 
--- Fast "which jobs is this detail in" lookups (placements), filtered to active rows.
-CREATE INDEX IF NOT EXISTS idx_cut_job_item_active_order_detail
-  ON cut_job_item (order_detail_id)
-  WHERE is_active = true;
+-- Fast "which jobs is this detail in" lookups (placements). NON-partial: the
+-- placements query reads BOTH active and archived rows (to surface the archived
+-- flag), so it must not be limited to is_active = true.
+CREATE INDEX IF NOT EXISTS idx_cut_job_item_order_detail
+  ON cut_job_item (order_detail_id);
 
 -- ── Down ─────────────────────────────────────────────────────────────────────
 -- Reverting re-introduces GLOBAL exclusivity. It can FAIL if, by then, the same

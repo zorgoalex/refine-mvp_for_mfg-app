@@ -84,7 +84,9 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
         return;
       }
       const updated = await cutApi.addItems(job.cutJobId, { detailIds: finalIds, version: job.version });
-      message.success(`Добавлено деталей в раскрой #${updated.cutJobId}: ${finalIds.length}`);
+      // Count-free: a same-job re-add is a no-op server-side, so we don't claim a
+      // precise "added N" that may not reflect newly-inserted rows.
+      message.success(`Раскрой #${updated.cutJobId} обновлён`);
       onDone?.(updated);
       onClose();
     } catch (error) {

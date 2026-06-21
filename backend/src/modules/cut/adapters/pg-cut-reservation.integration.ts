@@ -28,9 +28,8 @@ async function createMinimalSchema(pool: Pool): Promise<void> {
     CREATE UNIQUE INDEX uq_cut_job_item_active_job_detail
       ON cut_job_item (cut_job_id, order_detail_id)
       WHERE is_active = true;
-    CREATE INDEX idx_cut_job_item_active_order_detail
-      ON cut_job_item (order_detail_id)
-      WHERE is_active = true;
+    CREATE INDEX idx_cut_job_item_order_detail
+      ON cut_job_item (order_detail_id);
   `);
 }
 

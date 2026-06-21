@@ -15,11 +15,14 @@ describe('031 cut detail multi-job migration text', () => {
     expect(sql).toMatch(/WHERE is_active = true/);
   });
 
-  it('adds a NON-unique lookup index on active cut_job_item by order_detail_id', () => {
-    expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS idx_cut_job_item_active_order_detail/);
-    expect(sql).toMatch(/ON cut_job_item\s*\(\s*order_detail_id\s*\)/);
-    // the order_detail_id lookup index must NOT be unique (that is the global guard we dropped)
-    expect(sql).not.toMatch(/CREATE UNIQUE INDEX[^\n]*idx_cut_job_item_active_order_detail/);
+  it('adds a NON-unique, NON-partial lookup index on cut_job_item by order_detail_id', () => {
+    expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS idx_cut_job_item_order_detail/);
+    expect(sql).toMatch(/ON cut_job_item\s*\(\s*order_detail_id\s*\)\s*;/);
+    // must NOT be unique (that is the global guard we dropped)
+    expect(sql).not.toMatch(/CREATE UNIQUE INDEX[^\n]*idx_cut_job_item_order_detail/);
+    // and the lookup index must NOT be partial (placements read archived rows too):
+    // no WHERE clause between the index name and its terminating semicolon.
+    expect(sql).not.toMatch(/CREATE INDEX IF NOT EXISTS idx_cut_job_item_order_detail[^;]*WHERE/);
   });
 
   it('documents a reversible down section', () => {
