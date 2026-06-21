@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
-import { resolveDetailMaterialName } from "../../utils/materialDisplayName";
+import { resolveDetailMaterialName, resolveHeaderMaterialName } from "../../utils/materialDisplayName";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
 import { handleExcelError } from "../../utils/excel/excelErrorHandler";
@@ -242,7 +242,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Header-only/no-details order: the order's own material (orders_view COALESCE
   // in Hasura mode / backend header COALESCE name).
   const headerMaterialName =
-    record?.material_name ?? backendOrder?.header?.materialName ?? null;
+    resolveHeaderMaterialName(record) ??
+    resolveHeaderMaterialName(backendOrder?.header) ??
+    backendOrder?.header?.materialName ??
+    null;
 
   // Ref для печати
   const printRef = useRef<HTMLDivElement>(null);

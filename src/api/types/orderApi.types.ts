@@ -369,6 +369,8 @@ export interface OrderHeaderDto {
   surcharge?: number | null;
   materialId?: number | null;
   sheetMaterialTypeId?: number | null;
+  /** SP3: server-resolved COALESCE(sheet name, material name) for header display. */
+  materialName?: string | null;
   millingTypeId?: number | null;
   edgeTypeId?: number | null;
   filmId?: number | null;
@@ -397,6 +399,8 @@ export interface OrderDetailDto {
   area?: number | null;
   materialId: number;
   sheetMaterialTypeId?: number | null;
+  /** SP3: server-resolved COALESCE(sheet name, material name) for per-detail display. */
+  materialName?: string | null;
   millingTypeId: number;
   edgeTypeId: number;
   filmId?: number | null;

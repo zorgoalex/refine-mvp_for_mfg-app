@@ -97,4 +97,16 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
     expect(values.header.sheet_material_type_id).toBe(9);
     expect(values.details[0].sheet_material_type_id).toBe(7);
   });
+
+  it('carries server-resolved materialName (COALESCE) onto header + detail for display', () => {
+    const dtoWithNames: OrderDto = {
+      ...dto,
+      header: { ...(dto.header as any), materialName: 'МДФ 16мм' } as any,
+      details: [{ ...(dto.details[0] as any), materialName: 'МДФ 16мм' } as any],
+    } as any;
+    const values = mapOrderDtoToFormValues(dtoWithNames);
+    // backend-read surfaces (show/edit via __backendOrder) must display the sheet name, not "—"
+    expect((values.header as any).material_name_resolved).toBe('МДФ 16мм');
+    expect((values.details[0] as any).material_name_resolved).toBe('МДФ 16мм');
+  });
 });

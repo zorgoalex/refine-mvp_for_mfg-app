@@ -162,6 +162,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
 
     material_id: optionalNumber(order.header.materialId),
     sheet_material_type_id: optionalNumber(order.header.sheetMaterialTypeId),
+    // SP3: server-resolved header material name (COALESCE) for backend-read display.
+    material_name_resolved: order.header.materialName ?? null,
     milling_type_id: optionalNumber(order.header.millingTypeId),
     edge_type_id: optionalNumber(order.header.edgeTypeId),
     film_id: optionalNumber(order.header.filmId),
@@ -467,6 +469,9 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     area: detail.area ?? calculateArea(detail.height, detail.width, detail.quantity),
     material_id: detail.materialId,
     sheet_material_type_id: detail.sheetMaterialTypeId ?? null,
+    // SP3: carry the server-resolved COALESCE(sheet, material) name so backend-read
+    // surfaces (show/edit via __backendOrder) display the sheet name, not "—".
+    material_name_resolved: detail.materialName ?? null,
     milling_type_id: detail.millingTypeId,
     edge_type_id: detail.edgeTypeId,
     film_id: detail.filmId ?? null,
