@@ -204,8 +204,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     selectedKeys: selectedRowKeys,
     onSelectionChange: handleDragSelectionChange,
     scrollContainerRef: scrollContainerRef,
-    autoScrollZone: 60,
-    autoScrollSpeed: 10,
+    autoScrollZone: 120,
+    autoScrollSpeed: 32,
   });
 
   // Notify parent when pending selections change
