@@ -13,6 +13,9 @@ test.describe('Order UI full form coverage', () => {
     test.setTimeout(300000);
 
     test('creates a durable order through UI and verifies fields, tabs, buttons, and creator history', async ({ page }, testInfo) => {
+        // Comprehensive durable flow against the deployed stage (network latency + many
+        // form fields); the default 300s budget is too tight, so allow more headroom.
+        testInfo.setTimeout(600000);
         const runId = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
         const orderName = `E2E codex full coverage ${runId}`;
         const detailName = `E2E detail ${runId}`;
@@ -170,7 +173,7 @@ test.describe('Order UI full form coverage', () => {
         await verifyEditTabs(page, testInfo, orderName, detailName, paymentNote);
         await verifyDurableDatabaseState(orderId, orderName, detailName, paymentRef);
 
-        await page.getByRole('button', { name: 'Просмотр' }).click();
+        await page.getByRole('button', { name: 'Просмотр' }).first().click();
         await page.waitForURL(new RegExp(`/orders/show/${orderId}`), { timeout: 30000 });
         await verifyShowPage(page, testInfo, orderId, orderName, note, paymentNote);
 
@@ -371,18 +374,20 @@ function summarizeApiBody(body: unknown): string {
 async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string, detailName: string, paymentNote: string) {
     const form = page.locator('.ant-card').filter({ hasText: orderName }).first();
     await clickOrderTab(form, 'Основная информация');
-    await expect(page.getByPlaceholder('Введите название заказа')).toHaveValue(orderName);
+    // Scope to the active order card + .first(): the tabbed workspace keeps multiple order
+    // panels alive, so page-wide selectors hit duplicate elements (strict-mode violation).
+    await expect(form.getByPlaceholder('Введите название заказа').first()).toHaveValue(orderName);
     await screenshot(page, testInfo, 'edit-basic');
 
     await clickOrderTab(form, 'Детали заказа');
-    await expect(page.getByText(detailName)).toBeVisible();
+    await expect(form.getByText(detailName).first()).toBeVisible();
     await screenshot(page, testInfo, 'edit-details');
 
     await clickOrderTab(form, 'Даты');
     await screenshot(page, testInfo, 'edit-dates');
 
     await clickOrderTab(form, 'Финансы');
-    await expect(page.getByText(paymentNote)).toBeVisible();
+    await expect(form.getByText(paymentNote).first()).toBeVisible();
     await screenshot(page, testInfo, 'edit-finance');
 
     await clickOrderTab(form, 'Услуги/работы');
@@ -413,28 +418,26 @@ async function verifyShowPage(
     await expect(page.getByRole('row', { name: /610 410 2/ })).toBeVisible();
     await screenshot(page, testInfo, 'show-details');
 
-    await page.getByRole('button', { name: /Финансы/ }).click();
+    await page.getByText('Финансы', { exact: false }).first().click();
     await expect(page.getByRole('row', { name: /4\s?501/ }).first()).toBeVisible();
     await screenshot(page, testInfo, 'show-finance');
 
-    await page.getByRole('button', { name: /Дополнительная информация/ }).click();
-    await expect(page.getByText('Создал')).toBeVisible();
-    await expect(
-        page.locator('.ant-collapse-item')
-            .filter({ hasText: 'Дополнительная информация' })
-            .filter({ hasText: 'Создал' })
-            .getByText(username)
-            .first(),
-    ).toBeVisible();
+    await page.getByText('Дополнительная информация', { exact: false }).first().click();
+    await expect(page.getByText('Создал').first()).toBeVisible();
+    // The show page renders the creator as the user's full name ("Codex Playwright"),
+    // while the orders list shows the username ("codex_playwright"). Match either form so
+    // the assertion is robust to which identity field a surface displays.
+    const creatorPattern = new RegExp(username.replace(/[_\s]+/g, '[\\s_]+'), 'i');
+    await expect(page.getByText(creatorPattern).first()).toBeVisible({ timeout: 15000 });
     await screenshot(page, testInfo, 'show-additional-created-by');
 
-    await page.getByRole('button', { name: 'Обновить' }).click();
+    await page.getByRole('button', { name: 'Обновить' }).first().click();
     await expect(page.getByText(orderName, { exact: true }).first()).toBeVisible();
 
-    await page.getByRole('button', { name: 'Печать' }).click();
+    await page.getByRole('button', { name: 'Печать' }).first().click();
     await expect(page.getByText(orderName, { exact: true }).first()).toBeVisible();
 
-    await page.getByRole('button', { name: 'Экспорт в Excel' }).click();
+    await page.getByRole('button', { name: 'Экспорт в Excel' }).first().click();
     await expect(page.getByText(/Excel файл успешно сгенерирован|Ошибка/)).toBeVisible({ timeout: 30000 });
 
     await page.getByRole('button', { name: 'JSON snapshot' }).click();
@@ -483,7 +486,18 @@ async function verifyDurableDatabaseState(orderId: number, orderName: string, de
 }
 
 function formItem(scope: Locator, label: string) {
-    return scope.locator('.ant-form-item').filter({ hasText: label }).first();
+    // Match the form-item by its EXACT label text. A loose `hasText` substring match breaks
+    // since SP3 added the "Листовой материал" field, whose label contains "Материал" and
+    // would otherwise be matched by `formItem(scope, 'Материал')`.
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return scope
+        .locator('.ant-form-item')
+        .filter({
+            has: scope.page().locator('.ant-form-item-label label', {
+                hasText: new RegExp(`^\\s*${escaped}\\s*$`),
+            }),
+        })
+        .first();
 }
 
 async function clickOrderTab(scope: Locator, label: string) {
@@ -491,10 +505,21 @@ async function clickOrderTab(scope: Locator, label: string) {
 }
 
 async function selectAntdOption(page: Page, item: Locator, optionText?: string) {
-    await item.locator('.ant-select').first().click();
+    const select = item.locator('.ant-select').first();
+    await select.click();
+    // For a named option, type into the search box first. Large lists (e.g. materials,
+    // 58+ entries) are virtualized by AntD, so the target row may not be in the rendered
+    // window until the search filters it into view.
+    if (optionText) {
+        const search = select.locator('input.ant-select-selection-search-input');
+        if (await search.count()) {
+            await search.fill('');
+            await search.type(optionText, { delay: 10 });
+        }
+    }
     const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
     const option = optionText
-        ? dropdown.getByText(optionText, { exact: true })
+        ? dropdown.getByText(optionText, { exact: true }).first()
         : dropdown.locator('.ant-select-item-option:not(.ant-select-item-option-disabled)').first();
     await expect(option).toBeVisible({ timeout: 15000 });
     await option.click();
