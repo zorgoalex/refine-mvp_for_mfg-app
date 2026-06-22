@@ -13,6 +13,7 @@
     "test:backend:deadline-integration": "vitest run --config vitest.deadline-integration.config.ts",
     "test:backend:notification-integration": "vitest run --config vitest.notification-engine-integration.config.ts",
     "test:backend:cut-integration": "vitest run --config vitest.cut-integration.config.ts",
+    "test:backend:production-actions-integration": "vitest run --config vitest.production-actions-integration.config.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:frontend-pages": "playwright test tests/frontend-pages-smoke.spec.ts",

@@ -22,6 +22,94 @@ describe('ProductionActionService', () => {
     } satisfies Partial<ApiError>);
   });
 
+  describe('production command coarse gate', () => {
+    it('lets a worker (only orders.change_production_status) reach the repo for changeProductionStatus', async () => {
+      let called = false;
+      const service = new ProductionActionService({
+        productionActions: createRepository({
+          async changeProductionStatus() {
+            called = true;
+            return response();
+          },
+        }),
+      });
+      await service.changeProductionStatus({
+        currentUser: currentUser('worker'),
+        orderId: 15,
+        dto: { productionStatusId: 2, version: 3, idempotencyKey: 'coarse-prod-1' },
+      });
+      expect(called).toBe(true);
+    });
+
+    it('lets a worker reach the repo for activateProductionStage', async () => {
+      let called = false;
+      const service = new ProductionActionService({
+        productionActions: createRepository({
+          async activateProductionStage() {
+            called = true;
+            return response();
+          },
+        }),
+      });
+      await service.activateProductionStage({
+        currentUser: currentUser('worker'),
+        orderId: 15,
+        productionStatusId: 4,
+        dto: { version: 6, idempotencyKey: 'coarse-stage-on-1' },
+      });
+      expect(called).toBe(true);
+    });
+
+    it('lets a worker reach the repo for deactivateProductionStage', async () => {
+      let called = false;
+      const service = new ProductionActionService({
+        productionActions: createRepository({
+          async deactivateProductionStage() {
+            called = true;
+            return response();
+          },
+        }),
+      });
+      await service.deactivateProductionStage({
+        currentUser: currentUser('worker'),
+        orderId: 15,
+        productionStatusId: 4,
+        dto: { version: 6, idempotencyKey: 'coarse-stage-off-1' },
+      });
+      expect(called).toBe(true);
+    });
+
+    it('lets a worker reach the repo for activateDetailProductionStage', async () => {
+      let called = false;
+      const service = new ProductionActionService({
+        productionActions: createRepository({
+          async activateDetailProductionStage() {
+            called = true;
+            return response();
+          },
+        }),
+      });
+      await service.activateDetailProductionStage({
+        currentUser: currentUser('worker'),
+        detailId: 99,
+        productionStatusId: 4,
+        dto: { idempotencyKey: 'coarse-detail-1' },
+      });
+      expect(called).toBe(true);
+    });
+
+    it('still denies a viewer (no orders.change_production_status) for changeProductionStatus', async () => {
+      const service = new ProductionActionService({ productionActions: createRepository() });
+      await expect(
+        service.changeProductionStatus({
+          currentUser: currentUser('viewer'),
+          orderId: 15,
+          dto: { productionStatusId: 2, version: 3, idempotencyKey: 'coarse-prod-deny-1' },
+        }),
+      ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    });
+  });
+
   it('delegates allowed commands to the repository', async () => {
     const calls: string[] = [];
     const service = new ProductionActionService({
@@ -199,7 +287,8 @@ describe('ProductionActionService', () => {
       statusCode: 403,
       code: 'PERMISSION_DENIED',
       details: {
-        requiredPermissions: ['orders.change_production_status', 'orders.update'],
+        // Coarse gate relaxed to capability-only; owner/assigned scope enforced in repo.
+        requiredPermissions: ['orders.change_production_status'],
       },
     } satisfies Partial<ApiError>);
   });
@@ -218,7 +307,7 @@ describe('ProductionActionService', () => {
       statusCode: 403,
       code: 'PERMISSION_DENIED',
       details: {
-        requiredPermissions: ['orders.change_production_status', 'orders.update'],
+        requiredPermissions: ['orders.change_production_status'],
       },
     } satisfies Partial<ApiError>);
   });

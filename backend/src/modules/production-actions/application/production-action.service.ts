@@ -56,34 +56,24 @@ export class ProductionActionService {
   }
 
   async changeProductionStatus(command: ChangeProductionStatusCommand) {
-    this.requirePermissions(command.currentUser, [
-      'orders.change_production_status',
-      'orders.update',
-    ]);
+    // Coarse capability gate only. Fine-grained owner-vs-assigned scope (incl. the
+    // assigned-production-worker path) is enforced in the repository's assertOrderScope.
+    this.requirePermissions(command.currentUser, ['orders.change_production_status']);
     return this.ports.productionActions.changeProductionStatus(command);
   }
 
   async activateProductionStage(command: ActivateProductionStageCommand) {
-    this.requirePermissions(command.currentUser, [
-      'orders.change_production_status',
-      'orders.update',
-    ]);
+    this.requirePermissions(command.currentUser, ['orders.change_production_status']);
     return this.ports.productionActions.activateProductionStage(command);
   }
 
   async deactivateProductionStage(command: DeactivateProductionStageCommand) {
-    this.requirePermissions(command.currentUser, [
-      'orders.change_production_status',
-      'orders.update',
-    ]);
+    this.requirePermissions(command.currentUser, ['orders.change_production_status']);
     return this.ports.productionActions.deactivateProductionStage(command);
   }
 
   async activateDetailProductionStage(command: ActivateDetailProductionStageCommand) {
-    this.requirePermissions(command.currentUser, [
-      'orders.change_production_status',
-      'orders.update',
-    ]);
+    this.requirePermissions(command.currentUser, ['orders.change_production_status']);
     return this.ports.productionActions.activateDetailProductionStage(command);
   }
 
