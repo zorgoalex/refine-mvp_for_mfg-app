@@ -148,6 +148,8 @@ export const envSchema = z
     BACKEND_OUTBOX_RELAY_MAX_ATTEMPTS: z.coerce.number().int().positive().max(100).default(10),
     FREECUT_BASE_URL: optionalUrlFromEnv,
     FREECUT_OPTIMIZE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+    CAD_SERVICE_BASE_URL: optionalUrlFromEnv,
+    CAD_SERVICE_API_TOKEN: optionalTrimmedStringFromEnv,
     GAS_WEBAPP_URL: optionalUrlFromEnv,
     GAS_API_KEY: optionalTrimmedStringFromEnv,
     GAS_EXPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(55000),

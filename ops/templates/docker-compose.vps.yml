@@ -207,6 +207,10 @@ services:
       BACKEND_CUT_AUTO_TRIGGER: ${BACKEND_CUT_AUTO_TRIGGER:-false}
       FREECUT_BASE_URL: ${FREECUT_BASE_URL:-}
       FREECUT_OPTIMIZE_TIMEOUT_MS: ${FREECUT_OPTIMIZE_TIMEOUT_MS:-15000}
+      # CAD SVG/DXF service over the internal "back" network. Backend calls it
+      # by service DNS and skips the token (trusted Docker CIDR).
+      CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}
+      CAD_SERVICE_API_TOKEN: ${CAD_SERVICE_API_TOKEN:-}
       # Twenty CRM one-way sync (Phase 2) — fail-closed
       BACKEND_ENABLE_TWENTY_SYNC: ${BACKEND_ENABLE_TWENTY_SYNC:-false}
       BACKEND_TWENTY_SYNC_RELAY_OWNER: ${BACKEND_TWENTY_SYNC_RELAY_OWNER:-none}
@@ -266,6 +270,57 @@ services:
     networks:
       - back
 
+  cad-service:
+    build:
+      context: ${CAD_BUILD_CONTEXT:-./repo_svgdxf}
+      dockerfile: Dockerfile
+    image: cad-service:local
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      CAD_SERVICE_API_TOKEN: ${CAD_SERVICE_API_TOKEN:-}
+      CAD_SERVICE_TRUSTED_CIDRS: ${CAD_SERVICE_TRUSTED_CIDRS:-127.0.0.0/8,::1/128,172.16.0.0/12}
+      # Public traffic arrives via traefik, so trust X-Forwarded-For: the real
+      # external client IP is evaluated (not traefik's trusted Docker IP), which
+      # keeps internal backend token-free while forcing a token for outside IPs.
+      CAD_SERVICE_TRUST_PROXY_HEADERS: ${CAD_SERVICE_TRUST_PROXY_HEADERS:-1}
+    volumes:
+      - cad-data:/app/data
+      - cad-generated:/app/generated
+    # Blast-radius isolation: cap CPU/mem so a runaway render cannot starve the
+    # host and take down sibling services; cap logs so it cannot fill the disk.
+    cpus: ${CAD_CPUS:-1.0}
+    mem_limit: ${CAD_MEM_LIMIT:-512m}
+    pids_limit: ${CAD_PIDS_LIMIT:-256}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${EDGE_NETWORK_NAME:-erp_edge}
+      - traefik.http.routers.cad.rule=Host(`${CAD_FQDN}`)
+      - traefik.http.routers.cad.entrypoints=websecure
+      - traefik.http.routers.cad.tls.certresolver=letsencrypt
+      - traefik.http.services.cad.loadbalancer.server.port=8000
+    networks:
+      - back
+      - edge
+
 networks:
   edge:
     name: ${EDGE_NETWORK_NAME:-erp_edge}
@@ -278,3 +333,5 @@ networks:
 
 volumes:
   valkey_data:
+  cad-data:
+  cad-generated:

@@ -26,4 +26,24 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('BACKEND_PROJECTS_READ_ONLY=true');
     expect(envExample).toContain('BACKEND_ENABLE_PROJECT_P8_NOTIFICATIONS=false');
   });
+
+  it('publishes the CAD service on a public traefik subdomain with internal access', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+
+    expect(compose).toContain('cad-service:');
+    expect(compose).toContain('context: ${CAD_BUILD_CONTEXT:-./repo_svgdxf}');
+    expect(compose).toContain('traefik.http.routers.cad.rule=Host(`${CAD_FQDN}`)');
+    expect(compose).toContain('traefik.http.services.cad.loadbalancer.server.port=8000');
+    expect(compose).toContain('CAD_SERVICE_TRUST_PROXY_HEADERS: ${CAD_SERVICE_TRUST_PROXY_HEADERS:-1}');
+    expect(compose).toContain('CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}');
+  });
+
+  it('documents the CAD service env vars in the VPS env example', () => {
+    const envExample = readTemplate('ops/templates/env.vps.example');
+
+    expect(envExample).toContain('CAD_FQDN=cad-test.example.com');
+    expect(envExample).toContain('CAD_BUILD_CONTEXT=./repo_svgdxf');
+    expect(envExample).toContain('CAD_SERVICE_TRUST_PROXY_HEADERS=1');
+    expect(envExample).toContain('CAD_SERVICE_BASE_URL=http://cad-service:8000');
+  });
 });
