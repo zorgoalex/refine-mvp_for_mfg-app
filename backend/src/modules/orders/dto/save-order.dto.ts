@@ -56,7 +56,8 @@ export interface SaveOrderDetailDto {
   height: number;
   width: number;
   quantity: number;
-  materialId: number;
+  /** @deprecated Variant B: always NULL for sheet-bearing rows (post-034). Use sheetMaterialTypeId. */
+  materialId: number | null;
   sheetMaterialTypeId?: number | null;
   millingTypeId: number;
   edgeTypeId: number;

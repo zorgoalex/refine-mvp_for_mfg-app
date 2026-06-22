@@ -46,11 +46,9 @@ import type {
 } from '../dto/save-order.dto';
 import { prepareOrderSave } from '../domain/order-save-preparer';
 import { OrderNotFoundError } from '../errors/order.errors';
-import {
-  buildShadowMaterialAuditEvent,
-  resolveShadowMaterialId,
-  type ShadowContext,
-} from './shadow-material';
+// Note: shadow-material helpers (resolveShadowMaterialId, buildShadowMaterialAuditEvent,
+// ShadowContext) and SNAPSHOT_IMPORT_SOURCE removed in Variant B (Task 4): post-034 migration
+// we no longer create/sync synthetic shadow materials during snapshot import.
 import {
   assertSheetEligibilityAndNoClear,
   validateSheetReferences,
@@ -63,7 +61,7 @@ type AnyRow = QueryResultRow & Record<string, unknown>;
 type ImportStatus = 'created' | 'updated' | 'noop';
 
 const SOURCE = 'backend-orders-command';
-const SNAPSHOT_IMPORT_SOURCE = 'backend-orders-snapshot-import';
+// SNAPSHOT_IMPORT_SOURCE removed in Variant B (Task 4): no longer used after shadow material removal.
 
 const SNAPSHOT_ENTITY_TYPES = {
   order: 'order',
@@ -681,6 +679,25 @@ async function upsertProductionEvents(
   await deleteMissingImportedProductionEvents(tx, source, orderId, saved);
 }
 
+/**
+ * Variant B (Task 4 — Critic R15 B1): strip legacy materialId from any header/detail
+ * that carries a non-null sheetMaterialTypeId, BEFORE prepareOrderSave/validation.
+ *
+ * A Variant-A export snapshot carried a real shadow materialId alongside sheetMaterialTypeId.
+ * Post-034, material_id is always NULL for sheet-bearing rows. The Task-5 validator will
+ * reject a non-null materialId when sheetMaterialTypeId is set, so we sanitize it here.
+ *
+ * Anti-injection guard (validateNoShadowInjection) stays active only for rows where
+ * sheetMaterialTypeId is null — those are legacy/non-sheet rows and the guard is benign.
+ */
+export function nullifyMaterialIdForSheetEntries<
+  T extends { materialId?: number | null; sheetMaterialTypeId?: number | null },
+>(entries: readonly T[]): T[] {
+  return entries.map((e) =>
+    e.sheetMaterialTypeId != null ? { ...e, materialId: null } : e,
+  );
+}
+
 function snapshotToSaveOrderDto(
   snapshot: OrderSnapshotDto,
   clientId: number,
@@ -692,14 +709,22 @@ function snapshotToSaveOrderDto(
     dowelingLinks: Array<OrderSnapshotDowelingLinkDto & { id?: number; clientKey?: string; dowelingOrderId: number }>;
   },
 ): SaveOrderDto {
+  // Variant B: null out materialId for any header/detail that carries sheetMaterialTypeId.
+  // This sanitizes Variant-A legacy export payloads (which carried a shadow materialId alongside
+  // sheetMaterialTypeId) before they reach prepareOrderSave / the Task-5 validator.
+  const sanitizedOrder = snapshot.data.order.sheetMaterialTypeId != null
+    ? { ...snapshot.data.order, materialId: null }
+    : snapshot.data.order;
+  const sanitizedDetails = nullifyMaterialIdForSheetEntries(children.details);
+
   return {
     header: {
-      ...snapshot.data.order,
+      ...sanitizedOrder,
       orderId: undefined,
       clientId,
-      paymentStatusId: snapshot.data.order.paymentStatusId ?? undefined,
+      paymentStatusId: sanitizedOrder.paymentStatusId ?? undefined,
     },
-    details: children.details.map(stripSourceFields),
+    details: sanitizedDetails.map(stripSourceFields),
     payments: children.payments.map(stripSourceFields),
     workshops: children.workshops.map(stripSourceFields),
     requirements: children.requirements.map(stripSourceFields),
@@ -759,7 +784,7 @@ function mapDetailSnapshot(row: AnyRow): OrderSnapshotDetailDto {
     height: toNumber(row.height),
     width: toNumber(row.width),
     quantity: toNumber(row.quantity),
-    materialId: toNumber(row.material_id),
+    materialId: toNullableNumber(row.material_id),
     millingTypeId: toNumber(row.milling_type_id),
     edgeTypeId: toNumber(row.edge_type_id),
     filmId: toNullableNumber(row.film_id),
@@ -1057,27 +1082,13 @@ async function upsertDetail(
   detail: CalculatedOrderDetailDto,
   command: ImportOrderSnapshotCommand,
 ): Promise<number> {
-  // Variant A: a sheet detail resolves (creates/syncs) its dedicated synthetic shadow material
-  // INSIDE this tx and OVERRIDES material_id with it. Mirrors pg-order-transaction-manager.ts.
-  let effective: CalculatedOrderDetailDto = detail;
-  if (detail.sheetMaterialTypeId != null) {
-    const ctx: ShadowContext = {
-      actorUserId: toNullableUserId(command.currentUser.id),
-      requestId: command.requestId,
-      source: SNAPSHOT_IMPORT_SOURCE,
-      clientId: null, // clientId not yet known at this point; orderId is known from outer scope
-      orderId,
-    };
-    const materialId = await resolveShadowMaterialId(
-      tx,
-      detail.sheetMaterialTypeId,
-      ctx,
-      async (auditInput) => {
-        await auditService.record(tx, buildShadowMaterialAuditEvent(auditInput, ctx));
-      },
-    );
-    effective = { ...detail, materialId };
-  }
+  // Variant B (migration 034): order_details.material_id is always NULL for sheet-bearing rows.
+  // Variant-A shadow material resolution is removed — we no longer create/sync shadow materials.
+  // Any legacy materialId arriving from an older snapshot export is discarded here (the
+  // sanitisation in nullifyMaterialIdForSheetEntries already cleared it before prepareOrderSave,
+  // but we enforce null at the DB-write level too for defence-in-depth).
+  const effective: CalculatedOrderDetailDto =
+    detail.sheetMaterialTypeId != null ? { ...detail, materialId: null } : detail;
 
   if (effective.id) {
     await tx.query(
@@ -2374,4 +2385,5 @@ export {
   mapOrderHeaderSnapshot as _testOnlyMapOrderHeaderSnapshot,
   mapDetailSnapshot as _testOnlyMapDetailSnapshot,
   detailValues as _testOnlyDetailValues,
+  nullifyMaterialIdForSheetEntries as _testOnlyNullifyMaterialIdForSheetEntries,
 };

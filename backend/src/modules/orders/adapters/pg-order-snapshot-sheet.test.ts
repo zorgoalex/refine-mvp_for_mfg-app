@@ -2,12 +2,15 @@
  * Unit tests for SP3 sheet-material support in the snapshot path.
  * Covers:
  *  - mapOrderHeaderSnapshot includes sheetMaterialTypeId on export
- *  - mapDetailSnapshot includes sheetMaterialTypeId on export
+ *  - mapDetailSnapshot includes sheetMaterialTypeId on export (and materialId is null-safe)
  *  - orderHeaderInsertParams / orderHeaderUpdateParams include sheet_material_type_id
  *    and enforce the header invariant (force material_id NULL when sheetMaterialTypeId set)
  *  - detailValues includes sheetMaterialTypeId as the last param
  *  - OrderSnapshotService.importOrderSnapshot gates on sheet_materials.view when
  *    the incoming snapshot payload contains a sheetMaterialTypeId
+ *  - Variant B (Task 4): export materialId is null when DB material_id is NULL (post-034)
+ *  - Variant B (Task 4): import sanitization strips materialId from legacy Variant-A payloads
+ *    when sheetMaterialTypeId is present, before prepareOrderSave/validation
  */
 import JSZip from 'jszip';
 import { describe, expect, it, vi } from 'vitest';
@@ -24,6 +27,7 @@ import {
   _testOnlyOrderHeaderInsertParams as insertParams,
   _testOnlyOrderHeaderUpdateParams as updateParams,
   _testOnlyDetailValues as detailValues,
+  _testOnlyNullifyMaterialIdForSheetEntries as nullifyMaterialIdForSheetEntries,
   buildSheetValidationDetails,
 } from './pg-order-snapshot';
 import { assertSheetEligibilityAndNoClear } from '../domain/sheet-order-validation';
@@ -520,5 +524,76 @@ describe('OrderSnapshotService — sheet_materials.view gate on BATCH import', (
       service.importOrderSnapshotBatch({ currentUser: makeUser({}), zipBase64 }),
     ).resolves.toMatchObject({ success: true });
     expect(snapshots.importOrderSnapshotBatch).toHaveBeenCalled();
+  });
+});
+
+// ── Variant B (Task 4): export null-safe materialId ───────────────────────
+// Post-034 migration, material_id IS NULL in the DB for all order_details.
+// The export serializer must emit materialId: null, not NaN or 0.
+
+describe('mapDetailSnapshot — Variant B: null-safe materialId export', () => {
+  it('exports a sheet detail with materialId null when DB material_id is NULL', () => {
+    const result = mapDetailSnapshot(makeDetailRow({ material_id: null, sheet_material_type_id: 2 }));
+    expect(result.materialId).toBeNull();
+    expect(result.sheetMaterialTypeId).toBe(2);
+  });
+
+  it('exports a non-sheet detail with materialId null when DB material_id is NULL', () => {
+    // Legacy path: post-034 even non-sheet rows have material_id NULL in DB
+    const result = mapDetailSnapshot(makeDetailRow({ material_id: null, sheet_material_type_id: null }));
+    expect(result.materialId).toBeNull();
+  });
+
+  it('still exports a numeric materialId when the DB row has a non-null material_id', () => {
+    // Backward compatibility: existing rows with material_id set still serialize correctly
+    const result = mapDetailSnapshot(makeDetailRow({ material_id: 99, sheet_material_type_id: 5 }));
+    expect(result.materialId).toBe(99);
+    expect(result.sheetMaterialTypeId).toBe(5);
+  });
+});
+
+// ── Variant B (Task 4): import sanitization (Critic R15 B1) ─────────────────
+// A Variant-A export carries a real materialId (shadow) alongside sheetMaterialTypeId.
+// Before prepareOrderSave/validation, the snapshot builder must NULL out materialId
+// for any header/detail that has a non-null sheetMaterialTypeId.
+// Anti-injection guard stays active only for sheetMaterialTypeId==null rows.
+
+describe('nullifyMaterialIdForSheetEntries — import sanitization', () => {
+  it('nulls materialId in a detail when sheetMaterialTypeId is set (Variant-A legacy payload)', () => {
+    const details = [{ materialId: 7, sheetMaterialTypeId: 2 }];
+    const result = nullifyMaterialIdForSheetEntries(details);
+    expect(result[0].materialId).toBeNull();
+    expect(result[0].sheetMaterialTypeId).toBe(2);
+  });
+
+  it('preserves materialId in a detail when sheetMaterialTypeId is null', () => {
+    const details = [{ materialId: 3, sheetMaterialTypeId: null }];
+    const result = nullifyMaterialIdForSheetEntries(details);
+    expect(result[0].materialId).toBe(3);
+  });
+
+  it('handles a detail where materialId is already null and sheetMaterialTypeId is set', () => {
+    const details = [{ materialId: null, sheetMaterialTypeId: 2 }];
+    const result = nullifyMaterialIdForSheetEntries(details);
+    expect(result[0].materialId).toBeNull();
+    expect(result[0].sheetMaterialTypeId).toBe(2);
+  });
+
+  it('handles a detail where materialId is undefined and sheetMaterialTypeId is set', () => {
+    const details = [{ sheetMaterialTypeId: 2 }];
+    const result = nullifyMaterialIdForSheetEntries(details as Array<{ materialId?: number | null; sheetMaterialTypeId?: number | null }>);
+    expect(result[0].materialId).toBeNull();
+  });
+
+  it('processes multiple details: nulls only sheet ones, preserves legacy ones', () => {
+    const details = [
+      { materialId: 7, sheetMaterialTypeId: 2 },   // sheet → null materialId
+      { materialId: 3, sheetMaterialTypeId: null }, // legacy → keep materialId
+      { materialId: null, sheetMaterialTypeId: 5 }, // already null + sheet → stays null
+    ];
+    const result = nullifyMaterialIdForSheetEntries(details);
+    expect(result[0].materialId).toBeNull();
+    expect(result[1].materialId).toBe(3);
+    expect(result[2].materialId).toBeNull();
   });
 });
