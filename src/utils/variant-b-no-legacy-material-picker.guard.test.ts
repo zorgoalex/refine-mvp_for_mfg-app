@@ -11,6 +11,16 @@ describe('Variant B: no legacy material picker', () => {
     expect(src).not.toMatch(/resource:\s*['"]materials['"]/);
   });
 
+  it('OrderDetailModal has no dead resource:materials query', () => {
+    const src = read('src/pages/orders/components/modals/OrderDetailModal.tsx');
+    expect(src).not.toMatch(/resource:\s*['"]materials['"]/);
+  });
+
+  it('BulkEditModal uses filterCuttableOptions for the sheet picker', () => {
+    const src = read('src/pages/orders/components/modals/BulkEditModal.tsx');
+    expect(src).toMatch(/filterCuttableOptions/);
+  });
+
   it('no order create default seeds a legacy material_id', () => {
     for (const p of [
       'src/pages/orders/components/tabs/OrderDetailsTab.tsx',

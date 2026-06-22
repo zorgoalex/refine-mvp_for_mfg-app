@@ -27,10 +27,12 @@ interface FilmAggregation {
 export const OrderMaterialsTab: React.FC = () => {
   const { details } = useOrderFormStore();
 
-  // Загружаем справочники
+  // Загружаем справочники — gate: skip when no detail carries a legacy material_id (Variant B normal case)
+  const hasLegacyMaterialIds = details.some((d) => d.material_id != null);
   const { data: materialsData } = useList({
     resource: 'materials',
     pagination: { pageSize: 10000 },
+    queryOptions: { enabled: hasLegacyMaterialIds },
   });
 
   const { data: filmsData } = useList({

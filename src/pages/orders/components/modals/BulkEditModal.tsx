@@ -12,6 +12,7 @@ import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/us
 import {
   useSheetMaterialOptions,
   toSheetSelectOptions,
+  filterCuttableOptions,
 } from '../../../../hooks/useSheetMaterialOptions';
 
 const { Text } = Typography;
@@ -344,7 +345,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             >
               <Form.Item name="sheet_material_type_id" noStyle>
                 <Select
-                  options={toSheetSelectOptions(sheetMaterials.options, undefined)}
+                  options={toSheetSelectOptions(filterCuttableOptions(sheetMaterials.options), undefined)}
                   loading={sheetMaterials.isLoading}
                   placeholder="Выберите материал"
                   showSearch

@@ -5,7 +5,6 @@ import React, { useEffect, useState } from 'react';
 import { Modal, Form, Input, InputNumber, Row, Col, Select, Space, Button, Alert } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
-import { useOne } from '@refinedev/core';
 import { OrderDetail } from '../../../../types/orders';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
@@ -19,10 +18,7 @@ import {
   filterCuttableOptions,
 } from '../../../../hooks/useSheetMaterialOptions';
 import {
-  validateMaterialDimensions,
   validateSheetDimensions,
-  getMaterialDimensionDescription,
-  MaterialInfo
 } from '../../../../utils/materialDimensionValidation';
 
 interface OrderDetailModalProps {
@@ -45,7 +41,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [calculatedCost, setCalculatedCost] = useState<number>(0);
   const [millingTypeModalOpen, setMillingTypeModalOpen] = useState(false);
   const [edgeTypeModalOpen, setEdgeTypeModalOpen] = useState(false);
-  const selectedMaterialId: number | null = null; // VB: always null, legacy path dead
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
@@ -115,22 +110,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
     : productionStatusSelectProps;
 
-  // Load selected material with type information
-  const { data: materialData } = useOne({
-    resource: 'materials',
-    id: selectedMaterialId || 0,
-    queryOptions: {
-      enabled: selectedMaterialId !== null && selectedMaterialId > 0,
-    },
-    meta: {
-      fields: [
-        'material_id',
-        'material_name',
-        { material_type: ['material_type_id', 'material_type_name'] }
-      ],
-    },
-  });
-
   // Initialize form when detail changes
   useEffect(() => {
     if (open) {
@@ -174,25 +153,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       return;
     }
 
-    if (!height || !width || !materialData?.data) {
-      setDimensionValidationError(null);
-      return;
-    }
-
-    const material: MaterialInfo = {
-      material_id: materialData.data.material_id,
-      material_name: materialData.data.material_name,
-      material_type_id: materialData.data.material_type?.material_type_id,
-      material_type_name: materialData.data.material_type?.material_type_name,
-    };
-
-    const validationResult = validateMaterialDimensions(height, width, material);
-
-    if (!validationResult.isValid) {
-      setDimensionValidationError(validationResult.errorMessage || null);
-    } else {
-      setDimensionValidationError(null);
-    }
+    setDimensionValidationError(null);
   };
 
   // Auto-calculate area when height, width or quantity changes
@@ -222,14 +183,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     // Validate dimensions against material limits
     validateDimensions();
   };
-
-  // Trigger validation when material data loads
-  useEffect(() => {
-    if (materialData?.data) {
-      validateDimensions();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [materialData]);
 
   // Auto-calculate cost when area or price changes
   const handleCostCalculation = (areaOverride?: number) => {
@@ -302,21 +255,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         {dimensionValidationError && (
           <Alert
             message="Ошибка размеров детали"
-            description={
-              <div>
-                <div>{dimensionValidationError}</div>
-                {materialData?.data && (
-                  <div style={{ marginTop: 8, fontSize: '12px', opacity: 0.8 }}>
-                    {getMaterialDimensionDescription({
-                      material_id: materialData.data.material_id,
-                      material_name: materialData.data.material_name,
-                      material_type_id: materialData.data.material_type?.material_type_id,
-                      material_type_name: materialData.data.material_type?.material_type_name,
-                    })}
-                  </div>
-                )}
-              </div>
-            }
+            description={dimensionValidationError}
             type="error"
             showIcon
             closable
