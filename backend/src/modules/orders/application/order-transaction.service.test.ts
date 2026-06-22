@@ -1227,6 +1227,69 @@ describe('OrderTransactionService', () => {
     ]);
   });
 
+  it('detail sheet change with unchanged header emits detailSheetMaterialChanges in before/after (Critic R7 M2)', async () => {
+    // Scenario: only a detail's sheetMaterialTypeId changes; the order header is identical.
+    // The audit before/after MUST carry detailSheetMaterialChanges so computeDiff() can
+    // emit a queryable diff_json entry (not just opaque metadata).
+    const transactions = new FakeOrderTransactions();
+    // Seed order with detail id=11, sheetMaterialTypeId=777 (before value).
+    transactions.seedOrder({
+      orderId: 42,
+      version: 5,
+      details: [calculatedDetail({ id: 11, sheetMaterialTypeId: 777 })],
+    });
+
+    // Update: same header, only sheetMaterialTypeId on detail 11 changes (777 → 888).
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Test order',  // SAME as default in createSaveDto
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            sheetMaterialTypeId: 888,  // changed
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 10000,
+          },
+        ],
+        payments: [],
+        version: 5,
+      }),
+    });
+
+    expect(transactions.state.auditEvents).toHaveLength(1);
+    const event = transactions.state.auditEvents[0] as OrderSaveAuditEvent;
+
+    // Before snapshot must contain detailSheetMaterialChanges with the stored (before) ref.
+    const beforeObj = event.before as Record<string, unknown> | null;
+    expect(beforeObj).toBeTruthy();
+    expect(Array.isArray(beforeObj!['detailSheetMaterialChanges'])).toBe(true);
+    const beforeRefs = beforeObj!['detailSheetMaterialChanges'] as Array<{ detailId?: number; sheetMaterialTypeId: number | null }>;
+    // The before snapshot should capture the stored sheet id (777) for detail 11.
+    expect(beforeRefs.some((r) => r.detailId === 11 && r.sheetMaterialTypeId === 777)).toBe(true);
+
+    // After snapshot must contain detailSheetMaterialChanges with the new (after) ref.
+    const afterObj = event.after as Record<string, unknown> | null;
+    expect(afterObj).toBeTruthy();
+    expect(Array.isArray(afterObj!['detailSheetMaterialChanges'])).toBe(true);
+    const afterRefs = afterObj!['detailSheetMaterialChanges'] as Array<{ detailId?: number; sheetMaterialTypeId: number | null }>;
+    expect(afterRefs.some((r) => r.detailId === 11 && r.sheetMaterialTypeId === 888)).toBe(true);
+  });
+
   it('collects active and deleted child ids for DB ownership checks', () => {
     const refs = collectChildReferences({
       ...createPreparedNormalizedOrder(),

@@ -143,6 +143,7 @@ export class OrderTransactionService {
         currentUser: command.currentUser,
       });
       const afterSnapshot = await unitOfWork.loadOrderHeaderSnapshot(orderId);
+      const afterDetailRefs = touchesSheet ? toAfterDetailRefs(prepared.details) : undefined;
       await unitOfWork.writeAuditEvent({
         action: 'orders.create',
         orderId,
@@ -152,11 +153,15 @@ export class OrderTransactionService {
         clientId: prepared.order.header.clientId ?? null,
         requestId: command.requestId,
         before: null,
-        after: afterSnapshot,
+        // Embed detail sheet refs into the snapshot so computeDiff() emits them in diff_json
+        // (Critic R7 M2). Uses a key without password/token/secret to avoid redaction.
+        after: touchesSheet
+          ? { ...afterSnapshot, detailSheetMaterialChanges: afterDetailRefs }
+          : afterSnapshot,
         metadata: this.buildSaveMetadata(
           'orders.create',
           command.requestId,
-          touchesSheet ? { before: [], after: toAfterDetailRefs(prepared.details) } : undefined,
+          touchesSheet ? { before: [], after: afterDetailRefs! } : undefined,
         ),
         relatedSheetMaterialTypeIds: collectSheetMaterialTypeIds(
           prepared.order.header.sheetMaterialTypeId,
@@ -243,6 +248,8 @@ export class OrderTransactionService {
         currentUser: command.currentUser,
       });
       const afterSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
+      const beforeDetailRefs = touchesSheet ? toBeforeDetailRefs(storedDetailSheetIds) : undefined;
+      const afterDetailRefs2 = touchesSheet ? toAfterDetailRefs(prepared.details) : undefined;
       await unitOfWork.writeAuditEvent({
         action: 'orders.update',
         orderId: command.orderId,
@@ -251,13 +258,19 @@ export class OrderTransactionService {
         actorRole: command.currentUser.role,
         clientId: prepared.order.header.clientId ?? null,
         requestId: command.requestId,
-        before: beforeSnapshot,
-        after: afterSnapshot,
+        // Embed detail sheet refs into snapshots so computeDiff() emits them in diff_json
+        // (Critic R7 M2). Uses a key without password/token/secret to avoid redaction.
+        before: touchesSheet
+          ? { ...beforeSnapshot, detailSheetMaterialChanges: beforeDetailRefs }
+          : beforeSnapshot,
+        after: touchesSheet
+          ? { ...afterSnapshot, detailSheetMaterialChanges: afterDetailRefs2 }
+          : afterSnapshot,
         metadata: this.buildSaveMetadata(
           'orders.update',
           command.requestId,
           touchesSheet
-            ? { before: toBeforeDetailRefs(storedDetailSheetIds), after: toAfterDetailRefs(prepared.details) }
+            ? { before: beforeDetailRefs!, after: afterDetailRefs2! }
             : undefined,
         ),
         relatedSheetMaterialTypeIds: collectSheetMaterialTypeIds(
