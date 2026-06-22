@@ -40,7 +40,9 @@ import {
   findSetting,
   formToParams,
   paramsToForm,
+  summarizeParams,
 } from './cutConfigHelpers';
+import { CutDefaultSettingsCard } from './CutDefaultSettingsCard';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -148,7 +150,7 @@ export const CutConfigTab: React.FC = () => {
     () => [
       { title: 'Название', dataIndex: 'name', key: 'name' },
       { title: 'По умолчанию', key: 'default', render: (_: unknown, r) => (r.isDefault ? <Tag color="blue">да</Tag> : null) },
-      { title: 'Параметры', key: 'params', render: (_: unknown, r) => <Text code>{JSON.stringify(r.params)}</Text> },
+      { title: 'Параметры', key: 'params', render: (_: unknown, r) => <Text type="secondary">{summarizeParams(r.params)}</Text> },
       { title: 'Активен', key: 'active', render: (_: unknown, r) => (r.isActive ? <Tag color="green">да</Tag> : <Tag>нет</Tag>) },
       {
         title: 'Действия',
@@ -199,6 +201,8 @@ export const CutConfigTab: React.FC = () => {
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Title level={4}>Раскрой</Title>
 
+      <CutDefaultSettingsCard config={config} canManage={canManage} onSaved={reload} />
+
       <Card size="small" title="Статусы готовности к раскрою (eligibility.statuses)">
         <Paragraph type="secondary">
           Коды производственных статусов, при которых деталь считается готовой к раскрою.
@@ -222,7 +226,7 @@ export const CutConfigTab: React.FC = () => {
 
       <Card
         size="small"
-        title="Профили параметров freecut"
+        title="Профили параметров (доп.)"
         extra={
           <Button type="primary" disabled={!canManage} onClick={() => setProfileCreate(true)}>
             Добавить профиль
