@@ -172,7 +172,7 @@ describe('normalizeSaveOrderDto', () => {
   });
 });
 
-describe('normalizeSaveOrderDto sheetMaterialTypeId (SP3)', () => {
+describe('normalizeSaveOrderDto sheetMaterialTypeId (SP3/Variant B)', () => {
   it('normalizes detail sheetMaterialTypeId (optional)', () => {
     const out = normalizeSaveOrderDto(
       createRawOrder({
@@ -182,7 +182,7 @@ describe('normalizeSaveOrderDto sheetMaterialTypeId (SP3)', () => {
             height: 1,
             width: 1,
             quantity: 1,
-            materialId: 5,
+            materialId: null,
             millingTypeId: 1,
             edgeTypeId: 1,
             sheetMaterialTypeId: 7,
@@ -203,7 +203,7 @@ describe('normalizeSaveOrderDto sheetMaterialTypeId (SP3)', () => {
             height: 1,
             width: 1,
             quantity: 1,
-            materialId: 5,
+            materialId: null,
             millingTypeId: 1,
             edgeTypeId: 1,
           } as unknown as SaveOrderDto['details'][number],
@@ -228,5 +228,81 @@ describe('normalizeSaveOrderDto sheetMaterialTypeId (SP3)', () => {
     );
 
     expect(out.header.sheetMaterialTypeId).toBe(9);
+  });
+});
+
+describe('normalizeSaveOrderDto Variant B: nullable materialId', () => {
+  it('normalizes a sheet detail with null materialId to materialId: null', () => {
+    const out = normalizeSaveOrderDto(
+      createRawOrder({
+        details: [
+          {
+            detailName: 'sheet-detail',
+            height: 500,
+            width: 300,
+            quantity: 1,
+            materialId: null,
+            sheetMaterialTypeId: 7,
+            millingTypeId: 1,
+            edgeTypeId: 1,
+          } as unknown as SaveOrderDto['details'][number],
+        ],
+      }),
+    );
+
+    expect(out.details[0].materialId).toBeNull();
+    expect(out.details[0].sheetMaterialTypeId).toBe(7);
+  });
+
+  it('normalizes a detail with absent materialId to materialId: null (no coerce to 0)', () => {
+    const out = normalizeSaveOrderDto(
+      createRawOrder({
+        details: [
+          {
+            detailName: 'sheet-detail',
+            height: 500,
+            width: 300,
+            quantity: 1,
+            sheetMaterialTypeId: 3,
+            millingTypeId: 1,
+            edgeTypeId: 1,
+          } as unknown as SaveOrderDto['details'][number],
+        ],
+      }),
+    );
+
+    expect(out.details[0].materialId).toBeNull();
+  });
+
+  it('normalizes header materialId to null (Variant B sunset)', () => {
+    const out = normalizeSaveOrderDto(
+      createRawOrder({
+        header: {
+          orderName: 'Test order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          // Even if client sends a materialId, normalizer forces null
+          materialId: 42,
+        },
+      }),
+    );
+
+    expect(out.header.materialId).toBeNull();
+  });
+
+  it('normalizes header materialId to null when absent', () => {
+    const out = normalizeSaveOrderDto(
+      createRawOrder({
+        header: {
+          orderName: 'Test order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+        },
+      }),
+    );
+
+    expect(out.header.materialId).toBeNull();
   });
 });

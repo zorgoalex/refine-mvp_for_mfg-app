@@ -110,7 +110,9 @@ function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderD
     linkPdfFile: normalizeOptionalString(raw.linkPdfFile),
     notes: normalizeOptionalString(raw.notes),
     refKey1c: normalizeOptionalString(raw.refKey1c),
-    materialId: optionalInteger(raw.materialId, 'header.materialId'),
+    // VARIANT B: header material_id is sunset. Force null so validation can reject a
+    // non-null incoming value and the write path never persists a stale material_id.
+    materialId: null,
     sheetMaterialTypeId: optionalInteger(raw.sheetMaterialTypeId, 'header.sheetMaterialTypeId'),
     millingTypeId: optionalInteger(raw.millingTypeId, 'header.millingTypeId'),
     edgeTypeId: optionalInteger(raw.edgeTypeId, 'header.edgeTypeId'),
@@ -129,7 +131,9 @@ function normalizeDetail(detail: SaveOrderDetailDto): NormalizedSaveOrderDetailD
     height: requiredNumber(raw.height, 'details[].height'),
     width: requiredNumber(raw.width, 'details[].width'),
     quantity: requiredNumber(raw.quantity, 'details[].quantity'),
-    materialId: requiredNumber(raw.materialId, 'details[].materialId'),
+    // VARIANT B: material_id is always NULL for sheet-bearing details (migration 034).
+    // Accept null/absent from client; never coerce to 0.
+    materialId: optionalInteger(raw.materialId, 'details[].materialId'),
     sheetMaterialTypeId: optionalInteger(raw.sheetMaterialTypeId, 'details[].sheetMaterialTypeId'),
     millingTypeId: requiredNumber(raw.millingTypeId, 'details[].millingTypeId'),
     edgeTypeId: requiredNumber(raw.edgeTypeId, 'details[].edgeTypeId'),

@@ -139,7 +139,14 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
 
   async loadStoredOrderSheetState(_orderId: number): Promise<StoredOrderSheetState> {
     this.call('loadStoredOrderSheetState');
-    return { sheetEligible: false, headerSheetMaterialTypeId: null, detailSheetIds: [] };
+    // VARIANT B: all orders are sheet-eligible (sheet_eligible=true); every detail uses
+    // sheetMaterialTypeId. Existing stored detail sheet ids reflect previously saved data.
+    const seededOrder = this.state.orders.get(_orderId);
+    const storedDetailSheetIds = seededOrder?.details.map((d) => ({
+      detailId: d.id as number,
+      sheetMaterialTypeId: (d as typeof d & { sheetMaterialTypeId?: number | null }).sheetMaterialTypeId ?? null,
+    })) ?? [];
+    return { sheetEligible: true, headerSheetMaterialTypeId: null, detailSheetIds: storedDetailSheetIds };
   }
 
   async validateSheetReferences(_input: SheetReferenceValidationInput): Promise<void> {
@@ -400,6 +407,9 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       edgeTypeId: order.header.edgeTypeId ?? null,
       filmId: order.header.filmId ?? null,
       refKey1c: order.header.refKey1c ?? null,
+      // VARIANT B: all seeded orders are sheet-eligible; sheetEligible drives enforceSheetGuards
+      // path selection in OrderTransactionService (storedEligible check at line ~190).
+      sheetEligible: true,
     };
   }
 
@@ -462,7 +472,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
-      'validateNoShadowInjection',
+      'validateSheetReferences',
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',
@@ -539,7 +549,8 @@ describe('OrderTransactionService', () => {
             height: 550,
             width: 200,
             quantity: 2,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 7000,
@@ -549,7 +560,8 @@ describe('OrderTransactionService', () => {
             height: 1000,
             width: 500,
             quantity: 1,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 3000,
@@ -575,12 +587,14 @@ describe('OrderTransactionService', () => {
     expect(updateAuditEvent1.after).toBeTruthy();
     // after reflects the updated orderName
     expect((updateAuditEvent1.after as Record<string, unknown>)?.orderName).toBe('Updated order');
-    expect(transactions.calls.slice(0, 7)).toEqual([
+    expect(transactions.calls.slice(0, 8)).toEqual([
       'begin',
       'setSessionUser',
       'loadOrderForUpdate',
       'loadOrderHeaderSnapshot',
-      'validateNoShadowInjection',
+      // VARIANT B: storedEligible=true (sheetEligible in snapshot) → loadStoredOrderSheetState runs
+      'loadStoredOrderSheetState',
+      'validateSheetReferences',
       'assertChildOwnership',
       'updateOrderHeader',
     ]);
@@ -625,7 +639,8 @@ describe('OrderTransactionService', () => {
             height: 500,
             width: 500,
             quantity: 1,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 5000,
@@ -747,7 +762,8 @@ describe('OrderTransactionService', () => {
             height: 550,
             width: 200,
             quantity: 3,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 15000,
@@ -792,7 +808,8 @@ describe('OrderTransactionService', () => {
             height: 550,
             width: 200,
             quantity: 4,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 20000,
@@ -1084,6 +1101,8 @@ describe('OrderTransactionService', () => {
       'orders.view_financials',
       'payments.create',
       'payments.update',
+      // VARIANT B: all orders touch sheet path (sheetMaterialTypeId on every detail)
+      'sheet_materials.view',
     ]);
 
     const result = await new OrderTransactionService({ transactions }).create({
@@ -1147,7 +1166,8 @@ describe('OrderTransactionService', () => {
           height: 550,
           width: 200,
           quantity: 2,
-          materialId: 1001,
+          materialId: null,
+          sheetMaterialTypeId: 1001,
           millingTypeId: 1001,
           edgeTypeId: 1001,
         },
@@ -1198,7 +1218,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
-      'validateNoShadowInjection',
+      'validateSheetReferences',
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',
@@ -1255,7 +1275,8 @@ function createSaveDto(overrides: Partial<SaveOrderDto> = {}): SaveOrderDto {
         height: 550,
         width: 200,
         quantity: 2,
-        materialId: 1001,
+        materialId: null,
+        sheetMaterialTypeId: 1001,
         millingTypeId: 1001,
         edgeTypeId: 1001,
         detailCost: 10000,
@@ -1355,7 +1376,8 @@ function calculatedDetail(
     height: 550,
     width: 200,
     quantity: 2,
-    materialId: 1001,
+    materialId: null,
+    sheetMaterialTypeId: 1001,
     millingTypeId: 1001,
     edgeTypeId: 1001,
     filmId: null,

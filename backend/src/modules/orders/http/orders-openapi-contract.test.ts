@@ -103,6 +103,37 @@ describe('orders OpenAPI contract', () => {
     expect(contract).not.toContain('refreshTokenHash');
     expect(contract).not.toContain('providerSecret');
   });
+
+  it('documents Variant B: sheetMaterialTypeId required, materialId nullable/optional on detail schemas', () => {
+    const contract = readOpenApiContract();
+
+    // OrderDetailDto (response): sheetMaterialTypeId in required; materialId nullable
+    const orderDetailDtoSection = sectionBetween(
+      contract,
+      '    OrderDetailDto:',
+      '    PaymentDto:',
+    );
+    expect(orderDetailDtoSection).toContain('- sheetMaterialTypeId');
+    expect(orderDetailDtoSection).not.toMatch(/^        - materialId$/m);
+    // materialId property present but nullable
+    expect(orderDetailDtoSection).toContain('materialId:');
+    expect(
+      sectionBetween(orderDetailDtoSection, '        materialId:', '        sheetMaterialTypeId:'),
+    ).toContain('nullable: true');
+
+    // SaveOrderDetailDto (request): sheetMaterialTypeId in required; materialId not in required
+    const saveOrderDetailDtoSection = sectionBetween(
+      contract,
+      '    SaveOrderDetailDto:',
+      '    SavePaymentDto:',
+    );
+    expect(saveOrderDetailDtoSection).toContain('- sheetMaterialTypeId');
+    expect(saveOrderDetailDtoSection).not.toMatch(/^        - materialId$/m);
+    expect(saveOrderDetailDtoSection).toContain('materialId:');
+    expect(
+      sectionBetween(saveOrderDetailDtoSection, '        materialId:', '        sheetMaterialTypeId:'),
+    ).toContain('nullable: true');
+  });
 });
 
 function readOpenApiContract(): string {
