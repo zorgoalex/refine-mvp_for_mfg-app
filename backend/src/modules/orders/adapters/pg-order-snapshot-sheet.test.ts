@@ -28,6 +28,7 @@ import {
   _testOnlyOrderHeaderUpdateParams as updateParams,
   _testOnlyDetailValues as detailValues,
   _testOnlyNullifyMaterialIdForSheetEntries as nullifyMaterialIdForSheetEntries,
+  _testOnlySnapshotToSaveOrderDto as snapshotToSaveOrderDto,
   buildSheetValidationDetails,
 } from './pg-order-snapshot';
 import { assertSheetEligibilityAndNoClear } from '../domain/sheet-order-validation';
@@ -595,5 +596,94 @@ describe('nullifyMaterialIdForSheetEntries — import sanitization', () => {
     expect(result[0].materialId).toBeNull();
     expect(result[1].materialId).toBe(3);
     expect(result[2].materialId).toBeNull();
+  });
+});
+
+// ── Variant B (Critic R2 MAJOR Finding 1): unconditional header materialId null on import ─
+// A header-only legacy snapshot that carries a materialId with NO header sheetMaterialTypeId
+// must import without throwing (the header materialId is always dropped regardless of whether
+// a sheetMaterialTypeId is present). Before the fix, the conditional sanitizer only cleared
+// materialId when sheetMaterialTypeId != null, leaving header-only legacy payloads to fail
+// validation with 422.
+
+describe('snapshotToSaveOrderDto — header-only legacy import (Critic R2 MAJOR Finding 1)', () => {
+  function makeMinimalSnapshot(headerOverrides: Record<string, unknown> = {}): import('../dto/order-snapshot.dto').OrderSnapshotDto {
+    return {
+      schema: ORDER_SNAPSHOT_SCHEMA,
+      formatVersion: ORDER_SNAPSHOT_FORMAT_VERSION,
+      exporterService: {
+        name: 'erp-order-snapshot' as const,
+        version: '1.0.0',
+        compatibleImportVersions: ['1.0.0'],
+      },
+      source: { sourceInstanceId: 'test-inst', exportedAt: '2026-06-22T00:00:00.000Z', payloadHash: '' },
+      identity: {
+        order: { sourceId: '42', refKey1c: null },
+        client: { sourceId: '10', refKey1c: null },
+      },
+      data: {
+        client: { sourceId: '10', clientName: 'Test Client', refKey1c: null, notes: null, isActive: true },
+        clientPhones: [],
+        order: {
+          sourceId: '42',
+          orderName: 'Legacy-Header-Only',
+          clientId: 10,
+          orderDate: '2026-06-22',
+          orderStatusId: 1,
+          ...headerOverrides,
+        } as import('../dto/order-snapshot.dto').OrderSnapshotHeaderDto,
+        details: [],
+        payments: [],
+        workshops: [],
+        requirements: [],
+        dowelingOrders: [],
+        dowelingLinks: [],
+        productionStatusEvents: [],
+        deadlineInstances: [],
+        deadlineEvents: [],
+      },
+      references: {},
+    };
+  }
+
+  it('does not throw when header has materialId set but NO header sheetMaterialTypeId', () => {
+    // Regression: before the fix, this would have produced a DTO with materialId=7 on the
+    // header, which the Task-5 validator then rejected with 422. Now materialId is always
+    // nulled unconditionally on the header, so the DTO passes validation.
+    const snapshot = makeMinimalSnapshot({ materialId: 7, sheetMaterialTypeId: null });
+    expect(() =>
+      snapshotToSaveOrderDto(snapshot, 10, {
+        details: [],
+        payments: [],
+        workshops: [],
+        requirements: [],
+        dowelingLinks: [],
+      }),
+    ).not.toThrow();
+  });
+
+  it('resulting header materialId is null for a header-only legacy snapshot', () => {
+    const snapshot = makeMinimalSnapshot({ materialId: 7, sheetMaterialTypeId: null });
+    const dto = snapshotToSaveOrderDto(snapshot, 10, {
+      details: [],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+    });
+    expect(dto.header.materialId).toBeNull();
+  });
+
+  it('resulting header materialId is null even when sheetMaterialTypeId is also set (Variant-A double-field export)', () => {
+    const snapshot = makeMinimalSnapshot({ materialId: 99, sheetMaterialTypeId: 5 });
+    const dto = snapshotToSaveOrderDto(snapshot, 10, {
+      details: [],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+    });
+    expect(dto.header.materialId).toBeNull();
+    expect(dto.header.sheetMaterialTypeId).toBe(5);
   });
 });

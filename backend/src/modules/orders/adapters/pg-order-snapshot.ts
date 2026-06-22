@@ -710,12 +710,15 @@ function snapshotToSaveOrderDto(
     dowelingLinks: Array<OrderSnapshotDowelingLinkDto & { id?: number; clientKey?: string; dowelingOrderId: number }>;
   },
 ): SaveOrderDto {
-  // Variant B: null out materialId for any header/detail that carries sheetMaterialTypeId.
-  // This sanitizes Variant-A legacy export payloads (which carried a shadow materialId alongside
-  // sheetMaterialTypeId) before they reach prepareOrderSave / the Task-5 validator.
-  const sanitizedOrder = snapshot.data.order.sheetMaterialTypeId != null
-    ? { ...snapshot.data.order, materialId: null }
-    : snapshot.data.order;
+  // Variant B: header material_id is fully sunset — always null out, regardless of whether
+  // a header sheetMaterialTypeId is present. This sanitizes both Variant-A legacy exports
+  // (shadow materialId alongside sheetMaterialTypeId) AND header-only legacy snapshots
+  // that carry a materialId with NO header sheet id (which would otherwise hit the 422
+  // validator added in Variant B). The header material_id is never authoritative: callers
+  // must use sheetMaterialTypeId exclusively. Do NOT mirror this unconditional clear to
+  // details — detail sanitization is handled by nullifyMaterialIdForSheetEntries which
+  // targets only sheet-tagged entries.
+  const sanitizedOrder = { ...snapshot.data.order, materialId: null };
   const sanitizedDetails = nullifyMaterialIdForSheetEntries(children.details);
 
   return {
@@ -2405,4 +2408,5 @@ export {
   mapDetailSnapshot as _testOnlyMapDetailSnapshot,
   detailValues as _testOnlyDetailValues,
   nullifyMaterialIdForSheetEntries as _testOnlyNullifyMaterialIdForSheetEntries,
+  snapshotToSaveOrderDto as _testOnlySnapshotToSaveOrderDto,
 };
