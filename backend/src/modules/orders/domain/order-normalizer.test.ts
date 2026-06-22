@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SaveOrderDto } from '../dto/save-order.dto';
 import { OrderValidationError } from '../errors/order.errors';
 import { normalizeSaveOrderDto } from './order-normalizer';
+import { validateSaveOrderDto } from './order-validation';
 
 function createRawOrder(overrides: Partial<SaveOrderDto> = {}): SaveOrderDto {
   return {
@@ -274,7 +275,9 @@ describe('normalizeSaveOrderDto Variant B: nullable materialId', () => {
     expect(out.details[0].materialId).toBeNull();
   });
 
-  it('normalizes header materialId to null (Variant B sunset)', () => {
+  it('normalizes header materialId to the raw value (Variant B: normalizer PRESERVES, does NOT force-null)', () => {
+    // The normalizer must preserve the raw header materialId so that validateSaveOrderDto
+    // can REJECT a non-null value with a 422. Forcing null here makes the validator dead code.
     const out = normalizeSaveOrderDto(
       createRawOrder({
         header: {
@@ -282,13 +285,13 @@ describe('normalizeSaveOrderDto Variant B: nullable materialId', () => {
           clientId: 1001,
           orderDate: '2026-04-30',
           orderStatusId: 1001,
-          // Even if client sends a materialId, normalizer forces null
           materialId: 42,
         },
       }),
     );
 
-    expect(out.header.materialId).toBeNull();
+    // Normalizer must preserve the non-null value (42) — NOT force it to null.
+    expect(out.header.materialId).toBe(42);
   });
 
   it('normalizes header materialId to null when absent', () => {
@@ -304,5 +307,55 @@ describe('normalizeSaveOrderDto Variant B: nullable materialId', () => {
     );
 
     expect(out.header.materialId).toBeNull();
+  });
+
+  // VARIANT B: validateSaveOrderDto must REJECT a non-null header materialId (422 / OrderValidationError).
+  // This test proves the validator is NOT dead code after removing the normalizer force-null.
+  it('validation rejects a non-null header materialId (Variant B: direct API path)', () => {
+    const normalized = normalizeSaveOrderDto(
+      createRawOrder({
+        header: {
+          orderName: 'Test order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          materialId: 99,
+        },
+      }),
+    );
+
+    // normalizer preserved the value; validator must reject it.
+    expect(() => validateSaveOrderDto(normalized, { mode: 'create' })).toThrowError(OrderValidationError);
+  });
+
+  it('validation accepts a null header materialId (Variant B: null is correct)', () => {
+    const normalized = normalizeSaveOrderDto(
+      createRawOrder({
+        header: {
+          orderName: 'Test order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          // materialId absent → normalizer yields null → validator accepts
+        },
+        // Provide a Variant-B-valid detail (sheetMaterialTypeId set, no materialId).
+        details: [
+          {
+            detailName: 'sheet-detail',
+            height: 500,
+            width: 300,
+            quantity: 1,
+            sheetMaterialTypeId: 3,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+          } as unknown as SaveOrderDto['details'][number],
+        ],
+        // Override deleted so detailIds is empty (no stale deleted IDs from createRawOrder default).
+        deleted: { detailIds: [] },
+      }),
+    );
+
+    // Must not throw for a null/absent header materialId.
+    expect(() => validateSaveOrderDto(normalized, { mode: 'create' })).not.toThrow();
   });
 });

@@ -110,9 +110,12 @@ function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderD
     linkPdfFile: normalizeOptionalString(raw.linkPdfFile),
     notes: normalizeOptionalString(raw.notes),
     refKey1c: normalizeOptionalString(raw.refKey1c),
-    // VARIANT B: header material_id is sunset. Force null so validation can reject a
-    // non-null incoming value and the write path never persists a stale material_id.
-    materialId: null,
+    // VARIANT B: header material_id is sunset. Preserve the raw value so that
+    // validateSaveOrderDto can REJECT a non-null incoming materialId (422).
+    // Nulling happens at the PERSISTENCE layer (pg-order-transaction-manager /
+    // pg-order-snapshot), NOT here — forcing null here would make the validation
+    // check at order-validation.ts:68 dead code and silently accept stale payloads.
+    materialId: optionalInteger(raw.materialId, 'header.materialId'),
     sheetMaterialTypeId: optionalInteger(raw.sheetMaterialTypeId, 'header.sheetMaterialTypeId'),
     millingTypeId: optionalInteger(raw.millingTypeId, 'header.millingTypeId'),
     edgeTypeId: optionalInteger(raw.edgeTypeId, 'header.edgeTypeId'),
