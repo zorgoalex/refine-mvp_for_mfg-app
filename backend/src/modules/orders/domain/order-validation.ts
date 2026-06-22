@@ -65,7 +65,8 @@ function validateHeader(
   requirePositiveIntegerIfPresent(header.productionStatusId, 'header.productionStatusId', errors);
   requirePositiveIntegerIfPresent(header.managerId, 'header.managerId', errors);
   // VARIANT B: header material_id is sunset — must be null/absent.
-  if (header.materialId != null && header.materialId !== 0) {
+  // Any non-null value (including 0) is rejected; the 0-sentinel is not a valid bypass.
+  if (header.materialId != null) {
     errors.push({ field: 'header.materialId', message: 'material_id is not allowed on the header; use sheet_material_type_id' });
   }
   requirePositiveIntegerIfPresent(header.sheetMaterialTypeId, 'header.sheetMaterialTypeId', errors);
@@ -106,8 +107,9 @@ function validateDetails(
     requirePositiveInteger(detail.quantity, `details[${index}].quantity`, errors);
     // VARIANT B: every order detail references its material via sheet_material_type_id.
     // material_id must be omitted/null; sheet id is required and positive.
+    // Any non-null materialId (including 0) is rejected; the 0-sentinel is not a valid bypass.
     requirePositiveInteger(detail.sheetMaterialTypeId, `details[${index}].sheetMaterialTypeId`, errors);
-    if (detail.materialId != null && detail.materialId !== 0) {
+    if (detail.materialId != null) {
       errors.push({ field: `details[${index}].materialId`, message: 'material_id is not allowed; use sheet_material_type_id' });
     }
     requirePositiveInteger(detail.millingTypeId, `details[${index}].millingTypeId`, errors);

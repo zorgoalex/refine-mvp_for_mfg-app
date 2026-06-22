@@ -160,7 +160,7 @@ async function collectShadowInjectionErrors(
     materialIds.add(header.materialId);
   }
   for (const detail of details) {
-    if (detail.materialId != null && detail.materialId !== 0) {
+    if (detail.materialId != null) {
       materialIds.add(detail.materialId);
     }
   }

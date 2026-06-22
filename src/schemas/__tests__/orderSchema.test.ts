@@ -64,6 +64,15 @@ describe('orderDetailSchema Variant B — sheet_material_type_id required', () =
       expect(paths).toContain('material_id');
     }
   });
+
+  it('rejects a detail with material_id: 0 (0-sentinel is not a valid bypass, Critic R2)', () => {
+    const res = orderDetailSchema.safeParse({ ...validSheetDetail, material_id: 0 });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      const paths = res.error.issues.map((i) => i.path.join('.'));
+      expect(paths).toContain('material_id');
+    }
+  });
 });
 
 describe('orderHeaderSchema Variant B — material_id must be null/absent', () => {
@@ -80,6 +89,15 @@ describe('orderHeaderSchema Variant B — material_id must be null/absent', () =
 
   it('rejects a header with a positive material_id (stale pre-034 payload)', () => {
     const res = orderHeaderSchema.safeParse({ ...validHeader, material_id: 4 });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      const paths = res.error.issues.map((i) => i.path.join('.'));
+      expect(paths).toContain('material_id');
+    }
+  });
+
+  it('rejects a header with material_id: 0 (0-sentinel is not a valid bypass, Critic R2)', () => {
+    const res = orderHeaderSchema.safeParse({ ...validHeader, material_id: 0 });
     expect(res.success).toBe(false);
     if (!res.success) {
       const paths = res.error.issues.map((i) => i.path.join('.'));

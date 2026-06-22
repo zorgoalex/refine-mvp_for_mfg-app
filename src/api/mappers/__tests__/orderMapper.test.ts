@@ -58,7 +58,8 @@ describe('orderMapper outbound (draft -> SaveOrderDto)', () => {
       form({ details: [{ ...sheetOnly, sheet_material_type_id: 7 }] }),
     );
     expect(dto.details[0].sheetMaterialTypeId).toBe(7);
-    expect(dto.details[0].materialId ?? 0).toBe(0);
+    // Variant B: mapper always emits null for materialId on sheet details (0-sentinel removed)
+    expect(dto.details[0].materialId).toBeNull();
   });
 
   it('keeps a legacy detail unchanged (sheet id null/undefined)', () => {
@@ -80,7 +81,8 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
       sheetMaterialTypeId: 9,
     } as any,
     details: [
-      { id: 10, detailNumber: 1, height: 1, width: 1, quantity: 1, materialId: 0, millingTypeId: 1, edgeTypeId: 1, detailCost: 1, sheetMaterialTypeId: 7 } as any,
+      // Variant B: server returns materialId: null for sheet details (0-sentinel removed)
+      { id: 10, detailNumber: 1, height: 1, width: 1, quantity: 1, materialId: null, millingTypeId: 1, edgeTypeId: 1, detailCost: 1, sheetMaterialTypeId: 7 } as any,
     ],
     payments: [],
     workshops: [],

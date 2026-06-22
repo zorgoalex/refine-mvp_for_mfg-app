@@ -52,12 +52,11 @@ export const orderHeaderSchema = z
     total_area: z.number().min(0).optional(),
 
     // Variant B: material_id is sunsetted at the order level; must be null/absent.
-    // A positive material_id indicates a stale pre-034 payload and MUST be rejected
-    // to mirror the backend order-validation contract.
+    // Any non-null numeric value (including 0) is a stale pre-034 payload and MUST be
+    // rejected to mirror the backend order-validation contract (422 for any non-null).
+    // Only null or absent (undefined) is accepted.
     material_id: z
-      .number()
-      .max(0, 'Вариант Б: material_id устарел — используйте sheet_material_type_id')
-      .nullable()
+      .null()
       .optional(),
     sheet_material_type_id: z.number().nullable().optional(),
     milling_type_id: z.number().nullable().optional(),
@@ -173,12 +172,11 @@ export const orderDetailSchema = z.object({
 
   // Materials and processing
   // Variant B: sheet_material_type_id is the ONLY order-material reference.
-  // material_id must be null/absent (positive value = stale pre-034 payload, rejected).
-  // Cross-field enforcement in the superRefine below.
+  // material_id must be null/absent; any numeric value (including 0) is a stale pre-034
+  // payload and MUST be rejected to mirror the backend 422 contract.
+  // Only null or absent (undefined) is accepted.
   material_id: z
-    .number()
-    .max(0, 'Вариант Б: material_id устарел — используйте sheet_material_type_id')
-    .nullable()
+    .null()
     .optional(),
   sheet_material_type_id: z.number().positive('Выберите листовой материал').nullable().optional(),
   milling_type_id: z.number().min(0, "Выберите тип фрезеровки"),
