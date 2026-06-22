@@ -12,8 +12,13 @@ describe('CutDefaultSettingsCard', () => {
   });
 
   it('every control carries a small-font description (extra) and a tooltip', () => {
-    expect(src).toMatch(/extra=/);
-    expect(src).toMatch(/tooltip=/);
+    const extras = src.match(/extra=/g) ?? [];
+    const tooltips = src.match(/tooltip=/g) ?? [];
+    expect(extras.length).toBeGreaterThanOrEqual(12);
+    expect(tooltips.length).toBeGreaterThanOrEqual(12);
+    // trim inputs must carry descriptions too (no tooltip-only controls)
+    expect(src).toMatch(/Обрезка левого края/);
+    expect(src).toMatch(/Обрезка верхнего края/);
   });
 
   it('exposes the new quality + group-shift controls with their copy', () => {

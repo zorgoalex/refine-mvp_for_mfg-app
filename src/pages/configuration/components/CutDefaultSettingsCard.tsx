@@ -24,6 +24,7 @@ import {
   type ParamProfileForm,
   formToParams,
   paramsToForm,
+  resolveRuntimeDefaultProfile,
 } from './cutConfigHelpers';
 
 const { Text } = Typography;
@@ -65,11 +66,11 @@ const SLIDER_META: Record<'kerf_mm' | 'spacing_mm' | 'time_limit_ms' | 'restarts
   },
 };
 
-const TRIM_META: Record<'trim_left' | 'trim_right' | 'trim_top' | 'trim_bottom', { label: string; tooltip: string }> = {
-  trim_left: { label: 'Слева', tooltip: 'Сколько мм обрезается с левого края листа перед раскроем (некондиционная кромка).' },
-  trim_right: { label: 'Справа', tooltip: 'Сколько мм обрезается с правого края листа перед раскроем (некондиционная кромка).' },
-  trim_top: { label: 'Сверху', tooltip: 'Сколько мм обрезается с верхнего края листа перед раскроем (некондиционная кромка).' },
-  trim_bottom: { label: 'Снизу', tooltip: 'Сколько мм обрезается с нижнего края листа перед раскроем (некондиционная кромка).' },
+const TRIM_META: Record<'trim_left' | 'trim_right' | 'trim_top' | 'trim_bottom', { label: string; extra: string; tooltip: string }> = {
+  trim_left: { label: 'Слева', extra: 'Обрезка левого края', tooltip: 'Сколько мм обрезается с левого края листа перед раскроем (некондиционная кромка).' },
+  trim_right: { label: 'Справа', extra: 'Обрезка правого края', tooltip: 'Сколько мм обрезается с правого края листа перед раскроем (некондиционная кромка).' },
+  trim_top: { label: 'Сверху', extra: 'Обрезка верхнего края', tooltip: 'Сколько мм обрезается с верхнего края листа перед раскроем (некондиционная кромка).' },
+  trim_bottom: { label: 'Снизу', extra: 'Обрезка нижнего края', tooltip: 'Сколько мм обрезается с нижнего края листа перед раскроем (некондиционная кромка).' },
 };
 
 interface Props {
@@ -82,7 +83,7 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
   const [form, setForm] = useState<ParamProfileForm>(DEFAULT_PARAM_FORM);
   const [saving, setSaving] = useState(false);
 
-  const defaultProfile = config.paramProfiles.find((p) => p.isDefault) ?? null;
+  const defaultProfile = resolveRuntimeDefaultProfile(config.paramProfiles, config.settings);
 
   useEffect(() => {
     setForm(defaultProfile ? paramsToForm(defaultProfile.params) : DEFAULT_PARAM_FORM);
@@ -98,7 +99,7 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
       const input = {
         name: defaultProfile?.name ?? 'По умолчанию',
         params: formToParams(form),
-        isDefault: true,
+        isDefault: defaultProfile ? defaultProfile.isDefault : true,
       };
       if (defaultProfile) {
         await cutConfigApi.updateParamProfile(defaultProfile.cutParamProfileId, input, defaultProfile.version);
@@ -114,55 +115,53 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
     }
   }, [defaultProfile, form, onSaved]);
 
-  const sliderField = (key: 'kerf_mm' | 'spacing_mm' | 'time_limit_ms' | 'restarts') => {
-    const m = SLIDER_META[key];
-    const value = form[key] as number;
-    return (
-      <Form.Item label={m.label} tooltip={m.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{m.extra}</Text>} style={{ marginBottom: 12 }}>
-        <Row gutter={8} align="middle">
-          <Col flex="auto">
-            <Slider min={m.min} max={m.max} step={m.step} value={value} onChange={(v) => setField(key, Number(v) as never)} disabled={!canManage} />
-          </Col>
-          <Col flex="130px">
-            <InputNumber
-              min={m.min}
-              max={m.max}
-              step={m.step}
-              value={value}
-              onChange={(v) => setField(key, Number(v ?? 0) as never)}
-              addonAfter={m.unit || undefined}
-              disabled={!canManage}
-              style={{ width: '100%' }}
-            />
-          </Col>
-        </Row>
-      </Form.Item>
-    );
-  };
-
-  const trimField = (key: 'trim_left' | 'trim_right' | 'trim_top' | 'trim_bottom') => {
-    const m = TRIM_META[key];
-    return (
-      <Form.Item label={m.label} tooltip={m.tooltip} style={{ marginBottom: 12 }}>
-        <InputNumber min={0} max={50} step={1} value={form[key] as number} onChange={(v) => setField(key, Number(v ?? 0) as never)} disabled={!canManage} style={{ width: '100%' }} addonAfter="мм" />
-      </Form.Item>
-    );
-  };
-
   return (
     <Card size="small" title="Настройки раскроя по умолчанию">
       <Form layout="vertical">
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+          Редактируется профиль: {defaultProfile ? defaultProfile.name : 'По умолчанию (будет создан)'}
+        </Text>
         <Row gutter={16}>
-          <Col span={12}>{sliderField('kerf_mm')}</Col>
-          <Col span={12}>{sliderField('spacing_mm')}</Col>
+          <Col span={12}>
+            <Form.Item label={SLIDER_META.kerf_mm.label} tooltip={SLIDER_META.kerf_mm.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{SLIDER_META.kerf_mm.extra}</Text>} style={{ marginBottom: 12 }}>
+              <Row gutter={8} align="middle">
+                <Col flex="auto"><Slider min={SLIDER_META.kerf_mm.min} max={SLIDER_META.kerf_mm.max} step={SLIDER_META.kerf_mm.step} value={form.kerf_mm} onChange={(v) => setField('kerf_mm', Number(v) as never)} disabled={!canManage} /></Col>
+                <Col flex="130px"><InputNumber min={SLIDER_META.kerf_mm.min} max={SLIDER_META.kerf_mm.max} step={SLIDER_META.kerf_mm.step} value={form.kerf_mm} onChange={(v) => setField('kerf_mm', Number(v ?? 0) as never)} addonAfter={SLIDER_META.kerf_mm.unit || undefined} disabled={!canManage} style={{ width: '100%' }} /></Col>
+              </Row>
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label={SLIDER_META.spacing_mm.label} tooltip={SLIDER_META.spacing_mm.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{SLIDER_META.spacing_mm.extra}</Text>} style={{ marginBottom: 12 }}>
+              <Row gutter={8} align="middle">
+                <Col flex="auto"><Slider min={SLIDER_META.spacing_mm.min} max={SLIDER_META.spacing_mm.max} step={SLIDER_META.spacing_mm.step} value={form.spacing_mm} onChange={(v) => setField('spacing_mm', Number(v) as never)} disabled={!canManage} /></Col>
+                <Col flex="130px"><InputNumber min={SLIDER_META.spacing_mm.min} max={SLIDER_META.spacing_mm.max} step={SLIDER_META.spacing_mm.step} value={form.spacing_mm} onChange={(v) => setField('spacing_mm', Number(v ?? 0) as never)} addonAfter={SLIDER_META.spacing_mm.unit || undefined} disabled={!canManage} style={{ width: '100%' }} /></Col>
+              </Row>
+            </Form.Item>
+          </Col>
         </Row>
 
         <Text type="secondary" style={{ fontSize: 12 }}>Обрезка кромки листа (trim), мм</Text>
         <Row gutter={12}>
-          <Col span={6}>{trimField('trim_left')}</Col>
-          <Col span={6}>{trimField('trim_right')}</Col>
-          <Col span={6}>{trimField('trim_top')}</Col>
-          <Col span={6}>{trimField('trim_bottom')}</Col>
+          <Col span={6}>
+            <Form.Item label={TRIM_META.trim_left.label} tooltip={TRIM_META.trim_left.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{TRIM_META.trim_left.extra}</Text>} style={{ marginBottom: 12 }}>
+              <InputNumber min={0} max={50} step={1} value={form.trim_left} onChange={(v) => setField('trim_left', Number(v ?? 0) as never)} disabled={!canManage} style={{ width: '100%' }} addonAfter="мм" />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item label={TRIM_META.trim_right.label} tooltip={TRIM_META.trim_right.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{TRIM_META.trim_right.extra}</Text>} style={{ marginBottom: 12 }}>
+              <InputNumber min={0} max={50} step={1} value={form.trim_right} onChange={(v) => setField('trim_right', Number(v ?? 0) as never)} disabled={!canManage} style={{ width: '100%' }} addonAfter="мм" />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item label={TRIM_META.trim_top.label} tooltip={TRIM_META.trim_top.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{TRIM_META.trim_top.extra}</Text>} style={{ marginBottom: 12 }}>
+              <InputNumber min={0} max={50} step={1} value={form.trim_top} onChange={(v) => setField('trim_top', Number(v ?? 0) as never)} disabled={!canManage} style={{ width: '100%' }} addonAfter="мм" />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item label={TRIM_META.trim_bottom.label} tooltip={TRIM_META.trim_bottom.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{TRIM_META.trim_bottom.extra}</Text>} style={{ marginBottom: 12 }}>
+              <InputNumber min={0} max={50} step={1} value={form.trim_bottom} onChange={(v) => setField('trim_bottom', Number(v ?? 0) as never)} disabled={!canManage} style={{ width: '100%' }} addonAfter="мм" />
+            </Form.Item>
+          </Col>
         </Row>
 
         <Row gutter={16}>
@@ -241,8 +240,22 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
         </Row>
 
         <Row gutter={16}>
-          <Col span={8}>{sliderField('time_limit_ms')}</Col>
-          <Col span={8}>{sliderField('restarts')}</Col>
+          <Col span={8}>
+            <Form.Item label={SLIDER_META.time_limit_ms.label} tooltip={SLIDER_META.time_limit_ms.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{SLIDER_META.time_limit_ms.extra}</Text>} style={{ marginBottom: 12 }}>
+              <Row gutter={8} align="middle">
+                <Col flex="auto"><Slider min={SLIDER_META.time_limit_ms.min} max={SLIDER_META.time_limit_ms.max} step={SLIDER_META.time_limit_ms.step} value={form.time_limit_ms} onChange={(v) => setField('time_limit_ms', Number(v) as never)} disabled={!canManage} /></Col>
+                <Col flex="130px"><InputNumber min={SLIDER_META.time_limit_ms.min} max={SLIDER_META.time_limit_ms.max} step={SLIDER_META.time_limit_ms.step} value={form.time_limit_ms} onChange={(v) => setField('time_limit_ms', Number(v ?? 0) as never)} addonAfter={SLIDER_META.time_limit_ms.unit || undefined} disabled={!canManage} style={{ width: '100%' }} /></Col>
+              </Row>
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label={SLIDER_META.restarts.label} tooltip={SLIDER_META.restarts.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{SLIDER_META.restarts.extra}</Text>} style={{ marginBottom: 12 }}>
+              <Row gutter={8} align="middle">
+                <Col flex="auto"><Slider min={SLIDER_META.restarts.min} max={SLIDER_META.restarts.max} step={SLIDER_META.restarts.step} value={form.restarts} onChange={(v) => setField('restarts', Number(v) as never)} disabled={!canManage} /></Col>
+                <Col flex="130px"><InputNumber min={SLIDER_META.restarts.min} max={SLIDER_META.restarts.max} step={SLIDER_META.restarts.step} value={form.restarts} onChange={(v) => setField('restarts', Number(v ?? 0) as never)} addonAfter={SLIDER_META.restarts.unit || undefined} disabled={!canManage} style={{ width: '100%' }} /></Col>
+              </Row>
+            </Form.Item>
+          </Col>
           <Col span={8}>
             <Form.Item
               label="Умные ретраи при таймауте"

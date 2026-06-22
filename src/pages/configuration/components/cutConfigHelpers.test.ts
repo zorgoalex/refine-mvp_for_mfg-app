@@ -6,6 +6,7 @@ import {
   formToParams,
   paramsToForm,
   parseCodesCsv,
+  resolveRuntimeDefaultProfile,
   sheetSpecOnboardingHint,
   summarizeParams,
 } from './cutConfigHelpers';
@@ -103,5 +104,26 @@ describe('cutConfigHelpers', () => {
     expect(s).toContain('kerf 2');
     expect(s).toContain('баланс');
     expect(s).not.toContain('{');
+  });
+
+  describe('resolveRuntimeDefaultProfile', () => {
+    const P = (name: string, isDefault: boolean, isActive = true) => ({ name, isDefault, isActive });
+    it('prefers the active profile named by cut_settings.defaults.param_profile', () => {
+      const profiles = [P('A', true), P('B', false)];
+      const settings = [{ key: 'defaults', value: { param_profile: 'B' } }];
+      expect(resolveRuntimeDefaultProfile(profiles, settings)?.name).toBe('B');
+    });
+    it('falls back to the active is_default profile when no pointer is set', () => {
+      expect(resolveRuntimeDefaultProfile([P('A', true), P('B', false)], [])?.name).toBe('A');
+    });
+    it('falls back to is_default when the pointer names a missing or inactive profile', () => {
+      const inactiveB = [P('A', true), P('B', false, false)];
+      expect(resolveRuntimeDefaultProfile(inactiveB, [{ key: 'defaults', value: { param_profile: 'B' } }])?.name).toBe('A');
+      expect(resolveRuntimeDefaultProfile([P('A', true)], [{ key: 'defaults', value: { param_profile: 'X' } }])?.name).toBe('A');
+    });
+    it('ignores an inactive is_default profile and returns null when nothing matches', () => {
+      expect(resolveRuntimeDefaultProfile([P('A', true, false)], [])).toBeNull();
+      expect(resolveRuntimeDefaultProfile([P('A', false)], [])).toBeNull();
+    });
   });
 });

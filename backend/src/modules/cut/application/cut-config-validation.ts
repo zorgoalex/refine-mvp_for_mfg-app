@@ -127,6 +127,9 @@ function validateFreecutParams(params: Record<string, unknown>): void {
     ) {
       invalid('params.group_shift.max_passes', 'group_shift.max_passes должен быть целым числом 1..16');
     }
+    if (g.debug_artifacts !== undefined && typeof g.debug_artifacts !== 'boolean') {
+      invalid('params.group_shift.debug_artifacts', 'group_shift.debug_artifacts должен быть boolean');
+    }
   }
   if (params.trim_mm !== undefined) {
     if (!isObject(params.trim_mm)) invalid('params.trim_mm', 'trim_mm должен быть объектом');

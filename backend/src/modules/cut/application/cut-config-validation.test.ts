@@ -83,7 +83,7 @@ describe('cut-config validation', () => {
         params: {
           sla_profile: 'quality',
           ga_profile: 'quality',
-          group_shift: { enabled: true, min_shift_mm: 5, max_passes: 4 },
+          group_shift: { enabled: true, min_shift_mm: 5, max_passes: 4, debug_artifacts: true },
         },
       }).name,
     ).toBe('ok');
@@ -100,5 +100,6 @@ describe('cut-config validation', () => {
     expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { min_shift_mm: -1 } } })).toThrow();
     expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { max_passes: 0 } } })).toThrow();
     expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { max_passes: 99 } } })).toThrow();
+    expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { debug_artifacts: 'yes' } } })).toThrow();
   });
 });

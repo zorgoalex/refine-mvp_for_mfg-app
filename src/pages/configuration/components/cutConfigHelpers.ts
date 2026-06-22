@@ -126,6 +126,24 @@ export function formToParams(form: ParamProfileForm): Record<string, unknown> {
   };
 }
 
+/**
+ * Resolve which param profile the cut runtime actually treats as the default,
+ * mirroring backend getDefaultParams precedence:
+ *   cut_settings.defaults.param_profile (active, by name) > active is_default > none.
+ * Editing any other row silently diverges saved settings from what cut jobs use.
+ */
+export function resolveRuntimeDefaultProfile<
+  T extends { name: string; isDefault: boolean; isActive: boolean },
+>(profiles: T[], settings: ReadonlyArray<{ key: string; value: unknown }>): T | null {
+  const defaults = settings.find((s) => s.key === 'defaults');
+  const named = (defaults?.value as { param_profile?: unknown } | null | undefined)?.param_profile;
+  if (typeof named === 'string' && named.length > 0) {
+    const byName = profiles.find((p) => p.name === named && p.isActive);
+    if (byName) return byName;
+  }
+  return profiles.find((p) => p.isDefault && p.isActive) ?? null;
+}
+
 /** Day-0 onboarding hint shown when no sheet material types are defined yet. */
 export function sheetSpecOnboardingHint(count: number): string | null {
   if (count > 0) return null;
