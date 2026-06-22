@@ -83,6 +83,15 @@ describe('CutPage source guards', () => {
     expect(source).toContain('form.setFieldsValue');
   });
 
+  it('auto-loads small per-sheet layout previews for a ready job', () => {
+    // Ready jobs show an inline thumbnail per sheet (light 'thumb' preset),
+    // fetched automatically, click-to-enlarge.
+    expect(source).toContain("job.status !== 'ready'");
+    expect(source).toContain('loadThumb');
+    expect(source).toContain("'thumb'");
+    expect(source).toContain('sheetThumbs');
+  });
+
   it('refreshes the job after a failed calculate so the reason + fresh version show', () => {
     // The calculate catch must reload the job (persisted reason + bumped version),
     // otherwise the Alert never renders and a retry would 409 on a stale version.

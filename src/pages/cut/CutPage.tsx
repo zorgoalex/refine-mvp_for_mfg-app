@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -83,6 +83,10 @@ export const CutPage: React.FC = () => {
   const [selected, setSelected] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [sheetImages, setSheetImages] = useState<Record<string, string>>({});
+  // Auto-loaded small layout previews (preset 'thumb') for a ready job's sheets,
+  // keyed `${cutGroupId}:${sheetIndex}`. thumbReqRef dedupes in-flight/done fetches.
+  const [sheetThumbs, setSheetThumbs] = useState<Record<string, string>>({});
+  const thumbReqRef = useRef<Set<string>>(new Set());
   const [preset, setPreset] = useState<string>('screen');
   const [presetOptions, setPresetOptions] = useState(DEFAULT_PRESET_OPTIONS);
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
@@ -155,6 +159,8 @@ export const CutPage: React.FC = () => {
         setEligible(null);
         setSelected([]);
         setSheetImages({});
+        setSheetThumbs({});
+        thumbReqRef.current = new Set();
       } catch (error) {
         handleError(error, 'Не удалось открыть раскрой');
       } finally {
@@ -176,6 +182,8 @@ export const CutPage: React.FC = () => {
           setEligible(null);
           setSelected([]);
           setSheetImages({});
+        setSheetThumbs({});
+        thumbReqRef.current = new Set();
         }
         await loadJobs();
       } catch (error) {
@@ -291,6 +299,36 @@ export const CutPage: React.FC = () => {
     },
     [job, preset, handleError],
   );
+
+  // Small layout preview for a ready job's sheet, fetched once with the light
+  // 'thumb' preset. Deduped via thumbReqRef so the auto-load effect is idempotent.
+  const loadThumb = useCallback(
+    async (cutJobId: number, group: CutGroupDto, sheetIndex: number) => {
+      const key = `${group.cutGroupId}:${sheetIndex}`;
+      const reqKey = `${cutJobId}:${key}`;
+      if (thumbReqRef.current.has(reqKey)) return;
+      thumbReqRef.current.add(reqKey);
+      try {
+        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb');
+        setSheetThumbs((prev) => ({ ...prev, [key]: URL.createObjectURL(blob) }));
+      } catch {
+        // Preview is best-effort; the full-size "Лист N" view still works on click.
+        thumbReqRef.current.delete(reqKey);
+      }
+    },
+    [],
+  );
+
+  // Auto-load per-sheet previews when a ready job's layout is present, so an
+  // operator sees the cut result inline without clicking each sheet.
+  useEffect(() => {
+    if (!job || job.status !== 'ready') return;
+    for (const group of job.groups) {
+      for (const sheet of group.sheets) {
+        void loadThumb(job.cutJobId, group, sheet.sheetIndex);
+      }
+    }
+  }, [job, loadThumb]);
 
   const downloadSheetSvg = useCallback(
     async (group: CutGroupDto, sheetIndex: number) => {
@@ -681,6 +719,19 @@ export const CutPage: React.FC = () => {
                       SVG
                     </Button>
                   </Space>
+                  {/* Inline auto-preview (~5 detail rows tall); click to open full size. */}
+                  {sheetThumbs[key] && !sheetImages[key] && (
+                    <div style={{ marginTop: 4 }}>
+                      <Tooltip title="Открыть лист в полном размере">
+                        <img
+                          src={sheetThumbs[key]}
+                          alt={`Превью листа ${sheet.sheetIndex + 1}`}
+                          onClick={() => loadSheet(group, sheet.sheetIndex)}
+                          style={{ height: 170, width: 'auto', maxWidth: '100%', cursor: 'pointer', border: '1px solid #f0f0f0' }}
+                        />
+                      </Tooltip>
+                    </div>
+                  )}
                   {sheetImages[key] && (
                     <div>
                       <img src={sheetImages[key]} alt={`Лист ${sheet.sheetIndex + 1}`} style={{ maxWidth: '100%' }} />
