@@ -239,6 +239,7 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     notes: item.notes ?? null,
     material_ids: item.materialIds ?? [],
     material_names: item.materialNames ?? [],
+    sheet_material_type_ids: item.sheetMaterialTypeIds ?? [],
     material_name: item.materialNames?.join(', ') ?? null,
     milling_type_id: item.millingTypeId ?? null,
     milling_type_name: item.millingTypeName ?? null,

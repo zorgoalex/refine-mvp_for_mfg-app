@@ -232,9 +232,135 @@ describe('PgOrderReadRepository sheetOrdersReads gate', () => {
     expect(sql).toContain('o.sheet_material_type_id');
     expect(sql).toContain('o.sheet_eligible');
     expect(sql).toContain('is_sheet_shadow = false');
-    expect(sql).toContain('COALESCE(smt.name, m.material_name)');
+    // Variant B (flag-ON): sheet name is smt.name directly — no COALESCE fallback to materials
+    expect(sql).not.toContain('COALESCE(smt.name, m.material_name)');
+    expect(sql).toContain('smt.name');
+    // No materials join in the flag-ON detail/header reads
+    expect(sql).not.toContain('LEFT JOIN materials m ON m.material_id = od.material_id');
+    expect(sql).not.toContain('LEFT JOIN materials m ON m.material_id = o.material_id');
+    // Aggregate groups by sheet_material_type_id, not material_id
+    expect(sql).toContain('od.sheet_material_type_id');
+    // sheetMaterialTypeIds aggregate in the list query
+    expect(sql).toContain('sheet_material_type_ids');
   });
 });
+
+// Variant B: NULL-safe mapper and sheet-only flag-ON read
+describe('PgOrderReadRepository Variant B (sheet-only reads)', () => {
+  it('maps detail row with material_id NULL to materialId: null (not 0/NaN)', async () => {
+    const database = createDatabaseWithNullMaterialId();
+    const repository = new PgOrderReadRepository(database.service, true);
+
+    const result = await repository.getOrderById({
+      currentUser: currentUser('42'),
+      orderId: 100,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.details[0].materialId).toBeNull();
+  });
+
+  it('list aggregate populates sheetMaterialTypeIds and leaves materialIds empty when flag is ON', async () => {
+    const database = createDatabaseWithSheetAggregate();
+    const repository = new PgOrderReadRepository(database.service, true);
+
+    const result = await repository.listOrders({
+      currentUser: currentUser('42'),
+      query: { page: 1, pageSize: 10 },
+    });
+
+    expect(result.data[0].sheetMaterialTypeIds).toEqual([5, 6]);
+    expect(result.data[0].materialIds).toEqual([]);
+  });
+});
+
+function createDatabaseWithNullMaterialId() {
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  const service = {
+    async query(text: string, params: readonly unknown[] = []) {
+      queries.push({ text, params });
+      if (text.includes('COUNT(*)::int')) return { rows: [{ total: 1 }] };
+      if (text.includes('FROM audit_log')) return { rows: [] };
+      if (text.includes('FROM orders o')) return { rows: [orderRow()] };
+      if (text.includes('FROM order_details')) {
+        return {
+          rows: [
+            {
+              detail_id: 201,
+              order_id: 100,
+              detail_number: 1,
+              detail_name: 'Panel',
+              height: '800',
+              width: '600',
+              quantity: 1,
+              area: '0.48',
+              material_id: null,
+              sheet_material_type_id: 5,
+              material_name: 'МДФ 16',
+              milling_type_id: 1,
+              edge_type_id: 1,
+              film_id: null,
+              milling_cost_per_sqm: null,
+              detail_cost: '100.00',
+              priority: 100,
+              production_status_id: null,
+              joint_order_id: null,
+              note: null,
+              link_cutting_file: null,
+              link_cutting_image_file: null,
+              link_cad_file: null,
+              link_pdf_file: null,
+              ref_key_1c: null,
+            },
+          ],
+        };
+      }
+      if (text.includes('FROM payments')) return { rows: [] };
+      if (text.includes('FROM order_workshops')) return { rows: [] };
+      if (text.includes('FROM order_resource_requirements')) return { rows: [] };
+      if (text.includes('FROM order_doweling_links')) return { rows: [] };
+      if (text.includes('FROM clients')) return { rows: [{ id: '1', name: 'Client A' }] };
+      if (text.includes('FROM materials')) return { rows: [{ id: '10', name: 'MDF 16', unit_id: '2' }] };
+      if (text.includes('FROM milling_types')) return { rows: [] };
+      if (text.includes('FROM edge_types')) return { rows: [] };
+      if (text.includes('FROM films')) return { rows: [] };
+      if (text.includes('FROM order_statuses')) return { rows: [] };
+      if (text.includes('FROM payment_statuses')) return { rows: [] };
+      if (text.includes('FROM payment_types')) return { rows: [] };
+      if (text.includes('FROM production_statuses')) return { rows: [] };
+      if (text.includes('FROM workshops')) return { rows: [] };
+      if (text.includes('FROM employees')) return { rows: [] };
+      if (text.includes('FROM units')) return { rows: [] };
+      if (text.includes('FROM sheet_material_types')) return { rows: [] };
+      return { rows: [] };
+    },
+  } as unknown as DatabaseService;
+  return { service, queries };
+}
+
+function createDatabaseWithSheetAggregate() {
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  const service = {
+    async query(text: string, params: readonly unknown[] = []) {
+      queries.push({ text, params });
+      if (text.includes('COUNT(*)::int')) return { rows: [{ total: 1 }] };
+      if (text.includes('FROM orders o')) {
+        return {
+          rows: [
+            {
+              ...orderRow(),
+              material_ids: [],
+              material_names: ['МДФ 16', 'МДФ 19'],
+              sheet_material_type_ids: [5, 6],
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  } as unknown as DatabaseService;
+  return { service, queries };
+}
 
 function createDatabase() {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];

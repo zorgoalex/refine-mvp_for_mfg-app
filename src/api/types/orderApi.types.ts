@@ -524,8 +524,11 @@ export interface OrderListItemDto {
   managerId?: number | null;
   priority?: number | null;
   notes?: string | null;
+  /** @deprecated Variant B: always empty post-034; use sheetMaterialTypeIds. */
   materialIds?: number[];
   materialNames?: string[];
+  /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
+  sheetMaterialTypeIds?: number[];
   millingTypeId?: number | null;
   millingTypeName?: string | null;
   dowelingOrderId?: number | null;

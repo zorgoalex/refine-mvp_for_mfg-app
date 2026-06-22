@@ -572,8 +572,10 @@ const orderListItemSwaggerSchema = {
     totalArea: { type: 'number' },
     managerId: nullableIntegerSwaggerSchema,
     notes: nullableStringSwaggerSchema,
-    materialIds: { type: 'array', items: { type: 'integer' } },
+    /** @deprecated Variant B: always empty post-034; use sheetMaterialTypeIds. */
+    materialIds: { type: 'array', items: { type: 'integer' }, deprecated: true },
     materialNames: { type: 'array', items: { type: 'string' } },
+    sheetMaterialTypeIds: { type: 'array', items: { type: 'integer' } },
     millingTypeId: nullableIntegerSwaggerSchema,
     millingTypeName: nullableStringSwaggerSchema,
     dowelingOrderId: nullableIntegerSwaggerSchema,

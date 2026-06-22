@@ -8048,6 +8048,23 @@ components:
           type: integer
           format: int64
           nullable: true
+        materialIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          deprecated: true
+          description: "Variant B: always empty post-034; use sheetMaterialTypeIds."
+        materialNames:
+          type: array
+          items:
+            type: string
+        sheetMaterialTypeIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: "Variant B: aggregated sheet material type IDs from order details (authoritative post-034)."
         primaryProject:
           $ref: '#/components/schemas/OrderProjectSummaryDtoNullable'
         projects:

@@ -33,7 +33,7 @@ export class HealthService {
     return createReadyHealthResponse({
       database: await this.databaseCheck(),
       redis: await this.redisCheck(),
-      config: { status: 'ok' },
+      config: await this.configCheck(),
     });
   }
 
@@ -62,6 +62,51 @@ export class HealthService {
         status: 'unavailable',
         message: 'database connection failed',
       };
+    }
+  }
+
+  /**
+   * Variant B hard-stop: if migration 034 has been applied (constraint
+   * chk_order_details_sheet_only exists) but BACKEND_SHEET_ORDERS_READS is still
+   * false, order reads will blank every material name (legacy path reads material_id
+   * which is NULL post-034). Fail readiness immediately so a missed flag flip is
+   * a hard-stop rather than silent corruption.
+   */
+  private async configCheck(): Promise<HealthCheckStatus> {
+    const sheetOrdersReads = this.config.get('BACKEND_SHEET_ORDERS_READS', { infer: true });
+
+    if (sheetOrdersReads) {
+      // Flag is ON — no mismatch possible.
+      return { status: 'ok' };
+    }
+
+    if (!this.database.isConfigured) {
+      // Can't query pg_constraint; skip the check.
+      return { status: 'ok' };
+    }
+
+    try {
+      const result = await this.database.query<{ found: boolean }>(
+        `SELECT EXISTS(
+           SELECT 1 FROM pg_constraint
+           WHERE conname = 'chk_order_details_sheet_only'
+         ) AS found`,
+      );
+      const migration034Applied = result.rows[0]?.found === true;
+
+      if (migration034Applied) {
+        return {
+          status: 'unavailable',
+          message:
+            'Migration 034 (chk_order_details_sheet_only) is applied but BACKEND_SHEET_ORDERS_READS=false. ' +
+            'Order reads will return blank material names. Set BACKEND_SHEET_ORDERS_READS=true and restart.',
+        };
+      }
+
+      return { status: 'ok' };
+    } catch {
+      // If the constraint check itself fails, don't block readiness — DB check will handle DB issues.
+      return { status: 'ok' };
     }
   }
 
