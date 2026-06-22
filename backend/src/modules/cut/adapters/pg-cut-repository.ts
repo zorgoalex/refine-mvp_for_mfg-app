@@ -55,7 +55,7 @@ import type {
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
-import { buildSheetSvg, computeGroupItemQuantities, formatPieceLabel } from '../render/sheet-svg';
+import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import { buildSheetsPdf } from '../render/sheet-pdf';
 import {
@@ -978,11 +978,18 @@ export class PgCutRepository implements CutRepositoryPort {
       orderByDetail.set(toNum(row.order_detail_id), toNum(row.order_id));
     }
 
-    const labelFor = (piece: FreecutPlacement): string => {
+    const labelFor = (piece: FreecutPlacement): string[] => {
       const detailId = parseFreecutItemId(piece.item_id);
       const orderId = detailId === null ? null : orderByDetail.get(detailId) ?? null;
-      const base = orderId !== null ? `№${orderId}-${detailId}` : `${piece.item_id}`;
-      return formatPieceLabel(base, piece.instance, quantities.get(piece.item_id) ?? 1);
+      // Order on line 1, detail (+ instance N/qty) on line 2 — rendered as
+      // separate <tspan> lines by buildSheetSvg.
+      return composePieceLabelLines({
+        orderId,
+        detailId,
+        itemId: piece.item_id,
+        instance: piece.instance,
+        qty: quantities.get(piece.item_id) ?? 1,
+      });
     };
 
     return {
