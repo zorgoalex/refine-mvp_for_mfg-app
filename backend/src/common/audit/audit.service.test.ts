@@ -202,6 +202,32 @@ describe('AuditService relatedEntities bridge writes', () => {
   });
 });
 
+describe('AuditService VLM usage-count allowlist', () => {
+  it('preserves inputTokens/outputTokens as integers but redacts api_key', async () => {
+    const captured: Captured[] = [];
+    const service = new AuditService();
+
+    await service.record(fakeClient(captured), {
+      event: 'vlm.analyze',
+      entityType: 'file_upload',
+      entityId: 'upload-uuid',
+      actorUserId: '10',
+      requestId: 'req_vlm',
+      source: 'vlm-analyze',
+      metadata: {
+        usage: { inputTokens: 10, outputTokens: 5 },
+        api_key: 'SUPER_SECRET',
+      },
+    });
+
+    const metaJson = captured[0].params[22] as string;
+    expect(metaJson).toContain('"inputTokens":10');
+    expect(metaJson).not.toContain('"inputTokens":"[REDACTED]"');
+    expect(metaJson).toContain('"api_key":"[REDACTED]"');
+    expect(metaJson).not.toContain('SUPER_SECRET');
+  });
+});
+
 describe('AuditService.recordDenied', () => {
   it('writes a denied audit row with denied metadata', async () => {
     const captured: Captured[] = [];

@@ -1,6 +1,46 @@
 import { describe, expect, it } from 'vitest';
 import { isSensitiveKey, redactLogFields, redactLogValue } from './redaction';
 
+describe('redactLogFields with allowKeys (audit allowlist)', () => {
+  const AUDIT_ALLOWLIST: ReadonlySet<string> = new Set(['inputTokens', 'outputTokens']);
+
+  it('(a) preserves exact-matched allowed integers but still redacts substring-matched secrets', () => {
+    const result = redactLogFields(
+      {
+        inputTokens: 10,
+        outputTokens: 5,
+        access_token: 'SECRET',
+        apiToken: 'SECRET2',
+        password: 'p',
+      },
+      AUDIT_ALLOWLIST,
+    );
+    expect(result).toEqual({
+      inputTokens: 10,
+      outputTokens: 5,
+      access_token: '[REDACTED]',
+      apiToken: '[REDACTED]',
+      password: '[REDACTED]',
+    });
+  });
+
+  it('(b) without allowKeys (default), inputTokens is still [REDACTED]', () => {
+    const result = redactLogFields({ inputTokens: 10, outputTokens: 5 });
+    expect(result).toEqual({
+      inputTokens: '[REDACTED]',
+      outputTokens: '[REDACTED]',
+    });
+  });
+
+  it('(c) allowlist works for a nested key', () => {
+    const result = redactLogFields(
+      { usage: { inputTokens: 10 } },
+      AUDIT_ALLOWLIST,
+    );
+    expect(result).toEqual({ usage: { inputTokens: 10 } });
+  });
+});
+
 describe('log redaction', () => {
   it('redacts sensitive object fields recursively', () => {
     expect(

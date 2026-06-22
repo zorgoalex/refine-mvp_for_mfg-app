@@ -151,11 +151,11 @@ describe('PgVlmProvider', () => {
     expect(database.queries[1].params[5]).toBe('manager');              // role_code
     expect(database.queries[1].params[6]).toBe('req_vlm_analyze');      // request_id
     expect(database.queries[1].params[7]).toBe('vlm-analyze');          // source
-    // metadata_json: provider/model stored; inputTokens/outputTokens match /token/i → redacted by auditService
+    // metadata_json: provider/model stored; inputTokens/outputTokens preserved via audit allowlist
     expect(database.queries[1].params[22] as string).toContain('"provider":"zai"');
     expect(database.queries[1].params[22] as string).toContain('"model":"zai/model-a"');
-    expect(database.queries[1].params[22] as string).toContain('"inputTokens":"[REDACTED]"');
-    expect(database.queries[1].params[22] as string).not.toContain('"inputTokens":10');
+    expect(database.queries[1].params[22] as string).toContain('"inputTokens":10');
+    expect(database.queries[1].params[22] as string).not.toContain('"inputTokens":"[REDACTED]"');
   });
 
   it('does not return raw provider payloads from analyze responses', async () => {
@@ -313,12 +313,12 @@ describe('PgVlmProvider', () => {
     expect(auditQuery?.params[1]).toBe('file_upload');
     expect(auditQuery?.params[2]).toBe('11111111-1111-4111-8111-111111111111');
     expect(auditQuery?.params[7]).toBe('vlm-analyze');
-    // metadata_json: inputTokens/outputTokens match /token/i → redacted
+    // metadata_json: inputTokens/outputTokens preserved as integers via audit allowlist
     const metaStr = auditQuery?.params[22] as string;
     expect(metaStr).toContain('"provider":"zai"');
-    expect(metaStr).toContain('"inputTokens":"[REDACTED]"');
-    expect(metaStr).toContain('"outputTokens":"[REDACTED]"');
-    expect(metaStr).not.toContain('"inputTokens":5');
+    expect(metaStr).toContain('"inputTokens":5');
+    expect(metaStr).toContain('"outputTokens":3');
+    expect(metaStr).not.toContain('"inputTokens":"[REDACTED]"');
     expect(metaStr).not.toContain('SUPER_SECRET'); // api_key from provider response not in metadata
   });
 });

@@ -28,9 +28,15 @@ const AUDIT_INSERT = `
   RETURNING audit_id
 `;
 
+/**
+ * VLM usage-count keys: integers that would otherwise collide with /token/i.
+ * Exact-match only — substring keys like `access_token` remain redacted.
+ */
+const AUDIT_REDACT_ALLOWLIST: ReadonlySet<string> = new Set(['inputTokens', 'outputTokens']);
+
 function redactJson(value?: Record<string, unknown> | null): string | null {
   if (value === undefined || value === null) return null;
-  return JSON.stringify(redactLogFields(value));
+  return JSON.stringify(redactLogFields(value, AUDIT_REDACT_ALLOWLIST));
 }
 
 /**
