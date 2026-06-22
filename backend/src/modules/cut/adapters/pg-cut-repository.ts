@@ -1190,6 +1190,9 @@ interface ItemRow extends QueryResultRow {
   cut_group_id: string | number | null;
   // Enriched order-detail fields (present only when includeItemDetails); null when
   // the source order_detail no longer exists. Price/sum are intentionally omitted.
+  // joined_detail_id is the existence sentinel: NULL iff the LEFT JOIN found no
+  // live (non-deleted) detail. Never key existence off user data (detail_number).
+  joined_detail_id?: string | number | null;
   detail_number?: string | number | null;
   detail_name?: string | null;
   height?: string | number | null;
@@ -1223,6 +1226,7 @@ interface ItemRow extends QueryResultRow {
 // deliberately not selected — the cut surface is production-facing, not financial.
 const ENRICHED_ITEMS_QUERY = `
   SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
+         od.detail_id AS joined_detail_id,
          od.detail_number, od.detail_name, od.height, od.width,
          od.quantity AS detail_quantity, od.area,
          od.material_id, od.sheet_material_type_id,
@@ -1234,7 +1238,10 @@ const ENRICHED_ITEMS_QUERY = `
          od.joint_order_id, od.note,
          od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file
   FROM cut_job_item i
-  LEFT JOIN order_details od ON od.detail_id = i.order_detail_id
+  -- delete_flag in the JOIN (not WHERE): a reserved detail that was later soft-
+  -- deleted must still return its item row, but with detail: null (canonical
+  -- read-side semantics exclude deleted details — see order_details_view).
+  LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND od.delete_flag = false
   LEFT JOIN materials m ON m.material_id = od.material_id
   LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
   LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
@@ -1248,8 +1255,9 @@ const ENRICHED_ITEMS_QUERY = `
 const LIGHT_ITEMS_QUERY = `SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item WHERE cut_job_id = $1 AND is_active = true ORDER BY cut_job_item_id`;
 
 function mapItemDetail(row: ItemRow): CutDetailInfoDto | null {
-  // No joined detail row (hard-deleted source) -> no detail block.
-  if (row.detail_number === undefined || row.detail_number === null) {
+  // Existence keyed off the joined PK, not user data: NULL means the LEFT JOIN
+  // matched no live detail (hard-deleted or soft-deleted via delete_flag).
+  if (row.joined_detail_id === undefined || row.joined_detail_id === null) {
     return null;
   }
   return {

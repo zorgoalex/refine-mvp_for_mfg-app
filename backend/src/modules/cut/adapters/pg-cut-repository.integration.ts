@@ -310,6 +310,34 @@ describeIntegration('PgCutRepository (integration)', () => {
     expect(placements.hasArchived).toBe(false);
   });
 
+  it('enriched item detail hydrates for a live detail (even with null position) and collapses to null after soft-delete', async () => {
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест detail', detailIds: [1] }, requestId: 'd1' });
+
+    const opened = await repo.getJob({ currentUser: currentUser(), cutJobId: job.cutJobId, requestId: 'd2' });
+    expect(opened.items).toHaveLength(1);
+    // Detail 1 has a NULL detail_number in the fixture, yet the enriched block must
+    // still hydrate — existence is keyed off the joined PK, not user data
+    // (REGRESSION-DEBT guard).
+    expect(opened.items[0].detail).not.toBeNull();
+    expect(opened.items[0].detail?.detailNumber).toBeNull();
+    expect(opened.items[0].detail?.materialName).toBe('Материал 1');
+
+    // Soft-delete the source detail: the item row stays, but the detail collapses
+    // to null instead of leaking stale fields (DATA-INTEGRITY-DEBT guard).
+    // order_details is seeded once (beforeEach truncates only cut_* tables), so
+    // restore the flag in finally to keep detail 1 live for later tests.
+    try {
+      await pool.query('UPDATE order_details SET delete_flag = true WHERE detail_id = 1');
+      const afterDelete = await repo.getJob({ currentUser: currentUser(), cutJobId: job.cutJobId, requestId: 'd3' });
+      expect(afterDelete.items).toHaveLength(1);
+      expect(afterDelete.items[0].orderDetailId).toBe(1);
+      expect(afterDelete.items[0].detail).toBeNull();
+    } finally {
+      await pool.query('UPDATE order_details SET delete_flag = false WHERE detail_id = 1');
+    }
+  });
+
   it('re-adding the SAME detail to the SAME job is a no-op (no qty doubling, no version/audit churn)', async () => {
     const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
     const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест idem', detailIds: [1] }, requestId: 'ri1' });
