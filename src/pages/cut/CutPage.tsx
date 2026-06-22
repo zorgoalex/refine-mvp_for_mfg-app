@@ -36,6 +36,7 @@ import {
   noSheetSpecMessage,
   parseIdCsv,
   pollPdf,
+  safeHttpHref,
   selectableDetailIds,
   triggerBlobDownload,
 } from './cutPageHelpers';
@@ -465,11 +466,22 @@ export const CutPage: React.FC = () => {
           if (present.length === 0) return '—';
           return (
             <Space size={4} wrap>
-              {present.map(([label, href]) => (
-                <a key={label} href={href as string} target="_blank" rel="noreferrer">
-                  {label}
-                </a>
-              ))}
+              {present.map(([label, href]) => {
+                // Fail-closed: only http(s)/app-relative links become clickable;
+                // a javascript:/data: stored link renders as inert text (no XSS).
+                const safe = safeHttpHref(href);
+                return safe ? (
+                  <a key={label} href={safe} target="_blank" rel="noreferrer">
+                    {label}
+                  </a>
+                ) : (
+                  <Tooltip key={label} title="Небезопасная ссылка — открытие заблокировано">
+                    <Text type="secondary" delete>
+                      {label}
+                    </Text>
+                  </Tooltip>
+                );
+              })}
             </Space>
           );
         },

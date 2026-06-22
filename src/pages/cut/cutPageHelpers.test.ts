@@ -11,6 +11,7 @@ import {
   formatGroupSummary,
   noSheetSpecMessage,
   parseIdCsv,
+  safeHttpHref,
   pollPdf,
   restrictDetailIds,
   selectableDetailIds,
@@ -124,6 +125,22 @@ describe('cutPageHelpers', () => {
     expect(restrictDetailIds([1, 2, 3], [])).toEqual([]);
     expect(restrictDetailIds([1, 2], [5, 6])).toEqual([]);
     expect(restrictDetailIds([1, 1, 2], [1, 2])).toEqual([1, 2]);
+  });
+
+  it('safeHttpHref fail-closes non-http schemes (stored-link XSS guard)', () => {
+    expect(safeHttpHref('https://drive.google.com/file/x')).toBe('https://drive.google.com/file/x');
+    expect(safeHttpHref('http://x.test/a')).toBe('http://x.test/a');
+    expect(safeHttpHref('  https://x.test/a  ')).toBe('https://x.test/a');
+    expect(safeHttpHref('/orders/show/1')).toBe('/orders/show/1');
+    // Hostile / non-http schemes -> null (rendered as inert text, not anchor).
+    expect(safeHttpHref('javascript:alert(1)')).toBeNull();
+    expect(safeHttpHref('JavaScript:alert(1)')).toBeNull();
+    expect(safeHttpHref('data:text/html,hi')).toBeNull();
+    expect(safeHttpHref('vbscript:msgbox(1)')).toBeNull();
+    expect(safeHttpHref('//evil.test')).toBeNull();
+    expect(safeHttpHref('')).toBeNull();
+    expect(safeHttpHref(null)).toBeNull();
+    expect(safeHttpHref(undefined)).toBeNull();
   });
 
   it('distinctOrderIdsFromItems keeps first-seen order, drops dups and invalid ids', () => {

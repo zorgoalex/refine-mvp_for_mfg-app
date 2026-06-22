@@ -62,6 +62,13 @@ describe('CutPage source guards', () => {
     expect(source).toContain('onDoubleClick');
   });
 
+  it('fail-closes detail file links against javascript:/data: stored-link XSS', () => {
+    // Operator-clickable detail links must be sanitized; a raw href is never
+    // rendered directly into an anchor on this cut.view surface.
+    expect(source).toContain('safeHttpHref');
+    expect(source).not.toMatch(/href=\{href as string\}/);
+  });
+
   it('prefills the eligible-load criteria with the reserved orders when opening a job', () => {
     // Opening a job must scope "Загрузить подходящие детали" to the order(s) the
     // job was built from, not scan every order. Source of truth = reserved items.

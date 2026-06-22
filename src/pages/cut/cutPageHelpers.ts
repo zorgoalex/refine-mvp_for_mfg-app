@@ -38,6 +38,25 @@ export function distinctOrderIdsFromItems(items: ReadonlyArray<{ orderId: number
   return out;
 }
 
+/**
+ * Fail-closed href sanitizer for operator-clickable detail links. Stored order
+ * link_* fields are only `z.string().url()`-validated upstream, which accepts
+ * `javascript:`/`data:` URIs — rendering those as live anchors on the cut screen
+ * would be stored-link XSS. Returns the href only for absolute http(s) or
+ * app-relative ("/...") links; everything else (any non-http scheme, protocol-
+ * relative "//", bare/unknown forms) collapses to null so the caller renders
+ * plain, non-clickable text instead.
+ */
+export function safeHttpHref(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed === '' || trimmed.startsWith('//')) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null; // non-http scheme -> reject
+  if (trimmed.startsWith('/')) return trimmed; // app-relative path
+  return null; // unknown bare form -> fail closed
+}
+
 /** Detail ids that may be added to the basket (eligible only). */
 export function selectableDetailIds(details: ReadonlyArray<{ orderDetailId: number; eligible: boolean }>): number[] {
   return details.filter((d) => d.eligible).map((d) => d.orderDetailId);
