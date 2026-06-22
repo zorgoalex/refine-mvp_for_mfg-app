@@ -235,9 +235,10 @@ describe('orderHeaderInsertParams — sheet_material_type_id', () => {
     expect(params[30]).toBe(42);   // sheetMaterialTypeId
   });
 
-  it('preserves materialId when sheetMaterialTypeId is null', () => {
+  it('always binds null for materialId regardless of sheetMaterialTypeId (Variant B sunset)', () => {
+    // Variant B: header material_id is fully sunset — ALWAYS null, even when sheetMaterialTypeId is absent.
     const params = insertParams(makeNormalizedHeader({ materialId: 3, sheetMaterialTypeId: null }), makeTotals());
-    expect(params[25]).toBe(3);    // materialId preserved
+    expect(params[25]).toBeNull(); // materialId always null (Variant B invariant)
     expect(params[30]).toBeNull(); // sheetMaterialTypeId null
   });
 });
@@ -261,6 +262,13 @@ describe('orderHeaderUpdateParams — sheet_material_type_id', () => {
     const params = updateParams(makeNormalizedHeader({ materialId: 8, sheetMaterialTypeId: 33 }), makeTotals());
     expect(params[24]).toBeNull(); // materialId forced null
     expect(params[29]).toBe(33);  // sheetMaterialTypeId
+  });
+
+  it('always binds null for materialId regardless of sheetMaterialTypeId (Variant B sunset)', () => {
+    // Variant B: header material_id is fully sunset — ALWAYS null, even without a sheet id.
+    const params = updateParams(makeNormalizedHeader({ materialId: 5, sheetMaterialTypeId: null }), makeTotals());
+    expect(params[24]).toBeNull(); // materialId always null (Variant B invariant)
+    expect(params[29]).toBeNull(); // sheetMaterialTypeId null
   });
 });
 

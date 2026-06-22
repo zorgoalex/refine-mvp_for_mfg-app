@@ -1024,10 +1024,10 @@ function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTo
     header.linkCadFile,
     header.linkPdfFile,
     header.notes,
-    // Header invariant (§13): a sheet header forces material_id NULL so legacy
-    // material_id consumers never read a material that disagrees with the sheet.
+    // Variant B: header material_id is fully sunset — always null (034 drops the column
+    // constraint and 034+ invariant chk_orders_material_id_null enforces NULL).
     // keep in sync with pg-order-transaction-manager.ts createOrderHeader.
-    header.sheetMaterialTypeId != null ? null : (header.materialId ?? null),
+    null,
     header.millingTypeId,
     header.edgeTypeId,
     header.filmId,
@@ -1069,9 +1069,9 @@ function orderHeaderUpdateParams(header: NormalizedSaveOrderHeaderDto, totals: O
     header.linkCadFile,
     header.linkPdfFile,
     header.notes,
-    // Header invariant (§13): a sheet header forces material_id NULL.
+    // Variant B: header material_id is fully sunset — always null (034 invariant).
     // keep in sync with pg-order-transaction-manager.ts updateOrderHeader.
-    header.sheetMaterialTypeId != null ? null : (header.materialId ?? null),
+    null,
     header.millingTypeId,
     header.edgeTypeId,
     header.filmId,
