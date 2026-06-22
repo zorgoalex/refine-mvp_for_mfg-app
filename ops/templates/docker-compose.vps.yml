@@ -317,6 +317,11 @@ services:
       - traefik.http.routers.cad.entrypoints=websecure
       - traefik.http.routers.cad.tls.certresolver=letsencrypt
       - traefik.http.services.cad.loadbalancer.server.port=8000
+      # Browser access to the built-in UI is gated at the edge with HTTP basic
+      # auth (the UI itself sends no token); the app trusts the proxy so it does
+      # not also demand a Bearer. Credentials live in CAD_BASICAUTH_USERS (.env).
+      - traefik.http.routers.cad.middlewares=cad-auth
+      - traefik.http.middlewares.cad-auth.basicauth.users=${CAD_BASICAUTH_USERS}
     networks:
       - back
       - edge
