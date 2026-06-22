@@ -106,6 +106,13 @@ BEGIN
   END IF;
 END $$;
 
+-- 0a-pre) Drop the migration-029 XOR constraint before the conversion UPDATE.
+--         Step 0a sets sheet_material_type_id while material_id is still non-NULL,
+--         which would violate chk_orders_sheet_xor_material (added by 029) if left.
+--         The replacement constraint (chk_orders_material_id_null) is added in step 5
+--         after step 2 nulls all material_id values.
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_orders_sheet_xor_material;
+
 -- 0a) Convert ALL still-legacy details/headers using the map — INCLUDING soft-deleted
 --     rows (Critic R2 B1): step 5 sets sheet_material_type_id NOT NULL for the whole
 --     table and step 2 nulls material_id, so deleted history must also resolve.
