@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 
-// SP3 invariant 5 (detail-level new-only): an EXISTING detail saved as legacy (persisted
-// detail_id, no stored sheet id) must NOT be flippable to a sheet detail in the UI — the
-// backend rejects the flip with 422, so the picker must not be offered for such rows.
-// Verified as source-text guards (Vitest node env, no DOM).
+// Variant B: all details use sheet_material_type_id — legacy material_id is always null.
+// SP3 "no-flip" guards (isExistingLegacyDetail / showSheetPicker gate) are intentionally
+// removed: the concept of a "legacy row that must not flip" no longer exists in VB because
+// every row is a sheet row.
+// These guards confirm that the VB-era invariants are in place:
+//   - The modal shows an unconditional sheet picker (no conditional gate).
+//   - The table column is keyed on sheet_material_type_id unconditionally.
 const modalSrc = readFileSync(
   new URL('./modals/OrderDetailModal.tsx', import.meta.url),
   'utf8',
@@ -14,22 +17,27 @@ const tableSrc = readFileSync(
   'utf8',
 );
 
-describe('OrderDetailModal hides the sheet picker for existing legacy rows', () => {
-  it('derives an existing-legacy-detail guard from a persisted detail_id with no stored sheet id', () => {
-    expect(modalSrc).toMatch(/isExistingDetail\s*=\s*typeof detail\?\.detail_id === ['"]number['"]/);
-    expect(modalSrc).toMatch(/isExistingLegacyDetail\s*=\s*isExistingDetail\s*&&\s*!detailHasStoredSheetId/);
+describe('OrderDetailModal VB: unconditional sheet picker (no legacy guard)', () => {
+  it('no longer contains isExistingLegacyDetail (SP3 guard removed in VB)', () => {
+    expect(modalSrc).not.toMatch(/isExistingLegacyDetail/);
   });
 
-  it('gates showSheetPicker on NOT being an existing legacy detail', () => {
-    expect(modalSrc).toMatch(/showSheetPicker\s*=[\s\S]{0,80}!isExistingLegacyDetail/);
+  it('no longer conditionally gates the sheet picker on showSheetPicker', () => {
+    // In VB the picker is always rendered — showSheetPicker is gone or not used as a gate.
+    expect(modalSrc).not.toMatch(/\{showSheetPicker\s*&&/);
+  });
+
+  it('sheet picker Form.Item is unconditionally present with name sheet_material_type_id', () => {
+    expect(modalSrc).toMatch(/name=["']sheet_material_type_id["']/);
   });
 });
 
-describe('OrderDetailTable inline picker is read-only for existing legacy rows', () => {
-  it('renders the sheet column read-only when the row is a persisted legacy detail', () => {
-    // editing path must exclude rows with a persisted detail_id and no stored sheet id
-    expect(tableSrc).toMatch(
-      /isEditing\(record\)\s*&&[\s\S]{0,200}record\.detail_id[\s\S]{0,160}sheet_material_type_id/,
-    );
+describe('OrderDetailTable VB: sheet column unconditional', () => {
+  it('table column is keyed on sheet_material_type_id', () => {
+    expect(tableSrc).toMatch(/dataIndex:\s*['"]sheet_material_type_id['"]/);
+  });
+
+  it('no longer has a conditional spread for the sheet column', () => {
+    expect(tableSrc).not.toMatch(/showSheetPicker\s*\?/);
   });
 });

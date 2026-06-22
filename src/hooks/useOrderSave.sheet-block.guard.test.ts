@@ -23,13 +23,17 @@ describe('useOrderSave legacy sheet hard-block', () => {
   });
 });
 
-describe('OrderDetailsTab bulk material scoping', () => {
+describe('OrderDetailsTab VB bulk material scoping', () => {
+  // VB: legacy material_id is gone from bulk edit entirely.
+  // BulkEditModal now has sheet_material_type_id instead of material_id.
+  // The old isSheetRow guard that deleted material_id is no longer needed.
   const tabSrc = readFileSync(
     new URL('../pages/orders/components/tabs/OrderDetailsTab.tsx', import.meta.url),
     'utf8',
   );
 
-  it('strips a bulk material_id change for sheet rows', () => {
-    expect(tabSrc).toMatch(/isSheetRow[\s\S]*delete updateData\.material_id/);
+  it('no longer contains the legacy isSheetRow material_id strip (VB: material_id removed)', () => {
+    // In VB the isSheetRow guard is gone because there is no material_id in bulk edits.
+    expect(tabSrc).not.toMatch(/isSheetRow[\s\S]*delete updateData\.material_id/);
   });
 });

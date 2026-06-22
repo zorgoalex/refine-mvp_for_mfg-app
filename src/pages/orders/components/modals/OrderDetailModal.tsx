@@ -13,7 +13,6 @@ import { MillingTypeQuickCreate } from './MillingTypeQuickCreate';
 import { EdgeTypeQuickCreate } from './EdgeTypeQuickCreate';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
-import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import {
   useSheetMaterialOptions,
   toSheetSelectOptions,
@@ -45,25 +44,15 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [calculatedCost, setCalculatedCost] = useState<number>(0);
   const [millingTypeModalOpen, setMillingTypeModalOpen] = useState(false);
   const [edgeTypeModalOpen, setEdgeTypeModalOpen] = useState(false);
-  const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
+  const selectedMaterialId: number | null = null; // VB: always null, legacy path dead
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
 
-  // SP3: sheet picker gating (backend write + sheet_materials.view) and order-era
-  // eligibility (create OR loaded order's sheet_eligible !== false).
-  const { header } = useOrderFormStore();
+  // VB: sheet picker is unconditional — every detail uses sheet_material_type_id.
   const sheetMaterials = useSheetMaterialOptions();
-  const sheetEligible = header.sheet_eligible !== false;
-  // SP3 invariant 5 (detail-level new-only): an EXISTING detail saved as legacy
-  // (persisted detail_id, no stored sheet id) must not flip to a sheet detail. Hide the
-  // picker for such rows so the UI never offers a choice the backend rejects with 422.
-  // Brand-new rows (no detail_id) and existing sheet rows still show the picker.
-  const isExistingDetail = typeof detail?.detail_id === 'number' && detail.detail_id > 0;
   const detailHasStoredSheetId =
     typeof detail?.sheet_material_type_id === 'number' && detail.sheet_material_type_id > 0;
-  const isExistingLegacyDetail = isExistingDetail && !detailHasStoredSheetId;
-  const showSheetPicker = sheetMaterials.enabled && sheetEligible && !isExistingLegacyDetail;
   const selectedSheetId = Form.useWatch('sheet_material_type_id', form) as
     | number
     | null
@@ -73,19 +62,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const hasStoredSheetId = detailHasStoredSheetId;
 
   // Load reference data with search
-  const { selectProps: materialSelectProps } = useSelect({
-    resource: 'materials',
-    optionLabel: 'material_name',
-    optionValue: 'material_id',
-    filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    pagination: { pageSize: 100 },
-    ...(detail?.material_id ? { defaultValue: detail.material_id } : {}),
-    queryOptions: { enabled: !useBackendReferences },
-  });
-  const resolvedMaterialSelectProps = useBackendReferences
-    ? createBackendSelectProps(orderFormData.references.materials, orderFormData.isLoading)
-    : materialSelectProps;
-
   const { selectProps: millingTypeSelectProps } = useSelect({
     resource: 'milling_types',
     optionLabel: 'milling_type_name',
@@ -161,18 +137,15 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         form.setFieldsValue(detail);
         setCalculatedArea(detail.area || 0);
         setCalculatedCost(detail.detail_cost || 0);
-        setSelectedMaterialId(detail.material_id || null);
       } else {
         form.resetFields();
         form.setFieldsValue({
           priority: 100,
-          material_id: 1, // МДФ 16мм
           milling_type_id: 1, // Модерн
           edge_type_id: 1, // р-1
         });
         setCalculatedArea(0);
         setCalculatedCost(0);
-        setSelectedMaterialId(1);
         setDimensionValidationError(null);
       }
     }
@@ -247,12 +220,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
     // Validate dimensions against material limits
     validateDimensions();
-  };
-
-  // Handle material change
-  const handleMaterialChange = (materialId: number) => {
-    setSelectedMaterialId(materialId);
-    // Validation will be triggered by useEffect when materialData loads
   };
 
   // Trigger validation when material data loads
@@ -419,63 +386,20 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <Col span={12}>
             <Form.Item
               label="Материал"
-              name="material_id"
-              // SP3: a sheet-only detail needs no legacy material — drop required.
-              rules={hasSheetSelected ? [] : [{ required: true, message: 'Обязательное поле' }]}
-              tooltip={
-                materialData?.data
-                  ? getMaterialDimensionDescription({
-                      material_id: materialData.data.material_id,
-                      material_name: materialData.data.material_name,
-                      material_type_id: materialData.data.material_type?.material_type_id,
-                      material_type_name: materialData.data.material_type?.material_type_name,
-                    })
-                  : undefined
-              }
+              name="sheet_material_type_id"
+              rules={[{ required: true, message: 'Обязательное поле' }]}
             >
               <Select
-                {...resolvedMaterialSelectProps}
-                showSearch
+                options={toSheetSelectOptions(sheetMaterials.options, selectedSheetId)}
+                loading={sheetMaterials.isLoading}
+                onChange={() => setTimeout(validateDimensions, 0)}
                 placeholder="Выберите материал"
-                onChange={handleMaterialChange}
-                disabled={hasSheetSelected}
-                dropdownRender={(menu) => (
-                  <>
-                    {menu}
-                    <Space style={{ padding: '8px' }}>
-                      <Button
-                        type="text"
-                        icon={<PlusOutlined />}
-                        onClick={() => {
-                          // TODO: Open MaterialQuickCreate modal
-                          // console.log('Open MaterialQuickCreate');
-                        }}
-                      >
-                        Создать материал
-                      </Button>
-                    </Space>
-                  </>
-                )}
+                allowClear={!hasStoredSheetId}
+                showSearch
+                optionFilterProp="label"
               />
             </Form.Item>
           </Col>
-          {showSheetPicker && (
-            <Col span={12}>
-              <Form.Item label="Листовой материал" name="sheet_material_type_id">
-                <Select
-                  options={toSheetSelectOptions(sheetMaterials.options, selectedSheetId)}
-                  loading={sheetMaterials.isLoading}
-                  onChange={() => setTimeout(validateDimensions, 0)}
-                  placeholder="Выберите листовой материал"
-                  // No-clear for a row that already has a stored sheet id; a brand-new
-                  // unresolved row may still clear back to the legacy picker.
-                  allowClear={!hasStoredSheetId}
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </Form.Item>
-            </Col>
-          )}
           <Col span={12}>
             <Form.Item
               label="Пленка"
