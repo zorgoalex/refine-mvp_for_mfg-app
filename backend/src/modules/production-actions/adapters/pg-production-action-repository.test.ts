@@ -1122,6 +1122,44 @@ describe('assertOrderScope assigned-production-worker path', () => {
   });
 });
 
+describe('non-denied audit redaction via auditService.record', () => {
+  it('redacts JWT token in orderStatusName within after_json and metadata_json blobs', async () => {
+    // A JWT-like token in the order status name flows into afterJson.orderStatusName and
+    // metadataJson.orderStatusName in writeAudit.
+    // With the old inline INSERT: the JSON blobs are serialized raw — token is present.
+    // After replacing with auditService.record(): redactJson() applies JWT_PATTERN → [REDACTED].
+    //
+    // The status_name column ($17 in AUDIT_INSERT) holds the raw status name and is NOT a JSON
+    // blob — it is legitimately not redacted.  We check only the JSON blob params (after_json /
+    // metadata_json) which are the last 4 params in AUDIT_INSERT: indices 19..22 (0-based).
+    const secretToken =
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ';
+    const database = createDatabase({ orderStatusNameOverride: secretToken });
+    const repo = new PgProductionActionRepository(database.service);
+
+    await repo.changeOrderStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { orderStatusId: 7, version: 3, idempotencyKey: 'redaction-test-key-1' },
+      requestId: 'request-redaction-test',
+    });
+
+    const auditInsert = database.queries.find((q) =>
+      normalizeSql(q.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(auditInsert, 'audit_log INSERT must exist').toBeDefined();
+
+    // JSON blob params are the last 4 (before/after/diff/metadata) — always the trailing 4 params
+    const jsonBlobParams = auditInsert!.params.slice(-4);
+    const jsonBlobStr = JSON.stringify(jsonBlobParams);
+
+    // Within the JSON blobs, the raw token must be absent (redacted)
+    expect(jsonBlobStr).not.toContain(secretToken);
+    // [REDACTED] sentinel must appear in at least one JSON blob (after_json or metadata_json)
+    expect(jsonBlobStr).toContain('[REDACTED]');
+  });
+});
+
 describe('assigned-worker audit metadata across production commands', () => {
   it('changeProductionStatus stamps accessVia/assignmentSource into audit + outbox', async () => {
     const database = createDatabase({
@@ -1218,6 +1256,8 @@ function createDatabase(options: {
   detailStatusRowsAfter?: Array<{ detail_id: number; production_status_id: number | null }>;
   recalcOrderProductionStatusId?: number | null;
   assignedUserIds?: Array<number | string>;
+  /** Suffix appended to the fake order status name — used to inject a token for redaction tests */
+  orderStatusNameOverride?: string;
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
@@ -1286,7 +1326,10 @@ function createDatabase(options: {
       }
 
       if (normalized.startsWith('SELECT order_status_id, order_status_name')) {
-        return { rows: [{ order_status_id: params[0], order_status_name: 'Выдан' }], rowCount: 1 };
+        const statusName = options.orderStatusNameOverride
+          ? `Выдан ${options.orderStatusNameOverride}`
+          : 'Выдан';
+        return { rows: [{ order_status_id: params[0], order_status_name: statusName }], rowCount: 1 };
       }
 
       if (normalized.startsWith('SELECT payment_status_id, payment_status_name')) {
