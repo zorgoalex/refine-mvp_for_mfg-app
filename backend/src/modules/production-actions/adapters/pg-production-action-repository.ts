@@ -11,6 +11,7 @@ import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type {
   ActivateProductionStageCommand,
   ActivateDetailProductionStageCommand,
+  ChangeBatchDetailProductionStatusCommand,
   ChangeOrderStatusCommand,
   ChangeOrderStatusFromDeadlineCommand,
   ChangeOrderStatusFromDeadlineResult,
@@ -24,7 +25,10 @@ import type {
   ProductionActionRepositoryPort,
   RestoreAutoProductionStatusCommand,
 } from '../application/production-action.types';
-import type { ProductionActionResponseDto } from '../dto/production-action.dto';
+import type {
+  BatchDetailProductionStatusResponseDto,
+  ProductionActionResponseDto,
+} from '../dto/production-action.dto';
 import {
   ProductionActionIdempotencyFailedError,
   ProductionActionIdempotencyInProgressError,
@@ -135,7 +139,8 @@ type CommandName =
   | 'orders.production_status_mode_manual'
   | 'production.stage_activate'
   | 'production.stage_deactivate'
-  | 'production.detail_stage_activate';
+  | 'production.detail_stage_activate'
+  | 'orders.detail_production_status_batch_change';
 
 interface OrderScopeOptions {
   tx?: TransactionClient;
@@ -1143,6 +1148,217 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusFromDetailsEnabled: false,
           version: nextVersion,
         },
+        auditId,
+        requestId,
+      };
+      await completeIdempotency(tx, command.dto.idempotencyKey, response);
+      return response;
+    });
+  }
+
+  changeBatchDetailProductionStatus(
+    command: ChangeBatchDetailProductionStatusCommand,
+  ): Promise<BatchDetailProductionStatusResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const requestId = requestIdOrFallback(command.requestId);
+
+      const detailIds = Array.from(new Set(command.dto.detailIds)).sort((a, b) => a - b);
+
+      const idempotency = await reconcileIdempotency(tx, {
+        idempotencyKey: command.dto.idempotencyKey,
+        commandName: 'orders.detail_production_status_batch_change',
+        currentUser: command.currentUser,
+        entityType: 'order',
+        entityId: String(command.orderId),
+        requestShape: {
+          actorUserId: command.currentUser.id,
+          commandName: 'orders.detail_production_status_batch_change',
+          orderId: command.orderId,
+          detailIds,
+          productionStatusId: command.dto.productionStatusId,
+          version: command.dto.version,
+        },
+      });
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse as BatchDetailProductionStatusResponseDto;
+      }
+
+      // 1. Lock the parent order row FIRST as the sole serialization mutex, then scope + version guard.
+      const order = await loadOrderForUpdate(tx, command.orderId);
+      await this.assertOrderScope(
+        command.currentUser,
+        order,
+        ['orders.update', 'orders.change_production_status'],
+        requestId,
+      );
+      assertVersion(order, command.dto.version);
+
+      const status = await loadProductionStatus(tx, command.dto.productionStatusId);
+
+      // 2. Non-locking read of all live details (validation + before-distribution). The orders-row
+      //    lock from step 1 is the sole mutex; the batch takes NO FOR UPDATE on detail rows
+      //    (locking them would reopen the batch<->detail-stage deadlock cycle).
+      const currentDetails = await loadOrderDetailsForBatch(tx, order.orderId);
+      const currentDetailIds = currentDetails.map((detail) => detail.detailId);
+      const missingDetailIds = detailIds.filter((id) => !currentDetailIds.includes(id));
+      if (missingDetailIds.length > 0) {
+        throw new ApiError(
+          404,
+          'ORDER_DETAIL_NOT_FOUND',
+          'Часть выбранных деталей не найдена в заказе',
+          { orderId: order.orderId, missingDetailIds },
+        );
+      }
+      const beforeStatusDistribution = detailStatusDistribution(currentDetails);
+      const currentById = new Map(
+        currentDetails.map((detail) => [detail.detailId, detail.productionStatusId] as const),
+      );
+      const selectedDetailCount = detailIds.length;
+
+      // 3. Update only the SELECTED details whose status actually changes (COALESCE delete_flag —
+      //    legacy null rows are active). RETURNING yields the true changed-row count.
+      const updated = await tx.query<{ detail_id: string | number }>(
+        `
+        UPDATE order_details
+        SET production_status_id = $1
+        WHERE order_id = $2
+          AND detail_id = ANY($3::bigint[])
+          AND COALESCE(delete_flag, false) = false
+          AND production_status_id IS DISTINCT FROM $1
+        RETURNING detail_id
+        `,
+        [status.productionStatusId, order.orderId, detailIds],
+      );
+      const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
+      const affectedDetailCount = changedDetailIds.length;
+
+      // 4. Auto mode: command owns the recalc (a DB trigger also guards on the flag; the explicit
+      //    call is idempotent). Manual mode leaves orders.production_status_id untouched.
+      if (order.productionStatusFromDetailsEnabled) {
+        await runRecalcOrderProductionStatus(tx, order.orderId);
+      }
+
+      // 5. Bump the parent version so stale callers are rejected (recalc never bumps version).
+      //    This UPDATE orders fires the existing trg_crm_sync_orders trigger, exactly as the
+      //    sibling production commands already do; crm_sync_enqueue dedups pending by key.
+      const bumped = await tx.query<{
+        version: string | number;
+        production_status_id: string | number | null;
+      }>(
+        `
+        UPDATE orders
+        SET version = version + 1, updated_at = now()
+        WHERE order_id = $1
+        RETURNING version, production_status_id
+        `,
+        [order.orderId],
+      );
+      const newVersion = toNumber(bumped.rows[0].version);
+      const afterProductionStatusId =
+        bumped.rows[0].production_status_id === null
+          ? null
+          : toNumber(bumped.rows[0].production_status_id);
+
+      // After-distribution is computed analytically from the observed before-snapshot + this
+      // command's own changes (NOT a racy second read) — distributions are command-start-relative.
+      const afterStatusDistribution = projectDistributionAfterChange(
+        beforeStatusDistribution,
+        currentById,
+        changedDetailIds,
+        status.productionStatusId,
+      );
+
+      const auditId = await writeAudit(tx, {
+        event: 'orders.detail_production_status_batch_change',
+        currentUser: command.currentUser,
+        requestId,
+        order,
+        source: SOURCE,
+        statusField: 'productionDetailBatch',
+        statusId: status.productionStatusId,
+        statusName: status.productionStatusName,
+        statusCode: status.productionStatusCode,
+        beforeJson: {
+          orderProductionStatusId: order.productionStatusId,
+          productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+          orderVersion: order.version,
+          detailStatusDistribution: beforeStatusDistribution,
+        },
+        afterJson: {
+          orderProductionStatusId: afterProductionStatusId,
+          productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+          orderVersion: newVersion,
+          detailStatusDistribution: afterStatusDistribution,
+        },
+        diffJson: {
+          detailIds,
+          changedDetailIds,
+          selectedDetailCount,
+          affectedDetailCount,
+          productionStatusId: status.productionStatusId,
+          orderProductionStatusId: { before: order.productionStatusId, after: afterProductionStatusId },
+          orderVersion: { before: order.version, after: newVersion },
+          beforeStatusDistribution,
+          afterStatusDistribution,
+          statusDistributionBasis: 'command-start-snapshot',
+        },
+        metadataJson: {
+          source: SOURCE,
+          orderId: order.orderId,
+          clientId: order.clientId,
+          detailIds,
+          changedDetailIds,
+          selectedDetailCount,
+          affectedDetailCount,
+          productionStatusId: status.productionStatusId,
+          productionStatusCode: status.productionStatusCode,
+          productionStatusName: status.productionStatusName,
+          productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+          action: 'detail_production_status_batch_change',
+          statusField: 'productionDetailBatch',
+          requestId,
+        },
+      });
+
+      await enqueueOutbox(tx, {
+        eventType: 'order.detail_production_status_batch_changed',
+        aggregateType: 'order',
+        aggregateId: String(order.orderId),
+        idempotencyKey: command.dto.idempotencyKey,
+        payload: {
+          eventType: 'order.detail_production_status_batch_changed',
+          actorUserId: command.currentUser.id,
+          requestId,
+          entityType: 'order',
+          entityId: String(order.orderId),
+          orderId: order.orderId,
+          clientId: order.clientId,
+          detailIds,
+          changedDetailIds,
+          selectedDetailCount,
+          affectedDetailCount,
+          productionStatusId: status.productionStatusId,
+          productionStatusCode: status.productionStatusCode,
+          productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+          orderProductionStatusId: { before: order.productionStatusId, after: afterProductionStatusId },
+          orderVersion: { before: order.version, after: newVersion },
+          beforeStatusDistribution,
+          afterStatusDistribution,
+          statusDistributionBasis: 'command-start-snapshot',
+          action: 'detail_production_status_batch_change',
+          idempotencyKey: command.dto.idempotencyKey,
+        },
+      });
+
+      const response: BatchDetailProductionStatusResponseDto = {
+        order: {
+          orderId: order.orderId,
+          productionStatusId: afterProductionStatusId ?? undefined,
+          version: newVersion,
+        },
+        selectedDetailCount,
+        affectedDetailCount,
         auditId,
         requestId,
       };
@@ -2179,6 +2395,67 @@ async function disableAutoProductionStatus(tx: TransactionClient, orderId: numbe
 
 async function runRecalcOrderProductionStatus(tx: TransactionClient, orderId: number): Promise<void> {
   await tx.query('SELECT recalc_order_production_status($1)', [orderId]);
+}
+
+// Non-locking read of every live detail's id + current production status, deterministically ordered.
+// NO FOR UPDATE: the parent orders-row lock (loadOrderForUpdate) is the sole mutex for the batch
+// command; locking detail rows here would reopen the batch<->detail-stage deadlock cycle.
+async function loadOrderDetailsForBatch(
+  tx: TransactionClient,
+  orderId: number,
+): Promise<Array<{ detailId: number; productionStatusId: number | null }>> {
+  const result = await tx.query<{
+    detail_id: string | number;
+    production_status_id: string | number | null;
+  }>(
+    `
+    SELECT detail_id, production_status_id
+    FROM order_details
+    WHERE order_id = $1
+      AND COALESCE(delete_flag, false) = false
+    ORDER BY detail_id
+    `,
+    [orderId],
+  );
+  return result.rows.map((row) => ({
+    detailId: toNumber(row.detail_id),
+    productionStatusId: row.production_status_id === null ? null : toNumber(row.production_status_id),
+  }));
+}
+
+// Pure helper: status distribution keyed 'null' | String(id) (mirrors loadDetailProductionStatusSnapshot).
+function detailStatusDistribution(
+  rows: ReadonlyArray<{ productionStatusId: number | null }>,
+): Record<string, number> {
+  const distribution: Record<string, number> = {};
+  for (const row of rows) {
+    const key = row.productionStatusId === null ? 'null' : String(row.productionStatusId);
+    distribution[key] = (distribution[key] ?? 0) + 1;
+  }
+  return distribution;
+}
+
+// Pure helper: project the after-distribution from the observed before-snapshot plus this command's
+// own changes (no second DB read). For each changed detail, decrement its observed old-status bucket
+// and increment the target-status bucket.
+function projectDistributionAfterChange(
+  before: Record<string, number>,
+  currentById: ReadonlyMap<number, number | null>,
+  changedDetailIds: readonly number[],
+  newStatusId: number,
+): Record<string, number> {
+  const distribution: Record<string, number> = { ...before };
+  const newKey = String(newStatusId);
+  for (const id of changedDetailIds) {
+    const oldStatus = currentById.get(id) ?? null;
+    const oldKey = oldStatus === null ? 'null' : String(oldStatus);
+    distribution[oldKey] = (distribution[oldKey] ?? 0) - 1;
+    if (distribution[oldKey] <= 0) {
+      delete distribution[oldKey];
+    }
+    distribution[newKey] = (distribution[newKey] ?? 0) + 1;
+  }
+  return distribution;
 }
 
 async function loadOrderProductionStatusId(

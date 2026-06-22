@@ -1201,6 +1201,201 @@ describe('assigned-worker audit metadata across production commands', () => {
     expect(params).toContain('order_workshops.responsible_employee_id');
     expect(normalizedSql(database.queries)).toContain('SELECT DISTINCT u.user_id');
   });
+
+  describe('changeBatchDetailProductionStatus', () => {
+    const cmd = (over: Record<string, unknown> = {}) => ({
+      currentUser: currentUser(),
+      orderId: 15,
+      requestId: 'req-batch-1',
+      dto: {
+        detailIds: [100, 101],
+        productionStatusId: 5,
+        version: 3,
+        idempotencyKey: 'batch-key-1',
+        ...over,
+      },
+    });
+
+    it('updates selected details, recalcs in auto mode, and bumps version', async () => {
+      const database = createDatabase({
+        productionStatusFromDetailsEnabled: true,
+        detailStatusRowsBefore: [
+          { detail_id: 100, production_status_id: 1 },
+          { detail_id: 101, production_status_id: 1 },
+        ],
+        updatedDetailIds: [100, 101],
+        recalcOrderProductionStatusId: 5,
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      const result = await repository.changeBatchDetailProductionStatus(cmd());
+
+      expect(result).toMatchObject({
+        order: { orderId: 15, productionStatusId: 5, version: 4 },
+        selectedDetailCount: 2,
+        affectedDetailCount: 2,
+        auditId: 'audit-id-1',
+        requestId: 'req-batch-1',
+      });
+      const sql = normalizedSql(database.queries);
+      expect(sql).toContain('UPDATE order_details SET production_status_id = $1');
+      expect(sql).toContain('production_status_id IS DISTINCT FROM $1');
+      expect(sql).toContain('SELECT recalc_order_production_status');
+      expect(sql).toContain('UPDATE orders SET version = version + 1');
+      expect(sql).toContain('INSERT INTO audit_log');
+      expect(sql).toContain('INSERT INTO outbox_events');
+    });
+
+    it('does NOT recalc in manual mode but still bumps version', async () => {
+      const database = createDatabase({
+        productionStatusFromDetailsEnabled: false,
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
+        updatedDetailIds: [100],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
+
+      const sql = normalizedSql(database.queries);
+      expect(sql).not.toContain('SELECT recalc_order_production_status');
+      expect(sql).toContain('UPDATE orders SET version = version + 1');
+    });
+
+    it('never writes production_status_events', async () => {
+      const database = createDatabase({
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
+        updatedDetailIds: [100],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
+
+      expect(normalizedSql(database.queries)).not.toContain('INSERT INTO production_status_events');
+    });
+
+    it('takes NO FOR UPDATE on detail rows (orders row is the sole mutex)', async () => {
+      const database = createDatabase({
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
+        updatedDetailIds: [100],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
+
+      // The batch's detail read must NOT lock rows; only the parent orders row is locked FOR UPDATE.
+      const detailRead = database.queries.find((query) =>
+        normalizeSql(query.text).startsWith('SELECT detail_id, production_status_id FROM order_details'),
+      );
+      expect(detailRead).toBeDefined();
+      expect(normalizeSql(detailRead!.text)).not.toContain('FOR UPDATE');
+      expect(normalizedSql(database.queries)).toContain(
+        'FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE',
+      );
+    });
+
+    it('rejects when a selected detail does not belong to the order (404)', async () => {
+      const database = createDatabase({
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      await expect(
+        repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100, 999] })),
+      ).rejects.toMatchObject({ statusCode: 404 });
+      expect(normalizedSql(database.queries)).not.toContain('UPDATE order_details');
+    });
+
+    it('rejects on stale parent version (409)', async () => {
+      const database = createDatabase({
+        orderVersion: 3,
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
+        updatedDetailIds: [100],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      await expect(
+        repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100], version: 1 })),
+      ).rejects.toMatchObject({ statusCode: 409 });
+    });
+
+    it('replays idempotently for the same key (cached response, no UPDATE)', async () => {
+      const database = createDatabase({
+        idempotencyExistingRequestHash: hashStable({
+          actorUserId: '1',
+          commandName: 'orders.detail_production_status_batch_change',
+          orderId: 15,
+          detailIds: [100],
+          productionStatusId: 5,
+          version: 3,
+        }),
+        idempotencyCompletedResponse: {
+          order: { orderId: 15, productionStatusId: 5, version: 4 },
+          selectedDetailCount: 1,
+          affectedDetailCount: 1,
+          requestId: 'req-batch-1',
+        },
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      const result = await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
+
+      expect(result).toMatchObject({ selectedDetailCount: 1, affectedDetailCount: 1 });
+      expect(normalizedSql(database.queries)).not.toContain('UPDATE order_details');
+      expect(normalizedSql(database.queries)).not.toContain('UPDATE orders SET version = version + 1');
+    });
+
+    it('writes audit with normalized batch dimensions and snapshot distributions', async () => {
+      const database = createDatabase({
+        detailStatusRowsBefore: [
+          { detail_id: 100, production_status_id: 1 },
+          { detail_id: 101, production_status_id: 1 },
+        ],
+        updatedDetailIds: [100, 101],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      await repository.changeBatchDetailProductionStatus(cmd());
+
+      const params = normalizedParams(database.queries);
+      expect(params).toContain('detail_production_status_batch_change');
+      expect(params).toContain('beforeStatusDistribution');
+      expect(params).toContain('afterStatusDistribution');
+      expect(params).toContain('selectedDetailCount');
+      expect(params).toContain('command-start-snapshot');
+    });
+
+    it('enqueues an outbox event carrying before/after distributions and counts', async () => {
+      const database = createDatabase({
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
+        updatedDetailIds: [100],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
+
+      const params = normalizedParams(database.queries);
+      expect(params).toContain('order.detail_production_status_batch_changed');
+      expect(params).toContain('beforeStatusDistribution');
+      expect(params).toContain('afterStatusDistribution');
+      expect(params).toContain('affectedDetailCount');
+    });
+
+    it('affectedDetailCount counts only rows that actually changed, not selected count', async () => {
+      const database = createDatabase({
+        detailStatusRowsBefore: [
+          { detail_id: 100, production_status_id: 5 },
+          { detail_id: 101, production_status_id: 1 },
+        ],
+        updatedDetailIds: [101],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      const result = await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100, 101] }));
+
+      expect(result.selectedDetailCount).toBe(2);
+      expect(result.affectedDetailCount).toBe(1);
+    });
+  });
 });
 
 function createDatabase(options: {
@@ -1218,6 +1413,7 @@ function createDatabase(options: {
   detailStatusRowsAfter?: Array<{ detail_id: number; production_status_id: number | null }>;
   recalcOrderProductionStatusId?: number | null;
   assignedUserIds?: Array<number | string>;
+  updatedDetailIds?: number[];
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
@@ -1367,6 +1563,11 @@ function createDatabase(options: {
         return { rows: [{ event_id: 42 }], rowCount: 1 };
       }
 
+      if (normalized.startsWith('UPDATE order_details SET production_status_id')) {
+        const ids = options.updatedDetailIds ?? [];
+        return { rows: ids.map((id) => ({ detail_id: id })), rowCount: ids.length };
+      }
+
       if (normalized.startsWith('SELECT detail_id, production_status_id FROM order_details')) {
         const updateAlreadyRan = queries.some((query) => {
           const n = normalizeSql(query.text);
@@ -1389,7 +1590,11 @@ function createDatabase(options: {
         normalized.startsWith('UPDATE orders SET production_status_from_details_enabled') ||
         normalized.startsWith('UPDATE orders SET version = version + 1')
       ) {
-        return { rows: [{ version: 4 }], rowCount: 1 };
+        const productionStatusId =
+          options.recalcOrderProductionStatusId !== undefined
+            ? options.recalcOrderProductionStatusId
+            : (options.orderProductionStatusId ?? 1);
+        return { rows: [{ version: 4, production_status_id: productionStatusId }], rowCount: 1 };
       }
 
       if (normalized.startsWith('INSERT INTO audit_log')) {
