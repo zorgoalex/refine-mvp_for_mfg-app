@@ -97,7 +97,10 @@ interface OrderHeaderRow extends QueryResultRow {
   material_ids: unknown[] | null;
   material_names: unknown[] | null;
   sheet_material_type_ids: unknown[] | null;
+  material_id: string | number | null;
   milling_type_id: string | number | null;
+  edge_type_id: string | number | null;
+  film_id: string | number | null;
   milling_type_name: string | null;
   latest_doweling_order_id: string | number | null;
   latest_doweling_order_name: string | null;
@@ -461,9 +464,13 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     // flag-OFF stays as the legacy pre-migration path (materials join only).
     const headerSheetCols = this.sheetOrdersReads
       ? `o.sheet_material_type_id, o.sheet_eligible,
-        smt.name AS material_name`
+        smt.name AS material_name,
+        NULL::bigint AS material_id,
+        o.milling_type_id, o.edge_type_id, o.film_id`
       : `NULL::bigint AS sheet_material_type_id, false AS sheet_eligible,
-        m.material_name AS material_name`;
+        m.material_name AS material_name,
+        o.material_id,
+        o.milling_type_id, o.edge_type_id, o.film_id`;
     const headerSheetJoin = this.sheetOrdersReads
       ? 'LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = o.sheet_material_type_id'
       : '';
@@ -982,6 +989,11 @@ function mapOrderDto(
       sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
       sheetEligible: row.sheet_eligible ?? false,
       materialName: row.material_name ?? null,
+      // Variant B: materialId is null post-034 (flag-ON); preserved from o.material_id in flag-OFF.
+      materialId: toNullableNumber(row.material_id),
+      millingTypeId: toNullableNumber(row.milling_type_id),
+      edgeTypeId: toNullableNumber(row.edge_type_id),
+      filmId: toNullableNumber(row.film_id),
       createdAt: toIsoString(row.created_at),
       updatedAt: toIsoString(row.updated_at),
       createdBy: toNullableNumber(row.created_by),
