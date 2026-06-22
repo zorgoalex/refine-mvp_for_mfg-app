@@ -9,11 +9,9 @@ import {
   SHEET_MATERIALS_AUDIT_EVENTS,
 } from '../application/sheet-materials-audit';
 import { validateSheetMaterialTypeInput } from '../application/sheet-materials-validation';
-import {
-  buildShadowMaterialAuditEvent,
-  syncLinkedShadow,
-  type ShadowContext,
-} from '../../orders/adapters/shadow-material';
+// VARIANT B (Task 7b): buildShadowMaterialAuditEvent / syncLinkedShadow / ShadowContext
+// imports removed — no live call path invokes shadow sync anymore.
+// Delete this comment in shadow-column cleanup (follow-up plan).
 import {
   SheetMaterialNotFoundError,
   SheetMaterialStaleVersionError,
@@ -163,9 +161,8 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             requestId: command.requestId,
           }),
         );
-        // SP3 eager sync (Task 3b): keep the linked synthetic shadow material in lockstep
-        // with the sheet spec in the SAME tx. No-op if the sheet type has no shadow yet.
-        await this.syncShadowForSheetType(tx, after.sheetMaterialTypeId, command.currentUser.id, command.requestId);
+        // VARIANT B (Task 7b): eager shadow sync removed — migration 034 hard-deletes all
+        // synthetic shadow rows; re-calling syncShadowForSheetType here would resurrect them.
         return after;
       }),
     );
@@ -201,33 +198,26 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
           requestId: command.requestId,
         }),
       );
-      // SP3 eager sync (Task 3b): deactivating the sheet type deactivates its shadow too.
-      await this.syncShadowForSheetType(tx, command.id, command.currentUser.id, command.requestId);
+      // VARIANT B (Task 7b): eager shadow sync removed — migration 034 hard-deletes all
+      // synthetic shadow rows; re-calling syncShadowForSheetType here would resurrect them.
     });
   }
 
   /**
-   * Sync the dedicated synthetic shadow material for a sheet type after a reference write,
-   * inside the same tx. Targets the row via shadow_of_sheet_material_type_id (the real
-   * SP2-linked row is never touched). Audits `materials.shadow_sync` with
-   * source=backend-sheet-materials.
+   * VARIANT B: dead — no live call path invokes this anymore (Task 7b).
+   * Migration 034 hard-deletes all synthetic shadow rows; calling this would resurrect them.
+   * Delete in shadow-column cleanup (follow-up plan).
+   *
+   * @deprecated — no callers since Task 7b; kept compiled per one-release no-op policy.
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async syncShadowForSheetType(
-    tx: TransactionClient,
-    sheetMaterialTypeId: number,
-    actorUserId: string | number,
-    requestId: string,
+    _tx: TransactionClient,
+    _sheetMaterialTypeId: number,
+    _actorUserId: string | number,
+    _requestId: string,
   ): Promise<void> {
-    const ctx: ShadowContext = {
-      actorUserId: numOrNull(actorUserId),
-      requestId,
-      source: 'backend-sheet-materials',
-      clientId: null,
-      orderId: null,
-    };
-    await syncLinkedShadow(tx, sheetMaterialTypeId, ctx, async (input) => {
-      await auditService.record(tx, buildShadowMaterialAuditEvent(input, ctx));
-    });
+    // VARIANT B: dead — delete in shadow-column cleanup
   }
 
   async recordPermissionDenied(input: SheetMaterialsPermissionDeniedInput): Promise<void> {
