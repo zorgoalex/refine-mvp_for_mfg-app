@@ -9,6 +9,7 @@ function candidate(overrides: Record<string, unknown> = {}) {
     deleteFlag: false,
     productionStatusId: 10,
     sheetMaterialTypeId: 99,
+    isCuttable: true,
     ...overrides,
   };
 }
@@ -51,5 +52,38 @@ describe('cut eligibility classification (§5)', () => {
     );
     expect(result.eligible).toBe(false);
     expect(result.reason).not.toBeNull();
+  });
+
+  it('flags a non-cuttable sheet type (is_cuttable=false) with reason not_cuttable', () => {
+    expect(
+      classifyDetailEligibility(
+        candidate({ sheetMaterialTypeId: 55, isCuttable: false }),
+        config,
+      ).reason,
+    ).toBe('not_cuttable');
+  });
+
+  it('not_cuttable detail is ineligible (eligible=false)', () => {
+    const result = classifyDetailEligibility(
+      candidate({ sheetMaterialTypeId: 55, isCuttable: false }),
+      config,
+    );
+    expect(result.eligible).toBe(false);
+  });
+
+  it('a cuttable sheet type (is_cuttable=true) stays eligible', () => {
+    expect(
+      classifyDetailEligibility(candidate({ isCuttable: true }), config),
+    ).toEqual({ eligible: true, reason: null });
+  });
+
+  it('null sheetMaterialTypeId (no_sheet_spec) takes precedence over isCuttable default', () => {
+    // isCuttable=true default when no sheet type; ensure no_sheet_spec fires, not not_cuttable
+    expect(
+      classifyDetailEligibility(
+        candidate({ sheetMaterialTypeId: null, isCuttable: true }),
+        config,
+      ).reason,
+    ).toBe('no_sheet_spec');
   });
 });

@@ -685,8 +685,10 @@ export class PgCutRepository implements CutRepositoryPort {
       `
       SELECT od.detail_id, od.order_id, od.quantity, od.material_id,
              od.sheet_material_type_id,
-             od.film_id, od.production_status_id, od.delete_flag
+             od.film_id, od.production_status_id, od.delete_flag,
+             s.is_cuttable
       FROM order_details od
+      LEFT JOIN sheet_material_types s ON s.sheet_material_type_id = od.sheet_material_type_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY od.detail_id
       LIMIT 2000
@@ -709,6 +711,11 @@ export class PgCutRepository implements CutRepositoryPort {
         deleteFlag: Boolean(row.delete_flag),
         productionStatusId: row.production_status_id === null ? null : toNum(row.production_status_id),
         sheetMaterialTypeId: row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id),
+        // When sheet_material_type_id is null (no_sheet_spec path), is_cuttable comes
+        // back null from the LEFT JOIN. Default to true so the not_cuttable guard never
+        // fires before no_sheet_spec handles the missing-spec case.
+        // Also treat undefined (absent column in test stubs) as true for the same reason.
+        isCuttable: row.is_cuttable == null ? true : Boolean(row.is_cuttable),
       };
       const { eligible, reason } = classifyDetailEligibility(candidate, { readyStatusIds });
       if (reason === 'no_sheet_spec') {
@@ -937,19 +944,22 @@ export class PgCutRepository implements CutRepositoryPort {
     detailId: number,
     readyStatusIds: readonly number[],
   ): Promise<{ orderId: number; inserted: boolean }> {
-    // Resolve the detail WITH its eligibility inputs (status + sheet spec) so the
-    // backend enforces eligibility itself — never trusting the frontend's list
-    // (Critic BLOCKER). delete_flag / wrong_status / no_sheet_spec are rejected here.
+    // Resolve the detail WITH its eligibility inputs (status + sheet spec + is_cuttable)
+    // so the backend enforces eligibility itself — never trusting the frontend's list
+    // (Critic BLOCKER). delete_flag / wrong_status / not_cuttable / no_sheet_spec are
+    // rejected here.
     const detail = await tx.query<{
       order_id: string | number;
       quantity: string | number;
       production_status_id: number | null;
       delete_flag: boolean;
       sheet_material_type_id: string | number | null;
+      is_cuttable: boolean | null;
     }>(
       `SELECT od.order_id, od.quantity, od.production_status_id, od.delete_flag,
-              od.sheet_material_type_id
+              od.sheet_material_type_id, s.is_cuttable
        FROM order_details od
+       LEFT JOIN sheet_material_types s ON s.sheet_material_type_id = od.sheet_material_type_id
        WHERE od.detail_id = $1`,
       [detailId],
     );
@@ -963,6 +973,7 @@ export class PgCutRepository implements CutRepositoryPort {
         deleteFlag: row.delete_flag,
         productionStatusId: row.production_status_id === null ? null : toNum(row.production_status_id),
         sheetMaterialTypeId: row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id),
+        isCuttable: row.is_cuttable == null ? true : Boolean(row.is_cuttable),
       },
       { readyStatusIds },
     );
@@ -1040,11 +1051,13 @@ interface EligibleRow extends QueryResultRow {
   detail_id: string | number;
   order_id: string | number;
   quantity: string | number;
-  material_id: string | number;
+  material_id: string | number | null;
   sheet_material_type_id: string | number | null;
   film_id: string | number | null;
   production_status_id: string | number | null;
   delete_flag: boolean;
+  /** NULL when sheet_material_type_id is NULL (LEFT JOIN produces no row). */
+  is_cuttable: boolean | null;
 }
 
 interface CuttableGroup {

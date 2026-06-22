@@ -47,7 +47,6 @@ describe('cut audit contract (§11)', () => {
       source: 'manual',
       related: {
         orderIds: [101, 101, 102],
-        materialIds: [5],
         sheetMaterialTypeIds: [9, 9],
         cutGroupIds: [777],
       },
@@ -57,13 +56,38 @@ describe('cut audit contract (§11)', () => {
       expect.arrayContaining([
         { entityType: 'order', entityId: 101 },
         { entityType: 'order', entityId: 102 },
-        { entityType: 'material', entityId: 5 },
         { entityType: 'sheet_material_type', entityId: 9 },
         { entityType: 'cut_group', entityId: 777 },
       ]),
     );
     // de-duplicated: order 101 once, sheet_material_type 9 once
-    expect(event.relatedEntities).toHaveLength(5);
+    expect(event.relatedEntities).toHaveLength(4);
+  });
+
+  it('Variant B audit: emits sheet_material_type related entity and ZERO material entities', () => {
+    const event = buildCutAuditEvent({
+      event: CUT_AUDIT_EVENTS.calculated,
+      cutJobId: 10,
+      actor,
+      requestId: 'req_vb',
+      source: 'manual',
+      related: {
+        orderIds: [200],
+        sheetMaterialTypeIds: [3, 3, 5],
+      },
+    });
+
+    const materialEntities = event.relatedEntities.filter((e) => e.entityType === 'material');
+    expect(materialEntities).toHaveLength(0);
+
+    const smtEntities = event.relatedEntities.filter((e) => e.entityType === 'sheet_material_type');
+    expect(smtEntities).toHaveLength(2); // de-duplicated 3,3,5 → 3,5
+    expect(smtEntities).toEqual(
+      expect.arrayContaining([
+        { entityType: 'sheet_material_type', entityId: 3 },
+        { entityType: 'sheet_material_type', entityId: 5 },
+      ]),
+    );
   });
 
   it('keeps the first affected order in relatedOrderId for the legacy column', () => {

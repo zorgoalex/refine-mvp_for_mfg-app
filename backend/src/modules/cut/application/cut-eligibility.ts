@@ -7,14 +7,17 @@
 export type IneligibleReason =
   | 'deleted'
   | 'wrong_status'
+  | 'not_cuttable'
   | 'no_sheet_spec';
 
 export interface DetailEligibilityCandidate {
   detailId: number;
   deleteFlag: boolean;
   productionStatusId: number | null;
-  /** resolved via detail -> material -> sheet_material_type (null = unlinked) */
+  /** Variant B: direct ref on order_details (null = unlinked / no_sheet_spec) */
   sheetMaterialTypeId: number | null;
+  /** true when sheet_material_types.is_cuttable = true for this detail's sheet type */
+  isCuttable: boolean;
 }
 
 export interface CutEligibilityConfig {
@@ -48,6 +51,12 @@ export function classifyDetailEligibility(
     !config.readyStatusIds.includes(candidate.productionStatusId)
   ) {
     return ineligible('wrong_status');
+  }
+  // not_cuttable before no_sheet_spec: a non-cuttable sheet type still has a spec;
+  // the isCuttable field is set to true when sheetMaterialTypeId is null (handled
+  // below), so this guard only fires when a sheet type is set but is non-cuttable.
+  if (!candidate.isCuttable) {
+    return ineligible('not_cuttable');
   }
   if (candidate.sheetMaterialTypeId === null) {
     return ineligible('no_sheet_spec');
