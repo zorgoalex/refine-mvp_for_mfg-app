@@ -21,6 +21,9 @@ describe('resolveTabLabel', () => {
   it('normalizes kebab-case resource paths to known resource labels', () => {
     expect(resolveTabLabel('/material-types/edit/2')).toBe('Типы материалов · Редактирование #2');
   });
+  it('labels the cut page tab "Раскрой", not the raw path', () => {
+    expect(resolveTabLabel('/cut')).toBe('Раскрой');
+  });
   it('falls back to the last segment for unknown routes', () => {
     expect(resolveTabLabel('/unknown-thing')).toBe('unknown-thing');
   });

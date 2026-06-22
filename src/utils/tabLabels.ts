@@ -35,6 +35,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   configuration: 'Конфигурация',
   audit: 'Аудит',
   sheet_material_types: 'Листовые материалы',
+  cut: 'Раскрой',
 };
 
 // First path segment → resource key for list routes.

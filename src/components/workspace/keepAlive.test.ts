@@ -7,6 +7,15 @@ describe('keep-alive policy', () => {
     expect(isKeepAliveEligible('/calendar', { dirty: false })).toBe(false);
     expect(isKeepAliveEligible('/calendar', { dirty: true })).toBe(false); // calendar excluded even if dirty
   });
+  it('keeps /cut always so the open job survives navigating to an order and back', () => {
+    expect(isKeepAliveEligible('/cut', { dirty: false })).toBe(true);
+    const cache = new Set(['/cut']);
+    const next = nextKeepAliveCache(cache, {
+      activeKey: '/orders/show/9',
+      tabs: [{ key: '/cut', dirty: false }, { key: '/orders/show/9', dirty: false }],
+    });
+    expect(next.has('/cut')).toBe(true); // retained while inactive (order tab active)
+  });
   it('keeps a dirty non-orders tab while dirty', () => {
     expect(isKeepAliveEligible('/clients/edit/3', { dirty: true })).toBe(true);
     expect(isKeepAliveEligible('/clients/edit/3', { dirty: false })).toBe(false);
