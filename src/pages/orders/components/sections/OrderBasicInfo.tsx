@@ -4,7 +4,7 @@
 // Row 3: Doweling Orders Table (Name, Engineer)
 
 import React, { useCallback, useRef, useState } from 'react';
-import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm, Switch, Tooltip, notification } from 'antd';
+import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm, Switch, Tooltip, Tag, notification } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
@@ -530,14 +530,19 @@ export const OrderBasicInfo: React.FC = () => {
                 gap: 8,
               }}
             >
-              <Tooltip title="При включении статус производства заказа рассчитывается автоматически из статусов деталей">
-                <span
-                  onClick={() => { void handleAutoStatusToggle(!(header.production_status_from_details_enabled ?? true)); }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  Автообновление статусов производства
-                </span>
-              </Tooltip>
+              <Space size={6} wrap>
+                <Tooltip title="Если включено, статус производства заказа пересчитывается из статусов деталей. Если выключено, статус выбирается вручную.">
+                  <span
+                    onClick={() => { void handleAutoStatusToggle(!(header.production_status_from_details_enabled ?? true)); }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    Статус заказа рассчитывается от деталей
+                  </span>
+                </Tooltip>
+                <Tag color={(header.production_status_from_details_enabled ?? true) ? 'processing' : 'warning'}>
+                  {(header.production_status_from_details_enabled ?? true) ? 'Авто' : 'Ручной'}
+                </Tag>
+              </Space>
               <Switch
                 checked={header.production_status_from_details_enabled ?? true}
                 onChange={(checked) => { void handleAutoStatusToggle(checked); }}
