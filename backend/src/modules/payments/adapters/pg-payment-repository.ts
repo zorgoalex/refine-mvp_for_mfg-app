@@ -18,6 +18,7 @@ import type {
   PaymentRepositoryPort,
   UpdatePaymentCommand,
 } from '../application/payment-command.types';
+import { buildPaymentDeniedEvent } from '../application/payments-audit';
 import type {
   DeletePaymentResponseDto,
   PaymentDto,
@@ -64,7 +65,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       await setSessionUser(tx, command.currentUser.id);
       const orders = await loadOrdersForUpdate(tx, [command.dto.orderId]);
       const order = requireLockedOrder(orders, command.dto.orderId);
-      this.assertPaymentScope(command.currentUser, 'create', 0, order);
+      await this.assertPaymentScope(command.currentUser, 'create', 0, order, command.requestId ?? 'payment-command');
       const inserted = await tx.query<PaymentRow>(
         `
         INSERT INTO payments (order_id, amount, payment_date, type_paid_id, notes, ref_key_1c)
@@ -110,9 +111,9 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       const orders = await loadOrdersForUpdate(tx, uniqueNumbers([previousOrderId, nextOrderId]));
       const previousOrder = requireLockedOrder(orders, previousOrderId);
       const nextOrder = requireLockedOrder(orders, nextOrderId);
-      this.assertPaymentScope(command.currentUser, 'update', command.paymentId, previousOrder);
+      await this.assertPaymentScope(command.currentUser, 'update', command.paymentId, previousOrder, command.requestId ?? 'payment-command');
       if (nextOrderId !== previousOrderId) {
-        this.assertPaymentScope(command.currentUser, 'create', command.paymentId, nextOrder);
+        await this.assertPaymentScope(command.currentUser, 'create', command.paymentId, nextOrder, command.requestId ?? 'payment-command');
       }
       const update = buildUpdateAssignments(command.dto);
       const updated = await tx.query<PaymentRow>(
@@ -162,7 +163,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       const orderId = toNumber(existing.order_id);
       const orders = await loadOrdersForUpdate(tx, [orderId]);
       const order = requireLockedOrder(orders, orderId);
-      this.assertPaymentScope(command.currentUser, 'delete', command.paymentId, order);
+      await this.assertPaymentScope(command.currentUser, 'delete', command.paymentId, order, command.requestId ?? 'payment-command');
       await tx.query('DELETE FROM payments WHERE payment_id = $1', [command.paymentId]);
       const orderSummary = await recalculateOrderPaymentState(tx, order);
       await writeAudit(tx, {
@@ -178,12 +179,13 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
     });
   }
 
-  private assertPaymentScope(
+  private async assertPaymentScope(
     currentUser: CurrentUser,
     action: 'create' | 'update' | 'delete',
     paymentId: number,
     order: LockedOrder,
-  ): void {
+    requestId: string,
+  ): Promise<void> {
     const subject = {
       paymentId,
       order: order.policySubject,
@@ -196,6 +198,14 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
           : this.paymentAccessPolicy.canDelete(currentUser, subject);
 
     if (!allowed) {
+      try {
+        // pool (this.database), NOT tx: must survive the rollback the throw triggers
+        await auditService.recordDenied(this.database, buildPaymentDeniedEvent({
+          currentUser, requestId, action, orderId: order.orderId, paymentId: paymentId || null,
+        }));
+      } catch {
+        // best-effort: never let an audit-sink outage mask the 403
+      }
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: [`payments.${action}`],
       });

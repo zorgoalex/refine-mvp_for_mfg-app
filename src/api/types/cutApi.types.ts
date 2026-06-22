@@ -17,12 +17,47 @@ export interface AddCutItemsRequest {
   version: number;
 }
 
+/**
+ * Full order-detail data for a reserved cut item (server-resolved dictionary
+ * names), mirroring the order form's detail fields. Price/sum
+ * (milling_cost_per_sqm, detail_cost) are intentionally absent — the /cut surface
+ * is production-facing. Fields are null when the source detail no longer exists.
+ */
+export interface CutDetailInfoDto {
+  detailNumber: number | null;
+  detailName: string | null;
+  height: number | null;
+  width: number | null;
+  quantity: number | null;
+  area: number | null;
+  materialId: number | null;
+  sheetMaterialTypeId: number | null;
+  materialName: string | null;
+  millingTypeId: number | null;
+  millingTypeName: string | null;
+  edgeTypeId: number | null;
+  edgeTypeName: string | null;
+  filmId: number | null;
+  filmName: string | null;
+  priority: number | null;
+  productionStatusId: number | null;
+  productionStatusName: string | null;
+  jointOrderId: number | null;
+  note: string | null;
+  linkCuttingFile: string | null;
+  linkCuttingImageFile: string | null;
+  linkCadFile: string | null;
+  linkPdfFile: string | null;
+}
+
 export interface CutJobItemDto {
   cutJobItemId: number;
   orderDetailId: number;
   orderId: number;
   qty: number;
   cutGroupId: number | null;
+  /** Resolved order-detail fields (null when the source detail no longer exists). */
+  detail: CutDetailInfoDto | null;
 }
 
 export interface SheetPlacementPiece {

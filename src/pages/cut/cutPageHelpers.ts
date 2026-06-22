@@ -19,6 +19,44 @@ export function noSheetSpecMessage(noSheetSpecCount: number): string | null {
   return `${noSheetSpecCount} деталей без раскройной спецификации материала — задайте её в Конфигурации`;
 }
 
+/**
+ * Distinct order ids of the details already reserved into a job, in first-seen
+ * order. Used to prefill the eligible-load criteria on open so "Загрузить
+ * подходящие детали" is scoped to the order(s) the job was actually built from,
+ * instead of scanning every order (the stored selection_criteria is not exposed
+ * on the job DTO, so the reserved items are the source of truth).
+ */
+export function distinctOrderIdsFromItems(items: ReadonlyArray<{ orderId: number }>): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const item of items) {
+    if (Number.isInteger(item.orderId) && item.orderId > 0 && !seen.has(item.orderId)) {
+      seen.add(item.orderId);
+      out.push(item.orderId);
+    }
+  }
+  return out;
+}
+
+/**
+ * Fail-closed href sanitizer for operator-clickable detail links. Stored order
+ * link_* fields are only `z.string().url()`-validated upstream, which accepts
+ * `javascript:`/`data:` URIs — rendering those as live anchors on the cut screen
+ * would be stored-link XSS. Returns the href only for absolute http(s) or
+ * app-relative ("/...") links; everything else (any non-http scheme, protocol-
+ * relative "//", bare/unknown forms) collapses to null so the caller renders
+ * plain, non-clickable text instead.
+ */
+export function safeHttpHref(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed === '' || trimmed.startsWith('//')) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null; // non-http scheme -> reject
+  if (trimmed.startsWith('/')) return trimmed; // app-relative path
+  return null; // unknown bare form -> fail closed
+}
+
 /** Detail ids that may be added to the basket (eligible only). */
 export function selectableDetailIds(details: ReadonlyArray<{ orderDetailId: number; eligible: boolean }>): number[] {
   return details.filter((d) => d.eligible).map((d) => d.orderDetailId);

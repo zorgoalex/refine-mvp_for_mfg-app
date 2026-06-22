@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../common/errors/api-error';
+import { auditService } from '../../common/audit/audit.service';
 import type { DatabaseClient, TransactionClient } from '../../database/database.types';
 import { computeDiff, computeListDiff } from '../../common/audit/audit-diff';
-import { insertRelatedEntities, type AuditRelatedEntity } from '../../common/audit/related-entities';
+import type { AuditRelatedEntity } from '../../common/audit/related-entities';
 import type {
   ProjectDto,
   ProjectListQuery,
@@ -59,10 +60,6 @@ interface ProjectMemberRow extends QueryResultRow {
 
 interface UserValidationRow extends QueryResultRow {
   user_id: string | number;
-}
-
-interface AuditRow extends QueryResultRow {
-  audit_id: string;
 }
 
 interface IdempotencyRow extends QueryResultRow {
@@ -538,49 +535,33 @@ async function writeProjectMembersAudit(
     input.after,
     (m) => 'user:' + m.userId,
   );
-  const result = await tx.query<AuditRow>(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, username, role_code, role,
-      request_id, source, before_json, after_json, diff_json, metadata_json
-    )
-    VALUES (
-      $1, 'project', $2, $3, $4, $5, $5,
-      $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb
-    )
-    RETURNING audit_id
-    `,
-    [
-      'projects.members_changed',
-      input.command.projectId,
-      toNullableUserId(input.command.currentUser.id),
-      input.command.currentUser.username,
-      input.command.currentUser.role,
-      input.requestId,
-      PROJECT_MEMBERS_SOURCE,
-      JSON.stringify({ members: input.before }),
-      JSON.stringify({ members: input.after }),
-      JSON.stringify(memberDiff),
-      JSON.stringify({
-        source: PROJECT_MEMBERS_SOURCE,
-        idempotencyKey: input.command.dto.idempotencyKey,
-        reason: input.reason,
-      }),
-    ],
-  );
-  const auditId = result.rows[0]?.audit_id ?? '';
-  if (auditId) {
-    const { added, removed } = memberDiff;
-    const entities: AuditRelatedEntity[] = [];
-    for (const m of [...added, ...removed]) {
-      entities.push({ entityType: 'user', entityId: m.userId });
-      if (m.employeeId != null) {
-        entities.push({ entityType: 'employee', entityId: m.employeeId });
-      }
+  const { added, removed } = memberDiff;
+  const relatedEntities: AuditRelatedEntity[] = [];
+  for (const m of [...added, ...removed]) {
+    relatedEntities.push({ entityType: 'user', entityId: m.userId });
+    if (m.employeeId != null) {
+      relatedEntities.push({ entityType: 'employee', entityId: m.employeeId });
     }
-    await insertRelatedEntities(tx, auditId, entities);
   }
-  return auditId;
+  return auditService.record(tx, {
+    event: 'projects.members_changed',
+    entityType: 'project',
+    entityId: input.command.projectId,
+    actorUserId: toNullableUserId(input.command.currentUser.id),
+    actorUsername: input.command.currentUser.username,
+    actorRole: input.command.currentUser.role,
+    requestId: input.requestId,
+    source: PROJECT_MEMBERS_SOURCE,
+    before: { members: input.before },
+    after: { members: input.after },
+    diff: memberDiff,
+    metadata: {
+      source: PROJECT_MEMBERS_SOURCE,
+      idempotencyKey: input.command.dto.idempotencyKey,
+      reason: input.reason,
+    },
+    relatedEntities,
+  });
 }
 
 async function enqueueProjectMembersOutbox(
@@ -741,28 +722,20 @@ async function writeProjectAudit(
     metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
-  await tx.query(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, username, role_code, role,
-      request_id, source, before_json, after_json, diff_json, metadata_json
-    )
-    VALUES ($1, 'project', $2, $3, $4, $5, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb)
-    `,
-    [
-      input.action,
-      input.entityId,
-      toNullableUserId(input.command.currentUser.id),
-      input.command.currentUser.username,
-      input.command.currentUser.role,
-      input.command.requestId ?? 'projects-command',
-      PROJECT_SOURCE,
-      input.before ? JSON.stringify(input.before) : null,
-      input.after ? JSON.stringify(input.after) : null,
-      JSON.stringify(computeDiff(input.before ?? null, input.after ?? null)),
-      input.metadata ? JSON.stringify(input.metadata) : null,
-    ],
-  );
+  await auditService.record(tx, {
+    event: input.action,
+    entityType: 'project',
+    entityId: input.entityId,
+    actorUserId: toNullableUserId(input.command.currentUser.id),
+    actorUsername: input.command.currentUser.username,
+    actorRole: input.command.currentUser.role,
+    requestId: input.command.requestId ?? 'projects-command',
+    source: PROJECT_SOURCE,
+    before: input.before ?? null,
+    after: input.after ?? null,
+    diff: computeDiff(input.before ?? null, input.after ?? null),
+    metadata: input.metadata ?? null,
+  });
 }
 
 function projectAuditSnapshot(project: ProjectDto): Record<string, unknown> {

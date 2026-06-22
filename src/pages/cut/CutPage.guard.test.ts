@@ -34,6 +34,82 @@ describe('CutPage source guards', () => {
     expect(source).toContain('Повторить расчёт');
   });
 
+  it('lists the details already reserved into the job (job.items), not only the eligible pool', () => {
+    // The reopened-job surface must render the reserved cut_job_item rows so a
+    // selection staged from Orders "Добавить в раскрой" is visible; otherwise the
+    // job looks empty and only the candidate-pool button shows.
+    expect(source).toContain('Детали задания');
+    expect(source).toContain('jobItemColumns');
+    expect(source).toContain('dataSource={job.items}');
+    // The reserved details are removable on the same job (release reservation).
+    expect(source).toContain('cutApi.removeItem');
+    expect(source).toContain('Убрать');
+  });
+
+  it('shows the full per-detail order fields (position + names), never price/sum', () => {
+    // Position number + resolved dictionary names mirror the order form's detail.
+    expect(source).toContain('detailNumber');
+    expect(source).toContain('materialName');
+    expect(source).toContain('millingTypeName');
+    expect(source).toContain('edgeTypeName');
+    expect(source).toContain('productionStatusName');
+    // The /cut surface is production-facing: detail price/sum must not leak.
+    expect(source).not.toContain('detailCost');
+    expect(source).not.toContain('millingCostPerSqm');
+  });
+
+  it('opens a job on row double-click', () => {
+    expect(source).toContain('onDoubleClick');
+  });
+
+  it('opens the order in an in-app workspace tab (not a new browser tab)', () => {
+    // Use Refine navigation push (keep-alive tab) for the order number; not a
+    // react-router Link with target="_blank".
+    expect(source).toContain("show('orders_view', r.orderId, 'push')");
+    expect(source).not.toContain('react-router-dom');
+  });
+
+  it('fail-closes detail file links against javascript:/data: stored-link XSS', () => {
+    // Operator-clickable detail links must be sanitized; a raw href is never
+    // rendered directly into an anchor on this cut.view surface.
+    expect(source).toContain('safeHttpHref');
+    expect(source).not.toMatch(/href=\{href as string\}/);
+  });
+
+  it('prefills the eligible-load criteria with the reserved orders when opening a job', () => {
+    // Opening a job must scope "Загрузить подходящие детали" to the order(s) the
+    // job was built from, not scan every order. Source of truth = reserved items.
+    expect(source).toContain('distinctOrderIdsFromItems');
+    expect(source).toContain('form.setFieldsValue');
+  });
+
+  it('auto-loads small per-sheet layout previews for a ready job', () => {
+    // Ready jobs show an inline thumbnail per sheet (light 'thumb' preset),
+    // fetched automatically, click-to-enlarge.
+    expect(source).toContain("job.status !== 'ready'");
+    expect(source).toContain('loadThumb');
+    expect(source).toContain("'thumb'");
+    expect(source).toContain('sheetThumbs');
+  });
+
+  it('resets previews on recalculate and revokes blob URLs (no stale preview, no leak)', () => {
+    // Recalculate must clear thumbs+ref via the shared reset (otherwise a stale
+    // preview survives the dedupe), and blob URLs must be revoked on reset,
+    // overwrite, and unmount — /cut stays mounted (keep-alive) so leaks accrue.
+    expect(source).toContain('resetSheetViews');
+    expect(source).toContain('URL.revokeObjectURL');
+    const calc = source.slice(source.indexOf('const calculate'));
+    const body = calc.slice(0, calc.indexOf('}, [job'));
+    expect(body).toContain('resetSheetViews()');
+    // create switches job context -> must also reset/revoke prior previews.
+    const create = source.slice(source.indexOf('const createJob'));
+    expect(create.slice(0, create.indexOf('}, [form')).includes('resetSheetViews()')).toBe(true);
+    // In-flight sheet/thumb fetches are generation-gated: a late completion after
+    // a job switch/reset is discarded, never repopulating cleared maps.
+    expect(source).toContain('viewEpochRef');
+    expect(source).toContain('viewEpochRef.current !== epoch');
+  });
+
   it('refreshes the job after a failed calculate so the reason + fresh version show', () => {
     // The calculate catch must reload the job (persisted reason + bumped version),
     // otherwise the Alert never renders and a retry would 409 on a stale version.

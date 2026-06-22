@@ -28,9 +28,15 @@ const AUDIT_INSERT = `
   RETURNING audit_id
 `;
 
+/**
+ * VLM usage-count keys: integers that would otherwise collide with /token/i.
+ * Exact-match only — substring keys like `access_token` remain redacted.
+ */
+const AUDIT_REDACT_ALLOWLIST: ReadonlySet<string> = new Set(['inputTokens', 'outputTokens']);
+
 function redactJson(value?: Record<string, unknown> | null): string | null {
   if (value === undefined || value === null) return null;
-  return JSON.stringify(redactLogFields(value));
+  return JSON.stringify(redactLogFields(value, AUDIT_REDACT_ALLOWLIST));
 }
 
 /**
@@ -75,26 +81,16 @@ export class AuditService {
 
   async recordDenied(client: DatabaseClient, event: DeniedAuditEvent): Promise<string> {
     return this.record(client, {
-      event: event.event,
-      entityType: event.entityType,
-      entityId: event.entityId,
-      actorUserId: event.actorUserId ?? null,
-      actorUsername: event.actorUsername ?? null,
-      actorRole: event.actorRole ?? null,
-      requestId: event.requestId,
-      source: event.source,
-      relatedOrderId: event.relatedOrderId ?? null,
-      relatedClientId: event.relatedClientId ?? null,
-      before: {},
-      after: {},
-      diff: {},
-      metadata: {
-        ...(event.metadata ?? {}),
-        source: event.source,
-        denied: true,
-        reason: event.reason,
-        requiredPermissions: event.requiredPermissions ?? [],
-      },
+      event: event.event, entityType: event.entityType, entityId: event.entityId,
+      actorUserId: event.actorUserId ?? null, actorUsername: event.actorUsername ?? null,
+      actorRole: event.actorRole ?? null, requestId: event.requestId, source: event.source,
+      relatedOrderId: event.relatedOrderId ?? null, relatedClientId: event.relatedClientId ?? null,
+      relatedPaymentId: event.relatedPaymentId ?? null,
+      relatedProductionEventId: event.relatedProductionEventId ?? null,
+      relatedDeadlineId: event.relatedDeadlineId ?? null, relatedUserId: event.relatedUserId ?? null,
+      statusField: 'denied', statusCode: event.reason,
+      before: {}, after: {}, diff: {},
+      metadata: { ...(event.metadata ?? {}), source: event.source, denied: true, reason: event.reason, requiredPermissions: event.requiredPermissions ?? [] },
     });
   }
 }

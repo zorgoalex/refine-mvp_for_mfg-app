@@ -7,6 +7,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type {
   ActivateProductionStageCommand,
   ActivateDetailProductionStageCommand,
@@ -74,10 +75,6 @@ interface VersionRow extends QueryResultRow {
   version: string | number;
 }
 
-interface AuditRow extends QueryResultRow {
-  audit_id: string;
-}
-
 interface IdempotencyRow extends QueryResultRow {
   idempotency_key: string;
   request_hash: string;
@@ -135,6 +132,16 @@ type CommandName =
   | 'production.stage_activate'
   | 'production.stage_deactivate'
   | 'production.detail_stage_activate';
+
+interface OrderScopeOptions {
+  tx?: TransactionClient;
+  allowAssignedProductionWorker?: boolean;
+}
+
+interface OrderAccessDecision {
+  accessVia: 'owner' | 'assigned_production_worker';
+  assignmentSource: 'order_workshops.responsible_employee_id' | null;
+}
 
 export class PgProductionActionRepository implements ProductionActionRepositoryPort {
   private readonly orderAccessPolicy = new OrderAccessPolicy();
@@ -536,10 +543,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      await this.assertOrderScope(command.currentUser, order, [
+      const access = await this.assertOrderScope(command.currentUser, order, [
         'orders.update',
         'orders.change_production_status',
-      ], requestId);
+      ], requestId, { tx, allowAssignedProductionWorker: true });
       const status = await loadProductionStatus(tx, command.dto.productionStatusId);
       assertVersion(order, command.dto.version);
 
@@ -626,6 +633,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           afterStatusDistribution: afterDetails.statusDistribution,
           action: 'production_status_change',
           statusField: 'productionCurrentStatus',
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           requestId,
         },
       });
@@ -650,6 +659,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           affectedDetailCount: affectedDetailIds.length,
           action: 'production_status_change',
           scope: { source: 'order-header' },
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           idempotencyKey: command.dto.idempotencyKey,
         },
       });
@@ -706,10 +717,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const detail = await loadOrderDetailForUpdate(tx, command.detailId);
-      await this.assertOrderScope(command.currentUser, detail.order, [
+      const access = await this.assertOrderScope(command.currentUser, detail.order, [
         'orders.update',
         'orders.change_production_status',
-      ], requestId);
+      ], requestId, { tx, allowAssignedProductionWorker: true });
       const productionStatus = await loadProductionStatus(tx, command.productionStatusId);
 
       const existingEventId = await findDetailProductionEventId(
@@ -782,6 +793,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusName: productionStatus.productionStatusName,
           action: 'activate',
           statusField: 'productionDetailStage',
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           requestId,
         },
       });
@@ -805,6 +818,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusCode: productionStatus.productionStatusCode,
           action: 'activate',
           scope: { source: 'order-detail' },
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           idempotencyKey: command.dto.idempotencyKey,
         },
       });
@@ -1163,10 +1178,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      await this.assertOrderScope(command.currentUser, order, [
+      const access = await this.assertOrderScope(command.currentUser, order, [
         'orders.update',
         'orders.change_production_status',
-      ], requestId);
+      ], requestId, { tx, allowAssignedProductionWorker: true });
       const productionStatus = await loadProductionStatus(tx, command.productionStatusId);
       assertVersion(order, command.dto.version);
 
@@ -1244,6 +1259,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusCode: productionStatus.productionStatusCode,
           action: active ? 'activate' : 'deactivate',
           statusField: 'productionStage',
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           requestId,
         },
       });
@@ -1266,6 +1283,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusCode: productionStatus.productionStatusCode,
           action: active ? 'activate' : 'deactivate',
           scope: { source: 'calendar|order-header' },
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           idempotencyKey: command.dto.idempotencyKey,
         },
       });
@@ -1293,8 +1312,9 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
     order: LockedOrder,
     requiredPermissions: readonly string[],
     requestId: string,
-  ): Promise<void> {
-    const allowed =
+    options: OrderScopeOptions = {},
+  ): Promise<OrderAccessDecision> {
+    const ownerAllowed =
       requiredPermissions.every((permission) => currentUser.permissions.includes(permission as PermissionName)) &&
       this.orderAccessPolicy.canUpdate(currentUser, {
       orderId: order.orderId,
@@ -1302,17 +1322,39 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       managerUserId: order.managerUserId,
       });
 
-    if (!allowed) {
-      await writeDeniedActionAudit(this.database, {
-        currentUser,
-        requestId,
-        order,
-        requiredPermissions,
-      });
-      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
-        requiredPermissions,
-      });
+    if (ownerAllowed) {
+      return { accessVia: 'owner', assignmentSource: null };
     }
+
+    // Additive path: a worker (productionTasks.update scope === 'assigned') who is the
+    // responsible_employee on at least one of the order's order_workshops rows may act on
+    // production status/stages. Order-level allow only; never broadens non-worker roles
+    // (their productionTasks.update scope is 'all'/'none', not 'assigned').
+    if (options.allowAssignedProductionWorker && options.tx) {
+      const productionTaskScope = ROLE_POLICIES[currentUser.role].productionTasks.update;
+      if (
+        productionTaskScope === 'assigned' &&
+        currentUser.permissions.includes('orders.change_production_status')
+      ) {
+        const assignedUserIds = await loadOrderAssignedUserIds(options.tx, order.orderId);
+        if (assignedUserIds.includes(currentUser.id)) {
+          return {
+            accessVia: 'assigned_production_worker',
+            assignmentSource: 'order_workshops.responsible_employee_id',
+          };
+        }
+      }
+    }
+
+    await writeDeniedActionAudit(this.database, {
+      currentUser,
+      requestId,
+      order,
+      requiredPermissions,
+    });
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+      requiredPermissions,
+    });
   }
 }
 
@@ -1831,6 +1873,26 @@ async function loadOrderForUpdate(tx: TransactionClient, orderId: number): Promi
   };
 }
 
+export async function loadOrderAssignedUserIds(
+  tx: TransactionClient,
+  orderId: number,
+): Promise<string[]> {
+  const result = await tx.query<{ user_id: string | number }>(
+    `
+    SELECT DISTINCT u.user_id
+    FROM order_workshops ow
+    JOIN users u ON u.employee_id = ow.responsible_employee_id
+    WHERE ow.order_id = $1
+      AND ow.delete_flag = false
+      AND ow.responsible_employee_id IS NOT NULL
+      AND u.is_active = true
+    ORDER BY u.user_id
+    `,
+    [orderId],
+  );
+  return result.rows.map((row) => String(row.user_id));
+}
+
 async function loadOrderDetailForUpdate(
   tx: TransactionClient,
   detailId: number,
@@ -2320,45 +2382,28 @@ async function writeAudit(
     metadataJson: Record<string, unknown>;
   },
 ): Promise<string> {
-  const result = await tx.query<AuditRow>(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, request_id, source,
-      related_order_id, related_client_id, related_production_event_id,
-      status_field, status_id, status_name, status_code, stage_code,
-      before_json, after_json, diff_json, metadata_json
-    )
-    VALUES (
-      $1, $2, $3, $4, $5, $6,
-      $7, $8, $9,
-      $10, $11, $12, $13, $14,
-      $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb
-    )
-    RETURNING audit_id
-    `,
-    [
-      input.event,
-      input.entityType ?? 'order',
-      input.entityId ?? String(input.order.orderId),
-      input.actorUserId ?? input.currentUser?.id ?? null,
-      input.requestId,
-      input.source,
-      input.order.orderId,
-      input.order.clientId,
-      input.relatedProductionEventId ?? null,
-      input.statusField ?? null,
-      input.statusId ?? null,
-      input.statusName ?? null,
-      input.statusCode ?? null,
-      input.stageCode ?? null,
-      JSON.stringify(input.beforeJson),
-      JSON.stringify(input.afterJson),
-      JSON.stringify(input.diffJson),
-      JSON.stringify(input.metadataJson),
-    ],
-  );
-
-  return result.rows[0].audit_id;
+  return auditService.record(tx, {
+    event: input.event,
+    entityType: input.entityType ?? 'order',
+    entityId: input.entityId ?? String(input.order.orderId),
+    actorUserId: input.actorUserId ?? input.currentUser?.id ?? null,
+    actorUsername: input.currentUser?.username ?? null,
+    actorRole: input.currentUser?.role ?? null,
+    requestId: input.requestId,
+    source: input.source,
+    relatedOrderId: input.order.orderId,
+    relatedClientId: input.order.clientId ?? null,
+    relatedProductionEventId: input.relatedProductionEventId ?? null,
+    statusField: input.statusField ?? null,
+    statusId: input.statusId ?? null,
+    statusName: input.statusName ?? null,
+    statusCode: input.statusCode ?? null,
+    stageCode: input.stageCode ?? null,
+    before: input.beforeJson,
+    after: input.afterJson,
+    diff: input.diffJson,
+    metadata: input.metadataJson,
+  });
 }
 
 async function enqueueOutbox(

@@ -1,4 +1,6 @@
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
+import { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName, UserRole } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
@@ -8,6 +10,7 @@ import type {
   ProjectBatchLinkRequestDto,
   ProjectBatchLinkResponseDto,
 } from './project-batch-link.dto';
+import { buildBatchLinkRoleDeniedEvent } from './project-batch-link-audit';
 
 export interface DryRunProjectBatchLinkCommand {
   currentUser: CurrentUser;
@@ -28,6 +31,7 @@ export interface ProjectBatchLinkServicePorts {
   batchLinks: ProjectBatchLinkRepositoryPort;
   entityLinks?: ProjectEntityLinksRepositoryPort;
   permissions?: ProjectBatchLinkPermissionsPort;
+  database: DatabaseService;
 }
 
 const ALLOWED_BATCH_LINK_ROLES = new Set<UserRole>(['admin', 'top_manager']);
@@ -40,12 +44,12 @@ export class ProjectBatchLinkService {
   }
 
   async dryRun(command: DryRunProjectBatchLinkCommand): Promise<ProjectBatchLinkResponseDto> {
-    this.authorize(command);
+    await this.authorize(command);
     return this.ports.batchLinks.dryRun(command);
   }
 
   async write(command: DryRunProjectBatchLinkCommand): Promise<ProjectBatchLinkResponseDto> {
-    this.authorize(command);
+    await this.authorize(command);
     if (!this.ports.entityLinks?.appendIdempotent) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Projects batch link write adapter is not configured', {
         feature: 'projects',
@@ -131,9 +135,17 @@ export class ProjectBatchLinkService {
     };
   }
 
-  private authorize(command: DryRunProjectBatchLinkCommand): void {
-    this.requirePermission(command.currentUser, 'projects.manage_links');
+  private async authorize(command: DryRunProjectBatchLinkCommand): Promise<void> {
+    this.requirePermission(command.currentUser, 'projects.manage_links'); // plain static → deferred (service-helper or decorate+guard)
     if (!ALLOWED_BATCH_LINK_ROLES.has(command.currentUser.role)) {
+      try {
+        await auditService.recordDenied(this.ports.database, buildBatchLinkRoleDeniedEvent({
+          currentUser: command.currentUser,
+          requestId: command.requestId ?? 'projects-command', // reuse existing projects fallback (project.repository.ts:758)
+          projectId: command.projectId ?? null,
+          allowedRoles: [...ALLOWED_BATCH_LINK_ROLES],
+        }));
+      } catch { /* best-effort */ }
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         allowedRoles: [...ALLOWED_BATCH_LINK_ROLES],
       });

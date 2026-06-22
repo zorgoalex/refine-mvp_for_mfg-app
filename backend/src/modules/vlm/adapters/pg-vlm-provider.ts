@@ -1,5 +1,6 @@
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { RateLimitService } from '../../../rate-limit/rate-limit.service';
 import type {
@@ -260,24 +261,21 @@ export class PgVlmProvider implements VlmProviderPort {
           },
         };
 
-        await this.database.query(
-          `
-          INSERT INTO audit_log (event, entity_type, entity_id, user_id, username, role_code, role, request_id, metadata_json)
-          VALUES ('vlm.analyze', 'file_upload', $1, $2, $3, $4, $4, $5, $6::jsonb)
-          `,
-          [
-            upload.upload_id,
-            toUserId(command.currentUser.id),
-            command.currentUser.username,
-            command.currentUser.role,
-            command.requestId ?? DEFAULT_REQUEST_ID,
-            JSON.stringify({
-              provider,
-              model: response.model,
-              usage: response.usage,
-            }),
-          ],
-        );
+        await auditService.record(this.database, {
+          event: 'vlm.analyze',
+          entityType: 'file_upload',
+          entityId: upload.upload_id,
+          actorUserId: toUserId(command.currentUser.id),
+          actorUsername: command.currentUser.username,
+          actorRole: command.currentUser.role,
+          requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+          source: 'vlm-analyze',
+          metadata: {
+            provider,
+            model: response.model,
+            usage: response.usage,
+          },
+        });
 
         return response;
       } catch (error) {
@@ -539,21 +537,17 @@ async function writeAudit(
     metadata: Record<string, unknown>;
   },
 ): Promise<void> {
-  await tx.query(
-    `
-    INSERT INTO audit_log (event, entity_type, entity_id, user_id, username, role_code, role, request_id, metadata_json)
-    VALUES ($1, 'file_upload', $2, $3, $4, $5, $5, $6, $7::jsonb)
-    `,
-    [
-      input.event,
-      input.entityId,
-      toUserId(input.command.currentUser.id),
-      input.command.currentUser.username,
-      input.command.currentUser.role,
-      input.command.requestId ?? DEFAULT_REQUEST_ID,
-      JSON.stringify(input.metadata),
-    ],
-  );
+  await auditService.record(tx, {
+    event: input.event,
+    entityType: 'file_upload',
+    entityId: input.entityId,
+    actorUserId: toUserId(input.command.currentUser.id),
+    actorUsername: input.command.currentUser.username,
+    actorRole: input.command.currentUser.role,
+    requestId: input.command.requestId ?? DEFAULT_REQUEST_ID,
+    source: 'vlm-upload',
+    metadata: input.metadata,
+  });
 }
 
 function toUserId(value: string): number {

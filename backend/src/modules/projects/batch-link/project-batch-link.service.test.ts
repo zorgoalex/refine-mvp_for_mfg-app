@@ -1,16 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '../../../common/errors/api-error';
+import * as auditServiceModule from '../../../common/audit/audit.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName, UserRole } from '../../../permissions/permissions';
 import { ProjectBatchLinkService, type ProjectBatchLinkRepositoryPort } from './project-batch-link.service';
 
 const projectId = '11111111-1111-4111-8111-111111111111';
 
+/** Minimal stub for DatabaseService used in audit sink tests */
+function mockDatabase() {
+  return { query: vi.fn().mockResolvedValue({ rows: [{ audit_id: 'test-audit-id' }] }) } as any;
+}
+
 describe('ProjectBatchLinkService', () => {
   it('requires projects.manage_links and admin/top_manager role only', async () => {
     const service = new ProjectBatchLinkService({
       batchLinks: repository(),
+      database: mockDatabase(),
     });
 
     await expect(service.dryRun(command({
@@ -25,6 +32,7 @@ describe('ProjectBatchLinkService', () => {
   it('requires entity-specific view permission', async () => {
     const service = new ProjectBatchLinkService({
       batchLinks: repository(),
+      database: mockDatabase(),
     });
 
     await expect(service.dryRun(command({
@@ -67,6 +75,7 @@ describe('ProjectBatchLinkService', () => {
           };
         },
       }),
+      database: mockDatabase(),
     });
 
     await expect(service.dryRun(command())).resolves.toMatchObject({
@@ -92,6 +101,7 @@ describe('ProjectBatchLinkService', () => {
           };
         },
       }),
+      database: mockDatabase(),
     });
 
     await expect(service.dryRun(command({
@@ -100,6 +110,79 @@ describe('ProjectBatchLinkService', () => {
       projectId,
       mode: 'dry-run',
       writeEnabled: false,
+    });
+  });
+
+  describe('role-denied audit', () => {
+    it('writes one audit row with allowedRoles when role check fails', async () => {
+      const auditRows: any[] = [];
+      vi.spyOn(auditServiceModule.auditService, 'recordDenied').mockImplementation(async (_client, event) => {
+        auditRows.push(event);
+        return 'audit-id-1';
+      });
+
+      const service = new ProjectBatchLinkService({
+        batchLinks: repository(),
+        database: mockDatabase(),
+      });
+
+      await expect(service.dryRun(command({
+        currentUser: user('manager', ['projects.manage_links', 'orders.view']),
+      }))).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0]).toMatchObject({
+        event: 'project_batch_link.role_denied',
+        reason: 'role_denied',
+        metadata: { allowedRoles: expect.arrayContaining(['admin', 'top_manager']) },
+      });
+
+      vi.restoreAllMocks();
+    });
+
+    it('writes zero audit rows when role check passes (permitted path)', async () => {
+      const auditRows: any[] = [];
+      vi.spyOn(auditServiceModule.auditService, 'recordDenied').mockImplementation(async (_client, event) => {
+        auditRows.push(event);
+        return 'audit-id-2';
+      });
+
+      const service = new ProjectBatchLinkService({
+        batchLinks: repository({
+          async dryRun(input) {
+            return {
+              projectId: input.projectId,
+              mode: 'dry-run',
+              summary: { proposed: 0, skipped: 0, conflicts: 0, sampledEvidenceRows: 0 },
+              proposals: [], skipped: [], sampleEvidence: [], writeEnabled: false,
+            };
+          },
+        }),
+        database: mockDatabase(),
+      });
+
+      await service.dryRun(command({
+        currentUser: user('admin', ['projects.manage_links', 'orders.view']),
+      }));
+
+      expect(auditRows).toHaveLength(0);
+
+      vi.restoreAllMocks();
+    });
+
+    it('still throws PERMISSION_DENIED even if audit sink throws', async () => {
+      vi.spyOn(auditServiceModule.auditService, 'recordDenied').mockRejectedValue(new Error('DB down'));
+
+      const service = new ProjectBatchLinkService({
+        batchLinks: repository(),
+        database: mockDatabase(),
+      });
+
+      await expect(service.dryRun(command({
+        currentUser: user('director', ['projects.manage_links', 'orders.view']),
+      }))).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+
+      vi.restoreAllMocks();
     });
   });
 });

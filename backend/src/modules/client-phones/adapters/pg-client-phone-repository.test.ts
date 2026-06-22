@@ -47,7 +47,7 @@ describe('PgClientPhoneRepository', () => {
       (q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log') && q.params[0] === 'client_phones.create',
     );
     expect(createAuditQuery).toBeDefined();
-    const createDiff = JSON.parse(createAuditQuery!.params[8] as string);
+    const createDiff = JSON.parse(createAuditQuery!.params[21] as string);
     expect(createDiff.phoneNumber).toEqual({ from: null, to: '+7 700 000 01 01' });
     expect(createDiff).not.toHaveProperty('phoneNumber.before');
     expect(createDiff).not.toHaveProperty('phoneNumber.after');
@@ -57,7 +57,7 @@ describe('PgClientPhoneRepository', () => {
       (q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log') && q.params[0] === 'client_phones.primary_demote',
     );
     expect(demoteAuditQuery).toBeDefined();
-    const demoteDiff = JSON.parse(demoteAuditQuery!.params[8] as string);
+    const demoteDiff = JSON.parse(demoteAuditQuery!.params[21] as string);
     expect(demoteDiff).toEqual({ isPrimary: { from: true, to: false } });
   });
 
@@ -152,7 +152,7 @@ describe('PgClientPhoneRepository', () => {
       (q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log') && q.params[0] === 'client_phones.update',
     );
     expect(updateAuditQuery).toBeDefined();
-    const updateDiff = JSON.parse(updateAuditQuery!.params[8] as string);
+    const updateDiff = JSON.parse(updateAuditQuery!.params[21] as string);
     expect(updateDiff.phoneNumber).toEqual({ from: '+7 700 000 01 01', to: '+7 700 000 99 99' });
     expect(updateDiff).not.toHaveProperty('phoneNumber.before');
     expect(updateDiff).not.toHaveProperty('phoneNumber.after');
@@ -173,8 +173,108 @@ describe('PgClientPhoneRepository', () => {
       (q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log') && q.params[0] === 'client_phones.delete',
     );
     expect(deleteAuditQuery).toBeDefined();
-    const deleteDiff = JSON.parse(deleteAuditQuery!.params[8] as string);
+    const deleteDiff = JSON.parse(deleteAuditQuery!.params[21] as string);
     expect(deleteDiff).toEqual({ deleted: { from: false, to: true } });
+  });
+
+  it('audit create: redacts api_key in metadata, preserves event/entity/client dims', async () => {
+    // Inject a secret-shaped field into the metadata by creating a phone with a refKey1c that
+    // would appear in metadataJson — but metadataJson is built internally. Instead we verify
+    // the audit dims are correct and that a secret placed in beforeJson/afterJson/diffJson
+    // would be redacted. We do this by directly checking what auditService.record() does:
+    // it calls redactJson() on before/after/diff/metadata before persisting.
+    // The createClientPhone path puts mutablePhoneJson (no secret) into before/after/diff,
+    // so we test the redaction contract via the auditService.record route by checking
+    // that the params flow through (dims correct) and the redaction path is active.
+    const database = createDatabase({ demotedPhoneId: null });
+    const repository = new PgClientPhoneRepository(database.service);
+
+    await repository.createClientPhone({
+      currentUser: currentUser(),
+      dto: {
+        clientId: 5,
+        phoneNumber: '+7 700 111 11 11',
+        phoneType: 'mobile',
+        isPrimary: false,
+        refKey1c: null,
+        idempotencyKey: 'redact-create-key',
+      },
+      requestId: 'req-redact-create',
+    });
+
+    const auditQuery = database.queries.find(
+      (q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log') && q.params[0] === 'client_phones.create',
+    );
+    expect(auditQuery).toBeDefined();
+    // Dimensions: event, entity_type, entity_id, user_id, request_id, source, related_client_id
+    expect(auditQuery!.params[0]).toBe('client_phones.create');
+    expect(auditQuery!.params[1]).toBe('client_phone');         // entity_type
+    expect(auditQuery!.params[2]).toBe('11');                   // entity_id (phoneId = 11)
+    expect(auditQuery!.params[3]).toBe('1');                    // user_id
+    expect(auditQuery!.params[6]).toBe('req-redact-create');    // request_id
+    expect(auditQuery!.params[7]).toBe('backend-client-phones-command'); // source
+    // Note: related_client_id comes from phone.clientId (DB result), fake returns client_id=1
+    expect(auditQuery!.params[9]).toBe(1);                      // related_client_id (from DB row)
+    // before_json null on create, after_json has phone fields (fake DB returns default phone_number)
+    expect(auditQuery!.params[19]).toBeNull();                  // before_json
+    expect(auditQuery!.params[20]).toContain('"phoneNumber"');  // after_json has phoneNumber key
+    // Verify redaction is active: diff_json should not contain any raw secret
+    // (phone data has no sensitive keys; verify the path flows through redactLogFields)
+    const diffStr = auditQuery!.params[21] as string;
+    expect(diffStr).not.toContain('SUPER_SECRET');
+    // metadata_json: clientId, phoneId etc — no secrets (fake DB returns client_id=1)
+    const metaStr = auditQuery!.params[22] as string;
+    expect(metaStr).toContain('"clientId":1');
+    expect(metaStr).not.toContain('SUPER_SECRET');
+  });
+
+  it('audit create: secret-shaped field in afterJson is redacted by AuditService', async () => {
+    // We verify redaction by using the import of auditService directly
+    // This test exercises the actual redaction path using a custom database that
+    // captures audit params and verifies [REDACTED] appears for api_key in after_json.
+    const { auditService: svc } = await import('../../../common/audit/audit.service');
+    const captured: Array<readonly unknown[]> = [];
+    const fakeClient = {
+      query: async (text: string, params: readonly unknown[] = []) => {
+        if (text.includes('INSERT INTO audit_log')) captured.push(params);
+        return { rows: [{ audit_id: 'test-audit-id' }], rowCount: 1, command: 'INSERT', oid: 0, fields: [] };
+      },
+    };
+
+    await svc.record(fakeClient as unknown as import('../../../database/database.types').DatabaseClient, {
+      event: 'client_phones.create',
+      entityType: 'client_phone',
+      entityId: '42',
+      actorUserId: 1,
+      requestId: 'req-secret-test',
+      source: 'backend-client-phones-command',
+      relatedClientId: 10,
+      before: null,
+      after: { phoneNumber: '+7 700 000 00 00', api_key: 'SUPER_SECRET' },
+      diff: { phoneNumber: { from: null, to: '+7 700 000 00 00' }, api_key: { from: null, to: 'SUPER_SECRET' } },
+      metadata: { token: 'SENSITIVE_TOKEN', phoneId: 42 },
+    });
+
+    expect(captured).toHaveLength(1);
+    const params = captured[0];
+    // event + key dims preserved
+    expect(params[0]).toBe('client_phones.create');
+    expect(params[1]).toBe('client_phone');
+    expect(params[2]).toBe('42');
+    expect(params[9]).toBe(10);  // related_client_id
+    // after_json: api_key redacted, phoneNumber preserved
+    const afterJson = JSON.parse(params[20] as string);
+    expect(afterJson.phoneNumber).toBe('+7 700 000 00 00');
+    expect(afterJson.api_key).toBe('[REDACTED]');
+    expect(JSON.stringify(afterJson)).not.toContain('SUPER_SECRET');
+    // diff_json: api_key key itself is redacted (entire value replaced, not nested fields)
+    const diffJson = JSON.parse(params[21] as string);
+    expect(diffJson.api_key).toBe('[REDACTED]');
+    expect(JSON.stringify(diffJson)).not.toContain('SUPER_SECRET');
+    // metadata_json: token redacted, phoneId preserved
+    const metaJson = JSON.parse(params[22] as string);
+    expect(metaJson.token).toBe('[REDACTED]');
+    expect(metaJson.phoneId).toBe(42);
   });
 });
 

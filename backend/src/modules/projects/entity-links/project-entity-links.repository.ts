@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
@@ -81,10 +82,6 @@ interface IdempotencyRow extends QueryResultRow {
   request_hash: string;
   response_json: unknown;
   status: 'processing' | 'completed' | 'failed';
-}
-
-interface AuditRow extends QueryResultRow {
-  audit_id: string;
 }
 
 const SOURCE = 'projects-entity-links';
@@ -364,49 +361,37 @@ async function writeAudit(
   const removed = input.removed.map(rowDimension);
   const existing = input.existing.map(linkDimension);
   const source = 'source' in input.command ? input.command.source : SOURCE;
-  const result = await tx.query<AuditRow>(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, username, role_code, role,
-      request_id, source, before_json, after_json, diff_json, metadata_json
-    )
-    VALUES (
-      'projects.entity_links_changed', 'project', $1, $2, $3, $4, $4,
-      $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb
-    )
-    RETURNING audit_id
-    `,
-    [
-      input.command.projectId,
-      toNullableUserId(input.command.currentUser.id),
-      input.command.currentUser.username,
-      input.command.currentUser.role,
-      input.requestId,
-      source,
-      JSON.stringify({ links: input.before }),
-      JSON.stringify({ links: input.after }),
-      JSON.stringify({ added, removed, existing, skipped: [] }),
-      JSON.stringify({
-        idempotencyKey: input.command.dto.idempotencyKey,
-        reason: normalizeReason(input.command.dto.reason),
-        batchSourceType: input.command.dto.links[0]?.metadata?.batchSourceType ?? null,
-        batchSourceReference: input.command.dto.links[0]?.metadata?.batchSourceReference ?? null,
-        fixtureKey: input.command.dto.links[0]?.metadata?.fixtureKey ?? null,
-        sourceRows: input.command.dto.links.map((link) => link.metadata?.sourceRow ?? null),
-        createdCount: added.length,
-        existingCount: existing.length,
-        skippedCount: 0,
-        relatedEntityTypes: [...new Set([...added, ...removed, ...existing].map((item) => item.entityType))],
-        relatedOrderIds: dimensionIds([...added, ...removed, ...existing], 'order'),
-        relatedUserIds: dimensionIds([...added, ...removed, ...existing], 'user'),
-        relatedEmployeeIds: dimensionIds([...added, ...removed, ...existing], 'employee'),
-        relatedClientIds: dimensionIds([...added, ...removed, ...existing], 'client'),
-        relatedWorkshopIds: dimensionIds([...added, ...removed, ...existing], 'workshop'),
-        relatedDeadlineInstanceIds: dimensionIds([...added, ...removed, ...existing], 'deadline_instance'),
-      }),
-    ],
-  );
-  return result.rows[0]?.audit_id ?? '';
+  return auditService.record(tx, {
+    event: 'projects.entity_links_changed',
+    entityType: 'project',
+    entityId: input.command.projectId,
+    actorUserId: toNullableUserId(input.command.currentUser.id),
+    actorUsername: input.command.currentUser.username,
+    actorRole: input.command.currentUser.role,
+    requestId: input.requestId,
+    source,
+    before: { links: input.before },
+    after: { links: input.after },
+    diff: { added, removed, existing, skipped: [] },
+    metadata: {
+      idempotencyKey: input.command.dto.idempotencyKey,
+      reason: normalizeReason(input.command.dto.reason),
+      batchSourceType: input.command.dto.links[0]?.metadata?.batchSourceType ?? null,
+      batchSourceReference: input.command.dto.links[0]?.metadata?.batchSourceReference ?? null,
+      fixtureKey: input.command.dto.links[0]?.metadata?.fixtureKey ?? null,
+      sourceRows: input.command.dto.links.map((link) => link.metadata?.sourceRow ?? null),
+      createdCount: added.length,
+      existingCount: existing.length,
+      skippedCount: 0,
+      relatedEntityTypes: [...new Set([...added, ...removed, ...existing].map((item) => item.entityType))],
+      relatedOrderIds: dimensionIds([...added, ...removed, ...existing], 'order'),
+      relatedUserIds: dimensionIds([...added, ...removed, ...existing], 'user'),
+      relatedEmployeeIds: dimensionIds([...added, ...removed, ...existing], 'employee'),
+      relatedClientIds: dimensionIds([...added, ...removed, ...existing], 'client'),
+      relatedWorkshopIds: dimensionIds([...added, ...removed, ...existing], 'workshop'),
+      relatedDeadlineInstanceIds: dimensionIds([...added, ...removed, ...existing], 'deadline_instance'),
+    },
+  });
 }
 
 async function enqueueOutbox(

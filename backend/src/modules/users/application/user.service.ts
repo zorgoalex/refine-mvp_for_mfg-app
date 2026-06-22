@@ -1,4 +1,6 @@
+import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
+import { DatabaseService } from '../../../database/database.service';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { UserAccessPolicy } from '../../../permissions/policies/user-access.policy';
 import type { TargetUserSubject } from '../../../permissions/policies/user-access.policy';
@@ -17,9 +19,13 @@ import type {
   UserActivationCommand,
   UserRepositoryPort,
 } from './user-command.types';
+import { buildUserDeniedEvent } from './users-audit';
+
+const DEFAULT_REQUEST_ID = 'users-adapter';
 
 export interface UserServicePorts {
   users: UserRepositoryPort;
+  database: DatabaseService;
   permissions?: PermissionsService;
   policy?: UserAccessPolicy;
 }
@@ -50,7 +56,19 @@ export class UserService {
   }
 
   async create(command: CreateUserCommand): Promise<UserDto> {
-    if (!this.policy.canCreateUser(command.currentUser, command.dto.role)) {
+    const reason = this.policy.canCreateUser(command.currentUser, command.dto.role);
+    if (reason) {
+      if (reason !== 'missing_permission') {
+        try {
+          await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
+            actor: command.currentUser,
+            requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+            action: 'create',
+            targetUserId: null,
+            reason,
+          }));
+        } catch { /* best-effort */ }
+      }
       throw permissionDenied('users.create');
     }
 
@@ -60,7 +78,19 @@ export class UserService {
   async update(command: UpdateUserCommand): Promise<UserDto> {
     const targetUser = await this.getTargetUser(command);
 
-    if (!this.policy.canUpdateUser(command.currentUser, targetUser, command.dto.role)) {
+    const reason = this.policy.canUpdateUser(command.currentUser, targetUser, command.dto.role);
+    if (reason) {
+      if (reason !== 'missing_permission') {
+        try {
+          await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
+            actor: command.currentUser,
+            requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+            action: 'update',
+            targetUserId: targetUser.id,
+            reason,
+          }));
+        } catch { /* best-effort */ }
+      }
       throw permissionDenied('users.update');
     }
 
@@ -70,7 +100,19 @@ export class UserService {
   async changePassword(command: ChangeUserPasswordCommand): Promise<ChangePasswordResponseDto> {
     const targetUser = await this.getTargetUser(command);
 
-    if (!this.policy.canChangePassword(command.currentUser, targetUser)) {
+    const reason = this.policy.canChangePassword(command.currentUser, targetUser);
+    if (reason) {
+      if (reason !== 'missing_permission') {
+        try {
+          await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
+            actor: command.currentUser,
+            requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+            action: 'change_password',
+            targetUserId: targetUser.id,
+            reason,
+          }));
+        } catch { /* best-effort */ }
+      }
       throw permissionDenied('users.change_password');
     }
 
@@ -80,7 +122,19 @@ export class UserService {
   async deactivate(command: UserActivationCommand): Promise<UserDto> {
     const targetUser = await this.getTargetUser(command);
 
-    if (!this.policy.canDeactivate(command.currentUser, targetUser)) {
+    const reason = this.policy.canDeactivate(command.currentUser, targetUser);
+    if (reason) {
+      if (reason !== 'missing_permission') {
+        try {
+          await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
+            actor: command.currentUser,
+            requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+            action: 'deactivate',
+            targetUserId: targetUser.id,
+            reason,
+          }));
+        } catch { /* best-effort */ }
+      }
       throw permissionDenied('users.deactivate');
     }
 
@@ -90,7 +144,19 @@ export class UserService {
   async activate(command: UserActivationCommand): Promise<UserDto> {
     const targetUser = await this.getTargetUser(command);
 
-    if (!this.policy.canActivate(command.currentUser, targetUser)) {
+    const reason = this.policy.canActivate(command.currentUser, targetUser);
+    if (reason) {
+      if (reason !== 'missing_permission') {
+        try {
+          await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
+            actor: command.currentUser,
+            requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+            action: 'activate',
+            targetUserId: targetUser.id,
+            reason,
+          }));
+        } catch { /* best-effort */ }
+      }
       throw permissionDenied('users.activate');
     }
 

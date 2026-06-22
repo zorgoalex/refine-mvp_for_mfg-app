@@ -47,6 +47,7 @@ import type {
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
+  CutDetailInfoDto,
   CutDetailPlacementsResponseDto,
   CutGroupDto,
   CutJobDto,
@@ -670,7 +671,8 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const jobs: CutJobDto[] = [];
     for (const row of result.rows) {
-      jobs.push(await loadJob(this.database, toNum(row.cut_job_id)));
+      // List only renders item/group counts -> skip the per-item detail joins.
+      jobs.push(await loadJob(this.database, toNum(row.cut_job_id), false));
     }
     return jobs;
   }
@@ -1239,6 +1241,104 @@ interface ItemRow extends QueryResultRow {
   order_id: string | number;
   qty: string | number;
   cut_group_id: string | number | null;
+  // Enriched order-detail fields (present only when includeItemDetails); null when
+  // the source order_detail no longer exists. Price/sum are intentionally omitted.
+  // joined_detail_id is the existence sentinel: NULL iff the LEFT JOIN found no
+  // live (non-deleted) detail. Never key existence off user data (detail_number).
+  joined_detail_id?: string | number | null;
+  detail_number?: string | number | null;
+  detail_name?: string | null;
+  height?: string | number | null;
+  width?: string | number | null;
+  detail_quantity?: string | number | null;
+  area?: string | number | null;
+  material_id?: string | number | null;
+  sheet_material_type_id?: string | number | null;
+  material_name?: string | null;
+  milling_type_id?: string | number | null;
+  milling_type_name?: string | null;
+  edge_type_id?: string | number | null;
+  edge_type_name?: string | null;
+  film_id?: string | number | null;
+  film_name?: string | null;
+  priority?: string | number | null;
+  production_status_id?: string | number | null;
+  production_status_name?: string | null;
+  joint_order_id?: string | number | null;
+  note?: string | null;
+  link_cutting_file?: string | null;
+  link_cutting_image_file?: string | null;
+  link_cad_file?: string | null;
+  link_pdf_file?: string | null;
+}
+
+// Enriched item query: joins order_details + dictionaries to resolve the order
+// form's detail fields (names, not bare ids) for the /cut "Детали задания" table.
+// LEFT JOINs so a reserved-then-hard-deleted detail still returns its item row
+// (detail fields null). Price columns (milling_cost_per_sqm, detail_cost) are
+// deliberately not selected — the cut surface is production-facing, not financial.
+const ENRICHED_ITEMS_QUERY = `
+  SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
+         od.detail_id AS joined_detail_id,
+         od.detail_number, od.detail_name, od.height, od.width,
+         od.quantity AS detail_quantity, od.area,
+         od.material_id, od.sheet_material_type_id,
+         COALESCE(smt.name, m.material_name) AS material_name,
+         od.milling_type_id, mt.milling_type_name,
+         od.edge_type_id, et.edge_type_name,
+         od.film_id, f.film_name,
+         od.priority, od.production_status_id, ps.production_status_name,
+         od.joint_order_id, od.note,
+         od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file
+  FROM cut_job_item i
+  -- delete_flag in the JOIN (not WHERE): a reserved detail that was later soft-
+  -- deleted must still return its item row, but with detail: null (canonical
+  -- read-side semantics exclude deleted details — see order_details_view).
+  LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND od.delete_flag = false
+  LEFT JOIN materials m ON m.material_id = od.material_id
+  LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+  LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
+  LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
+  LEFT JOIN films f ON f.film_id = od.film_id
+  LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+  WHERE i.cut_job_id = $1 AND i.is_active = true
+  ORDER BY i.cut_job_item_id
+`;
+
+const LIGHT_ITEMS_QUERY = `SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item WHERE cut_job_id = $1 AND is_active = true ORDER BY cut_job_item_id`;
+
+function mapItemDetail(row: ItemRow): CutDetailInfoDto | null {
+  // Existence keyed off the joined PK, not user data: NULL means the LEFT JOIN
+  // matched no live detail (hard-deleted or soft-deleted via delete_flag).
+  if (row.joined_detail_id === undefined || row.joined_detail_id === null) {
+    return null;
+  }
+  return {
+    detailNumber: numOrNull(row.detail_number),
+    detailName: row.detail_name ?? null,
+    height: numOrNull(row.height),
+    width: numOrNull(row.width),
+    quantity: numOrNull(row.detail_quantity),
+    area: numOrNull(row.area),
+    materialId: numOrNull(row.material_id),
+    sheetMaterialTypeId: numOrNull(row.sheet_material_type_id),
+    materialName: row.material_name ?? null,
+    millingTypeId: numOrNull(row.milling_type_id),
+    millingTypeName: row.milling_type_name ?? null,
+    edgeTypeId: numOrNull(row.edge_type_id),
+    edgeTypeName: row.edge_type_name ?? null,
+    filmId: numOrNull(row.film_id),
+    filmName: row.film_name ?? null,
+    priority: numOrNull(row.priority),
+    productionStatusId: numOrNull(row.production_status_id),
+    productionStatusName: row.production_status_name ?? null,
+    jointOrderId: numOrNull(row.joint_order_id),
+    note: row.note ?? null,
+    linkCuttingFile: row.link_cutting_file ?? null,
+    linkCuttingImageFile: row.link_cutting_image_file ?? null,
+    linkCadFile: row.link_cad_file ?? null,
+    linkPdfFile: row.link_pdf_file ?? null,
+  };
 }
 
 interface GroupRow extends QueryResultRow {
@@ -1257,7 +1357,11 @@ interface SheetRow extends QueryResultRow {
   placements: SheetPlacementsJson;
 }
 
-async function loadJob(client: DatabaseClient, cutJobId: number): Promise<CutJobDto> {
+async function loadJob(
+  client: DatabaseClient,
+  cutJobId: number,
+  includeItemDetails = true,
+): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
     `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
@@ -1267,8 +1371,10 @@ async function loadJob(client: DatabaseClient, cutJobId: number): Promise<CutJob
     throw new CutJobNotFoundError(cutJobId);
   }
 
+  // The list view only needs item counts, so it opts out of the dictionary joins
+  // (it loads up to 200 jobs); single-job reads enrich each item with full detail.
   const itemsResult = await client.query<ItemRow>(
-    `SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item WHERE cut_job_id = $1 AND is_active = true ORDER BY cut_job_item_id`,
+    includeItemDetails ? ENRICHED_ITEMS_QUERY : LIGHT_ITEMS_QUERY,
     [cutJobId],
   );
   const groupsResult = await client.query<GroupRow>(
@@ -1317,6 +1423,7 @@ async function loadJob(client: DatabaseClient, cutJobId: number): Promise<CutJob
       orderId: toNum(row.order_id),
       qty: toNum(row.qty),
       cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
+      detail: includeItemDetails ? mapItemDetail(row) : null,
     })),
     groups,
   };
