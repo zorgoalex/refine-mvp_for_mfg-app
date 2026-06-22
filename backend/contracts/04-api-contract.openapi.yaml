@@ -8250,6 +8250,28 @@ components:
         refKey1c:
           type: string
           nullable: true
+        materialId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Variant B: always null for order headers; deprecated. Use sheetMaterialTypeId."
+        sheetMaterialTypeId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Variant B: authoritative sheet material reference for the order header. materialId is deprecated and always null."
+        millingTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        edgeTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        filmId:
+          type: integer
+          format: int64
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -8674,6 +8696,28 @@ components:
           nullable: true
         refKey1c:
           type: string
+          nullable: true
+        materialId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Variant B: must be null/absent on request; deprecated. Non-null values are rejected (422). Use sheetMaterialTypeId."
+        sheetMaterialTypeId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Variant B: authoritative sheet material reference for the order header. Optional; when set, determines the material for the whole order."
+        millingTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        edgeTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        filmId:
+          type: integer
+          format: int64
           nullable: true
 
     SaveOrderDetailDto:

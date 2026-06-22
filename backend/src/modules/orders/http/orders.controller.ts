@@ -66,7 +66,8 @@ const orderPaginationSwaggerSchema = {
   },
 } as const;
 
-const saveOrderHeaderSwaggerSchema = {
+// Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
+export const saveOrderHeaderSwaggerSchema = {
   type: 'object',
   required: ['orderName', 'clientId', 'orderDate', 'orderStatusId'],
   properties: {
@@ -92,8 +93,9 @@ const saveOrderHeaderSwaggerSchema = {
     linkPdfFile: nullableStringSwaggerSchema,
     notes: nullableStringSwaggerSchema,
     refKey1c: nullableStringSwaggerSchema,
-    materialId: nullableIntegerSwaggerSchema,
-    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'SP3 sheet material type; when set, materialId is resolved server-side to the sheet shadow and must be omitted or null' },
+    // Variant B: header materialId is always null/absent (sunset); sheet_material_type_id is authoritative.
+    materialId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: always null for order headers; deprecated. Use sheetMaterialTypeId.' },
+    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: authoritative sheet material reference for the order header. materialId is deprecated and always null.' },
     millingTypeId: nullableIntegerSwaggerSchema,
     edgeTypeId: nullableIntegerSwaggerSchema,
     filmId: nullableIntegerSwaggerSchema,
@@ -397,7 +399,8 @@ const orderProjectSummarySwaggerSchema = {
   },
 } as const;
 
-const orderHeaderResponseSwaggerSchema = {
+// Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
+export const orderHeaderResponseSwaggerSchema = {
   type: 'object',
   required: [
     'orderId',
