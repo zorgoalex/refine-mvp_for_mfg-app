@@ -62,6 +62,10 @@ describe('CutPage source guards', () => {
     expect(source).toContain('onDoubleClick');
   });
 
+  it('links the order number of each detail to its order card', () => {
+    expect(source).toContain('/orders/show/${r.orderId}');
+  });
+
   it('fail-closes detail file links against javascript:/data: stored-link XSS', () => {
     // Operator-clickable detail links must be sanitized; a raw href is never
     // rendered directly into an anchor on this cut.view surface.

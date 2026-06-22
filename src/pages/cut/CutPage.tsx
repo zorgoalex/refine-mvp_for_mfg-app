@@ -14,6 +14,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { Link } from 'react-router-dom';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
@@ -418,7 +419,19 @@ export const CutPage: React.FC = () => {
     return [
       { title: 'Поз.', key: 'pos', width: 60, fixed: 'left', render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.detailNumber) },
       { title: 'Наименование', key: 'name', width: 180, fixed: 'left', render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.detailName) },
-      { title: 'Заказ', dataIndex: 'orderId', key: 'order', width: 80 },
+      {
+        title: 'Заказ',
+        dataIndex: 'orderId',
+        key: 'order',
+        width: 80,
+        // Click the order number to open its card in a new tab (keeps the cut
+        // job context open in this one).
+        render: (_: unknown, r: CutJobItemDto) => (
+          <Link to={`/orders/show/${r.orderId}`} target="_blank" rel="noreferrer">
+            {r.orderId}
+          </Link>
+        ),
+      },
       { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: 90 },
       {
         title: 'Размер (Ш×В)',
