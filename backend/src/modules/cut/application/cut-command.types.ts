@@ -115,6 +115,21 @@ export interface DetailPlacementsQuery {
   requestId?: string;
 }
 
+/** Minimal sheet-type data returned by the cut-gated sheet-lookup endpoint. */
+export interface CutSheetTypeOption {
+  sheetMaterialTypeId: number;
+  name: string;
+  widthMm: number;
+  heightMm: number;
+  /** Only cuttable sheet types are included in the cut filter. */
+  isCuttable: boolean;
+}
+
+export interface ListSheetTypesForCutQuery {
+  currentUser: CurrentUser;
+  requestId?: string;
+}
+
 export interface CutRepositoryPort {
   createJob(command: CreateCutJobCommand): Promise<CutJobDto>;
   recordPermissionDenied(input: CutPermissionDeniedInput): Promise<void>;
@@ -131,4 +146,5 @@ export interface CutRepositoryPort {
   renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer>;
   renderJobPdf(query: RenderJobPdfQuery): Promise<Buffer>;
   setPdfPrewarmState(query: SetPdfPrewarmStateQuery): Promise<void>;
+  listSheetTypesForCut(query: ListSheetTypesForCutQuery): Promise<CutSheetTypeOption[]>;
 }

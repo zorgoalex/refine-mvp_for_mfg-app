@@ -54,4 +54,23 @@ describe('CutPage source guards', () => {
     expect(source).not.toContain('useBackendOrdersWrite');
     expect(source).not.toMatch(/can\(['"]sheet_materials/);
   });
+
+  // Variant B Task 11: sheet filter is a Select driven by useCutSheetTypeOptions (not a CSV Input).
+  it('Variant B Task 11: imports and uses useCutSheetTypeOptions for the sheet filter Select', () => {
+    expect(source).toContain('useCutSheetTypeOptions');
+    expect(source).toContain('sheetFilterEnabled');
+    expect(source).toContain('sheetTypeOptions');
+    // The filter must use a Select (not a raw Input for sheet types).
+    expect(source).toContain('cut-sheet-type-filter');
+    // Must NOT directly call the sheet-materials catalog API from the cut page.
+    expect(source).not.toContain('sheetMaterialsApi');
+    expect(source).not.toContain('/sheet-material-types');
+  });
+
+  it('Variant B Task 11: sheetMaterialTypeIds from form are forwarded as number[] (Select), not CSV string', () => {
+    // criteriaFromForm must handle number[] from the Select (not parseIdCsv for sheet types).
+    expect(source).toContain('sheetMaterialTypeIds');
+    // The array handling must be present (not relying on parseIdCsv for sheet types).
+    expect(source).toContain('values.sheetMaterialTypeIds');
+  });
 });

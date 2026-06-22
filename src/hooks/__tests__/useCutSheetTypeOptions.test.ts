@@ -40,4 +40,22 @@ describe('useCutSheetTypeOptions gating (source guard)', () => {
     // And does not reference the catalog sheet grant.
     expect(source).not.toContain("can('sheet_materials.view')");
   });
+
+  // Variant B Task 11: the hook must be wired to the CUT-gated endpoint, not Hasura.
+  it('sources from cutApi.listSheetTypes (the cut.view-gated backend endpoint)', () => {
+    expect(source).toContain('cutApi');
+    expect(source).toContain('listSheetTypes');
+    // Must NOT read from Hasura or the sheet_materials catalog endpoint.
+    expect(source).not.toMatch(/hasura/i);
+    expect(source).not.toMatch(/graphql/i);
+    expect(source).not.toContain('sheetMaterialsApi');
+    expect(source).not.toContain('/sheet-material-types');
+  });
+
+  it('maps backend CutSheetTypeOption to { value, label } Select options', () => {
+    // The hook maps sheetMaterialTypeId -> value and name -> label.
+    expect(source).toContain('sheetMaterialTypeId');
+    expect(source).toContain('value');
+    expect(source).toContain('label');
+  });
 });

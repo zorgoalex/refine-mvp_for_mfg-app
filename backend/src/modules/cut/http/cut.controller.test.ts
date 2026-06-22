@@ -196,4 +196,40 @@ describe('CutController', () => {
     expect(parseAddItemsRequest({ detailIds: [3], version: 2 }).version).toBe(2);
     expect(parseEligibleCriteria({ orderIds: '9,10', filmIds: '5' })).toMatchObject({ orderIds: [9, 10], filmIds: [5] });
   });
+
+  // Variant B Task 11: GET /cut-jobs/sheet-types — cut.view-gated sheet lookup.
+  it('listSheetTypes: worker (cut.view only, no sheet_materials.view) gets sheet type options', async () => {
+    const sheetTypes = [
+      { sheetMaterialTypeId: 3, name: 'ЛДСП 16мм', widthMm: 2750, heightMm: 1830, isCuttable: true },
+    ];
+    const listSheetTypesForCut = vi.fn(async () => sheetTypes);
+    const controller = createController({ service: { listSheetTypesForCut } });
+    // worker has cut.view but NOT sheet_materials.view
+    const workerUser: CurrentUser = {
+      id: '20',
+      username: 'worker1',
+      role: 'worker',
+      permissions: ['cut.view'],
+    } as CurrentUser;
+    const result = await controller.listSheetTypes({ user: workerUser } as never);
+    expect(result).toEqual(sheetTypes);
+    expect(listSheetTypesForCut).toHaveBeenCalledWith(
+      expect.objectContaining({ currentUser: workerUser }),
+    );
+  });
+
+  it('listSheetTypes: 401 without an authenticated user', async () => {
+    const controller = createController({});
+    await expect(controller.listSheetTypes({} as never)).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'AUTH_REQUIRED',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('listSheetTypes: 503 when the cut feature flag is disabled', async () => {
+    const controller = createController({ flags: { cutEnabled: false } });
+    await expect(
+      controller.listSheetTypes({ user: currentUser() } as never),
+    ).rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_UNAVAILABLE' } satisfies Partial<ApiError>);
+  });
 });

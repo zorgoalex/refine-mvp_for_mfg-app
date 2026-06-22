@@ -8,10 +8,12 @@ import type {
   CalculateCutJobCommand,
   CreateCutJobCommand,
   CutRepositoryPort,
+  CutSheetTypeOption,
   DetailPlacementsQuery,
   EligibleDetailsQuery,
   GetCutJobQuery,
   ListCutJobsQuery,
+  ListSheetTypesForCutQuery,
   RemoveCutItemCommand,
   RenderGroupPdfQuery,
   RenderJobPdfQuery,
@@ -105,6 +107,16 @@ export class CutService {
   /** Internal pre-warm bookkeeping (no user-facing permission gate). */
   async setPdfPrewarmState(query: SetPdfPrewarmStateQuery) {
     return this.ports.cut.setPdfPrewarmState(query);
+  }
+
+  /**
+   * Cut-gated sheet-type lookup for the /cut filter (Variant B Task 11).
+   * Gated on cut.view ONLY — independent of sheet_materials.view or order perms.
+   * This lets worker (cut.view, no sheet_materials.view) populate the cut filter.
+   */
+  async listSheetTypesForCut(query: ListSheetTypesForCutQuery): Promise<CutSheetTypeOption[]> {
+    this.require(query.currentUser, 'cut.view', { requestId: query.requestId });
+    return this.ports.cut.listSheetTypesForCut(query);
   }
 
   private require(

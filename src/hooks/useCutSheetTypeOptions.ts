@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { can } from '../utils/permissions';
 import { featureFlags } from '../config/featureFlags';
+import { cutApi } from '../api/cutApi';
 
 export interface SheetTypeOption {
   value: number;
@@ -22,9 +23,9 @@ export interface UseCutSheetTypeOptionsResult {
  * sheetMaterialsReads. Requires only cut.view — independent of orders-write
  * flags or catalog-level sheet perms (Critic R22 B3). The cut module is self-contained.
  *
- * Sources from a CUT-gated backend endpoint (Task 11). Until that endpoint is
- * live the options list is empty; the gate logic is correct now so the filter
- * render and permission model are ready.
+ * Sources from the CUT-gated backend endpoint GET /api/v1/cut-jobs/sheet-types
+ * (Variant B Task 11). No catalog-level read. No sheet_materials.view required —
+ * worker (cut.view only) gets cut filter options via this endpoint.
  */
 export function useCutSheetTypeOptions(): UseCutSheetTypeOptionsResult {
   const enabled = can('cut.view') && featureFlags.sheetMaterialsReads;
@@ -35,8 +36,22 @@ export function useCutSheetTypeOptions(): UseCutSheetTypeOptionsResult {
       setOptions([]);
       return;
     }
-    // Task 11 will add GET /api/v1/cut-jobs/sheet-types and wire it here.
-    // The hook is ready to receive options once the endpoint exists.
+    let cancelled = false;
+    cutApi
+      .listSheetTypes()
+      .then((types) => {
+        if (!cancelled) {
+          setOptions(types.map((t) => ({ value: t.sheetMaterialTypeId, label: t.name })));
+        }
+      })
+      .catch(() => {
+        // Best-effort: if the endpoint is unavailable the filter shows no options
+        // (the cut job can still be created without a sheet-type filter).
+        if (!cancelled) setOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [enabled]);
 
   const byId = new Map(options.map((o) => [o.value, o]));

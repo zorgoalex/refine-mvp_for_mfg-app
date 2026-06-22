@@ -898,6 +898,36 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   /**
+   * Cut-gated sheet-type lookup (Variant B Task 11). Returns the minimal set of
+   * fields needed for the /cut filter: id, name, dims, is_cuttable.
+   * Active types only — inactive types are not selectable as cut criteria.
+   * No cut.manage or sheet_materials.view required — cut.view is sufficient.
+   */
+  async listSheetTypesForCut(
+    _query: import('../application/cut-command.types').ListSheetTypesForCutQuery,
+  ): Promise<import('../application/cut-command.types').CutSheetTypeOption[]> {
+    const result = await this.database.query<{
+      sheet_material_type_id: string | number;
+      name: string;
+      width_mm: string | number;
+      height_mm: string | number;
+      is_cuttable: boolean | null;
+    }>(
+      `SELECT sheet_material_type_id, name, width_mm, height_mm, is_cuttable
+       FROM sheet_material_types
+       WHERE is_active = true
+       ORDER BY name`,
+    );
+    return result.rows.map((row) => ({
+      sheetMaterialTypeId: toNum(row.sheet_material_type_id),
+      name: row.name,
+      widthMm: toNum(row.width_mm),
+      heightMm: toNum(row.height_mm),
+      isCuttable: row.is_cuttable == null ? true : Boolean(row.is_cuttable),
+    }));
+  }
+
+  /**
    * Load every sheet of a group as a ready-to-render SVG, with a per-group label
    * context (order/detail + "instance N/qty"). Shared by PNG/SVG/PDF render.
    */

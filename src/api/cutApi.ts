@@ -6,6 +6,7 @@ import type {
   CutDetailPlacements,
   CutJobDto,
   CutSelectionCriteria,
+  CutSheetTypeOption,
   EligibleDetailsResponse,
 } from './types/cutApi.types';
 
@@ -49,6 +50,15 @@ export const cutApi = {
       body: JSON.stringify({ version }),
       headers: { 'Content-Type': 'application/json' },
     });
+  },
+
+  /**
+   * Variant B Task 11: list active sheet types for the /cut filter.
+   * Gated on cut.view only — no sheet_materials.view required.
+   * Sources from GET /api/v1/cut-jobs/sheet-types (not catalog API, not Hasura).
+   */
+  listSheetTypes(): Promise<CutSheetTypeOption[]> {
+    return httpClient.get<CutSheetTypeOption[]>(apiRoutes.cutJobs.sheetTypes);
   },
 
   /**

@@ -101,4 +101,33 @@ describe('CutService RBAC (§8 principle 8)', () => {
       expect((error as ApiError).details).toMatchObject({ requiredPermissions: ['cut.view'] });
     }
   });
+
+  // Variant B Task 11: cut.view-gated sheet-type lookup for the /cut filter.
+  it('denies listSheetTypesForCut without cut.view (worker-without-cut scenario)', async () => {
+    const service = new CutService({ cut: repo() });
+    await expect(
+      service.listSheetTypesForCut({ currentUser: user([]) }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('allows listSheetTypesForCut with cut.view only (worker has cut.view, not sheet_materials.view)', async () => {
+    const sheetTypes = [
+      { sheetMaterialTypeId: 1, name: 'МДФ 18мм', widthMm: 2800, heightMm: 2070, isCuttable: true },
+    ];
+    const listSheetTypesForCut = vi.fn(async () => sheetTypes);
+    const service = new CutService({ cut: repo({ listSheetTypesForCut }) });
+    const result = await service.listSheetTypesForCut({ currentUser: user(['cut.view']), requestId: 'rq' });
+    expect(result).toEqual(sheetTypes);
+    expect(listSheetTypesForCut).toHaveBeenCalledOnce();
+  });
+
+  it('denies listSheetTypesForCut for roles with sheet_materials.view but no cut.view (viewer has sheet_materials.view)', async () => {
+    // viewer has sheet_materials.view but also cut.view per ROLE_PERMISSIONS — this test
+    // verifies the service gates on cut.view specifically, not sheet_materials.view.
+    // So we simulate a hypothetical role that has sheet_materials.view but not cut.view.
+    const service = new CutService({ cut: repo() });
+    await expect(
+      service.listSheetTypesForCut({ currentUser: user(['sheet_materials.view']) }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+  });
 });

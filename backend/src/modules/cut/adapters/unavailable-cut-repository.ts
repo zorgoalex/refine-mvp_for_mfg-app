@@ -63,6 +63,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
   setPdfPrewarmState() {
     return Promise.reject(unavailable());
   }
+
+  listSheetTypesForCut() {
+    return Promise.reject(unavailable());
+  }
 }
 
 function unavailable(): ApiError {

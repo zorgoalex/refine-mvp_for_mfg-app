@@ -23,6 +23,7 @@ import type {
   EligibleDetailDto,
 } from '../../api/types/cutApi.types';
 import { can } from '../../utils/permissions';
+import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
   CUT_JOB_STATUS_FILTER_OPTIONS,
@@ -69,7 +70,10 @@ const STATUS_TAG_COLORS: Record<string, string> = {
  */
 export const CutPage: React.FC = () => {
   const canManage = can('cut.manage');
-  const [form] = Form.useForm<{ name: string; orderIds?: string; sheetMaterialTypeIds?: string; filmIds?: string }>();
+  // Variant B Task 11: cut.view-gated sheet-type options for the filter Select.
+  // Gated on cut.view only — no sheet_materials.view required (worker can use filter).
+  const { enabled: sheetFilterEnabled, options: sheetTypeOptions } = useCutSheetTypeOptions();
+  const [form] = Form.useForm<{ name: string; orderIds?: string; sheetMaterialTypeIds?: number[]; filmIds?: string }>();
   const [job, setJob] = useState<CutJobDto | null>(null);
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
@@ -98,9 +102,15 @@ export const CutPage: React.FC = () => {
 
   const criteriaFromForm = useCallback(() => {
     const values = form.getFieldsValue();
+    // sheetMaterialTypeIds: comes from a Select<number[]> (not a CSV string) when the
+    // sheet filter is enabled; falls back to empty array otherwise.
+    const sheetMaterialTypeIds: number[] | undefined =
+      values.sheetMaterialTypeIds && values.sheetMaterialTypeIds.length > 0
+        ? values.sheetMaterialTypeIds
+        : undefined;
     return {
       orderIds: parseIdCsv(values.orderIds ?? ''),
-      sheetMaterialTypeIds: parseIdCsv(values.sheetMaterialTypeIds ?? ''),
+      sheetMaterialTypeIds,
       filmIds: parseIdCsv(values.filmIds ?? ''),
     };
   }, [form]);
@@ -395,9 +405,19 @@ export const CutPage: React.FC = () => {
           <Form.Item name="orderIds">
             <Input placeholder="Заказы (9,10)" />
           </Form.Item>
-          <Form.Item name="sheetMaterialTypeIds">
-            <Input placeholder="Типы листов" />
-          </Form.Item>
+          {sheetFilterEnabled && (
+            <Form.Item name="sheetMaterialTypeIds">
+              <Select<number[]>
+                mode="multiple"
+                allowClear
+                placeholder="Типы листов"
+                options={sheetTypeOptions}
+                fieldNames={{ label: 'label', value: 'value' }}
+                style={{ minWidth: 200 }}
+                data-testid="cut-sheet-type-filter"
+              />
+            </Form.Item>
+          )}
           <Form.Item name="filmIds">
             <Input placeholder="Плёнки" />
           </Form.Item>

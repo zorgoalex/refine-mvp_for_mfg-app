@@ -11,6 +11,7 @@ import type {
   CutSelectionCriteriaDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
+import type { CutSheetTypeOption } from '../application/cut-command.types';
 import { CutPdfCache, type PdfEnsureResult } from '../application/cut-pdf-cache';
 import { CutRuntimeConfigService } from './cut-runtime-config.service';
 
@@ -92,6 +93,18 @@ export class CutController {
       orderIds: parseCsvIds(query.orderIds),
       requestId: request.requestId,
     });
+  }
+
+  @ApiOperation({
+    operationId: 'listCutSheetTypes',
+    summary: 'List active sheet material types for the cut filter (cut.view only — no sheet_materials.view required)',
+  })
+  @Get('sheet-types')
+  async listSheetTypes(@Req() request: RequestWithCurrentUser): Promise<CutSheetTypeOption[]> {
+    // Registered BEFORE ':cutJobId' so the literal 'sheet-types' path is not captured as an id.
+    // Gated on cut.view: worker can populate the cut filter without sheet_materials.view (Variant B Task 11).
+    const currentUser = this.requireRead(request);
+    return this.cut.listSheetTypesForCut({ currentUser, requestId: request.requestId });
   }
 
   @ApiOperation({ operationId: 'getCutJob', summary: 'Get a cut job manifest' })

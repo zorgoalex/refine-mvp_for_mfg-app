@@ -112,3 +112,17 @@ export interface CutDetailPlacements {
 }
 
 export type CutRenderPreset = 'thumb' | 'screen' | 'print';
+
+/**
+ * Minimal sheet-type data for the /cut filter (Variant B Task 11).
+ * Returned by the cut.view-gated GET /cut-jobs/sheet-types endpoint.
+ * No sheet_materials.view required.
+ */
+export interface CutSheetTypeOption {
+  sheetMaterialTypeId: number;
+  name: string;
+  widthMm: number;
+  heightMm: number;
+  /** Only cuttable types are eligible cut criteria. */
+  isCuttable: boolean;
+}

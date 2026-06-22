@@ -4930,6 +4930,30 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/sheet-types:
+    get:
+      tags:
+        - CutJobs
+      operationId: listCutSheetTypes
+      summary: List active sheet material types for the cut filter (cut.view only — no sheet_materials.view required)
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/cut-jobs/{cutJobId}:
     get:
       tags:
