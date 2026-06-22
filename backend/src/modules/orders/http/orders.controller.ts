@@ -100,9 +100,11 @@ const saveOrderHeaderSwaggerSchema = {
   },
 } as const;
 
-const saveOrderDetailSwaggerSchema = {
+// Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
+export const saveOrderDetailSwaggerSchema = {
   type: 'object',
-  required: ['height', 'width', 'quantity', 'millingTypeId', 'edgeTypeId'],
+  // Variant B: sheetMaterialTypeId is required (authoritative material ref); materialId must be null/absent.
+  required: ['height', 'width', 'quantity', 'sheetMaterialTypeId', 'millingTypeId', 'edgeTypeId'],
   properties: {
     id: { type: 'integer' },
     clientKey: { type: 'string' },
@@ -111,8 +113,8 @@ const saveOrderDetailSwaggerSchema = {
     height: { type: 'number' },
     width: { type: 'number' },
     quantity: { type: 'integer' },
-    materialId: { ...nullableIntegerSwaggerSchema, description: 'Required only when sheetMaterialTypeId is absent; omit or set null for sheet details — the server resolves the shadow material' },
-    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'SP3 sheet material type id; when set, materialId is resolved server-side to the sheet shadow' },
+    materialId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: must be null/absent; sheet_material_type_id is authoritative. Sending a non-null value is rejected with 422.' },
+    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: required for sheet details; authoritative reference to sheet_material_types. materialId must be null/absent.' },
     millingTypeId: { type: 'integer' },
     edgeTypeId: { type: 'integer' },
     filmId: nullableIntegerSwaggerSchema,
@@ -203,7 +205,8 @@ const saveOrderDowelingLinkSwaggerSchema = {
   },
 } as const;
 
-const orderDetailResponseSwaggerSchema = {
+// Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
+export const orderDetailResponseSwaggerSchema = {
   type: 'object',
   required: [
     'id',
@@ -213,7 +216,8 @@ const orderDetailResponseSwaggerSchema = {
     'height',
     'width',
     'quantity',
-    'materialId',
+    // Variant B: materialId is nullable (NULL post-034); NOT in required.
+    'sheetMaterialTypeId',
     'millingTypeId',
     'edgeTypeId',
     'filmId',
@@ -239,8 +243,9 @@ const orderDetailResponseSwaggerSchema = {
     height: { type: 'number' },
     width: { type: 'number' },
     quantity: { type: 'integer' },
-    materialId: { type: 'integer' },
-    sheetMaterialTypeId: nullableIntegerSwaggerSchema,
+    // Variant B: materialId is NULL post-034 (nullable, NOT in required).
+    materialId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: always null post-migration 034; sheet_material_type_id is authoritative.' },
+    sheetMaterialTypeId: { type: 'integer', description: 'Variant B: required; authoritative sheet material type reference.' },
     millingTypeId: { type: 'integer' },
     edgeTypeId: { type: 'integer' },
     filmId: nullableIntegerSwaggerSchema,
