@@ -547,10 +547,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      await this.assertOrderScope(command.currentUser, order, [
+      const access = await this.assertOrderScope(command.currentUser, order, [
         'orders.update',
         'orders.change_production_status',
-      ], requestId);
+      ], requestId, { tx, allowAssignedProductionWorker: true });
       const status = await loadProductionStatus(tx, command.dto.productionStatusId);
       assertVersion(order, command.dto.version);
 
@@ -637,6 +637,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           afterStatusDistribution: afterDetails.statusDistribution,
           action: 'production_status_change',
           statusField: 'productionCurrentStatus',
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           requestId,
         },
       });
@@ -661,6 +663,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           affectedDetailCount: affectedDetailIds.length,
           action: 'production_status_change',
           scope: { source: 'order-header' },
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           idempotencyKey: command.dto.idempotencyKey,
         },
       });
@@ -717,10 +721,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const detail = await loadOrderDetailForUpdate(tx, command.detailId);
-      await this.assertOrderScope(command.currentUser, detail.order, [
+      const access = await this.assertOrderScope(command.currentUser, detail.order, [
         'orders.update',
         'orders.change_production_status',
-      ], requestId);
+      ], requestId, { tx, allowAssignedProductionWorker: true });
       const productionStatus = await loadProductionStatus(tx, command.productionStatusId);
 
       const existingEventId = await findDetailProductionEventId(
@@ -793,6 +797,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusName: productionStatus.productionStatusName,
           action: 'activate',
           statusField: 'productionDetailStage',
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           requestId,
         },
       });
@@ -816,6 +822,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusCode: productionStatus.productionStatusCode,
           action: 'activate',
           scope: { source: 'order-detail' },
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           idempotencyKey: command.dto.idempotencyKey,
         },
       });
@@ -1174,10 +1182,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      await this.assertOrderScope(command.currentUser, order, [
+      const access = await this.assertOrderScope(command.currentUser, order, [
         'orders.update',
         'orders.change_production_status',
-      ], requestId);
+      ], requestId, { tx, allowAssignedProductionWorker: true });
       const productionStatus = await loadProductionStatus(tx, command.productionStatusId);
       assertVersion(order, command.dto.version);
 
@@ -1255,6 +1263,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusCode: productionStatus.productionStatusCode,
           action: active ? 'activate' : 'deactivate',
           statusField: 'productionStage',
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           requestId,
         },
       });
@@ -1277,6 +1287,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusCode: productionStatus.productionStatusCode,
           action: active ? 'activate' : 'deactivate',
           scope: { source: 'calendar|order-header' },
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           idempotencyKey: command.dto.idempotencyKey,
         },
       });

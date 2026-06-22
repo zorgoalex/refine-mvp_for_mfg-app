@@ -1122,6 +1122,87 @@ describe('assertOrderScope assigned-production-worker path', () => {
   });
 });
 
+describe('assigned-worker audit metadata across production commands', () => {
+  it('changeProductionStatus stamps accessVia/assignmentSource into audit + outbox', async () => {
+    const database = createDatabase({
+      orderCreatedByUserId: 999,
+      orderManagerUserId: 888,
+      assignedUserIds: [20],
+    });
+    const repository = new PgProductionActionRepository(database.service);
+    await repository.changeProductionStatus({
+      currentUser: currentUser('worker', '20'),
+      orderId: 15,
+      dto: { productionStatusId: 2, version: 3, idempotencyKey: 'wrk-audit-1' },
+      requestId: 'req-w',
+    });
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('assigned_production_worker');
+    expect(params).toContain('order_workshops.responsible_employee_id');
+  });
+
+  it('activateProductionStage records assignment source for an assigned worker', async () => {
+    const database = createDatabase({
+      orderCreatedByUserId: 999,
+      orderManagerUserId: 888,
+      assignedUserIds: [20],
+      existingProductionEventId: null,
+    });
+    const repository = new PgProductionActionRepository(database.service);
+    await repository.activateProductionStage({
+      currentUser: currentUser('worker', '20'),
+      orderId: 15,
+      productionStatusId: 4,
+      dto: { version: 3, idempotencyKey: 'wrk-stage-act-1' },
+      requestId: 'req-sa',
+    });
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('assigned_production_worker');
+    expect(params).toContain('order_workshops.responsible_employee_id');
+  });
+
+  it('deactivateProductionStage records assignment source for an assigned worker', async () => {
+    const database = createDatabase({
+      orderCreatedByUserId: 999,
+      orderManagerUserId: 888,
+      assignedUserIds: [20],
+      existingProductionEventId: 42,
+    });
+    const repository = new PgProductionActionRepository(database.service);
+    await repository.deactivateProductionStage({
+      currentUser: currentUser('worker', '20'),
+      orderId: 15,
+      productionStatusId: 4,
+      dto: { version: 3, idempotencyKey: 'wrk-stage-deact-1' },
+      requestId: 'req-sd',
+    });
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('assigned_production_worker');
+    expect(params).toContain('order_workshops.responsible_employee_id');
+  });
+
+  it('activateDetailProductionStage enforces parent-order scope and records assignment source', async () => {
+    const database = createDatabase({
+      orderCreatedByUserId: 999,
+      orderManagerUserId: 888,
+      assignedUserIds: [20],
+      existingDetailProductionEventId: null,
+    });
+    const repository = new PgProductionActionRepository(database.service);
+    await repository.activateDetailProductionStage({
+      currentUser: currentUser('worker', '20'),
+      detailId: 99,
+      productionStatusId: 4,
+      dto: { idempotencyKey: 'wrk-detail-1' },
+      requestId: 'req-d',
+    });
+    const params = normalizedParams(database.queries);
+    expect(params).toContain('assigned_production_worker');
+    expect(params).toContain('order_workshops.responsible_employee_id');
+    expect(normalizedSql(database.queries)).toContain('SELECT DISTINCT u.user_id');
+  });
+});
+
 function createDatabase(options: {
   orderVersion?: number;
   orderStatusId?: number;
