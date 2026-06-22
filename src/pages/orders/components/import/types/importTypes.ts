@@ -97,7 +97,9 @@ export interface ImportRow {
 export interface ResolvedRow extends ImportRow {
   edge_type_id?: number | null;
   film_id?: number | null;
-  material_id?: number | null;
+  /** Variant B: resolved via sheet_material_types (cuttable only). Always null on new imports. */
+  material_id?: null;
+  sheet_material_type_id?: number | null;
   milling_type_id?: number | null;
 }
 
@@ -111,6 +113,7 @@ export interface ValidatedRow extends ResolvedRow {
   isValid: boolean;
   errors: FieldError[];
   warnings: FieldError[];
+  sheet_material_type_id?: number | null;
 }
 
 // ============================================================================
@@ -125,11 +128,18 @@ export interface ReferenceItem {
   name: string;
 }
 
+export interface SheetMaterialReferenceItem extends ReferenceItem {
+  isCuttable?: boolean;
+}
+
 export interface ReferenceData {
   edgeTypes: ReferenceItem[];
   films: ReferenceItem[];
-  materials: ReferenceItem[];
+  /** Variant B: replaced by sheetMaterialTypes for order detail resolution. Kept for compatibility. */
+  materials?: ReferenceItem[];
   millingTypes: ReferenceItem[];
+  /** Variant B: cuttable sheet types used for import material-name resolution. */
+  sheetMaterialTypes: SheetMaterialReferenceItem[];
 }
 
 // ============================================================================
@@ -159,7 +169,7 @@ export const FIELD_CONFIGS: FieldConfig[] = [
   { field: 'width', label: 'Ширина (мм)', required: true, type: 'number' },
   { field: 'quantity', label: 'Количество', required: true, type: 'number' },
   { field: 'edge_type', label: 'Обкат', required: false, type: 'reference', referenceResource: 'edge_types' },
-  { field: 'material', label: 'Материал', required: false, type: 'reference', referenceResource: 'materials' },
+  { field: 'material', label: 'Материал', required: false, type: 'reference', referenceResource: 'sheet_material_types' },
   { field: 'milling_type', label: 'Фрезеровка', required: false, type: 'reference', referenceResource: 'milling_types' },
   { field: 'film', label: 'Плёнка', required: false, type: 'reference', referenceResource: 'films' },
   { field: 'note', label: 'Примечание', required: false, type: 'text' },
@@ -179,7 +189,8 @@ export const FIELD_KEYWORDS: Record<ImportableField, string[]> = {
 };
 
 export const IMPORT_DEFAULTS = {
-  material_id: 1,
+  // material_id removed (Variant B, Critic R6 M2): imported rows seed material_id: null;
+  // material is resolved via sheet_material_type_id against sheet_material_types.
   milling_type_id: 1,
   edge_type_id: 1,
   priority: 100,

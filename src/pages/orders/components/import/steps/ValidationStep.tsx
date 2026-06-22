@@ -159,15 +159,15 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
     },
     {
       title: 'Материал',
-      dataIndex: 'material_id',
-      key: 'material_id',
+      dataIndex: 'sheet_material_type_id',
+      key: 'sheet_material_type_id',
       width: 140,
       render: (value: number | null, row: ValidatedRow, index: number) => (
         <div>
           <RefSelectEditor
             value={value}
-            items={referenceData.materials}
-            onChange={(val) => onUpdateRow(index, 'material_id', val)}
+            items={referenceData.sheetMaterialTypes ?? []}
+            onChange={(val) => onUpdateRow(index, 'sheet_material_type_id', val)}
           />
           {row.materialName && !value && (
             <Text type="secondary" style={{ fontSize: 10 }}>{row.materialName}</Text>

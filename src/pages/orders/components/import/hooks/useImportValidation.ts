@@ -9,6 +9,7 @@ import type {
   ValidatedRow,
   ReferenceData,
   ReferenceItem,
+  SheetMaterialReferenceItem,
   FieldError,
   NormalizedRange,
   ImportableField,
@@ -115,6 +116,30 @@ export const findReferenceId = (name: string | null | undefined, items: Referenc
   return null;
 };
 
+/** Partial reference context for pure row resolution (used in tests and internally). */
+export interface ResolveImportRowRefs {
+  sheetMaterialTypes?: SheetMaterialReferenceItem[];
+}
+
+/**
+ * Pure helper: resolves a single partial ImportRow's materialName against
+ * sheet_material_types (cuttable types only, per Critic R21 B1) and returns
+ * the resolved ids. Used both internally and in unit tests.
+ */
+export function resolveImportRow(
+  row: Partial<ImportRow>,
+  refs: ResolveImportRowRefs,
+): { sheet_material_type_id: number | null; material_id: null } {
+  const cuttableTypes = (refs.sheetMaterialTypes ?? []).filter(
+    (t) => t.isCuttable !== false,
+  );
+  const sheet_material_type_id = findReferenceId(
+    row.materialName ?? null,
+    cuttableTypes,
+  );
+  return { sheet_material_type_id, material_id: null };
+}
+
 export const useImportValidation = (): UseImportValidationReturn => {
   const [validatedRows, setValidatedRows] = useState<ValidatedRow[]>([]);
   const [referenceData, setReferenceData] = useState<ReferenceData>({
@@ -122,6 +147,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
     films: [],
     materials: [],
     millingTypes: [],
+    sheetMaterialTypes: [],
   });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -176,7 +202,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
         const key = String(row.filmName).trim();
         countMap.films.set(key, (countMap.films.get(key) || 0) + 1);
       }
-      if (row.materialName && !row.material_id) {
+      if (row.materialName && !row.sheet_material_type_id) {
         const key = String(row.materialName).trim();
         countMap.materials.set(key, (countMap.materials.get(key) || 0) + 1);
       }
@@ -227,7 +253,8 @@ export const useImportValidation = (): UseImportValidationReturn => {
     const fieldMap = {
       edge_type: { nameField: 'edgeTypeName', idField: 'edge_type_id' },
       film: { nameField: 'filmName', idField: 'film_id' },
-      material: { nameField: 'materialName', idField: 'material_id' },
+      // Variant B: material resolves to sheet_material_type_id, not material_id
+      material: { nameField: 'materialName', idField: 'sheet_material_type_id' },
       milling_type: { nameField: 'millingTypeName', idField: 'milling_type_id' },
     };
 
@@ -306,9 +333,10 @@ export const useImportValidation = (): UseImportValidationReturn => {
     }
 
     // Content-based detection for reference fields
+    // Variant B: material auto-detection uses sheetMaterialTypes (cuttable only)
     const refFields: { field: ImportableField; data: ReferenceItem[] }[] = [
       { field: 'edge_type', data: referenceData.edgeTypes },
-      { field: 'material', data: referenceData.materials },
+      { field: 'material', data: (referenceData.sheetMaterialTypes ?? []).filter(t => t.isCuttable !== false) },
       { field: 'milling_type', data: referenceData.millingTypes },
       { field: 'film', data: referenceData.films },
     ];
@@ -454,7 +482,10 @@ export const useImportValidation = (): UseImportValidationReturn => {
         // Resolve references
         const edge_type_id = findReferenceId(row.edgeTypeName, referenceData.edgeTypes);
         const film_id = findReferenceId(row.filmName, referenceData.films);
-        const material_id = findReferenceId(row.materialName, referenceData.materials);
+        // Variant B: material resolves to sheet_material_type_id against cuttable types only
+        const { sheet_material_type_id } = resolveImportRow(row, {
+          sheetMaterialTypes: referenceData.sheetMaterialTypes,
+        });
         const milling_type_id = findReferenceId(row.millingTypeName, referenceData.millingTypes);
 
         // Warnings for unresolved references
@@ -464,7 +495,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
         if (row.filmName && !film_id) {
           warnings.push({ field: 'film', message: `Не найдена плёнка: "${row.filmName}"`, type: 'warning' });
         }
-        if (row.materialName && !material_id) {
+        if (row.materialName && !sheet_material_type_id) {
           warnings.push({ field: 'material', message: `Не найден материал: "${row.materialName}"`, type: 'warning' });
         }
         if (row.millingTypeName && !milling_type_id) {
@@ -478,7 +509,8 @@ export const useImportValidation = (): UseImportValidationReturn => {
           quantity: isNaN(quantity) ? null : quantity,
           edge_type_id,
           film_id,
-          material_id,
+          material_id: null,
+          sheet_material_type_id,
           milling_type_id,
           isValid: errors.length === 0,
           errors,
@@ -519,7 +551,10 @@ export const useImportValidation = (): UseImportValidationReturn => {
         // Resolve references
         const edge_type_id = findReferenceId(row.edgeTypeName, referenceData.edgeTypes);
         const film_id = findReferenceId(row.filmName, referenceData.films);
-        const material_id = findReferenceId(row.materialName, referenceData.materials);
+        // Variant B: material resolves to sheet_material_type_id against cuttable types only
+        const { sheet_material_type_id } = resolveImportRow(row, {
+          sheetMaterialTypes: referenceData.sheetMaterialTypes,
+        });
         const milling_type_id = findReferenceId(row.millingTypeName, referenceData.millingTypes);
 
         // Warnings for unresolved references
@@ -529,7 +564,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
         if (row.filmName && !film_id) {
           warnings.push({ field: 'film', message: `Не найдена плёнка: "${row.filmName}"`, type: 'warning' });
         }
-        if (row.materialName && !material_id) {
+        if (row.materialName && !sheet_material_type_id) {
           warnings.push({ field: 'material', message: `Не найден материал: "${row.materialName}"`, type: 'warning' });
         }
         if (row.millingTypeName && !milling_type_id) {
@@ -543,7 +578,8 @@ export const useImportValidation = (): UseImportValidationReturn => {
           quantity: isNaN(quantity) ? null : quantity,
           edge_type_id,
           film_id,
-          material_id,
+          material_id: null,
+          sheet_material_type_id,
           milling_type_id,
           isValid: errors.length === 0,
           errors,
