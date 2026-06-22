@@ -90,13 +90,15 @@ async function createSchema(pool: Pool): Promise<void> {
       delete_flag BOOLEAN NOT NULL DEFAULT false
     );
     -- Variant B seed: material_id = NULL; sheet_material_type_id is authoritative.
-    -- Details 1,2 -> sheet type 1 (2800x2070, cuttable); 3,4 -> sheet type 2 (2070x2800, cuttable).
-    -- Detail 5 (order 11) uses sheet type 2, NULL material (Variant B model).
-    -- Detail 6 (order 12) uses sheet type 3 (is_cuttable=false) -> not_cuttable path.
+    -- Details 1,2 (order 9) -> sheet type 1 (2800x2070, cuttable).
+    -- Detail  3  (order 10) -> sheet_material_type_id = NULL (no_sheet_spec path).
+    -- Detail  4  (order 10) -> sheet type 2 (2070x2800, cuttable).
+    -- Detail  5  (order 11) -> sheet type 2 (cuttable, SP3 shadow test).
+    -- Detail  6  (order 12) -> sheet type 3 (is_cuttable=false) -> not_cuttable path.
     INSERT INTO order_details (detail_id, order_id, quantity, width, height, material_id, production_status_id, sheet_material_type_id) VALUES
       (1, 9, 1, 600, 400, NULL, 1, 1),
       (2, 9, 1, 600, 400, NULL, 1, 1),
-      (3, 10, 1, 600, 400, NULL, 1, 2),
+      (3, 10, 1, 600, 400, NULL, 1, NULL),
       (4, 10, 1, 600, 400, NULL, 1, 2),
       (5, 11, 1, 600, 400, NULL, 1, 2),
       (6, 12, 1, 600, 400, NULL, 1, 3);
@@ -312,7 +314,7 @@ describeIntegration('PgCutRepository (integration)', () => {
 
   it('placements report ONLY eligible details (ineligible placed rows are not surfaced)', async () => {
     const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
-    // detail 3 -> material 2 (no sheet spec) is INELIGIBLE; force it into a job at the
+    // detail 3 -> sheet_material_type_id = NULL (no_sheet_spec) is INELIGIBLE; force it into a job at the
     // DB level (the API would reject it) to prove placements filters it out.
     const j = await pool.query(`INSERT INTO cut_job (name, status) VALUES ('forced', 'draft') RETURNING cut_job_id`);
     const forcedJobId = j.rows[0].cut_job_id;
@@ -453,7 +455,7 @@ describeIntegration('PgCutRepository (integration)', () => {
 
   it('refuses to reserve an ineligible detail (no_sheet_spec) server-side', async () => {
     const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
-    // detail 3 -> material 2 -> no sheet_material_type.
+    // detail 3 -> sheet_material_type_id = NULL (no_sheet_spec in Variant B).
     await expect(
       repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест ineligible', detailIds: [3] }, requestId: 'ri' }),
     ).rejects.toMatchObject({ statusCode: 422, code: 'CUT_DETAIL_NOT_ELIGIBLE' });
