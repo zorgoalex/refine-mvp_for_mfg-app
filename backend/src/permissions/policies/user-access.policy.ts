@@ -16,53 +16,49 @@ export interface TargetUserSubject {
   role: UserRole;
 }
 
+export type UserDenialReason =
+  | 'missing_permission'
+  | 'role_hierarchy_denied'
+  | 'role_assignment_denied'
+  | 'self_target_denied';
+
 export class UserAccessPolicy {
-  canCreateUser(actor: CurrentUser, targetRole: UserRole): boolean {
-    return (
-      actor.permissions.includes('users.create') &&
-      this.canAssignRole(actor.role, targetRole)
-    );
+  canCreateUser(actor: CurrentUser, targetRole: UserRole): UserDenialReason | null {
+    if (!actor.permissions.includes('users.create')) return 'missing_permission';
+    if (!this.canAssignRole(actor.role, targetRole)) return 'role_assignment_denied';
+    return null;
   }
 
-  canUpdateUser(actor: CurrentUser, targetUser: TargetUserSubject, nextRole?: UserRole): boolean {
-    if (!actor.permissions.includes('users.update')) {
-      return false;
-    }
-
-    if (!this.canManageTarget(actor.role, targetUser.role)) {
-      return false;
-    }
-
-    return nextRole ? this.canAssignRole(actor.role, nextRole) : true;
+  canUpdateUser(actor: CurrentUser, target: TargetUserSubject, nextRole?: UserRole): UserDenialReason | null {
+    if (!actor.permissions.includes('users.update')) return 'missing_permission';
+    if (!this.canManageTarget(actor.role, target.role)) return 'role_hierarchy_denied';
+    if (nextRole && !this.canAssignRole(actor.role, nextRole)) return 'role_assignment_denied';
+    return null;
   }
 
-  canChangePassword(actor: CurrentUser, targetUser: TargetUserSubject): boolean {
-    return (
-      actor.permissions.includes('users.change_password') &&
-      this.canManageTarget(actor.role, targetUser.role)
-    );
+  canChangePassword(actor: CurrentUser, target: TargetUserSubject): UserDenialReason | null {
+    if (!actor.permissions.includes('users.change_password')) return 'missing_permission';
+    if (!this.canManageTarget(actor.role, target.role)) return 'role_hierarchy_denied';
+    return null;
   }
 
-  canDeactivate(actor: CurrentUser, targetUser: TargetUserSubject): boolean {
-    return (
-      actor.id !== targetUser.id &&
-      actor.permissions.includes('users.deactivate') &&
-      this.canManageTarget(actor.role, targetUser.role)
-    );
+  canDeactivate(actor: CurrentUser, target: TargetUserSubject): UserDenialReason | null {
+    if (actor.id === target.id) return 'self_target_denied';
+    if (!actor.permissions.includes('users.deactivate')) return 'missing_permission';
+    if (!this.canManageTarget(actor.role, target.role)) return 'role_hierarchy_denied';
+    return null;
   }
 
-  canActivate(actor: CurrentUser, targetUser: TargetUserSubject): boolean {
-    return (
-      actor.permissions.includes('users.activate') &&
-      this.canManageTarget(actor.role, targetUser.role)
-    );
+  canActivate(actor: CurrentUser, target: TargetUserSubject): UserDenialReason | null {
+    if (!actor.permissions.includes('users.activate')) return 'missing_permission';
+    if (!this.canManageTarget(actor.role, target.role)) return 'role_hierarchy_denied';
+    return null;
   }
 
   private canAssignRole(actorRole: UserRole, targetRole: UserRole): boolean {
     if (actorRole === 'superadmin') {
       return true;
     }
-
     return ROLE_RANK[targetRole] < ROLE_RANK[actorRole];
   }
 
@@ -70,7 +66,6 @@ export class UserAccessPolicy {
     if (actorRole === 'superadmin') {
       return true;
     }
-
     return ROLE_RANK[targetRole] < ROLE_RANK[actorRole];
   }
 }
