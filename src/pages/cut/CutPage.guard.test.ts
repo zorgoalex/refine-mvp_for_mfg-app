@@ -34,6 +34,25 @@ describe('CutPage source guards', () => {
     expect(source).toContain('Повторить расчёт');
   });
 
+  it('lists the details already reserved into the job (job.items), not only the eligible pool', () => {
+    // The reopened-job surface must render the reserved cut_job_item rows so a
+    // selection staged from Orders "Добавить в раскрой" is visible; otherwise the
+    // job looks empty and only the candidate-pool button shows.
+    expect(source).toContain('Детали задания');
+    expect(source).toContain('jobItemColumns');
+    expect(source).toContain('dataSource={job.items}');
+    // The reserved details are removable on the same job (release reservation).
+    expect(source).toContain('cutApi.removeItem');
+    expect(source).toContain('Убрать');
+  });
+
+  it('prefills the eligible-load criteria with the reserved orders when opening a job', () => {
+    // Opening a job must scope "Загрузить подходящие детали" to the order(s) the
+    // job was built from, not scan every order. Source of truth = reserved items.
+    expect(source).toContain('distinctOrderIdsFromItems');
+    expect(source).toContain('form.setFieldsValue');
+  });
+
   it('refreshes the job after a failed calculate so the reason + fresh version show', () => {
     // The calculate catch must reload the job (persisted reason + bumped version),
     // otherwise the Alert never renders and a retry would 409 on a stale version.

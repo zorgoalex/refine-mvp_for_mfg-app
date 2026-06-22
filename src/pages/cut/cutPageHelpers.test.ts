@@ -6,6 +6,7 @@ import {
   cutJobCounts,
   cutJobSourceLabel,
   cutJobStatusLabel,
+  distinctOrderIdsFromItems,
   filterJobsByStatus,
   formatGroupSummary,
   noSheetSpecMessage,
@@ -123,5 +124,11 @@ describe('cutPageHelpers', () => {
     expect(restrictDetailIds([1, 2, 3], [])).toEqual([]);
     expect(restrictDetailIds([1, 2], [5, 6])).toEqual([]);
     expect(restrictDetailIds([1, 1, 2], [1, 2])).toEqual([1, 2]);
+  });
+
+  it('distinctOrderIdsFromItems keeps first-seen order, drops dups and invalid ids', () => {
+    expect(distinctOrderIdsFromItems([{ orderId: 9 }, { orderId: 10 }, { orderId: 9 }])).toEqual([9, 10]);
+    expect(distinctOrderIdsFromItems([])).toEqual([]);
+    expect(distinctOrderIdsFromItems([{ orderId: 0 }, { orderId: -1 }, { orderId: 7 }])).toEqual([7]);
   });
 });

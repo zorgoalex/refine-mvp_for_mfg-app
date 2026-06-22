@@ -19,6 +19,25 @@ export function noSheetSpecMessage(noSheetSpecCount: number): string | null {
   return `${noSheetSpecCount} деталей без раскройной спецификации материала — задайте её в Конфигурации`;
 }
 
+/**
+ * Distinct order ids of the details already reserved into a job, in first-seen
+ * order. Used to prefill the eligible-load criteria on open so "Загрузить
+ * подходящие детали" is scoped to the order(s) the job was actually built from,
+ * instead of scanning every order (the stored selection_criteria is not exposed
+ * on the job DTO, so the reserved items are the source of truth).
+ */
+export function distinctOrderIdsFromItems(items: ReadonlyArray<{ orderId: number }>): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const item of items) {
+    if (Number.isInteger(item.orderId) && item.orderId > 0 && !seen.has(item.orderId)) {
+      seen.add(item.orderId);
+      out.push(item.orderId);
+    }
+  }
+  return out;
+}
+
 /** Detail ids that may be added to the basket (eligible only). */
 export function selectableDetailIds(details: ReadonlyArray<{ orderDetailId: number; eligible: boolean }>): number[] {
   return details.filter((d) => d.eligible).map((d) => d.orderDetailId);

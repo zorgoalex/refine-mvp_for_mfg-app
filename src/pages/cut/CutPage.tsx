@@ -20,6 +20,7 @@ import { ApiError } from '../../api/httpClient';
 import type {
   CutGroupDto,
   CutJobDto,
+  CutJobItemDto,
   EligibleDetailDto,
 } from '../../api/types/cutApi.types';
 import { can } from '../../utils/permissions';
@@ -29,6 +30,7 @@ import {
   cutJobCounts,
   cutJobSourceLabel,
   cutJobStatusLabel,
+  distinctOrderIdsFromItems,
   filterJobsByStatus,
   formatGroupSummary,
   noSheetSpecMessage,
@@ -134,6 +136,17 @@ export const CutPage: React.FC = () => {
       try {
         const fresh = await cutApi.get(cutJobId);
         setJob(fresh);
+        // Prefill the eligible-load criteria with the order(s) this job was built
+        // from (the reserved items' orders) so "Загрузить подходящие детали" is
+        // scoped to those orders instead of scanning everything. Material/film
+        // filters are cleared to avoid stale criteria leaking from a prior job.
+        const orderIds = distinctOrderIdsFromItems(fresh.items);
+        form.setFieldsValue({
+          name: fresh.name,
+          orderIds: orderIds.length > 0 ? orderIds.join(',') : undefined,
+          materialIds: undefined,
+          filmIds: undefined,
+        });
         setEligible(null);
         setSelected([]);
         setSheetImages({});
@@ -143,7 +156,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [handleError],
+    [form, handleError],
   );
 
   const archiveJob = useCallback(
@@ -216,6 +229,24 @@ export const CutPage: React.FC = () => {
       setBusy(false);
     }
   }, [job, selected, loadJobs, handleError]);
+
+  const removeJobItem = useCallback(
+    async (cutJobItemId: number) => {
+      if (!job) return;
+      setBusy(true);
+      try {
+        const updated = await cutApi.removeItem(job.cutJobId, cutJobItemId, job.version);
+        setJob(updated);
+        message.success('Деталь убрана из раскроя');
+        await loadJobs();
+      } catch (error) {
+        handleError(error, 'Не удалось убрать деталь');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [job, loadJobs, handleError],
+  );
 
   const calculate = useCallback(async () => {
     if (!job) return;
@@ -377,6 +408,30 @@ export const CutPage: React.FC = () => {
     [],
   );
 
+  // The details an operator actually reserved into this job (cut_job_item rows),
+  // including those staged from the Orders "Добавить в раскрой" action. Showing
+  // them is what makes a reopened job legible: "Загрузить подходящие детали" only
+  // surfaces the candidate pool, never the selection already in the job.
+  const jobItemColumns: ColumnsType<CutJobItemDto> = useMemo(
+    () => [
+      { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detail' },
+      { title: 'Заказ', dataIndex: 'orderId', key: 'order' },
+      { title: 'Кол-во', dataIndex: 'qty', key: 'qty' },
+      {
+        title: 'Действия',
+        key: 'actions',
+        width: 120,
+        render: (_: unknown, row: CutJobItemDto) =>
+          canManage ? (
+            <Button size="small" type="link" danger onClick={() => removeJobItem(row.cutJobItemId)} disabled={busy}>
+              Убрать
+            </Button>
+          ) : null,
+      },
+    ],
+    [busy, canManage, removeJobItem],
+  );
+
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
 
   if (!can('cut.view')) {
@@ -477,6 +532,19 @@ export const CutPage: React.FC = () => {
               </Button>
             )}
           </Space>
+        </Card>
+      )}
+
+      {job && (
+        <Card size="small" title={`Детали задания (${job.items.length})`}>
+          <Table<CutJobItemDto>
+            size="small"
+            rowKey="cutJobItemId"
+            columns={jobItemColumns}
+            dataSource={job.items}
+            pagination={false}
+            locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
+          />
         </Card>
       )}
 
