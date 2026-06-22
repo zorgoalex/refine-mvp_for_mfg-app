@@ -125,10 +125,16 @@ export async function seedVariantAMain(client: Client): Promise<void> {
 
 // Critic R16 B2: per-test seed hook. Runs `seed(client)` (insert ONLY the offending
 // row(s)) then `sql` against a FRESH isolated schema, so abort-path tests are executable.
+//
+// restoreSearchPath: caller passes the search_path string to restore after the nested
+// schema is torn down. Required when the caller itself runs inside an isolated schema
+// (e.g. the 034-apply test), so the client returns to the correct outer schema instead
+// of falling back to 'public'. Pass null to restore to 'public' (original behaviour).
 export async function applyInIsolatedSchema(
   client: Client,
   seed: (c: Client) => Promise<void>,
   sql: string,
+  restoreSearchPath: string | null = null,
 ): Promise<void> {
   const schema = `vb_${process.hrtime.bigint()}`;
   await client.query(`CREATE SCHEMA ${schema}`);
@@ -150,7 +156,9 @@ export async function applyInIsolatedSchema(
     if (!failed) {
       // nothing to roll back; cleanup normally
     }
-    await client.query(`SET search_path TO public`);
+    // Restore caller's search_path before dropping the nested schema.
+    const restoreTo = restoreSearchPath ?? 'public';
+    try { await client.query(`SET search_path TO ${restoreTo}`); } catch { /* ignore */ }
     await client.query(`DROP SCHEMA ${schema} CASCADE`);
   }
 }

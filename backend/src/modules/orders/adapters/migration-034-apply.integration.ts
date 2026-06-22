@@ -19,8 +19,14 @@ const mig = (n: string) =>
 
 d('migration 034 apply (Variant B sunset)', () => {
   const client = new Client({ connectionString: url });
+  // Unique schema for this run — isolates from sibling files (029-apply, 034-rollback,
+  // shadow-material) that run in parallel and also write to pg.
+  const schema = `vb_034_apply_${process.hrtime.bigint()}`;
+
   beforeAll(async () => {
     await client.connect();
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}, public`);
     // Critic R7 M3: a CONCRETE bootstrap, not "minimal schema". The 034 view rebuilds
     // reference clients, order_statuses, payment_statuses, production_statuses,
     // milling_types, edge_types, films, employees, doweling_orders, order_doweling_links,
@@ -36,6 +42,8 @@ d('migration 034 apply (Variant B sunset)', () => {
     await seedVariantAMain(client); // main dataset (separate from bootstrap)
   });
   afterAll(async () => {
+    try { await client.query(`SET search_path TO public`); } catch { /* ignore */ }
+    try { await client.query(`DROP SCHEMA ${schema} CASCADE`); } catch { /* ignore */ }
     await client.end();
   });
 
@@ -83,6 +91,7 @@ d('migration 034 apply (Variant B sunset)', () => {
           );
         },
         SUNSET(),
+        `${schema}, public`,
       ),
     ).rejects.toThrow(/no sheet_material_type_id/);
   });
@@ -96,6 +105,7 @@ d('migration 034 apply (Variant B sunset)', () => {
           await c.query(`INSERT INTO orders (order_id, material_id, created_by) OVERRIDING SYSTEM VALUE VALUES (702, 9992, 1)`);
         },
         SUNSET(),
+        `${schema}, public`,
       ),
     ).rejects.toThrow(/unmapped header material_id/);
   });
@@ -135,6 +145,7 @@ d('migration 034 apply (Variant B sunset)', () => {
           await c.query(`INSERT INTO warehouse_stock (material_id) VALUES (9993)`);
         },
         SUNSET(),
+        `${schema}, public`,
       ),
     ).rejects.toThrow(/shadow materials still referenced/);
   });
@@ -162,7 +173,8 @@ d('migration 034 apply (Variant B sunset)', () => {
   it('order_details_view column list + order is unchanged from 029', async () => {
     const cols = await client.query(
       `SELECT column_name FROM information_schema.columns
-        WHERE table_name = 'order_details_view' ORDER BY ordinal_position`,
+        WHERE table_schema = $1 AND table_name = 'order_details_view' ORDER BY ordinal_position`,
+      [schema],
     );
     expect(cols.rows.map((c) => c.column_name)).toEqual([
       'detail_id',
@@ -195,7 +207,8 @@ d('migration 034 apply (Variant B sunset)', () => {
   it('orders_view column list + order is unchanged from 029', async () => {
     const cols = await client.query(
       `SELECT column_name FROM information_schema.columns
-        WHERE table_name = 'orders_view' ORDER BY ordinal_position`,
+        WHERE table_schema = $1 AND table_name = 'orders_view' ORDER BY ordinal_position`,
+      [schema],
     );
     // exact 029 orders_view column list (verbatim ordinal order) — material_name
     // keeps its position; only its expression changes to smt.name.
@@ -247,8 +260,8 @@ d('migration 034 apply (Variant B sunset)', () => {
   const cols = async (view: string) =>
     (
       await client.query(
-        `SELECT column_name FROM information_schema.columns WHERE table_name=$1 ORDER BY ordinal_position`,
-        [view],
+        `SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position`,
+        [schema, view],
       )
     ).rows.map((c) => c.column_name);
 

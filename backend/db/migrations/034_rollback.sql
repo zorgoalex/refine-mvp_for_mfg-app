@@ -47,15 +47,54 @@ ALTER TABLE order_details ALTER COLUMN material_id SET NOT NULL;
 -- 5. Restore sheet_material_type_id to nullable (Variant-A: optional SP3 column).
 ALTER TABLE order_details ALTER COLUMN sheet_material_type_id DROP NOT NULL;
 
--- 6. Drop the post-034 header constraint and restore the Variant-A XOR check.
+-- 6. Drop the post-034 header constraint and restore the Variant-A XOR check (idempotent).
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_orders_material_id_null;
-ALTER TABLE orders ADD CONSTRAINT chk_orders_sheet_xor_material
-  CHECK (sheet_material_type_id IS NULL OR material_id IS NULL)
-  NOT VALID;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'chk_orders_sheet_xor_material'
+      AND conrelid = 'orders'::regclass
+  ) THEN
+    ALTER TABLE orders ADD CONSTRAINT chk_orders_sheet_xor_material
+      CHECK (sheet_material_type_id IS NULL OR material_id IS NULL)
+      NOT VALID;
+  END IF;
+END$$;
 
 -- 7. Restore the 030 trigger (shadow pairing on order_details INSERT/UPDATE).
---    The trigger function shadow_pairing_trigger() was created by 030 and is still present
---    (we never dropped it in 034, only the trigger binding). Re-create the binding.
+--    Migration 034 dropped assert_order_detail_shadow_pairing() + its trigger binding.
+--    Recreate the function first, then the trigger (idempotent via OR REPLACE / IF NOT EXISTS).
+CREATE OR REPLACE FUNCTION assert_order_detail_shadow_pairing()
+RETURNS trigger AS $$
+DECLARE
+  v_is_shadow BOOLEAN;
+  v_shadow_of BIGINT;
+BEGIN
+  IF NEW.material_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT is_sheet_shadow, shadow_of_sheet_material_type_id
+    INTO v_is_shadow, v_shadow_of
+    FROM materials
+   WHERE material_id = NEW.material_id;
+
+  IF v_is_shadow IS TRUE THEN
+    IF NEW.sheet_material_type_id IS NULL
+       OR v_shadow_of IS NULL
+       OR NEW.sheet_material_type_id <> v_shadow_of THEN
+      RAISE EXCEPTION
+        'order_details.material_id % is a hidden sheet shadow; sheet_material_type_id must equal % (got %)',
+        NEW.material_id, v_shadow_of, NEW.sheet_material_type_id
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -65,7 +104,7 @@ BEGIN
   ) THEN
     CREATE TRIGGER order_detail_shadow_pairing
       BEFORE INSERT OR UPDATE ON order_details
-      FOR EACH ROW EXECUTE FUNCTION shadow_pairing_trigger();
+      FOR EACH ROW EXECUTE FUNCTION assert_order_detail_shadow_pairing();
   END IF;
 END$$;
 

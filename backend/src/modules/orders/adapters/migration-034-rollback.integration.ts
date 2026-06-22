@@ -1,6 +1,11 @@
 // backend/src/modules/orders/adapters/migration-034-rollback.integration.ts
 // Integration test: apply 034 then 034_rollback, assert Variant-A invariants are restored.
 // Uses an ephemeral Postgres; set SHEET_INTEGRATION_DATABASE_URL to enable.
+//
+// ISOLATION: this file runs its ENTIRE lifecycle inside a dedicated schema
+// (vb_rollback_<hrtime>) so it never touches `public` and cannot collide with
+// sibling integration files (029-apply, 034-apply, shadow-material) that all
+// create objects in public in parallel.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'pg';
@@ -17,9 +22,17 @@ const mig = (n: string) =>
 
 d('migration 034 rollback (Variant B → Variant A revert)', () => {
   const client = new Client({ connectionString: url });
+  // Unique schema name for this run — avoids collision even under rapid re-runs.
+  const schema = `vb_rollback_${process.hrtime.bigint()}`;
 
   beforeAll(async () => {
     await client.connect();
+
+    // Create the isolated schema and put it first on the search path.
+    // All subsequent DDL/DML (bootstrap, seed, migrations) lands here, not in public.
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}, public`);
+
     // Apply the full forward chain first: bootstrap + seed Variant-A data + 034.
     await bootstrapVariantBSchema(client);
     await seedVariantAMain(client);
@@ -29,6 +42,9 @@ d('migration 034 rollback (Variant B → Variant A revert)', () => {
   });
 
   afterAll(async () => {
+    // Reset search_path before dropping the schema (avoids stale path on re-use).
+    try { await client.query(`SET search_path TO public`); } catch { /* ignore */ }
+    try { await client.query(`DROP SCHEMA ${schema} CASCADE`); } catch { /* ignore */ }
     await client.end();
   });
 
