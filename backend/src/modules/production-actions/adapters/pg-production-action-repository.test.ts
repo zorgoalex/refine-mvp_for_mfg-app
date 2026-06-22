@@ -1273,7 +1273,7 @@ describe('assigned-worker audit metadata across production commands', () => {
       expect(normalizedSql(database.queries)).not.toContain('INSERT INTO production_status_events');
     });
 
-    it('locks selected detail rows FOR UPDATE BEFORE the parent order row (details-before-order)', async () => {
+    it('locks the parent order row BEFORE locking detail rows (order-before-detail discipline)', async () => {
       const database = createDatabase({
         detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
         updatedDetailIds: [100],
@@ -1282,24 +1282,21 @@ describe('assigned-worker audit metadata across production commands', () => {
 
       await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
 
-      // Global deadlock-avoidance order: the SELECTED detail rows are locked FOR UPDATE (ANY filter)
-      // BEFORE the parent order row is locked FOR UPDATE — matching the detail-stage command's order.
+      // Follows the order-level production commands' lock discipline: the order row is locked
+      // FOR UPDATE first, then the detail rows are locked FOR UPDATE.
+      const orderLockIdx = database.queries.findIndex((query) =>
+        normalizeSql(query.text).startsWith('SELECT order_id, client_id'),
+      );
       const detailLockIdx = database.queries.findIndex((query) => {
         const n = normalizeSql(query.text);
         return (
           n.startsWith('SELECT detail_id, production_status_id FROM order_details') &&
-          n.includes('detail_id = ANY') &&
           n.includes('FOR UPDATE')
         );
       });
-      const orderLockIdx = database.queries.findIndex((query) =>
-        normalizeSql(query.text).startsWith(
-          'SELECT order_id, client_id',
-        ),
-      );
-      expect(detailLockIdx).toBeGreaterThanOrEqual(0);
       expect(orderLockIdx).toBeGreaterThanOrEqual(0);
-      expect(detailLockIdx).toBeLessThan(orderLockIdx);
+      expect(detailLockIdx).toBeGreaterThanOrEqual(0);
+      expect(orderLockIdx).toBeLessThan(detailLockIdx);
       expect(normalizedSql(database.queries)).toContain(
         'FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE',
       );
@@ -1655,19 +1652,6 @@ function createDatabase(options: {
       if (normalized.startsWith('UPDATE order_details SET production_status_id')) {
         const ids = options.updatedDetailIds ?? [];
         return { rows: ids.map((id) => ({ detail_id: id })), rowCount: ids.length };
-      }
-
-      if (
-        normalized.startsWith('SELECT detail_id, production_status_id FROM order_details') &&
-        normalized.includes('detail_id = ANY') &&
-        normalized.includes('FOR UPDATE')
-      ) {
-        // lockSelectedOrderDetails: return only the requested ids that exist among the order's details.
-        const requested = (params[1] as number[]) ?? [];
-        const rows = (options.detailStatusRowsBefore ?? []).filter((row) =>
-          requested.includes(row.detail_id),
-        );
-        return { rows, rowCount: rows.length };
       }
 
       if (normalized.startsWith('SELECT detail_id, production_status_id FROM order_details')) {
