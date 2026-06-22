@@ -240,9 +240,24 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     manager_id: item.managerId ?? null,
     notes: item.notes ?? null,
     material_ids: item.materialIds ?? [],
-    material_names: item.materialNames ?? [],
-    sheet_material_type_ids: item.sheetMaterialTypeIds ?? [],
-    material_name: item.materialNames?.join(', ') ?? null,
+    // SP3/R8: for header-only orders (no details) materialNames is empty; fall back to
+    // the header material name so the orders list shows a non-blank material column.
+    material_names:
+      (item.materialNames ?? []).length > 0
+        ? (item.materialNames ?? [])
+        : item.headerMaterialName
+          ? [item.headerMaterialName]
+          : [],
+    sheet_material_type_ids:
+      (item.sheetMaterialTypeIds ?? []).length > 0
+        ? (item.sheetMaterialTypeIds ?? [])
+        : item.headerSheetMaterialTypeId != null
+          ? [item.headerSheetMaterialTypeId]
+          : [],
+    material_name:
+      (item.materialNames ?? []).length > 0
+        ? (item.materialNames ?? []).join(', ')
+        : (item.headerMaterialName ?? null),
     milling_type_id: item.millingTypeId ?? null,
     milling_type_name: item.millingTypeName ?? null,
     doweling_order_id: item.dowelingOrderId ?? null,

@@ -1,8 +1,8 @@
 // Task 11 (SP3): orderMapper must carry sheetMaterialTypeId both directions and
 // allow a sheet-only detail (no legacy material_id) through the outbound mapping.
 import { describe, it, expect } from 'vitest';
-import { mapOrderFormToSaveOrderDto, mapOrderDtoToFormValues } from '../orderMapper';
-import type { OrderDto } from '../../types/orderApi.types';
+import { mapOrderFormToSaveOrderDto, mapOrderDtoToFormValues, mapOrderListItemToLegacyRow } from '../orderMapper';
+import type { OrderDto, OrderListItemDto } from '../../types/orderApi.types';
 
 const baseDetail = {
   detail_number: 1,
@@ -110,5 +110,78 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
     // backend-read surfaces (show/edit via __backendOrder) must display the sheet name, not "—"
     expect((values.header as any).material_name_resolved).toBe('МДФ 16мм');
     expect((values.details[0] as any).material_name_resolved).toBe('МДФ 16мм');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Critic R8 fix: mapOrderListItemToLegacyRow header-material fallback
+// A header-only order (no details, empty materialNames/sheetMaterialTypeIds)
+// must display the header material in the orders list via the fallback.
+// ---------------------------------------------------------------------------
+function makeListItem(overrides: Partial<OrderListItemDto> = {}): OrderListItemDto {
+  return {
+    orderId: 1,
+    orderName: 'Тест R8',
+    clientId: 1,
+    orderDate: '2026-06-22',
+    orderStatusId: 1,
+    updatedAt: '2026-06-22T10:00:00.000Z',
+    version: 1,
+    ...overrides,
+  } as OrderListItemDto;
+}
+
+describe('mapOrderListItemToLegacyRow — header-material fallback (critic R8)', () => {
+  it('header-only order: uses headerMaterialName when materialNames is empty', () => {
+    const item = makeListItem({
+      materialNames: [],
+      sheetMaterialTypeIds: [],
+      headerMaterialName: 'МДФ 16мм',
+      headerSheetMaterialTypeId: 42,
+    });
+    const row = mapOrderListItemToLegacyRow(item);
+    expect(row.material_names).toEqual(['МДФ 16мм']);
+    expect(row.material_name).toBe('МДФ 16мм');
+    expect(row.sheet_material_type_ids).toEqual([42]);
+  });
+
+  it('header-only order: empty result when both materialNames and headerMaterialName are absent', () => {
+    const item = makeListItem({
+      materialNames: [],
+      sheetMaterialTypeIds: [],
+      headerMaterialName: null,
+      headerSheetMaterialTypeId: null,
+    });
+    const row = mapOrderListItemToLegacyRow(item);
+    expect(row.material_names).toEqual([]);
+    expect(row.material_name).toBeNull();
+    expect(row.sheet_material_type_ids).toEqual([]);
+  });
+
+  it('order with details: keeps detail materialNames (no fallback override)', () => {
+    const item = makeListItem({
+      materialNames: ['МДФ 16мм', 'ДСП 18мм'],
+      sheetMaterialTypeIds: [7, 8],
+      headerMaterialName: 'МДФ 25мм',
+      headerSheetMaterialTypeId: 99,
+    });
+    const row = mapOrderListItemToLegacyRow(item);
+    // Detail aggregates win; header fallback must NOT override
+    expect(row.material_names).toEqual(['МДФ 16мм', 'ДСП 18мм']);
+    expect(row.material_name).toBe('МДФ 16мм, ДСП 18мм');
+    expect(row.sheet_material_type_ids).toEqual([7, 8]);
+  });
+
+  it('header-only order: header sheet type fallback when materialNames absent but sheetMaterialTypeIds also empty', () => {
+    const item = makeListItem({
+      materialNames: undefined,
+      sheetMaterialTypeIds: undefined,
+      headerMaterialName: 'Фанера 12мм',
+      headerSheetMaterialTypeId: 55,
+    });
+    const row = mapOrderListItemToLegacyRow(item);
+    expect(row.material_names).toEqual(['Фанера 12мм']);
+    expect(row.material_name).toBe('Фанера 12мм');
+    expect(row.sheet_material_type_ids).toEqual([55]);
   });
 });

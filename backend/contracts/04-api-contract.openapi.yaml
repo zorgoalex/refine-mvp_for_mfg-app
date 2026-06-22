@@ -8089,6 +8089,15 @@ components:
             type: integer
             format: int64
           description: "Variant B: aggregated sheet material type IDs from order details (authoritative post-034)."
+        headerMaterialName:
+          type: string
+          nullable: true
+          description: "SP3/R8: header sheet material name fallback for header-only orders with no details."
+        headerSheetMaterialTypeId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "SP3/R8: header sheet material type ID fallback for header-only orders with no details."
         primaryProject:
           $ref: '#/components/schemas/OrderProjectSummaryDtoNullable'
         projects:

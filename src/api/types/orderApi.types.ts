@@ -531,6 +531,10 @@ export interface OrderListItemDto {
   materialNames?: string[];
   /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
   sheetMaterialTypeIds?: number[];
+  /** SP3/R8: header material name fallback for header-only orders with no details. */
+  headerMaterialName?: string | null;
+  /** SP3/R8: header sheet material type id fallback for header-only orders with no details. */
+  headerSheetMaterialTypeId?: number | null;
   millingTypeId?: number | null;
   millingTypeName?: string | null;
   dowelingOrderId?: number | null;

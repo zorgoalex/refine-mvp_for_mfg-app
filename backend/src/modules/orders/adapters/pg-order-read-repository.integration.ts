@@ -363,3 +363,79 @@ d('PgOrderReadRepository integration — both flag states (critic R3)', () => {
     expect(order!.header.orderId).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Critic R8: header-only order must expose headerMaterialName + headerSheetMaterialTypeId
+// in the listOrders response (no details → empty materialNames aggregate → fallback).
+// ---------------------------------------------------------------------------
+d('PgOrderReadRepository integration — header-only order list fallback (critic R8)', () => {
+  const client = new Client({ connectionString: url });
+  const schema = `vb_r8_header_only_${process.hrtime.bigint()}`;
+  let headerOnlyOrderId: number;
+  let headerSmtId: number;
+
+  beforeAll(async () => {
+    await client.connect();
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}, public`);
+
+    // Apply the full Variant B forward chain.
+    await bootstrapVariantBSchema(client);
+    await seedVariantAMain(client);
+    await client.query(mig('034_order_material_sunset_legacy.sql'));
+    await createStubTables(client);
+
+    // Ensure required lookup rows exist.
+    await client.query(`INSERT INTO films (film_id, film_name) VALUES (1, 'Плёнка тест') ON CONFLICT DO NOTHING`);
+    await client.query(`INSERT INTO order_statuses (order_status_id, order_status_name) VALUES (1, 'Новый') ON CONFLICT DO NOTHING`);
+    await client.query(`INSERT INTO payment_statuses (payment_status_id, payment_status_name) VALUES (1, 'Не оплачен') ON CONFLICT DO NOTHING`);
+
+    // Insert a sheet_material_type.
+    const smtRes = await client.query<{ sheet_material_type_id: number }>(
+      `INSERT INTO sheet_material_types (name, unit_id, material_type_id, width_mm, height_mm, is_active)
+       VALUES ('МДФ R8 header-only тест', 1, 1, 2800, 2070, true)
+       RETURNING sheet_material_type_id`,
+    );
+    headerSmtId = smtRes.rows[0].sheet_material_type_id;
+
+    // Insert a HEADER-ONLY order: has sheet_material_type_id on header, NO details.
+    const orderRes = await client.query<{ order_id: number }>(
+      `INSERT INTO orders (order_name, sheet_eligible, sheet_material_type_id,
+         order_status_id, payment_status_id, total_amount, final_amount, paid_amount,
+         parts_count, total_area, discount, surcharge)
+       VALUES ('R8 Header-only тест заказ', true, $1, 1, 1, 0, 0, 0, 0, 0, 0, 0)
+       RETURNING order_id`,
+      [headerSmtId],
+    );
+    headerOnlyOrderId = orderRes.rows[0].order_id;
+    // No details inserted — this is a header-only order.
+  });
+
+  afterAll(async () => {
+    try { await client.query('SET search_path TO public'); } catch { /* ignore */ }
+    try { await client.query(`DROP SCHEMA ${schema} CASCADE`); } catch { /* ignore */ }
+    try {
+      await client.query('DROP TABLE IF EXISTS public.project_order_projects CASCADE');
+      await client.query('DROP TABLE IF EXISTS public.project_projects CASCADE');
+    } catch { /* ignore */ }
+    await client.end();
+  });
+
+  it('flag-ON: header-only order returns headerMaterialName populated in list item', async () => {
+    const db = makeDbClient(client, schema);
+    const repo = new PgOrderReadRepository(db, true);
+    const result = await repo.listOrders(minimalListCommand());
+
+    const item = result.data.find((o) => o.orderId === Number(headerOnlyOrderId));
+    expect(item).toBeDefined();
+    if (!item) return;
+
+    // No details → materialNames/sheetMaterialTypeIds from detail aggregate must be empty.
+    expect(item.materialNames).toEqual([]);
+    expect(item.sheetMaterialTypeIds).toEqual([]);
+
+    // Header fallback fields must be populated from orders.sheet_material_type_id.
+    expect(item.headerMaterialName).toBe('МДФ R8 header-only тест');
+    expect(item.headerSheetMaterialTypeId).toBe(Number(headerSmtId));
+  });
+});
