@@ -7,6 +7,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type {
   ActivateProductionStageCommand,
   ActivateDetailProductionStageCommand,
@@ -135,6 +136,16 @@ type CommandName =
   | 'production.stage_activate'
   | 'production.stage_deactivate'
   | 'production.detail_stage_activate';
+
+interface OrderScopeOptions {
+  tx?: TransactionClient;
+  allowAssignedProductionWorker?: boolean;
+}
+
+interface OrderAccessDecision {
+  accessVia: 'owner' | 'assigned_production_worker';
+  assignmentSource: 'order_workshops.responsible_employee_id' | null;
+}
 
 export class PgProductionActionRepository implements ProductionActionRepositoryPort {
   private readonly orderAccessPolicy = new OrderAccessPolicy();
@@ -1293,8 +1304,9 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
     order: LockedOrder,
     requiredPermissions: readonly string[],
     requestId: string,
-  ): Promise<void> {
-    const allowed =
+    options: OrderScopeOptions = {},
+  ): Promise<OrderAccessDecision> {
+    const ownerAllowed =
       requiredPermissions.every((permission) => currentUser.permissions.includes(permission as PermissionName)) &&
       this.orderAccessPolicy.canUpdate(currentUser, {
       orderId: order.orderId,
@@ -1302,17 +1314,39 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       managerUserId: order.managerUserId,
       });
 
-    if (!allowed) {
-      await writeDeniedActionAudit(this.database, {
-        currentUser,
-        requestId,
-        order,
-        requiredPermissions,
-      });
-      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
-        requiredPermissions,
-      });
+    if (ownerAllowed) {
+      return { accessVia: 'owner', assignmentSource: null };
     }
+
+    // Additive path: a worker (productionTasks.update scope === 'assigned') who is the
+    // responsible_employee on at least one of the order's order_workshops rows may act on
+    // production status/stages. Order-level allow only; never broadens non-worker roles
+    // (their productionTasks.update scope is 'all'/'none', not 'assigned').
+    if (options.allowAssignedProductionWorker && options.tx) {
+      const productionTaskScope = ROLE_POLICIES[currentUser.role].productionTasks.update;
+      if (
+        productionTaskScope === 'assigned' &&
+        currentUser.permissions.includes('orders.change_production_status')
+      ) {
+        const assignedUserIds = await loadOrderAssignedUserIds(options.tx, order.orderId);
+        if (assignedUserIds.includes(currentUser.id)) {
+          return {
+            accessVia: 'assigned_production_worker',
+            assignmentSource: 'order_workshops.responsible_employee_id',
+          };
+        }
+      }
+    }
+
+    await writeDeniedActionAudit(this.database, {
+      currentUser,
+      requestId,
+      order,
+      requiredPermissions,
+    });
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+      requiredPermissions,
+    });
   }
 }
 

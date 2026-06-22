@@ -1028,6 +1028,100 @@ describe('loadOrderAssignedUserIds', () => {
   });
 });
 
+describe('assertOrderScope assigned-production-worker path', () => {
+  const nonOwnOrder = { orderId: 15, createdByUserId: '999', managerUserId: '888' } as const;
+
+  async function runScope(database: ReturnType<typeof createDatabase>, user: CurrentUser) {
+    const repo = new PgProductionActionRepository(database.service);
+    return database.service.transaction((tx) =>
+      (repo as unknown as {
+        assertOrderScope: (
+          user: CurrentUser,
+          order: typeof nonOwnOrder,
+          perms: readonly string[],
+          requestId: string,
+          options: { tx: unknown; allowAssignedProductionWorker: boolean },
+        ) => Promise<unknown>;
+      }).assertOrderScope(
+        user,
+        nonOwnOrder,
+        ['orders.update', 'orders.change_production_status'],
+        'req',
+        { tx, allowAssignedProductionWorker: true },
+      ),
+    );
+  }
+
+  it('allows an assigned worker (accessVia=assigned_production_worker)', async () => {
+    const database = createDatabase({ assignedUserIds: [20] });
+    const decision = await runScope(database, currentUser('worker', '20'));
+    expect(decision).toEqual({
+      accessVia: 'assigned_production_worker',
+      assignmentSource: 'order_workshops.responsible_employee_id',
+    });
+  });
+
+  it('denies a worker NOT assigned on the order', async () => {
+    const database = createDatabase({ assignedUserIds: [77] });
+    await expect(runScope(database, currentUser('worker', '20'))).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    });
+  });
+
+  it('denies an assigned user who lacks orders.change_production_status', async () => {
+    const database = createDatabase({ assignedUserIds: ['worker-custom-id'] });
+    await expect(
+      runScope(database, userWithPermissions('worker', ['doweling.view'])),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('does NOT broaden a manager: non-own order + matching assignment row stays denied', async () => {
+    const database = createDatabase({ assignedUserIds: [20] });
+    await expect(runScope(database, currentUser('manager', '20'))).rejects.toMatchObject({
+      statusCode: 403,
+    });
+  });
+
+  it('does NOT broaden an operator: non-own order + matching assignment row stays denied', async () => {
+    const database = createDatabase({ assignedUserIds: [20] });
+    await expect(runScope(database, currentUser('operator', '20'))).rejects.toMatchObject({
+      statusCode: 403,
+    });
+  });
+
+  it('keeps admin all-scope owner allow on a non-own order (accessVia=owner)', async () => {
+    const database = createDatabase({ assignedUserIds: [] });
+    const decision = await runScope(database, currentUser('admin', '20'));
+    expect(decision).toMatchObject({ accessVia: 'owner' });
+  });
+
+  it('manager owner allow on OWN order is unchanged and never runs the assignment query', async () => {
+    const database = createDatabase({ assignedUserIds: [] });
+    const repo = new PgProductionActionRepository(database.service);
+    const ownOrder = { orderId: 15, createdByUserId: '20', managerUserId: '20' } as const;
+    const decision = await database.service.transaction((tx) =>
+      (repo as unknown as {
+        assertOrderScope: (
+          user: CurrentUser,
+          order: typeof ownOrder,
+          perms: readonly string[],
+          requestId: string,
+          options: { tx: unknown; allowAssignedProductionWorker: boolean },
+        ) => Promise<unknown>;
+      }).assertOrderScope(
+        currentUser('manager', '20'),
+        ownOrder,
+        ['orders.update', 'orders.change_production_status'],
+        'req',
+        { tx, allowAssignedProductionWorker: true },
+      ),
+    );
+    expect(decision).toMatchObject({ accessVia: 'owner' });
+    expect(normalizedSql(database.queries)).not.toContain('SELECT DISTINCT u.user_id');
+  });
+});
+
 function createDatabase(options: {
   orderVersion?: number;
   orderStatusId?: number;
