@@ -225,6 +225,8 @@ describe('PgOrderReadRepository sheetOrdersReads gate', () => {
     }
     // legacy material name still resolved from materials only
     expect(sql).toContain('m.material_name AS material_name');
+    // legacy path: header materials join must be present in the list query
+    expect(sql).toContain('LEFT JOIN materials hm ON hm.material_id = o.material_id');
   });
 
   it('includes migration-029 sheet schema when the flag is on', async () => {
@@ -238,6 +240,8 @@ describe('PgOrderReadRepository sheetOrdersReads gate', () => {
     // No materials join in the flag-ON detail/header reads
     expect(sql).not.toContain('LEFT JOIN materials m ON m.material_id = od.material_id');
     expect(sql).not.toContain('LEFT JOIN materials m ON m.material_id = o.material_id');
+    // flag-ON: header materials join must NOT scan the materials table (dead weight post-034)
+    expect(sql).not.toContain('LEFT JOIN materials hm ON hm.material_id = o.material_id');
     // Aggregate groups by sheet_material_type_id, not material_id
     expect(sql).toContain('od.sheet_material_type_id');
     // sheetMaterialTypeIds aggregate in the list query

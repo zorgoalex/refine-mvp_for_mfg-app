@@ -132,6 +132,7 @@ describe('HealthService readiness', () => {
   });
 
   it('is ready when migration 034 is applied and BACKEND_SHEET_ORDERS_READS is true', async () => {
+    const queryMock = vi.fn(async () => ({ rows: [{ found: true }] }));
     const service = new HealthService(
       createConfig({
         APP_NAME: 'erp-backend',
@@ -143,7 +144,7 @@ describe('HealthService readiness', () => {
         isConfigured: true,
         ping: vi.fn(async () => true),
         // query should NOT be called (flag is ON, no check needed)
-        query: vi.fn(async () => ({ rows: [{ found: true }] })),
+        query: queryMock,
       }),
       createRateLimits(),
     );
@@ -154,6 +155,8 @@ describe('HealthService readiness', () => {
         config: { status: 'ok' },
       },
     });
+    // Short-circuit enforced: flag-ON skips the pg_constraint readiness probe
+    expect(queryMock).not.toHaveBeenCalled();
   });
 
   it('is ready when migration 034 is not applied and BACKEND_SHEET_ORDERS_READS is false', async () => {

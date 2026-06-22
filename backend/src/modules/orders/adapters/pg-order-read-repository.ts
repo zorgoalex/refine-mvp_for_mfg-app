@@ -303,6 +303,10 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const listDetailFilter = this.sheetOrdersReads
       ? 'od.sheet_material_type_id IS NOT NULL'
       : 'od.material_id IS NOT NULL';
+    // Variant B: header materials join is dead weight when flag-ON (hm alias not referenced).
+    const headerListMaterialJoin = this.sheetOrdersReads
+      ? ''
+      : 'LEFT JOIN materials hm ON hm.material_id = o.material_id';
     // Variant B: aggregate sheet_material_type_id in flag-ON; produce NULL column in flag-OFF.
     const listDetailSheetIdSelect = this.sheetOrdersReads
       ? 'od.sheet_material_type_id,'
@@ -343,7 +347,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
         LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
-        LEFT JOIN materials hm ON hm.material_id = o.material_id
+        ${headerListMaterialJoin}
         ${headerSheetJoin}
         ${where}
         ORDER BY ${orderBy} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
