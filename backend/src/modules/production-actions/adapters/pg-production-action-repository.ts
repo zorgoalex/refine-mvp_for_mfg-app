@@ -1831,6 +1831,26 @@ async function loadOrderForUpdate(tx: TransactionClient, orderId: number): Promi
   };
 }
 
+export async function loadOrderAssignedUserIds(
+  tx: TransactionClient,
+  orderId: number,
+): Promise<string[]> {
+  const result = await tx.query<{ user_id: string | number }>(
+    `
+    SELECT DISTINCT u.user_id
+    FROM order_workshops ow
+    JOIN users u ON u.employee_id = ow.responsible_employee_id
+    WHERE ow.order_id = $1
+      AND ow.delete_flag = false
+      AND ow.responsible_employee_id IS NOT NULL
+      AND u.is_active = true
+    ORDER BY u.user_id
+    `,
+    [orderId],
+  );
+  return result.rows.map((row) => String(row.user_id));
+}
+
 async function loadOrderDetailForUpdate(
   tx: TransactionClient,
   detailId: number,

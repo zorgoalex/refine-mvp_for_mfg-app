@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
-import { PgProductionActionRepository } from './pg-production-action-repository';
+import {
+  PgProductionActionRepository,
+  loadOrderAssignedUserIds,
+} from './pg-production-action-repository';
 
 describe('PgProductionActionRepository', () => {
   it('moves calendar date with idempotency, audit, outbox, and deadline sync boundary', async () => {
@@ -1003,6 +1006,28 @@ describe('PgProductionActionRepository', () => {
   });
 });
 
+describe('loadOrderAssignedUserIds', () => {
+  it('resolves responsible users and emits the soft-delete/inactive/null filters', async () => {
+    const database = createDatabase({ assignedUserIds: [20, 77] });
+    const ids = await database.service.transaction((tx) => loadOrderAssignedUserIds(tx, 15));
+    expect(ids).toEqual(['20', '77']);
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('SELECT DISTINCT u.user_id');
+    expect(sql).toContain('JOIN users u ON u.employee_id = ow.responsible_employee_id');
+    expect(sql).toContain('ow.delete_flag = false');
+    expect(sql).toContain('ow.responsible_employee_id IS NOT NULL');
+    expect(sql).toContain('u.is_active = true');
+    expect(sql).toContain('ORDER BY u.user_id');
+  });
+
+  it('returns [] when no responsible employees map to a user', async () => {
+    const database = createDatabase({ assignedUserIds: [] });
+    const ids = await database.service.transaction((tx) => loadOrderAssignedUserIds(tx, 15));
+    expect(ids).toEqual([]);
+  });
+});
+
 function createDatabase(options: {
   orderVersion?: number;
   orderStatusId?: number;
@@ -1017,6 +1042,7 @@ function createDatabase(options: {
   detailStatusRowsBefore?: Array<{ detail_id: number; production_status_id: number | null }>;
   detailStatusRowsAfter?: Array<{ detail_id: number; production_status_id: number | null }>;
   recalcOrderProductionStatusId?: number | null;
+  assignedUserIds?: Array<number | string>;
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
@@ -1024,6 +1050,11 @@ function createDatabase(options: {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
       const normalized = normalizeSql(text);
+
+      if (normalized.startsWith('SELECT DISTINCT u.user_id')) {
+        const ids = options.assignedUserIds ?? [];
+        return { rows: ids.map((id) => ({ user_id: id })), rowCount: ids.length };
+      }
 
       if (normalized.startsWith('INSERT INTO command_idempotency_keys')) {
         lastRequestHash = params[5];
