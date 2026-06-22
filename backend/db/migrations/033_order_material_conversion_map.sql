@@ -1,3 +1,4 @@
+BEGIN;
 -- 033: committed conversion manifest (idempotent). Extend ONLY by a reviewed commit
 -- to THIS file; prove zero-unmapped on the restore rehearsal BEFORE go-live. NEVER
 -- edit the map during the cutover window. The manifest carries the FULL target-type
@@ -96,3 +97,4 @@ UPDATE sheet_material_types s
    AND (s.unit_id <> mk.target_unit_id
      OR s.material_type_id <> mk.target_material_type_id
      OR s.is_cuttable <> mk.is_cuttable);
+COMMIT;
