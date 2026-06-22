@@ -356,7 +356,9 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
                           size="small"
                           placeholder="Заменить на..."
                           style={{ width: 280 }}
-                          options={referenceData.materials.map(item => ({ label: item.name, value: item.id }))}
+                          options={(referenceData.sheetMaterialTypes ?? [])
+                            .filter(t => t.isCuttable !== false)
+                            .map(item => ({ label: item.name, value: item.id }))}
                           onChange={(val) => val && onBatchReplace('material', ref.originalValue, val)}
                           showSearch
                           filterOption={(input, option) =>

@@ -113,7 +113,6 @@ export interface ValidatedRow extends ResolvedRow {
   isValid: boolean;
   errors: FieldError[];
   warnings: FieldError[];
-  sheet_material_type_id?: number | null;
 }
 
 // ============================================================================

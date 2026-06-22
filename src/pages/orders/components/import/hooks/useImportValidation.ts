@@ -21,7 +21,7 @@ export interface UnresolvedReference {
   count: number;
   field: 'edge_type' | 'film' | 'material' | 'milling_type';
   nameField: 'edgeTypeName' | 'filmName' | 'materialName' | 'millingTypeName';
-  idField: 'edge_type_id' | 'film_id' | 'material_id' | 'milling_type_id';
+  idField: 'edge_type_id' | 'film_id' | 'material_id' | 'sheet_material_type_id' | 'milling_type_id';
 }
 
 export interface UnresolvedReferences {
@@ -232,7 +232,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
         count,
         field: 'material' as const,
         nameField: 'materialName' as const,
-        idField: 'material_id' as const,
+        idField: 'sheet_material_type_id' as const,
       })),
       millingTypes: Array.from(countMap.millingTypes.entries()).map(([originalValue, count]) => ({
         originalValue,
