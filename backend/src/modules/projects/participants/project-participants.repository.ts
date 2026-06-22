@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
-import { insertRelatedEntities, type AuditRelatedEntity } from '../../../common/audit/related-entities';
+import type { AuditRelatedEntity } from '../../../common/audit/related-entities';
 import { computeListDiff } from '../../../common/audit/audit-diff';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
@@ -77,10 +78,6 @@ interface IdempotencyRow extends QueryResultRow {
   request_hash: string;
   response_json: unknown;
   status: 'processing' | 'completed' | 'failed';
-}
-
-interface AuditRow extends QueryResultRow {
-  audit_id: string;
 }
 
 const SOURCE = 'projects-participants';
@@ -359,46 +356,31 @@ async function writeAudit(
   const diff = computeListDiff(input.before, input.after, participantDiffKey);
   const added = diff.added.map(rowDimension);
   const removed = diff.removed.map(rowDimension);
-  const result = await tx.query<AuditRow>(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, username, role_code, role,
-      request_id, source, before_json, after_json, diff_json, metadata_json
-    )
-    VALUES (
-      'projects.participants_changed', 'project', $1, $2, $3, $4, $4,
-      $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb
-    )
-    RETURNING audit_id
-    `,
-    [
-      input.command.projectId,
-      toNullableUserId(input.command.currentUser.id),
-      input.command.currentUser.username,
-      input.command.currentUser.role,
-      input.requestId,
-      SOURCE,
-      JSON.stringify({ participants: input.before.map(rowDimension) }),
-      JSON.stringify({ participants: input.after.map(rowDimension) }),
-      JSON.stringify({ added, removed }),
-      JSON.stringify({
-        idempotencyKey: input.command.dto.idempotencyKey,
-        reason: normalizeReason(input.command.dto.reason),
-        relatedUserIds: dimensionIds([...added, ...removed], 'user'),
-        relatedEmployeeIds: dimensionIds([...added, ...removed], 'employee'),
-        roleCodes: [...new Set([...added, ...removed].map((item) => item.roleCode))],
-      }),
-    ],
-  );
-  const auditId = result.rows[0]?.audit_id ?? '';
-  if (auditId) {
-    const entities: AuditRelatedEntity[] = [...added, ...removed].map((d) => ({
-      entityType: d.participantType,
-      entityId: Number(d.participantId),
-    }));
-    await insertRelatedEntities(tx, auditId, entities);
-  }
-  return auditId;
+  const relatedEntities: AuditRelatedEntity[] = [...added, ...removed].map((d) => ({
+    entityType: d.participantType,
+    entityId: Number(d.participantId),
+  }));
+  return auditService.record(tx, {
+    event: 'projects.participants_changed',
+    entityType: 'project',
+    entityId: input.command.projectId,
+    actorUserId: toNullableUserId(input.command.currentUser.id),
+    actorUsername: input.command.currentUser.username,
+    actorRole: input.command.currentUser.role,
+    requestId: input.requestId,
+    source: SOURCE,
+    before: { participants: input.before.map(rowDimension) },
+    after: { participants: input.after.map(rowDimension) },
+    diff: { added, removed },
+    metadata: {
+      idempotencyKey: input.command.dto.idempotencyKey,
+      reason: normalizeReason(input.command.dto.reason),
+      relatedUserIds: dimensionIds([...added, ...removed], 'user'),
+      relatedEmployeeIds: dimensionIds([...added, ...removed], 'employee'),
+      roleCodes: [...new Set([...added, ...removed].map((item) => item.roleCode))],
+    },
+    relatedEntities,
+  });
 }
 
 async function enqueueOutbox(

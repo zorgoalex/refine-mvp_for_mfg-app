@@ -51,7 +51,8 @@ describe('PgProjectNotificationRepository', () => {
     const database = fakeDatabase();
     await new PgProjectNotificationRepository(database).createNotifications(baseInput());
     const audit = database.queries.find((query) => query.text.includes('INSERT INTO audit_log'));
-    expect(audit?.params[4]).toBe(15);
+    // params[8] = related_order_id in the standard 23-param AUDIT_INSERT
+    expect(audit?.params[8]).toBe(15);
   });
 
   it('sets related_deadline_id and related_order_id when PROJECT_DEADLINE_OVERDUE has an order', async () => {
@@ -67,8 +68,9 @@ describe('PgProjectNotificationRepository', () => {
       },
     });
     const audit = database.queries.find((query) => query.text.includes('INSERT INTO audit_log'));
-    expect(audit?.params[4]).toBe(15);
-    expect(audit?.params[5]).toBe(22);
+    // params[8] = related_order_id, params[12] = related_deadline_id
+    expect(audit?.params[8]).toBe(15);
+    expect(audit?.params[12]).toBe(22);
   });
 
   it('sets related user or employee facts in metadata without exposing names', async () => {
@@ -84,7 +86,8 @@ describe('PgProjectNotificationRepository', () => {
       },
       auditMetadata: { participantType: 'user' },
     });
-    const metadata = String(database.queries.find((query) => query.text.includes('INSERT INTO audit_log'))?.params[6]);
+    // params[22] = metadata_json in the standard 23-param AUDIT_INSERT
+    const metadata = String(database.queries.find((query) => query.text.includes('INSERT INTO audit_log'))?.params[22]);
     expect(metadata).toContain('"relatedUserId":"158"');
     expect(metadata).not.toContain('User 158');
     expect(metadata).not.toContain('displayName');
@@ -144,6 +147,53 @@ describe('PgProjectNotificationRepository', () => {
 
     expect(tx.transactionCalls).toBe(0);
     expect(tx.queries.some((query) => query.text.includes('INSERT INTO audit_log'))).toBe(true);
+  });
+
+  it('audit notification_created: secret-shaped fields in auditMetadata are redacted by AuditService', async () => {
+    const { auditService: svc } = await import('../../../common/audit/audit.service');
+    const captured: Array<readonly unknown[]> = [];
+    const fakeClient = {
+      query: async (text: string, params: readonly unknown[] = []) => {
+        if (text.includes('INSERT INTO audit_log')) captured.push(params);
+        return { rows: [{ audit_id: 'notif-audit-1' }], rowCount: 1, command: 'INSERT', oid: 0, fields: [] };
+      },
+    };
+
+    await svc.record(fakeClient as unknown as import('../../../database/database.types').DatabaseClient, {
+      event: 'projects.notification_created',
+      entityType: 'project',
+      entityId: projectId(),
+      actorUserId: 1,
+      actorUsername: null,
+      actorRole: null,
+      requestId: 'req-notif-secret',
+      source: 'projects-p8-notifications',
+      relatedOrderId: 15,
+      relatedDeadlineId: null,
+      metadata: {
+        source: 'projects-p8-notifications',
+        eventType: 'PROJECT_ORDER_LINKS_CHANGED',
+        api_key: 'SUPER_SECRET',
+        recipientUserIds: ['1', '2'],
+      },
+    });
+
+    expect(captured).toHaveLength(1);
+    const params = captured[0];
+    // Dimensions
+    expect(params[0]).toBe('projects.notification_created');
+    expect(params[1]).toBe('project');
+    expect(params[2]).toBe(projectId());
+    expect(params[6]).toBe('req-notif-secret');
+    expect(params[7]).toBe('projects-p8-notifications');
+    expect(params[8]).toBe(15);   // related_order_id
+    expect(params[12]).toBeNull(); // related_deadline_id
+    // metadata_json: api_key redacted, eventType + recipientUserIds preserved
+    const metaJson = JSON.parse(params[22] as string);
+    expect(metaJson.eventType).toBe('PROJECT_ORDER_LINKS_CHANGED');
+    expect(metaJson.api_key).toBe('[REDACTED]');
+    expect(metaJson.recipientUserIds).toEqual(['1', '2']);
+    expect(JSON.stringify(metaJson)).not.toContain('SUPER_SECRET');
   });
 });
 

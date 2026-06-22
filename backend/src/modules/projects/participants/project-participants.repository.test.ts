@@ -216,7 +216,7 @@ describe('PgProjectParticipantsRepository', () => {
     });
 
     const auditQuery = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
-    const diffJson = JSON.parse(String(auditQuery?.params[8]));
+    const diffJson = JSON.parse(String(auditQuery?.params[21])); // params[21] = diff_json in standard AUDIT_INSERT
     expect(diffJson.added).toHaveLength(1);
     expect(diffJson.added[0]).toMatchObject({ participantType: 'employee', participantId: '77', roleCode: 'manager' });
     expect(diffJson.removed).toHaveLength(0);
@@ -238,7 +238,7 @@ describe('PgProjectParticipantsRepository', () => {
     });
 
     const auditQuery = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
-    const diffJson = JSON.parse(String(auditQuery?.params[8]));
+    const diffJson = JSON.parse(String(auditQuery?.params[21])); // params[21] = diff_json in standard AUDIT_INSERT
     expect(diffJson.removed).toHaveLength(1);
     expect(diffJson.removed[0]).toMatchObject({ participantType: 'employee', participantId: '77', roleCode: 'manager' });
     expect(diffJson.added).toHaveLength(0);
@@ -277,7 +277,7 @@ describe('PgProjectParticipantsRepository', () => {
     });
 
     const auditQuery = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
-    const diffJson = JSON.parse(String(auditQuery?.params[8]));
+    const diffJson = JSON.parse(String(auditQuery?.params[21])); // params[21] = diff_json in standard AUDIT_INSERT
     // Same participant (employee:77) must appear in BOTH added (new role) and removed (old role)
     expect(diffJson.added).toHaveLength(1);
     expect(diffJson.added[0]).toMatchObject({ participantType: 'employee', participantId: '77', roleCode: 'lead' });
@@ -303,7 +303,7 @@ describe('PgProjectParticipantsRepository', () => {
     });
 
     const auditQuery = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
-    const metaJson = JSON.parse(String(auditQuery?.params[9]));
+    const metaJson = JSON.parse(String(auditQuery?.params[22])); // params[22] = metadata_json in standard AUDIT_INSERT
     expect(metaJson.relatedUserIds).toEqual(['158']);
     expect(metaJson.relatedEmployeeIds).toEqual(['77']);
     expect(metaJson.roleCodes).toEqual(['manager']);
@@ -313,6 +313,53 @@ describe('PgProjectParticipantsRepository', () => {
     const bridgeEntities = bridgeQueries.map((q) => ({ entityType: q.params[1], entityId: q.params[2] }));
     expect(bridgeEntities).toContainEqual({ entityType: 'user', entityId: 158 });
     expect(bridgeEntities).toContainEqual({ entityType: 'employee', entityId: 77 });
+  });
+
+  it('audit participants_changed: secret-shaped fields in before/after/metadata are redacted by AuditService', async () => {
+    const { auditService: svc } = await import('../../../common/audit/audit.service');
+    const captured: Array<readonly unknown[]> = [];
+    const fakeClient = {
+      query: async (text: string, params: readonly unknown[] = []) => {
+        if (text.includes('INSERT INTO audit_log')) captured.push(params);
+        return { rows: [{ audit_id: 'pp-audit-1' }], rowCount: 1, command: 'INSERT', oid: 0, fields: [] };
+      },
+    };
+
+    await svc.record(fakeClient as unknown as import('../../../database/database.types').DatabaseClient, {
+      event: 'projects.participants_changed',
+      entityType: 'project',
+      entityId: 'proj-p-1',
+      actorUserId: 1,
+      actorUsername: 'tester',
+      actorRole: 'admin',
+      requestId: 'req-secret-pp',
+      source: 'projects-participants',
+      before: { participants: [{ api_key: 'SUPER_SECRET', roleCode: 'manager' }] },
+      after: { participants: [{ roleCode: 'lead', token: 'SECRET_TOKEN' }] },
+      diff: { added: [{ roleCode: 'lead' }], removed: [{ roleCode: 'manager' }] },
+      metadata: { idempotencyKey: 'pp-key', reason: null, secret: 'VERY_SECRET' },
+    });
+
+    expect(captured).toHaveLength(1);
+    const params = captured[0];
+    // Dimensions
+    expect(params[0]).toBe('projects.participants_changed');
+    expect(params[1]).toBe('project');
+    expect(params[2]).toBe('proj-p-1');
+    expect(params[6]).toBe('req-secret-pp');
+    expect(params[7]).toBe('projects-participants');
+    // before_json: api_key redacted
+    const beforeJson = JSON.parse(params[19] as string);
+    expect(beforeJson.participants[0].api_key).toBe('[REDACTED]');
+    expect(JSON.stringify(beforeJson)).not.toContain('SUPER_SECRET');
+    // after_json: token redacted
+    const afterJson = JSON.parse(params[20] as string);
+    expect(afterJson.participants[0].token).toBe('[REDACTED]');
+    // metadata_json: secret redacted, idempotencyKey preserved
+    const metaJson = JSON.parse(params[22] as string);
+    expect(metaJson.idempotencyKey).toBe('pp-key');
+    expect(metaJson.secret).toBe('[REDACTED]');
+    expect(JSON.stringify(metaJson)).not.toContain('VERY_SECRET');
   });
 });
 

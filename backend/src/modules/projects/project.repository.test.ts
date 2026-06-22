@@ -107,16 +107,17 @@ describe('PgProjectRepository', () => {
     expect(database.queries[1].text).toContain('source');
     expect(database.queries[1].text).toContain('diff_json');
     expect(database.queries[1].params[0]).toBe('projects.create');
-    expect(database.queries[1].params[1]).toBe('33333333-3333-4333-8333-333333333333');
-    expect(database.queries[1].params[2]).toBe(42);
-    expect(database.queries[1].params[3]).toBe('admin_user');
-    expect(database.queries[1].params[4]).toBe('admin');
-    expect(database.queries[1].params[5]).toBe('req-create-project');
-    expect(database.queries[1].params[6]).toBe('backend-projects-command');
-    expect(database.queries[1].params[7]).toBeNull(); // before_json (null on create)
-    expect(database.queries[1].params[8]).toEqual(expect.any(String)); // after_json
+    expect(database.queries[1].params[1]).toBe('project');        // entity_type
+    expect(database.queries[1].params[2]).toBe('33333333-3333-4333-8333-333333333333'); // entity_id
+    expect(database.queries[1].params[3]).toBe(42);               // user_id
+    expect(database.queries[1].params[4]).toBe('admin_user');     // username
+    expect(database.queries[1].params[5]).toBe('admin');          // role_code
+    expect(database.queries[1].params[6]).toBe('req-create-project'); // request_id
+    expect(database.queries[1].params[7]).toBe('backend-projects-command'); // source
+    expect(database.queries[1].params[19]).toBeNull(); // before_json (null on create)
+    expect(database.queries[1].params[20]).toEqual(expect.any(String)); // after_json
     // diff_json for create: computeDiff(null, after) — non-empty since after has fields
-    const createDiff = JSON.parse(database.queries[1].params[9] as string);
+    const createDiff = JSON.parse(database.queries[1].params[21] as string);
     expect(Object.keys(createDiff).length).toBeGreaterThan(0);
   });
 
@@ -146,12 +147,12 @@ describe('PgProjectRepository', () => {
     expect(database.queries[2].text).toContain('source');
     expect(database.queries[2].text).toContain('diff_json');
     expect(database.queries[2].params[0]).toBe('projects.update');
-    expect(database.queries[2].params[5]).toBe('req-update-project');
-    expect(database.queries[2].params[6]).toBe('backend-projects-command'); // source
-    expect(JSON.parse(database.queries[2].params[7] as string)).toMatchObject({ name: 'Old project' });
-    expect(JSON.parse(database.queries[2].params[8] as string)).toMatchObject({ name: 'Updated project' });
+    expect(database.queries[2].params[6]).toBe('req-update-project'); // request_id
+    expect(database.queries[2].params[7]).toBe('backend-projects-command'); // source
+    expect(JSON.parse(database.queries[2].params[19] as string)).toMatchObject({ name: 'Old project' }); // before_json
+    expect(JSON.parse(database.queries[2].params[20] as string)).toMatchObject({ name: 'Updated project' }); // after_json
     // diff_json: name and status changed
-    const updateDiff = JSON.parse(database.queries[2].params[9] as string);
+    const updateDiff = JSON.parse(database.queries[2].params[21] as string);
     expect(updateDiff.name).toEqual({ from: 'Old project', to: 'Updated project' });
   });
 
@@ -307,8 +308,8 @@ describe('PgProjectRepository', () => {
     expect(database.queries[2].text).toContain('source');
     expect(database.queries[2].text).toContain('diff_json');
     expect(database.queries[2].params[0]).toBe('projects.archive');
-    expect(database.queries[2].params[5]).toBe('req-archive-project');
-    expect(database.queries[2].params[6]).toBe('backend-projects-command'); // source
+    expect(database.queries[2].params[6]).toBe('req-archive-project'); // request_id
+    expect(database.queries[2].params[7]).toBe('backend-projects-command'); // source
   });
 
   it('lists current project members through user and employee read-model joins', async () => {
@@ -413,7 +414,7 @@ describe('PgProjectRepository', () => {
     expect(database.queries[6].text).toContain('INSERT INTO audit_log');
     expect(database.queries[6].params[0]).toBe('projects.members_changed');
     // diff_json: {added,removed} not {memberCount}
-    const membersDiff = JSON.parse(database.queries[6].params[9] as string);
+    const membersDiff = JSON.parse(database.queries[6].params[21] as string);
     expect(membersDiff).not.toHaveProperty('memberCount');
     expect(membersDiff).toHaveProperty('added');
     expect(membersDiff).toHaveProperty('removed');
@@ -509,6 +510,62 @@ describe('PgProjectRepository', () => {
       JSON.stringify({ allocation: 'lead' }),
       42,
     ]);
+  });
+
+  it('audit create: secret-shaped fields in before/after/metadata are redacted by AuditService', async () => {
+    // Use auditService.record() directly to test the redaction path through writeProjectAudit
+    const { auditService: svc } = await import('../../common/audit/audit.service');
+    const captured: Array<readonly unknown[]> = [];
+    const fakeClient = {
+      query: async (text: string, params: readonly unknown[] = []) => {
+        if (text.includes('INSERT INTO audit_log')) captured.push(params);
+        return { rows: [{ audit_id: 'prj-audit-id' }], rowCount: 1, command: 'INSERT', oid: 0, fields: [] };
+      },
+    };
+
+    await svc.record(fakeClient as unknown as import('../../database/database.types').DatabaseClient, {
+      event: 'projects.create',
+      entityType: 'project',
+      entityId: 'proj-id-1',
+      actorUserId: 7,
+      actorUsername: 'admin_user',
+      actorRole: 'admin',
+      requestId: 'req-secret-prj',
+      source: 'backend-projects-command',
+      before: null,
+      after: { name: 'Test Project', api_key: 'SUPER_SECRET', token: 'SECRET_TOKEN' },
+      diff: { name: { from: null, to: 'Test Project' }, api_key: { from: null, to: 'SUPER_SECRET' } },
+      metadata: { source: 'projects-api', password: 'SECRET_PASS' },
+    });
+
+    expect(captured).toHaveLength(1);
+    const params = captured[0];
+    // Dimensions preserved
+    expect(params[0]).toBe('projects.create');         // event
+    expect(params[1]).toBe('project');                 // entity_type
+    expect(params[2]).toBe('proj-id-1');               // entity_id
+    expect(params[3]).toBe(7);                         // user_id
+    expect(params[4]).toBe('admin_user');              // username
+    expect(params[5]).toBe('admin');                   // role_code
+    expect(params[6]).toBe('req-secret-prj');          // request_id
+    expect(params[7]).toBe('backend-projects-command'); // source
+    // before_json null on create
+    expect(params[19]).toBeNull();
+    // after_json: name preserved, api_key and token redacted
+    const afterJson = JSON.parse(params[20] as string);
+    expect(afterJson.name).toBe('Test Project');
+    expect(afterJson.api_key).toBe('[REDACTED]');
+    expect(afterJson.token).toBe('[REDACTED]');
+    expect(JSON.stringify(afterJson)).not.toContain('SUPER_SECRET');
+    // diff_json: api_key entire value replaced by '[REDACTED]'
+    const diffJson = JSON.parse(params[21] as string);
+    expect(diffJson.api_key).toBe('[REDACTED]');
+    expect(JSON.stringify(diffJson)).not.toContain('SUPER_SECRET');
+    // metadata_json: password redacted, source preserved
+    const metaJson = JSON.parse(params[22] as string);
+    expect(metaJson.source).toBe('projects-api');
+    expect(metaJson.password).toBe('[REDACTED]');
+    expect(JSON.stringify(metaJson)).not.toContain('SECRET_PASS');
   });
 });
 

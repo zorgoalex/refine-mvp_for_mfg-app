@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { computeDiff } from '../../../common/audit/audit-diff';
+import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
@@ -46,10 +47,6 @@ interface ClientPhoneRow extends QueryResultRow {
 
 interface LockedClientRow extends QueryResultRow {
   client_id: string | number;
-}
-
-interface AuditRow extends QueryResultRow {
-  audit_id: string;
 }
 
 interface IdempotencyRow extends QueryResultRow {
@@ -611,33 +608,19 @@ async function writeAudit(
     metadataJson: Record<string, unknown>;
   },
 ): Promise<string> {
-  const result = await tx.query<AuditRow>(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, request_id, source,
-      related_client_id, before_json, after_json, diff_json, metadata_json
-    )
-    VALUES (
-      $1, 'client_phone', $2, $3, $4, $5,
-      $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb
-    )
-    RETURNING audit_id
-    `,
-    [
-      input.event,
-      String(input.phoneId),
-      input.currentUser.id,
-      input.requestId,
-      SOURCE,
-      input.clientId,
-      input.beforeJson === null ? null : JSON.stringify(input.beforeJson),
-      input.afterJson === null ? null : JSON.stringify(input.afterJson),
-      JSON.stringify(input.diffJson),
-      JSON.stringify(input.metadataJson),
-    ],
-  );
-
-  return result.rows[0].audit_id;
+  return auditService.record(tx, {
+    event: input.event,
+    entityType: 'client_phone',
+    entityId: String(input.phoneId),
+    actorUserId: input.currentUser.id,
+    requestId: input.requestId,
+    source: SOURCE,
+    relatedClientId: input.clientId,
+    before: input.beforeJson,
+    after: input.afterJson,
+    diff: input.diffJson,
+    metadata: input.metadataJson,
+  });
 }
 
 async function enqueueOutbox(
