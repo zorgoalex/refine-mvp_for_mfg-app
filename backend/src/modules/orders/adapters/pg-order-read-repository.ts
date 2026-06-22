@@ -312,9 +312,10 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const listDetailSheetIdSelect = this.sheetOrdersReads
       ? 'od.sheet_material_type_id,'
       : 'NULL::bigint AS sheet_material_type_id,';
+    // Note: no trailing comma — this is the last column in the outer LATERAL SELECT before FROM.
     const listSheetTypeIdsAggregate = this.sheetOrdersReads
-      ? 'ARRAY_AGG(materials.sheet_material_type_id ORDER BY materials.first_detail_number, materials.first_detail_id) AS sheet_material_type_ids,'
-      : 'NULL::bigint[] AS sheet_material_type_ids,';
+      ? 'ARRAY_AGG(materials.sheet_material_type_id ORDER BY materials.first_detail_number, materials.first_detail_id) AS sheet_material_type_ids'
+      : 'NULL::bigint[] AS sheet_material_type_ids';
     const count = await this.database.query<CountRow>(
       `
       SELECT COUNT(*)::int AS total
@@ -374,7 +375,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           ${listSheetTypeIdsAggregate}
         FROM (
           SELECT
-            od.material_id,
+            ${this.sheetOrdersReads ? 'NULL::bigint AS material_id,' : 'od.material_id,'}
             ${listDetailSheetIdSelect}
             ${listDetailNameSelect},
             MIN(od.detail_number) AS first_detail_number,
