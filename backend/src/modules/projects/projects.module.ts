@@ -190,6 +190,7 @@ import { ProjectDeadlineStatusCountsReportService } from './reporting/project-de
           entityLinks: database.isConfigured
             ? new PgProjectEntityLinksRepository(database)
             : new UnavailableProjectEntityLinksRepository(),
+          database,
         }),
       inject: [DatabaseService],
     },
