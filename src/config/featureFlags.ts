@@ -15,9 +15,12 @@ export interface FrontendFeatureFlags {
   useBackendCut: boolean;
   // Variant B: gates reads that depend on migration 034 Hasura schema
   // (sheet_material_type_id as the sole order-material reference; order_details_view
-  // now returns sheet name only). Default MUST stay false — a fresh env or rollback
+  // now returns sheet name only). Default MUST stay false — a FRESH env (no 034 applied)
   // boots on the legacy (pre-034) path; flip to true ONLY inside the atomic cutover
   // window after migration 034 + Hasura metadata reload + backend rebuild are all live.
+  // NOTE: reverting an already-applied 034 is an EMERGENCY-only path (see
+  // 034_rollback.sql) — the reverse script is structural and may leave legacy UX
+  // degraded; a real revert restores from a DB backup, not the reverse script.
   // Flag is removed in a follow-up cleanup release.
   sheetMaterialsReads: boolean;
   enableLegacyHasura: boolean;

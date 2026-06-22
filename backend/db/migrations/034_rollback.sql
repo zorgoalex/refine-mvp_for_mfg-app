@@ -1,8 +1,15 @@
 -- 034_rollback.sql — Variant B reverse rollback: restore Variant-A shadow bridge from sheet refs.
 -- Idempotent: each step is guarded against double-application.
--- WARNING: this restores the Variant-A STRUCTURE (shadow bridge keyed on sheet_material_type_id),
--- NOT the original pre-SP3 legacy material identity of backfilled rows.
--- The forward path (034) is preferred; use this only for an emergency Variant-A revert.
+-- ⚠️ EMERGENCY STRUCTURAL revert ONLY — this does NOT produce a fully-functional legacy DB:
+--   * shadows are recreated only for sheet types referenced by order_details (NOT order headers);
+--   * orders.material_id is NOT backfilled; order_details.sheet_material_type_id is retained.
+--   So on the legacy (flag-off) path after this script, header-only orders may show no material
+--   and sheet-bearing orders may be unsaveable on the legacy write path (useOrderSave rejects
+--   a draft carrying sheet_material_type_id). It also does NOT restore the original pre-SP3
+--   legacy material identity of backfilled rows.
+-- The forward path (034) is preferred. For a REAL revert of applied 034, restore from a DB
+-- backup — not this script. This reverse SQL exists to document intent + as a last-resort
+-- structural escape hatch. erp_test = test data.
 
 BEGIN;
 
