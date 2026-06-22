@@ -74,7 +74,7 @@ export interface CutJobDto {
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;
 }
 
-export type CutIneligibleReason = 'deleted' | 'wrong_status' | 'no_sheet_spec';
+export type CutIneligibleReason = 'deleted' | 'wrong_status' | 'not_cuttable' | 'no_sheet_spec';
 
 /** A cut job a detail is placed in (informational; placement is non-exclusive). */
 export interface CutJobRef {

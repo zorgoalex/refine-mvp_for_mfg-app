@@ -73,4 +73,14 @@ describe('CutPage source guards', () => {
     // The array handling must be present (not relying on parseIdCsv for sheet types).
     expect(source).toContain('values.sheetMaterialTypeIds');
   });
+
+  it('INELIGIBLE_LABELS covers not_cuttable so a non-cuttable detail shows a human label, not raw text (critic R4 MAJOR)', () => {
+    // The label map must include all four ineligibility reasons so no raw reason key
+    // leaks into the UI when the backend returns not_cuttable for a non-cuttable sheet type.
+    expect(source).toContain("not_cuttable:");
+    // The label value must be a non-empty Russian string.
+    const match = source.match(/not_cuttable:\s*['"]([^'"]+)['"]/);
+    expect(match).not.toBeNull();
+    expect(match![1].length).toBeGreaterThan(2);
+  });
 });
