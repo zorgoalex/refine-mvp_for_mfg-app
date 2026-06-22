@@ -349,6 +349,50 @@ describe('ProductionActionService', () => {
       },
     } satisfies Partial<ApiError>);
   });
+
+  describe('changeBatchDetailProductionStatus coarse gate', () => {
+    const batchDto = {
+      detailIds: [100, 101],
+      productionStatusId: 5,
+      version: 3,
+      idempotencyKey: 'batch-key-1',
+    };
+
+    it('lets a worker (only orders.change_production_status) reach the repo', async () => {
+      let called = false;
+      const service = new ProductionActionService({
+        productionActions: createRepository({
+          async changeBatchDetailProductionStatus() {
+            called = true;
+            return { ...response(), selectedDetailCount: 2, affectedDetailCount: 2 };
+          },
+        }),
+      });
+
+      await service.changeBatchDetailProductionStatus({
+        currentUser: currentUser('worker'),
+        orderId: 15,
+        dto: batchDto,
+      });
+
+      expect(called).toBe(true);
+    });
+
+    it('rejects a viewer without orders.change_production_status (403)', async () => {
+      const service = new ProductionActionService({ productionActions: createRepository() });
+
+      await expect(
+        service.changeBatchDetailProductionStatus({
+          currentUser: currentUser('viewer'),
+          orderId: 15,
+          dto: batchDto,
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        code: 'PERMISSION_DENIED',
+      } satisfies Partial<ApiError>);
+    });
+  });
 });
 
 function createRepository(
@@ -387,6 +431,9 @@ function createRepository(
     },
     async enterManualProductionStatus() {
       throw new Error('enterManualProductionStatus should not be called');
+    },
+    async changeBatchDetailProductionStatus() {
+      throw new Error('changeBatchDetailProductionStatus should not be called');
     },
     ...overrides,
   };
