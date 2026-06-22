@@ -412,15 +412,73 @@ export const CutPage: React.FC = () => {
   // including those staged from the Orders "Добавить в раскрой" action. Showing
   // them is what makes a reopened job legible: "Загрузить подходящие детали" only
   // surfaces the candidate pool, never the selection already in the job.
-  const jobItemColumns: ColumnsType<CutJobItemDto> = useMemo(
-    () => [
-      { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detail' },
-      { title: 'Заказ', dataIndex: 'orderId', key: 'order' },
-      { title: 'Кол-во', dataIndex: 'qty', key: 'qty' },
+  const jobItemColumns: ColumnsType<CutJobItemDto> = useMemo(() => {
+    const dash = (value: unknown) => (value === null || value === undefined || value === '' ? '—' : String(value));
+    return [
+      { title: 'Поз.', key: 'pos', width: 60, fixed: 'left', render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.detailNumber) },
+      { title: 'Наименование', key: 'name', width: 180, fixed: 'left', render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.detailName) },
+      { title: 'Заказ', dataIndex: 'orderId', key: 'order', width: 80 },
+      { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: 90 },
+      {
+        title: 'Размер (Ш×В)',
+        key: 'size',
+        width: 130,
+        render: (_: unknown, r: CutJobItemDto) =>
+          r.detail && (r.detail.width !== null || r.detail.height !== null)
+            ? `${dash(r.detail.width)}×${dash(r.detail.height)}`
+            : '—',
+      },
+      { title: 'Кол-во', dataIndex: 'qty', key: 'qty', width: 80 },
+      { title: 'Площадь', key: 'area', width: 90, render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.area) },
+      { title: 'Материал', key: 'material', width: 160, render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.materialName) },
+      { title: 'Фрезеровка', key: 'milling', width: 140, render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.millingTypeName) },
+      { title: 'Кромка', key: 'edge', width: 120, render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.edgeTypeName) },
+      { title: 'Плёнка', key: 'film', width: 140, render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.filmName) },
+      { title: 'Статус', key: 'pstatus', width: 130, render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.productionStatusName) },
+      { title: 'Приоритет', key: 'priority', width: 100, render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.priority) },
+      { title: 'Соед. заказ', key: 'joint', width: 110, render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.jointOrderId) },
+      {
+        title: 'Примечание',
+        key: 'note',
+        width: 200,
+        render: (_: unknown, r: CutJobItemDto) =>
+          r.detail?.note ? (
+            <Tooltip title={r.detail.note}>
+              <Text ellipsis style={{ maxWidth: 180, display: 'inline-block' }}>{r.detail.note}</Text>
+            </Tooltip>
+          ) : (
+            '—'
+          ),
+      },
+      {
+        title: 'Файлы',
+        key: 'files',
+        width: 150,
+        render: (_: unknown, r: CutJobItemDto) => {
+          const links: Array<[string, string | null | undefined]> = [
+            ['Рез', r.detail?.linkCuttingFile],
+            ['Фото', r.detail?.linkCuttingImageFile],
+            ['CAD', r.detail?.linkCadFile],
+            ['PDF', r.detail?.linkPdfFile],
+          ];
+          const present = links.filter(([, href]) => Boolean(href));
+          if (present.length === 0) return '—';
+          return (
+            <Space size={4} wrap>
+              {present.map(([label, href]) => (
+                <a key={label} href={href as string} target="_blank" rel="noreferrer">
+                  {label}
+                </a>
+              ))}
+            </Space>
+          );
+        },
+      },
       {
         title: 'Действия',
         key: 'actions',
-        width: 120,
+        width: 110,
+        fixed: 'right',
         render: (_: unknown, row: CutJobItemDto) =>
           canManage ? (
             <Button size="small" type="link" danger onClick={() => removeJobItem(row.cutJobItemId)} disabled={busy}>
@@ -428,9 +486,8 @@ export const CutPage: React.FC = () => {
             </Button>
           ) : null,
       },
-    ],
-    [busy, canManage, removeJobItem],
-  );
+    ];
+  }, [busy, canManage, removeJobItem]);
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
 
@@ -490,6 +547,11 @@ export const CutPage: React.FC = () => {
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
           locale={{ emptyText: 'Нет раскроев' }}
           rowClassName={(row) => (row.cutJobId === job?.cutJobId ? 'ant-table-row-selected' : '')}
+          onRow={(row) => ({
+            onDoubleClick: () => {
+              if (!busy) void openJob(row.cutJobId);
+            },
+          })}
         />
       </Card>
 
@@ -543,6 +605,7 @@ export const CutPage: React.FC = () => {
             columns={jobItemColumns}
             dataSource={job.items}
             pagination={false}
+            scroll={{ x: 1900 }}
             locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
           />
         </Card>

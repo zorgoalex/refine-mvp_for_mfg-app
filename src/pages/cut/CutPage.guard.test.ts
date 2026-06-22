@@ -46,6 +46,22 @@ describe('CutPage source guards', () => {
     expect(source).toContain('Убрать');
   });
 
+  it('shows the full per-detail order fields (position + names), never price/sum', () => {
+    // Position number + resolved dictionary names mirror the order form's detail.
+    expect(source).toContain('detailNumber');
+    expect(source).toContain('materialName');
+    expect(source).toContain('millingTypeName');
+    expect(source).toContain('edgeTypeName');
+    expect(source).toContain('productionStatusName');
+    // The /cut surface is production-facing: detail price/sum must not leak.
+    expect(source).not.toContain('detailCost');
+    expect(source).not.toContain('millingCostPerSqm');
+  });
+
+  it('opens a job on row double-click', () => {
+    expect(source).toContain('onDoubleClick');
+  });
+
   it('prefills the eligible-load criteria with the reserved orders when opening a job', () => {
     // Opening a job must scope "Загрузить подходящие детали" to the order(s) the
     // job was built from, not scan every order. Source of truth = reserved items.
