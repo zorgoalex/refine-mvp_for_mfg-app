@@ -88,10 +88,9 @@ const MUTABLE_STATUSES = new Set(['draft', 'calculating', 'ready', 'failed']);
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
 interface CalcRelatedDimensions {
   orderIds: number[];
-  materialIds: number[];
   sheetMaterialTypeIds: number[];
 }
-const EMPTY_RELATED: CalcRelatedDimensions = { orderIds: [], materialIds: [], sheetMaterialTypeIds: [] };
+const EMPTY_RELATED: CalcRelatedDimensions = { orderIds: [], sheetMaterialTypeIds: [] };
 
 interface FreecutClientLike {
   optimize: (
@@ -312,7 +311,6 @@ export class PgCutRepository implements CutRepositoryPort {
       const groups = [...groupByCuttableKey(items).values()];
       phase1Related = {
         orderIds: groups.flatMap((g) => g.orderIds),
-        materialIds: groups.flatMap((g) => g.materialIds),
         sheetMaterialTypeIds: groups
           .map((g) => g.sheetMaterialTypeId)
           .filter((id): id is number => id !== null),
@@ -380,7 +378,6 @@ export class PgCutRepository implements CutRepositoryPort {
 
     // Related dimensions aggregated across ALL groups (audit query/report-ready).
     const allOrderIds = prep.groupPreps.flatMap((p) => p.group.orderIds);
-    const allMaterialIds = prep.groupPreps.flatMap((p) => p.group.materialIds);
     const allSheetMaterialTypeIds = prep.groupPreps.map((p) => p.group.sheetMaterialTypeId as number);
 
     // Phase 2 — external freecut calls (no DB lock held), one per group.
@@ -400,7 +397,7 @@ export class PgCutRepository implements CutRepositoryPort {
       await this.markCalcFailed(
         error,
         command,
-        { orderIds: allOrderIds, materialIds: allMaterialIds, sheetMaterialTypeIds: allSheetMaterialTypeIds },
+        { orderIds: allOrderIds, sheetMaterialTypeIds: allSheetMaterialTypeIds },
         prep.expectedVersion,
       );
     }
@@ -485,7 +482,6 @@ export class PgCutRepository implements CutRepositoryPort {
         requestId: command.requestId,
         related: {
           orderIds: allOrderIds,
-          materialIds: allMaterialIds,
           sheetMaterialTypeIds: allSheetMaterialTypeIds,
           cutGroupIds,
         },
@@ -667,7 +663,7 @@ export class PgCutRepository implements CutRepositoryPort {
       }
     };
     addArrayFilter('od.order_id', query.criteria.orderIds);
-    addArrayFilter('od.material_id', query.criteria.materialIds);
+    addArrayFilter('od.sheet_material_type_id', query.criteria.sheetMaterialTypeIds);
     addArrayFilter('od.film_id', query.criteria.filmIds);
     if (query.criteria.productionStatusIds && query.criteria.productionStatusIds.length > 0) {
       // Operator override: explicit status filter wins over the ready-set default.
@@ -688,10 +684,9 @@ export class PgCutRepository implements CutRepositoryPort {
     const result = await this.database.query<EligibleRow>(
       `
       SELECT od.detail_id, od.order_id, od.quantity, od.material_id,
-             COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id,
+             od.sheet_material_type_id,
              od.film_id, od.production_status_id, od.delete_flag
       FROM order_details od
-      JOIN materials m ON m.material_id = od.material_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY od.detail_id
       LIMIT 2000
@@ -724,7 +719,7 @@ export class PgCutRepository implements CutRepositoryPort {
         orderDetailId: candidate.detailId,
         orderId: toNum(row.order_id),
         quantity: toNum(row.quantity),
-        materialId: toNum(row.material_id),
+        materialId: row.material_id === null || row.material_id === undefined ? null : toNum(row.material_id),
         sheetMaterialTypeId: candidate.sheetMaterialTypeId,
         filmId: row.film_id === null ? null : toNum(row.film_id),
         eligible,
@@ -794,11 +789,10 @@ export class PgCutRepository implements CutRepositoryPort {
       `
       SELECT od.detail_id
       FROM order_details od
-      JOIN materials m ON m.material_id = od.material_id
       WHERE od.detail_id = ANY($1::bigint[])
         AND od.delete_flag = false
         AND od.production_status_id = ANY($2::smallint[])
-        AND COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) IS NOT NULL
+        AND od.sheet_material_type_id IS NOT NULL
       `,
       [[...detailIds], readyStatusIds],
     );
@@ -954,9 +948,8 @@ export class PgCutRepository implements CutRepositoryPort {
       sheet_material_type_id: string | number | null;
     }>(
       `SELECT od.order_id, od.quantity, od.production_status_id, od.delete_flag,
-              COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id
+              od.sheet_material_type_id
        FROM order_details od
-       JOIN materials m ON m.material_id = od.material_id
        WHERE od.detail_id = $1`,
       [detailId],
     );
@@ -1013,7 +1006,6 @@ export class PgCutRepository implements CutRepositoryPort {
       requestId?: string;
       related?: {
         orderIds?: number[];
-        materialIds?: Array<number | null>;
         sheetMaterialTypeIds?: Array<number | null>;
         cutGroupIds?: number[];
       };
@@ -1035,7 +1027,6 @@ export class PgCutRepository implements CutRepositoryPort {
         source: AUDIT_SOURCE,
         related: {
           orderIds: cleanIds(input.related?.orderIds),
-          materialIds: cleanIds(input.related?.materialIds),
           sheetMaterialTypeIds: cleanIds(input.related?.sheetMaterialTypeIds),
           cutGroupIds: cleanIds(input.related?.cutGroupIds),
         },
@@ -1063,7 +1054,6 @@ interface CuttableGroup {
   smtWidthMm: number | null;
   smtHeightMm: number | null;
   orderIds: number[];
-  materialIds: number[];
   items: Array<{ orderDetailId: number; orderId: number; qty: number; widthMm: number; heightMm: number; filmTexture: boolean | null }>;
 }
 
@@ -1082,16 +1072,12 @@ function groupByCuttableKey(rows: CalcItemRow[]): Map<string, CuttableGroup> {
         smtWidthMm: row.smt_width_mm === null ? null : toNum(row.smt_width_mm),
         smtHeightMm: row.smt_height_mm === null ? null : toNum(row.smt_height_mm),
         orderIds: [],
-        materialIds: [],
         items: [],
       };
       groups.set(key, group);
     }
     const orderId = toNum(row.order_id);
     group.orderIds.push(orderId);
-    if (row.material_id !== undefined && row.material_id !== null) {
-      group.materialIds.push(toNum(row.material_id));
-    }
     group.items.push({
       orderDetailId: toNum(row.order_detail_id),
       orderId,
@@ -1109,12 +1095,11 @@ async function loadCalcItems(tx: TransactionClient, cutJobId: number): Promise<C
     `
     SELECT cji.cut_job_item_id, cji.order_detail_id, cji.order_id, cji.qty,
            od.width AS width_mm, od.height AS height_mm, od.material_id,
-           COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id, od.film_id, f.film_texture,
+           od.sheet_material_type_id, od.film_id, f.film_texture,
            smt.width_mm AS smt_width_mm, smt.height_mm AS smt_height_mm
     FROM cut_job_item cji
     JOIN order_details od ON od.detail_id = cji.order_detail_id
-    JOIN materials m ON m.material_id = od.material_id
-    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = COALESCE(od.sheet_material_type_id, m.sheet_material_type_id)
+    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
     LEFT JOIN films f ON f.film_id = od.film_id
     WHERE cji.cut_job_id = $1 AND cji.is_active = true
     ORDER BY cji.cut_job_item_id

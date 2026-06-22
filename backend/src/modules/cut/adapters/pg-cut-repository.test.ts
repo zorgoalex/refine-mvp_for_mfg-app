@@ -440,13 +440,15 @@ describe('PgCutRepository', () => {
     expect(statusUpdate?.params?.[2]).toBe('CUT_NO_SHEET_SPEC');
     expect(String(statusUpdate?.params?.[3])).toMatch(/раскройной спецификации/i);
     // The Phase 1 failure audit keeps query/report-ready related dimensions
-    // (order/material/sheet) captured from the grouped items — not an empty set.
+    // (order/sheet) captured from the grouped items — not an empty set.
+    // Variant B: material_id is NULL post-034; only order + sheet_material_type
+    // dimensions are emitted (no 'material' entity in the related set).
     const relatedPairs = db.queries
       .filter((q) => /INSERT INTO audit_log_related_entity/i.test(q.text))
       .map((q) => `${q.params?.[1]}:${q.params?.[2]}`);
     expect(relatedPairs).toContain('order:9');
-    expect(relatedPairs).toContain('material:5');
     expect(relatedPairs).toContain('sheet_material_type:9');
+    expect(relatedPairs).not.toContain('material:5');
   });
 
   it('calculate: a stale-version precondition does NOT mark the job failed', async () => {
@@ -468,8 +470,8 @@ describe('PgCutRepository', () => {
     const db = createDatabase({
       readyStatusIds: [1, 2, 3],
       eligibleRows: [
-        { detail_id: 1, order_id: 9, quantity: 2, material_id: 5, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false, already_reserved: false },
-        { detail_id: 2, order_id: 9, quantity: 1, material_id: 6, sheet_material_type_id: null, film_id: null, production_status_id: 1, delete_flag: false, already_reserved: false },
+        { detail_id: 1, order_id: 9, quantity: 2, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false },
+        { detail_id: 2, order_id: 9, quantity: 1, sheet_material_type_id: null, film_id: null, production_status_id: 1, delete_flag: false },
       ],
     });
     const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
@@ -480,5 +482,46 @@ describe('PgCutRepository', () => {
     expect(result.details.find((d) => d.orderDetailId === 1)?.eligible).toBe(true);
     expect(result.details.find((d) => d.orderDetailId === 2)?.ineligibleReason).toBe('no_sheet_spec');
     expect(result.noSheetSpecCount).toBe(1);
+  });
+
+  it('Variant B: treats a sheet detail with NULL material_id as eligible (no mandatory materials JOIN)', async () => {
+    // Post-034: order_details.material_id IS NULL; sheet_material_type_id is authoritative.
+    // The inner JOIN materials m ON m.material_id = od.material_id would drop every row.
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 5, order_id: 11, quantity: 1, sheet_material_type_id: 2, film_id: null, production_status_id: 1, delete_flag: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [11] }, requestId: 'r-vb' });
+
+    expect(result.details.map((d) => d.orderDetailId)).toContain(5);
+    expect(result.details.find((d) => d.orderDetailId === 5)?.eligible).toBe(true);
+  });
+
+  it('Variant B: filters eligible details by sheetMaterialTypeIds (replaces materialIds filter)', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 5, order_id: 11, quantity: 1, sheet_material_type_id: 2, film_id: null, production_status_id: 1, delete_flag: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listEligibleDetails({
+      currentUser: currentUser(),
+      criteria: { sheetMaterialTypeIds: [2] },
+      requestId: 'r-vb-filter',
+    });
+
+    // The query must have used od.sheet_material_type_id = ANY(...) — verified by
+    // the fake DB routing: the condition is built against sheetMaterialTypeIds.
+    const sheetFilterQuery = db.queries.find((q) =>
+      normalize(q.text).includes('od.sheet_material_type_id = ANY'),
+    );
+    expect(sheetFilterQuery).toBeDefined();
+    expect(result.details.every((d) => d.sheetMaterialTypeId === 2)).toBe(true);
   });
 });

@@ -41,4 +41,17 @@ describe('CutPage source guards', () => {
     const body = calc.slice(0, calc.indexOf('}, [job'));
     expect(body).toMatch(/catch[\s\S]*cutApi\.get\(/);
   });
+
+  it('Variant B: cut filter sends sheetMaterialTypeIds (not materialIds)', () => {
+    // Post-034 the filter key is sheetMaterialTypeIds; materialIds must not be sent.
+    expect(source).toContain('sheetMaterialTypeIds');
+    expect(source).not.toContain('materialIds');
+  });
+
+  it('Variant B: cut filter does NOT depend on useBackendOrdersWrite or sheet_materials.* perms', () => {
+    // The /cut page is gated on cut.view/cut.manage only (Critic R22 B3).
+    // It must never check orders-write or catalog-level sheet perms.
+    expect(source).not.toContain('useBackendOrdersWrite');
+    expect(source).not.toMatch(/can\(['"]sheet_materials/);
+  });
 });

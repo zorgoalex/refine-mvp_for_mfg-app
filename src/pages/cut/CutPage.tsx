@@ -69,7 +69,7 @@ const STATUS_TAG_COLORS: Record<string, string> = {
  */
 export const CutPage: React.FC = () => {
   const canManage = can('cut.manage');
-  const [form] = Form.useForm<{ name: string; orderIds?: string; materialIds?: string; filmIds?: string }>();
+  const [form] = Form.useForm<{ name: string; orderIds?: string; sheetMaterialTypeIds?: string; filmIds?: string }>();
   const [job, setJob] = useState<CutJobDto | null>(null);
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
@@ -100,7 +100,7 @@ export const CutPage: React.FC = () => {
     const values = form.getFieldsValue();
     return {
       orderIds: parseIdCsv(values.orderIds ?? ''),
-      materialIds: parseIdCsv(values.materialIds ?? ''),
+      sheetMaterialTypeIds: parseIdCsv(values.sheetMaterialTypeIds ?? ''),
       filmIds: parseIdCsv(values.filmIds ?? ''),
     };
   }, [form]);
@@ -395,8 +395,8 @@ export const CutPage: React.FC = () => {
           <Form.Item name="orderIds">
             <Input placeholder="Заказы (9,10)" />
           </Form.Item>
-          <Form.Item name="materialIds">
-            <Input placeholder="Материалы" />
+          <Form.Item name="sheetMaterialTypeIds">
+            <Input placeholder="Типы листов" />
           </Form.Item>
           <Form.Item name="filmIds">
             <Input placeholder="Плёнки" />

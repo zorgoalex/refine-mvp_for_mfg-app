@@ -21,7 +21,8 @@ const idArray = z.array(z.number().int().positive()).max(5000);
 
 const criteriaSchema = z
   .object({
-    materialIds: idArray.optional(),
+    /** Variant B: filter by sheet_material_type_id (replaces materialIds post-034). */
+    sheetMaterialTypeIds: idArray.optional(),
     orderIds: idArray.optional(),
     filmIds: idArray.optional(),
     productionStatusIds: idArray.optional(),
@@ -389,7 +390,7 @@ export function parseVersionBody(body: unknown): number {
 /** Query CSV (`orderIds=9,10`) → number arrays. */
 export function parseEligibleCriteria(query: Record<string, string>): CutSelectionCriteriaDto {
   return {
-    materialIds: parseCsvIds(query.materialIds),
+    sheetMaterialTypeIds: parseCsvIds(query.sheetMaterialTypeIds),
     orderIds: parseCsvIds(query.orderIds),
     filmIds: parseCsvIds(query.filmIds),
     productionStatusIds: parseCsvIds(query.productionStatusIds),

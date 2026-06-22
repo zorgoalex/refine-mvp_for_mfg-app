@@ -3,7 +3,8 @@ import type { SheetPlacementsJson } from '../application/cut-freecut-mapping';
 
 /** Filters that resolve a candidate detail set (snapshot onto the job). */
 export interface CutSelectionCriteriaDto {
-  materialIds?: number[];
+  /** Variant B: filter by sheet_material_type_id (replaces materialIds post-034). */
+  sheetMaterialTypeIds?: number[];
   orderIds?: number[];
   filmIds?: number[];
   productionStatusIds?: number[];
@@ -70,7 +71,8 @@ export interface EligibleDetailDto {
   orderDetailId: number;
   orderId: number;
   quantity: number;
-  materialId: number;
+  /** NULL post-034 (Variant B: material_id sunsetted on order_details). */
+  materialId: number | null;
   sheetMaterialTypeId: number | null;
   filmId: number | null;
   eligible: boolean;

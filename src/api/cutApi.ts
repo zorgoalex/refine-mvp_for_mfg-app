@@ -125,7 +125,7 @@ async function downloadPdf(path: string): Promise<CutPdfResult> {
 export function buildEligibleQuery(criteria: CutSelectionCriteria): string {
   const params = new URLSearchParams();
   appendCsv(params, 'orderIds', criteria.orderIds);
-  appendCsv(params, 'materialIds', criteria.materialIds);
+  appendCsv(params, 'sheetMaterialTypeIds', criteria.sheetMaterialTypeIds);
   appendCsv(params, 'filmIds', criteria.filmIds);
   appendCsv(params, 'productionStatusIds', criteria.productionStatusIds);
   return params.toString();
