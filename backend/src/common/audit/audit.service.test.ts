@@ -225,19 +225,18 @@ describe('AuditService.recordDenied', () => {
     expect(serialized.toLowerCase()).toContain('denied');
   });
 
-  it('recordDenied persists related dims and normalizes the denial reason into status columns', async () => {
-    const captured: any[] = [];
-    const client = { query: async (_sql: string, params: any[]) => { captured.push(params); return { rows: [{ audit_id: 'a1' }] }; } } as any;
-    await new AuditService().recordDenied(client, {
+  it('persists related dims and normalizes the denial reason into status columns', async () => {
+    const captured: Captured[] = [];
+    await new AuditService().recordDenied(fakeClient(captured, 'a1'), {
       event: 'payment.permission_denied', entityType: 'payment', entityId: 5,
       actorUserId: 9, requestId: 'req_p', source: 'backend-payments-command',
       relatedOrderId: 11192, relatedPaymentId: 5, relatedUserId: 9,
       reason: 'order_scope_denied', requiredPermissions: ['payments.update'],
     });
-    const p = captured[0];
-    expect(p[10]).toBe(5);          // related_payment_id
-    expect(p[13]).toBe(9);          // related_user_id
-    expect(p[14]).toBe('denied');   // status_field
-    expect(p[17]).toBe('order_scope_denied'); // status_code
+    const { params } = captured[0];
+    expect(params[10]).toBe(5);          // related_payment_id
+    expect(params[13]).toBe(9);          // related_user_id
+    expect(params[14]).toBe('denied');   // status_field
+    expect(params[17]).toBe('order_scope_denied'); // status_code
   });
 });
