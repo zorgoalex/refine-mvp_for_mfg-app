@@ -92,6 +92,17 @@ describe('CutPage source guards', () => {
     expect(source).toContain('sheetThumbs');
   });
 
+  it('resets previews on recalculate and revokes blob URLs (no stale preview, no leak)', () => {
+    // Recalculate must clear thumbs+ref via the shared reset (otherwise a stale
+    // preview survives the dedupe), and blob URLs must be revoked on reset,
+    // overwrite, and unmount — /cut stays mounted (keep-alive) so leaks accrue.
+    expect(source).toContain('resetSheetViews');
+    expect(source).toContain('URL.revokeObjectURL');
+    const calc = source.slice(source.indexOf('const calculate'));
+    const body = calc.slice(0, calc.indexOf('}, [job'));
+    expect(body).toContain('resetSheetViews()');
+  });
+
   it('refreshes the job after a failed calculate so the reason + fresh version show', () => {
     // The calculate catch must reload the job (persisted reason + bumped version),
     // otherwise the Alert never renders and a retry would 409 on a stale version.

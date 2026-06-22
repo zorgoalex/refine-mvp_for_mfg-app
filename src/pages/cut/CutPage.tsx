@@ -65,6 +65,11 @@ const STATUS_TAG_COLORS: Record<string, string> = {
   archived: 'default',
 };
 
+/** Revoke every blob object URL in a key->url map (leak guard on reset/unmount). */
+const revokeObjectUrls = (map: Record<string, string>): void => {
+  Object.values(map).forEach((url) => URL.revokeObjectURL(url));
+};
+
 /**
  * Backend-owned /cut page (CLAUDE.md principle 2/3): all reads and commands go
  * through cutApi (`/api/v1/cut-jobs`); the read-layer is never written from here.
@@ -87,6 +92,37 @@ export const CutPage: React.FC = () => {
   // keyed `${cutGroupId}:${sheetIndex}`. thumbReqRef dedupes in-flight/done fetches.
   const [sheetThumbs, setSheetThumbs] = useState<Record<string, string>>({});
   const thumbReqRef = useRef<Set<string>>(new Set());
+  // Mirror of the live blob maps so the unmount cleanup (stale-closure-safe) can
+  // revoke any outstanding object URLs even though /cut is kept mounted.
+  const blobsRef = useRef<{ images: Record<string, string>; thumbs: Record<string, string> }>({
+    images: {},
+    thumbs: {},
+  });
+
+  // Clear both per-sheet view caches, revoking blob URLs so a recalculated or
+  // reopened job never shows a stale preview and never leaks blobs.
+  const resetSheetViews = useCallback(() => {
+    setSheetImages((prev) => {
+      revokeObjectUrls(prev);
+      return {};
+    });
+    setSheetThumbs((prev) => {
+      revokeObjectUrls(prev);
+      return {};
+    });
+    thumbReqRef.current = new Set();
+  }, []);
+
+  useEffect(() => {
+    blobsRef.current = { images: sheetImages, thumbs: sheetThumbs };
+  }, [sheetImages, sheetThumbs]);
+  useEffect(
+    () => () => {
+      revokeObjectUrls(blobsRef.current.images);
+      revokeObjectUrls(blobsRef.current.thumbs);
+    },
+    [],
+  );
   const [preset, setPreset] = useState<string>('screen');
   const [presetOptions, setPresetOptions] = useState(DEFAULT_PRESET_OPTIONS);
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
@@ -158,16 +194,14 @@ export const CutPage: React.FC = () => {
         });
         setEligible(null);
         setSelected([]);
-        setSheetImages({});
-        setSheetThumbs({});
-        thumbReqRef.current = new Set();
+        resetSheetViews();
       } catch (error) {
         handleError(error, 'Не удалось открыть раскрой');
       } finally {
         setBusy(false);
       }
     },
-    [form, handleError],
+    [form, handleError, resetSheetViews],
   );
 
   const archiveJob = useCallback(
@@ -181,9 +215,7 @@ export const CutPage: React.FC = () => {
           setJob(null);
           setEligible(null);
           setSelected([]);
-          setSheetImages({});
-        setSheetThumbs({});
-        thumbReqRef.current = new Set();
+          resetSheetViews();
         }
         await loadJobs();
       } catch (error) {
@@ -192,7 +224,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, loadJobs, handleError],
+    [job, loadJobs, handleError, resetSheetViews],
   );
 
   const createJob = useCallback(async () => {
@@ -267,7 +299,7 @@ export const CutPage: React.FC = () => {
     try {
       const calculated = await cutApi.calculate(job.cutJobId, job.version);
       setJob(calculated);
-      setSheetImages({});
+      resetSheetViews();
       message.success('Раскрой рассчитан');
       await loadJobs();
     } catch (error) {
@@ -284,7 +316,7 @@ export const CutPage: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [job, loadJobs, handleError]);
+  }, [job, loadJobs, handleError, resetSheetViews]);
 
   const loadSheet = useCallback(
     async (group: CutGroupDto, sheetIndex: number) => {
@@ -292,7 +324,10 @@ export const CutPage: React.FC = () => {
       const key = `${group.cutGroupId}:${sheetIndex}`;
       try {
         const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset);
-        setSheetImages((prev) => ({ ...prev, [key]: URL.createObjectURL(blob) }));
+        setSheetImages((prev) => {
+          if (prev[key]) URL.revokeObjectURL(prev[key]);
+          return { ...prev, [key]: URL.createObjectURL(blob) };
+        });
       } catch (error) {
         handleError(error, 'Не удалось загрузить лист раскроя');
       }
@@ -310,7 +345,10 @@ export const CutPage: React.FC = () => {
       thumbReqRef.current.add(reqKey);
       try {
         const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb');
-        setSheetThumbs((prev) => ({ ...prev, [key]: URL.createObjectURL(blob) }));
+        setSheetThumbs((prev) => {
+          if (prev[key]) URL.revokeObjectURL(prev[key]);
+          return { ...prev, [key]: URL.createObjectURL(blob) };
+        });
       } catch {
         // Preview is best-effort; the full-size "Лист N" view still works on click.
         thumbReqRef.current.delete(reqKey);
