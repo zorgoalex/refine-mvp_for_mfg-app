@@ -51,8 +51,14 @@ export const orderHeaderSchema = z
     parts_count: z.number().int().min(0).optional(),
     total_area: z.number().min(0).optional(),
 
-    // Legacy fields (for compatibility)
-    material_id: z.number().nullable().optional(),
+    // Variant B: material_id is sunsetted at the order level; must be null/absent.
+    // A positive material_id indicates a stale pre-034 payload and MUST be rejected
+    // to mirror the backend order-validation contract.
+    material_id: z
+      .number()
+      .max(0, 'Вариант Б: material_id устарел — используйте sheet_material_type_id')
+      .nullable()
+      .optional(),
     sheet_material_type_id: z.number().nullable().optional(),
     milling_type_id: z.number().nullable().optional(),
     edge_type_id: z.number().nullable().optional(),
@@ -166,10 +172,15 @@ export const orderDetailSchema = z.object({
   area: z.number().min(0, "Площадь должна быть >= 0"),
 
   // Materials and processing
-  // A detail satisfies the material requirement with EITHER a legacy material
-  // OR a sheet material (SP3). Cross-field check in the superRefine below.
-  material_id: z.number().min(0, "Выберите материал").optional(),
-  sheet_material_type_id: z.number().nullable().optional(),
+  // Variant B: sheet_material_type_id is the ONLY order-material reference.
+  // material_id must be null/absent (positive value = stale pre-034 payload, rejected).
+  // Cross-field enforcement in the superRefine below.
+  material_id: z
+    .number()
+    .max(0, 'Вариант Б: material_id устарел — используйте sheet_material_type_id')
+    .nullable()
+    .optional(),
+  sheet_material_type_id: z.number().positive('Выберите листовой материал').nullable().optional(),
   milling_type_id: z.number().min(0, "Выберите тип фрезеровки"),
   edge_type_id: z.number().min(0, "Выберите тип кромки"),
   film_id: z.number().nullable().optional(),
@@ -208,11 +219,22 @@ export const orderDetailSchema = z.object({
   updated_at: z.date().optional().or(z.string().optional()),
   temp_id: z.number().optional(),
 }).superRefine((d, ctx) => {
-  // A detail must carry EITHER a legacy material OR a sheet material (SP3).
-  const hasLegacy = typeof d.material_id === 'number' && d.material_id > 0;
+  // Variant B: sheet_material_type_id is REQUIRED (positive integer).
   const hasSheet = typeof d.sheet_material_type_id === 'number' && d.sheet_material_type_id > 0;
-  if (!hasLegacy && !hasSheet) {
-    ctx.addIssue({ code: 'custom', path: ['material_id'], message: 'Выберите материал или листовой материал' });
+  if (!hasSheet) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['sheet_material_type_id'],
+      message: 'Выберите листовой материал',
+    });
+  }
+  // Variant B: a positive material_id means a stale pre-034 payload — reject it.
+  if (typeof d.material_id === 'number' && d.material_id > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['material_id'],
+      message: 'Вариант Б: material_id устарел — используйте sheet_material_type_id',
+    });
   }
 });
 

@@ -206,6 +206,7 @@ export interface SaveOrderHeaderDto {
 
   managerId?: number | null;
 
+  /** @deprecated Variant B: always null; sheet_material_type_id is the authoritative order-material reference */
   materialId?: number | null;
   sheetMaterialTypeId?: number | null;
   millingTypeId?: number | null;
@@ -232,10 +233,8 @@ export interface SaveOrderDetailDto {
   width: number;
   quantity: number;
 
-  // SP3: a detail carries EITHER a legacy material OR a sheet material. When a
-  // sheet material is set the backend authoritatively resolves materialId (shadow
-  // row), so the FE may send materialId 0/omitted for a sheet-only detail.
-  materialId: number;
+  /** @deprecated Variant B: always null for sheet details; sheetMaterialTypeId is the authoritative order-material reference */
+  materialId?: number | null;
   sheetMaterialTypeId?: number | null;
   millingTypeId: number;
   edgeTypeId: number;

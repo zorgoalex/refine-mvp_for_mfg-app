@@ -102,7 +102,8 @@ export interface OrderDetail {
   area: number; // Auto-calculated: height × width
 
   // Materials and processing
-  material_id: number;
+  // Variant B: material_id is always NULL for order details (sheet_material_type_id is authoritative).
+  material_id: number | null;
   sheet_material_type_id?: number | null;
   // SP3: server-resolved per-detail material name = COALESCE(sheet name, material
   // name) from order_details_view. Edit workspace reads this, not a materials map.

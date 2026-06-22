@@ -13,11 +13,12 @@ export interface FrontendFeatureFlags {
   useBackendVlm: boolean;
   useBackendReferences: boolean;
   useBackendCut: boolean;
-  // SP3: gates all reads that depend on migration 029 Hasura schema
-  // (order_details_view, orders/orders_view/order_details.sheet_material_type_id,
-  // orders.sheet_eligible, materials.is_sheet_shadow). MUST stay false until the
-  // Hasura metadata for migration 029 is applied, else legacy Hasura reads fail
-  // with "field not found". Deploy order: migration + Hasura metadata, THEN flip.
+  // Variant B: gates reads that depend on migration 034 Hasura schema
+  // (sheet_material_type_id as the sole order-material reference; order_details_view
+  // now returns sheet name only). Default MUST stay false — a fresh env or rollback
+  // boots on the legacy (pre-034) path; flip to true ONLY inside the atomic cutover
+  // window after migration 034 + Hasura metadata reload + backend rebuild are all live.
+  // Flag is removed in a follow-up cleanup release.
   sheetMaterialsReads: boolean;
   enableLegacyHasura: boolean;
 }
