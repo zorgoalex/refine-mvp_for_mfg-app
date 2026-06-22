@@ -62,8 +62,11 @@ describe('CutPage source guards', () => {
     expect(source).toContain('onDoubleClick');
   });
 
-  it('links the order number of each detail to its order card', () => {
-    expect(source).toContain('/orders/show/${r.orderId}');
+  it('opens the order in an in-app workspace tab (not a new browser tab)', () => {
+    // Use Refine navigation push (keep-alive tab) for the order number; not a
+    // react-router Link with target="_blank".
+    expect(source).toContain("show('orders_view', r.orderId, 'push')");
+    expect(source).not.toContain('react-router-dom');
   });
 
   it('fail-closes detail file links against javascript:/data: stored-link XSS', () => {

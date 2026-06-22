@@ -14,7 +14,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { Link } from 'react-router-dom';
+import { useNavigation } from '@refinedev/core';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
@@ -73,6 +73,9 @@ const STATUS_TAG_COLORS: Record<string, string> = {
  */
 export const CutPage: React.FC = () => {
   const canManage = can('cut.manage');
+  // Open orders inside the app's keep-alive workspace tabs (same as the orders
+  // list double-click), not a new browser tab.
+  const { show } = useNavigation();
   const [form] = Form.useForm<{ name: string; orderIds?: string; materialIds?: string; filmIds?: string }>();
   const [job, setJob] = useState<CutJobDto | null>(null);
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
@@ -424,12 +427,12 @@ export const CutPage: React.FC = () => {
         dataIndex: 'orderId',
         key: 'order',
         width: 80,
-        // Click the order number to open its card in a new tab (keeps the cut
-        // job context open in this one).
+        // Click the order number to open its card as an in-app workspace tab
+        // (push = new keep-alive tab, same as the orders list double-click).
         render: (_: unknown, r: CutJobItemDto) => (
-          <Link to={`/orders/show/${r.orderId}`} target="_blank" rel="noreferrer">
+          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => show('orders_view', r.orderId, 'push')}>
             {r.orderId}
-          </Link>
+          </Button>
         ),
       },
       { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: 90 },
@@ -512,7 +515,7 @@ export const CutPage: React.FC = () => {
           ) : null,
       },
     ];
-  }, [busy, canManage, removeJobItem]);
+  }, [busy, canManage, removeJobItem, show]);
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
 
