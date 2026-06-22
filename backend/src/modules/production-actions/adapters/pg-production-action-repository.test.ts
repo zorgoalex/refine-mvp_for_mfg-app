@@ -1273,7 +1273,7 @@ describe('assigned-worker audit metadata across production commands', () => {
       expect(normalizedSql(database.queries)).not.toContain('INSERT INTO production_status_events');
     });
 
-    it('takes NO FOR UPDATE on detail rows (orders row is the sole mutex)', async () => {
+    it('locks selected detail rows FOR UPDATE BEFORE the parent order row (details-before-order)', async () => {
       const database = createDatabase({
         detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
         updatedDetailIds: [100],
@@ -1282,12 +1282,24 @@ describe('assigned-worker audit metadata across production commands', () => {
 
       await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
 
-      // The batch's detail read must NOT lock rows; only the parent orders row is locked FOR UPDATE.
-      const detailRead = database.queries.find((query) =>
-        normalizeSql(query.text).startsWith('SELECT detail_id, production_status_id FROM order_details'),
+      // Global deadlock-avoidance order: the SELECTED detail rows are locked FOR UPDATE (ANY filter)
+      // BEFORE the parent order row is locked FOR UPDATE — matching the detail-stage command's order.
+      const detailLockIdx = database.queries.findIndex((query) => {
+        const n = normalizeSql(query.text);
+        return (
+          n.startsWith('SELECT detail_id, production_status_id FROM order_details') &&
+          n.includes('detail_id = ANY') &&
+          n.includes('FOR UPDATE')
+        );
+      });
+      const orderLockIdx = database.queries.findIndex((query) =>
+        normalizeSql(query.text).startsWith(
+          'SELECT order_id, client_id',
+        ),
       );
-      expect(detailRead).toBeDefined();
-      expect(normalizeSql(detailRead!.text)).not.toContain('FOR UPDATE');
+      expect(detailLockIdx).toBeGreaterThanOrEqual(0);
+      expect(orderLockIdx).toBeGreaterThanOrEqual(0);
+      expect(detailLockIdx).toBeLessThan(orderLockIdx);
       expect(normalizedSql(database.queries)).toContain(
         'FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE',
       );
@@ -1344,40 +1356,117 @@ describe('assigned-worker audit metadata across production commands', () => {
       expect(normalizedSql(database.queries)).not.toContain('UPDATE orders SET version = version + 1');
     });
 
-    it('writes audit with normalized batch dimensions and snapshot distributions', async () => {
+    it('writes audit with normalized batch dimensions and snapshot distributions (values)', async () => {
       const database = createDatabase({
+        orderProductionStatusId: 1,
         detailStatusRowsBefore: [
           { detail_id: 100, production_status_id: 1 },
           { detail_id: 101, production_status_id: 1 },
         ],
         updatedDetailIds: [100, 101],
+        recalcOrderProductionStatusId: 5,
       });
       const repository = new PgProductionActionRepository(database.service);
 
       await repository.changeBatchDetailProductionStatus(cmd());
 
-      const params = normalizedParams(database.queries);
-      expect(params).toContain('detail_production_status_batch_change');
-      expect(params).toContain('beforeStatusDistribution');
-      expect(params).toContain('afterStatusDistribution');
-      expect(params).toContain('selectedDetailCount');
-      expect(params).toContain('command-start-snapshot');
+      const auditQuery = database.queries.find((query) =>
+        normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+      );
+      expect(auditQuery).toBeDefined();
+      // audit_log params: ...[6]=related_order_id, [12]=status_code, [16]=diff_json, [17]=metadata_json
+      expect(auditQuery!.params[0]).toBe('orders.detail_production_status_batch_change');
+      expect(Number(auditQuery!.params[6])).toBe(15); // related_order_id
+      expect(auditQuery!.params[12]).toBe('cut'); // status_code
+      const diff = JSON.parse(auditQuery!.params[16] as string);
+      const metadata = JSON.parse(auditQuery!.params[17] as string);
+      expect(diff).toMatchObject({
+        detailIds: [100, 101],
+        changedDetailIds: [100, 101],
+        selectedDetailCount: 2,
+        affectedDetailCount: 2,
+        productionStatusId: 5,
+        statusDistributionBasis: 'command-start-snapshot',
+      });
+      expect(diff.beforeStatusDistribution).toEqual({ '1': 2 });
+      expect(diff.afterStatusDistribution).toEqual({ '5': 2 });
+      expect(metadata).toMatchObject({
+        orderId: 15,
+        clientId: 969,
+        action: 'detail_production_status_batch_change',
+        productionStatusCode: 'cut',
+        selectedDetailCount: 2,
+        affectedDetailCount: 2,
+        requestId: 'req-batch-1',
+      });
     });
 
-    it('enqueues an outbox event carrying before/after distributions and counts', async () => {
+    it('enqueues an outbox event carrying actor/request/order, counts, and distributions (values)', async () => {
       const database = createDatabase({
+        orderProductionStatusId: 1,
         detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
         updatedDetailIds: [100],
+        recalcOrderProductionStatusId: 5,
       });
       const repository = new PgProductionActionRepository(database.service);
 
       await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
 
-      const params = normalizedParams(database.queries);
-      expect(params).toContain('order.detail_production_status_batch_changed');
-      expect(params).toContain('beforeStatusDistribution');
-      expect(params).toContain('afterStatusDistribution');
-      expect(params).toContain('affectedDetailCount');
+      const outboxQuery = database.queries.find((query) =>
+        normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+      );
+      expect(outboxQuery).toBeDefined();
+      expect(outboxQuery!.params[0]).toBe('order.detail_production_status_batch_changed'); // event_type
+      expect(outboxQuery!.params[4]).toBe('batch-key-1'); // idempotency_key
+      const payload = JSON.parse(outboxQuery!.params[3] as string); // payload_json
+      expect(payload).toMatchObject({
+        eventType: 'order.detail_production_status_batch_changed',
+        actorUserId: '1',
+        requestId: 'req-batch-1',
+        entityType: 'order',
+        entityId: '15',
+        orderId: 15,
+        clientId: 969,
+        detailIds: [100],
+        changedDetailIds: [100],
+        selectedDetailCount: 1,
+        affectedDetailCount: 1,
+        productionStatusId: 5,
+        productionStatusCode: 'cut',
+        action: 'detail_production_status_batch_change',
+        idempotencyKey: 'batch-key-1',
+      });
+      expect(payload.beforeStatusDistribution).toEqual({ '1': 1 });
+      expect(payload.afterStatusDistribution).toEqual({ '5': 1 });
+      expect(payload.statusDistributionBasis).toBe('command-start-snapshot');
+    });
+
+    it('rejects a reused idempotency key with a different payload (same key, changed request)', async () => {
+      const database = createDatabase({
+        idempotencyExistingRequestHash: hashStable({
+          actorUserId: '1',
+          commandName: 'orders.detail_production_status_batch_change',
+          orderId: 15,
+          detailIds: [100],
+          productionStatusId: 5,
+          version: 3,
+        }),
+        idempotencyCompletedResponse: {
+          order: { orderId: 15, productionStatusId: 5, version: 4 },
+          selectedDetailCount: 1,
+          affectedDetailCount: 1,
+          requestId: 'req-batch-1',
+        },
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      // Same key, but a DIFFERENT productionStatusId -> request hash mismatch -> rejected.
+      await expect(
+        repository.changeBatchDetailProductionStatus(
+          cmd({ detailIds: [100], productionStatusId: 7 }),
+        ),
+      ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+      expect(normalizedSql(database.queries)).not.toContain('UPDATE order_details');
     });
 
     it('affectedDetailCount counts only rows that actually changed, not selected count', async () => {
@@ -1566,6 +1655,19 @@ function createDatabase(options: {
       if (normalized.startsWith('UPDATE order_details SET production_status_id')) {
         const ids = options.updatedDetailIds ?? [];
         return { rows: ids.map((id) => ({ detail_id: id })), rowCount: ids.length };
+      }
+
+      if (
+        normalized.startsWith('SELECT detail_id, production_status_id FROM order_details') &&
+        normalized.includes('detail_id = ANY') &&
+        normalized.includes('FOR UPDATE')
+      ) {
+        // lockSelectedOrderDetails: return only the requested ids that exist among the order's details.
+        const requested = (params[1] as number[]) ?? [];
+        const rows = (options.detailStatusRowsBefore ?? []).filter((row) =>
+          requested.includes(row.detail_id),
+        );
+        return { rows, rowCount: rows.length };
       }
 
       if (normalized.startsWith('SELECT detail_id, production_status_id FROM order_details')) {

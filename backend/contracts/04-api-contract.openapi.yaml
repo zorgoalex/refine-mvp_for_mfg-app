@@ -930,7 +930,18 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/OrderNotFound'
+          description: Заказ или часть выбранных деталей не найдены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+              examples:
+                detailNotFound:
+                  value:
+                    error:
+                      code: ORDER_DETAIL_NOT_FOUND
+                      message: Часть выбранных деталей не найдена в заказе
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
         '409':
           $ref: '#/components/responses/OrderVersionConflict'
         '422':

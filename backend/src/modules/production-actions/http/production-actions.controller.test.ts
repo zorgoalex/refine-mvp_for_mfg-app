@@ -291,6 +291,19 @@ describe('ProductionActionsController', () => {
       }),
     ).rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_UNAVAILABLE' });
   });
+
+  it('returns 401 on details/production-status when user is not authenticated', async () => {
+    const controller = createController({ flags: { productionActionsEnabled: true } });
+
+    await expect(
+      controller.changeBatchDetailProductionStatus({}, '15', {
+        detailIds: [100],
+        productionStatusId: 5,
+        version: 3,
+        idempotencyKey: 'batch-key-1',
+      }),
+    ).rejects.toMatchObject({ statusCode: 401, code: 'AUTH_REQUIRED' });
+  });
 });
 
 function createController(options: {

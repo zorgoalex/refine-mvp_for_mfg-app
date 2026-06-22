@@ -1184,7 +1184,28 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         return idempotency.completedResponse as BatchDetailProductionStatusResponseDto;
       }
 
-      // 1. Lock the parent order row FIRST as the sole serialization mutex, then scope + version guard.
+      // 1. Lock the SELECTED detail rows FIRST (FOR UPDATE, ascending detail_id), BEFORE the
+      //    parent order row. This establishes a single global lock order — details-before-order —
+      //    shared with the detail-stage command (whose `order_details JOIN orders ... FOR UPDATE`
+      //    also locks the detail row before the order row). Because no production command ever holds
+      //    the order row while waiting on a detail row, the batch<->detail-stage deadlock cycle is
+      //    impossible. Validation (selected ⊆ live details) falls out of the same locked read.
+      const lockedSelected = await lockSelectedOrderDetails(tx, command.orderId, detailIds);
+      const lockedSelectedIds = new Set(lockedSelected.map((detail) => detail.detailId));
+      const missingDetailIds = detailIds.filter((id) => !lockedSelectedIds.has(id));
+      if (missingDetailIds.length > 0) {
+        throw new ApiError(
+          404,
+          'ORDER_DETAIL_NOT_FOUND',
+          'Часть выбранных деталей не найдена в заказе',
+          { orderId: command.orderId, missingDetailIds },
+        );
+      }
+      const currentById = new Map(
+        lockedSelected.map((detail) => [detail.detailId, detail.productionStatusId] as const),
+      );
+
+      // 2. Lock the parent order row (AFTER the detail rows), then scope + version guard.
       const order = await loadOrderForUpdate(tx, command.orderId);
       await this.assertOrderScope(
         command.currentUser,
@@ -1196,28 +1217,16 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
 
       const status = await loadProductionStatus(tx, command.dto.productionStatusId);
 
-      // 2. Non-locking read of all live details (validation + before-distribution). The orders-row
-      //    lock from step 1 is the sole mutex; the batch takes NO FOR UPDATE on detail rows
-      //    (locking them would reopen the batch<->detail-stage deadlock cycle).
-      const currentDetails = await loadOrderDetailsForBatch(tx, order.orderId);
-      const currentDetailIds = currentDetails.map((detail) => detail.detailId);
-      const missingDetailIds = detailIds.filter((id) => !currentDetailIds.includes(id));
-      if (missingDetailIds.length > 0) {
-        throw new ApiError(
-          404,
-          'ORDER_DETAIL_NOT_FOUND',
-          'Часть выбранных деталей не найдена в заказе',
-          { orderId: order.orderId, missingDetailIds },
-        );
-      }
-      const beforeStatusDistribution = detailStatusDistribution(currentDetails);
-      const currentById = new Map(
-        currentDetails.map((detail) => [detail.detailId, detail.productionStatusId] as const),
+      // 3. Non-locking read of all live details for the before-distribution (diagnostic only,
+      //    command-start-relative — it does not participate in lock ordering).
+      const beforeStatusDistribution = detailStatusDistribution(
+        await loadOrderDetailsForBatch(tx, order.orderId),
       );
       const selectedDetailCount = detailIds.length;
 
-      // 3. Update only the SELECTED details whose status actually changes (COALESCE delete_flag —
-      //    legacy null rows are active). RETURNING yields the true changed-row count.
+      // 4. Update only the SELECTED (already-locked) details whose status actually changes
+      //    (COALESCE delete_flag — legacy null rows are active). RETURNING yields the true
+      //    changed-row count.
       const updated = await tx.query<{ detail_id: string | number }>(
         `
         UPDATE order_details
@@ -1233,13 +1242,13 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
       const affectedDetailCount = changedDetailIds.length;
 
-      // 4. Auto mode: command owns the recalc (a DB trigger also guards on the flag; the explicit
+      // 5. Auto mode: command owns the recalc (a DB trigger also guards on the flag; the explicit
       //    call is idempotent). Manual mode leaves orders.production_status_id untouched.
       if (order.productionStatusFromDetailsEnabled) {
         await runRecalcOrderProductionStatus(tx, order.orderId);
       }
 
-      // 5. Bump the parent version so stale callers are rejected (recalc never bumps version).
+      // 6. Bump the parent version so stale callers are rejected (recalc never bumps version).
       //    This UPDATE orders fires the existing trg_crm_sync_orders trigger, exactly as the
       //    sibling production commands already do; crm_sync_enqueue dedups pending by key.
       const bumped = await tx.query<{
@@ -2397,9 +2406,40 @@ async function runRecalcOrderProductionStatus(tx: TransactionClient, orderId: nu
   await tx.query('SELECT recalc_order_production_status($1)', [orderId]);
 }
 
+// Locks the SELECTED detail rows FOR UPDATE in ascending detail_id order. Called BEFORE the parent
+// order row is locked so the global lock order is details-before-order, matching the detail-stage
+// command's `order_details JOIN orders ... FOR UPDATE` (which locks the detail row before the order
+// row). This shared ordering makes the batch<->detail-stage deadlock cycle impossible: no production
+// command ever holds the order row while waiting on a detail row. Ascending detail_id also prevents
+// batch<->batch cycles on overlapping detail sets. The returned rows double as belonging-validation.
+async function lockSelectedOrderDetails(
+  tx: TransactionClient,
+  orderId: number,
+  detailIds: readonly number[],
+): Promise<Array<{ detailId: number; productionStatusId: number | null }>> {
+  const result = await tx.query<{
+    detail_id: string | number;
+    production_status_id: string | number | null;
+  }>(
+    `
+    SELECT detail_id, production_status_id
+    FROM order_details
+    WHERE order_id = $1
+      AND detail_id = ANY($2::bigint[])
+      AND COALESCE(delete_flag, false) = false
+    ORDER BY detail_id
+    FOR UPDATE
+    `,
+    [orderId, detailIds],
+  );
+  return result.rows.map((row) => ({
+    detailId: toNumber(row.detail_id),
+    productionStatusId: row.production_status_id === null ? null : toNumber(row.production_status_id),
+  }));
+}
+
 // Non-locking read of every live detail's id + current production status, deterministically ordered.
-// NO FOR UPDATE: the parent orders-row lock (loadOrderForUpdate) is the sole mutex for the batch
-// command; locking detail rows here would reopen the batch<->detail-stage deadlock cycle.
+// Used only for the diagnostic before-distribution; it does NOT participate in lock ordering.
 async function loadOrderDetailsForBatch(
   tx: TransactionClient,
   orderId: number,
