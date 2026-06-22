@@ -25,7 +25,7 @@ const DEFAULT_REQUEST_ID = 'users-adapter';
 
 export interface UserServicePorts {
   users: UserRepositoryPort;
-  database?: DatabaseService;
+  database: DatabaseService;
   permissions?: PermissionsService;
   policy?: UserAccessPolicy;
 }
@@ -58,7 +58,7 @@ export class UserService {
   async create(command: CreateUserCommand): Promise<UserDto> {
     const reason = this.policy.canCreateUser(command.currentUser, command.dto.role);
     if (reason) {
-      if (reason !== 'missing_permission' && this.ports.database) {
+      if (reason !== 'missing_permission') {
         try {
           await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
             actor: command.currentUser,
@@ -80,7 +80,7 @@ export class UserService {
 
     const reason = this.policy.canUpdateUser(command.currentUser, targetUser, command.dto.role);
     if (reason) {
-      if (reason !== 'missing_permission' && this.ports.database) {
+      if (reason !== 'missing_permission') {
         try {
           await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
             actor: command.currentUser,
@@ -102,7 +102,7 @@ export class UserService {
 
     const reason = this.policy.canChangePassword(command.currentUser, targetUser);
     if (reason) {
-      if (reason !== 'missing_permission' && this.ports.database) {
+      if (reason !== 'missing_permission') {
         try {
           await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
             actor: command.currentUser,
@@ -124,7 +124,7 @@ export class UserService {
 
     const reason = this.policy.canDeactivate(command.currentUser, targetUser);
     if (reason) {
-      if (reason !== 'missing_permission' && this.ports.database) {
+      if (reason !== 'missing_permission') {
         try {
           await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
             actor: command.currentUser,
@@ -146,7 +146,7 @@ export class UserService {
 
     const reason = this.policy.canActivate(command.currentUser, targetUser);
     if (reason) {
-      if (reason !== 'missing_permission' && this.ports.database) {
+      if (reason !== 'missing_permission') {
         try {
           await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
             actor: command.currentUser,

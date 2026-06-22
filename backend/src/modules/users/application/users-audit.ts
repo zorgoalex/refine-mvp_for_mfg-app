@@ -8,7 +8,7 @@ export const USER_PERMISSION_DENIED = 'user.permission_denied';
 export interface BuildUserDeniedInput {
   actor: CurrentUser;
   requestId: string;
-  action: string;
+  action: 'create' | 'update' | 'change_password' | 'deactivate' | 'activate';
   targetUserId: string | number | null;
   reason: UserDenialReason;
 }
