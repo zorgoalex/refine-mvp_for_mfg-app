@@ -11,14 +11,16 @@ import { ImportDropdownButton } from '../import';
 import { useOrderFormStore, useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import { useSheetMaterialOptions, filterCuttableOptions } from '../../../../hooks/useSheetMaterialOptions';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
   applyCurrentEdits: () => Promise<boolean>;
 }
 
-// Default values for quick add
-const QUICK_ADD_DEFAULTS = {
+// Static defaults for quick add (sheet_material_type_id is resolved dynamically
+// from the first active cuttable option in the component body).
+const QUICK_ADD_DEFAULTS_BASE = {
   milling_type_id: 1,  // Модерн
   edge_type_id: 1,     // р-1
   priority: 100,
@@ -34,6 +36,25 @@ interface DragSelectionState {
 export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
+
+  // Sheet-material quick-add default: first active cuttable type; falls back to
+  // undefined so form validation prompts the user if no cuttable types are loaded.
+  const sheetMaterials = useSheetMaterialOptions();
+  const defaultSheetMaterialTypeId = React.useMemo(() => {
+    const cuttable = filterCuttableOptions(sheetMaterials.options).filter((o) => o.isActive);
+    return cuttable[0]?.value ?? undefined;
+  }, [sheetMaterials.options]);
+
+  const QUICK_ADD_DEFAULTS = React.useMemo(
+    () => ({
+      ...QUICK_ADD_DEFAULTS_BASE,
+      ...(defaultSheetMaterialTypeId != null
+        ? { sheet_material_type_id: defaultSheetMaterialTypeId }
+        : {}),
+    }),
+    [defaultSheetMaterialTypeId],
+  );
+
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();

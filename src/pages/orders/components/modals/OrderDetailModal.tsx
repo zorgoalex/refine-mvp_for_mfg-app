@@ -16,6 +16,7 @@ import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/us
 import {
   useSheetMaterialOptions,
   toSheetSelectOptions,
+  filterCuttableOptions,
 } from '../../../../hooks/useSheetMaterialOptions';
 import {
   validateMaterialDimensions,
@@ -390,7 +391,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               rules={[{ required: true, message: 'Обязательное поле' }]}
             >
               <Select
-                options={toSheetSelectOptions(sheetMaterials.options, selectedSheetId)}
+                options={toSheetSelectOptions(filterCuttableOptions(sheetMaterials.options), selectedSheetId)}
                 loading={sheetMaterials.isLoading}
                 onChange={() => setTimeout(validateDimensions, 0)}
                 placeholder="Выберите материал"

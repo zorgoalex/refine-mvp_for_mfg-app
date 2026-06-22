@@ -22,6 +22,7 @@ import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/us
 import {
   useSheetMaterialOptions,
   toSheetSelectOptions,
+  filterCuttableOptions,
 } from '../../../../hooks/useSheetMaterialOptions';
 import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
 
@@ -825,7 +826,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         isEditing(record) ? (
           <Form.Item name="sheet_material_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
-              options={toSheetSelectOptions(sheetMaterials.options.filter(o => o.isActive !== false || o.value === watchedSheetId), watchedSheetId)}
+              options={toSheetSelectOptions(filterCuttableOptions(sheetMaterials.options).filter(o => o.isActive !== false || o.value === watchedSheetId), watchedSheetId)}
               loading={sheetMaterials.isLoading}
               placeholder="Материал"
               allowClear={

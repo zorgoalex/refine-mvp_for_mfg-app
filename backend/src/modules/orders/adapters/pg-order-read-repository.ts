@@ -238,6 +238,7 @@ interface SheetMaterialTypeLookupRow extends IdNameLookupRow {
   width_mm: string | number | null;
   height_mm: string | number | null;
   is_active: boolean;
+  is_cuttable: boolean;
 }
 
 interface StatusLookupRow extends IdNameLookupRow {
@@ -747,9 +748,11 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       // SP3: ALL sheet types (active + inactive) — repo stays dumb; the service
       // decides whether to attach them (sheet_materials.view) and the FE disables
       // inactive non-current options so a deactivated-but-selected sheet still edits.
+      // Variant B: is_cuttable=false marks header-only materials (e.g. «краска»)
+      // the FE DETAIL picker must exclude (HEADER picker keeps the full set).
       this.database.query<SheetMaterialTypeLookupRow>(
         `
-        SELECT sheet_material_type_id AS id, name, width_mm, height_mm, is_active
+        SELECT sheet_material_type_id AS id, name, width_mm, height_mm, is_active, is_cuttable
         FROM sheet_material_types
         ORDER BY is_active DESC, name ASC, sheet_material_type_id ASC
         `,
@@ -897,6 +900,7 @@ function mapSheetMaterialTypeLookup(row: SheetMaterialTypeLookupRow) {
     widthMm: toNullableNumber(row.width_mm),
     heightMm: toNullableNumber(row.height_mm),
     isActive: row.is_active,
+    isCuttable: row.is_cuttable,
   };
 }
 

@@ -145,10 +145,12 @@ export interface MillingTypeLookup extends IdNameLookup {
 }
 
 // SP3: present only when the caller has sheet_materials.view (service-masked).
+// Variant B: isCuttable=false = header-only material; DETAIL picker must exclude these.
 export interface SheetMaterialTypeLookup extends IdNameLookup {
   widthMm: number | null;
   heightMm: number | null;
   isActive: boolean;
+  isCuttable: boolean;
 }
 
 export interface StatusLookup extends IdNameLookup {
