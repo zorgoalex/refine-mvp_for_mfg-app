@@ -1190,11 +1190,15 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       //    order row (loadOrderForUpdate) before locking detail rows (loadDetailProductionStatusSnapshot).
       //    See "Lock ordering" note below for the residual batch<->detail-stage debt.
       const order = await loadOrderForUpdate(tx, command.orderId);
-      await this.assertOrderScope(
+      // Additive assigned-production-worker path (parity with the sibling production commands from
+      // §7.1): a worker who is responsible_employee on an order_workshops row may act even without
+      // orders.update. Owner-path (manager/operator/admin) is unchanged.
+      const access = await this.assertOrderScope(
         command.currentUser,
         order,
         ['orders.update', 'orders.change_production_status'],
         requestId,
+        { tx, allowAssignedProductionWorker: true },
       );
       assertVersion(order, command.dto.version);
 
@@ -1322,6 +1326,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
           action: 'detail_production_status_batch_change',
           statusField: 'productionDetailBatch',
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           requestId,
         },
       });
@@ -1352,6 +1358,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           afterStatusDistribution,
           statusDistributionBasis: 'command-start-snapshot',
           action: 'detail_production_status_batch_change',
+          accessVia: access.accessVia,
+          assignmentSource: access.assignmentSource,
           idempotencyKey: command.dto.idempotencyKey,
         },
       });

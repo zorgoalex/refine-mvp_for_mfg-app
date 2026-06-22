@@ -1481,6 +1481,47 @@ describe('assigned-worker audit metadata across production commands', () => {
       expect(result.selectedDetailCount).toBe(2);
       expect(result.affectedDetailCount).toBe(1);
     });
+
+    it('allows an assigned production worker (responsible_employee) without orders.update', async () => {
+      const database = createDatabase({
+        assignedUserIds: [20],
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
+        updatedDetailIds: [100],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      const result = await repository.changeBatchDetailProductionStatus({
+        currentUser: currentUser('worker', '20'),
+        orderId: 15,
+        requestId: 'req-batch-worker',
+        dto: { detailIds: [100], productionStatusId: 5, version: 3, idempotencyKey: 'batch-worker-1' },
+      });
+
+      expect(result.affectedDetailCount).toBe(1);
+      const params = normalizedParams(database.queries);
+      expect(params).toContain('assigned_production_worker');
+      expect(params).toContain('order_workshops.responsible_employee_id');
+      expect(normalizedSql(database.queries)).toContain('SELECT DISTINCT u.user_id');
+    });
+
+    it('rejects a non-assigned worker (not responsible_employee, no orders.update) with 403', async () => {
+      const database = createDatabase({
+        assignedUserIds: [],
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
+        updatedDetailIds: [100],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      await expect(
+        repository.changeBatchDetailProductionStatus({
+          currentUser: currentUser('worker', '20'),
+          orderId: 15,
+          requestId: 'req-batch-worker',
+          dto: { detailIds: [100], productionStatusId: 5, version: 3, idempotencyKey: 'batch-worker-2' },
+        }),
+      ).rejects.toMatchObject({ statusCode: 403 });
+      expect(normalizedSql(database.queries)).not.toContain('UPDATE order_details');
+    });
   });
 });
 
