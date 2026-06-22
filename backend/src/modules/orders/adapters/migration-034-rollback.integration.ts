@@ -124,6 +124,35 @@ d('migration 034 rollback (Variant B → Variant A revert)', () => {
     expect(r.rows[0].material_name).toBeTruthy();
   });
 
+  it('order_details_view after rollback hides details belonging to a SOFT-DELETED order (Critic R7 M3)', async () => {
+    // Seed: a live detail under a soft-deleted order.
+    // After rollback, order_details_view must NOT expose it (orders.delete_flag join).
+    // seedVariantAMain already inserts a soft-deleted order (VB удалённый заказ) with
+    // a soft-deleted detail (delete_flag=true). We need a LIVE detail (delete_flag=false)
+    // under a SOFT-DELETED order to prove the orders-join filter is present.
+    const softDelOrdRes = await client.query<{ order_id: number }>(
+      `INSERT INTO orders (order_name, delete_flag) VALUES ('RB тест мягко удалён', true) RETURNING order_id`,
+    );
+    const softDelOrdId: number = softDelOrdRes.rows[0].order_id;
+
+    // A live detail (delete_flag=false) attached to the soft-deleted order.
+    await client.query(
+      `INSERT INTO order_details (order_id, detail_number, detail_name, height, width, quantity, area,
+         material_id, milling_type_id, edge_type_id, priority)
+       VALUES ($1, 99, 'RB утечка деталь', 100, 100, 1, 0.01,
+         (SELECT material_id FROM materials WHERE is_sheet_shadow = false LIMIT 1),
+         1, 1, 100)`,
+      [softDelOrdId],
+    );
+
+    // After rollback, this detail must NOT appear in order_details_view.
+    const r = await client.query(
+      `SELECT count(*)::int n FROM order_details_view WHERE order_id = $1`,
+      [softDelOrdId],
+    );
+    expect(r.rows[0].n).toBe(0); // hidden by orders.delete_flag join
+  });
+
   it('rollback is idempotent: re-applying 034_rollback leaves the same state', async () => {
     // Apply rollback a second time — must not error or double-insert shadows.
     await client.query(mig('034_rollback.sql'));

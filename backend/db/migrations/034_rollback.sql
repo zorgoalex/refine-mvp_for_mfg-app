@@ -105,7 +105,8 @@ CREATE TRIGGER trg_order_detail_shadow_pairing
 --    doweling_orders_view, orders_alias_view, details_of_order.
 
 --    order_details_view: COALESCE(m.material_name, smt.name) AS material_name
---    Source: migration 029 (latest pre-034 definition).
+--    Source: migration 029 (latest pre-034 definition — EXACT column list + JOIN orders
+--    for delete_flag filter, matching 029:199-203 to prevent soft-deleted-order detail leak).
 CREATE OR REPLACE VIEW order_details_view AS
 SELECT
   od.detail_id,
@@ -134,6 +135,7 @@ SELECT
   od.link_pdf_file,
   od.ref_key_1c
 FROM order_details od
+JOIN orders ord ON ord.order_id = od.order_id AND ord.delete_flag = false
 LEFT JOIN materials m ON m.material_id = od.material_id
 LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
 WHERE od.delete_flag = false;
