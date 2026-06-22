@@ -56,4 +56,10 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
   it('is registered in /configuration only behind the useBackendCut flag', () => {
     expect(indexSrc).toMatch(/featureFlags\.useBackendCut[\s\S]*CutConfigTab/);
   });
+
+  it('mounts the inline default-settings card and drops the JSON params dump', () => {
+    expect(tabSrc).toMatch(/CutDefaultSettingsCard/);
+    expect(tabSrc).toMatch(/summarizeParams\(/);
+    expect(tabSrc).not.toMatch(/JSON\.stringify\(r\.params\)/);
+  });
 });
