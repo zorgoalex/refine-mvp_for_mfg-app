@@ -89,6 +89,32 @@ d('migration 034 rollback (Variant B → Variant A revert)', () => {
     expect(r.rows[0].n).toBe(1);
   });
 
+  it('order_details_view returns non-null material_name for a rolled-back legacy-material detail', async () => {
+    // After rollback: order_details_view uses COALESCE(m.material_name, smt.name).
+    // The live detail (delete_flag=false) has material_id pointing at its shadow material,
+    // so material_name must be non-null and non-empty.
+    const r = await client.query<{ material_name: string | null }>(`
+      SELECT material_name
+      FROM order_details_view
+      LIMIT 1
+    `);
+    expect(r.rows.length).toBeGreaterThan(0);
+    expect(r.rows[0].material_name).toBeTruthy();
+  });
+
+  it('orders_view returns non-null material_name for orders after rollback', async () => {
+    // After rollback: orders_view uses COALESCE(smt.name, m.material_name).
+    // Legacy order has material_id=161 → m.material_name should resolve.
+    // Sheet-seeded order has sheet_material_type_id → smt.name takes priority.
+    const r = await client.query<{ order_name: string; material_name: string | null }>(`
+      SELECT order_name, material_name
+      FROM orders_view
+      WHERE order_name = 'VB заказ легаси'
+    `);
+    expect(r.rows.length).toBe(1);
+    expect(r.rows[0].material_name).toBeTruthy();
+  });
+
   it('rollback is idempotent: re-applying 034_rollback leaves the same state', async () => {
     // Apply rollback a second time — must not error or double-insert shadows.
     await client.query(mig('034_rollback.sql'));
