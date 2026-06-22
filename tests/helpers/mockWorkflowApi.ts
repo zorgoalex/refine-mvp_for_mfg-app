@@ -441,6 +441,27 @@ export async function setupWorkflowMockApi(
                 username: 'admin',
                 role: 'admin',
                 role_id: 1,
+                // Variant B: include permissions so can('sheet_materials.view') returns true
+                // even when backendAuth=false (legacy localStorage path). Without permissions
+                // here, useSheetMaterialOptions.enabled stays false and the picker has no
+                // options in mocked tests.
+                permissions: [
+                    'orders.view',
+                    'orders.create',
+                    'orders.update',
+                    'orders.export',
+                    'payments.view',
+                    'payments.create',
+                    'payments.update',
+                    'payments.delete',
+                    'clients.view',
+                    'clients.create',
+                    'clients.update',
+                    'production.actions',
+                    'settings.view',
+                    'sheet_materials.view',
+                    'sheet_materials.manage',
+                ],
             }),
         );
     }, AUTH_TOKEN);
@@ -582,6 +603,237 @@ export async function setupWorkflowMockApi(
             contentType: 'application/json',
             body: JSON.stringify(createOrderFormDataResponse(db)),
         });
+    });
+
+    // Variant B: backend orders write (POST /api/v1/orders, PUT /api/v1/orders/:id).
+    // When backendOrdersWrite=true the order form sends the full command to REST, not GraphQL.
+    // The mock creates records in db (matching the flat column names the test assertions expect)
+    // and returns a minimal OrderDto so mapOrderDtoToFormValues can hydrate the store.
+    await page.route(/\/api\/v1\/orders(?:\/\d+)?$/, async (route) => {
+        const method = route.request().method();
+        if (method !== 'POST' && method !== 'PUT') {
+            await route.continue();
+            return;
+        }
+
+        try {
+            const body = JSON.parse(route.request().postData() || '{}');
+            const header = body.header ?? {};
+            const details: any[] = body.details ?? [];
+            const payments: any[] = body.payments ?? [];
+
+            const orderId = method === 'PUT'
+                ? Number(route.request().url().match(/\/orders\/(\d+)$/)?.[1] ?? 0)
+                : nextId(db, 'orders');
+
+            const orderDate = header.orderDate ?? new Date().toISOString().slice(0, 10);
+
+            // Upsert order
+            const existingIndex = method === 'PUT'
+                ? ensureRows(db, 'orders').findIndex((o) => o.order_id === orderId)
+                : -1;
+
+            // Compute totals from details
+            const totalAmount = details.reduce((sum: number, d: any) => sum + (d.detailCost ?? 0), 0);
+            const paidAmount = payments.reduce((sum: number, p: any) => sum + (p.amount ?? 0), 0);
+            const partsCount = details.reduce((sum: number, d: any) => sum + (d.quantity ?? 0), 0);
+            const totalArea = details.reduce((sum: number, d: any) => {
+                const h = (d.height ?? 0) / 1000;
+                const w = (d.width ?? 0) / 1000;
+                return sum + h * w * (d.quantity ?? 0);
+            }, 0);
+
+            const orderRow: Row = {
+                order_id: orderId,
+                order_name: header.orderName ?? '',
+                client_id: header.clientId ?? null,
+                order_date: orderDate,
+                order_status_id: header.orderStatusId ?? 1,
+                payment_status_id: header.paymentStatusId ?? 1,
+                production_status_id: header.productionStatusId ?? 1,
+                priority: header.priority ?? 100,
+                discount: header.discount ?? 0,
+                surcharge: header.surcharge ?? 0,
+                manager_id: header.managerId ?? null,
+                material_id: header.materialId ?? null,
+                sheet_material_type_id: header.sheetMaterialTypeId ?? null,
+                milling_type_id: header.millingTypeId ?? null,
+                edge_type_id: header.edgeTypeId ?? null,
+                film_id: header.filmId ?? null,
+                notes: header.notes ?? null,
+                total_amount: totalAmount,
+                final_amount: totalAmount,
+                paid_amount: paidAmount,
+                parts_count: partsCount,
+                total_area: Math.round(totalArea * 1000) / 1000,
+                delete_flag: false,
+                version: 1,
+            };
+
+            if (existingIndex >= 0) {
+                ensureRows(db, 'orders')[existingIndex] = orderRow;
+            } else {
+                ensureRows(db, 'orders').push(orderRow);
+            }
+
+            // Upsert details
+            const existingDetailIds = new Set(
+                ensureRows(db, 'order_details')
+                    .filter((d: Row) => d.order_id === orderId)
+                    .map((d: Row) => d.detail_id),
+            );
+            for (const d of details) {
+                const detailId = d.id ?? nextId(db, 'order_details');
+                const height = d.height ?? 0;
+                const width = d.width ?? 0;
+                const quantity = d.quantity ?? 0;
+                const area = Math.round((height / 1000) * (width / 1000) * quantity * 1000) / 1000;
+                const detailRow: Row = {
+                    detail_id: detailId,
+                    order_id: orderId,
+                    detail_number: d.detailNumber ?? 1,
+                    detail_name: d.detailName ?? null,
+                    height,
+                    width,
+                    quantity,
+                    area,
+                    material_id: d.materialId ?? null,
+                    sheet_material_type_id: d.sheetMaterialTypeId ?? null,
+                    milling_type_id: d.millingTypeId ?? 1,
+                    edge_type_id: d.edgeTypeId ?? 1,
+                    film_id: d.filmId ?? null,
+                    milling_cost_per_sqm: d.millingCostPerSqm ?? null,
+                    detail_cost: d.detailCost ?? 0,
+                    delete_flag: false,
+                    version: 1,
+                };
+                const idx = ensureRows(db, 'order_details').findIndex((r: Row) => r.detail_id === detailId);
+                if (idx >= 0) {
+                    ensureRows(db, 'order_details')[idx] = detailRow;
+                } else {
+                    ensureRows(db, 'order_details').push(detailRow);
+                }
+                existingDetailIds.delete(detailId);
+            }
+            // Remove deleted details (not in the new list)
+            if (existingDetailIds.size > 0) {
+                db.order_details = ensureRows(db, 'order_details').filter(
+                    (d: Row) => !existingDetailIds.has(d.detail_id),
+                );
+            }
+
+            // Upsert payments
+            const existingPaymentIds = new Set(
+                ensureRows(db, 'payments')
+                    .filter((p: Row) => p.order_id === orderId)
+                    .map((p: Row) => p.payment_id),
+            );
+            for (const p of payments) {
+                const paymentId = p.id ?? nextId(db, 'payments');
+                const paymentRow: Row = {
+                    payment_id: paymentId,
+                    order_id: orderId,
+                    type_paid_id: p.typePaidId ?? 1,
+                    amount: p.amount ?? 0,
+                    payment_date: p.paymentDate ?? orderDate,
+                    notes: p.notes ?? null,
+                };
+                const idx = ensureRows(db, 'payments').findIndex((r: Row) => r.payment_id === paymentId);
+                if (idx >= 0) {
+                    ensureRows(db, 'payments')[idx] = paymentRow;
+                } else {
+                    ensureRows(db, 'payments').push(paymentRow);
+                }
+                existingPaymentIds.delete(paymentId);
+            }
+            if (existingPaymentIds.size > 0) {
+                db.payments = ensureRows(db, 'payments').filter(
+                    (p: Row) => !existingPaymentIds.has(p.payment_id),
+                );
+            }
+
+            // Build the OrderDto response
+            const orderDto = {
+                header: {
+                    orderId,
+                    orderName: orderRow.order_name,
+                    clientId: orderRow.client_id,
+                    clientName: getRows(db, 'clients').find((c) => c.client_id === orderRow.client_id)?.client_name ?? null,
+                    orderDate: orderRow.order_date,
+                    priority: orderRow.priority,
+                    orderStatusId: orderRow.order_status_id,
+                    paymentStatusId: orderRow.payment_status_id,
+                    productionStatusId: orderRow.production_status_id,
+                    productionStatusFromDetailsEnabled: true,
+                    discount: orderRow.discount,
+                    surcharge: orderRow.surcharge,
+                    managerId: orderRow.manager_id,
+                    materialId: orderRow.material_id,
+                    sheetMaterialTypeId: orderRow.sheet_material_type_id,
+                    millingTypeId: orderRow.milling_type_id,
+                    edgeTypeId: orderRow.edge_type_id,
+                    filmId: orderRow.film_id,
+                    notes: orderRow.notes,
+                    version: orderRow.version,
+                },
+                details: ensureRows(db, 'order_details')
+                    .filter((d: Row) => d.order_id === orderId)
+                    .map((d: Row) => ({
+                        id: d.detail_id,
+                        orderId: d.order_id,
+                        detailNumber: d.detail_number,
+                        detailName: d.detail_name,
+                        height: d.height,
+                        width: d.width,
+                        quantity: d.quantity,
+                        area: d.area,
+                        materialId: d.material_id,
+                        sheetMaterialTypeId: d.sheet_material_type_id,
+                        millingTypeId: d.milling_type_id,
+                        edgeTypeId: d.edge_type_id,
+                        filmId: d.film_id,
+                        millingCostPerSqm: d.milling_cost_per_sqm,
+                        detailCost: d.detail_cost,
+                        priority: 100,
+                    })),
+                payments: ensureRows(db, 'payments')
+                    .filter((p: Row) => p.order_id === orderId)
+                    .map((p: Row) => ({
+                        id: p.payment_id,
+                        orderId: p.order_id,
+                        typePaidId: p.type_paid_id,
+                        amount: p.amount,
+                        paymentDate: p.payment_date,
+                        notes: p.notes,
+                    })),
+                workshops: [],
+                requirements: [],
+                dowelingLinks: [],
+                primaryProject: null,
+                projects: [],
+                totals: {
+                    totalAmount: orderRow.total_amount,
+                    finalAmount: orderRow.final_amount,
+                    paidAmount: orderRow.paid_amount,
+                    partsCount: orderRow.parts_count,
+                    totalArea: orderRow.total_area,
+                    debtAmount: Math.max(0, orderRow.final_amount - orderRow.paid_amount),
+                },
+                version: orderRow.version,
+            };
+
+            await route.fulfill({
+                status: method === 'POST' ? 201 : 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ order: orderDto }),
+            });
+        } catch (error) {
+            await route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: JSON.stringify({ message: `Mock order save error: ${error}` }),
+            });
+        }
     });
 
     await page.route(/\/(v1\/graphql|undefined)$/, async (route) => {

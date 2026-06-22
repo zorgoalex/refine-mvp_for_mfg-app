@@ -115,8 +115,10 @@ test.describe('Order workflows', () => {
         await expect(quantityInput).toHaveValue('2');
         await expect(amountInput).toHaveValue(/4\s?800(?:[,.]00)?/);
 
-        // Variant B: sheet picker is required in inline table edit — select sheet material.
-        await selectAntdOption(page, detailsCard.locator('.ant-form-item').first(), 'МДФ 16 мм (Лист)');
+        // Variant B: QUICK_ADD_DEFAULTS pre-populates sheet_material_type_id with the first
+        // active cuttable type (МДФ 16 мм (Лист)), so no manual selection is needed.
+        // Assert it is already set so the inline save won't fail validation.
+        await expect(detailsCard.locator('.ant-card-body').getByText('МДФ 16 мм (Лист)').first()).toBeVisible();
 
         await detailsCard.getByRole('button').filter({ has: page.locator('.anticon-check') }).click();
 
