@@ -246,7 +246,9 @@ function seedFrontendPagesDb(db: WorkflowMockDb) {
         quantity: 1,
         area: 0.5,
         milling_type_id: 1,
-        material_id: 1,
+        // Variant B: material_id is always null; sheet_material_type_id is authoritative.
+        material_id: null,
+        sheet_material_type_id: 1,
         delete_flag: false,
         version: 1,
     });

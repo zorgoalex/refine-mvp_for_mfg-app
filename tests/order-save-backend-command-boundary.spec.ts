@@ -131,7 +131,9 @@ function seedOrderAggregate(db: WorkflowMockDb) {
         width: 500,
         quantity: 1,
         area: 0.5,
-        material_id: 1,
+        // Variant B: material_id is always NULL; sheet_material_type_id is authoritative.
+        material_id: null,
+        sheet_material_type_id: 1,
         milling_type_id: 1,
         edge_type_id: 1,
         film_id: null,
@@ -309,7 +311,9 @@ function toBackendOrder(db: WorkflowMockDb) {
                 width: detail.width,
                 quantity: detail.quantity,
                 area: detail.area,
-                materialId: detail.material_id,
+                // Variant B: material_id is always null; sheet_material_type_id is authoritative.
+                materialId: null,
+                sheetMaterialTypeId: detail.sheet_material_type_id ?? null,
                 millingTypeId: detail.milling_type_id,
                 edgeTypeId: detail.edge_type_id,
                 filmId: detail.film_id,

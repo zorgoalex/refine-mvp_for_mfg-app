@@ -28,6 +28,7 @@ const ID_COLUMNS: Record<string, string> = {
     material_types: 'material_type_id',
     materials: 'material_id',
     milling_types: 'milling_type_id',
+    sheet_material_types: 'sheet_material_type_id',
     order_details: 'detail_id',
     order_doweling_links: 'order_doweling_link_id',
     order_resource_requirements: 'requirement_id',
@@ -404,6 +405,22 @@ export function createWorkflowMockDb(): WorkflowMockDb {
             },
         ],
         work_centers: [],
+        // Variant B: sheet_material_types is now the sole order-material reference.
+        // Seeded with one cuttable type so the detail picker has an option.
+        sheet_material_types: [
+            {
+                sheet_material_type_id: 1,
+                name: 'МДФ 16 мм (Лист)',
+                material_type_id: 1,
+                unit_id: 1,
+                thickness_mm: 16,
+                width_mm: 2800,
+                height_mm: 2070,
+                is_active: true,
+                is_cuttable: true,
+                ref_key_1c: 'smt-mdf-16',
+            },
+        ],
     };
 }
 
@@ -466,6 +483,9 @@ export async function setupWorkflowMockApi(
                         'clients.update',
                         'production.actions',
                         'settings.view',
+                        // Variant B: admin has sheet_materials.view so the sheet picker renders.
+                        'sheet_materials.view',
+                        'sheet_materials.manage',
                     ],
                 },
             }),
@@ -497,6 +517,9 @@ export async function setupWorkflowMockApi(
                         'clients.update',
                         'production.actions',
                         'settings.view',
+                        // Variant B: admin has sheet_materials.view so the sheet picker renders.
+                        'sheet_materials.view',
+                        'sheet_materials.manage',
                     ],
                 },
             }),
@@ -517,7 +540,8 @@ export async function setupWorkflowMockApi(
                         backendOrdersRead:
                             process.env.VITE_USE_BACKEND_ORDERS_READ === 'true' ||
                             process.env.VITE_USE_BACKEND_ORDERS === 'true',
-                        backendOrdersWrite: process.env.VITE_USE_BACKEND_ORDERS_WRITE === 'true',
+                        // Variant B: orders write backend is on by default in mocks (sheet picker requires it).
+                        backendOrdersWrite: true,
                         backendOrderExport: process.env.VITE_USE_BACKEND_ORDER_EXPORT === 'true',
                         backendVlm: process.env.VITE_USE_BACKEND_VLM === 'true',
                         backendPayments: process.env.VITE_USE_BACKEND_PAYMENTS === 'true',
@@ -527,6 +551,11 @@ export async function setupWorkflowMockApi(
                         backendDeadlines: false,
                         backendReferences: false,
                         enableLegacyHasura: true,
+                        // Variant B: enable sheet picker by default in mocked tests.
+                        // The sheet picker requires backendOrdersWrite + sheetMaterialsReads.
+                        // Tests that need the legacy (pre-034) path must explicitly pass
+                        // { sheetMaterialsReads: false, backendOrdersWrite: false }.
+                        sheetMaterialsReads: true,
                         ...options.runtimeConfig,
                     },
                 }),
@@ -601,6 +630,15 @@ function createOrderFormDataResponse(db: WorkflowMockDb) {
             code: String(row.unit_code),
             name: String(row.unit_name),
             symbol: row.unit_symbol === undefined || row.unit_symbol === null ? undefined : String(row.unit_symbol),
+        })),
+        // Variant B: sheetMaterialTypes replaces the legacy materials picker for order details.
+        sheetMaterialTypes: getRows(db, 'sheet_material_types').map((row) => ({
+            id: Number(row.sheet_material_type_id),
+            name: String(row.name),
+            widthMm: row.width_mm != null ? Number(row.width_mm) : null,
+            heightMm: row.height_mm != null ? Number(row.height_mm) : null,
+            isActive: Boolean(row.is_active),
+            isCuttable: row.is_cuttable != null ? Boolean(row.is_cuttable) : true,
         })),
     };
 }
