@@ -1,5 +1,7 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
+  BatchDetailProductionStatusRequestDto,
+  BatchDetailProductionStatusResponseDto,
   ChangeOrderStatusRequestDto,
   ChangePaymentStatusRequestDto,
   ChangeProductionStatusRequestDto,
@@ -128,6 +130,13 @@ export interface EnterManualProductionStatusCommand {
   requestId?: string;
 }
 
+export interface ChangeBatchDetailProductionStatusCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  requestId?: string;
+  dto: BatchDetailProductionStatusRequestDto;
+}
+
 export interface ProductionActionRepositoryPort {
   moveCalendarDate(command: MoveCalendarDateCommand): Promise<ProductionActionResponseDto>;
   changeOrderStatus(command: ChangeOrderStatusCommand): Promise<ProductionActionResponseDto>;
@@ -156,4 +165,7 @@ export interface ProductionActionRepositoryPort {
   enterManualProductionStatus(
     command: EnterManualProductionStatusCommand,
   ): Promise<ProductionActionResponseDto>;
+  changeBatchDetailProductionStatus(
+    command: ChangeBatchDetailProductionStatusCommand,
+  ): Promise<BatchDetailProductionStatusResponseDto>;
 }
