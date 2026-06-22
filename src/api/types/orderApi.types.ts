@@ -398,7 +398,8 @@ export interface OrderDetailDto {
   width: number;
   quantity: number;
   area?: number | null;
-  materialId: number;
+  /** Variant B: null for sheet-bearing details post-034 (material_id sunset). */
+  materialId: number | null;
   sheetMaterialTypeId?: number | null;
   /** SP3: server-resolved COALESCE(sheet name, material name) for per-detail display. */
   materialName?: string | null;
