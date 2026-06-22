@@ -78,6 +78,7 @@ export function validateSettingValue(key: string, value: unknown): Record<string
 const LAYOUT_MODES = ['guillotine', 'nested'];
 const OBJECTIVES = ['min_waste', 'min_sheets'];
 const RETRY_STRATEGIES = ['disabled', 'smart'];
+const QUALITY_PROFILES = ['fast', 'balanced', 'quality'];
 
 /**
  * Structural validation of the known freecut param keys so a stored profile can
@@ -100,6 +101,32 @@ function validateFreecutParams(params: Record<string, unknown>): void {
   }
   if (params.retry_strategy !== undefined && !RETRY_STRATEGIES.includes(params.retry_strategy as string)) {
     invalid('params.retry_strategy', `retry_strategy должен быть одним из: ${RETRY_STRATEGIES.join(', ')}`);
+  }
+  for (const key of ['sla_profile', 'ga_profile']) {
+    const value = params[key];
+    if (value !== undefined && !QUALITY_PROFILES.includes(value as string)) {
+      invalid(`params.${key}`, `${key} должен быть одним из: ${QUALITY_PROFILES.join(', ')}`);
+    }
+  }
+  if (params.group_shift !== undefined) {
+    const gs = params.group_shift;
+    if (!isObject(gs)) invalid('params.group_shift', 'group_shift должен быть объектом');
+    const g = gs as Record<string, unknown>;
+    if (g.enabled !== undefined && typeof g.enabled !== 'boolean') {
+      invalid('params.group_shift.enabled', 'group_shift.enabled должен быть boolean');
+    }
+    if (
+      g.min_shift_mm !== undefined &&
+      (typeof g.min_shift_mm !== 'number' || !Number.isFinite(g.min_shift_mm) || g.min_shift_mm < 0)
+    ) {
+      invalid('params.group_shift.min_shift_mm', 'group_shift.min_shift_mm должен быть неотрицательным числом');
+    }
+    if (
+      g.max_passes !== undefined &&
+      (!Number.isInteger(g.max_passes) || (g.max_passes as number) < 1 || (g.max_passes as number) > 16)
+    ) {
+      invalid('params.group_shift.max_passes', 'group_shift.max_passes должен быть целым числом 1..16');
+    }
   }
   if (params.trim_mm !== undefined) {
     if (!isObject(params.trim_mm)) invalid('params.trim_mm', 'trim_mm должен быть объектом');

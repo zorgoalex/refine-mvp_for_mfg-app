@@ -84,7 +84,16 @@ export interface FreecutParams {
   restarts?: number;
   seed?: number;
   layout_mode?: 'guillotine' | 'nested';
+  /** Quality knobs (freecut API). Set together by the UI "Качество" control. */
   sla_profile?: 'fast' | 'balanced' | 'quality';
+  ga_profile?: 'fast' | 'balanced' | 'quality';
+  /** Post-process compaction of peripheral part groups (freecut group_shift). */
+  group_shift?: {
+    enabled?: boolean;
+    min_shift_mm?: number;
+    max_passes?: number;
+    debug_artifacts?: boolean;
+  };
   /**
    * Calibrated prod path sends "disabled" (commit dcfa2db): the freecut default
    * "smart" retries on slice timeout and turns near-fill jobs into ~3.3s 408s.
