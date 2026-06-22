@@ -444,6 +444,107 @@ describe('PgOrderTransactionManager', () => {
     expect(snapshot).toHaveProperty('clientId');
   });
 
+  it('Variant B: sheet detail INSERT persists material_id = NULL, never calls shadow resolver', async () => {
+    // TDD RED target: current code resolves shadow and overrides materialId.
+    // GREEN target: effective.materialId is forced to null, no shadow queries issued.
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+    const sheetDetail: CalculatedOrderDetailDto = {
+      clientKey: 'tmp-sheet-1',
+      detailNumber: 1,
+      detailName: 'Sheet Side',
+      height: 1000,
+      width: 500,
+      quantity: 1,
+      area: 0.5,
+      materialId: 99, // caller may supply a materialId but Variant B must ignore it → NULL
+      sheetMaterialTypeId: 7,
+      millingTypeId: null,
+      edgeTypeId: null,
+      filmId: null,
+      millingCostPerSqm: null,
+      detailCost: 80,
+      priority: 100,
+      productionStatusId: null,
+      jointOrderId: null,
+      note: null,
+      linkCuttingFile: null,
+      linkCuttingImageFile: null,
+      linkCadFile: null,
+      linkPdfFile: null,
+      refKey1c: null,
+    };
+
+    await manager.runInTransaction((uow) => uow.upsertDetails(100, [sheetDetail]));
+
+    const insertQuery = database.queries.find((q) =>
+      normalizeSql(q.text).startsWith('INSERT INTO order_details'),
+    );
+    expect(insertQuery).toBeDefined();
+
+    // For INSERT the params are: [$1=orderId, $2=detailNumber, $3=detailName, $4=height,
+    // $5=width, $6=quantity, $7=area, $8=materialId, ...] → bind index 7 (0-based)
+    expect(insertQuery!.params[7]).toBeNull(); // material_id must be NULL
+
+    // Shadow resolver queries (pg_advisory_xact_lock, SELECT from sheet_material_types,
+    // SELECT from materials WHERE shadow_of_...) must NOT have been issued.
+    const shadowQueries = database.queries.filter(
+      (q) =>
+        q.text.includes('pg_advisory_xact_lock') ||
+        q.text.includes('shadow_of_sheet_material_type_id'),
+    );
+    expect(shadowQueries).toHaveLength(0);
+  });
+
+  it('Variant B: header CREATE and UPDATE persist material_id = NULL unconditionally', async () => {
+    // TDD RED target: current code uses sheetMaterialTypeId != null ? null : materialId ?? null
+    // so a header with no sheetMaterialTypeId but a materialId would persist the materialId.
+    // GREEN target: material_id is always NULL under Variant B.
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+
+    // Header with a non-null materialId but no sheetMaterialTypeId
+    const headerWithMaterial: NormalizedSaveOrderHeaderDto = {
+      ...header(),
+      materialId: 55,         // legacy material reference — must become NULL under Variant B
+      sheetMaterialTypeId: undefined, // no sheet override
+    };
+
+    // Test CREATE path
+    await manager.runInTransaction((uow) =>
+      uow.createOrderHeader({
+        header: headerWithMaterial,
+        totals: totals(),
+        currentUser: currentUser(),
+      }),
+    );
+
+    const insertQuery = database.queries.find((q) =>
+      normalizeSql(q.text).startsWith('INSERT INTO orders'),
+    );
+    expect(insertQuery).toBeDefined();
+    // In INSERT, material_id is at bind position $26 (index 25) — after notes at $25
+    const insertMaterialIdParam = insertQuery!.params[25];
+    expect(insertMaterialIdParam).toBeNull();
+
+    // Test UPDATE path
+    database.queries.length = 0;
+    await manager.runInTransaction((uow) =>
+      uow.updateOrderHeader({
+        orderId: 100,
+        header: headerWithMaterial,
+        totals: totals(),
+        currentUser: currentUser(),
+      }),
+    );
+    const updateQuery = database.queries.find((q) =>
+      normalizeSql(q.text).startsWith('UPDATE orders SET order_name'),
+    );
+    expect(updateQuery).toBeDefined();
+    // material_id = $21 in UPDATE → bind index 20
+    expect(updateQuery!.params[20]).toBeNull();
+  });
+
   it('orderDeleteDiffJson uses {from,to} shape (not {before,after})', async () => {
     const { queries, service } = createDatabase();
     const manager = new PgOrderTransactionManager(service);

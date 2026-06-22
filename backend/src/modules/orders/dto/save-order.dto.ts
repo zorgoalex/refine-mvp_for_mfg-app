@@ -180,6 +180,7 @@ export type NormalizedSaveOrderHeaderDto = Required<
 
 export type NormalizedSaveOrderDetailDto = Omit<
   SaveOrderDetailDto,
+  | 'materialId'
   | 'detailName'
   | 'filmId'
   | 'millingCostPerSqm'
@@ -194,6 +195,8 @@ export type NormalizedSaveOrderDetailDto = Omit<
   | 'linkPdfFile'
   | 'refKey1c'
 > & {
+  // VARIANT B: order_details.material_id is nullable (migration 034); always written as NULL.
+  materialId: number | null;
   detailName: string | null;
   filmId: number | null;
   millingCostPerSqm: number | null;

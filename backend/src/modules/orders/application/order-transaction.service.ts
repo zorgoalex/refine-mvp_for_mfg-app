@@ -411,12 +411,9 @@ export class OrderTransactionService {
       details,
     });
     await unitOfWork.validateSheetReferences({ header, details });
-    unitOfWork.setSaveContext({
-      actorUserId: actorUserIdOf(command.currentUser),
-      requestId: command.requestId,
-      source: 'backend-orders-command',
-      clientId: prepared.order.header.clientId ?? null,
-    });
+    // VARIANT B: shadow save-context no longer needed — material_id is always NULL for
+    // order rows and resolveShadowMaterialId is never called. setSaveContext is retained
+    // on the interface as a no-op (dead after shadow removal — delete in follow-up).
     return true;
   }
 
