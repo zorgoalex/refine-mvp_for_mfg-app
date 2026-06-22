@@ -101,6 +101,13 @@ describe('CutPage source guards', () => {
     const calc = source.slice(source.indexOf('const calculate'));
     const body = calc.slice(0, calc.indexOf('}, [job'));
     expect(body).toContain('resetSheetViews()');
+    // create switches job context -> must also reset/revoke prior previews.
+    const create = source.slice(source.indexOf('const createJob'));
+    expect(create.slice(0, create.indexOf('}, [form')).includes('resetSheetViews()')).toBe(true);
+    // In-flight sheet/thumb fetches are generation-gated: a late completion after
+    // a job switch/reset is discarded, never repopulating cleared maps.
+    expect(source).toContain('viewEpochRef');
+    expect(source).toContain('viewEpochRef.current !== epoch');
   });
 
   it('refreshes the job after a failed calculate so the reason + fresh version show', () => {

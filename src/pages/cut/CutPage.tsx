@@ -92,6 +92,9 @@ export const CutPage: React.FC = () => {
   // keyed `${cutGroupId}:${sheetIndex}`. thumbReqRef dedupes in-flight/done fetches.
   const [sheetThumbs, setSheetThumbs] = useState<Record<string, string>>({});
   const thumbReqRef = useRef<Set<string>>(new Set());
+  // Generation counter bumped on every job-context switch/reset; an async sheet
+  // fetch captures it and discards its result if it changed (job switched).
+  const viewEpochRef = useRef(0);
   // Mirror of the live blob maps so the unmount cleanup (stale-closure-safe) can
   // revoke any outstanding object URLs even though /cut is kept mounted.
   const blobsRef = useRef<{ images: Record<string, string>; thumbs: Record<string, string> }>({
@@ -111,6 +114,9 @@ export const CutPage: React.FC = () => {
       return {};
     });
     thumbReqRef.current = new Set();
+    // Invalidate in-flight sheet/thumb fetches so a late completion can't
+    // repopulate the just-cleared maps with a stale-job blob.
+    viewEpochRef.current += 1;
   }, []);
 
   useEffect(() => {
@@ -235,6 +241,7 @@ export const CutPage: React.FC = () => {
       setJob(created);
       setEligible(null);
       setSelected([]);
+      resetSheetViews(); // new job context: drop any previewed prior job's blobs
       message.success('Раскрой создан');
       await loadJobs();
     } catch (error) {
@@ -243,7 +250,7 @@ export const CutPage: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [form, criteriaFromForm, loadJobs, handleError]);
+  }, [form, criteriaFromForm, loadJobs, handleError, resetSheetViews]);
 
   const loadEligible = useCallback(async () => {
     if (!job) return;
@@ -322,8 +329,11 @@ export const CutPage: React.FC = () => {
     async (group: CutGroupDto, sheetIndex: number) => {
       if (!job) return;
       const key = `${group.cutGroupId}:${sheetIndex}`;
+      const epoch = viewEpochRef.current;
       try {
         const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset);
+        // Discard a completion that lands after a job switch/reset (stale blob).
+        if (viewEpochRef.current !== epoch) return;
         setSheetImages((prev) => {
           if (prev[key]) URL.revokeObjectURL(prev[key]);
           return { ...prev, [key]: URL.createObjectURL(blob) };
@@ -343,8 +353,11 @@ export const CutPage: React.FC = () => {
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
+      const epoch = viewEpochRef.current;
       try {
         const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb');
+        // Discard a completion that lands after a job switch/reset (stale blob).
+        if (viewEpochRef.current !== epoch) return;
         setSheetThumbs((prev) => {
           if (prev[key]) URL.revokeObjectURL(prev[key]);
           return { ...prev, [key]: URL.createObjectURL(blob) };
