@@ -71,13 +71,22 @@ d('migration 034 rollback (Variant B → Variant A revert)', () => {
     expect(r.rows[0].n).toBe(total.rows[0].n);
   });
 
-  it('the 030 shadow_pairing trigger is restored', async () => {
+  it('the 030 shadow_pairing trigger is restored with the correct name trg_order_detail_shadow_pairing', async () => {
+    const r = await client.query(`
+      SELECT count(*)::int n FROM pg_trigger
+      WHERE tgname = 'trg_order_detail_shadow_pairing'
+        AND tgrelid = 'order_details'::regclass
+    `);
+    expect(r.rows[0].n).toBe(1);
+  });
+
+  it('the wrongly-named order_detail_shadow_pairing trigger is NOT present after rollback', async () => {
     const r = await client.query(`
       SELECT count(*)::int n FROM pg_trigger
       WHERE tgname = 'order_detail_shadow_pairing'
         AND tgrelid = 'order_details'::regclass
     `);
-    expect(r.rows[0].n).toBe(1);
+    expect(r.rows[0].n).toBe(0);
   });
 
   it('chk_orders_sheet_xor_material constraint is restored', async () => {
@@ -131,5 +140,79 @@ d('migration 034 rollback (Variant B → Variant A revert)', () => {
       `SELECT count(*)::int n FROM order_details WHERE delete_flag = false AND material_id IS NULL`,
     );
     expect(uncovered.rows[0].n).toBe(0);
+  });
+});
+
+// Roundtrip test: rollback → re-apply 034 must succeed with no dangling trigger or
+// DROP FUNCTION dependency error. This is the exact failure scenario described in
+// Finding 1: if the rollback recreates the trigger with the WRONG name, re-applying
+// 034 would leave a stale trigger attached to the function, causing
+// `DROP FUNCTION IF EXISTS assert_order_detail_shadow_pairing()` to fail on dependency.
+d('migration 034 rollback→forward roundtrip (no dangling trigger / no DROP FUNCTION dependency)', () => {
+  const client = new Client({ connectionString: url });
+  const schema = `vb_roundtrip_${process.hrtime.bigint()}`;
+
+  beforeAll(async () => {
+    await client.connect();
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}, public`);
+
+    // Forward chain: bootstrap + seed + apply 034.
+    await bootstrapVariantBSchema(client);
+    await seedVariantAMain(client);
+    await client.query(mig('034_order_material_sunset_legacy.sql'));
+
+    // Rollback: must leave trigger with the correct name so 034 can drop it again.
+    await client.query(mig('034_rollback.sql'));
+
+    // Re-apply 034: must succeed — DROP TRIGGER must find the correct name, and
+    // DROP FUNCTION must not fail on a dangling dependency.
+    // If the rollback used the wrong trigger name, this throws here.
+    await client.query(mig('034_order_material_sunset_legacy.sql'));
+  });
+
+  afterAll(async () => {
+    try { await client.query(`SET search_path TO public`); } catch { /* ignore */ }
+    try { await client.query(`DROP SCHEMA ${schema} CASCADE`); } catch { /* ignore */ }
+    await client.end();
+  });
+
+  it('034 re-applied cleanly: assert_order_detail_shadow_pairing function is gone (no dependency error)', async () => {
+    const r = await client.query(`
+      SELECT count(*)::int n FROM pg_proc
+      WHERE proname = 'assert_order_detail_shadow_pairing'
+        AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+    `);
+    expect(r.rows[0].n).toBe(0);
+  });
+
+  it('034 re-applied cleanly: trg_order_detail_shadow_pairing trigger is gone', async () => {
+    const r = await client.query(`
+      SELECT count(*)::int n FROM pg_trigger
+      WHERE tgname = 'trg_order_detail_shadow_pairing'
+        AND tgrelid = 'order_details'::regclass
+    `);
+    expect(r.rows[0].n).toBe(0);
+  });
+
+  it('034 re-applied cleanly: no stale order_detail_shadow_pairing trigger either', async () => {
+    const r = await client.query(`
+      SELECT count(*)::int n FROM pg_trigger
+      WHERE tgname = 'order_detail_shadow_pairing'
+        AND tgrelid = 'order_details'::regclass
+    `);
+    expect(r.rows[0].n).toBe(0);
+  });
+
+  it('034 re-applied cleanly: order_details.material_id is nullable', async () => {
+    const r = await client.query(`
+      SELECT is_nullable
+      FROM information_schema.columns
+      WHERE table_name = 'order_details'
+        AND column_name = 'material_id'
+        AND table_schema = current_schema()
+    `);
+    expect(r.rows.length).toBe(1);
+    expect(r.rows[0].is_nullable).toBe('YES');
   });
 });

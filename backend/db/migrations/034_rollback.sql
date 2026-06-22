@@ -95,18 +95,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger
-    WHERE tgname = 'order_detail_shadow_pairing'
-      AND tgrelid = 'order_details'::regclass
-  ) THEN
-    CREATE TRIGGER order_detail_shadow_pairing
-      BEFORE INSERT OR UPDATE ON order_details
-      FOR EACH ROW EXECUTE FUNCTION assert_order_detail_shadow_pairing();
-  END IF;
-END$$;
+DROP TRIGGER IF EXISTS trg_order_detail_shadow_pairing ON order_details;
+CREATE TRIGGER trg_order_detail_shadow_pairing
+  BEFORE INSERT OR UPDATE OF material_id, sheet_material_type_id ON order_details
+  FOR EACH ROW EXECUTE FUNCTION assert_order_detail_shadow_pairing();
 
 -- 8. Restore the 029-era COALESCE-based views (material_id OR sheet lookup).
 --    Dependency order: order_details_view first (no deps), then orders_view,
