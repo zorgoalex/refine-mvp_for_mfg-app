@@ -368,3 +368,68 @@ d('migration 034 apply (Variant B sunset)', () => {
     ]);
   });
 });
+
+// Critic R7 B1 — 033 rerunnability convergence test.
+// Proves that editing a manifest structural attr + reapplying 033 reconciles the
+// already-existing target type, so 034 then COMMITS instead of aborting.
+d('migration 033 rerunnability: reconciles existing target types, 034 converges (Critic R7 BLOCKER)', () => {
+  const client = new Client({ connectionString: url });
+  const schema = `vb_033_rerun_${process.hrtime.bigint()}`;
+
+  beforeAll(async () => {
+    await client.connect();
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}, public`);
+    await bootstrapVariantBSchema(client);
+    await seedVariantAMain(client);
+    // Apply 034 so target types exist in sheet_material_types keyed by conversion_key.
+    await client.query(mig('034_order_material_sunset_legacy.sql'));
+  });
+
+  afterAll(async () => {
+    try { await client.query(`SET search_path TO public`); } catch { /* ignore */ }
+    try { await client.query(`DROP SCHEMA ${schema} CASCADE`); } catch { /* ignore */ }
+    await client.end();
+  });
+
+  it('mutating a target type structural attr then reapplying 033 reconciles it, and 034 then commits', async () => {
+    // 1. Flip is_cuttable on an existing manifest-keyed type to break structural parity.
+    //    'NOT_DEFINED' is is_cuttable=true in the manifest; flip to false to simulate drift.
+    const flipResult = await client.query(
+      `UPDATE sheet_material_types SET is_cuttable = false WHERE conversion_key = 'NOT_DEFINED' RETURNING sheet_material_type_id`,
+    );
+    expect(flipResult.rows.length).toBe(1); // target type exists
+
+    // 2. Verify the drift exists (034 would abort here without the reconcile fix).
+    const drifted = await client.query(
+      `SELECT is_cuttable FROM sheet_material_types WHERE conversion_key = 'NOT_DEFINED'`,
+    );
+    expect(drifted.rows[0].is_cuttable).toBe(false); // confirms drift
+
+    // 3. Reapply 033: must reconcile is_cuttable back to manifest value (true).
+    await client.query(mig('033_order_material_conversion_map.sql'));
+
+    // 4. Assert the row is reconciled to manifest attrs.
+    const reconciled = await client.query(
+      `SELECT is_cuttable, material_type_id, unit_id FROM sheet_material_types WHERE conversion_key = 'NOT_DEFINED'`,
+    );
+    expect(reconciled.rows.length).toBe(1);
+    expect(reconciled.rows[0].is_cuttable).toBe(true); // reconciled back to manifest
+    expect(reconciled.rows[0].material_type_id).toBe(3); // manifest value
+    expect(reconciled.rows[0].unit_id).toBe(1); // manifest value
+
+    // 5. Now reapply 034: must COMMIT (not abort on structural mismatch).
+    //    If it aborts, the test will throw here, proving the fix is needed.
+    await expect(client.query(mig('034_order_material_sunset_legacy.sql'))).resolves.not.toThrow();
+
+    // 6. End state still clean: no material_id on details/orders, no shadows.
+    const legacy = await client.query(
+      `SELECT count(*)::int n FROM order_details WHERE material_id IS NOT NULL`,
+    );
+    expect(legacy.rows[0].n).toBe(0);
+    const shadows = await client.query(
+      `SELECT count(*)::int n FROM materials WHERE is_sheet_shadow = true`,
+    );
+    expect(shadows.rows[0].n).toBe(0);
+  });
+});

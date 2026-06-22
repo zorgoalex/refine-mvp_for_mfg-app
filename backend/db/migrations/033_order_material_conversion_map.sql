@@ -77,6 +77,22 @@ SELECT DISTINCT ON (t.target_key) t.target_sheet_name, t.target_unit_id, t.targe
 FROM sheet_material_conversion_map t
 WHERE NOT EXISTS (SELECT 1 FROM sheet_material_types s WHERE s.conversion_key = t.target_key)
 ORDER BY t.target_key;
-UPDATE sheet_material_types s SET is_cuttable = false
- WHERE s.conversion_key IN (SELECT target_key FROM sheet_material_conversion_map WHERE is_cuttable = false)
-   AND s.is_cuttable = true;
+-- Reconcile EXISTING target rows to manifest-owned STRUCTURAL attrs (Critic R7 B1): if 033
+-- is reapplied after a manifest edit, already-keyed types must be updated so that 034's
+-- structural-attr fail-closed check (0.0b2) converges instead of aborting. DISPLAY attrs
+-- (name, dims) are intentionally NOT overwritten — they are operator-editable via the SP1
+-- UI and 034 does NOT assert them. Only manifest-owned structural attrs are reconciled:
+-- unit_id, material_type_id, is_cuttable.
+UPDATE sheet_material_types s
+   SET unit_id           = mk.target_unit_id,
+       material_type_id  = mk.target_material_type_id,
+       is_cuttable       = mk.is_cuttable
+  FROM (
+    SELECT DISTINCT ON (target_key) target_key, target_unit_id, target_material_type_id, is_cuttable
+    FROM sheet_material_conversion_map
+    ORDER BY target_key
+  ) mk
+ WHERE s.conversion_key = mk.target_key
+   AND (s.unit_id <> mk.target_unit_id
+     OR s.material_type_id <> mk.target_material_type_id
+     OR s.is_cuttable <> mk.is_cuttable);
