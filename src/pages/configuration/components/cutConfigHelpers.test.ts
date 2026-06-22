@@ -7,6 +7,7 @@ import {
   paramsToForm,
   parseCodesCsv,
   sheetSpecOnboardingHint,
+  summarizeParams,
 } from './cutConfigHelpers';
 
 const settings = [
@@ -62,5 +63,45 @@ describe('cutConfigHelpers', () => {
     expect(form.objective).toBe(DEFAULT_PARAM_FORM.objective);
     expect(form.layout_mode).toBe(DEFAULT_PARAM_FORM.layout_mode);
     expect(form.kerf_mm).toBe(DEFAULT_PARAM_FORM.kerf_mm);
+  });
+
+  it('formToParams sets sla_profile + ga_profile from quality and omits group_shift when off', () => {
+    const params = formToParams({ ...DEFAULT_PARAM_FORM, quality: 'quality', groupShift: false });
+    expect(params).toMatchObject({ sla_profile: 'quality', ga_profile: 'quality' });
+    expect(params.group_shift).toBeUndefined();
+  });
+
+  it('formToParams writes the group_shift object when groupShift is on', () => {
+    const params = formToParams({ ...DEFAULT_PARAM_FORM, groupShift: true });
+    expect(params.group_shift).toEqual({ enabled: true, min_shift_mm: 5, max_passes: 4 });
+  });
+
+  it('paramsToForm derives quality (both profiles equal) and groupShift', () => {
+    const form = paramsToForm({
+      sla_profile: 'quality',
+      ga_profile: 'quality',
+      group_shift: { enabled: true },
+    });
+    expect(form.quality).toBe('quality');
+    expect(form.groupShift).toBe(true);
+  });
+
+  it('paramsToForm falls back to balanced when profiles disagree or are absent (back-compat)', () => {
+    expect(paramsToForm({ sla_profile: 'fast', ga_profile: 'quality' }).quality).toBe('balanced');
+    expect(paramsToForm({}).quality).toBe('balanced');
+    expect(paramsToForm({ group_shift: { enabled: false } }).groupShift).toBe(false);
+    expect(paramsToForm({}).groupShift).toBe(false);
+  });
+
+  it('round-trips quality + groupShift through formToParams/paramsToForm', () => {
+    const form = { ...DEFAULT_PARAM_FORM, quality: 'fast' as const, groupShift: true };
+    expect(paramsToForm(formToParams(form))).toEqual(form);
+  });
+
+  it('summarizeParams renders a readable one-liner (no raw JSON)', () => {
+    const s = summarizeParams(formToParams(DEFAULT_PARAM_FORM));
+    expect(s).toContain('kerf 2');
+    expect(s).toContain('баланс');
+    expect(s).not.toContain('{');
   });
 });
