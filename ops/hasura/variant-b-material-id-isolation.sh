@@ -4,38 +4,27 @@
 # Variant B Task 11 — write-isolation: remove `material_id` from the non-admin
 # Hasura INSERT/UPDATE column allowlists on `orders` and `order_details`.
 #
-# Background (Critic R25 B2): migration 029 (SP3) already stripped
-# `sheet_material_type_id`, `sheet_eligible`, `is_sheet_shadow`, and
-# `shadow_of_sheet_material_type_id` from non-admin write allowlists.
-# `material_id` is still legacy-writable via Hasura — an exact bypass once the
-# backend is the sole NULL-writer after migration 034. This script closes that gap.
+# SECURITY FIX (Critic BLOCKER): this script PRESERVES the live check/filter/set
+# (column presets) and all other permission fields from the existing Hasura metadata.
+# Only the `columns` array is mutated (material_id removed). This prevents wiping
+# row-level check/filter conditions and stripping audit presets (created_by/edited_by)
+# that dataProvider.ts relies on (line ~1837).
 #
-# Targeted API approach (Critic R26 B1): the repo has NO tracked metadata tree
-# and `ops/apply-hasura-metadata.sh` does a FULL `replace_metadata` (would
-# clobber unrelated state). Instead, use targeted `pg_drop_*_permission` +
-# `pg_create_*_permission` calls per affected role, which is idempotent and
-# safe to re-run.
-#
-# Affected non-admin roles (derived from permissions.ts ROLE_PERMISSIONS):
-#   - operator:    orders.create + orders.update → has INSERT+UPDATE in Hasura
-#   - manager:     orders.create + orders.update → has INSERT+UPDATE in Hasura
-#   - top_manager: orders.create + orders.update → has INSERT+UPDATE in Hasura
-# (worker/viewer have only orders.view or orders.change_production_status — no
-#  INSERT/UPDATE in Hasura; admin/superadmin are excluded as admin roles.)
+# Approach:
+#   1. export_metadata to get the full current permission JSON for each role/table.
+#   2. Parse with python3, extract each target permission object (role, table,
+#      insert/update), remove material_id from the columns array, preserve everything
+#      else (check, filter, set/presets, backend_only, etc.).
+#   3. For each target: pg_drop_*_permission + pg_create_*_permission with the
+#      mutated object. Idempotent: drop is a no-op if the permission doesn't exist.
+#   4. If a target role/table has no existing permission, skip it.
 #
 # Reads HASURA_GRAPHQL_ENDPOINT and HASURA_ADMIN_SECRET from the environment
 # (loaded from .env by the caller). Does NOT print the secret.
 #
 # Usage:
-#   source /path/to/.env   # sets HASURA_GRAPHQL_ENDPOINT, HASURA_ADMIN_SECRET
+#   set -a; source /path/to/.env; set +a
 #   ops/hasura/variant-b-material-id-isolation.sh
-#
-# Or via the project ops pattern:
-#   set -a; source .env; set +a
-#   ops/hasura/variant-b-material-id-isolation.sh
-#
-# Idempotent: pg_drop_*_permission is a no-op if the permission doesn't exist;
-# pg_create_*_permission recreates it with the correct column set.
 
 set -euo pipefail
 
@@ -51,9 +40,6 @@ fail() {
 [[ -n "${HASURA_GRAPHQL_ENDPOINT:-}" ]] || fail "HASURA_GRAPHQL_ENDPOINT is required in the environment"
 [[ -n "${HASURA_ADMIN_SECRET:-}" ]] || fail "HASURA_ADMIN_SECRET is required in the environment"
 
-METADATA_URL="${HASURA_GRAPHQL_ENDPOINT%/v1/graphql}/v1/metadata"
-METADATA_URL="${METADATA_URL%/graphql}/v1/metadata"
-# Normalise: strip any trailing /v1/graphql or /graphql suffix, then append /v1/metadata
 BASE_URL="${HASURA_GRAPHQL_ENDPOINT%/v1/graphql}"
 BASE_URL="${BASE_URL%/graphql}"
 METADATA_URL="${BASE_URL}/v1/metadata"
@@ -67,91 +53,129 @@ hasura_api() {
     "${METADATA_URL}"
 }
 
-# ---------------------------------------------------------------------------
-# Column allowlists (post-029 + Variant B 034):
-# Already excluded by SP3 (migration 029): sheet_material_type_id, sheet_eligible
-# Already excluded by SP3 (migration 029 on order_details): sheet_material_type_id
-# Already excluded (materials): is_sheet_shadow, shadow_of_sheet_material_type_id
-#
-# NOW excluding (Variant B Task 11): material_id on orders + order_details
-#
-# The lists below represent the ALLOWED (writable) columns EXCLUDING all
-# backend-only control columns. These are the same columns that were already
-# in the SP3 allowlists, minus material_id.
-#
-# NOTE: The exact column sets below reflect the live erp_test Hasura state after
-# migration 029. If the live metadata differs, Task 13 will verify via the
-# assertion script (variant-b-assert-write-isolation.sh) and apply corrections.
-# ---------------------------------------------------------------------------
-
-# Roles to patch
-ROLES=("operator" "manager" "top_manager")
-
-# ---- ORDERS table ----
-# Columns that non-admin roles should be allowed to INSERT on `orders`
-# (excludes: material_id, sheet_material_type_id, sheet_eligible — backend-only).
-ORDERS_INSERT_COLUMNS='[
-  "order_name","client_id","order_date","priority","completion_date",
-  "planned_completion_date","order_status_id","payment_status_id",
-  "production_status_id","milling_type_id","edge_type_id","film_id",
-  "total_amount","final_amount","discount","surcharge","paid_amount",
-  "payment_date","parts_count","total_area","notes","link_cutting_file",
-  "link_cutting_image_file","ref_key_1c","manager_id","delete_flag",
-  "issue_date","created_by","edited_by","production_status_mode"
-]'
-
-# Columns that non-admin roles should be allowed to UPDATE on `orders`
-# (same exclusions as INSERT).
-ORDERS_UPDATE_COLUMNS="$ORDERS_INSERT_COLUMNS"
-
-# ---- ORDER_DETAILS table ----
-# Columns that non-admin roles should be allowed to INSERT on `order_details`
-# (excludes: material_id, sheet_material_type_id — backend-only).
-ORDER_DETAILS_INSERT_COLUMNS='[
-  "order_id","detail_number","detail_name","height","width","quantity",
-  "production_status_id","notes","delete_flag","film_id","texture",
-  "edge_type_id","milling_type_id","edge_1","edge_2","edge_3","edge_4"
-]'
-
-ORDER_DETAILS_UPDATE_COLUMNS="$ORDER_DETAILS_INSERT_COLUMNS"
-
-log "Starting Variant B material_id write-isolation (targeted Hasura metadata API)"
+log "Starting Variant B material_id write-isolation (metadata-preserving)"
 log "Endpoint: ${BASE_URL}"
-log "Roles: ${ROLES[*]}"
+log "Fetching current Hasura metadata..."
 
-for ROLE in "${ROLES[@]}"; do
-  log "--- Role: ${ROLE} ---"
+METADATA_JSON=$(hasura_api '{"type":"export_metadata","args":{}}')
 
-  # -- orders INSERT --
-  log "  Dropping insert permission on orders for role ${ROLE}"
-  hasura_api "$(printf '{"type":"pg_drop_insert_permission","args":{"table":{"schema":"public","name":"orders"},"role":"%s","source":"default"}}' "$ROLE")" > /dev/null
+log "Metadata fetched. Computing permission mutations..."
 
-  log "  Creating insert permission on orders for role ${ROLE} (material_id excluded)"
-  hasura_api "$(printf '{"type":"pg_create_insert_permission","args":{"table":{"schema":"public","name":"orders"},"role":"%s","permission":{"check":{},"columns":%s,"backend_only":false},"source":"default"}}' "$ROLE" "$ORDERS_INSERT_COLUMNS")" > /dev/null
+# Use python3 to parse metadata and emit per-action payloads as a JSON array.
+# Each action: { drop_payload, create_payload, label }
+ACTIONS_FILE=$(mktemp /tmp/vb-isolation-actions-XXXXXX.json)
+trap 'rm -f "$ACTIONS_FILE"' EXIT
 
-  # -- orders UPDATE --
-  log "  Dropping update permission on orders for role ${ROLE}"
-  hasura_api "$(printf '{"type":"pg_drop_update_permission","args":{"table":{"schema":"public","name":"orders"},"role":"%s","source":"default"}}' "$ROLE")" > /dev/null
+export _VB_METADATA="$METADATA_JSON"
+python3 - "$ACTIONS_FILE" <<'PY'
+import sys
+import json
+import os
 
-  log "  Creating update permission on orders for role ${ROLE} (material_id excluded)"
-  hasura_api "$(printf '{"type":"pg_create_update_permission","args":{"table":{"schema":"public","name":"orders"},"role":"%s","permission":{"columns":%s,"filter":{},"check":null,"backend_only":false},"source":"default"}}' "$ROLE" "$ORDERS_UPDATE_COLUMNS")" > /dev/null
+actions_path = sys.argv[1]
+raw = os.environ.get("_VB_METADATA", "")
+if not raw:
+    print("ERROR: _VB_METADATA is empty", file=sys.stderr)
+    sys.exit(1)
 
-  # -- order_details INSERT --
-  log "  Dropping insert permission on order_details for role ${ROLE}"
-  hasura_api "$(printf '{"type":"pg_drop_insert_permission","args":{"table":{"schema":"public","name":"order_details"},"role":"%s","source":"default"}}' "$ROLE")" > /dev/null
+m = json.loads(raw)
+metadata = m.get("metadata", m) if isinstance(m, dict) else m
 
-  log "  Creating insert permission on order_details for role ${ROLE} (material_id excluded)"
-  hasura_api "$(printf '{"type":"pg_create_insert_permission","args":{"table":{"schema":"public","name":"order_details"},"role":"%s","permission":{"check":{},"columns":%s,"backend_only":false},"source":"default"}}' "$ROLE" "$ORDER_DETAILS_INSERT_COLUMNS")" > /dev/null
+ROLES = {"operator", "manager", "top_manager"}
+TARGET_TABLES = {"orders", "order_details"}
+COLUMN_TO_REMOVE = "material_id"
 
-  # -- order_details UPDATE --
-  log "  Dropping update permission on order_details for role ${ROLE}"
-  hasura_api "$(printf '{"type":"pg_drop_update_permission","args":{"table":{"schema":"public","name":"order_details"},"role":"%s","source":"default"}}' "$ROLE")" > /dev/null
+PERM_KEYS = [
+    ("insert_permissions", "pg_drop_insert_permission", "pg_create_insert_permission"),
+    ("update_permissions", "pg_drop_update_permission", "pg_create_update_permission"),
+]
 
-  log "  Creating update permission on order_details for role ${ROLE} (material_id excluded)"
-  hasura_api "$(printf '{"type":"pg_create_update_permission","args":{"table":{"schema":"public","name":"order_details"},"role":"%s","permission":{"columns":%s,"filter":{},"check":null,"backend_only":false},"source":"default"}}' "$ROLE" "$ORDER_DETAILS_UPDATE_COLUMNS")" > /dev/null
+actions = []
 
-  log "  Done: ${ROLE}"
-done
+for source in metadata.get("sources", []):
+    source_name = source.get("name", "default")
+    for table in source.get("tables", []):
+        tbl_name = table["table"]["name"]
+        tbl_schema = table["table"].get("schema", "public")
+        if tbl_name not in TARGET_TABLES:
+            continue
 
-log "Variant B material_id write-isolation applied successfully."
-log "Run ops/hasura/variant-b-assert-write-isolation.sh (via docker exec) to verify."
+        for perm_key, drop_type, create_type in PERM_KEYS:
+            for perm in table.get(perm_key, []):
+                role = perm["role"]
+                if role not in ROLES:
+                    continue
+
+                # Deep-copy permission object; remove only material_id from columns.
+                permission = json.loads(json.dumps(perm["permission"]))
+                cols = list(permission.get("columns") or [])
+                changed = COLUMN_TO_REMOVE in cols
+                if changed:
+                    cols.remove(COLUMN_TO_REMOVE)
+                    permission["columns"] = cols
+
+                label = (
+                    f"{tbl_name}/{role}/{'insert' if 'insert' in perm_key else 'update'}"
+                    f": {'removed material_id' if changed else 'no-change (not in columns)'}"
+                )
+                print(f"  {label}", file=sys.stderr)
+
+                table_ref = {"schema": tbl_schema, "name": tbl_name}
+                drop_payload = json.dumps({
+                    "type": drop_type,
+                    "args": {"table": table_ref, "role": role, "source": source_name}
+                })
+                create_payload = json.dumps({
+                    "type": create_type,
+                    "args": {"table": table_ref, "role": role, "permission": permission, "source": source_name}
+                })
+                actions.append({
+                    "label": label,
+                    "drop": drop_payload,
+                    "create": create_payload,
+                })
+
+with open(actions_path, "w") as f:
+    json.dump(actions, f)
+
+print(f"Total actions: {len(actions)}", file=sys.stderr)
+PY
+unset _VB_METADATA
+
+ACTION_COUNT=$(python3 -c "import json; d=json.load(open('$ACTIONS_FILE')); print(len(d))")
+log "Applying ${ACTION_COUNT} permission mutations..."
+
+python3 - "$ACTIONS_FILE" <<PY_APPLY
+import sys
+import json
+import subprocess
+
+actions_path = sys.argv[1]
+metadata_url = "${METADATA_URL}"
+admin_secret = "${HASURA_ADMIN_SECRET}"
+
+with open(actions_path) as f:
+    actions = json.load(f)
+
+def hasura_api(payload_str):
+    r = subprocess.run(
+        ["curl", "-sSf",
+         "-H", "Content-Type: application/json",
+         "-H", f"x-hasura-admin-secret: {admin_secret}",
+         "-d", payload_str,
+         metadata_url],
+        capture_output=True, text=True, check=True,
+    )
+    return r.stdout
+
+for action in actions:
+    print(f"  drop:   {action['label']}", flush=True)
+    hasura_api(action["drop"])
+    print(f"  create: {action['label']} (check/filter/presets preserved)", flush=True)
+    hasura_api(action["create"])
+
+print("Done.")
+PY_APPLY
+
+log "Variant B material_id write-isolation applied successfully (check/filter/presets preserved)."
+log "Run ops/hasura/variant-b-assert-write-isolation.sh to verify."

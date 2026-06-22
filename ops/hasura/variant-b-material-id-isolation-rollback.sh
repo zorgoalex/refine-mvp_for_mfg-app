@@ -4,15 +4,30 @@
 # Rollback for variant-b-material-id-isolation.sh: restores `material_id` to the
 # non-admin INSERT/UPDATE column allowlists on `orders` and `order_details`.
 #
-# Use ONLY when rolling back to the pre-034 path (i.e. before migration 034 is
-# applied). After migration 034, `material_id` is NULL for all order rows and the
-# backend is the sole writer — do NOT use this rollback post-034.
+# SECURITY FIX (Critic BLOCKER): this script PRESERVES the live check/filter/set
+# (column presets) and all other permission fields from the existing Hasura metadata.
+# Only the `columns` array is mutated (material_id added back). This prevents wiping
+# row-level check/filter conditions and stripping audit presets (created_by/edited_by)
+# that dataProvider.ts relies on (line ~1837).
+#
+# Approach:
+#   1. export_metadata to get the full current permission JSON.
+#   2. Parse with python3, extract each target permission object, add material_id back
+#      to columns (if not already present), preserve everything else.
+#   3. pg_drop_*_permission + pg_create_*_permission with the mutated object.
+#   4. If a target role/table has no existing permission, skip it.
+#
+# Use ONLY when rolling back to the pre-034 path (before migration 034 is applied).
+# After migration 034, material_id is NULL for all order rows — do NOT use post-034.
+#
+# SP3 exclusions (sheet_material_type_id, sheet_eligible, etc.) remain excluded —
+# those are from migration 029 and are NOT rolled back here.
 #
 # Reads HASURA_GRAPHQL_ENDPOINT and HASURA_ADMIN_SECRET from the environment.
 # Does NOT print the secret.
 #
 # Usage:
-#   source /path/to/.env
+#   set -a; source /path/to/.env; set +a
 #   ops/hasura/variant-b-material-id-isolation-rollback.sh
 
 set -euo pipefail
@@ -42,72 +57,127 @@ hasura_api() {
     "${METADATA_URL}"
 }
 
-# ---------------------------------------------------------------------------
-# Column allowlists WITH material_id restored (pre-Variant-B state after SP3).
-# SP3 exclusions are still in place (sheet_material_type_id, sheet_eligible,
-# is_sheet_shadow, shadow_of_sheet_material_type_id remain excluded — those are
-# from migration 029 and are NOT rolled back here).
-# ---------------------------------------------------------------------------
-
-ROLES=("operator" "manager" "top_manager")
-
-# orders: WITH material_id restored (plus sheet_material_type_id still excluded as SP3)
-ORDERS_INSERT_COLUMNS='[
-  "order_name","client_id","order_date","priority","completion_date",
-  "planned_completion_date","order_status_id","payment_status_id",
-  "production_status_id","milling_type_id","edge_type_id","film_id",
-  "material_id",
-  "total_amount","final_amount","discount","surcharge","paid_amount",
-  "payment_date","parts_count","total_area","notes","link_cutting_file",
-  "link_cutting_image_file","ref_key_1c","manager_id","delete_flag",
-  "issue_date","created_by","edited_by","production_status_mode"
-]'
-
-ORDERS_UPDATE_COLUMNS="$ORDERS_INSERT_COLUMNS"
-
-# order_details: WITH material_id restored (plus sheet_material_type_id still excluded as SP3)
-ORDER_DETAILS_INSERT_COLUMNS='[
-  "order_id","detail_number","detail_name","height","width","quantity",
-  "production_status_id","notes","delete_flag","film_id","texture",
-  "edge_type_id","milling_type_id","edge_1","edge_2","edge_3","edge_4",
-  "material_id"
-]'
-
-ORDER_DETAILS_UPDATE_COLUMNS="$ORDER_DETAILS_INSERT_COLUMNS"
-
-log "Starting Variant B material_id isolation ROLLBACK (restoring material_id to allowlists)"
+log "Starting Variant B material_id isolation ROLLBACK (metadata-preserving, material_id restored)"
 log "WARNING: use only when rolling back to pre-034 path."
 log "Endpoint: ${BASE_URL}"
-log "Roles: ${ROLES[*]}"
+log "Fetching current Hasura metadata..."
 
-for ROLE in "${ROLES[@]}"; do
-  log "--- Role: ${ROLE} ---"
+METADATA_JSON=$(hasura_api '{"type":"export_metadata","args":{}}')
 
-  log "  Dropping insert permission on orders for role ${ROLE}"
-  hasura_api "$(printf '{"type":"pg_drop_insert_permission","args":{"table":{"schema":"public","name":"orders"},"role":"%s","source":"default"}}' "$ROLE")" > /dev/null
+log "Metadata fetched. Computing permission mutations (add material_id back to columns)..."
 
-  log "  Creating insert permission on orders for role ${ROLE} (material_id RESTORED)"
-  hasura_api "$(printf '{"type":"pg_create_insert_permission","args":{"table":{"schema":"public","name":"orders"},"role":"%s","permission":{"check":{},"columns":%s,"backend_only":false},"source":"default"}}' "$ROLE" "$ORDERS_INSERT_COLUMNS")" > /dev/null
+ACTIONS_FILE=$(mktemp /tmp/vb-isolation-rollback-actions-XXXXXX.json)
+trap 'rm -f "$ACTIONS_FILE"' EXIT
 
-  log "  Dropping update permission on orders for role ${ROLE}"
-  hasura_api "$(printf '{"type":"pg_drop_update_permission","args":{"table":{"schema":"public","name":"orders"},"role":"%s","source":"default"}}' "$ROLE")" > /dev/null
+export _VB_METADATA="$METADATA_JSON"
+python3 - "$ACTIONS_FILE" <<'PY'
+import sys
+import json
+import os
 
-  log "  Creating update permission on orders for role ${ROLE} (material_id RESTORED)"
-  hasura_api "$(printf '{"type":"pg_create_update_permission","args":{"table":{"schema":"public","name":"orders"},"role":"%s","permission":{"columns":%s,"filter":{},"check":null,"backend_only":false},"source":"default"}}' "$ROLE" "$ORDERS_UPDATE_COLUMNS")" > /dev/null
+actions_path = sys.argv[1]
+raw = os.environ.get("_VB_METADATA", "")
+if not raw:
+    print("ERROR: _VB_METADATA is empty", file=sys.stderr)
+    sys.exit(1)
 
-  log "  Dropping insert permission on order_details for role ${ROLE}"
-  hasura_api "$(printf '{"type":"pg_drop_insert_permission","args":{"table":{"schema":"public","name":"order_details"},"role":"%s","source":"default"}}' "$ROLE")" > /dev/null
+m = json.loads(raw)
+metadata = m.get("metadata", m) if isinstance(m, dict) else m
 
-  log "  Creating insert permission on order_details for role ${ROLE} (material_id RESTORED)"
-  hasura_api "$(printf '{"type":"pg_create_insert_permission","args":{"table":{"schema":"public","name":"order_details"},"role":"%s","permission":{"check":{},"columns":%s,"backend_only":false},"source":"default"}}' "$ROLE" "$ORDER_DETAILS_INSERT_COLUMNS")" > /dev/null
+ROLES = {"operator", "manager", "top_manager"}
+TARGET_TABLES = {"orders", "order_details"}
+COLUMN_TO_ADD = "material_id"
 
-  log "  Dropping update permission on order_details for role ${ROLE}"
-  hasura_api "$(printf '{"type":"pg_drop_update_permission","args":{"table":{"schema":"public","name":"order_details"},"role":"%s","source":"default"}}' "$ROLE")" > /dev/null
+PERM_KEYS = [
+    ("insert_permissions", "pg_drop_insert_permission", "pg_create_insert_permission"),
+    ("update_permissions", "pg_drop_update_permission", "pg_create_update_permission"),
+]
 
-  log "  Creating update permission on order_details for role ${ROLE} (material_id RESTORED)"
-  hasura_api "$(printf '{"type":"pg_create_update_permission","args":{"table":{"schema":"public","name":"order_details"},"role":"%s","permission":{"columns":%s,"filter":{},"check":null,"backend_only":false},"source":"default"}}' "$ROLE" "$ORDER_DETAILS_UPDATE_COLUMNS")" > /dev/null
+actions = []
 
-  log "  Done: ${ROLE}"
-done
+for source in metadata.get("sources", []):
+    source_name = source.get("name", "default")
+    for table in source.get("tables", []):
+        tbl_name = table["table"]["name"]
+        tbl_schema = table["table"].get("schema", "public")
+        if tbl_name not in TARGET_TABLES:
+            continue
 
-log "Rollback complete: material_id restored to non-admin allowlists."
+        for perm_key, drop_type, create_type in PERM_KEYS:
+            for perm in table.get(perm_key, []):
+                role = perm["role"]
+                if role not in ROLES:
+                    continue
+
+                # Deep-copy permission object; add material_id back if missing.
+                permission = json.loads(json.dumps(perm["permission"]))
+                cols = list(permission.get("columns") or [])
+                changed = COLUMN_TO_ADD not in cols
+                if changed:
+                    cols.append(COLUMN_TO_ADD)
+                    permission["columns"] = cols
+
+                label = (
+                    f"{tbl_name}/{role}/{'insert' if 'insert' in perm_key else 'update'}"
+                    f": {'added material_id back' if changed else 'no-change (already present)'}"
+                )
+                print(f"  {label}", file=sys.stderr)
+
+                table_ref = {"schema": tbl_schema, "name": tbl_name}
+                drop_payload = json.dumps({
+                    "type": drop_type,
+                    "args": {"table": table_ref, "role": role, "source": source_name}
+                })
+                create_payload = json.dumps({
+                    "type": create_type,
+                    "args": {"table": table_ref, "role": role, "permission": permission, "source": source_name}
+                })
+                actions.append({
+                    "label": label,
+                    "drop": drop_payload,
+                    "create": create_payload,
+                })
+
+with open(actions_path, "w") as f:
+    json.dump(actions, f)
+
+print(f"Total actions: {len(actions)}", file=sys.stderr)
+PY
+unset _VB_METADATA
+
+ACTION_COUNT=$(python3 -c "import json; d=json.load(open('$ACTIONS_FILE')); print(len(d))")
+log "Applying ${ACTION_COUNT} permission mutations..."
+
+python3 - "$ACTIONS_FILE" <<PY_APPLY
+import sys
+import json
+import subprocess
+
+actions_path = sys.argv[1]
+metadata_url = "${METADATA_URL}"
+admin_secret = "${HASURA_ADMIN_SECRET}"
+
+with open(actions_path) as f:
+    actions = json.load(f)
+
+def hasura_api(payload_str):
+    r = subprocess.run(
+        ["curl", "-sSf",
+         "-H", "Content-Type: application/json",
+         "-H", f"x-hasura-admin-secret: {admin_secret}",
+         "-d", payload_str,
+         metadata_url],
+        capture_output=True, text=True, check=True,
+    )
+    return r.stdout
+
+for action in actions:
+    print(f"  drop:   {action['label']}", flush=True)
+    hasura_api(action["drop"])
+    print(f"  create: {action['label']} (check/filter/presets preserved, material_id restored)", flush=True)
+    hasura_api(action["create"])
+
+print("Done.")
+PY_APPLY
+
+log "Rollback complete: material_id restored to non-admin allowlists (check/filter/presets preserved)."
