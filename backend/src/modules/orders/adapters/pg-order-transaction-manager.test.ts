@@ -571,6 +571,72 @@ describe('PgOrderTransactionManager', () => {
     expect(diff.deleteFlag).not.toHaveProperty('before');
     expect(diff.deleteFlag).not.toHaveProperty('after');
   });
+
+  it('Variant B: sheet order save writes sheet_material_type bridge rows via audit', async () => {
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+    await manager.runInTransaction(async (uow) => {
+      await uow.writeAuditEvent({
+        action: 'orders.create',
+        orderId: 77,
+        actorUserId: '9',
+        actorUsername: 'manager1',
+        actorRole: 'manager',
+        clientId: 555,
+        requestId: 'req_sheet',
+        relatedSheetMaterialTypeIds: [3, 7],
+      });
+    });
+    const auditInsert = queries.find((q) => /INSERT INTO audit_log/i.test(q.text));
+    expect(auditInsert).toBeDefined();
+    // audit_log_related_entity bridge rows must be written for each sheet material type id
+    const relatedInserts = queries.filter((q) => /INSERT INTO audit_log_related_entity/i.test(q.text));
+    expect(relatedInserts).toHaveLength(2);
+    expect(relatedInserts.some((q) => q.params.includes('sheet_material_type') && q.params.includes(3))).toBe(true);
+    expect(relatedInserts.some((q) => q.params.includes('sheet_material_type') && q.params.includes(7))).toBe(true);
+  });
+
+  it('Variant B: no shadow-material audit rows when sheet order is saved (removed call sites)', async () => {
+    // Verify that writeAuditEvent for a sheet order does NOT write any "materials." event
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+    await manager.runInTransaction(async (uow) => {
+      await uow.writeAuditEvent({
+        action: 'orders.create',
+        orderId: 77,
+        actorUserId: '9',
+        relatedSheetMaterialTypeIds: [3],
+      });
+    });
+    const materialAuditEvents = queries.filter(
+      (q) => /INSERT INTO audit_log/i.test(q.text) && q.params.some((p) => typeof p === 'string' && p.startsWith('materials.')),
+    );
+    expect(materialAuditEvents).toHaveLength(0);
+  });
+
+  it('Variant B: diff_json carries before/after sheetMaterialTypeId in header', async () => {
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+    const before = { orderName: 'A-1', sheetMaterialTypeId: 3, clientId: 5 };
+    const after = { orderName: 'A-1', sheetMaterialTypeId: 7, clientId: 5 };
+    await manager.runInTransaction(async (uow) => {
+      await uow.writeAuditEvent({
+        action: 'orders.update',
+        orderId: 77,
+        actorUserId: '9',
+        before,
+        after,
+        relatedSheetMaterialTypeIds: [3, 7],
+      });
+    });
+    const audit = queries.find((q) => /INSERT INTO audit_log/i.test(q.text));
+    expect(audit).toBeDefined();
+    const diffParam = audit!.params[21] as string | null;
+    expect(diffParam).not.toBeNull();
+    const diff = JSON.parse(diffParam!);
+    // sheetMaterialTypeId changed from 3 to 7 — must appear in diff
+    expect(diff.sheetMaterialTypeId).toEqual({ from: 3, to: 7 });
+  });
 });
 
 function createDatabase(

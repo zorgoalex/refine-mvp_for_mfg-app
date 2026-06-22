@@ -1,0 +1,93 @@
+// backend/src/modules/orders/adapters/migration-034-rollback.integration.ts
+// Integration test: apply 034 then 034_rollback, assert Variant-A invariants are restored.
+// Uses an ephemeral Postgres; set SHEET_INTEGRATION_DATABASE_URL to enable.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { Client } from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  bootstrapVariantBSchema,
+  seedVariantAMain,
+} from './__fixtures__/variant-b-migration-fixture';
+
+const url = process.env.SHEET_INTEGRATION_DATABASE_URL;
+const d = url ? describe : describe.skip;
+const mig = (n: string) =>
+  readFileSync(join(__dirname, '../../../../db/migrations', n), 'utf8');
+
+d('migration 034 rollback (Variant B → Variant A revert)', () => {
+  const client = new Client({ connectionString: url });
+
+  beforeAll(async () => {
+    await client.connect();
+    // Apply the full forward chain first: bootstrap + seed Variant-A data + 034.
+    await bootstrapVariantBSchema(client);
+    await seedVariantAMain(client);
+    await client.query(mig('034_order_material_sunset_legacy.sql'));
+    // Now apply the rollback.
+    await client.query(mig('034_rollback.sql'));
+  });
+
+  afterAll(async () => {
+    await client.end();
+  });
+
+  it('every non-deleted detail has material_id NOT NULL after rollback', async () => {
+    const r = await client.query(
+      `SELECT count(*)::int n FROM order_details WHERE delete_flag = false AND material_id IS NULL`,
+    );
+    expect(r.rows[0].n).toBe(0);
+  });
+
+  it('every non-deleted detail material_id points at an is_sheet_shadow row matching its sheet', async () => {
+    const r = await client.query(`
+      SELECT count(*)::int n
+      FROM order_details od
+      INNER JOIN materials m ON m.material_id = od.material_id
+      WHERE od.delete_flag = false
+        AND m.is_sheet_shadow = true
+        AND m.shadow_of_sheet_material_type_id = od.sheet_material_type_id
+    `);
+    const total = await client.query(
+      `SELECT count(*)::int n FROM order_details WHERE delete_flag = false`,
+    );
+    // All non-deleted details should be covered
+    expect(r.rows[0].n).toBe(total.rows[0].n);
+  });
+
+  it('the 030 shadow_pairing trigger is restored', async () => {
+    const r = await client.query(`
+      SELECT count(*)::int n FROM pg_trigger
+      WHERE tgname = 'order_detail_shadow_pairing'
+        AND tgrelid = 'order_details'::regclass
+    `);
+    expect(r.rows[0].n).toBe(1);
+  });
+
+  it('chk_orders_sheet_xor_material constraint is restored', async () => {
+    const r = await client.query(`
+      SELECT count(*)::int n FROM pg_constraint
+      WHERE conname = 'chk_orders_sheet_xor_material'
+        AND conrelid = 'orders'::regclass
+    `);
+    expect(r.rows[0].n).toBe(1);
+  });
+
+  it('rollback is idempotent: re-applying 034_rollback leaves the same state', async () => {
+    // Apply rollback a second time — must not error or double-insert shadows.
+    await client.query(mig('034_rollback.sql'));
+    const shadows = await client.query(
+      `SELECT count(*)::int n FROM materials WHERE is_sheet_shadow = true`,
+    );
+    // Should not have doubled
+    const shadowsByType = await client.query(
+      `SELECT shadow_of_sheet_material_type_id, count(*)::int n FROM materials WHERE is_sheet_shadow = true GROUP BY shadow_of_sheet_material_type_id HAVING count(*) > 1`,
+    );
+    expect(shadowsByType.rows).toHaveLength(0);
+    // details still all covered
+    const uncovered = await client.query(
+      `SELECT count(*)::int n FROM order_details WHERE delete_flag = false AND material_id IS NULL`,
+    );
+    expect(uncovered.rows[0].n).toBe(0);
+  });
+});

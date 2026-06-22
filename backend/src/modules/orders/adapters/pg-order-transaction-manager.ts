@@ -737,6 +737,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   async writeAuditEvent(event: OrderSaveAuditEvent): Promise<void> {
+    const sheetIds = event.relatedSheetMaterialTypeIds ?? [];
     await auditService.record(this.tx, {
       event: event.action,
       entityType: 'order',
@@ -755,6 +756,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         string,
         unknown
       >,
+      relatedEntities: sheetIds.map((entityId) => ({ entityType: 'sheet_material_type', entityId })),
     });
   }
 

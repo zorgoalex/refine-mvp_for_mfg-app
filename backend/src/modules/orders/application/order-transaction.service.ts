@@ -83,6 +83,22 @@ function toBeforeDetailRefs(
   }));
 }
 
+function collectSheetMaterialTypeIds(
+  headerSheetId: number | null | undefined,
+  details: ReadonlyArray<{ sheetMaterialTypeId?: number | null }>,
+  storedDetailIds?: ReadonlyArray<{ sheetMaterialTypeId: number | null }>,
+): number[] {
+  const ids = new Set<number>();
+  if (headerSheetId != null) ids.add(headerSheetId);
+  for (const d of details) {
+    if (d.sheetMaterialTypeId != null) ids.add(d.sheetMaterialTypeId);
+  }
+  for (const d of storedDetailIds ?? []) {
+    if (d.sheetMaterialTypeId != null) ids.add(d.sheetMaterialTypeId);
+  }
+  return [...ids];
+}
+
 export interface OrderTransactionServicePorts {
   transactions: OrderTransactionManagerPort;
   permissions?: OrderPermissionCheckerPort;
@@ -141,6 +157,10 @@ export class OrderTransactionService {
           'orders.create',
           command.requestId,
           touchesSheet ? { before: [], after: toAfterDetailRefs(prepared.details) } : undefined,
+        ),
+        relatedSheetMaterialTypeIds: collectSheetMaterialTypeIds(
+          prepared.order.header.sheetMaterialTypeId,
+          prepared.details,
         ),
       });
 
@@ -239,6 +259,11 @@ export class OrderTransactionService {
           touchesSheet
             ? { before: toBeforeDetailRefs(storedDetailSheetIds), after: toAfterDetailRefs(prepared.details) }
             : undefined,
+        ),
+        relatedSheetMaterialTypeIds: collectSheetMaterialTypeIds(
+          prepared.order.header.sheetMaterialTypeId,
+          prepared.details,
+          storedDetailSheetIds,
         ),
       });
 

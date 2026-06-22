@@ -92,6 +92,7 @@ export interface OrderSaveAuditEvent {
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
   metadata?: OrderSaveAuditMetadata;
+  relatedSheetMaterialTypeIds?: number[];
 }
 
 /** Transaction-scoped context threaded into shadow-material audit writes. */

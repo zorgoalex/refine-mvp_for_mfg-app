@@ -180,6 +180,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
             formatVersion: snapshot.formatVersion,
             serviceVersion: snapshot.exporterService.version,
           },
+          collectSnapshotSheetIds(snapshot),
         );
         return { ...result, importRunId: runId };
       } catch (error) {
@@ -2265,6 +2266,21 @@ async function setSessionUser(tx: TransactionClient, userId: string): Promise<vo
   await tx.query('SELECT set_session_user($1)', [userId]);
 }
 
+function collectSnapshotSheetIds(snapshot: OrderSnapshotDto): number[] {
+  const ids = new Set<number>();
+  const headerSheetId = (snapshot.data.order as unknown as Record<string, unknown>).sheetMaterialTypeId;
+  if (typeof headerSheetId === 'number' && Number.isFinite(headerSheetId)) {
+    ids.add(headerSheetId);
+  }
+  for (const detail of snapshot.data.details) {
+    const detailSheetId = (detail as unknown as Record<string, unknown>).sheetMaterialTypeId;
+    if (typeof detailSheetId === 'number' && Number.isFinite(detailSheetId)) {
+      ids.add(detailSheetId);
+    }
+  }
+  return [...ids];
+}
+
 export async function writeAudit(
   tx: TransactionClient,
   event: string,
@@ -2272,7 +2288,9 @@ export async function writeAudit(
   orderId: number,
   clientId: number | null,
   metadata: Record<string, unknown>,
+  relatedSheetMaterialTypeIds?: number[],
 ): Promise<void> {
+  const sheetIds = relatedSheetMaterialTypeIds ?? [];
   await auditService.record(tx, {
     event,
     entityType: 'order',
@@ -2285,6 +2303,7 @@ export async function writeAudit(
     relatedOrderId: orderId,
     relatedClientId: clientId ?? null,
     metadata,
+    relatedEntities: sheetIds.map((entityId) => ({ entityType: 'sheet_material_type', entityId })),
   });
 }
 
