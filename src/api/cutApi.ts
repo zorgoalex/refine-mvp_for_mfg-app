@@ -3,6 +3,7 @@ import { httpClient } from './httpClient';
 import type {
   AddCutItemsRequest,
   CreateCutJobRequest,
+  CutDetailLastReadyResponse,
   CutDetailPlacements,
   CutJobDto,
   CutSelectionCriteria,
@@ -71,6 +72,16 @@ export const cutApi = {
     if (params.orderIds && params.orderIds.length > 0) query.append('orderIds', params.orderIds.join(','));
     const qs = query.toString();
     return httpClient.get<CutDetailPlacements>(qs ? `${apiRoutes.cutJobs.placements}?${qs}` : apiRoutes.cutJobs.placements);
+  },
+
+  /** Per-detail latest-created ready (calculated) cut job, for the order-detail Раскрой column. */
+  async listDetailLastReady(detailIds: number[]): Promise<CutDetailLastReadyResponse> {
+    const ids = detailIds.filter((id) => Number.isInteger(id) && id > 0);
+    if (ids.length === 0) return { details: [] };
+    const query = new URLSearchParams({ detailIds: ids.join(',') });
+    return httpClient.get<CutDetailLastReadyResponse>(
+      `${apiRoutes.cutJobs.detailLastReady}?${query.toString()}`,
+    );
   },
 
   async listEligibleDetails(
