@@ -155,6 +155,16 @@ export interface CutDetailPlacements {
   hasArchived: boolean;
 }
 
+export interface CutDetailLastReadyRef {
+  orderDetailId: number;
+  cutJobId: number;
+  name: string;
+}
+
+export interface CutDetailLastReadyResponse {
+  details: CutDetailLastReadyRef[];
+}
+
 export type CutRenderPreset = 'thumb' | 'screen' | 'print';
 
 /**

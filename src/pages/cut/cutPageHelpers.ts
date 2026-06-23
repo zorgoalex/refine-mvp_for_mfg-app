@@ -1,5 +1,13 @@
 /** Pure helpers for the /cut page (unit-tested under vitest env=node, no jsdom). */
 
+/** Parse a `?job=<id>` deep-link param into a positive cut job id, or null. */
+export function parseJobQueryParam(search: string): number | null {
+  const raw = new URLSearchParams(search).get('job');
+  if (raw === null) return null;
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 /** Parse a CSV like "9, 10, x" into distinct positive integer ids. */
 export function parseIdCsv(input: string): number[] {
   const ids = input

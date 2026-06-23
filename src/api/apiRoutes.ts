@@ -56,6 +56,7 @@ export const apiRoutes = {
   cutJobs: {
     list: backendApiPath('/cut-jobs'),
     placements: backendApiPath('/cut-jobs/placements'),
+    detailLastReady: backendApiPath('/cut-jobs/detail-last-ready'),
     /** Variant B Task 11: cut.view-gated sheet-type lookup (no sheet_materials.view required). */
     sheetTypes: backendApiPath('/cut-jobs/sheet-types'),
     byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),

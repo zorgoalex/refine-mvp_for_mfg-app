@@ -26,6 +26,9 @@ import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { ProjectLinksEditor } from "./components/projects/ProjectLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { can } from "../../utils/permissions";
+import { cutApi } from "../../api/cutApi";
+import type { CutDetailLastReadyRef } from "../../api/types/cutApi.types";
+import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 
 type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'additional';
 
@@ -268,6 +271,49 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     setCutSelectMode(false);
     setCutSelectedDetailIds([]);
   }, [record?.order_id]);
+
+  // Read-only «Раскрой» column gate (cut.view; distinct from the cut.manage
+  // add-to-cut button gate above). Off ⇒ no fetch, no column (legacy behavior).
+  const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view');
+  const [cutJobByDetailId, setCutJobByDetailId] = useState<Map<number, CutDetailLastReadyRef>>(
+    () => new Map(),
+  );
+
+  // Stable positive detail ids + a primitive key so the fetch effect does NOT
+  // re-run on every rerender just because `details` is a fresh array identity
+  // (it is derived inline each render from backendOrder?.details or a sorted
+  // query array). Keying on the joined id string makes the fetch fire only when
+  // the actual set of detail ids changes.
+  const cutDetailIds = useMemo(
+    () =>
+      details
+        .map((d: any) => d?.detail_id)
+        .filter((id: unknown): id is number => Number.isInteger(id) && (id as number) > 0),
+    [details],
+  );
+  const cutDetailIdsKey = cutDetailIds.join(',');
+
+  useEffect(() => {
+    if (!cutColumnEnabled || cutDetailIds.length === 0) {
+      setCutJobByDetailId(new Map());
+      return;
+    }
+    let cancelled = false;
+    cutApi
+      .listDetailLastReady(cutDetailIds)
+      .then((res) => {
+        if (!cancelled) setCutJobByDetailId(buildCutJobByDetailId(res.details));
+      })
+      .catch(() => {
+        if (!cancelled) setCutJobByDetailId(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+    // cutDetailIdsKey is the primitive identity of cutDetailIds; intentionally
+    // depend on it instead of the array to avoid redundant fetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cutColumnEnabled, cutDetailIdsKey]);
 
   // Hook for updating order
   const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
@@ -911,6 +957,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </span>
                   ),
                 },
+                ...(cutColumnEnabled
+                  ? [
+                      {
+                        title: 'Раскрой',
+                        key: 'cut_job',
+                        width: 150,
+                        render: (_: unknown, record: any) => {
+                          const ref = cutJobByDetailId.get(record.detail_id);
+                          if (!ref) return '—';
+                          return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
+                        },
+                      },
+                    ]
+                  : []),
                 {
                   title: 'Цена за кв.м.',
                   dataIndex: 'milling_cost_per_sqm',

@@ -5157,6 +5157,32 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/detail-last-ready:
+    get:
+      tags:
+        - CutJobs
+      operationId: cutDetailLastReady
+      summary: Per-detail latest-created ready (calculated) cut job, for the order-detail Раскрой column
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/cut-jobs/sheet-types:
     get:
       tags:

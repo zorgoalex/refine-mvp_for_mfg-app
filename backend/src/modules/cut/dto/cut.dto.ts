@@ -145,3 +145,15 @@ export interface CutDetailPlacementsResponseDto {
   /** true when ANY requested detail also exists in an archived job */
   hasArchived: boolean;
 }
+
+/** One detail's latest-created ready (calculated) cut job. */
+export interface CutDetailLastReadyRefDto {
+  orderDetailId: number;
+  cutJobId: number;
+  name: string;
+}
+
+/** Per-detail latest-created ready cut job (only details that have one appear). */
+export interface CutDetailLastReadyResponseDto {
+  details: CutDetailLastReadyRefDto[];
+}
