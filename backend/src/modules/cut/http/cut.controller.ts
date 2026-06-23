@@ -6,6 +6,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CutService } from '../application/cut.service';
 import type {
+  CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutJobDto,
   CutSelectionCriteriaDto,
@@ -98,6 +99,24 @@ export class CutController {
       currentUser,
       detailIds: parseCsvIds(query.detailIds),
       orderIds: parseCsvIds(query.orderIds),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
+    operationId: 'cutDetailLastReady',
+    summary: 'Per-detail latest-created ready (calculated) cut job, for the order-detail Раскрой column',
+  })
+  @Get('detail-last-ready')
+  async detailLastReady(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, string>,
+  ): Promise<CutDetailLastReadyResponseDto> {
+    // Registered BEFORE ':cutJobId' so the literal path is not captured as an id.
+    const currentUser = this.requireRead(request);
+    return this.cut.listDetailLastReady({
+      currentUser,
+      detailIds: parseCsvIds(query.detailIds),
       requestId: request.requestId,
     });
   }

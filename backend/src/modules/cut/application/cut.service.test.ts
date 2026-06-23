@@ -28,6 +28,7 @@ function repo(overrides: Partial<CutRepositoryPort> = {}): CutRepositoryPort {
     listJobs: reject,
     listEligibleDetails: reject,
     renderSheetPng: reject,
+    listDetailLastReady: () => Promise.resolve({ details: [] }),
     ...overrides,
   } as CutRepositoryPort;
 }
@@ -148,5 +149,19 @@ describe('CutService RBAC (§8 principle 8)', () => {
     // fire-and-forget — allow the microtask to run
     await Promise.resolve();
     expect(recordPermissionDenied).toHaveBeenCalled();
+  });
+
+  it('denies detail-last-ready read without cut.view', async () => {
+    const service = new CutService({ cut: repo() });
+    await expect(
+      service.listDetailLastReady({ currentUser: user([]), detailIds: [1] }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('allows detail-last-ready read with cut.view and delegates', async () => {
+    const listDetailLastReady = vi.fn().mockResolvedValue({ details: [] });
+    const service = new CutService({ cut: repo({ listDetailLastReady }) });
+    await service.listDetailLastReady({ currentUser: user(['cut.view']), detailIds: [1] });
+    expect(listDetailLastReady).toHaveBeenCalledOnce();
   });
 });
