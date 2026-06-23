@@ -485,16 +485,40 @@ export const CutPage: React.FC = () => {
         render: (_: unknown, row: CutJobDto) => cutJobSourceLabel(row.source),
       },
       {
-        title: 'Детали',
-        key: 'items',
-        width: 80,
-        render: (_: unknown, row: CutJobDto) => cutJobCounts(row).items,
+        title: 'Позиции',
+        key: 'positions',
+        width: 90,
+        render: (_: unknown, row: CutJobDto) => row.totals.positions,
       },
       {
         title: 'Группы',
         key: 'groups',
         width: 80,
         render: (_: unknown, row: CutJobDto) => cutJobCounts(row).groups,
+      },
+      {
+        title: 'Деталей',
+        key: 'details',
+        width: 90,
+        render: (_: unknown, row: CutJobDto) => row.totals.details,
+      },
+      {
+        title: 'Площадь, итого',
+        key: 'area',
+        width: 120,
+        render: (_: unknown, row: CutJobDto) => formatArea(row.totals.area),
+      },
+      {
+        title: 'Кол-во листов раскроя',
+        key: 'sheets',
+        width: 120,
+        render: (_: unknown, row: CutJobDto) => (row.status === 'ready' ? row.totals.sheets : '—'),
+      },
+      {
+        title: 'Профиль',
+        key: 'profile',
+        width: 180,
+        render: (_: unknown, row: CutJobDto) => resolveProfileLabel(row.paramProfileId, profiles, cutSettings),
       },
       {
         title: 'Действия',
@@ -514,7 +538,7 @@ export const CutPage: React.FC = () => {
         ),
       },
     ],
-    [busy, canManage, openJob, archiveJob],
+    [busy, canManage, openJob, archiveJob, profiles, cutSettings],
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
