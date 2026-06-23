@@ -34,10 +34,10 @@ describe('cut detail column', () => {
     // references it in its dependency array. A regression (effect before const)
     // crashes every render with ReferenceError but is invisible to tsc/build.
     const openJobIdx = src.indexOf('const openJob = useCallback');
-    const deepLinkDepsIdx = src.indexOf('[searchParams, openJob]');
+    const deepLinkIdx = src.indexOf('parseJobQueryParam(window.location.search)');
     expect(openJobIdx).toBeGreaterThan(-1);
-    expect(deepLinkDepsIdx).toBeGreaterThan(-1);
+    expect(deepLinkIdx).toBeGreaterThan(-1);
     // openJob must be declared BEFORE the effect that depends on it (TDZ guard)
-    expect(openJobIdx).toBeLessThan(deepLinkDepsIdx);
+    expect(openJobIdx).toBeLessThan(deepLinkIdx);
   });
 });

@@ -15,7 +15,6 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigation } from '@refinedev/core';
-import { useSearchParams } from 'react-router-dom';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
@@ -253,16 +252,15 @@ export const CutPage: React.FC = () => {
   // openJob's handleError toast. The column only links ready jobs, so the normal
   // flow never deep-links archived — only a stale/hand-edited URL can. Mutate
   // controls are disabled for archived jobs (isArchivedJob guard) so this is truly read-only.
-  const [searchParams] = useSearchParams();
   const deepLinkHandledRef = useRef(false);
   useEffect(() => {
     if (deepLinkHandledRef.current) return;
     if (!can('cut.view')) return;
-    const jobId = parseJobQueryParam(`?${searchParams.toString()}`);
+    const jobId = parseJobQueryParam(window.location.search);
     if (jobId === null) return;
     deepLinkHandledRef.current = true;
     void openJob(jobId);
-  }, [searchParams, openJob]);
+  }, [openJob]);
 
   const archiveJob = useCallback(
     async (target: CutJobDto) => {
