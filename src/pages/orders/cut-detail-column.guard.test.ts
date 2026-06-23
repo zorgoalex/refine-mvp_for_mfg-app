@@ -17,19 +17,18 @@ describe('cut detail column', () => {
     expect(show).toContain("scroll={{ x: 'max-content' }}");
   });
 
-  it('summary row stays aligned for the selection column AND the Раскрой column', () => {
+  it('summary row aligns with the selection column and the trailing Раскрой column', () => {
     const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
-    // Footer offset must account for BOTH optional leading/extra columns:
-    //  - rowSelection (cutSelectMode) prepends a checkbox column → `base`,
-    //  - cutColumnEnabled inserts «Раскрой» → `cutGap`.
+    // rowSelection (cutSelectMode) prepends a checkbox column → `base`. «Раскрой»
+    // is the LAST column (after «Пленка»), so it only appends a trailing cell.
     expect(show).toContain('const base = cutSelectMode ? 1 : 0');
-    expect(show).toContain('const cutGap = cutColumnEnabled ? 1 : 0');
     // leading checkbox summary cell only while selecting
     expect(show).toContain('{cutSelectMode && <Table.Summary.Cell index={0} />}');
-    // conditional Раскрой summary cell
-    expect(show).toContain('cutColumnEnabled && <Table.Summary.Cell index={base + 9}');
-    // Сумма total cell carries both offsets
-    expect(show).toContain('index={base + 10 + cutGap}');
+    // Сумма total cell at its fixed position (no cut gap — Раскрой is last)
+    expect(show).toContain('index={base + 10}');
+    // Пленка cell, then the trailing conditional Раскрой cell
+    expect(show).toContain('index={base + 11}');
+    expect(show).toContain('cutColumnEnabled && <Table.Summary.Cell index={base + 12}');
   });
 
   it('CutPage gates every open-job mutate affordance on isArchivedJob', () => {

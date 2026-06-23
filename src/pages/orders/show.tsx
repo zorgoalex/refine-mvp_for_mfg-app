@@ -960,20 +960,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </span>
                   ),
                 },
-                ...(cutColumnEnabled
-                  ? [
-                      {
-                        title: 'Раскрой',
-                        key: 'cut_job',
-                        width: 150,
-                        render: (_: unknown, record: any) => {
-                          const ref = cutJobByDetailId.get(record.detail_id);
-                          if (!ref) return '—';
-                          return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
-                        },
-                      },
-                    ]
-                  : []),
                 {
                   title: 'Цена за кв.м.',
                   dataIndex: 'milling_cost_per_sqm',
@@ -1000,6 +986,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     return <span style={{ fontSize: '0.86em' }}>{filmName || ''}</span>;
                   },
                 },
+                // «Раскрой» — last column (after «Пленка»), read-only deep-link.
+                ...(cutColumnEnabled
+                  ? [
+                      {
+                        title: 'Раскрой',
+                        key: 'cut_job',
+                        width: 150,
+                        render: (_: unknown, record: any) => {
+                          const ref = cutJobByDetailId.get(record.detail_id);
+                          if (!ref) return '—';
+                          return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
+                        },
+                      },
+                    ]
+                  : []),
               ]}
               summary={() => {
                 const totalCount = details.length;
@@ -1007,14 +1008,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 const totalArea = details.reduce((sum, d) => sum + (d.area || 0), 0);
                 const totalCost = details.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
 
-                // Footer cells must line up with the RENDERED columns. Two
-                // optional leading/extra columns shift everything:
-                //  - rowSelection (cutSelectMode) prepends a checkbox column,
-                //  - cutColumnEnabled inserts the «Раскрой» column after «Пр-е».
-                // `base` is the offset from the leading selection column; the
-                // «Раскрой» gap adds one more to every column at/after «Цена».
+                // Footer cells must line up with the RENDERED columns.
+                // rowSelection (cutSelectMode) prepends a checkbox column → `base`.
+                // The «Раскрой» column is the LAST column (after «Пленка»), so it
+                // only appends a trailing cell and does not shift the others.
                 const base = cutSelectMode ? 1 : 0;
-                const cutGap = cutColumnEnabled ? 1 : 0;
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ backgroundColor: '#fafafa', fontWeight: 'bold' }}>
@@ -1044,19 +1042,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       <Table.Summary.Cell index={base + 7} />
                       {/* Пр-е */}
                       <Table.Summary.Cell index={base + 8} />
-                      {/* Раскрой (conditional — keeps the footer aligned with the
-                          13-column layout when the cut column is shown) */}
-                      {cutColumnEnabled && <Table.Summary.Cell index={base + 9} />}
                       {/* Цена за кв.м. */}
-                      <Table.Summary.Cell index={base + 9 + cutGap} />
+                      <Table.Summary.Cell index={base + 9} />
                       {/* Сумма */}
-                      <Table.Summary.Cell index={base + 10 + cutGap} align="right">
+                      <Table.Summary.Cell index={base + 10} align="right">
                         <span style={{ color: '#52c41a' }}>
                           {totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                         </span>
                       </Table.Summary.Cell>
                       {/* Пленка */}
-                      <Table.Summary.Cell index={base + 11 + cutGap} />
+                      <Table.Summary.Cell index={base + 11} />
+                      {/* Раскрой — last column (conditional), trailing summary cell */}
+                      {cutColumnEnabled && <Table.Summary.Cell index={base + 12} />}
                     </Table.Summary.Row>
                   </Table.Summary>
                 );
