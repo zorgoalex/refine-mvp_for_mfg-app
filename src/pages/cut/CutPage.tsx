@@ -217,11 +217,18 @@ export const CutPage: React.FC = () => {
     if (can('cut.view')) void loadJobs();
   }, [loadJobs]);
 
+  // Last-write-wins guard for openJob: a stale in-flight cutApi.get (e.g. rapid
+  // deep-link /cut?job=45 -> 46, or fast successive row opens) must not overwrite
+  // the UI with an older job after a newer open started. Each call captures its
+  // sequence; only the latest applies its result/error/busy reset.
+  const openSeqRef = useRef(0);
   const openJob = useCallback(
     async (cutJobId: number) => {
+      const seq = ++openSeqRef.current;
       setBusy(true);
       try {
         const fresh = await cutApi.get(cutJobId);
+        if (openSeqRef.current !== seq) return; // superseded by a newer openJob
         setJob(fresh);
         // Prefill the eligible-load criteria with the order(s) this job was built
         // from (the reserved items' orders) so "Загрузить подходящие детали" is
@@ -238,9 +245,10 @@ export const CutPage: React.FC = () => {
         setSelected([]);
         resetSheetViews();
       } catch (error) {
+        if (openSeqRef.current !== seq) return; // superseded; swallow the stale error
         handleError(error, 'Не удалось открыть раскрой');
       } finally {
-        setBusy(false);
+        if (openSeqRef.current === seq) setBusy(false);
       }
     },
     [form, handleError, resetSheetViews],

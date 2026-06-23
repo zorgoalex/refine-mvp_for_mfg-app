@@ -37,6 +37,11 @@ describe('cut detail column', () => {
     // CutPage must stay free of react-router-dom (orders open via workspace tabs).
     expect(src).not.toContain('react-router-dom');
 
+    // openJob must be last-write-wins (epoch guard) so a stale in-flight cutApi.get
+    // from a rapid deep-link (45 -> 46) cannot overwrite the UI with the older job.
+    expect(src).toContain('const openSeqRef = useRef(0)');
+    expect(src).toContain('if (openSeqRef.current !== seq) return');
+
     // TDZ guard: openJob must be declared BEFORE the deep-link effect that
     // references it. A regression (effect before const) crashes every render with
     // ReferenceError but is invisible to tsc/build.
