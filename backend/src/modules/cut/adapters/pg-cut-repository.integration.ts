@@ -907,6 +907,40 @@ describeIntegration('PgCutRepository (integration)', () => {
       .rejects.toMatchObject({ statusCode: 409 });
   });
 
+  // --- Task 6 integration tests: calculate resolves params from chosen profile ---
+
+  it('calculate uses the chosen profile params (not the create-time default); job.params unchanged', async () => {
+    const DISTINCT_KERF = 9;
+    const profileId = await insertProfile(pool, 'P-distinct', { kerf_mm: DISTINCT_KERF });
+    let captured: ReturnType<typeof import('../application/cut-freecut-mapping').buildOptimizeRequest> | undefined;
+    // build the repo with a request-capturing freecut stub, then create a job
+    // reserving the harness's eligible details 1/2:
+    const repo = new PgCutRepository(database, {
+      optimize: (req: ReturnType<typeof import('../application/cut-freecut-mapping').buildOptimizeRequest>) => {
+        captured = req;
+        return Promise.resolve(happyResponse);
+      },
+    } as never);
+    const created = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест calc', detailIds: [1, 2] }, requestId: 'c1' });
+    const cutJobId = created.cutJobId;
+    const set = await repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: profileId, version: created.version });
+    await repo.calculate({ currentUser: currentUser(), cutJobId, version: set.version });
+    expect((captured as { params?: { kerf_mm?: unknown } } | undefined)?.params?.kerf_mm).toBe(DISTINCT_KERF);
+    const paramsAfter = await pool.query(`SELECT params FROM cut_job WHERE cut_job_id = $1`, [cutJobId]);
+    expect(paramsAfter.rows[0].params?.kerf_mm).not.toBe(DISTINCT_KERF); // snapshot NOT rewritten
+  });
+
+  it('calculate REJECTS 422 when the chosen profile was deactivated after selection', async () => {
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const created = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест gone', detailIds: [1, 2] }, requestId: 'g1' });
+    const cutJobId = created.cutJobId;
+    const profileId = await insertProfile(pool, 'P-gone', { kerf_mm: 9 });
+    const set = await repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: profileId, version: created.version });
+    await pool.query(`UPDATE cut_param_profiles SET is_active = false WHERE cut_param_profile_id = $1`, [profileId]);
+    await expect(repo.calculate({ currentUser: currentUser(), cutJobId, version: set.version }))
+      .rejects.toMatchObject({ statusCode: 422, code: 'CUT_PARAM_PROFILE_NOT_FOUND' });
+  });
+
   it('totals: positions excludes deleted details; details=Σqty; area=Σ(area*qty); sheets pre-calc=0', async () => {
     // Seed two details with known area/qty mirroring createSchema's detail-seed INSERT
     // (use fresh detail ids, e.g. 101 area=1.5 qty=2 and 102 area=0.5 qty=3, with the

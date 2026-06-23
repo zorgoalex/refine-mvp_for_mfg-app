@@ -29,6 +29,7 @@ import {
 import { ApiError } from '../../../common/errors/api-error';
 import { type CutConfigPort } from '../application/cut-config';
 import { PgCutConfigRepository } from './pg-cut-config-repository';
+import { resolveCalcParams } from './resolve-calc-params';
 import type {
   AddCutItemsCommand,
   ArchiveCutJobCommand,
@@ -117,6 +118,7 @@ interface CutJobLockRow extends QueryResultRow {
   version: string | number;
   pdf_prewarm_state: string;
   params: Record<string, unknown> | null;
+  param_profile_id: string | number | null;
 }
 
 interface CalcItemRow extends QueryResultRow {
@@ -343,14 +345,25 @@ export class PgCutRepository implements CutRepositoryPort {
           .map((g) => g.sheetMaterialTypeId)
           .filter((id): id is number => id !== null),
       };
-      // Use the job's params snapshot (taken at createJob) — never the CURRENT
-      // config defaults — so a config edit after creation can't retro-mutate this
-      // calculation (§4a). Legacy jobs without a snapshot fall back to defaults.
-      const params = (
-        job.params && Object.keys(job.params).length > 0
-          ? job.params
-          : await this.config.getDefaultParams()
-      ) as FreecutParams;
+      // Resolve params from the job's chosen profile, or fall back to the
+      // create-time snapshot (or runtime defaults for legacy jobs with no snapshot).
+      // A non-null chosen profile that is inactive/missing is REJECTED with 422 —
+      // never silently substituted — because the UI shows the chosen profile and
+      // substituting surprise params would violate stale-safety. The operator must
+      // clear or re-pick an active profile.
+      let profileParams: FreecutParams | null = null;
+      if (job.paramProfileId !== null) {
+        profileParams = await this.config.getParamsByProfileId(job.paramProfileId);
+        if (profileParams === null) {
+          throw new CutParamProfileNotFoundError(job.paramProfileId);
+        }
+      }
+      const params = resolveCalcParams({
+        profileId: job.paramProfileId,
+        jobParams: (job.params ?? null) as FreecutParams | null,
+        profileParams,
+        defaultParams: await this.config.getDefaultParams(),
+      });
       const grainRules = await this.config.getGrainRules();
 
       const groupPreps = groups.map((group) => {
@@ -498,10 +511,10 @@ export class PgCutRepository implements CutRepositoryPort {
       await tx.query(
         `
         UPDATE cut_job
-        SET status = 'ready', request_hash = $2, params = $3::jsonb, version = version + 1, updated_at = now()
+        SET status = 'ready', request_hash = $2, version = version + 1, updated_at = now()
         WHERE cut_job_id = $1
         `,
-        [command.cutJobId, requestHash, JSON.stringify(prep.params)],
+        [command.cutJobId, requestHash],
       );
 
       await this.audit(tx, command.currentUser, {
@@ -1286,9 +1299,10 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   source: string;
   version: number;
   params: Record<string, unknown> | null;
+  paramProfileId: number | null;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -1302,6 +1316,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     source: row.source,
     version: toNum(row.version),
     params: row.params,
+    paramProfileId: row.param_profile_id === null || row.param_profile_id === undefined ? null : toNum(row.param_profile_id),
   };
 }
 

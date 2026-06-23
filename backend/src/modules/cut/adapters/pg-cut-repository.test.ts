@@ -3,7 +3,15 @@ import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { FreecutClient } from './freecut-client';
 import type { FreecutOptimizeResponse } from '../application/cut-freecut-mapping';
+import type { CutConfigPort } from '../application/cut-config';
+import { StaticCutConfig } from '../application/cut-config';
 import { PgCutRepository, profileChangedOutboxKey } from './pg-cut-repository';
+
+/** Build a CutConfigPort stub with selective overrides (defaults to StaticCutConfig). */
+function stubConfig(overrides: Partial<CutConfigPort> = {}): CutConfigPort {
+  const base = new StaticCutConfig();
+  return { ...base, ...overrides };
+}
 
 function currentUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
   return {
@@ -56,9 +64,9 @@ function createDatabase(options: FakeDbOptions = {}) {
       return { rows: [{ cut_job_id: 42 }], rowCount: 1 };
     }
 
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
       const base = options.cutJob ?? { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null };
-      return { rows: [{ ...base, version: jobVersion }], rowCount: 1 };
+      return { rows: [{ ...base, version: jobVersion, param_profile_id: options.cutJob?.param_profile_id ?? null }], rowCount: 1 };
     }
 
     // setProfile FOR UPDATE: narrower column list (cut_job_id, status, version, param_profile_id)
@@ -569,4 +577,19 @@ it('setProfile rejects a calculating job with 409 (status gate)', async () => {
   const repo = new PgCutRepository(db.service, { optimize: vi.fn() } as never);
   await expect(repo.setProfile({ currentUser: currentUser(), cutJobId: 42, paramProfileId: 5, version: 2 }))
     .rejects.toMatchObject({ statusCode: 409 });
+});
+
+it('calculate rejects an inactive chosen profile with 422 (no freecut call)', async () => {
+  const optimize = vi.fn();
+  // cutJob FOR UPDATE row carries param_profile_id = 5; config stub resolves it to null (inactive/removed)
+  const db = createDatabase({
+    cutJob: { cut_job_id: 42, status: 'draft', version: 0, pdf_prewarm_state: 'pending', params: null, param_profile_id: 5 },
+    calcItems: [
+      { cut_job_item_id: 501, order_detail_id: 1, order_id: 9, qty: 1, width_mm: 600, height_mm: 400, sheet_material_type_id: 9, film_id: null, film_texture: null, smt_width_mm: 2800, smt_height_mm: 2070 },
+    ],
+  });
+  const repo = new PgCutRepository(db.service, { optimize } as never, stubConfig({ getParamsByProfileId: async () => null }));
+  await expect(repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0 }))
+    .rejects.toMatchObject({ statusCode: 422 });
+  expect(optimize).not.toHaveBeenCalled();
 });
