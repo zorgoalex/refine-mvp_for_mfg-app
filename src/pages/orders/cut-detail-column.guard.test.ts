@@ -30,11 +30,18 @@ describe('cut detail column', () => {
     // re-renders disabled when the open job is archived.
     expect(src).toMatch(/\[busy, canManage, isArchivedJob, removeJobItem, show\]/);
 
+    // Deep-link must read the /cut tab path REACTIVELY from the tab store (not
+    // window.location once), so a deep-link clicked while /cut is already mounted
+    // still reopens the job (workspace keeps /cut alive keyed by pathname).
+    expect(src).toContain("useTabStore((s) => s.tabs.find((t) => t.key === '/cut')?.path)");
+    // CutPage must stay free of react-router-dom (orders open via workspace tabs).
+    expect(src).not.toContain('react-router-dom');
+
     // TDZ guard: openJob must be declared BEFORE the deep-link effect that
-    // references it in its dependency array. A regression (effect before const)
-    // crashes every render with ReferenceError but is invisible to tsc/build.
+    // references it. A regression (effect before const) crashes every render with
+    // ReferenceError but is invisible to tsc/build.
     const openJobIdx = src.indexOf('const openJob = useCallback');
-    const deepLinkIdx = src.indexOf('parseJobQueryParam(window.location.search)');
+    const deepLinkIdx = src.indexOf('parseJobQueryParam(');
     expect(openJobIdx).toBeGreaterThan(-1);
     expect(deepLinkIdx).toBeGreaterThan(-1);
     // openJob must be declared BEFORE the effect that depends on it (TDZ guard)

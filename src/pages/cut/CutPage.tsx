@@ -28,6 +28,7 @@ import type {
 } from '../../api/types/cutApi.types';
 import { can } from '../../utils/permissions';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
+import { useTabStore } from '../../stores/tabStore';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
   CUT_JOB_STATUS_FILTER_OPTIONS,
@@ -245,22 +246,29 @@ export const CutPage: React.FC = () => {
     [form, handleError, resetSheetViews],
   );
 
-  // Deep-link: /cut?job=<id> opens that job once on mount (e.g. from the order
-  // show page «Раскрой» column). Guarded so it fires a single time per mount.
-  // openJob(id) loads ANY existing job by id (getJob/loadJob do not filter
-  // archived) and shows it; a missing/invalid id throws and is caught by
-  // openJob's handleError toast. The column only links ready jobs, so the normal
-  // flow never deep-links archived — only a stale/hand-edited URL can. Mutate
-  // controls are disabled for archived jobs (isArchivedJob guard) so this is truly read-only.
-  const deepLinkHandledRef = useRef(false);
+  // Deep-link: /cut?job=<id> opens that job (e.g. from the order show page
+  // «Раскрой» column). The workspace keeps /cut mounted (keyed by pathname), so
+  // subscribe to the /cut tab's stored path (updated by useTabSync on every query
+  // change) rather than reading window.location once — otherwise a deep-link
+  // clicked while /cut is already open would not reopen. Per-job-id one-shot:
+  // opens when the parsed id changes to a new value. openJob loads ANY existing
+  // job by id (getJob/loadJob do not filter archived) and shows it; a missing/
+  // invalid id throws and is caught by openJob's handleError toast. The column
+  // only links ready jobs, so the normal flow never deep-links archived — only a
+  // stale/hand-edited URL can, and mutate controls are disabled for archived jobs
+  // (isArchivedJob guard) so that is truly read-only.
+  const cutTabPath = useTabStore((s) => s.tabs.find((t) => t.key === '/cut')?.path);
+  const deepLinkJobId = parseJobQueryParam(
+    cutTabPath && cutTabPath.includes('?') ? cutTabPath.slice(cutTabPath.indexOf('?')) : '',
+  );
+  const lastDeepLinkRef = useRef<number | null>(null);
   useEffect(() => {
-    if (deepLinkHandledRef.current) return;
     if (!can('cut.view')) return;
-    const jobId = parseJobQueryParam(window.location.search);
-    if (jobId === null) return;
-    deepLinkHandledRef.current = true;
-    void openJob(jobId);
-  }, [openJob]);
+    if (deepLinkJobId === null) return;
+    if (lastDeepLinkRef.current === deepLinkJobId) return;
+    lastDeepLinkRef.current = deepLinkJobId;
+    void openJob(deepLinkJobId);
+  }, [deepLinkJobId, openJob]);
 
   const archiveJob = useCallback(
     async (target: CutJobDto) => {
