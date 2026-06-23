@@ -8,4 +8,26 @@ describe('cut detail column', () => {
     expect(show).toContain('cutJobDeepLink');
     expect(show).toContain("can('cut.view')");
   });
+
+  it('CutPage gates every open-job mutate affordance on isArchivedJob', () => {
+    const src = readFileSync('src/pages/cut/CutPage.tsx', 'utf8');
+    expect(src).toContain("const isArchivedJob = job?.status === 'archived'");
+    expect(src).toContain('parseJobQueryParam');
+    // Each of the FOUR mutate `disabled` conditions must reference isArchivedJob
+    // verbatim. Dropping any single guard fails this test (a weak occurrence
+    // count would miss a real guard removed + a stray mention added elsewhere).
+    // Keep these strings in sync with Step 6 if the conditions change.
+    const requiredDisabled = [
+      "disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}", // profile Select
+      'disabled={!canManage || selected.length === 0 || isArchivedJob}',                 // Добавить выбранные
+      'disabled={!canManage || job.items.length === 0 || isArchivedJob}',                // Рассчитать
+      'disabled={busy || isArchivedJob}',                                                // per-item Убрать
+    ];
+    for (const fragment of requiredDisabled) {
+      expect(src, `missing archived guard: ${fragment}`).toContain(fragment);
+    }
+    // jobItemColumns useMemo must depend on isArchivedJob so the remove button
+    // re-renders disabled when the open job is archived.
+    expect(src).toMatch(/\[busy, canManage, isArchivedJob, removeJobItem, show\]/);
+  });
 });

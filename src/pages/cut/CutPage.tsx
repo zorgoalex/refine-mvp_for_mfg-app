@@ -15,6 +15,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigation } from '@refinedev/core';
+import { useSearchParams } from 'react-router-dom';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
@@ -39,6 +40,7 @@ import {
   formatGroupSummary,
   noSheetSpecMessage,
   parseIdCsv,
+  parseJobQueryParam,
   pollPdf,
   safeHttpHref,
   selectableDetailIds,
@@ -214,6 +216,24 @@ export const CutPage: React.FC = () => {
   useEffect(() => {
     if (can('cut.view')) void loadJobs();
   }, [loadJobs]);
+
+  // Deep-link: /cut?job=<id> opens that job once on mount (e.g. from the order
+  // show page «Раскрой» column). Guarded so it fires a single time per mount.
+  // openJob(id) loads ANY existing job by id (getJob/loadJob do not filter
+  // archived) and shows it; a missing/invalid id throws and is caught by
+  // openJob's handleError toast. The column only links ready jobs, so the normal
+  // flow never deep-links archived — only a stale/hand-edited URL can. Mutate
+  // controls are disabled for archived jobs (isArchivedJob guard) so this is truly read-only.
+  const [searchParams] = useSearchParams();
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    if (!can('cut.view')) return;
+    const jobId = parseJobQueryParam(`?${searchParams.toString()}`);
+    if (jobId === null) return;
+    deepLinkHandledRef.current = true;
+    void openJob(jobId);
+  }, [searchParams, openJob]);
 
   const openJob = useCallback(
     async (cutJobId: number) => {
@@ -560,6 +580,11 @@ export const CutPage: React.FC = () => {
     [],
   );
 
+  // Archived jobs are genuinely read-only: all mutate controls are disabled so
+  // an operator deep-linked to an archived job (e.g. from the order show Раскрой
+  // column via a stale/hand-edited URL) cannot accidentally mutate it.
+  const isArchivedJob = job?.status === 'archived';
+
   // The details an operator actually reserved into this job (cut_job_item rows),
   // including those staged from the Orders "Добавить в раскрой" action. Showing
   // them is what makes a reopened job legible: "Загрузить подходящие детали" only
@@ -656,13 +681,13 @@ export const CutPage: React.FC = () => {
         fixed: 'right',
         render: (_: unknown, row: CutJobItemDto) =>
           canManage ? (
-            <Button size="small" type="link" danger onClick={() => removeJobItem(row.cutJobItemId)} disabled={busy}>
+            <Button size="small" type="link" danger onClick={() => removeJobItem(row.cutJobItemId)} disabled={busy || isArchivedJob}>
               Убрать
             </Button>
           ) : null,
       },
     ];
-  }, [busy, canManage, removeJobItem, show]);
+  }, [busy, canManage, isArchivedJob, removeJobItem, show]);
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
 
@@ -779,7 +804,7 @@ export const CutPage: React.FC = () => {
                   <Select<number | null>
                     value={job.paramProfileId}
                     onChange={(v) => void setJobProfile(v ?? null)}
-                    disabled={!canManage || busy || job.status === 'calculating'}
+                    disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
                     style={{ minWidth: 240 }}
                     placeholder={resolveProfileLabel(null, profiles, cutSettings)}
                     allowClear
@@ -798,10 +823,10 @@ export const CutPage: React.FC = () => {
             <Button onClick={loadEligible} loading={busy}>
               Загрузить подходящие детали
             </Button>
-            <Button onClick={addToBasket} disabled={!canManage || selected.length === 0} loading={busy}>
+            <Button onClick={addToBasket} disabled={!canManage || selected.length === 0 || isArchivedJob} loading={busy}>
               Добавить выбранные ({selected.length})
             </Button>
-            <Button type="primary" onClick={calculate} disabled={!canManage || job.items.length === 0} loading={busy}>
+            <Button type="primary" onClick={calculate} disabled={!canManage || job.items.length === 0 || isArchivedJob} loading={busy}>
               {job.status === 'failed' ? 'Повторить расчёт' : 'Рассчитать'}
             </Button>
             <Select<string>

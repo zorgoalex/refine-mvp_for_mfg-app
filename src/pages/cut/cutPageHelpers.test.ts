@@ -11,11 +11,24 @@ import {
   formatGroupSummary,
   noSheetSpecMessage,
   parseIdCsv,
+  parseJobQueryParam,
   safeHttpHref,
   pollPdf,
   restrictDetailIds,
   selectableDetailIds,
 } from './cutPageHelpers';
+
+describe('parseJobQueryParam', () => {
+  it('parses a positive integer job id', () => {
+    expect(parseJobQueryParam('?job=45')).toBe(45);
+  });
+  it('returns null for missing/invalid', () => {
+    expect(parseJobQueryParam('')).toBeNull();
+    expect(parseJobQueryParam('?job=abc')).toBeNull();
+    expect(parseJobQueryParam('?job=-3')).toBeNull();
+    expect(parseJobQueryParam('?foo=1')).toBeNull();
+  });
+});
 
 describe('cutPageHelpers', () => {
   it('parses a CSV of positive ids, dropping noise', () => {
