@@ -112,3 +112,22 @@ describe('PgCutConfigRepository', () => {
     await expect(repo.getGrainRules()).rejects.toMatchObject({ code: 'CUT_INVALID_GRAIN_RULE' });
   });
 });
+
+function stubDb(rows: Array<Record<string, unknown>>) {
+  return { query: async () => ({ rows }) } as never;
+}
+
+describe('getParamsByProfileId', () => {
+  it('returns null for an unknown/inactive profile', async () => {
+    const repo = new PgCutConfigRepository(stubDb([]));
+    expect(await repo.getParamsByProfileId(999)).toBeNull();
+  });
+
+  it('deep-merges stored params over defaults (partial trim keeps other sides)', async () => {
+    const repo = new PgCutConfigRepository(stubDb([{ params: { kerf_mm: 4, trim_mm: { left: 5 } } }]));
+    const p = await repo.getParamsByProfileId(1);
+    expect(p?.kerf_mm).toBe(4);
+    expect(p?.trim_mm.left).toBe(5);
+    expect(p?.trim_mm.right).toBeTypeOf('number'); // not dropped
+  });
+});

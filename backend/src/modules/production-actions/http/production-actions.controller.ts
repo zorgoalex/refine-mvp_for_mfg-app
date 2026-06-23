@@ -13,6 +13,8 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { ProductionActionService } from '../application/production-action.service';
 import type {
+  BatchDetailProductionStatusRequestDto,
+  BatchDetailProductionStatusResponseDto,
   ChangeOrderStatusRequestDto,
   ChangePaymentStatusRequestDto,
   ChangeProductionStatusRequestDto,
@@ -68,6 +70,13 @@ const detailStageEventRequestSchema = z.object({
 });
 
 const productionStatusModeRequestSchema = z.object({
+  version: versionSchema,
+  idempotencyKey: idempotencyKeySchema,
+});
+
+const batchDetailProductionStatusRequestSchema = z.object({
+  detailIds: z.array(z.number().int().positive()).min(1).max(500),
+  productionStatusId: z.number().int().positive(),
   version: versionSchema,
   idempotencyKey: idempotencyKeySchema,
 });
@@ -151,6 +160,41 @@ const productionActionResponseSwaggerSchema = {
         active: { type: 'boolean' },
       },
     },
+    auditId: { type: 'string' },
+    requestId: { type: 'string' },
+  },
+} as const;
+
+const batchDetailProductionStatusRequestSwaggerSchema = {
+  type: 'object',
+  required: ['detailIds', 'productionStatusId', 'version', 'idempotencyKey'],
+  properties: {
+    detailIds: {
+      type: 'array',
+      items: { type: 'integer', minimum: 1 },
+      minItems: 1,
+      maxItems: 500,
+    },
+    productionStatusId: { type: 'integer', minimum: 1 },
+    ...actionVersionFieldsSwaggerSchema,
+  },
+} as const;
+
+const batchDetailProductionStatusResponseSwaggerSchema = {
+  type: 'object',
+  required: ['order', 'selectedDetailCount', 'affectedDetailCount', 'requestId'],
+  properties: {
+    order: {
+      type: 'object',
+      required: ['orderId', 'version'],
+      properties: {
+        orderId: { type: 'integer' },
+        productionStatusId: { type: 'integer' },
+        version: { type: 'integer' },
+      },
+    },
+    selectedDetailCount: { type: 'integer' },
+    affectedDetailCount: { type: 'integer' },
     auditId: { type: 'string' },
     requestId: { type: 'string' },
   },
@@ -284,6 +328,33 @@ export class ProductionActionsController {
       currentUser: this.requireCurrentUser(request),
       orderId: parseOrderId(orderIdParam),
       dto: parseProductionStatusRequest(body),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiBody({ schema: swaggerSchema(batchDetailProductionStatusRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Changed production status for the selected order details', schema: swaggerSchema(batchDetailProductionStatusResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Invalid order ID' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order or detail not found' })
+  @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid batch detail production-status payload' })
+  @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
+  @ApiOperation({ operationId: 'changeBatchDetailProductionStatus', summary: 'Set production status for a selected set of order details' })
+  @Patch('details/production-status')
+  async changeBatchDetailProductionStatus(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Body() body: unknown,
+  ): Promise<BatchDetailProductionStatusResponseDto> {
+    this.assertProductionActionsEnabled();
+
+    return this.productionActions.changeBatchDetailProductionStatus({
+      currentUser: this.requireCurrentUser(request),
+      orderId: parseOrderId(orderIdParam),
+      dto: parseBatchDetailProductionStatusRequest(body),
       requestId: request.requestId,
     });
   }
@@ -500,6 +571,17 @@ export function parsePaymentStatusRequest(body: unknown): ChangePaymentStatusReq
 
 export function parseProductionStatusRequest(body: unknown): ChangeProductionStatusRequestDto {
   const parsed = productionStatusRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw productionActionValidationError(parsed.error);
+  }
+
+  return parsed.data;
+}
+
+export function parseBatchDetailProductionStatusRequest(
+  body: unknown,
+): BatchDetailProductionStatusRequestDto {
+  const parsed = batchDetailProductionStatusRequestSchema.safeParse(body);
   if (!parsed.success) {
     throw productionActionValidationError(parsed.error);
   }

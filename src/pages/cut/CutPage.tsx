@@ -17,7 +17,9 @@ import type { ColumnsType } from 'antd/es/table';
 import { useNavigation } from '@refinedev/core';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
+import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
+import { resolveProfileLabel, formatArea } from './cutProfileHelpers';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -136,6 +138,8 @@ export const CutPage: React.FC = () => {
   );
   const [preset, setPreset] = useState<string>('screen');
   const [presetOptions, setPresetOptions] = useState(DEFAULT_PRESET_OPTIONS);
+  const [profiles, setProfiles] = useState<CutParamProfile[]>([]);
+  const [cutSettings, setCutSettings] = useState<CutSettingRow[]>([]);
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
@@ -150,6 +154,8 @@ export const CutPage: React.FC = () => {
           .filter((p) => p.isActive)
           .map((p) => ({ value: p.name, label: p.name }));
         if (options.length > 0) setPresetOptions(options);
+        setProfiles(cfg.paramProfiles); // FULL list (active + inactive)
+        setCutSettings(cfg.settings);
       })
       .catch(() => undefined);
   }, []);
@@ -185,6 +191,23 @@ export const CutPage: React.FC = () => {
     }
   }, [handleError]);
 
+  const setJobProfile = useCallback(
+    async (paramProfileId: number | null) => {
+      if (!job) return;
+      setBusy(true);
+      try {
+        const updated = await cutApi.setProfile(job.cutJobId, paramProfileId, job.version);
+        setJob(updated);
+        void loadJobs();
+      } catch (error) {
+        handleError(error, 'Не удалось изменить профиль раскроя');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [job, loadJobs, handleError],
+  );
+
   // Load the existing (non-archived) jobs on mount so an operator can reopen a
   // job created earlier — including jobs staged from the Orders "Добавить в
   // раскрой" action, which previously had no surface to be reopened on.
@@ -206,7 +229,7 @@ export const CutPage: React.FC = () => {
         form.setFieldsValue({
           name: fresh.name,
           orderIds: orderIds.length > 0 ? orderIds.join(',') : undefined,
-          materialIds: undefined,
+          sheetMaterialTypeIds: undefined, // Variant B sunset: cleared the post-034 filter key
           filmIds: undefined,
         });
         setEligible(null);
@@ -462,16 +485,40 @@ export const CutPage: React.FC = () => {
         render: (_: unknown, row: CutJobDto) => cutJobSourceLabel(row.source),
       },
       {
-        title: 'Детали',
-        key: 'items',
-        width: 80,
-        render: (_: unknown, row: CutJobDto) => cutJobCounts(row).items,
+        title: 'Позиции',
+        key: 'positions',
+        width: 90,
+        render: (_: unknown, row: CutJobDto) => row.totals.positions,
       },
       {
         title: 'Группы',
         key: 'groups',
         width: 80,
         render: (_: unknown, row: CutJobDto) => cutJobCounts(row).groups,
+      },
+      {
+        title: 'Деталей',
+        key: 'details',
+        width: 90,
+        render: (_: unknown, row: CutJobDto) => row.totals.details,
+      },
+      {
+        title: 'Площадь, итого',
+        key: 'area',
+        width: 120,
+        render: (_: unknown, row: CutJobDto) => formatArea(row.totals.area),
+      },
+      {
+        title: 'Кол-во листов раскроя',
+        key: 'sheets',
+        width: 120,
+        render: (_: unknown, row: CutJobDto) => (row.status === 'ready' ? row.totals.sheets : '—'),
+      },
+      {
+        title: 'Профиль',
+        key: 'profile',
+        width: 180,
+        render: (_: unknown, row: CutJobDto) => resolveProfileLabel(row.paramProfileId, profiles, cutSettings),
       },
       {
         title: 'Действия',
@@ -491,7 +538,7 @@ export const CutPage: React.FC = () => {
         ),
       },
     ],
-    [busy, canManage, openJob, archiveJob],
+    [busy, canManage, openJob, archiveJob, profiles, cutSettings],
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
@@ -710,6 +757,43 @@ export const CutPage: React.FC = () => {
               description={job.failureReason}
             />
           )}
+          {(() => {
+            const activeOptions = profiles
+              .filter((p) => p.isActive)
+              .map((p) => ({ value: p.cutParamProfileId, label: resolveProfileLabel(p.cutParamProfileId, profiles, cutSettings) }));
+            const chosen = job.paramProfileId;
+            const chosenInactive = chosen !== null && !profiles.some((p) => p.cutParamProfileId === chosen && p.isActive);
+            const profileOptions = chosenInactive
+              ? [...activeOptions, { value: chosen, label: resolveProfileLabel(chosen, profiles, cutSettings), disabled: true }]
+              : activeOptions;
+            return (
+              <>
+                <Space size="large" style={{ marginBottom: 12 }}>
+                  <span>Позиции: <b>{job.totals.positions}</b></span>
+                  <span>Деталей: <b>{job.totals.details}</b></span>
+                  <span>Площадь, итого: <b>{formatArea(job.totals.area)}</b></span>
+                  {job.status === 'ready' && <span>Листов раскроя: <b>{job.totals.sheets}</b></span>}
+                </Space>
+                <div style={{ marginBottom: 12 }}>
+                  <span style={{ marginRight: 8 }}>Профиль раскроя:</span>
+                  <Select<number | null>
+                    value={job.paramProfileId}
+                    onChange={(v) => void setJobProfile(v ?? null)}
+                    disabled={!canManage || busy || job.status === 'calculating'}
+                    style={{ minWidth: 240 }}
+                    placeholder={resolveProfileLabel(null, profiles, cutSettings)}
+                    allowClear
+                    options={profileOptions}
+                  />
+                  {job.status === 'ready' && (
+                    <span style={{ marginLeft: 8, color: '#ad8b00' }}>
+                      изменение профиля применится после команды «Повторить расчёт»
+                    </span>
+                  )}
+                </div>
+              </>
+            );
+          })()}
           <Space>
             <Button onClick={loadEligible} loading={busy}>
               Загрузить подходящие детали

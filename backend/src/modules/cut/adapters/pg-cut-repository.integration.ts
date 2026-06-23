@@ -142,6 +142,7 @@ async function createSchema(pool: Pool): Promise<void> {
       pdf_prewarm_failure_reason TEXT,
       failure_code TEXT,
       failure_reason TEXT,
+      param_profile_id BIGINT,
       created_by BIGINT,
       version INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT now(),
@@ -273,6 +274,22 @@ function makeDatabase(pool: Pool): DatabaseService {
 
 function stubFreecut(impl: () => Promise<FreecutOptimizeResponse>) {
   return { optimize: impl };
+}
+
+async function insertProfile(pool: Pool, name: string, params: Record<string, unknown>, isDefault = false): Promise<number> {
+  const r = await pool.query(
+    `INSERT INTO cut_param_profiles (name, params, is_default, is_active) VALUES ($1, $2::jsonb, $3, true) RETURNING cut_param_profile_id`,
+    [name, JSON.stringify(params), isDefault],
+  );
+  return Number(r.rows[0].cut_param_profile_id);
+}
+
+async function seedDetail(pool: Pool, opts: { detailId: number; area: number; quantity: number }): Promise<void> {
+  await pool.query(
+    `INSERT INTO order_details (detail_id, order_id, quantity, width, height, area, material_id, production_status_id, sheet_material_type_id)
+     VALUES ($1, 9, $2, 600, 400, $3, NULL, 1, 1)`,
+    [opts.detailId, opts.quantity, opts.area],
+  );
 }
 
 describeIntegration('PgCutRepository (integration)', () => {
@@ -812,5 +829,135 @@ describeIntegration('PgCutRepository (integration)', () => {
     const sheetRows = bridge.rows.filter((r) => r.entity_type === 'sheet_material_type');
     const sheetIds = sheetRows.map((r) => Number(r.entity_id)).sort();
     expect(sheetIds).toEqual([1, 2]);
+  });
+
+  // --- setProfile integration tests (Step 8b) ---
+
+  async function makeJob(requestId: string): Promise<{ repo: PgCutRepository; cutJobId: number }> {
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест', detailIds: [1, 2] }, requestId });
+    return { repo, cutJobId: job.cutJobId };
+  }
+
+  it('setProfile persists, bumps version, audits before/after, writes one outbox row', async () => {
+    const { repo, cutJobId } = await makeJob('mk-1');
+    const profileId = await insertProfile(pool, 'P-int', { kerf_mm: 4 });
+    const job = await repo.getJob({ currentUser: currentUser(), cutJobId });
+    const updated = await repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: profileId, version: job.version, requestId: 'req-1' });
+    expect(updated.paramProfileId).toBe(profileId);
+    expect(updated.version).toBe(job.version + 1);
+    const audit = await pool.query(`SELECT after_json FROM audit_log WHERE event = 'cut_job.profile_changed' AND entity_id = $1 ORDER BY audit_id DESC LIMIT 1`, [String(cutJobId)]);
+    expect(audit.rows[0].after_json).toMatchObject({ paramProfileId: profileId });
+    const outbox = await pool.query(`SELECT COUNT(*)::int n FROM outbox_events WHERE idempotency_key = $1`, ['cut_job.profile_changed:' + cutJobId + ':req-1']);
+    expect(outbox.rows[0].n).toBe(1);
+  });
+
+  it('outbox ON CONFLICT dedupes a duplicate idempotency_key (mechanism)', async () => {
+    const { cutJobId } = await makeJob('mk-2');
+    // prove the ON CONFLICT DO NOTHING clause: insert the same key twice directly
+    const key = 'cut_job.profile_changed:' + cutJobId + ':dup-1';
+    const ins = `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key) VALUES ('cut_job.profile_changed','cut_job',$1,'{}'::jsonb,$2) ON CONFLICT (idempotency_key) DO NOTHING`;
+    await pool.query(ins, [String(cutJobId), key]);
+    await pool.query(ins, [String(cutJobId), key]);
+    const n = await pool.query(`SELECT COUNT(*)::int n FROM outbox_events WHERE idempotency_key = $1`, [key]);
+    expect(n.rows[0].n).toBe(1);
+  });
+
+  it('setProfile no-op (same profile) does NOT bump version, audit, or write outbox', async () => {
+    const { repo, cutJobId } = await makeJob('mk-3');
+    const profileId = await insertProfile(pool, 'P-noop', { kerf_mm: 4 });
+    const job = await repo.getJob({ currentUser: currentUser(), cutJobId });
+    const set = await repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: profileId, version: job.version, requestId: 'noop-a' });
+    const auditBefore = await pool.query(`SELECT COUNT(*)::int n FROM audit_log WHERE event = 'cut_job.profile_changed' AND entity_id = $1`, [String(cutJobId)]);
+    const again = await repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: profileId, version: set.version, requestId: 'noop-b' });
+    expect(again.version).toBe(set.version);
+    const auditAfter = await pool.query(`SELECT COUNT(*)::int n FROM audit_log WHERE event = 'cut_job.profile_changed' AND entity_id = $1`, [String(cutJobId)]);
+    expect(auditAfter.rows[0].n).toBe(auditBefore.rows[0].n);
+    const outbox = await pool.query(`SELECT COUNT(*)::int n FROM outbox_events WHERE idempotency_key = $1`, ['cut_job.profile_changed:' + cutJobId + ':noop-b']);
+    expect(outbox.rows[0].n).toBe(0);
+  });
+
+  it('rejects an inactive/unknown profile with 422', async () => {
+    const { repo, cutJobId } = await makeJob('mk-4');
+    const job = await repo.getJob({ currentUser: currentUser(), cutJobId });
+    await expect(repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: 10_000_000, version: job.version })).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('rejects a stale version with 409', async () => {
+    const { repo, cutJobId } = await makeJob('mk-5');
+    await expect(repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: null, version: 999 })).rejects.toMatchObject({ statusCode: 409, code: 'CUT_STALE_VERSION' });
+  });
+
+  it('reset to default with paramProfileId=null', async () => {
+    const { repo, cutJobId } = await makeJob('mk-6');
+    const profileId = await insertProfile(pool, 'P-reset', { kerf_mm: 4 });
+    const job = await repo.getJob({ currentUser: currentUser(), cutJobId });
+    const set = await repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: profileId, version: job.version });
+    const reset = await repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: null, version: set.version });
+    expect(reset.paramProfileId).toBeNull();
+  });
+
+  it('rejects an archived job with 409 (status gate)', async () => {
+    const { repo, cutJobId } = await makeJob('mk-7');
+    const profileId = await insertProfile(pool, 'P-arch', { kerf_mm: 4 });
+    const job = await repo.getJob({ currentUser: currentUser(), cutJobId });
+    await repo.archive({ currentUser: currentUser(), cutJobId, version: job.version });
+    const archived = await repo.getJob({ currentUser: currentUser(), cutJobId });
+    await expect(repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: profileId, version: archived.version }))
+      .rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  // --- Task 6 integration tests: calculate resolves params from chosen profile ---
+
+  it('calculate uses the chosen profile params (not the create-time default); job.params unchanged', async () => {
+    const DISTINCT_KERF = 9;
+    const profileId = await insertProfile(pool, 'P-distinct', { kerf_mm: DISTINCT_KERF });
+    let captured: ReturnType<typeof import('../application/cut-freecut-mapping').buildOptimizeRequest> | undefined;
+    // build the repo with a request-capturing freecut stub, then create a job
+    // reserving the harness's eligible details 1/2:
+    const repo = new PgCutRepository(database, {
+      optimize: (req: ReturnType<typeof import('../application/cut-freecut-mapping').buildOptimizeRequest>) => {
+        captured = req;
+        return Promise.resolve(happyResponse);
+      },
+    } as never);
+    const created = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест calc', detailIds: [1, 2] }, requestId: 'c1' });
+    const cutJobId = created.cutJobId;
+    const set = await repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: profileId, version: created.version });
+    await repo.calculate({ currentUser: currentUser(), cutJobId, version: set.version });
+    expect((captured as { params?: { kerf_mm?: unknown } } | undefined)?.params?.kerf_mm).toBe(DISTINCT_KERF);
+    const paramsAfter = await pool.query(`SELECT params FROM cut_job WHERE cut_job_id = $1`, [cutJobId]);
+    expect(paramsAfter.rows[0].params?.kerf_mm).not.toBe(DISTINCT_KERF); // snapshot NOT rewritten
+  });
+
+  it('calculate REJECTS 422 when the chosen profile was deactivated after selection', async () => {
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const created = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест gone', detailIds: [1, 2] }, requestId: 'g1' });
+    const cutJobId = created.cutJobId;
+    const profileId = await insertProfile(pool, 'P-gone', { kerf_mm: 9 });
+    const set = await repo.setProfile({ currentUser: currentUser(), cutJobId, paramProfileId: profileId, version: created.version });
+    await pool.query(`UPDATE cut_param_profiles SET is_active = false WHERE cut_param_profile_id = $1`, [profileId]);
+    await expect(repo.calculate({ currentUser: currentUser(), cutJobId, version: set.version }))
+      .rejects.toMatchObject({ statusCode: 422, code: 'CUT_PARAM_PROFILE_NOT_FOUND' });
+  });
+
+  it('totals: positions excludes deleted details; details=Σqty; area=Σ(area*qty); sheets pre-calc=0', async () => {
+    // Seed two details with known area/qty mirroring createSchema's detail-seed INSERT
+    // (use fresh detail ids, e.g. 101 area=1.5 qty=2 and 102 area=0.5 qty=3, with the
+    // ready status + sheet spec the harness gives details 1/2 so they are eligible).
+    await seedDetail(pool, { detailId: 101, area: 1.5, quantity: 2 });
+    await seedDetail(pool, { detailId: 102, area: 0.5, quantity: 3 });
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест totals', detailIds: [101, 102] }, requestId: 't1' });
+    try {
+      await pool.query('UPDATE order_details SET delete_flag = true WHERE detail_id = 102');
+      const reread = await repo.getJob({ currentUser: currentUser(), cutJobId: job.cutJobId, requestId: 't2' });
+      expect(reread.totals.positions).toBe(1);          // deleted (102) excluded
+      expect(reread.totals.details).toBe(2);            // only 101's qty
+      expect(reread.totals.area).toBeCloseTo(3.0, 2);   // 1.5 * 2
+      expect(reread.totals.sheets).toBe(0);
+    } finally {
+      await pool.query('UPDATE order_details SET delete_flag = false WHERE detail_id = 102');
+    }
   });
 });

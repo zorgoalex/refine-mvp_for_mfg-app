@@ -160,3 +160,17 @@ describe('CutPage source guards', () => {
     expect(match![1].length).toBeGreaterThan(2);
   });
 });
+
+describe('CutPage profile + totals columns (source guard)', () => {
+  it('renames the positions column and adds totals/profile/sheets columns', () => {
+    expect(source).toContain("title: 'Позиции'");
+    expect(source).toContain("title: 'Деталей'");
+    expect(source).toContain("title: 'Площадь, итого'");
+    expect(source).toContain("title: 'Кол-во листов раскроя'");
+    expect(source).toContain("title: 'Профиль'");
+    expect(source).not.toContain("title: 'Детали'");
+  });
+  it('wires the profile selector to setProfile', () => {
+    expect(source).toContain('cutApi.setProfile');
+  });
+});

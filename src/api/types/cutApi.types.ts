@@ -93,6 +93,13 @@ export interface CutGroupDto {
   sheets: CutGroupSheetDto[];
 }
 
+export interface CutJobTotals {
+  positions: number;
+  details: number;
+  area: number;
+  sheets: number;
+}
+
 export interface CutJobDto {
   cutJobId: number;
   name: string;
@@ -104,6 +111,8 @@ export interface CutJobDto {
   failureCode?: string | null;
   /** Operator-facing Russian explanation when status === 'failed' (else null/absent). */
   failureReason?: string | null;
+  paramProfileId: number | null;
+  totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;

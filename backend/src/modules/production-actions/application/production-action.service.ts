@@ -4,6 +4,7 @@ import type { PermissionName } from '../../../permissions/permissions';
 import type {
   ActivateProductionStageCommand,
   ActivateDetailProductionStageCommand,
+  ChangeBatchDetailProductionStatusCommand,
   ChangeOrderStatusCommand,
   ChangeOrderStatusFromDeadlineCommand,
   ChangeProductionStatusFromDeadlineCommand,
@@ -91,6 +92,13 @@ export class ProductionActionService {
       'orders.update',
     ]);
     return this.ports.productionActions.enterManualProductionStatus(command);
+  }
+
+  async changeBatchDetailProductionStatus(command: ChangeBatchDetailProductionStatusCommand) {
+    // Coarse capability gate only (matches the sibling production commands). Fine-grained
+    // owner/all scope is enforced in the repository's assertOrderScope.
+    this.requirePermissions(command.currentUser, ['orders.change_production_status']);
+    return this.ports.productionActions.changeBatchDetailProductionStatus(command);
   }
 
   private requirePermissions(

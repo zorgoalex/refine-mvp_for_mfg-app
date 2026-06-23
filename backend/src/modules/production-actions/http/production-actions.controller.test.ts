@@ -5,6 +5,7 @@ import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { ProductionActionService } from '../application/production-action.service';
 import type { ChangeProductionStatusCommand } from '../application/production-action.types';
 import {
+  parseBatchDetailProductionStatusRequest,
   parseCalendarDateRequest,
   parseOrderDetailId,
   parseOrderId,
@@ -234,6 +235,74 @@ describe('ProductionActionsController', () => {
     expect(() =>
       parseProductionStatusModeRequest({ version: 'not-a-number', idempotencyKey: 'valid-key-123' }),
     ).toThrow(ApiError);
+  });
+
+  it('delegates PATCH details/production-status to the service with the parsed command', async () => {
+    let captured: unknown;
+    const controller = createController({
+      flags: { productionActionsEnabled: true },
+      service: {
+        async changeBatchDetailProductionStatus(command: unknown) {
+          captured = command;
+          return {
+            order: { orderId: 15, productionStatusId: 5, version: 4 },
+            selectedDetailCount: 2,
+            affectedDetailCount: 2,
+            requestId: 'req-batch-1',
+          };
+        },
+      } as unknown as Partial<ProductionActionService>,
+    });
+
+    const result = await controller.changeBatchDetailProductionStatus(
+      { user: currentUser(), requestId: 'req-batch-1' },
+      '15',
+      { detailIds: [100, 101], productionStatusId: 5, version: 3, idempotencyKey: 'batch-key-1' },
+    );
+
+    expect(result).toMatchObject({ selectedDetailCount: 2, affectedDetailCount: 2 });
+    expect(captured).toMatchObject({
+      orderId: 15,
+      requestId: 'req-batch-1',
+      dto: { detailIds: [100, 101], productionStatusId: 5, version: 3, idempotencyKey: 'batch-key-1' },
+    });
+  });
+
+  it('returns 422 on details/production-status with empty detailIds', () => {
+    expect(() =>
+      parseBatchDetailProductionStatusRequest({
+        detailIds: [],
+        productionStatusId: 5,
+        version: 3,
+        idempotencyKey: 'batch-key-1',
+      }),
+    ).toThrow(ApiError);
+  });
+
+  it('returns 503 on details/production-status when production actions flag is disabled', async () => {
+    const controller = createController({ flags: { productionActionsEnabled: false } });
+
+    await expect(
+      controller.changeBatchDetailProductionStatus({ user: currentUser() }, '15', {
+        detailIds: [100],
+        productionStatusId: 5,
+        version: 3,
+        idempotencyKey: 'batch-key-1',
+      }),
+    ).rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_UNAVAILABLE' });
+  });
+
+  it('returns 401 on details/production-status when user is not authenticated', async () => {
+    const controller = createController({ flags: { productionActionsEnabled: true } });
+
+    await expect(
+      controller.changeBatchDetailProductionStatus({}, '15', {
+        detailIds: [100],
+        productionStatusId: 5,
+        version: 3,
+        idempotencyKey: 'batch-key-1',
+      }),
+    ).rejects.toMatchObject({ statusCode: 401, code: 'AUTH_REQUIRED' });
   });
 });
 

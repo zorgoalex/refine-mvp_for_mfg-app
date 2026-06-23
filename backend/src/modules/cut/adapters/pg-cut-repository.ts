@@ -29,6 +29,7 @@ import {
 import { ApiError } from '../../../common/errors/api-error';
 import { type CutConfigPort } from '../application/cut-config';
 import { PgCutConfigRepository } from './pg-cut-config-repository';
+import { resolveCalcParams } from './resolve-calc-params';
 import type {
   AddCutItemsCommand,
   ArchiveCutJobCommand,
@@ -44,6 +45,7 @@ import type {
   RenderJobPdfQuery,
   RenderSheetPngQuery,
   RenderSheetSvgQuery,
+  SetCutJobProfileCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
@@ -52,10 +54,12 @@ import type {
   CutGroupDto,
   CutJobDto,
   CutJobRefDto,
+  CutJobTotals,
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
-import { buildSheetSvg, computeGroupItemQuantities, formatPieceLabel } from '../render/sheet-svg';
+import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, type TotalsRow } from './cut-totals';
+import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import { buildSheetsPdf } from '../render/sheet-pdf';
 import {
@@ -67,6 +71,7 @@ import {
   CutNoItemsError,
   CutNoSheetSpecError,
   CutOrderDetailNotFoundError,
+  CutParamProfileNotFoundError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
 
@@ -85,6 +90,11 @@ const AUDIT_SOURCE = 'backend-cut-command';
  * no groups but keeps its reserved items). `archived` stays terminal.
  */
 const MUTABLE_STATUSES = new Set(['draft', 'calculating', 'ready', 'failed']);
+
+/** Profile selection is editable while the basket can still be (re)calculated,
+ *  but NOT mid-calculation (the running solve already locked its params) and not
+ *  on an archived job. */
+const PROFILE_EDITABLE_STATUSES = new Set(['draft', 'ready', 'failed']);
 
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
 interface CalcRelatedDimensions {
@@ -108,6 +118,7 @@ interface CutJobLockRow extends QueryResultRow {
   version: string | number;
   pdf_prewarm_state: string;
   params: Record<string, unknown> | null;
+  param_profile_id: string | number | null;
 }
 
 interface CalcItemRow extends QueryResultRow {
@@ -123,6 +134,13 @@ interface CalcItemRow extends QueryResultRow {
   film_texture: boolean | null;
   smt_width_mm: string | number | null;
   smt_height_mm: string | number | null;
+}
+
+/** Idempotency key for the profile-changed outbox event. Stable for a given
+ *  (job, request) so a transport-level duplicate of the SAME request can't emit
+ *  two events; falls back to the version when no requestId is supplied. */
+export function profileChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.profileChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 export class PgCutRepository implements CutRepositoryPort {
@@ -327,14 +345,25 @@ export class PgCutRepository implements CutRepositoryPort {
           .map((g) => g.sheetMaterialTypeId)
           .filter((id): id is number => id !== null),
       };
-      // Use the job's params snapshot (taken at createJob) — never the CURRENT
-      // config defaults — so a config edit after creation can't retro-mutate this
-      // calculation (§4a). Legacy jobs without a snapshot fall back to defaults.
-      const params = (
-        job.params && Object.keys(job.params).length > 0
-          ? job.params
-          : await this.config.getDefaultParams()
-      ) as FreecutParams;
+      // Resolve params from the job's chosen profile, or fall back to the
+      // create-time snapshot (or runtime defaults for legacy jobs with no snapshot).
+      // A non-null chosen profile that is inactive/missing is REJECTED with 422 —
+      // never silently substituted — because the UI shows the chosen profile and
+      // substituting surprise params would violate stale-safety. The operator must
+      // clear or re-pick an active profile.
+      let profileParams: FreecutParams | null = null;
+      if (job.paramProfileId !== null) {
+        profileParams = await this.config.getParamsByProfileId(job.paramProfileId);
+        if (profileParams === null) {
+          throw new CutParamProfileNotFoundError(job.paramProfileId);
+        }
+      }
+      const params = resolveCalcParams({
+        profileId: job.paramProfileId,
+        jobParams: (job.params ?? null) as FreecutParams | null,
+        profileParams,
+        defaultParams: await this.config.getDefaultParams(),
+      });
       const grainRules = await this.config.getGrainRules();
 
       const groupPreps = groups.map((group) => {
@@ -482,10 +511,10 @@ export class PgCutRepository implements CutRepositoryPort {
       await tx.query(
         `
         UPDATE cut_job
-        SET status = 'ready', request_hash = $2, params = $3::jsonb, version = version + 1, updated_at = now()
+        SET status = 'ready', request_hash = $2, version = version + 1, updated_at = now()
         WHERE cut_job_id = $1
         `,
-        [command.cutJobId, requestHash, JSON.stringify(prep.params)],
+        [command.cutJobId, requestHash],
       );
 
       await this.audit(tx, command.currentUser, {
@@ -669,10 +698,12 @@ export class PgCutRepository implements CutRepositoryPort {
       `SELECT cut_job_id FROM cut_job WHERE ${conditions.join(' AND ')} ORDER BY cut_job_id DESC LIMIT 200`,
       params,
     );
+    const ids = result.rows.map((row) => toNum(row.cut_job_id));
+    const totalsById = await computeTotals(this.database, ids);
     const jobs: CutJobDto[] = [];
-    for (const row of result.rows) {
+    for (const id of ids) {
       // List only renders item/group counts -> skip the per-item detail joins.
-      jobs.push(await loadJob(this.database, toNum(row.cut_job_id), false));
+      jobs.push(await loadJob(this.database, id, false, totalsById.get(id)));
     }
     return jobs;
   }
@@ -978,11 +1009,18 @@ export class PgCutRepository implements CutRepositoryPort {
       orderByDetail.set(toNum(row.order_detail_id), toNum(row.order_id));
     }
 
-    const labelFor = (piece: FreecutPlacement): string => {
+    const labelFor = (piece: FreecutPlacement): string[] => {
       const detailId = parseFreecutItemId(piece.item_id);
       const orderId = detailId === null ? null : orderByDetail.get(detailId) ?? null;
-      const base = orderId !== null ? `№${orderId}-${detailId}` : `${piece.item_id}`;
-      return formatPieceLabel(base, piece.instance, quantities.get(piece.item_id) ?? 1);
+      // Order on line 1, detail (+ instance N/qty) on line 2 — rendered as
+      // separate <tspan> lines by buildSheetSvg.
+      return composePieceLabelLines({
+        orderId,
+        detailId,
+        itemId: piece.item_id,
+        instance: piece.instance,
+        qty: quantities.get(piece.item_id) ?? 1,
+      });
     };
 
     return {
@@ -1078,6 +1116,9 @@ export class PgCutRepository implements CutRepositoryPort {
         cutGroupIds?: number[];
       };
       metadata?: Record<string, unknown> | null;
+      before?: Record<string, unknown> | null;
+      after?: Record<string, unknown> | null;
+      diff?: Record<string, unknown> | null;
     },
   ): Promise<void> {
     const actor: CutAuditActor = {
@@ -1099,8 +1140,80 @@ export class PgCutRepository implements CutRepositoryPort {
           cutGroupIds: cleanIds(input.related?.cutGroupIds),
         },
         metadata: input.metadata ?? null,
+        before: input.before ?? null,
+        after: input.after ?? null,
+        diff: input.diff ?? null,
       }),
     );
+  }
+
+  setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ cut_job_id: string | number; status: string; version: string | number; param_profile_id: string | number | null }>(
+        `SELECT cut_job_id, status, version, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      if (command.paramProfileId !== null) {
+        const exists = await tx.query(
+          `SELECT 1 FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true LIMIT 1`,
+          [command.paramProfileId],
+        );
+        if (exists.rows.length === 0) throw new CutParamProfileNotFoundError(command.paramProfileId);
+      }
+      const beforeProfileId = row.param_profile_id === null ? null : toNum(row.param_profile_id);
+
+      // No-op short-circuit (fixes [AUDIT-DEBT]/[NOTIFICATION-DEBT]): an unchanged
+      // selection must NOT bump version, write audit, or emit an outbox event —
+      // mirrors the repo's existing no-op handling and prevents fake
+      // profile_changed rows + needless stale-version conflicts on replays.
+      if (beforeProfileId === command.paramProfileId) {
+        return loadJob(tx, command.cutJobId);
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET param_profile_id = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, command.paramProfileId],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.profileChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { paramProfileId: beforeProfileId },
+        after: { paramProfileId: command.paramProfileId },
+        metadata: { beforeProfileId, afterProfileId: command.paramProfileId },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.profileChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeProfileId,
+            afterProfileId: command.paramProfileId,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          profileChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+
+      return loadJob(tx, command.cutJobId);
+    });
   }
 }
 
@@ -1186,9 +1299,10 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   source: string;
   version: number;
   params: Record<string, unknown> | null;
+  paramProfileId: number | null;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -1202,6 +1316,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     source: row.source,
     version: toNum(row.version),
     params: row.params,
+    paramProfileId: row.param_profile_id === null || row.param_profile_id === undefined ? null : toNum(row.param_profile_id),
   };
 }
 
@@ -1233,6 +1348,7 @@ interface JobRow extends QueryResultRow {
   pdf_prewarm_state: string;
   failure_code: string | null;
   failure_reason: string | null;
+  param_profile_id: string | number | null;
 }
 
 interface ItemRow extends QueryResultRow {
@@ -1357,19 +1473,42 @@ interface SheetRow extends QueryResultRow {
   placements: SheetPlacementsJson;
 }
 
+async function computeTotals(client: DatabaseClient, cutJobIds: number[]): Promise<Map<number, CutJobTotals>> {
+  const out = new Map<number, CutJobTotals>();
+  for (const id of cutJobIds) out.set(id, { positions: 0, details: 0, area: 0, sheets: 0 });
+  if (cutJobIds.length === 0) return out;
+  // SEQUENTIAL, not Promise.all: loadJob/computeTotals run inside command
+  // transactions on a single pg client/connection. Two concurrent queries on one
+  // connection corrupt the wire protocol — await them one at a time.
+  const agg = await client.query<TotalsRow & { cut_job_id: string | number }>(TOTALS_BY_JOB_SQL, [cutJobIds]);
+  const sheets = await client.query<{ cut_job_id: string | number; sheets: string | number }>(SHEETS_BY_JOB_SQL, [cutJobIds]);
+  for (const row of agg.rows) {
+    const id = toNum(row.cut_job_id);
+    out.set(id, mapTotalsRow({ ...row, sheets: out.get(id)?.sheets ?? 0 }));
+  }
+  for (const row of sheets.rows) {
+    const id = toNum(row.cut_job_id);
+    const cur = out.get(id) ?? { positions: 0, details: 0, area: 0, sheets: 0 };
+    out.set(id, { ...cur, sheets: toNum(row.sheets) });
+  }
+  return out;
+}
+
 async function loadJob(
   client: DatabaseClient,
   cutJobId: number,
   includeItemDetails = true,
+  totals?: CutJobTotals,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
   if (!jobRow) {
     throw new CutJobNotFoundError(cutJobId);
   }
+  const resolvedTotals = totals ?? (await computeTotals(client, [cutJobId])).get(cutJobId)!;
 
   // The list view only needs item counts, so it opts out of the dictionary joins
   // (it loads up to 200 jobs); single-job reads enrich each item with full detail.
@@ -1417,6 +1556,8 @@ async function loadJob(
     pdfPrewarmState: jobRow.pdf_prewarm_state,
     failureCode: jobRow.failure_code,
     failureReason: jobRow.failure_reason,
+    paramProfileId: jobRow.param_profile_id === null || jobRow.param_profile_id === undefined ? null : toNum(jobRow.param_profile_id),
+    totals: resolvedTotals,
     items: itemsResult.rows.map((row) => ({
       cutJobItemId: toNum(row.cut_job_item_id),
       orderDetailId: toNum(row.order_detail_id),

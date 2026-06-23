@@ -118,6 +118,13 @@ export const cutApi = {
   fetchJobPdf(cutJobId: number): Promise<CutPdfResult> {
     return downloadPdf(apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId)));
   },
+
+  async setProfile(cutJobId: number, paramProfileId: number | null, version: number): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.profile(validateCutJobId(cutJobId)), {
+      paramProfileId,
+      version,
+    });
+  },
 };
 
 export type CutPdfResult = { pending: true } | { pending: false; blob: Blob; fileName: string | null };
