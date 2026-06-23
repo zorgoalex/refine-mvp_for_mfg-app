@@ -29,5 +29,15 @@ describe('cut detail column', () => {
     // jobItemColumns useMemo must depend on isArchivedJob so the remove button
     // re-renders disabled when the open job is archived.
     expect(src).toMatch(/\[busy, canManage, isArchivedJob, removeJobItem, show\]/);
+
+    // TDZ guard: openJob must be declared BEFORE the deep-link effect that
+    // references it in its dependency array. A regression (effect before const)
+    // crashes every render with ReferenceError but is invisible to tsc/build.
+    const openJobIdx = src.indexOf('const openJob = useCallback');
+    const deepLinkDepsIdx = src.indexOf('[searchParams, openJob]');
+    expect(openJobIdx).toBeGreaterThan(-1);
+    expect(deepLinkDepsIdx).toBeGreaterThan(-1);
+    // openJob must be declared BEFORE the effect that depends on it (TDZ guard)
+    expect(openJobIdx).toBeLessThan(deepLinkDepsIdx);
   });
 });

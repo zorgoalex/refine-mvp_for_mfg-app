@@ -217,24 +217,6 @@ export const CutPage: React.FC = () => {
     if (can('cut.view')) void loadJobs();
   }, [loadJobs]);
 
-  // Deep-link: /cut?job=<id> opens that job once on mount (e.g. from the order
-  // show page «Раскрой» column). Guarded so it fires a single time per mount.
-  // openJob(id) loads ANY existing job by id (getJob/loadJob do not filter
-  // archived) and shows it; a missing/invalid id throws and is caught by
-  // openJob's handleError toast. The column only links ready jobs, so the normal
-  // flow never deep-links archived — only a stale/hand-edited URL can. Mutate
-  // controls are disabled for archived jobs (isArchivedJob guard) so this is truly read-only.
-  const [searchParams] = useSearchParams();
-  const deepLinkHandledRef = useRef(false);
-  useEffect(() => {
-    if (deepLinkHandledRef.current) return;
-    if (!can('cut.view')) return;
-    const jobId = parseJobQueryParam(`?${searchParams.toString()}`);
-    if (jobId === null) return;
-    deepLinkHandledRef.current = true;
-    void openJob(jobId);
-  }, [searchParams, openJob]);
-
   const openJob = useCallback(
     async (cutJobId: number) => {
       setBusy(true);
@@ -263,6 +245,24 @@ export const CutPage: React.FC = () => {
     },
     [form, handleError, resetSheetViews],
   );
+
+  // Deep-link: /cut?job=<id> opens that job once on mount (e.g. from the order
+  // show page «Раскрой» column). Guarded so it fires a single time per mount.
+  // openJob(id) loads ANY existing job by id (getJob/loadJob do not filter
+  // archived) and shows it; a missing/invalid id throws and is caught by
+  // openJob's handleError toast. The column only links ready jobs, so the normal
+  // flow never deep-links archived — only a stale/hand-edited URL can. Mutate
+  // controls are disabled for archived jobs (isArchivedJob guard) so this is truly read-only.
+  const [searchParams] = useSearchParams();
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    if (!can('cut.view')) return;
+    const jobId = parseJobQueryParam(`?${searchParams.toString()}`);
+    if (jobId === null) return;
+    deepLinkHandledRef.current = true;
+    void openJob(jobId);
+  }, [searchParams, openJob]);
 
   const archiveJob = useCallback(
     async (target: CutJobDto) => {
