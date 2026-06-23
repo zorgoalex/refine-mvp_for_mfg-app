@@ -338,6 +338,31 @@ docker compose \
 `PG_TAILSCALE_BIND_IP` в `.env`; текущий compose template публикует
 `<postgres-service>` как `${PG_TAILSCALE_BIND_IP:-${PG_BIND_IP:-127.0.0.1}}:5432:5432`.
 
+### Twenty CRM overlay и orphan-контейнеры
+
+Twenty CRM запускается как отдельный overlay-файл
+`repo_erp/ops/templates/docker-compose.twenty.yml` в том же compose-проекте, что
+и основной стек (services `twenty`, `twenty_worker`, `twenty_db`, `twenty_redis`).
+Так как контейнеры Twenty живут под тем же `-p <compose-project>`, любой вызов
+`docker compose ... up` основного стека **без** overlay-файла пометит их как
+orphan, а `--remove-orphans` их удалит.
+
+Поэтому всегда передавай оба `-f` для любой операции над этим проектом, даже при
+пересборке только backend:
+
+```bash
+docker compose \
+  --project-directory ~/path/to/project \
+  -p <test-compose-project> \
+  --env-file .env \
+  -f repo_erp/ops/templates/docker-compose.vps.yml \
+  -f repo_erp/ops/templates/docker-compose.twenty.yml \
+  up -d --build --no-deps backend
+```
+
+Не запускай `--remove-orphans` с одним только `docker-compose.vps.yml` — это
+снесёт работающий Twenty-стек.
+
 Audit:
 
 - `created_by`, `edited_by`, `created_at`, `updated_at` управляются серверной стороной.
