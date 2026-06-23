@@ -213,6 +213,14 @@ test.describe('Order UI full form coverage', () => {
             await screenshot(page, testInfo, 'show-cut-modal-detail-mode');
             await cutModal.getByRole('button', { name: 'Отмена' }).click();
             await expect(cutModal).toBeHidden({ timeout: 30000 });
+
+            // «Раскрой» cut-job column (read-only deep-link to /cut?job=:id) — renders only
+            // when VITE_USE_BACKEND_CUT + cut.view; live render deferred to activation
+            // (backend rebuild + Vercel redeploy). Guarded so it is a no-op when absent.
+            const cutColumnHeader = page.getByRole('columnheader', { name: 'Раскрой' });
+            if ((await cutColumnHeader.count()) > 0) {
+                await expect(cutColumnHeader.first()).toBeVisible();
+            }
         } else {
             testInfo.annotations.push({
                 type: 'skip-reason',
