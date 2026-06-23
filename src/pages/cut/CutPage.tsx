@@ -258,9 +258,20 @@ export const CutPage: React.FC = () => {
   // stale/hand-edited URL can, and mutate controls are disabled for archived jobs
   // (isArchivedJob guard) so that is truly read-only.
   const cutTabPath = useTabStore((s) => s.tabs.find((t) => t.key === '/cut')?.path);
-  const deepLinkJobId = parseJobQueryParam(
+  const storeDeepLinkJobId = parseJobQueryParam(
     cutTabPath && cutTabPath.includes('?') ? cutTabPath.slice(cutTabPath.indexOf('?')) : '',
   );
+  // Cross-check against the LIVE url: the tab store rehydrates from sessionStorage
+  // and is only rewritten by useTabSync after mount, so on a fresh /cut?job=45
+  // load the store may briefly hold a stale persisted /cut path. Acting on it would
+  // openJob(staleId) and then race openJob(45). Only honor the deep-link once the
+  // store path's id agrees with the live url, so the stale value is skipped until
+  // useTabSync catches up. window.location is a plain DOM read, not a router hook.
+  const liveDeepLinkJobId = parseJobQueryParam(
+    typeof window !== 'undefined' ? window.location.search : '',
+  );
+  const deepLinkJobId =
+    storeDeepLinkJobId !== null && storeDeepLinkJobId === liveDeepLinkJobId ? storeDeepLinkJobId : null;
   const lastDeepLinkRef = useRef<number | null>(null);
   useEffect(() => {
     if (!can('cut.view')) return;
