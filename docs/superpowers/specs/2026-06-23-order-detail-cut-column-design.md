@@ -23,8 +23,15 @@ still actively contains the detail:
   matches the "actual" intent.
 - `cut_job_item.is_active = true` (the detail has not been removed from that
   job's layout).
-- When a detail is in multiple ready jobs, pick the most recent by
-  `cut_job.updated_at DESC`, tiebreak `cut_job_id DESC`.
+- When a detail is in multiple ready jobs, pick the latest by **`cut_job_id
+  DESC`** (creation order). We deliberately do NOT order by `cut_job.updated_at`:
+  that column is bumped by non-ready events (PDF prewarm bookkeeping while status
+  stays `ready`, profile changes, the ready transition itself), so it reflects
+  "last touched" not "became ready last". `cut_job_id` is monotonic at creation
+  and never mutated, so the highest-id ready job is the most recently *created*
+  ready job. Accepted tradeoff: a job calculated to `ready` out of creation order
+  (rare) is ordered by creation, not by ready time — acceptable for an
+  informational link.
 
 ## Backend
 
@@ -51,9 +58,9 @@ still actively contains the detail:
 
 - Query: set-based `DISTINCT ON (order_detail_id)` over
   `cut_job_item (is_active = true) JOIN cut_job (status = 'ready')` filtered by
-  the requested `detailIds`, ordered by
-  `order_detail_id, cut_job.updated_at DESC, cut_job_id DESC`. No N+1; uses the
-  existing `idx_cut_job_item_order_detail` index (migration 031).
+  the requested `detailIds`, ordered by `order_detail_id, cut_job_id DESC`
+  (stable creation order; NOT `updated_at`, see definition above). No N+1; uses
+  the existing `idx_cut_job_item_order_detail` index (migration 031).
 - Empty `detailIds` ⇒ `{ "details": [] }` without touching the DB.
 - Read-only ⇒ no audit / outbox writes (consistent with other cut reads). No new
   audit or notification contract is introduced.
@@ -81,8 +88,15 @@ still actively contains the detail:
   - New column «Раскрой» renders a react-router `<Link to={`/cut?job=${id}`}>`
     with the job name, or `—` when absent. Same-tab navigation.
 - `src/pages/cut/CutPage.tsx`: on mount, read the `job` query param; if present,
-  call the existing `openJob(jobId)`. Invalid / archived / missing job is handled
-  by the existing `openJob` error path. No route change — `/cut` already exists.
+  call the existing `openJob(jobId)`. Behavior of `openJob`: it calls
+  `cutApi.get(id)` then `setJob`; a missing/invalid id throws and is caught by
+  `openJob`'s existing `handleError` toast. NOTE (corrected): `getJob`/`loadJob`
+  do **not** filter archived jobs, so a deep-link to an *archived* job loads and
+  displays it read-only rather than failing. This is benign: the column only ever
+  links `ready` jobs, so the normal flow never deep-links an archived job; only a
+  stale/hand-edited URL (or a job archived after the page rendered) can, and
+  viewing an archived layout read-only is acceptable. No new rejection logic is
+  added. No route change — `/cut` already exists.
 
 ## Edge cases
 

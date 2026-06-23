@@ -15,7 +15,7 @@
 - Backend owns the cut command/read API (CLAUDE.md principle 2); RBAC checked server-side. Reads require `cut.view`.
 - This endpoint is read-only ⇒ no audit/outbox writes (consistent with `/cut-jobs/placements`, `/cut-jobs/eligible-details`). Do NOT add audit/notification code.
 - No migration. Use existing tables `cut_job`, `cut_job_item` and existing index `idx_cut_job_item_order_detail`.
-- "Last ready" = `cut_job.status='ready'` AND `cut_job_item.is_active=true`, most recent by `cut_job.updated_at DESC, cut_job_id DESC`.
+- "Last ready" = `cut_job.status='ready'` AND `cut_job_item.is_active=true`, latest by `cut_job_id DESC` (creation order). Do NOT order by `cut_job.updated_at` — it is bumped by PDF prewarm bookkeeping (`pg-cut-repository.ts:951`), profile changes (`:1181`) and the ready transition (`:514`), so it means "last touched ready job", not "became ready last". `cut_job_id` is monotonic at creation and never mutated.
 - Frontend unit tests run under Vitest `environment=node` (no jsdom/testing-library): test pure helpers + source-text guards, not React rendering.
 - Money/area/React rendering conventions unchanged; this is additive.
 - Review gate: Codex gpt-5.4 high Aggressive Critic — plan review then code review. Any ERP marker / BLOCKER ⇒ CHANGES_REQUESTED.
@@ -134,7 +134,20 @@ it('listDetailLastReady returns the most recent ready job per detail, ignoring d
 });
 ```
 
-Add a second assertion case for `is_active=false`: remove dA's item from the ready job (or set `is_active=false`) and assert it no longer appears.
+Add a second case for `is_active=false`: set dA's item `is_active=false` in the ready job and assert it no longer appears.
+
+Add a THIRD case proving the selector does NOT depend on `updated_at` (covers the BLOCKER): put dA in TWO ready jobs (jobOld with lower id, jobNew with higher id), then bump `jobOld.updated_at` to `now()` so the *older* job is the most-recently-touched:
+
+```typescript
+it('listDetailLastReady ignores updated_at noise — picks the latest ready job by id', async () => {
+  // jobOld (lower id) and jobNew (higher id) both ready and both contain dA
+  await pool.query(
+    `UPDATE cut_job SET updated_at = now() WHERE cut_job_id = $1`, [jobOldId],
+  ); // jobOld now has the newest updated_at, but jobNew has the higher id
+  const res = await repo.listDetailLastReady({ currentUser: currentUser(), detailIds: [dA] });
+  expect(res.details.find((d) => d.orderDetailId === dA)?.cutJobId).toBe(jobNewId);
+});
+```
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -150,9 +163,12 @@ Add to `pg-cut-repository.ts` after `listDetailPlacements` (after line 893):
   async listDetailLastReady(query: DetailLastReadyQuery): Promise<CutDetailLastReadyResponseDto> {
     const detailIds = query.detailIds ?? [];
     if (detailIds.length === 0) return { details: [] };
-    // One row per detail: the most recent READY (calculated) job that still
-    // actively contains it. Archiving overwrites status off 'ready', so archived
-    // jobs are naturally excluded. Uses idx_cut_job_item_order_detail (migr 031).
+    // One row per detail: the latest READY (calculated) job (by creation order,
+    // cut_job_id DESC) that still actively contains it. Archiving overwrites
+    // status off 'ready', so archived jobs are naturally excluded. We order by
+    // cut_job_id (monotonic, immutable) NOT updated_at, which is bumped by
+    // prewarm/profile/ready events and would yield "last touched" not "last
+    // ready". Uses idx_cut_job_item_order_detail (migr 031).
     const rows = await this.database.query<{
       order_detail_id: string | number;
       cut_job_id: string | number;
@@ -166,7 +182,7 @@ Add to `pg-cut-repository.ts` after `listDetailPlacements` (after line 893):
       WHERE cji.order_detail_id = ANY($1::bigint[])
         AND cji.is_active = true
         AND cj.status = 'ready'
-      ORDER BY cji.order_detail_id, cj.updated_at DESC, cj.cut_job_id DESC
+      ORDER BY cji.order_detail_id, cj.cut_job_id DESC
       `,
       [[...detailIds]],
     );
@@ -429,21 +445,28 @@ Near the existing cut state (after line 261), add:
     () => new Map(),
   );
 
+  // Stable positive detail ids + a primitive key so the fetch effect does NOT
+  // re-run on every rerender just because `details` is a fresh array identity
+  // (it is derived inline each render from backendOrder?.details or a sorted
+  // query array). Keying on the joined id string makes the fetch fire only when
+  // the actual set of detail ids changes.
+  const cutDetailIds = useMemo(
+    () =>
+      details
+        .map((d: any) => d?.detail_id)
+        .filter((id: unknown): id is number => Number.isInteger(id) && (id as number) > 0),
+    [details],
+  );
+  const cutDetailIdsKey = cutDetailIds.join(',');
+
   useEffect(() => {
-    if (!cutColumnEnabled) {
-      setCutJobByDetailId(new Map());
-      return;
-    }
-    const detailIds = details
-      .map((d: any) => d?.detail_id)
-      .filter((id: unknown): id is number => Number.isInteger(id) && (id as number) > 0);
-    if (detailIds.length === 0) {
+    if (!cutColumnEnabled || cutDetailIds.length === 0) {
       setCutJobByDetailId(new Map());
       return;
     }
     let cancelled = false;
     cutApi
-      .listDetailLastReady(detailIds)
+      .listDetailLastReady(cutDetailIds)
       .then((res) => {
         if (!cancelled) setCutJobByDetailId(buildCutJobByDetailId(res.details));
       })
@@ -453,7 +476,10 @@ Near the existing cut state (after line 261), add:
     return () => {
       cancelled = true;
     };
-  }, [cutColumnEnabled, details]);
+    // cutDetailIdsKey is the primitive identity of cutDetailIds; intentionally
+    // depend on it instead of the array to avoid redundant fetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cutColumnEnabled, cutDetailIdsKey]);
 ```
 
 Add the imports at the top of `show.tsx`:
@@ -588,6 +614,11 @@ Add `parseJobQueryParam` to the existing `./cutPageHelpers` import list. Inside 
 ```typescript
   // Deep-link: /cut?job=<id> opens that job once on mount (e.g. from the order
   // show page «Раскрой» column). Guarded so it fires a single time per mount.
+  // openJob(id) loads ANY existing job by id (getJob/loadJob do not filter
+  // archived) and shows it read-only; a missing/invalid id throws and is caught
+  // by openJob's handleError toast. The column only links ready jobs, so the
+  // normal flow never deep-links archived — only a stale/hand-edited URL can,
+  // and viewing an archived layout read-only is acceptable (no rejection added).
   const [searchParams] = useSearchParams();
   const deepLinkHandledRef = useRef(false);
   useEffect(() => {
