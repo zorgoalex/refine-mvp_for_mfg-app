@@ -59,6 +59,7 @@ import {
   getCurrentUserRoleKey,
   normalizeRoleVisibilityMatrix,
 } from "../utils/resourceVisibility";
+import { APP_VERSION } from "../version";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -218,7 +219,7 @@ export const CustomSider: React.FC = () => {
           ) : (
             <>
               <span>ERP </span>
-              <span style={{ fontSize: "0.75em", fontWeight: 400 }}>v.0.5</span>
+              <span style={{ fontSize: "0.75em", fontWeight: 400 }}>v{APP_VERSION}</span>
             </>
           )}
         </Title>

@@ -1,6 +1,9 @@
 ﻿import React from "react";
-import { Layout, Typography } from "antd";
+import { Button, Drawer, Layout, List, Space, Tag, Tooltip, Typography } from "antd";
+import { NotificationOutlined } from "@ant-design/icons";
 import { authStorage } from "../utils/auth";
+import { releaseNotes, REPOSITORY_LABELS, SERVICE_LABELS } from "../releaseNotes";
+import { APP_VERSION } from "../version";
 
 const decodeJwtPayload = (token: string): Record<string, any> | null => {
   try {
@@ -24,6 +27,7 @@ const formatSession = (minutes: number) => {
 };
 
 export const AppFooter: React.FC = () => {
+  const [isReleaseNotesOpen, setIsReleaseNotesOpen] = React.useState(false);
   const formattedDate = new Date().toLocaleDateString("ru-RU", {
     day: "2-digit",
     month: "long",
@@ -69,10 +73,75 @@ export const AppFooter: React.FC = () => {
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <Typography.Text type="secondary">Сегодня: {formattedDate}</Typography.Text>
-        <Typography.Text type="secondary">Сессия: {sessionLabel}</Typography.Text>
+        <Space size={12} wrap style={{ marginLeft: "auto" }}>
+          <Typography.Text type="secondary">Сессия: {sessionLabel}</Typography.Text>
+          <Typography.Text type="secondary">v{APP_VERSION}</Typography.Text>
+          <Tooltip title="Журнал изменений">
+            <Button
+              aria-label="Открыть журнал изменений"
+              icon={<NotificationOutlined />}
+              shape="circle"
+              size="small"
+              onClick={() => setIsReleaseNotesOpen(true)}
+            />
+          </Tooltip>
+        </Space>
       </div>
+      <Drawer
+        title={`Журнал изменений v${APP_VERSION}`}
+        placement="right"
+        width={520}
+        open={isReleaseNotesOpen}
+        onClose={() => setIsReleaseNotesOpen(false)}
+      >
+        <List
+          dataSource={releaseNotes}
+          renderItem={(entry) => (
+            <List.Item>
+              <Space direction="vertical" size={10} style={{ width: "100%" }}>
+                <Space align="baseline" wrap>
+                  <Typography.Title level={5} style={{ margin: 0 }}>
+                    v{entry.version} — {entry.title}
+                  </Typography.Title>
+                  <Typography.Text type="secondary">{entry.date}</Typography.Text>
+                </Space>
+                <Space size={[4, 4]} wrap>
+                  {entry.services.map((service) => (
+                    <Tag key={service}>{SERVICE_LABELS[service]}</Tag>
+                  ))}
+                </Space>
+                {entry.repositories?.length ? (
+                  <Space size={[4, 4]} wrap>
+                    {entry.repositories.map((repository) => (
+                      <Tag key={repository} color="blue">
+                        {REPOSITORY_LABELS[repository]}
+                      </Tag>
+                    ))}
+                  </Space>
+                ) : null}
+                {entry.added?.length ? <ReleaseNoteSection title="Добавлено" items={entry.added} /> : null}
+                {entry.changed?.length ? <ReleaseNoteSection title="Изменено" items={entry.changed} /> : null}
+                {entry.fixed?.length ? <ReleaseNoteSection title="Исправлено" items={entry.fixed} /> : null}
+              </Space>
+            </List.Item>
+          )}
+        />
+      </Drawer>
     </Layout.Footer>
   );
 };
+
+const ReleaseNoteSection: React.FC<{ title: string; items: string[] }> = ({ title, items }) => (
+  <div>
+    <Typography.Text strong>{title}</Typography.Text>
+    <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+      {items.map((item) => (
+        <li key={item}>
+          <Typography.Text>{item}</Typography.Text>
+        </li>
+      ))}
+    </ul>
+  </div>
+);
 
 export default AppFooter;

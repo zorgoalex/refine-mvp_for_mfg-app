@@ -65,6 +65,40 @@ docker compose \
   up -d --build --no-deps backend
 ```
 
+## up-all.sh — whole-complex wrapper
+
+`ops/up-all.sh` is a single entry point for the full `erp_test` complex. It
+hard-codes the fixed flags that every operation on this project needs:
+`--project-directory <runtime-root>`, `-p erp_test`, `--env-file .env`, and
+**both** compose files (`docker-compose.vps.yml` + `docker-compose.twenty.yml`).
+This prevents the classic mistakes: dropping the Twenty overlay (which marks the
+CRM as orphan, so a later `--remove-orphans` deletes it) and running from the
+wrong directory (which renders traefik labels and build contexts from empty env).
+
+The base file already defines `freecut` (cut optimizer) and `cad-service`
+(SVG/DXF milling layouts) alongside the core stack, so they come up with the
+rest. Twenty CRM comes up via the overlay the wrapper always passes.
+
+```bash
+cd ~/projects/erp_dev
+
+repo_erp/ops/up-all.sh up                  # bring up / update the whole complex
+repo_erp/ops/up-all.sh rebuild backend     # rebuild + restart one service
+repo_erp/ops/up-all.sh rebuild cad-service # SVG/DXF service
+repo_erp/ops/up-all.sh rebuild freecut     # cut optimizer
+repo_erp/ops/up-all.sh ps                  # status
+repo_erp/ops/up-all.sh logs backend        # tail logs
+repo_erp/ops/up-all.sh config              # render merged config (dry check)
+repo_erp/ops/up-all.sh down-crm            # service-scoped Twenty teardown only
+```
+
+The wrapper self-locates its runtime root (three levels up from the script), so
+it can be invoked from any directory. It refuses a bare `down`/`stop` on the
+merged stack (that would stop ERP too); use `down-crm` for the CRM, or the
+`-- <raw args>` escape hatch for deliberate one-off compose subcommands.
+Preflight checks (`.env` present, Twenty upload dir owned by uid 1000, no
+`REPLACE_ME` placeholders) are warn-only, since `erp_test` is the test contour.
+
 ## One Script Flow
 
 Use one command on the VPS:

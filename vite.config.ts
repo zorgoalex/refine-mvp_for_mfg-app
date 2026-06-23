@@ -33,7 +33,7 @@ export default defineConfig(({ mode }) => {
         },
       },
       watch: {
-        ignored: ["**/ai_docs/**"],
+        ignored: ["**/ai_docs/**", "**/.worktrees/**"],
       },
     },
     build: {
