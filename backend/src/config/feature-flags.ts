@@ -24,6 +24,8 @@ export interface BackendFeatureFlags {
   cutAutoTrigger: boolean;
   /** SP3: include migration-029 sheet columns in backend order reads (off pre-migration). */
   sheetOrdersReads: boolean;
+  /** §7.5: enable the create-only doweling quick-create command (off = 503). */
+  dowelingCommands: boolean;
 }
 
 export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
@@ -50,5 +52,6 @@ export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
     cutJobsReadOnly: env.BACKEND_CUT_JOBS_READ_ONLY,
     cutAutoTrigger: env.BACKEND_CUT_AUTO_TRIGGER,
     sheetOrdersReads: env.BACKEND_SHEET_ORDERS_READS,
+    dowelingCommands: env.BACKEND_ENABLE_DOWELING_COMMANDS,
   };
 }

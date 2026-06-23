@@ -27,6 +27,7 @@ describe('backend feature flags', () => {
       cutJobsReadOnly: true,
       cutAutoTrigger: false,
       sheetOrdersReads: false,
+      dowelingCommands: false,
     });
   });
 
