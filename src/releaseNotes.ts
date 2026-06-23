@@ -31,6 +31,18 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-06-23",
+    title: "Данные Базис в деталях заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В списке деталей заказа добавлены поля «Базис проект» и «Базис данные».",
+      "При импорте PDF Базис поле «Базис проект» заполняется значением заказа из шапки PDF.",
+      "Поле «Базис данные» заполняется из номера, обозначения и наименования детали в формате через слэш.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-06-23",
     title: "Журнал изменений и версионирование",
     services: ["ERP", "CRM", "Cutting", "SVG/DXF"],
     repositories: ["repo_erp", "repo_freecut", "repo_svgdxf"],

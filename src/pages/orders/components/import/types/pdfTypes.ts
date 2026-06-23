@@ -80,6 +80,8 @@ export interface PdfImportRow {
   millingTypeName?: string | null;
   filmName?: string | null;
   note?: string | null;
+  basisProject?: string | null;
+  basisData?: string | null;
   detailName: string;        // "designation~~name" format
 }
 

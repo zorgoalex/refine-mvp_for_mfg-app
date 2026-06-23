@@ -389,6 +389,8 @@ function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
       priority: normalizeNumber(detail.priority, 100),
       productionStatusId: optionalNumber(detail.production_status_id),
       jointOrderId: optionalNumber(detail.joint_order_id),
+      basisProject: normalizeOptionalString(detail.basis_project),
+      basisData: normalizeOptionalString(detail.basis_data),
 
       linkCuttingFile: normalizeOptionalString(detail.link_cutting_file),
       linkCuttingImageFile: normalizeOptionalString(detail.link_cutting_image_file),
@@ -499,6 +501,8 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     priority: normalizeNumber(detail.priority, 100),
     production_status_id: detail.productionStatusId ?? null,
     joint_order_id: detail.jointOrderId ?? null,
+    basis_project: detail.basisProject ?? null,
+    basis_data: detail.basisData ?? null,
     link_cutting_file: detail.linkCuttingFile ?? null,
     link_cutting_image_file: detail.linkCuttingImageFile ?? null,
     link_cad_file: detail.linkCadFile ?? null,
