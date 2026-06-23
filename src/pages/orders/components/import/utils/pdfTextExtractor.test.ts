@@ -192,6 +192,12 @@ describe('parsePdfContent PDF fixtures', () => {
       totalQuantity: 68,
       expectedTotalCount: 68,
     },
+    {
+      fixture: 'teststaff/МДФ-4pages.pdf',
+      positionsCount: 51,
+      totalQuantity: 57,
+      expectedTotalCount: 57,
+    },
   ];
   const availableFixtureCases = fixtureCases.filter(({ fixture }) => fs.existsSync(path.resolve(PDF_FIXTURE_DIR, fixture)));
   const hasAllTrickyFixtures = ['mdf_ex2.pdf', 'mdf_wrong.pdf', 'mdf_wrong2.pdf'].every(fixture =>

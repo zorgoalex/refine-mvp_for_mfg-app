@@ -384,9 +384,10 @@ function extractTableRowsForHeader(
   pageItems: PdfTextItem[],
   headerLine: PdfTextLine,
   tableBottomY: number,
-  materialOverride?: string
+  materialOverride?: string,
+  columnsOverride?: PdfTableColumn[]
 ): PdfDetailRaw[] {
-  const columns = getTableColumns(headerLine);
+  const columns = columnsOverride ?? getTableColumns(headerLine);
   const sectionItems = pageItems.filter(item => item.y < headerLine.y - 4 && item.y > tableBottomY);
   const anchors = findTableRowAnchors(sectionItems, headerLine.y, columns, tableBottomY);
   if (anchors.length === 0) return [];
@@ -463,9 +464,13 @@ function extractTableRowsFromPage(lines: PdfTextLine[]): PdfDetailRaw[] {
   return details;
 }
 
-function extractContinuationTableRowsFromPage(lines: PdfTextLine[], material?: string): PdfDetailRaw[] {
+function extractContinuationTableRowsFromPage(
+  lines: PdfTextLine[],
+  material?: string,
+  inheritedColumns: PdfTableColumn[] = BASIS_TABLE_COLUMNS
+): PdfDetailRaw[] {
   const pageItems = lines.flatMap(line => line.items);
-  const anchors = findTableRowAnchors(pageItems, Number.POSITIVE_INFINITY, BASIS_TABLE_COLUMNS);
+  const anchors = findTableRowAnchors(pageItems, Number.POSITIVE_INFINITY, inheritedColumns);
   if (anchors.length === 0) return [];
 
   const rowStep = estimateRowStep(anchors);
@@ -475,16 +480,18 @@ function extractContinuationTableRowsFromPage(lines: PdfTextLine[], material?: s
     text: '',
   };
 
-  return extractTableRowsForHeader(lines, pageItems, syntheticHeaderLine, TABLE_FOOTER_MIN_Y, material);
+  return extractTableRowsForHeader(lines, pageItems, syntheticHeaderLine, TABLE_FOOTER_MIN_Y, material, inheritedColumns);
 }
 
 function parseDetailsFromTableGeometry(pageLines: PdfTextLine[][]): PdfDetailRaw[] {
   const details: PdfDetailRaw[] = [];
   let inheritedMaterial: string | undefined;
+  let inheritedColumns: PdfTableColumn[] = BASIS_TABLE_COLUMNS;
 
   for (const lines of pageLines) {
     const headerLines = lines.filter(isTableHeaderLine).sort((a, b) => b.y - a.y);
     if (headerLines.length > 0) {
+      inheritedColumns = getTableColumns(headerLines[headerLines.length - 1]);
       const pageDetails = extractTableRowsFromPage(lines);
       details.push(...pageDetails);
       const lastMaterial = [...pageDetails].reverse().find(detail => detail.material)?.material;
@@ -494,7 +501,7 @@ function parseDetailsFromTableGeometry(pageLines: PdfTextLine[][]): PdfDetailRaw
       continue;
     }
 
-    const continuationDetails = extractContinuationTableRowsFromPage(lines, inheritedMaterial);
+    const continuationDetails = extractContinuationTableRowsFromPage(lines, inheritedMaterial, inheritedColumns);
     details.push(...continuationDetails);
   }
 
