@@ -130,6 +130,16 @@ export interface ListSheetTypesForCutQuery {
   requestId?: string;
 }
 
+export interface SetCutJobProfileCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  /** null = clear the selection (no explicit profile); calculate then uses the
+   *  create-time cut_job.params snapshot, runtime default only if it is empty */
+  paramProfileId: number | null;
+  version: number;
+  requestId?: string;
+}
+
 export interface CutRepositoryPort {
   createJob(command: CreateCutJobCommand): Promise<CutJobDto>;
   recordPermissionDenied(input: CutPermissionDeniedInput): Promise<void>;
@@ -137,6 +147,7 @@ export interface CutRepositoryPort {
   removeItem(command: RemoveCutItemCommand): Promise<CutJobDto>;
   calculate(command: CalculateCutJobCommand): Promise<CutJobDto>;
   archive(command: ArchiveCutJobCommand): Promise<CutJobDto>;
+  setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto>;
   getJob(query: GetCutJobQuery): Promise<CutJobDto>;
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;

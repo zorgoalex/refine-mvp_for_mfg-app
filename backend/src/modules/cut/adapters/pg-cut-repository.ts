@@ -44,6 +44,7 @@ import type {
   RenderJobPdfQuery,
   RenderSheetPngQuery,
   RenderSheetSvgQuery,
+  SetCutJobProfileCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
@@ -69,6 +70,7 @@ import {
   CutNoItemsError,
   CutNoSheetSpecError,
   CutOrderDetailNotFoundError,
+  CutParamProfileNotFoundError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
 
@@ -87,6 +89,11 @@ const AUDIT_SOURCE = 'backend-cut-command';
  * no groups but keeps its reserved items). `archived` stays terminal.
  */
 const MUTABLE_STATUSES = new Set(['draft', 'calculating', 'ready', 'failed']);
+
+/** Profile selection is editable while the basket can still be (re)calculated,
+ *  but NOT mid-calculation (the running solve already locked its params) and not
+ *  on an archived job. */
+const PROFILE_EDITABLE_STATUSES = new Set(['draft', 'ready', 'failed']);
 
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
 interface CalcRelatedDimensions {
@@ -125,6 +132,13 @@ interface CalcItemRow extends QueryResultRow {
   film_texture: boolean | null;
   smt_width_mm: string | number | null;
   smt_height_mm: string | number | null;
+}
+
+/** Idempotency key for the profile-changed outbox event. Stable for a given
+ *  (job, request) so a transport-level duplicate of the SAME request can't emit
+ *  two events; falls back to the version when no requestId is supplied. */
+export function profileChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.profileChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 export class PgCutRepository implements CutRepositoryPort {
@@ -1089,6 +1103,9 @@ export class PgCutRepository implements CutRepositoryPort {
         cutGroupIds?: number[];
       };
       metadata?: Record<string, unknown> | null;
+      before?: Record<string, unknown> | null;
+      after?: Record<string, unknown> | null;
+      diff?: Record<string, unknown> | null;
     },
   ): Promise<void> {
     const actor: CutAuditActor = {
@@ -1110,8 +1127,80 @@ export class PgCutRepository implements CutRepositoryPort {
           cutGroupIds: cleanIds(input.related?.cutGroupIds),
         },
         metadata: input.metadata ?? null,
+        before: input.before ?? null,
+        after: input.after ?? null,
+        diff: input.diff ?? null,
       }),
     );
+  }
+
+  setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ cut_job_id: string | number; status: string; version: string | number; param_profile_id: string | number | null }>(
+        `SELECT cut_job_id, status, version, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      if (command.paramProfileId !== null) {
+        const exists = await tx.query(
+          `SELECT 1 FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true LIMIT 1`,
+          [command.paramProfileId],
+        );
+        if (exists.rows.length === 0) throw new CutParamProfileNotFoundError(command.paramProfileId);
+      }
+      const beforeProfileId = row.param_profile_id === null ? null : toNum(row.param_profile_id);
+
+      // No-op short-circuit (fixes [AUDIT-DEBT]/[NOTIFICATION-DEBT]): an unchanged
+      // selection must NOT bump version, write audit, or emit an outbox event —
+      // mirrors the repo's existing no-op handling and prevents fake
+      // profile_changed rows + needless stale-version conflicts on replays.
+      if (beforeProfileId === command.paramProfileId) {
+        return loadJob(tx, command.cutJobId);
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET param_profile_id = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, command.paramProfileId],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.profileChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { paramProfileId: beforeProfileId },
+        after: { paramProfileId: command.paramProfileId },
+        metadata: { beforeProfileId, afterProfileId: command.paramProfileId },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.profileChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeProfileId,
+            afterProfileId: command.paramProfileId,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          profileChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+
+      return loadJob(tx, command.cutJobId);
+    });
   }
 }
 

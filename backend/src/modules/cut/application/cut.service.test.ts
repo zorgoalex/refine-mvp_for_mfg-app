@@ -130,4 +130,23 @@ describe('CutService RBAC (§8 principle 8)', () => {
       service.listSheetTypesForCut({ currentUser: user(['sheet_materials.view']) }),
     ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
   });
+
+  it('setProfile requires cut.manage and delegates to the repo', async () => {
+    const setProfile = vi.fn(async () => ({ cutJobId: 42 }) as never);
+    const service = new CutService({ cut: repo({ setProfile }) });
+    await service.setProfile({ currentUser: user(['cut.manage']), cutJobId: 42, paramProfileId: 5, version: 1 });
+    expect(setProfile).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, paramProfileId: 5 }));
+  });
+
+  it('setProfile denies a user without cut.manage (403 + denied audit, no repo call)', async () => {
+    const setProfile = vi.fn(async () => ({ cutJobId: 42 }) as never);
+    const recordPermissionDenied = vi.fn(async () => undefined);
+    const service = new CutService({ cut: repo({ setProfile, recordPermissionDenied }) });
+    await expect(service.setProfile({ currentUser: user(['cut.view']), cutJobId: 42, paramProfileId: 5, version: 1 }))
+      .rejects.toMatchObject({ statusCode: 403 });
+    expect(setProfile).not.toHaveBeenCalled();
+    // fire-and-forget — allow the microtask to run
+    await Promise.resolve();
+    expect(recordPermissionDenied).toHaveBeenCalled();
+  });
 });

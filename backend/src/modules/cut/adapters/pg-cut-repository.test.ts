@@ -3,7 +3,7 @@ import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { FreecutClient } from './freecut-client';
 import type { FreecutOptimizeResponse } from '../application/cut-freecut-mapping';
-import { PgCutRepository } from './pg-cut-repository';
+import { PgCutRepository, profileChangedOutboxKey } from './pg-cut-repository';
 
 function currentUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
   return {
@@ -36,6 +36,8 @@ interface FakeDbOptions {
   reserveConflict?: boolean;
   /** rows for listEligibleDetails */
   eligibleRows?: FakeRow[];
+  /** whether the cut_param_profiles SELECT returns a row (profile is active) */
+  profileActive?: boolean;
 }
 
 function createDatabase(options: FakeDbOptions = {}) {
@@ -57,6 +59,18 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
       const base = options.cutJob ?? { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null };
       return { rows: [{ ...base, version: jobVersion }], rowCount: 1 };
+    }
+
+    // setProfile FOR UPDATE: narrower column list (cut_job_id, status, version, param_profile_id)
+    if (sql.startsWith('SELECT cut_job_id, status, version, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
+      const base = options.cutJob ?? { cut_job_id: 42, status: 'ready', version: 0, param_profile_id: null };
+      return { rows: [{ cut_job_id: base.cut_job_id ?? 42, status: base.status ?? 'ready', version: jobVersion, param_profile_id: base.param_profile_id ?? null }], rowCount: 1 };
+    }
+
+    // profile active check
+    if (sql.startsWith('SELECT 1 FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true')) {
+      const active = options.profileActive !== false; // default true
+      return { rows: active ? [{ '?column?': 1 }] : [], rowCount: active ? 1 : 0 };
     }
 
     if (sql.startsWith('SELECT od.order_id, od.quantity, od.production_status_id, od.delete_flag')) {
@@ -530,4 +544,29 @@ describe('PgCutRepository', () => {
     expect(sheetFilterQuery).toBeDefined();
     expect(result.details.every((d) => d.sheetMaterialTypeId === 2)).toBe(true);
   });
+});
+
+describe('profileChangedOutboxKey', () => {
+  it('is stable per (job, requestId), falls back to version', () => {
+    expect(profileChangedOutboxKey(7, 'req-9', 3)).toBe('cut_job.profile_changed:7:req-9');
+    expect(profileChangedOutboxKey(7, undefined, 3)).toBe('cut_job.profile_changed:7:v3');
+  });
+});
+
+it('setProfile no-op (same profile) writes NO update/audit/outbox', async () => {
+  // cutJob FOR UPDATE row already has param_profile_id = 5; target is also 5
+  const db = createDatabase({ cutJob: { cut_job_id: 42, status: 'ready', version: 2, param_profile_id: 5 } });
+  const repo = new PgCutRepository(db.service, /* freecut stub */ { optimize: vi.fn() } as never);
+  await repo.setProfile({ currentUser: currentUser(), cutJobId: 42, paramProfileId: 5, version: 2 });
+  const texts = db.queries.map((q) => normalize(q.text));
+  expect(texts.some((t) => t.startsWith('UPDATE cut_job SET param_profile_id'))).toBe(false);
+  expect(texts.some((t) => t.startsWith('INSERT INTO outbox_events'))).toBe(false);
+  expect(texts.some((t) => t.includes('INTO audit_log'))).toBe(false);
+});
+
+it('setProfile rejects a calculating job with 409 (status gate)', async () => {
+  const db = createDatabase({ cutJob: { cut_job_id: 42, status: 'calculating', version: 2, param_profile_id: null } });
+  const repo = new PgCutRepository(db.service, { optimize: vi.fn() } as never);
+  await expect(repo.setProfile({ currentUser: currentUser(), cutJobId: 42, paramProfileId: 5, version: 2 }))
+    .rejects.toMatchObject({ statusCode: 409 });
 });
