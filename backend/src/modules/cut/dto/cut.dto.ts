@@ -3,7 +3,8 @@ import type { SheetPlacementsJson } from '../application/cut-freecut-mapping';
 
 /** Filters that resolve a candidate detail set (snapshot onto the job). */
 export interface CutSelectionCriteriaDto {
-  materialIds?: number[];
+  /** Variant B: filter by sheet_material_type_id (replaces materialIds post-034). */
+  sheetMaterialTypeIds?: number[];
   orderIds?: number[];
   filmIds?: number[];
   productionStatusIds?: number[];
@@ -80,6 +81,17 @@ export interface CutGroupDto {
   sheets: CutGroupSheetDto[];
 }
 
+export interface CutJobTotals {
+  /** count of active cut_job_item rows (one row per reserved detail) */
+  positions: number;
+  /** SUM(order_details.quantity) over the job's active items */
+  details: number;
+  /** SUM(order_details.area * order_details.quantity), rounded to 2 dp */
+  area: number;
+  /** count of cut_group_sheet rows across the job's groups (0 unless ready) */
+  sheets: number;
+}
+
 export interface CutJobDto {
   cutJobId: number;
   name: string;
@@ -91,6 +103,8 @@ export interface CutJobDto {
   failureCode: string | null;
   /** Operator-facing Russian explanation when status === 'failed' (else null). */
   failureReason: string | null;
+  paramProfileId: number | null;
+  totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;
@@ -106,7 +120,8 @@ export interface EligibleDetailDto {
   orderDetailId: number;
   orderId: number;
   quantity: number;
-  materialId: number;
+  /** NULL post-034 (Variant B: material_id sunsetted on order_details). */
+  materialId: number | null;
   sheetMaterialTypeId: number | null;
   filmId: number | null;
   eligible: boolean;

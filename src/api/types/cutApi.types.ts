@@ -1,5 +1,6 @@
 export interface CutSelectionCriteria {
-  materialIds?: number[];
+  /** Variant B: filter by sheet_material_type_id (replaces materialIds post-034). */
+  sheetMaterialTypeIds?: number[];
   orderIds?: number[];
   filmIds?: number[];
   productionStatusIds?: number[];
@@ -92,6 +93,13 @@ export interface CutGroupDto {
   sheets: CutGroupSheetDto[];
 }
 
+export interface CutJobTotals {
+  positions: number;
+  details: number;
+  area: number;
+  sheets: number;
+}
+
 export interface CutJobDto {
   cutJobId: number;
   name: string;
@@ -103,12 +111,14 @@ export interface CutJobDto {
   failureCode?: string | null;
   /** Operator-facing Russian explanation when status === 'failed' (else null/absent). */
   failureReason?: string | null;
+  paramProfileId: number | null;
+  totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;
 }
 
-export type CutIneligibleReason = 'deleted' | 'wrong_status' | 'no_sheet_spec';
+export type CutIneligibleReason = 'deleted' | 'wrong_status' | 'not_cuttable' | 'no_sheet_spec';
 
 /** A cut job a detail is placed in (informational; placement is non-exclusive). */
 export interface CutJobRef {
@@ -120,7 +130,8 @@ export interface EligibleDetailDto {
   orderDetailId: number;
   orderId: number;
   quantity: number;
-  materialId: number;
+  /** NULL post-034 (Variant B: material_id sunsetted on order_details). */
+  materialId: number | null;
   sheetMaterialTypeId: number | null;
   filmId: number | null;
   eligible: boolean;
@@ -145,3 +156,17 @@ export interface CutDetailPlacements {
 }
 
 export type CutRenderPreset = 'thumb' | 'screen' | 'print';
+
+/**
+ * Minimal sheet-type data for the /cut filter (Variant B Task 11).
+ * Returned by the cut.view-gated GET /cut-jobs/sheet-types endpoint.
+ * No sheet_materials.view required.
+ */
+export interface CutSheetTypeOption {
+  sheetMaterialTypeId: number;
+  name: string;
+  widthMm: number;
+  heightMm: number;
+  /** Only cuttable types are eligible cut criteria. */
+  isCuttable: boolean;
+}

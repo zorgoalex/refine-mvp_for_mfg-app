@@ -42,6 +42,10 @@ export interface DeniedAuditEvent {
   source: string;
   relatedOrderId?: number | null;
   relatedClientId?: number | null;
+  relatedPaymentId?: number | null;
+  relatedProductionEventId?: number | null;
+  relatedDeadlineId?: number | null;
+  relatedUserId?: number | null;
   reason: string;
   requiredPermissions?: readonly string[];
   metadata?: Record<string, unknown>;

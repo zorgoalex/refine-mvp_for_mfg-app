@@ -13,7 +13,6 @@ import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
-import { useOne } from '@refinedev/core';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { formatNumber, currencySmartFormatter, numberParser } from '../../../../utils/numberFormat';
@@ -23,12 +22,9 @@ import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/us
 import {
   useSheetMaterialOptions,
   toSheetSelectOptions,
+  filterCuttableOptions,
 } from '../../../../hooks/useSheetMaterialOptions';
 import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
-import {
-  validateMaterialDimensions,
-  MaterialInfo
-} from '../../../../utils/materialDimensionValidation';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -171,8 +167,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // SP3: sheet picker gating (backend write + sheet_materials.view) + order-era
   // eligibility (create OR loaded order's sheet_eligible !== false).
   const sheetMaterials = useSheetMaterialOptions();
-  const sheetEligible = header.sheet_eligible !== false;
-  const showSheetPicker = sheetMaterials.enabled && sheetEligible;
 
   // Ref for table scroll container (for auto-scroll)
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -233,7 +227,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [currentFilmId, setCurrentFilmId] = useState<number | null>(null);
   const [isSumEditable, setIsSumEditable] = useState(false);
   const [sumContextMenu, setSumContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(50);
   const [filmQuickCreateOpen, setFilmQuickCreateOpen] = useState(false);
@@ -260,7 +253,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // Watch required fields to show visual indication for empty fields
   const watchedHeight = Form.useWatch('height', form);
   const watchedWidth = Form.useWatch('width', form);
-  const watchedMaterialId = Form.useWatch('material_id', form);
   const watchedMillingTypeId = Form.useWatch('milling_type_id', form);
   const watchedEdgeTypeId = Form.useWatch('edge_type_id', form);
   const watchedSheetId = Form.useWatch('sheet_material_type_id', form) as
@@ -292,17 +284,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // Reference selects (enabled only while editing)
   // Prefetch reference data (variant A) so context-menu labels appear instantly.
   const selectsEnabled = true;
-  const { selectProps: materialSelectProps } = useSelect({
-    resource: 'materials',
-    optionLabel: 'material_name',
-    optionValue: 'material_id',
-    filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    pagination: { mode: 'off' },
-    queryOptions: { enabled: selectsEnabled && !useBackendReferences },
-  });
-  const resolvedMaterialSelectProps = useBackendReferences
-    ? createBackendSelectProps(orderFormData.references.materials, orderFormData.isLoading)
-    : materialSelectProps;
   const { selectProps: millingTypeSelectProps } = useSelect({
     resource: 'milling_types',
     optionLabel: 'milling_type_name',
@@ -361,54 +342,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
     : productionStatusSelectProps;
 
-  // Load selected material with type information for validation
-  const { data: materialData } = useOne({
-    resource: 'materials',
-    id: selectedMaterialId || 0,
-    queryOptions: {
-      enabled: selectedMaterialId !== null && selectedMaterialId > 0,
-    },
-    meta: {
-      fields: [
-        'material_id',
-        'material_name',
-        { material_type: ['material_type_id', 'material_type_name'] }
-      ],
-    },
-  });
-
-  // Validate dimensions against material limits
+  // VB: legacy material dimension validation removed; all details use sheet types.
   const validateDimensions = useCallback(() => {
-    const height = fieldValuesRef.current.height ?? form.getFieldValue('height');
-    const width = fieldValuesRef.current.width ?? form.getFieldValue('width');
-
-    if (!height || !width || !materialData?.data) {
-      setDimensionValidationError(null);
-      return;
-    }
-
-    const material: MaterialInfo = {
-      material_id: materialData.data.material_id,
-      material_name: materialData.data.material_name,
-      material_type_id: materialData.data.material_type?.material_type_id,
-      material_type_name: materialData.data.material_type?.material_type_name,
-    };
-
-    const validationResult = validateMaterialDimensions(height, width, material);
-
-    if (!validationResult.isValid) {
-      setDimensionValidationError(validationResult.errorMessage || null);
-    } else {
-      setDimensionValidationError(null);
-    }
-  }, [form, materialData]);
-
-  // Trigger validation when material data loads
-  useEffect(() => {
-    if (materialData?.data) {
-      validateDimensions();
-    }
-  }, [materialData, validateDimensions]);
+    setDimensionValidationError(null);
+  }, []);
 
   // ============================================================================
   // FIX: Обновлённая функция recalcSum с использованием useRef
@@ -497,7 +434,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     console.log('[OrderDetailTable] startEdit - detail:', record);
     setEditingKey(record.temp_id || record.detail_id || null);
     setCurrentFilmId(record.film_id ?? null);
-    setSelectedMaterialId(record.material_id || null);
     setDimensionValidationError(null);
     // Each edit session starts with the sum field locked; unlocking it is an
     // explicit per-row action via the context menu. Without this reset, a row
@@ -521,7 +457,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       width: record.width,
       quantity: record.quantity,
       area: record.area,
-      material_id: record.material_id,
       sheet_material_type_id: record.sheet_material_type_id ?? null,
       milling_type_id: record.milling_type_id,
       edge_type_id: record.edge_type_id,
@@ -638,7 +573,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const cancelEdit = () => {
     setEditingKey(null);
     setCurrentFilmId(null);
-    setSelectedMaterialId(null);
     setDimensionValidationError(null);
     setIsSumEditable(false);
     setSumContextMenu(null);
@@ -654,12 +588,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       milling_cost_per_sqm: null,
       detail_cost: null,
     };
-  };
-
-  // Handle material change
-  const handleMaterialChange = (materialId: number) => {
-    setSelectedMaterialId(materialId);
-    // Validation will be triggered by useEffect when materialData loads
   };
 
   // Check if detail cost matches auto-calculated value
@@ -885,81 +813,38 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Материал</div>,
-      dataIndex: 'material_id',
-      key: 'material_id',
-      width: 80,
-      align: 'center',
-      sorter: (a, b) => (a.material_id || 0) - (b.material_id || 0),
-      render: (materialId, record) =>
+      dataIndex: 'sheet_material_type_id',
+      key: 'sheet_material_type_id',
+      width: 120,
+      align: 'center' as const,
+      sorter: (a: OrderDetail, b: OrderDetail) => {
+        const nameA = sheetMaterials.byId.get(a.sheet_material_type_id ?? 0)?.label ?? '';
+        const nameB = sheetMaterials.byId.get(b.sheet_material_type_id ?? 0)?.label ?? '';
+        return nameA.localeCompare(nameB, 'ru');
+      },
+      render: (sheetId: number | null | undefined, record: OrderDetail) =>
         isEditing(record) ? (
-          <Form.Item
-            name="material_id"
-            style={{ margin: 0, padding: '0 4px' }}
-            // SP3: a sheet-only detail needs no legacy material — drop required.
-            rules={hasSheetSelected ? [] : [{ required: true }]}
-          >
+          <Form.Item name="sheet_material_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
-              {...resolvedMaterialSelectProps}
+              options={toSheetSelectOptions(filterCuttableOptions(sheetMaterials.options).filter(o => o.isActive !== false || o.value === watchedSheetId), watchedSheetId)}
+              loading={sheetMaterials.isLoading}
               placeholder="Материал"
+              allowClear={
+                !(typeof record.sheet_material_type_id === 'number' &&
+                  record.sheet_material_type_id > 0)
+              }
               showSearch
-              disabled={hasSheetSelected}
-              filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
+              optionFilterProp="label"
               dropdownMatchSelectWidth={false}
-              style={{ minWidth: 180, textAlign: 'left', ...(hasSheetSelected ? {} : getRequiredFieldStyle(watchedMaterialId)) }}
-              onChange={handleMaterialChange}
+              style={{ minWidth: 160, textAlign: 'left' }}
             />
           </Form.Item>
         ) : (
-          <MaterialCell
-            materialId={materialId}
-            namesById={materialNameById}
-            loading={referencesLoading}
-            resolvedName={record?.material_name_resolved}
-          />
+          <span style={{ fontSize: '90%' }}>
+            {sheetId ? (sheetMaterials.byId.get(sheetId)?.label ?? '') : ''}
+          </span>
         ),
     },
-    ...(showSheetPicker
-      ? [{
-          title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Листовой материал</div>,
-          dataIndex: 'sheet_material_type_id',
-          key: 'sheet_material_type_id',
-          width: 120,
-          align: 'center' as const,
-          render: (sheetId: number | null | undefined, record: OrderDetail) =>
-            // SP3 invariant 5: an EXISTING detail saved as legacy (persisted detail_id,
-            // no stored sheet id) cannot flip to a sheet detail — show it read-only so the
-            // inline picker is never offered. New rows + existing sheet rows still edit.
-            isEditing(record) &&
-            !(
-              typeof record.detail_id === 'number' &&
-              record.detail_id > 0 &&
-              !(typeof record.sheet_material_type_id === 'number' &&
-                record.sheet_material_type_id > 0)
-            ) ? (
-              <Form.Item name="sheet_material_type_id" style={{ margin: 0, padding: '0 4px' }}>
-                <Select
-                  options={toSheetSelectOptions(sheetMaterials.options, watchedSheetId)}
-                  loading={sheetMaterials.isLoading}
-                  placeholder="Лист"
-                  // No-clear once a row carries a stored sheet id (sheet->legacy
-                  // revert is out of SP3 scope and the backend rejects it).
-                  allowClear={
-                    !(typeof record.sheet_material_type_id === 'number' &&
-                      record.sheet_material_type_id > 0)
-                  }
-                  showSearch
-                  optionFilterProp="label"
-                  dropdownMatchSelectWidth={false}
-                  style={{ minWidth: 160, textAlign: 'left' }}
-                />
-              </Form.Item>
-            ) : (
-              <span style={{ fontSize: '90%' }}>
-                {sheetId ? (sheetMaterials.byId.get(sheetId)?.label ?? '') : ''}
-              </span>
-            ),
-        }]
-      : []),
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Примечание</div>,
       dataIndex: 'note',
@@ -1252,17 +1137,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     [],
   );
 
-  const materialNameById = useMemo(
-    () =>
-      useBackendReferences
-        ? orderFormData.references.materialNameById
-        : getOptionsMap(materialSelectProps.options as any[] | undefined),
-    [
-      getOptionsMap,
-      materialSelectProps.options,
-      orderFormData.references.materialNameById,
-      useBackendReferences,
-    ]
+  const sheetNameById = useMemo(
+    () => new Map(sheetMaterials.options.map(o => [o.value as number, o.label])),
+    [sheetMaterials.options]
   );
   const millingNameById = useMemo(
     () =>
@@ -1319,7 +1196,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // neutral placeholder instead of "Не найден".
   const referencesLoading = useBackendReferences
     ? orderFormData.isLoading
-    : !materialSelectProps.options;
+    : !millingTypeSelectProps.options;
 
   const selectRows = useCallback((predicate: (detail: OrderDetail) => boolean) => {
     if (!onSelectChange) return;
@@ -1364,7 +1241,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   const selectionAggregates = useMemo(() => {
     const millingIds = uniqueIds(sortedDetails, d => d.milling_type_id);
-    const materialIds = uniqueIds(sortedDetails, d => d.material_id);
+    const sheetTypeIds = uniqueIds(sortedDetails, d => d.sheet_material_type_id);
     const filmIds = uniqueIds(sortedDetails, d => d.film_id ?? null);
     const edgeIds = uniqueIds(sortedDetails, d => d.edge_type_id);
     const prices = uniquePrices(sortedDetails);
@@ -1372,7 +1249,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     return {
       millingIds,
-      materialIds,
+      materialIds: sheetTypeIds,
       filmIds,
       edgeIds,
       prices,
@@ -1384,7 +1261,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return !Number.isFinite(num) || num <= 0;
       }),
       hasEmptyMaterial: sortedDetails.some(d => {
-        const value = d.material_id;
+        const value = d.sheet_material_type_id;
         if (value === null || value === undefined) return true;
         const num = Number(value);
         return !Number.isFinite(num) || num <= 0;
@@ -1456,9 +1333,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const materialItems = buildValueItems(
       'select:material',
       selectionAggregates.hasEmptyMaterial,
-      sortByLabel(selectionAggregates.materialIds, materialNameById).map(id => ({
+      sortByLabel(selectionAggregates.materialIds, sheetNameById).map(id => ({
         key: `select:material:${id}`,
-        label: renderMenuValue(materialNameById.get(id) || `ID: ${id}`),
+        label: renderMenuValue(sheetNameById.get(id) || `ID: ${id}`),
       }))
     );
 
@@ -1523,7 +1400,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }, [
     edgeNameById,
     filmNameById,
-    materialNameById,
+    sheetNameById,
     millingNameById,
     noteValueKeyToValue,
     onSelectChange,
@@ -1592,7 +1469,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     if (key === 'select:material:empty') {
       selectRows(d => {
-        const value = d.material_id;
+        const value = d.sheet_material_type_id;
         if (value === null || value === undefined) return true;
         const num = Number(value);
         return !Number.isFinite(num) || num <= 0;
@@ -1602,7 +1479,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     if (key.startsWith('select:material:')) {
       const id = Number(key.replace('select:material:', ''));
-      selectRows(d => Number(d.material_id) === id);
+      selectRows(d => Number(d.sheet_material_type_id) === id);
       return;
     }
 

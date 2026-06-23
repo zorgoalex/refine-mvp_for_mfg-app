@@ -83,6 +83,22 @@ function toBeforeDetailRefs(
   }));
 }
 
+function collectSheetMaterialTypeIds(
+  headerSheetId: number | null | undefined,
+  details: ReadonlyArray<{ sheetMaterialTypeId?: number | null }>,
+  storedDetailIds?: ReadonlyArray<{ sheetMaterialTypeId: number | null }>,
+): number[] {
+  const ids = new Set<number>();
+  if (headerSheetId != null) ids.add(headerSheetId);
+  for (const d of details) {
+    if (d.sheetMaterialTypeId != null) ids.add(d.sheetMaterialTypeId);
+  }
+  for (const d of storedDetailIds ?? []) {
+    if (d.sheetMaterialTypeId != null) ids.add(d.sheetMaterialTypeId);
+  }
+  return [...ids];
+}
+
 export interface OrderTransactionServicePorts {
   transactions: OrderTransactionManagerPort;
   permissions?: OrderPermissionCheckerPort;
@@ -127,6 +143,7 @@ export class OrderTransactionService {
         currentUser: command.currentUser,
       });
       const afterSnapshot = await unitOfWork.loadOrderHeaderSnapshot(orderId);
+      const afterDetailRefs = touchesSheet ? toAfterDetailRefs(prepared.details) : undefined;
       await unitOfWork.writeAuditEvent({
         action: 'orders.create',
         orderId,
@@ -136,11 +153,19 @@ export class OrderTransactionService {
         clientId: prepared.order.header.clientId ?? null,
         requestId: command.requestId,
         before: null,
-        after: afterSnapshot,
+        // Embed detail sheet refs into the snapshot so computeDiff() emits them in diff_json
+        // (Critic R7 M2). Uses a key without password/token/secret to avoid redaction.
+        after: touchesSheet
+          ? { ...afterSnapshot, detailSheetMaterialChanges: afterDetailRefs }
+          : afterSnapshot,
         metadata: this.buildSaveMetadata(
           'orders.create',
           command.requestId,
-          touchesSheet ? { before: [], after: toAfterDetailRefs(prepared.details) } : undefined,
+          touchesSheet ? { before: [], after: afterDetailRefs! } : undefined,
+        ),
+        relatedSheetMaterialTypeIds: collectSheetMaterialTypeIds(
+          prepared.order.header.sheetMaterialTypeId,
+          prepared.details,
         ),
       });
 
@@ -223,6 +248,8 @@ export class OrderTransactionService {
         currentUser: command.currentUser,
       });
       const afterSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
+      const beforeDetailRefs = touchesSheet ? toBeforeDetailRefs(storedDetailSheetIds) : undefined;
+      const afterDetailRefs2 = touchesSheet ? toAfterDetailRefs(prepared.details) : undefined;
       await unitOfWork.writeAuditEvent({
         action: 'orders.update',
         orderId: command.orderId,
@@ -231,14 +258,25 @@ export class OrderTransactionService {
         actorRole: command.currentUser.role,
         clientId: prepared.order.header.clientId ?? null,
         requestId: command.requestId,
-        before: beforeSnapshot,
-        after: afterSnapshot,
+        // Embed detail sheet refs into snapshots so computeDiff() emits them in diff_json
+        // (Critic R7 M2). Uses a key without password/token/secret to avoid redaction.
+        before: touchesSheet
+          ? { ...beforeSnapshot, detailSheetMaterialChanges: beforeDetailRefs }
+          : beforeSnapshot,
+        after: touchesSheet
+          ? { ...afterSnapshot, detailSheetMaterialChanges: afterDetailRefs2 }
+          : afterSnapshot,
         metadata: this.buildSaveMetadata(
           'orders.update',
           command.requestId,
           touchesSheet
-            ? { before: toBeforeDetailRefs(storedDetailSheetIds), after: toAfterDetailRefs(prepared.details) }
+            ? { before: beforeDetailRefs!, after: afterDetailRefs2! }
             : undefined,
+        ),
+        relatedSheetMaterialTypeIds: collectSheetMaterialTypeIds(
+          prepared.order.header.sheetMaterialTypeId,
+          prepared.details,
+          storedDetailSheetIds,
         ),
       });
 
@@ -411,12 +449,9 @@ export class OrderTransactionService {
       details,
     });
     await unitOfWork.validateSheetReferences({ header, details });
-    unitOfWork.setSaveContext({
-      actorUserId: actorUserIdOf(command.currentUser),
-      requestId: command.requestId,
-      source: 'backend-orders-command',
-      clientId: prepared.order.header.clientId ?? null,
-    });
+    // VARIANT B: shadow save-context no longer needed — material_id is always NULL for
+    // order rows and resolveShadowMaterialId is never called. setSaveContext is retained
+    // on the interface as a no-op (dead after shadow removal — delete in follow-up).
     return true;
   }
 

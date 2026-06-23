@@ -40,6 +40,9 @@ const PASSTHROUGH_CODES = new Set<string>([
   'CUT_JOB_NOT_FOUND',
   'CUT_JOB_ITEM_NOT_FOUND',
   'ORDER_DETAIL_NOT_FOUND',
+  // Precondition: the chosen cut profile was deactivated after selection;
+  // operator must clear or re-pick the profile before recalculating — no solve was attempted.
+  'CUT_PARAM_PROFILE_NOT_FOUND',
   'PERMISSION_DENIED',
   'AUTH_REQUIRED',
 ]);

@@ -96,7 +96,11 @@ interface OrderHeaderRow extends QueryResultRow {
   header_sheet_material_type_id: string | number | null;
   material_ids: unknown[] | null;
   material_names: unknown[] | null;
+  sheet_material_type_ids: unknown[] | null;
+  material_id: string | number | null;
   milling_type_id: string | number | null;
+  edge_type_id: string | number | null;
+  film_id: string | number | null;
   milling_type_name: string | null;
   latest_doweling_order_id: string | number | null;
   latest_doweling_order_name: string | null;
@@ -114,7 +118,7 @@ interface OrderDetailRow extends QueryResultRow {
   width: string | number;
   quantity: string | number;
   area: string | number;
-  material_id: string | number;
+  material_id: string | number | null;
   sheet_material_type_id: string | number | null;
   material_name: string | null;
   milling_type_id: string | number;
@@ -237,6 +241,7 @@ interface SheetMaterialTypeLookupRow extends IdNameLookupRow {
   width_mm: string | number | null;
   height_mm: string | number | null;
   is_active: boolean;
+  is_cuttable: boolean;
 }
 
 interface StatusLookupRow extends IdNameLookupRow {
@@ -273,23 +278,47 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const limitIndex = params.push(command.query.pageSize);
     const offsetIndex = params.push((command.query.page - 1) * command.query.pageSize);
     // SP3: migration-029 sheet columns/joins gated so backend list reads work pre-migration.
+    // Variant B (flag-ON): sheet name is smt.name directly — no COALESCE fallback to materials.
+    // flag-OFF stays as the legacy pre-migration path (materials join only).
     const headerSheetSelect = this.sheetOrdersReads
       ? `o.sheet_material_type_id AS header_sheet_material_type_id,
-          COALESCE(hsmt.name, hm.material_name) AS header_material_name`
+          hsmt.name AS header_material_name`
       : `NULL::bigint AS header_sheet_material_type_id,
           hm.material_name AS header_material_name`;
     const headerSheetJoin = this.sheetOrdersReads
       ? 'LEFT JOIN sheet_material_types hsmt ON hsmt.sheet_material_type_id = o.sheet_material_type_id'
       : '';
+    // Variant B: detail name from sheet type only; legacy path still reads materials.
     const listDetailNameSelect = this.sheetOrdersReads
-      ? 'COALESCE(smt.name, m.material_name) AS material_name'
+      ? 'smt.name AS material_name'
       : 'm.material_name AS material_name';
+    // Variant B: no materials join in the detail aggregate (material_id is NULL post-034).
+    const listDetailMaterialJoin = this.sheetOrdersReads
+      ? ''
+      : 'LEFT JOIN materials m ON m.material_id = od.material_id';
     const listDetailSheetJoin = this.sheetOrdersReads
       ? 'LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id'
       : '';
+    // Variant B: group by sheet_material_type_id (not material_id which is NULL post-034).
     const listDetailNameGroupBy = this.sheetOrdersReads
-      ? 'GROUP BY od.material_id, COALESCE(smt.name, m.material_name)'
+      ? 'GROUP BY od.sheet_material_type_id, smt.name'
       : 'GROUP BY od.material_id, m.material_name';
+    // Variant B: filter by sheet_material_type_id presence; legacy path filters on material_id.
+    const listDetailFilter = this.sheetOrdersReads
+      ? 'od.sheet_material_type_id IS NOT NULL'
+      : 'od.material_id IS NOT NULL';
+    // Variant B: header materials join is dead weight when flag-ON (hm alias not referenced).
+    const headerListMaterialJoin = this.sheetOrdersReads
+      ? ''
+      : 'LEFT JOIN materials hm ON hm.material_id = o.material_id';
+    // Variant B: aggregate sheet_material_type_id in flag-ON; produce NULL column in flag-OFF.
+    const listDetailSheetIdSelect = this.sheetOrdersReads
+      ? 'od.sheet_material_type_id,'
+      : 'NULL::bigint AS sheet_material_type_id,';
+    // Note: no trailing comma — this is the last column in the outer LATERAL SELECT before FROM.
+    const listSheetTypeIdsAggregate = this.sheetOrdersReads
+      ? 'ARRAY_AGG(materials.sheet_material_type_id ORDER BY materials.first_detail_number, materials.first_detail_id) AS sheet_material_type_ids'
+      : 'NULL::bigint[] AS sheet_material_type_ids';
     const count = await this.database.query<CountRow>(
       `
       SELECT COUNT(*)::int AS total
@@ -323,7 +352,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
         LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
-        LEFT JOIN materials hm ON hm.material_id = o.material_id
+        ${headerListMaterialJoin}
         ${headerSheetJoin}
         ${where}
         ORDER BY ${orderBy} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
@@ -333,6 +362,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.*,
         material_projection.material_ids,
         material_projection.material_names,
+        material_projection.sheet_material_type_ids,
         milling_projection.milling_type_id,
         milling_projection.milling_type_name,
         latest_doweling.doweling_order_id AS latest_doweling_order_id,
@@ -344,17 +374,19 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       LEFT JOIN LATERAL (
         SELECT
           ARRAY_AGG(materials.material_id ORDER BY materials.first_detail_number, materials.first_detail_id) AS material_ids,
-          ARRAY_AGG(materials.material_name ORDER BY materials.first_detail_number, materials.first_detail_id) AS material_names
+          ARRAY_AGG(materials.material_name ORDER BY materials.first_detail_number, materials.first_detail_id) AS material_names,
+          ${listSheetTypeIdsAggregate}
         FROM (
           SELECT
-            od.material_id,
+            ${this.sheetOrdersReads ? 'NULL::bigint AS material_id,' : 'od.material_id,'}
+            ${listDetailSheetIdSelect}
             ${listDetailNameSelect},
             MIN(od.detail_number) AS first_detail_number,
             MIN(od.detail_id) AS first_detail_id
           FROM order_details od
-          LEFT JOIN materials m ON m.material_id = od.material_id
+          ${listDetailMaterialJoin}
           ${listDetailSheetJoin}
-          WHERE od.order_id = o.order_id AND od.delete_flag = false AND od.material_id IS NOT NULL
+          WHERE od.order_id = o.order_id AND od.delete_flag = false AND ${listDetailFilter}
           ${listDetailNameGroupBy}
         ) materials
       ) material_projection ON true
@@ -428,17 +460,31 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
 
   async getOrderById(command: GetOrderByIdCommand): Promise<OrderDto | null> {
     // SP3: gate migration-029 sheet columns/joins so single-order reads work pre-migration.
+    // Variant B (flag-ON): sheet name is smt.name directly — no COALESCE fallback to materials.
+    // flag-OFF stays as the legacy pre-migration path (materials join only).
     const headerSheetCols = this.sheetOrdersReads
       ? `o.sheet_material_type_id, o.sheet_eligible,
-        COALESCE(smt.name, m.material_name) AS material_name`
+        smt.name AS material_name,
+        NULL::bigint AS material_id,
+        o.milling_type_id, o.edge_type_id, o.film_id`
       : `NULL::bigint AS sheet_material_type_id, false AS sheet_eligible,
-        m.material_name AS material_name`;
+        m.material_name AS material_name,
+        o.material_id,
+        o.milling_type_id, o.edge_type_id, o.film_id`;
     const headerSheetJoin = this.sheetOrdersReads
       ? 'LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = o.sheet_material_type_id'
       : '';
+    // Variant B: detail name from sheet type only; legacy path still reads materials.
     const detailSheetName = this.sheetOrdersReads
-      ? 'COALESCE(smt.name, m.material_name) AS material_name'
+      ? 'smt.name AS material_name'
       : 'm.material_name AS material_name';
+    // Variant B: no materials join for header or detail reads (material_id is NULL post-034).
+    const headerMaterialJoin = this.sheetOrdersReads
+      ? ''
+      : 'LEFT JOIN materials m ON m.material_id = o.material_id';
+    const detailMaterialJoin = this.sheetOrdersReads
+      ? ''
+      : 'LEFT JOIN materials m ON m.material_id = od.material_id';
     const detailSheetJoin = this.sheetOrdersReads
       ? 'LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id'
       : '';
@@ -462,7 +508,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
       LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
-      LEFT JOIN materials m ON m.material_id = o.material_id
+      ${headerMaterialJoin}
       ${headerSheetJoin}
       WHERE o.order_id = $1 AND o.delete_flag = false
       `,
@@ -474,14 +520,14 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       return null;
     }
 
-    // Server-resolved per-detail material name (COALESCE sheet/material) so the caller
+    // Server-resolved per-detail material name (sheet name only in Variant B) so the caller
     // needs no sheet_materials.view; sheet_material_type_id carried for FE hydration.
     const details = await this.database.query<OrderDetailRow>(
       `
       SELECT od.*,
              ${detailSheetName}
       FROM order_details od
-      LEFT JOIN materials m ON m.material_id = od.material_id
+      ${detailMaterialJoin}
       ${detailSheetJoin}
       WHERE od.order_id = $1 AND od.delete_flag = false
       ORDER BY od.detail_number ASC, od.detail_id ASC
@@ -710,9 +756,11 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       // SP3: ALL sheet types (active + inactive) — repo stays dumb; the service
       // decides whether to attach them (sheet_materials.view) and the FE disables
       // inactive non-current options so a deactivated-but-selected sheet still edits.
+      // Variant B: is_cuttable=false marks header-only materials (e.g. «краска»)
+      // the FE DETAIL picker must exclude (HEADER picker keeps the full set).
       this.database.query<SheetMaterialTypeLookupRow>(
         `
-        SELECT sheet_material_type_id AS id, name, width_mm, height_mm, is_active
+        SELECT sheet_material_type_id AS id, name, width_mm, height_mm, is_active, is_cuttable
         FROM sheet_material_types
         ORDER BY is_active DESC, name ASC, sheet_material_type_id ASC
         `,
@@ -860,6 +908,7 @@ function mapSheetMaterialTypeLookup(row: SheetMaterialTypeLookupRow) {
     widthMm: toNullableNumber(row.width_mm),
     heightMm: toNullableNumber(row.height_mm),
     isActive: row.is_active,
+    isCuttable: row.is_cuttable,
   };
 }
 
@@ -940,6 +989,11 @@ function mapOrderDto(
       sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
       sheetEligible: row.sheet_eligible ?? false,
       materialName: row.material_name ?? null,
+      // Variant B: materialId is null post-034 (flag-ON); preserved from o.material_id in flag-OFF.
+      materialId: toNullableNumber(row.material_id),
+      millingTypeId: toNullableNumber(row.milling_type_id),
+      edgeTypeId: toNullableNumber(row.edge_type_id),
+      filmId: toNullableNumber(row.film_id),
       createdAt: toIsoString(row.created_at),
       updatedAt: toIsoString(row.updated_at),
       createdBy: toNullableNumber(row.created_by),
@@ -998,8 +1052,10 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
     totalArea: toNumber(row.total_area),
     managerId: toNullableNumber(row.manager_id),
     notes: row.notes,
+    // Variant B: materialIds is empty (material_id is NULL post-034); sheetMaterialTypeIds is authoritative.
     materialIds: toNumberArray(row.material_ids),
     materialNames: toStringArray(row.material_names),
+    sheetMaterialTypeIds: toNumberArray(row.sheet_material_type_ids),
     headerMaterialName: row.header_material_name ?? null,
     headerSheetMaterialTypeId: toNullableNumber(row.header_sheet_material_type_id),
     millingTypeId: toNullableNumber(row.milling_type_id),
@@ -1027,7 +1083,8 @@ function mapDetail(row: OrderDetailRow) {
     width: toNumber(row.width),
     quantity: toNumber(row.quantity),
     area: toNumber(row.area),
-    materialId: toNumber(row.material_id),
+    // Variant B: material_id is NULL post-034; null-safe to avoid 0/NaN.
+    materialId: row.material_id == null ? null : toNumber(row.material_id),
     sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
     materialName: row.material_name ?? null,
     millingTypeId: toNumber(row.milling_type_id),

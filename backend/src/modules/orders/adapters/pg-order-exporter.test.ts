@@ -133,20 +133,26 @@ describe('PgOrderExporter', () => {
       return { body: captured[0]?.body, database };
     }
 
-    it('detail SQL resolves COALESCE(sheet name, material name) via a sheet-type join', async () => {
+    it('detail SQL resolves sheet name via sheet-type join (Variant B: no COALESCE fallback)', async () => {
       const { database } = await runExport({}, [detailRow({ material_name: 'МДФ 16 мм' })]);
       const detailQuery = database.queries.find((q) => q.text.includes('FROM order_details od'));
       expect(detailQuery).toBeDefined();
       expect(detailQuery!.text).toContain('LEFT JOIN sheet_material_types');
-      expect(detailQuery!.text).toMatch(/COALESCE\(\s*smt\.name\s*,\s*m\.material_name\s*\)/);
+      expect(detailQuery!.text).toContain('smt.name AS material_name');
+      // Variant B: no COALESCE fallback to materials, no LEFT JOIN materials
+      expect(detailQuery!.text).not.toMatch(/COALESCE\(\s*smt\.name\s*,\s*m\.material_name\s*\)/);
+      expect(detailQuery!.text).not.toContain('LEFT JOIN materials');
     });
 
-    it('header SQL resolves COALESCE(sheet name, material name) for the order header', async () => {
+    it('header SQL resolves sheet name for the order header (Variant B: no COALESCE fallback)', async () => {
       const { database } = await runExport({}, [detailRow()]);
       const headerQuery = database.queries.find((q) => q.text.includes('FROM orders o'));
       expect(headerQuery).toBeDefined();
       expect(headerQuery!.text).toContain('LEFT JOIN sheet_material_types hsmt');
-      expect(headerQuery!.text).toMatch(/COALESCE\(\s*hsmt\.name\s*,\s*hm\.material_name\s*\)/);
+      expect(headerQuery!.text).toContain('hsmt.name AS material_name');
+      // Variant B: no COALESCE fallback to materials, no LEFT JOIN materials hm
+      expect(headerQuery!.text).not.toMatch(/COALESCE\(\s*hsmt\.name\s*,\s*hm\.material_name\s*\)/);
+      expect(headerQuery!.text).not.toContain('LEFT JOIN materials hm');
     });
 
     it('sheet order exports the sheet name in the material summary (never the shadow)', async () => {

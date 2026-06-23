@@ -9,6 +9,7 @@ import {
   parseCreateCutJobRequest,
   parseCutJobId,
   parseEligibleCriteria,
+  parseSetProfileBody,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -25,6 +26,10 @@ function jobDto(): CutJobDto {
     source: 'manual',
     version: 0,
     pdfPrewarmState: 'pending',
+    failureCode: null,
+    failureReason: null,
+    paramProfileId: null,
+    totals: { positions: 0, details: 0, area: 0, sheets: 0 },
     items: [],
     groups: [],
   };
@@ -196,4 +201,67 @@ describe('CutController', () => {
     expect(parseAddItemsRequest({ detailIds: [3], version: 2 }).version).toBe(2);
     expect(parseEligibleCriteria({ orderIds: '9,10', filmIds: '5' })).toMatchObject({ orderIds: [9, 10], filmIds: [5] });
   });
+
+  // Variant B Task 11: GET /cut-jobs/sheet-types — cut.view-gated sheet lookup.
+  it('listSheetTypes: worker (cut.view only, no sheet_materials.view) gets sheet type options', async () => {
+    const sheetTypes = [
+      { sheetMaterialTypeId: 3, name: 'ЛДСП 16мм', widthMm: 2750, heightMm: 1830, isCuttable: true },
+    ];
+    const listSheetTypesForCut = vi.fn(async () => sheetTypes);
+    const controller = createController({ service: { listSheetTypesForCut } });
+    // worker has cut.view but NOT sheet_materials.view
+    const workerUser: CurrentUser = {
+      id: '20',
+      username: 'worker1',
+      role: 'worker',
+      permissions: ['cut.view'],
+    } as CurrentUser;
+    const result = await controller.listSheetTypes({ user: workerUser } as never);
+    expect(result).toEqual(sheetTypes);
+    expect(listSheetTypesForCut).toHaveBeenCalledWith(
+      expect.objectContaining({ currentUser: workerUser }),
+    );
+  });
+
+  it('listSheetTypes: 401 without an authenticated user', async () => {
+    const controller = createController({});
+    await expect(controller.listSheetTypes({} as never)).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'AUTH_REQUIRED',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('listSheetTypes: 503 when the cut feature flag is disabled', async () => {
+    const controller = createController({ flags: { cutEnabled: false } });
+    await expect(
+      controller.listSheetTypes({ user: currentUser() } as never),
+    ).rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_UNAVAILABLE' } satisfies Partial<ApiError>);
+  });
+});
+
+describe('parseSetProfileBody', () => {
+  it('accepts a positive id or null + nonnegative version', () => {
+    expect(parseSetProfileBody({ paramProfileId: 5, version: 2 })).toEqual({ paramProfileId: 5, version: 2 });
+    expect(parseSetProfileBody({ paramProfileId: null, version: 0 })).toEqual({ paramProfileId: null, version: 0 });
+  });
+  it('rejects a non-integer / negative id, missing version, or extra fields (.strict)', () => {
+    expect(() => parseSetProfileBody({ paramProfileId: 0, version: 1 })).toThrow();
+    expect(() => parseSetProfileBody({ paramProfileId: 1.5, version: 1 })).toThrow();
+    expect(() => parseSetProfileBody({ paramProfileId: 1 })).toThrow();
+    expect(() => parseSetProfileBody({ paramProfileId: 1, version: 1, extra: true })).toThrow();
+  });
+});
+
+it('PATCH setProfile delegates parsed args to CutService.setProfile', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setProfile: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-xyz' } as never;
+  const dto = await controller.setProfile(request, '42', { paramProfileId: 5, version: 2 });
+  expect(service.setProfile).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, paramProfileId: 5, version: 2, requestId: 'req-xyz',
+  }));
+  expect(dto).toBe(serviceReturn);
 });

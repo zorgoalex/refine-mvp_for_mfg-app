@@ -2,13 +2,18 @@
 // Modal for bulk editing multiple order details at once
 
 import React, { useEffect, useState } from 'react';
-import { Modal, Form, Input, InputNumber, Row, Col, Select, Checkbox, Alert, Divider, Typography, Tooltip } from 'antd';
+import { Modal, Form, Input, InputNumber, Row, Col, Select, Checkbox, Alert, Divider, Typography } from 'antd';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
+import {
+  useSheetMaterialOptions,
+  toSheetSelectOptions,
+  filterCuttableOptions,
+} from '../../../../hooks/useSheetMaterialOptions';
 
 const { Text } = Typography;
 
@@ -16,10 +21,6 @@ interface BulkEditModalProps {
   open: boolean;
   selectedCount: number;
   totalCount: number;
-  // SP3: true when the in-scope selection contains any sheet-material row. The
-  // bulk legacy-material change is disabled for those (the backend re-resolves
-  // material_id from the sheet, so a bulk change would be a misleading no-op).
-  selectionHasSheet?: boolean;
   onApply: (changes: Partial<OrderDetail>, applyToAll: boolean) => void;
   onCancel: () => void;
 }
@@ -29,7 +30,7 @@ interface BulkEditFields {
   height?: number;
   width?: number;
   quantity?: number;
-  material_id?: number;
+  sheet_material_type_id?: number;
   note?: string;
   milling_type_id?: number;
   edge_type_id?: number;
@@ -44,7 +45,7 @@ interface EnabledFields {
   height: boolean;
   width: boolean;
   quantity: boolean;
-  material_id: boolean;
+  sheet_material_type_id: boolean;
   note: boolean;
   milling_type_id: boolean;
   edge_type_id: boolean;
@@ -58,7 +59,6 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   open,
   selectedCount,
   totalCount,
-  selectionHasSheet = false,
   onApply,
   onCancel,
 }) => {
@@ -68,7 +68,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     height: false,
     width: false,
     quantity: false,
-    material_id: false,
+    sheet_material_type_id: false,
     note: false,
     milling_type_id: false,
     edge_type_id: false,
@@ -84,17 +84,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   const enabledCount = Object.values(enabledFields).filter(Boolean).length;
 
   // Load reference data
-  const { selectProps: materialSelectProps } = useSelect({
-    resource: 'materials',
-    optionLabel: 'material_name',
-    optionValue: 'material_id',
-    filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    pagination: { mode: 'off' },
-    queryOptions: { enabled: open && !useBackendReferences },
-  });
-  const resolvedMaterialSelectProps = useBackendReferences
-    ? createBackendSelectProps(orderFormData.references.materials, orderFormData.isLoading)
-    : materialSelectProps;
+  const sheetMaterials = useSheetMaterialOptions();
 
   const { selectProps: millingTypeSelectProps } = useSelect({
     resource: 'milling_types',
@@ -156,7 +146,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         height: false,
         width: false,
         quantity: false,
-        material_id: false,
+        sheet_material_type_id: false,
         note: false,
         milling_type_id: false,
         edge_type_id: false,
@@ -196,8 +186,8 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
       if (enabledFields.quantity && values.quantity !== undefined) {
         changes.quantity = values.quantity;
       }
-      if (enabledFields.material_id && values.material_id !== undefined) {
-        changes.material_id = values.material_id;
+      if (enabledFields.sheet_material_type_id && values.sheet_material_type_id !== undefined) {
+        changes.sheet_material_type_id = values.sheet_material_type_id;
       }
       if (enabledFields.note && values.note !== undefined) {
         changes.note = values.note;
@@ -345,32 +335,23 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
           <Col span={12}>
             <Form.Item
               label={
-                <Tooltip
-                  title={
-                    selectionHasSheet
-                      ? 'Недоступно для листовых деталей'
-                      : undefined
-                  }
+                <Checkbox
+                  checked={enabledFields.sheet_material_type_id}
+                  onChange={() => toggleField('sheet_material_type_id')}
                 >
-                  <Checkbox
-                    checked={enabledFields.material_id && !selectionHasSheet}
-                    disabled={selectionHasSheet}
-                    onChange={() => toggleField('material_id')}
-                  >
-                    Материал
-                  </Checkbox>
-                </Tooltip>
+                  Материал
+                </Checkbox>
               }
             >
-              <Form.Item name="material_id" noStyle>
+              <Form.Item name="sheet_material_type_id" noStyle>
                 <Select
-                  {...resolvedMaterialSelectProps}
+                  options={toSheetSelectOptions(filterCuttableOptions(sheetMaterials.options), undefined)}
+                  loading={sheetMaterials.isLoading}
                   placeholder="Выберите материал"
                   showSearch
-                  filterOption={(input, option) =>
-                    ((option?.label as string) || '').toLowerCase().includes(input.toLowerCase())
-                  }
-                  disabled={!enabledFields.material_id || selectionHasSheet}
+                  optionFilterProp="label"
+                  allowClear
+                  disabled={!enabledFields.sheet_material_type_id}
                   style={{ width: '100%' }}
                 />
               </Form.Item>

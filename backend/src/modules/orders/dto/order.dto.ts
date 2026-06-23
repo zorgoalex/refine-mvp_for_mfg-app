@@ -102,8 +102,11 @@ export interface OrderListItemDto {
   totalArea: number;
   managerId: number | null;
   notes: string | null;
+  /** @deprecated Variant B: always empty post-034; use sheetMaterialTypeIds. */
   materialIds: number[];
   materialNames: string[];
+  /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
+  sheetMaterialTypeIds: number[];
   // SP3: header material-name fallback for header-only/no-details sheet orders (backend-read).
   headerMaterialName: string | null;
   headerSheetMaterialTypeId: number | null;

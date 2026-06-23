@@ -75,4 +75,31 @@ describe('cut-config validation', () => {
     expect(validateSettingValue('auto_trigger', { enabled: false })).toBeTruthy();
     expect(() => validateSettingValue('auto_trigger', { enabled: 'yes' })).toThrow();
   });
+
+  it('accepts valid quality (sla_profile/ga_profile) and group_shift params', () => {
+    expect(
+      validateParamProfileInput({
+        name: 'ok',
+        params: {
+          sla_profile: 'quality',
+          ga_profile: 'quality',
+          group_shift: { enabled: true, min_shift_mm: 5, max_passes: 4, debug_artifacts: true },
+        },
+      }).name,
+    ).toBe('ok');
+  });
+
+  it('rejects an out-of-enum quality profile', () => {
+    expect(() => validateParamProfileInput({ name: 'bad', params: { sla_profile: 'turbo' } })).toThrow();
+    expect(() => validateParamProfileInput({ name: 'bad', params: { ga_profile: 'ultra' } })).toThrow();
+  });
+
+  it('rejects a malformed group_shift (no bad value reaches freecut)', () => {
+    expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: 'on' } })).toThrow();
+    expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { enabled: 'yes' } } })).toThrow();
+    expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { min_shift_mm: -1 } } })).toThrow();
+    expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { max_passes: 0 } } })).toThrow();
+    expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { max_passes: 99 } } })).toThrow();
+    expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { debug_artifacts: 'yes' } } })).toThrow();
+  });
 });

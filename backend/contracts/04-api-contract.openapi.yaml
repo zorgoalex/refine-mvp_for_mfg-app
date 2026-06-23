@@ -5040,6 +5040,30 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/sheet-types:
+    get:
+      tags:
+        - CutJobs
+      operationId: listCutSheetTypes
+      summary: List active sheet material types for the cut filter (cut.view only — no sheet_materials.view required)
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/cut-jobs/{cutJobId}:
     get:
       tags:
@@ -5187,6 +5211,34 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/profile:
+    patch:
+      tags:
+        - CutJobs
+      operationId: setCutJobProfile
+      summary: Set the cut profile for a job
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -8158,6 +8210,32 @@ components:
           type: integer
           format: int64
           nullable: true
+        materialIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          deprecated: true
+          description: "Variant B: always empty post-034; use sheetMaterialTypeIds."
+        materialNames:
+          type: array
+          items:
+            type: string
+        sheetMaterialTypeIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: "Variant B: aggregated sheet material type IDs from order details (authoritative post-034)."
+        headerMaterialName:
+          type: string
+          nullable: true
+          description: "SP3/R8: header sheet material name fallback for header-only orders with no details."
+        headerSheetMaterialTypeId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "SP3/R8: header sheet material type ID fallback for header-only orders with no details."
         primaryProject:
           $ref: '#/components/schemas/OrderProjectSummaryDtoNullable'
         projects:
@@ -8319,6 +8397,28 @@ components:
         refKey1c:
           type: string
           nullable: true
+        materialId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Variant B: always null for order headers; deprecated. Use sheetMaterialTypeId."
+        sheetMaterialTypeId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Variant B: authoritative sheet material reference for the order header. materialId is deprecated and always null."
+        millingTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        edgeTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        filmId:
+          type: integer
+          format: int64
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -8339,7 +8439,7 @@ components:
         - height
         - width
         - quantity
-        - materialId
+        - sheetMaterialTypeId
         - millingTypeId
         - edgeTypeId
         - detailCost
@@ -8369,6 +8469,12 @@ components:
         materialId:
           type: integer
           format: int64
+          nullable: true
+          description: "Variant B: must be null/absent; sheet_material_type_id is authoritative."
+        sheetMaterialTypeId:
+          type: integer
+          format: int64
+          description: "Variant B: required; every order detail references its material via sheet_material_type_id."
         millingTypeId:
           type: integer
           format: int64
@@ -8738,6 +8844,28 @@ components:
         refKey1c:
           type: string
           nullable: true
+        materialId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Variant B: must be null/absent on request; deprecated. Non-null values are rejected (422). Use sheetMaterialTypeId."
+        sheetMaterialTypeId:
+          type: integer
+          format: int64
+          nullable: true
+          description: "Variant B: authoritative sheet material reference for the order header. Optional; when set, determines the material for the whole order."
+        millingTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        edgeTypeId:
+          type: integer
+          format: int64
+          nullable: true
+        filmId:
+          type: integer
+          format: int64
+          nullable: true
 
     SaveOrderDetailDto:
       type: object
@@ -8746,7 +8874,7 @@ components:
         - height
         - width
         - quantity
-        - materialId
+        - sheetMaterialTypeId
         - millingTypeId
         - edgeTypeId
       properties:
@@ -8779,7 +8907,13 @@ components:
         materialId:
           type: integer
           format: int64
+          nullable: true
+          description: "Variant B: must be null/absent; sheet_material_type_id is authoritative. Non-null values are rejected (422)."
+        sheetMaterialTypeId:
+          type: integer
+          format: int64
           minimum: 1
+          description: "Variant B: required; every order detail references its material via sheet_material_type_id."
         millingTypeId:
           type: integer
           format: int64

@@ -202,6 +202,32 @@ describe('AuditService relatedEntities bridge writes', () => {
   });
 });
 
+describe('AuditService VLM usage-count allowlist', () => {
+  it('preserves inputTokens/outputTokens as integers but redacts api_key', async () => {
+    const captured: Captured[] = [];
+    const service = new AuditService();
+
+    await service.record(fakeClient(captured), {
+      event: 'vlm.analyze',
+      entityType: 'file_upload',
+      entityId: 'upload-uuid',
+      actorUserId: '10',
+      requestId: 'req_vlm',
+      source: 'vlm-analyze',
+      metadata: {
+        usage: { inputTokens: 10, outputTokens: 5 },
+        api_key: 'SUPER_SECRET',
+      },
+    });
+
+    const metaJson = captured[0].params[22] as string;
+    expect(metaJson).toContain('"inputTokens":10');
+    expect(metaJson).not.toContain('"inputTokens":"[REDACTED]"');
+    expect(metaJson).toContain('"api_key":"[REDACTED]"');
+    expect(metaJson).not.toContain('SUPER_SECRET');
+  });
+});
+
 describe('AuditService.recordDenied', () => {
   it('writes a denied audit row with denied metadata', async () => {
     const captured: Captured[] = [];
@@ -223,5 +249,20 @@ describe('AuditService.recordDenied', () => {
     expect(serialized).toContain('order_scope_denied');
     expect(serialized).toContain('production.change_status');
     expect(serialized.toLowerCase()).toContain('denied');
+  });
+
+  it('persists related dims and normalizes the denial reason into status columns', async () => {
+    const captured: Captured[] = [];
+    await new AuditService().recordDenied(fakeClient(captured, 'a1'), {
+      event: 'payment.permission_denied', entityType: 'payment', entityId: 5,
+      actorUserId: 9, requestId: 'req_p', source: 'backend-payments-command',
+      relatedOrderId: 11192, relatedPaymentId: 5, relatedUserId: 9,
+      reason: 'order_scope_denied', requiredPermissions: ['payments.update'],
+    });
+    const { params } = captured[0];
+    expect(params[10]).toBe(5);          // related_payment_id
+    expect(params[13]).toBe(9);          // related_user_id
+    expect(params[14]).toBe('denied');   // status_field
+    expect(params[17]).toBe('order_scope_denied'); // status_code
   });
 });

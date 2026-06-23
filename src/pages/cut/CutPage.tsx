@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -17,7 +17,9 @@ import type { ColumnsType } from 'antd/es/table';
 import { useNavigation } from '@refinedev/core';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
+import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
+import { resolveProfileLabel, formatArea } from './cutProfileHelpers';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -25,6 +27,7 @@ import type {
   EligibleDetailDto,
 } from '../../api/types/cutApi.types';
 import { can } from '../../utils/permissions';
+import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
   CUT_JOB_STATUS_FILTER_OPTIONS,
@@ -54,6 +57,7 @@ const { Title, Text } = Typography;
 const INELIGIBLE_LABELS: Record<string, string> = {
   deleted: 'Удалена',
   wrong_status: 'Неподходящий статус',
+  not_cuttable: 'Нераскраиваемый материал',
   no_sheet_spec: 'Нет спецификации',
 };
 
@@ -65,6 +69,11 @@ const STATUS_TAG_COLORS: Record<string, string> = {
   archived: 'default',
 };
 
+/** Revoke every blob object URL in a key->url map (leak guard on reset/unmount). */
+const revokeObjectUrls = (map: Record<string, string>): void => {
+  Object.values(map).forEach((url) => URL.revokeObjectURL(url));
+};
+
 /**
  * Backend-owned /cut page (CLAUDE.md principle 2/3): all reads and commands go
  * through cutApi (`/api/v1/cut-jobs`); the read-layer is never written from here.
@@ -73,18 +82,64 @@ const STATUS_TAG_COLORS: Record<string, string> = {
  */
 export const CutPage: React.FC = () => {
   const canManage = can('cut.manage');
+  // Variant B Task 11: cut.view-gated sheet-type options for the filter Select.
+  // Gated on cut.view only — no sheet_materials.view required (worker can use filter).
+  const { enabled: sheetFilterEnabled, options: sheetTypeOptions } = useCutSheetTypeOptions();
   // Open orders inside the app's keep-alive workspace tabs (same as the orders
   // list double-click), not a new browser tab.
   const { show } = useNavigation();
-  const [form] = Form.useForm<{ name: string; orderIds?: string; materialIds?: string; filmIds?: string }>();
+  const [form] = Form.useForm<{ name: string; orderIds?: string; sheetMaterialTypeIds?: number[]; filmIds?: string }>();
   const [job, setJob] = useState<CutJobDto | null>(null);
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [sheetImages, setSheetImages] = useState<Record<string, string>>({});
+  // Auto-loaded small layout previews (preset 'thumb') for a ready job's sheets,
+  // keyed `${cutGroupId}:${sheetIndex}`. thumbReqRef dedupes in-flight/done fetches.
+  const [sheetThumbs, setSheetThumbs] = useState<Record<string, string>>({});
+  const thumbReqRef = useRef<Set<string>>(new Set());
+  // Generation counter bumped on every job-context switch/reset; an async sheet
+  // fetch captures it and discards its result if it changed (job switched).
+  const viewEpochRef = useRef(0);
+  // Mirror of the live blob maps so the unmount cleanup (stale-closure-safe) can
+  // revoke any outstanding object URLs even though /cut is kept mounted.
+  const blobsRef = useRef<{ images: Record<string, string>; thumbs: Record<string, string> }>({
+    images: {},
+    thumbs: {},
+  });
+
+  // Clear both per-sheet view caches, revoking blob URLs so a recalculated or
+  // reopened job never shows a stale preview and never leaks blobs.
+  const resetSheetViews = useCallback(() => {
+    setSheetImages((prev) => {
+      revokeObjectUrls(prev);
+      return {};
+    });
+    setSheetThumbs((prev) => {
+      revokeObjectUrls(prev);
+      return {};
+    });
+    thumbReqRef.current = new Set();
+    // Invalidate in-flight sheet/thumb fetches so a late completion can't
+    // repopulate the just-cleared maps with a stale-job blob.
+    viewEpochRef.current += 1;
+  }, []);
+
+  useEffect(() => {
+    blobsRef.current = { images: sheetImages, thumbs: sheetThumbs };
+  }, [sheetImages, sheetThumbs]);
+  useEffect(
+    () => () => {
+      revokeObjectUrls(blobsRef.current.images);
+      revokeObjectUrls(blobsRef.current.thumbs);
+    },
+    [],
+  );
   const [preset, setPreset] = useState<string>('screen');
   const [presetOptions, setPresetOptions] = useState(DEFAULT_PRESET_OPTIONS);
+  const [profiles, setProfiles] = useState<CutParamProfile[]>([]);
+  const [cutSettings, setCutSettings] = useState<CutSettingRow[]>([]);
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
@@ -99,15 +154,23 @@ export const CutPage: React.FC = () => {
           .filter((p) => p.isActive)
           .map((p) => ({ value: p.name, label: p.name }));
         if (options.length > 0) setPresetOptions(options);
+        setProfiles(cfg.paramProfiles); // FULL list (active + inactive)
+        setCutSettings(cfg.settings);
       })
       .catch(() => undefined);
   }, []);
 
   const criteriaFromForm = useCallback(() => {
     const values = form.getFieldsValue();
+    // sheetMaterialTypeIds: comes from a Select<number[]> (not a CSV string) when the
+    // sheet filter is enabled; falls back to empty array otherwise.
+    const sheetMaterialTypeIds: number[] | undefined =
+      values.sheetMaterialTypeIds && values.sheetMaterialTypeIds.length > 0
+        ? values.sheetMaterialTypeIds
+        : undefined;
     return {
       orderIds: parseIdCsv(values.orderIds ?? ''),
-      materialIds: parseIdCsv(values.materialIds ?? ''),
+      sheetMaterialTypeIds,
       filmIds: parseIdCsv(values.filmIds ?? ''),
     };
   }, [form]);
@@ -127,6 +190,23 @@ export const CutPage: React.FC = () => {
       setJobsLoading(false);
     }
   }, [handleError]);
+
+  const setJobProfile = useCallback(
+    async (paramProfileId: number | null) => {
+      if (!job) return;
+      setBusy(true);
+      try {
+        const updated = await cutApi.setProfile(job.cutJobId, paramProfileId, job.version);
+        setJob(updated);
+        void loadJobs();
+      } catch (error) {
+        handleError(error, 'Не удалось изменить профиль раскроя');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [job, loadJobs, handleError],
+  );
 
   // Load the existing (non-archived) jobs on mount so an operator can reopen a
   // job created earlier — including jobs staged from the Orders "Добавить в
@@ -149,19 +229,19 @@ export const CutPage: React.FC = () => {
         form.setFieldsValue({
           name: fresh.name,
           orderIds: orderIds.length > 0 ? orderIds.join(',') : undefined,
-          materialIds: undefined,
+          sheetMaterialTypeIds: undefined, // Variant B sunset: cleared the post-034 filter key
           filmIds: undefined,
         });
         setEligible(null);
         setSelected([]);
-        setSheetImages({});
+        resetSheetViews();
       } catch (error) {
         handleError(error, 'Не удалось открыть раскрой');
       } finally {
         setBusy(false);
       }
     },
-    [form, handleError],
+    [form, handleError, resetSheetViews],
   );
 
   const archiveJob = useCallback(
@@ -175,7 +255,7 @@ export const CutPage: React.FC = () => {
           setJob(null);
           setEligible(null);
           setSelected([]);
-          setSheetImages({});
+          resetSheetViews();
         }
         await loadJobs();
       } catch (error) {
@@ -184,7 +264,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, loadJobs, handleError],
+    [job, loadJobs, handleError, resetSheetViews],
   );
 
   const createJob = useCallback(async () => {
@@ -195,6 +275,7 @@ export const CutPage: React.FC = () => {
       setJob(created);
       setEligible(null);
       setSelected([]);
+      resetSheetViews(); // new job context: drop any previewed prior job's blobs
       message.success('Раскрой создан');
       await loadJobs();
     } catch (error) {
@@ -203,7 +284,7 @@ export const CutPage: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [form, criteriaFromForm, loadJobs, handleError]);
+  }, [form, criteriaFromForm, loadJobs, handleError, resetSheetViews]);
 
   const loadEligible = useCallback(async () => {
     if (!job) return;
@@ -259,7 +340,7 @@ export const CutPage: React.FC = () => {
     try {
       const calculated = await cutApi.calculate(job.cutJobId, job.version);
       setJob(calculated);
-      setSheetImages({});
+      resetSheetViews();
       message.success('Раскрой рассчитан');
       await loadJobs();
     } catch (error) {
@@ -276,21 +357,63 @@ export const CutPage: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [job, loadJobs, handleError]);
+  }, [job, loadJobs, handleError, resetSheetViews]);
 
   const loadSheet = useCallback(
     async (group: CutGroupDto, sheetIndex: number) => {
       if (!job) return;
       const key = `${group.cutGroupId}:${sheetIndex}`;
+      const epoch = viewEpochRef.current;
       try {
         const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset);
-        setSheetImages((prev) => ({ ...prev, [key]: URL.createObjectURL(blob) }));
+        // Discard a completion that lands after a job switch/reset (stale blob).
+        if (viewEpochRef.current !== epoch) return;
+        setSheetImages((prev) => {
+          if (prev[key]) URL.revokeObjectURL(prev[key]);
+          return { ...prev, [key]: URL.createObjectURL(blob) };
+        });
       } catch (error) {
         handleError(error, 'Не удалось загрузить лист раскроя');
       }
     },
     [job, preset, handleError],
   );
+
+  // Small layout preview for a ready job's sheet, fetched once with the light
+  // 'thumb' preset. Deduped via thumbReqRef so the auto-load effect is idempotent.
+  const loadThumb = useCallback(
+    async (cutJobId: number, group: CutGroupDto, sheetIndex: number) => {
+      const key = `${group.cutGroupId}:${sheetIndex}`;
+      const reqKey = `${cutJobId}:${key}`;
+      if (thumbReqRef.current.has(reqKey)) return;
+      thumbReqRef.current.add(reqKey);
+      const epoch = viewEpochRef.current;
+      try {
+        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb');
+        // Discard a completion that lands after a job switch/reset (stale blob).
+        if (viewEpochRef.current !== epoch) return;
+        setSheetThumbs((prev) => {
+          if (prev[key]) URL.revokeObjectURL(prev[key]);
+          return { ...prev, [key]: URL.createObjectURL(blob) };
+        });
+      } catch {
+        // Preview is best-effort; the full-size "Лист N" view still works on click.
+        thumbReqRef.current.delete(reqKey);
+      }
+    },
+    [],
+  );
+
+  // Auto-load per-sheet previews when a ready job's layout is present, so an
+  // operator sees the cut result inline without clicking each sheet.
+  useEffect(() => {
+    if (!job || job.status !== 'ready') return;
+    for (const group of job.groups) {
+      for (const sheet of group.sheets) {
+        void loadThumb(job.cutJobId, group, sheet.sheetIndex);
+      }
+    }
+  }, [job, loadThumb]);
 
   const downloadSheetSvg = useCallback(
     async (group: CutGroupDto, sheetIndex: number) => {
@@ -362,16 +485,40 @@ export const CutPage: React.FC = () => {
         render: (_: unknown, row: CutJobDto) => cutJobSourceLabel(row.source),
       },
       {
-        title: 'Детали',
-        key: 'items',
-        width: 80,
-        render: (_: unknown, row: CutJobDto) => cutJobCounts(row).items,
+        title: 'Позиции',
+        key: 'positions',
+        width: 90,
+        render: (_: unknown, row: CutJobDto) => row.totals.positions,
       },
       {
         title: 'Группы',
         key: 'groups',
         width: 80,
         render: (_: unknown, row: CutJobDto) => cutJobCounts(row).groups,
+      },
+      {
+        title: 'Деталей',
+        key: 'details',
+        width: 90,
+        render: (_: unknown, row: CutJobDto) => row.totals.details,
+      },
+      {
+        title: 'Площадь, итого',
+        key: 'area',
+        width: 120,
+        render: (_: unknown, row: CutJobDto) => formatArea(row.totals.area),
+      },
+      {
+        title: 'Кол-во листов раскроя',
+        key: 'sheets',
+        width: 120,
+        render: (_: unknown, row: CutJobDto) => (row.status === 'ready' ? row.totals.sheets : '—'),
+      },
+      {
+        title: 'Профиль',
+        key: 'profile',
+        width: 180,
+        render: (_: unknown, row: CutJobDto) => resolveProfileLabel(row.paramProfileId, profiles, cutSettings),
       },
       {
         title: 'Действия',
@@ -391,7 +538,7 @@ export const CutPage: React.FC = () => {
         ),
       },
     ],
-    [busy, canManage, openJob, archiveJob],
+    [busy, canManage, openJob, archiveJob, profiles, cutSettings],
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
@@ -535,9 +682,19 @@ export const CutPage: React.FC = () => {
           <Form.Item name="orderIds">
             <Input placeholder="Заказы (9,10)" />
           </Form.Item>
-          <Form.Item name="materialIds">
-            <Input placeholder="Материалы" />
-          </Form.Item>
+          {sheetFilterEnabled && (
+            <Form.Item name="sheetMaterialTypeIds">
+              <Select<number[]>
+                mode="multiple"
+                allowClear
+                placeholder="Типы листов"
+                options={sheetTypeOptions}
+                fieldNames={{ label: 'label', value: 'value' }}
+                style={{ minWidth: 200 }}
+                data-testid="cut-sheet-type-filter"
+              />
+            </Form.Item>
+          )}
           <Form.Item name="filmIds">
             <Input placeholder="Плёнки" />
           </Form.Item>
@@ -600,6 +757,43 @@ export const CutPage: React.FC = () => {
               description={job.failureReason}
             />
           )}
+          {(() => {
+            const activeOptions = profiles
+              .filter((p) => p.isActive)
+              .map((p) => ({ value: p.cutParamProfileId, label: resolveProfileLabel(p.cutParamProfileId, profiles, cutSettings) }));
+            const chosen = job.paramProfileId;
+            const chosenInactive = chosen !== null && !profiles.some((p) => p.cutParamProfileId === chosen && p.isActive);
+            const profileOptions = chosenInactive
+              ? [...activeOptions, { value: chosen, label: resolveProfileLabel(chosen, profiles, cutSettings), disabled: true }]
+              : activeOptions;
+            return (
+              <>
+                <Space size="large" style={{ marginBottom: 12 }}>
+                  <span>Позиции: <b>{job.totals.positions}</b></span>
+                  <span>Деталей: <b>{job.totals.details}</b></span>
+                  <span>Площадь, итого: <b>{formatArea(job.totals.area)}</b></span>
+                  {job.status === 'ready' && <span>Листов раскроя: <b>{job.totals.sheets}</b></span>}
+                </Space>
+                <div style={{ marginBottom: 12 }}>
+                  <span style={{ marginRight: 8 }}>Профиль раскроя:</span>
+                  <Select<number | null>
+                    value={job.paramProfileId}
+                    onChange={(v) => void setJobProfile(v ?? null)}
+                    disabled={!canManage || busy || job.status === 'calculating'}
+                    style={{ minWidth: 240 }}
+                    placeholder={resolveProfileLabel(null, profiles, cutSettings)}
+                    allowClear
+                    options={profileOptions}
+                  />
+                  {job.status === 'ready' && (
+                    <span style={{ marginLeft: 8, color: '#ad8b00' }}>
+                      изменение профиля применится после команды «Повторить расчёт»
+                    </span>
+                  )}
+                </div>
+              </>
+            );
+          })()}
           <Space>
             <Button onClick={loadEligible} loading={busy}>
               Загрузить подходящие детали
@@ -681,6 +875,19 @@ export const CutPage: React.FC = () => {
                       SVG
                     </Button>
                   </Space>
+                  {/* Inline auto-preview (~5 detail rows tall); click to open full size. */}
+                  {sheetThumbs[key] && !sheetImages[key] && (
+                    <div style={{ marginTop: 4 }}>
+                      <Tooltip title="Открыть лист в полном размере">
+                        <img
+                          src={sheetThumbs[key]}
+                          alt={`Превью листа ${sheet.sheetIndex + 1}`}
+                          onClick={() => loadSheet(group, sheet.sheetIndex)}
+                          style={{ height: 170, width: 'auto', maxWidth: '100%', cursor: 'pointer', border: '1px solid #f0f0f0' }}
+                        />
+                      </Tooltip>
+                    </div>
+                  )}
                   {sheetImages[key] && (
                     <div>
                       <img src={sheetImages[key]} alt={`Лист ${sheet.sheetIndex + 1}`} style={{ maxWidth: '100%' }} />

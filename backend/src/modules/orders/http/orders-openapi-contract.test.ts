@@ -1,6 +1,12 @@
 import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import { describe, expect, it } from 'vitest';
+import {
+  saveOrderDetailSwaggerSchema,
+  orderDetailResponseSwaggerSchema,
+  saveOrderHeaderSwaggerSchema,
+  orderHeaderResponseSwaggerSchema,
+} from './orders.controller';
 
 describe('orders OpenAPI contract', () => {
   it('documents stale-safe idempotent DELETE /api/v1/orders/{orderId}', () => {
@@ -102,6 +108,171 @@ describe('orders OpenAPI contract', () => {
     expect(contract).not.toContain('passwordHash');
     expect(contract).not.toContain('refreshTokenHash');
     expect(contract).not.toContain('providerSecret');
+  });
+
+  it('documents Variant B: sheetMaterialTypeId required, materialId nullable/optional on detail schemas', () => {
+    const contract = readOpenApiContract();
+
+    // OrderDetailDto (response): sheetMaterialTypeId in required; materialId nullable
+    const orderDetailDtoSection = sectionBetween(
+      contract,
+      '    OrderDetailDto:',
+      '    PaymentDto:',
+    );
+    expect(orderDetailDtoSection).toContain('- sheetMaterialTypeId');
+    expect(orderDetailDtoSection).not.toMatch(/^        - materialId$/m);
+    // materialId property present but nullable
+    expect(orderDetailDtoSection).toContain('materialId:');
+    expect(
+      sectionBetween(orderDetailDtoSection, '        materialId:', '        sheetMaterialTypeId:'),
+    ).toContain('nullable: true');
+
+    // SaveOrderDetailDto (request): sheetMaterialTypeId in required; materialId not in required
+    const saveOrderDetailDtoSection = sectionBetween(
+      contract,
+      '    SaveOrderDetailDto:',
+      '    SavePaymentDto:',
+    );
+    expect(saveOrderDetailDtoSection).toContain('- sheetMaterialTypeId');
+    expect(saveOrderDetailDtoSection).not.toMatch(/^        - materialId$/m);
+    expect(saveOrderDetailDtoSection).toContain('materialId:');
+    expect(
+      sectionBetween(saveOrderDetailDtoSection, '        materialId:', '        sheetMaterialTypeId:'),
+    ).toContain('nullable: true');
+  });
+
+  it('documents Variant B: header materialId and sheetMaterialTypeId present in OrderHeaderDto (response)', () => {
+    const contract = readOpenApiContract();
+
+    // OrderHeaderDto (response): materialId and sheetMaterialTypeId must be present and nullable;
+    // materialId must NOT be in required (always null in Variant B).
+    const orderHeaderDtoSection = sectionBetween(
+      contract,
+      '    OrderHeaderDto:',
+      '    OrderDetailDto:',
+    );
+    expect(orderHeaderDtoSection).not.toMatch(/^        - materialId$/m);
+    expect(orderHeaderDtoSection).toContain('materialId:');
+    expect(orderHeaderDtoSection).toContain('sheetMaterialTypeId:');
+    // materialId is nullable
+    const materialIdBlock = sectionBetween(orderHeaderDtoSection, '        materialId:', '        sheetMaterialTypeId:');
+    expect(materialIdBlock).toContain('nullable: true');
+    // description must mention Variant B deprecation (not the old Variant A "shadow" text)
+    expect(materialIdBlock.toLowerCase()).not.toContain('shadow');
+    expect(materialIdBlock.toLowerCase()).toMatch(/deprecated|always null/);
+  });
+
+  it('documents Variant B: header materialId and sheetMaterialTypeId present in SaveOrderHeaderDto (request)', () => {
+    const contract = readOpenApiContract();
+
+    // SaveOrderHeaderDto (request): materialId and sheetMaterialTypeId must be present;
+    // materialId must NOT be in required (must be null/absent — non-null → 422).
+    const saveOrderHeaderDtoSection = sectionBetween(
+      contract,
+      '    SaveOrderHeaderDto:',
+      '    SaveOrderDetailDto:',
+    );
+    expect(saveOrderHeaderDtoSection).not.toMatch(/^        - materialId$/m);
+    expect(saveOrderHeaderDtoSection).toContain('materialId:');
+    expect(saveOrderHeaderDtoSection).toContain('sheetMaterialTypeId:');
+    // materialId is nullable
+    const materialIdBlock = sectionBetween(saveOrderHeaderDtoSection, '        materialId:', '        sheetMaterialTypeId:');
+    expect(materialIdBlock).toContain('nullable: true');
+    // description must mention 422 rejection (not Variant A "shadow" wording)
+    expect(materialIdBlock.toLowerCase()).not.toContain('shadow');
+    expect(materialIdBlock.toLowerCase()).toMatch(/null|422|deprecated/);
+  });
+});
+
+// Generated Swagger document tests — asserts the CONTROLLER DECORATOR schemas (not only the
+// static YAML). These use the inline schema objects exported from orders.controller.ts,
+// which are the exact objects fed to @ApiBody / @ApiResponse. This covers the gap where
+// stale decorators can slip through while the static YAML stays correct.
+describe('orders controller Swagger schemas — Variant B shape (generated-doc assertions)', () => {
+  it('saveOrderDetailSwaggerSchema: sheetMaterialTypeId is in required (Variant B)', () => {
+    expect(saveOrderDetailSwaggerSchema.required).toContain('sheetMaterialTypeId');
+  });
+
+  it('saveOrderDetailSwaggerSchema: materialId is NOT in required (Variant B nullable/optional)', () => {
+    expect(saveOrderDetailSwaggerSchema.required).not.toContain('materialId');
+  });
+
+  it('saveOrderDetailSwaggerSchema: materialId property is nullable', () => {
+    const materialIdProp = saveOrderDetailSwaggerSchema.properties.materialId as Record<string, unknown>;
+    expect(materialIdProp.nullable).toBe(true);
+  });
+
+  it('saveOrderDetailSwaggerSchema: materialId description says must be null/absent (Variant B)', () => {
+    const materialIdProp = saveOrderDetailSwaggerSchema.properties.materialId as Record<string, unknown>;
+    expect(typeof materialIdProp.description).toBe('string');
+    const desc = (materialIdProp.description as string).toLowerCase();
+    expect(desc).toMatch(/null|absent/);
+  });
+
+  it('orderDetailResponseSwaggerSchema: materialId is NOT in required (Variant B: always null)', () => {
+    expect(orderDetailResponseSwaggerSchema.required).not.toContain('materialId');
+  });
+
+  it('orderDetailResponseSwaggerSchema: sheetMaterialTypeId is in required (Variant B)', () => {
+    expect(orderDetailResponseSwaggerSchema.required).toContain('sheetMaterialTypeId');
+  });
+
+  it('orderDetailResponseSwaggerSchema: materialId property is nullable', () => {
+    const materialIdProp = orderDetailResponseSwaggerSchema.properties.materialId as Record<string, unknown>;
+    expect(materialIdProp.nullable).toBe(true);
+  });
+
+  it('orderDetailResponseSwaggerSchema: sheetMaterialTypeId property type is integer (non-nullable in Variant B)', () => {
+    const smtProp = orderDetailResponseSwaggerSchema.properties.sheetMaterialTypeId as Record<string, unknown>;
+    expect(smtProp.type).toBe('integer');
+    // sheetMaterialTypeId is required and non-nullable in Variant B response
+    expect(smtProp.nullable).toBeUndefined();
+  });
+
+  // ── Header schema parity: request + response ─────────────────────────────
+  it('saveOrderHeaderSwaggerSchema: materialId present and nullable (Variant B: deprecated)', () => {
+    const materialIdProp = saveOrderHeaderSwaggerSchema.properties.materialId as Record<string, unknown>;
+    expect(materialIdProp).toBeDefined();
+    expect(materialIdProp.nullable).toBe(true);
+  });
+
+  it('saveOrderHeaderSwaggerSchema: materialId is NOT in required (must be null/absent on request)', () => {
+    expect(saveOrderHeaderSwaggerSchema.required).not.toContain('materialId');
+  });
+
+  it('saveOrderHeaderSwaggerSchema: materialId description does NOT contain Variant A "shadow" text', () => {
+    const materialIdProp = saveOrderHeaderSwaggerSchema.properties.materialId as Record<string, unknown>;
+    const desc = (materialIdProp.description as string | undefined)?.toLowerCase() ?? '';
+    expect(desc).not.toContain('shadow');
+    expect(desc).toMatch(/deprecated|null/);
+  });
+
+  it('saveOrderHeaderSwaggerSchema: sheetMaterialTypeId present and nullable (optional on header)', () => {
+    const smtProp = saveOrderHeaderSwaggerSchema.properties.sheetMaterialTypeId as Record<string, unknown>;
+    expect(smtProp).toBeDefined();
+    expect(smtProp.nullable).toBe(true);
+  });
+
+  it('saveOrderHeaderSwaggerSchema: sheetMaterialTypeId description does NOT contain Variant A "shadow" text', () => {
+    const smtProp = saveOrderHeaderSwaggerSchema.properties.sheetMaterialTypeId as Record<string, unknown>;
+    const desc = (smtProp.description as string | undefined)?.toLowerCase() ?? '';
+    expect(desc).not.toContain('shadow');
+  });
+
+  it('orderHeaderResponseSwaggerSchema: materialId present and nullable (always null in Variant B)', () => {
+    const materialIdProp = orderHeaderResponseSwaggerSchema.properties.materialId as Record<string, unknown>;
+    expect(materialIdProp).toBeDefined();
+    expect(materialIdProp.nullable).toBe(true);
+  });
+
+  it('orderHeaderResponseSwaggerSchema: materialId is NOT in required (always null in Variant B response)', () => {
+    expect(orderHeaderResponseSwaggerSchema.required).not.toContain('materialId');
+  });
+
+  it('orderHeaderResponseSwaggerSchema: sheetMaterialTypeId present (optional, nullable on header response)', () => {
+    const smtProp = orderHeaderResponseSwaggerSchema.properties.sheetMaterialTypeId as Record<string, unknown>;
+    expect(smtProp).toBeDefined();
+    expect(smtProp.nullable).toBe(true);
   });
 });
 

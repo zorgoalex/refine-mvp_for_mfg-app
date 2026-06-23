@@ -1,4 +1,5 @@
 import type { QueryResultRow } from 'pg';
+import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type {
   ProjectNotificationDelivery,
@@ -12,10 +13,6 @@ type ProjectNotificationDatabase = DatabaseClient & {
 
 interface NotificationRow extends QueryResultRow {
   notification_id: string;
-}
-
-interface AuditRow extends QueryResultRow {
-  audit_id: string;
 }
 
 const SOURCE = 'projects-p8-notifications';
@@ -145,39 +142,29 @@ async function insertAudit(
     auditMetadata: Record<string, unknown>;
   },
 ): Promise<string> {
-  const result = await tx.query<AuditRow>(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, username, role_code, role,
-      request_id, source, related_order_id, related_deadline_id, metadata_json
-    )
-    VALUES (
-      'projects.notification_created', 'project', $1, $2, NULL, NULL, NULL,
-      $3, $4, $5, $6, $7::jsonb
-    )
-    RETURNING audit_id
-    `,
-    [
-      input.projectId,
-      nullableNumber(input.actorUserId),
-      input.requestId,
-      SOURCE,
-      nullableNumber(input.fact.auditRelated.orderId),
-      nullableNumber(input.fact.auditRelated.deadlineId),
-      JSON.stringify({
-        ...input.auditMetadata,
-        source: SOURCE,
-        eventType: input.eventType,
-        sourceId: input.sourceId,
-        factKey: input.fact.factKey,
-        linkedEntity: input.fact.linkedEntity,
-        relatedUserId: input.fact.auditRelated.userId ?? null,
-        relatedEmployeeId: input.fact.auditRelated.employeeId ?? null,
-        recipientUserIds: input.deliveries.map((delivery) => delivery.recipientUserId),
-      }),
-    ],
-  );
-  return result.rows[0]?.audit_id ?? '';
+  return auditService.record(tx, {
+    event: 'projects.notification_created',
+    entityType: 'project',
+    entityId: input.projectId,
+    actorUserId: nullableNumber(input.actorUserId),
+    actorUsername: null,
+    actorRole: null,
+    requestId: input.requestId,
+    source: SOURCE,
+    relatedOrderId: nullableNumber(input.fact.auditRelated.orderId),
+    relatedDeadlineId: nullableNumber(input.fact.auditRelated.deadlineId),
+    metadata: {
+      ...input.auditMetadata,
+      source: SOURCE,
+      eventType: input.eventType,
+      sourceId: input.sourceId,
+      factKey: input.fact.factKey,
+      linkedEntity: input.fact.linkedEntity,
+      relatedUserId: input.fact.auditRelated.userId ?? null,
+      relatedEmployeeId: input.fact.auditRelated.employeeId ?? null,
+      recipientUserIds: input.deliveries.map((delivery) => delivery.recipientUserId),
+    },
+  });
 }
 
 async function insertOutbox(

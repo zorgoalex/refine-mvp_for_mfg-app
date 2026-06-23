@@ -1122,6 +1122,44 @@ describe('assertOrderScope assigned-production-worker path', () => {
   });
 });
 
+describe('non-denied audit redaction via auditService.record', () => {
+  it('redacts JWT token in orderStatusName within after_json and metadata_json blobs', async () => {
+    // A JWT-like token in the order status name flows into afterJson.orderStatusName and
+    // metadataJson.orderStatusName in writeAudit.
+    // With the old inline INSERT: the JSON blobs are serialized raw — token is present.
+    // After replacing with auditService.record(): redactJson() applies JWT_PATTERN → [REDACTED].
+    //
+    // The status_name column ($17 in AUDIT_INSERT) holds the raw status name and is NOT a JSON
+    // blob — it is legitimately not redacted.  We check only the JSON blob params (after_json /
+    // metadata_json) which are the last 4 params in AUDIT_INSERT: indices 19..22 (0-based).
+    const secretToken =
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ';
+    const database = createDatabase({ orderStatusNameOverride: secretToken });
+    const repo = new PgProductionActionRepository(database.service);
+
+    await repo.changeOrderStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { orderStatusId: 7, version: 3, idempotencyKey: 'redaction-test-key-1' },
+      requestId: 'request-redaction-test',
+    });
+
+    const auditInsert = database.queries.find((q) =>
+      normalizeSql(q.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(auditInsert, 'audit_log INSERT must exist').toBeDefined();
+
+    // JSON blob params are the last 4 (before/after/diff/metadata) — always the trailing 4 params
+    const jsonBlobParams = auditInsert!.params.slice(-4);
+    const jsonBlobStr = JSON.stringify(jsonBlobParams);
+
+    // Within the JSON blobs, the raw token must be absent (redacted)
+    expect(jsonBlobStr).not.toContain(secretToken);
+    // [REDACTED] sentinel must appear in at least one JSON blob (after_json or metadata_json)
+    expect(jsonBlobStr).toContain('[REDACTED]');
+  });
+});
+
 describe('assigned-worker audit metadata across production commands', () => {
   it('changeProductionStatus stamps accessVia/assignmentSource into audit + outbox', async () => {
     const database = createDatabase({
@@ -1371,12 +1409,31 @@ describe('assigned-worker audit metadata across production commands', () => {
         normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
       );
       expect(auditQuery).toBeDefined();
-      // audit_log params: ...[6]=related_order_id, [12]=status_code, [16]=diff_json, [17]=metadata_json
-      expect(auditQuery!.params[0]).toBe('orders.detail_production_status_batch_change');
-      expect(Number(auditQuery!.params[6])).toBe(15); // related_order_id
-      expect(auditQuery!.params[12]).toBe('cut'); // status_code
-      const diff = JSON.parse(auditQuery!.params[16] as string);
-      const metadata = JSON.parse(auditQuery!.params[17] as string);
+      // Param column order is owned by the centralized audit writer; assert index-independently by
+      // scanning the params for the event literal and the JSON-encoded diff/metadata objects.
+      expect(auditQuery!.params).toContain('orders.detail_production_status_batch_change'); // event
+      expect(auditQuery!.params).toContain('cut'); // status_code
+      const jsonParams = auditQuery!.params
+        .filter((param): param is string => typeof param === 'string')
+        .map((param) => {
+          try {
+            return JSON.parse(param) as unknown;
+          } catch {
+            return null;
+          }
+        })
+        .filter(
+          (obj): obj is Record<string, unknown> =>
+            obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+        );
+      const diff = jsonParams.find(
+        (obj) => 'beforeStatusDistribution' in obj && 'changedDetailIds' in obj,
+      );
+      const metadata = jsonParams.find(
+        (obj) => obj.action === 'detail_production_status_batch_change',
+      );
+      expect(diff).toBeDefined();
+      expect(metadata).toBeDefined();
       expect(diff).toMatchObject({
         detailIds: [100, 101],
         changedDetailIds: [100, 101],
@@ -1385,8 +1442,8 @@ describe('assigned-worker audit metadata across production commands', () => {
         productionStatusId: 5,
         statusDistributionBasis: 'command-start-snapshot',
       });
-      expect(diff.beforeStatusDistribution).toEqual({ '1': 2 });
-      expect(diff.afterStatusDistribution).toEqual({ '5': 2 });
+      expect((diff as Record<string, unknown>).beforeStatusDistribution).toEqual({ '1': 2 });
+      expect((diff as Record<string, unknown>).afterStatusDistribution).toEqual({ '5': 2 });
       expect(metadata).toMatchObject({
         orderId: 15,
         clientId: 969,
@@ -1541,6 +1598,8 @@ function createDatabase(options: {
   recalcOrderProductionStatusId?: number | null;
   assignedUserIds?: Array<number | string>;
   updatedDetailIds?: number[];
+  /** Suffix appended to the fake order status name — used to inject a token for redaction tests */
+  orderStatusNameOverride?: string;
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
@@ -1609,7 +1668,10 @@ function createDatabase(options: {
       }
 
       if (normalized.startsWith('SELECT order_status_id, order_status_name')) {
-        return { rows: [{ order_status_id: params[0], order_status_name: 'Выдан' }], rowCount: 1 };
+        const statusName = options.orderStatusNameOverride
+          ? `Выдан ${options.orderStatusNameOverride}`
+          : 'Выдан';
+        return { rows: [{ order_status_id: params[0], order_status_name: statusName }], rowCount: 1 };
       }
 
       if (normalized.startsWith('SELECT payment_status_id, payment_status_name')) {

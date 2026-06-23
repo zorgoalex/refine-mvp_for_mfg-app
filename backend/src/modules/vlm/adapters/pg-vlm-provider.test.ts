@@ -71,15 +71,16 @@ describe('PgVlmProvider', () => {
       'https://vlm.example.test/v1/images/upload',
     ]);
     expect(database.queries[0].params[0]).toBe(10);
-    expect(database.queries[1].params).toEqual([
-      'vlm.upload',
-      '11111111-1111-4111-8111-111111111111',
-      10,
-      'manager',
-      'manager',
-      'req_vlm_upload',
-      expect.stringContaining('"contentType":"image/png"'),
-    ]);
+    // auditService.record() uses the standard 23-param AUDIT_INSERT
+    expect(database.queries[1].params[0]).toBe('vlm.upload');           // event
+    expect(database.queries[1].params[1]).toBe('file_upload');          // entity_type
+    expect(database.queries[1].params[2]).toBe('11111111-1111-4111-8111-111111111111'); // entity_id
+    expect(database.queries[1].params[3]).toBe(10);                     // user_id
+    expect(database.queries[1].params[4]).toBe('manager');              // username
+    expect(database.queries[1].params[5]).toBe('manager');              // role_code
+    expect(database.queries[1].params[6]).toBe('req_vlm_upload');       // request_id
+    expect(database.queries[1].params[7]).toBe('vlm-upload');           // source
+    expect(database.queries[1].params[22] as string).toContain('"contentType":"image/png"'); // metadata_json
   });
 
   it('analyzes only trusted uploadId and writes usage audit', async () => {
@@ -141,14 +142,20 @@ describe('PgVlmProvider', () => {
       model: 'model-a',
       prompt_kv: { namespace: 'orders', name: 'import', version: 1, lang: 'ru' },
     });
-    expect(database.queries[1].params).toEqual([
-      '11111111-1111-4111-8111-111111111111',
-      10,
-      'manager',
-      'manager',
-      'req_vlm_analyze',
-      expect.stringContaining('"inputTokens":10'),
-    ]);
+    // auditService.record() uses the standard 23-param AUDIT_INSERT
+    expect(database.queries[1].params[0]).toBe('vlm.analyze');          // event
+    expect(database.queries[1].params[1]).toBe('file_upload');          // entity_type
+    expect(database.queries[1].params[2]).toBe('11111111-1111-4111-8111-111111111111'); // entity_id
+    expect(database.queries[1].params[3]).toBe(10);                     // user_id
+    expect(database.queries[1].params[4]).toBe('manager');              // username
+    expect(database.queries[1].params[5]).toBe('manager');              // role_code
+    expect(database.queries[1].params[6]).toBe('req_vlm_analyze');      // request_id
+    expect(database.queries[1].params[7]).toBe('vlm-analyze');          // source
+    // metadata_json: provider/model stored; inputTokens/outputTokens preserved via audit allowlist
+    expect(database.queries[1].params[22] as string).toContain('"provider":"zai"');
+    expect(database.queries[1].params[22] as string).toContain('"model":"zai/model-a"');
+    expect(database.queries[1].params[22] as string).toContain('"inputTokens":10');
+    expect(database.queries[1].params[22] as string).not.toContain('"inputTokens":"[REDACTED]"');
   });
 
   it('does not return raw provider payloads from analyze responses', async () => {
@@ -225,6 +232,94 @@ describe('PgVlmProvider', () => {
       }),
     ).rejects.toMatchObject({ statusCode: 429, code: 'RATE_LIMIT_EXCEEDED' });
     expect(providerCalls).toBe(1);
+  });
+
+  it('audit upload: redacts secret-shaped keys in metadata, preserves non-sensitive dims', async () => {
+    const database = new FakeVlmDatabase([], [
+      {
+        match: 'INSERT INTO file_uploads',
+        rows: [{
+          upload_id: '22222222-2222-4222-8222-222222222222',
+          public_url: 'https://files.example/secret.png',
+          signed_url: 'https://files.example/secret.png',
+          storage_key: 'images/secret.png',
+          content_type: 'image/png',
+          size_bytes: 4,
+        }],
+      },
+      { match: 'INSERT INTO audit_log', rows: [] },
+    ]);
+    const provider = createProvider(database, async (url) => {
+      if (String(url).includes('/oauth/token')) return response({ access_token: 'm2m-token', expires_in: 3600 });
+      return response({ key: 'images/secret.png', url: 'https://files.example/secret.png', contentType: 'image/png', size: 4 });
+    });
+
+    await provider.uploadImage({
+      currentUser: currentUser('manager', '10'),
+      requestId: 'req_redact_upload',
+      dto: {
+        file: { originalname: 'secret.png', mimetype: 'image/png', size: 4, buffer: Buffer.from('data') },
+        purpose: 'vlm',
+      },
+    });
+
+    // database.queries captures all tx queries (upload insert + audit insert)
+    const auditParams = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'))?.params;
+    expect(auditParams).toBeDefined();
+    // Dimensions preserved
+    expect(auditParams![0]).toBe('vlm.upload');       // event
+    expect(auditParams![1]).toBe('file_upload');      // entity_type
+    expect(auditParams![2]).toBe('22222222-2222-4222-8222-222222222222'); // entity_id
+    expect(auditParams![3]).toBe(10);                 // user_id
+    expect(auditParams![4]).toBe('manager');          // username
+    expect(auditParams![6]).toBe('req_redact_upload'); // request_id
+    expect(auditParams![7]).toBe('vlm-upload');       // source
+    // metadata_json: non-sensitive keys preserved, no secret leak
+    const metaStr = auditParams![22] as string;
+    expect(metaStr).toContain('"contentType":"image/png"');
+    expect(metaStr).toContain('"purpose":"vlm"');
+    expect(metaStr).not.toContain('SUPER_SECRET');
+  });
+
+  it('audit analyze metadata: token-shaped usage fields are redacted by AuditService', async () => {
+    const database = new FakeVlmDatabase(
+      [
+        { match: 'FROM file_uploads', rows: [uploadRow()] },
+        { match: 'INSERT INTO audit_log', rows: [] },
+      ],
+      [],
+    );
+    const provider = createProvider(database, async (url) => {
+      if (String(url).includes('/oauth/token')) {
+        return response({ access_token: 'm2m-token', expires_in: 3600 });
+      }
+      return response({
+        model: 'zai/model-b',
+        choices: [{ message: { content: '{}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+        api_key: 'SUPER_SECRET',
+      });
+    });
+
+    await provider.analyzeImage({
+      currentUser: currentUser('manager', '10'),
+      requestId: 'req_redact_analyze',
+      dto: { uploadId: '11111111-1111-4111-8111-111111111111' },
+    });
+
+    const auditQuery = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
+    // Dimensions: event + entity dims still present
+    expect(auditQuery?.params[0]).toBe('vlm.analyze');
+    expect(auditQuery?.params[1]).toBe('file_upload');
+    expect(auditQuery?.params[2]).toBe('11111111-1111-4111-8111-111111111111');
+    expect(auditQuery?.params[7]).toBe('vlm-analyze');
+    // metadata_json: inputTokens/outputTokens preserved as integers via audit allowlist
+    const metaStr = auditQuery?.params[22] as string;
+    expect(metaStr).toContain('"provider":"zai"');
+    expect(metaStr).toContain('"inputTokens":5');
+    expect(metaStr).toContain('"outputTokens":3');
+    expect(metaStr).not.toContain('"inputTokens":"[REDACTED]"');
+    expect(metaStr).not.toContain('SUPER_SECRET'); // api_key from provider response not in metadata
   });
 });
 

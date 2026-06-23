@@ -27,10 +27,12 @@ interface FilmAggregation {
 export const OrderMaterialsTab: React.FC = () => {
   const { details } = useOrderFormStore();
 
-  // Загружаем справочники
+  // Загружаем справочники — gate: skip when no detail carries a legacy material_id (Variant B normal case)
+  const hasLegacyMaterialIds = details.some((d) => d.material_id != null);
   const { data: materialsData } = useList({
     resource: 'materials',
     pagination: { pageSize: 10000 },
+    queryOptions: { enabled: hasLegacyMaterialIds },
   });
 
   const { data: filmsData } = useList({
@@ -60,26 +62,24 @@ export const OrderMaterialsTab: React.FC = () => {
     const aggregation: Record<number, MaterialAggregation> = {};
 
     details.forEach((detail) => {
-      const materialId = detail.material_id;
-      if (!materialId) return;
+      const sheetTypeId = detail.sheet_material_type_id;
+      if (!sheetTypeId) return;
 
       const area = detail.area || 0;
 
-      if (!aggregation[materialId]) {
-        aggregation[materialId] = {
-          id: materialId,
-          // SP3: server-resolved COALESCE(sheet, material) name from the store;
-          // legacy details fall back to the materials map (unchanged).
+      if (!aggregation[sheetTypeId]) {
+        aggregation[sheetTypeId] = {
+          id: sheetTypeId,
           name:
             resolveDetailMaterialName(detail, undefined, materialsMap) ||
-            `ID: ${materialId}`,
+            `ID: ${sheetTypeId}`,
           totalArea: 0,
           detailsCount: 0,
         };
       }
 
-      aggregation[materialId].totalArea += area;
-      aggregation[materialId].detailsCount += 1;
+      aggregation[sheetTypeId].totalArea += area;
+      aggregation[sheetTypeId].detailsCount += 1;
     });
 
     return Object.values(aggregation).sort((a, b) => a.name.localeCompare(b.name));

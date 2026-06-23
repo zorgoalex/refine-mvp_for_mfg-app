@@ -6,6 +6,7 @@ import type {
   CutDetailPlacements,
   CutJobDto,
   CutSelectionCriteria,
+  CutSheetTypeOption,
   EligibleDetailsResponse,
 } from './types/cutApi.types';
 
@@ -49,6 +50,15 @@ export const cutApi = {
       body: JSON.stringify({ version }),
       headers: { 'Content-Type': 'application/json' },
     });
+  },
+
+  /**
+   * Variant B Task 11: list active sheet types for the /cut filter.
+   * Gated on cut.view only — no sheet_materials.view required.
+   * Sources from GET /api/v1/cut-jobs/sheet-types (not catalog API, not Hasura).
+   */
+  listSheetTypes(): Promise<CutSheetTypeOption[]> {
+    return httpClient.get<CutSheetTypeOption[]>(apiRoutes.cutJobs.sheetTypes);
   },
 
   /**
@@ -108,6 +118,13 @@ export const cutApi = {
   fetchJobPdf(cutJobId: number): Promise<CutPdfResult> {
     return downloadPdf(apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId)));
   },
+
+  async setProfile(cutJobId: number, paramProfileId: number | null, version: number): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.profile(validateCutJobId(cutJobId)), {
+      paramProfileId,
+      version,
+    });
+  },
 };
 
 export type CutPdfResult = { pending: true } | { pending: false; blob: Blob; fileName: string | null };
@@ -125,7 +142,7 @@ async function downloadPdf(path: string): Promise<CutPdfResult> {
 export function buildEligibleQuery(criteria: CutSelectionCriteria): string {
   const params = new URLSearchParams();
   appendCsv(params, 'orderIds', criteria.orderIds);
-  appendCsv(params, 'materialIds', criteria.materialIds);
+  appendCsv(params, 'sheetMaterialTypeIds', criteria.sheetMaterialTypeIds);
   appendCsv(params, 'filmIds', criteria.filmIds);
   appendCsv(params, 'productionStatusIds', criteria.productionStatusIds);
   return params.toString();

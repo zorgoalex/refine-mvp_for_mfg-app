@@ -15,10 +15,13 @@ export interface MillingTypeLookupDto extends IdNameLookupDto {
 // mirror and is_active so the picker can disable (not drop) a deactivated
 // currently-selected sheet type. Only attached when the caller has
 // sheet_materials.view (masked at the service layer).
+// Variant B: isCuttable=false marks header-only materials (e.g. «краска») that
+// must not appear in the DETAIL picker (only the HEADER picker may carry them).
 export interface SheetMaterialTypeLookupDto extends IdNameLookupDto {
   widthMm: number | null;
   heightMm: number | null;
   isActive: boolean;
+  isCuttable: boolean;
 }
 
 export interface StatusLookupDto extends IdNameLookupDto {

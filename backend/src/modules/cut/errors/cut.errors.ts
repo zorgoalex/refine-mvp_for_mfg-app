@@ -83,3 +83,9 @@ export class CutGroupSheetNotFoundError extends ApiError {
     });
   }
 }
+
+export class CutParamProfileNotFoundError extends ApiError {
+  constructor(profileId: number) {
+    super(422, 'CUT_PARAM_PROFILE_NOT_FOUND', 'Выбранный профиль раскроя не найден или неактивен', { profileId });
+  }
+}

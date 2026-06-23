@@ -83,11 +83,94 @@ describe('CutPage source guards', () => {
     expect(source).toContain('form.setFieldsValue');
   });
 
+  it('auto-loads small per-sheet layout previews for a ready job', () => {
+    // Ready jobs show an inline thumbnail per sheet (light 'thumb' preset),
+    // fetched automatically, click-to-enlarge.
+    expect(source).toContain("job.status !== 'ready'");
+    expect(source).toContain('loadThumb');
+    expect(source).toContain("'thumb'");
+    expect(source).toContain('sheetThumbs');
+  });
+
+  it('resets previews on recalculate and revokes blob URLs (no stale preview, no leak)', () => {
+    // Recalculate must clear thumbs+ref via the shared reset (otherwise a stale
+    // preview survives the dedupe), and blob URLs must be revoked on reset,
+    // overwrite, and unmount — /cut stays mounted (keep-alive) so leaks accrue.
+    expect(source).toContain('resetSheetViews');
+    expect(source).toContain('URL.revokeObjectURL');
+    const calc = source.slice(source.indexOf('const calculate'));
+    const body = calc.slice(0, calc.indexOf('}, [job'));
+    expect(body).toContain('resetSheetViews()');
+    // create switches job context -> must also reset/revoke prior previews.
+    const create = source.slice(source.indexOf('const createJob'));
+    expect(create.slice(0, create.indexOf('}, [form')).includes('resetSheetViews()')).toBe(true);
+    // In-flight sheet/thumb fetches are generation-gated: a late completion after
+    // a job switch/reset is discarded, never repopulating cleared maps.
+    expect(source).toContain('viewEpochRef');
+    expect(source).toContain('viewEpochRef.current !== epoch');
+  });
+
   it('refreshes the job after a failed calculate so the reason + fresh version show', () => {
     // The calculate catch must reload the job (persisted reason + bumped version),
     // otherwise the Alert never renders and a retry would 409 on a stale version.
     const calc = source.slice(source.indexOf('const calculate'));
     const body = calc.slice(0, calc.indexOf('}, [job'));
     expect(body).toMatch(/catch[\s\S]*cutApi\.get\(/);
+  });
+
+  it('Variant B: cut filter sends sheetMaterialTypeIds (not materialIds)', () => {
+    // Post-034 the filter key is sheetMaterialTypeIds; materialIds must not be sent.
+    expect(source).toContain('sheetMaterialTypeIds');
+    expect(source).not.toContain('materialIds');
+  });
+
+  it('Variant B: cut filter does NOT depend on useBackendOrdersWrite or sheet_materials.* perms', () => {
+    // The /cut page is gated on cut.view/cut.manage only (Critic R22 B3).
+    // It must never check orders-write or catalog-level sheet perms.
+    expect(source).not.toContain('useBackendOrdersWrite');
+    expect(source).not.toMatch(/can\(['"]sheet_materials/);
+  });
+
+  // Variant B Task 11: sheet filter is a Select driven by useCutSheetTypeOptions (not a CSV Input).
+  it('Variant B Task 11: imports and uses useCutSheetTypeOptions for the sheet filter Select', () => {
+    expect(source).toContain('useCutSheetTypeOptions');
+    expect(source).toContain('sheetFilterEnabled');
+    expect(source).toContain('sheetTypeOptions');
+    // The filter must use a Select (not a raw Input for sheet types).
+    expect(source).toContain('cut-sheet-type-filter');
+    // Must NOT directly call the sheet-materials catalog API from the cut page.
+    expect(source).not.toContain('sheetMaterialsApi');
+    expect(source).not.toContain('/sheet-material-types');
+  });
+
+  it('Variant B Task 11: sheetMaterialTypeIds from form are forwarded as number[] (Select), not CSV string', () => {
+    // criteriaFromForm must handle number[] from the Select (not parseIdCsv for sheet types).
+    expect(source).toContain('sheetMaterialTypeIds');
+    // The array handling must be present (not relying on parseIdCsv for sheet types).
+    expect(source).toContain('values.sheetMaterialTypeIds');
+  });
+
+  it('INELIGIBLE_LABELS covers not_cuttable so a non-cuttable detail shows a human label, not raw text (critic R4 MAJOR)', () => {
+    // The label map must include all four ineligibility reasons so no raw reason key
+    // leaks into the UI when the backend returns not_cuttable for a non-cuttable sheet type.
+    expect(source).toContain("not_cuttable:");
+    // The label value must be a non-empty Russian string.
+    const match = source.match(/not_cuttable:\s*['"]([^'"]+)['"]/);
+    expect(match).not.toBeNull();
+    expect(match![1].length).toBeGreaterThan(2);
+  });
+});
+
+describe('CutPage profile + totals columns (source guard)', () => {
+  it('renames the positions column and adds totals/profile/sheets columns', () => {
+    expect(source).toContain("title: 'Позиции'");
+    expect(source).toContain("title: 'Деталей'");
+    expect(source).toContain("title: 'Площадь, итого'");
+    expect(source).toContain("title: 'Кол-во листов раскроя'");
+    expect(source).toContain("title: 'Профиль'");
+    expect(source).not.toContain("title: 'Детали'");
+  });
+  it('wires the profile selector to setProfile', () => {
+    expect(source).toContain('cutApi.setProfile');
   });
 });

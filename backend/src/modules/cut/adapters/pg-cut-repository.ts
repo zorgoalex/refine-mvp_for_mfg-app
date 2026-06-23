@@ -29,6 +29,7 @@ import {
 import { ApiError } from '../../../common/errors/api-error';
 import { type CutConfigPort } from '../application/cut-config';
 import { PgCutConfigRepository } from './pg-cut-config-repository';
+import { resolveCalcParams } from './resolve-calc-params';
 import type {
   AddCutItemsCommand,
   ArchiveCutJobCommand,
@@ -44,6 +45,7 @@ import type {
   RenderJobPdfQuery,
   RenderSheetPngQuery,
   RenderSheetSvgQuery,
+  SetCutJobProfileCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
@@ -52,10 +54,12 @@ import type {
   CutGroupDto,
   CutJobDto,
   CutJobRefDto,
+  CutJobTotals,
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
-import { buildSheetSvg, computeGroupItemQuantities, formatPieceLabel } from '../render/sheet-svg';
+import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, type TotalsRow } from './cut-totals';
+import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import { buildSheetsPdf } from '../render/sheet-pdf';
 import {
@@ -67,6 +71,7 @@ import {
   CutNoItemsError,
   CutNoSheetSpecError,
   CutOrderDetailNotFoundError,
+  CutParamProfileNotFoundError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
 
@@ -86,13 +91,17 @@ const AUDIT_SOURCE = 'backend-cut-command';
  */
 const MUTABLE_STATUSES = new Set(['draft', 'calculating', 'ready', 'failed']);
 
+/** Profile selection is editable while the basket can still be (re)calculated,
+ *  but NOT mid-calculation (the running solve already locked its params) and not
+ *  on an archived job. */
+const PROFILE_EDITABLE_STATUSES = new Set(['draft', 'ready', 'failed']);
+
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
 interface CalcRelatedDimensions {
   orderIds: number[];
-  materialIds: number[];
   sheetMaterialTypeIds: number[];
 }
-const EMPTY_RELATED: CalcRelatedDimensions = { orderIds: [], materialIds: [], sheetMaterialTypeIds: [] };
+const EMPTY_RELATED: CalcRelatedDimensions = { orderIds: [], sheetMaterialTypeIds: [] };
 
 interface FreecutClientLike {
   optimize: (
@@ -109,6 +118,7 @@ interface CutJobLockRow extends QueryResultRow {
   version: string | number;
   pdf_prewarm_state: string;
   params: Record<string, unknown> | null;
+  param_profile_id: string | number | null;
 }
 
 interface CalcItemRow extends QueryResultRow {
@@ -124,6 +134,13 @@ interface CalcItemRow extends QueryResultRow {
   film_texture: boolean | null;
   smt_width_mm: string | number | null;
   smt_height_mm: string | number | null;
+}
+
+/** Idempotency key for the profile-changed outbox event. Stable for a given
+ *  (job, request) so a transport-level duplicate of the SAME request can't emit
+ *  two events; falls back to the version when no requestId is supplied. */
+export function profileChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.profileChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 export class PgCutRepository implements CutRepositoryPort {
@@ -183,11 +200,13 @@ export class PgCutRepository implements CutRepositoryPort {
 
       const readyStatusIds = await this.resolveReadyStatusIds();
       const reservedOrderIds: number[] = [];
+      const reservedSheetTypeIds: number[] = [];
       let insertedCount = 0;
       for (const detailId of command.dto.detailIds ?? []) {
-        const { orderId, inserted } = await this.reserveDetail(tx, cutJobId, detailId, readyStatusIds);
+        const { orderId, sheetMaterialTypeId, inserted } = await this.reserveDetail(tx, cutJobId, detailId, readyStatusIds);
         if (inserted) {
           reservedOrderIds.push(orderId);
+          if (sheetMaterialTypeId !== null) reservedSheetTypeIds.push(sheetMaterialTypeId);
           insertedCount += 1;
         }
       }
@@ -196,7 +215,7 @@ export class PgCutRepository implements CutRepositoryPort {
         event: CUT_AUDIT_EVENTS.created,
         cutJobId,
         requestId: command.requestId,
-        related: { orderIds: reservedOrderIds },
+        related: { orderIds: reservedOrderIds, sheetMaterialTypeIds: reservedSheetTypeIds },
         metadata: { detailCount: insertedCount },
       });
 
@@ -213,11 +232,13 @@ export class PgCutRepository implements CutRepositoryPort {
 
       const readyStatusIds = await this.resolveReadyStatusIds();
       const reservedOrderIds: number[] = [];
+      const reservedSheetTypeIds: number[] = [];
       const insertedDetailIds: number[] = [];
       for (const detailId of command.dto.detailIds) {
-        const { orderId, inserted } = await this.reserveDetail(tx, command.cutJobId, detailId, readyStatusIds);
+        const { orderId, sheetMaterialTypeId, inserted } = await this.reserveDetail(tx, command.cutJobId, detailId, readyStatusIds);
         if (inserted) {
           reservedOrderIds.push(orderId);
+          if (sheetMaterialTypeId !== null) reservedSheetTypeIds.push(sheetMaterialTypeId);
           insertedDetailIds.push(detailId);
         }
       }
@@ -234,7 +255,7 @@ export class PgCutRepository implements CutRepositoryPort {
         event: CUT_AUDIT_EVENTS.itemAdded,
         cutJobId: command.cutJobId,
         requestId: command.requestId,
-        related: { orderIds: reservedOrderIds },
+        related: { orderIds: reservedOrderIds, sheetMaterialTypeIds: reservedSheetTypeIds },
         metadata: { detailIds: insertedDetailIds },
       });
 
@@ -249,25 +270,32 @@ export class PgCutRepository implements CutRepositoryPort {
       assertVersion(job, command.version);
       assertMutable(job);
 
-      const released = await tx.query<{ order_id: string | number; order_detail_id: string | number }>(
+      const released = await tx.query<{ order_id: string | number; order_detail_id: string | number; sheet_material_type_id: string | number | null }>(
         `
-        UPDATE cut_job_item
+        UPDATE cut_job_item cji
         SET is_active = false, updated_at = now()
-        WHERE cut_job_item_id = $1 AND cut_job_id = $2 AND is_active = true
-        RETURNING order_id, order_detail_id
+        FROM order_details od
+        WHERE cji.cut_job_item_id = $1 AND cji.cut_job_id = $2 AND cji.is_active = true
+          AND od.detail_id = cji.order_detail_id
+        RETURNING cji.order_id, cji.order_detail_id, od.sheet_material_type_id
         `,
         [command.cutJobItemId, command.cutJobId],
       );
       if (released.rowCount === 0) {
         throw new CutJobItemNotFoundError(command.cutJobItemId);
       }
+      const removedRow = released.rows[0];
+      const removedSheetTypeId = removedRow.sheet_material_type_id === null ? null : toNum(removedRow.sheet_material_type_id);
 
       await bumpVersion(tx, command.cutJobId);
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.itemRemoved,
         cutJobId: command.cutJobId,
         requestId: command.requestId,
-        related: { orderIds: [toNum(released.rows[0].order_id)] },
+        related: {
+          orderIds: [toNum(removedRow.order_id)],
+          sheetMaterialTypeIds: removedSheetTypeId !== null ? [removedSheetTypeId] : [],
+        },
         metadata: { cutJobItemId: command.cutJobItemId },
       });
 
@@ -313,19 +341,29 @@ export class PgCutRepository implements CutRepositoryPort {
       const groups = [...groupByCuttableKey(items).values()];
       phase1Related = {
         orderIds: groups.flatMap((g) => g.orderIds),
-        materialIds: groups.flatMap((g) => g.materialIds),
         sheetMaterialTypeIds: groups
           .map((g) => g.sheetMaterialTypeId)
           .filter((id): id is number => id !== null),
       };
-      // Use the job's params snapshot (taken at createJob) — never the CURRENT
-      // config defaults — so a config edit after creation can't retro-mutate this
-      // calculation (§4a). Legacy jobs without a snapshot fall back to defaults.
-      const params = (
-        job.params && Object.keys(job.params).length > 0
-          ? job.params
-          : await this.config.getDefaultParams()
-      ) as FreecutParams;
+      // Resolve params from the job's chosen profile, or fall back to the
+      // create-time snapshot (or runtime defaults for legacy jobs with no snapshot).
+      // A non-null chosen profile that is inactive/missing is REJECTED with 422 —
+      // never silently substituted — because the UI shows the chosen profile and
+      // substituting surprise params would violate stale-safety. The operator must
+      // clear or re-pick an active profile.
+      let profileParams: FreecutParams | null = null;
+      if (job.paramProfileId !== null) {
+        profileParams = await this.config.getParamsByProfileId(job.paramProfileId);
+        if (profileParams === null) {
+          throw new CutParamProfileNotFoundError(job.paramProfileId);
+        }
+      }
+      const params = resolveCalcParams({
+        profileId: job.paramProfileId,
+        jobParams: (job.params ?? null) as FreecutParams | null,
+        profileParams,
+        defaultParams: await this.config.getDefaultParams(),
+      });
       const grainRules = await this.config.getGrainRules();
 
       const groupPreps = groups.map((group) => {
@@ -381,7 +419,6 @@ export class PgCutRepository implements CutRepositoryPort {
 
     // Related dimensions aggregated across ALL groups (audit query/report-ready).
     const allOrderIds = prep.groupPreps.flatMap((p) => p.group.orderIds);
-    const allMaterialIds = prep.groupPreps.flatMap((p) => p.group.materialIds);
     const allSheetMaterialTypeIds = prep.groupPreps.map((p) => p.group.sheetMaterialTypeId as number);
 
     // Phase 2 — external freecut calls (no DB lock held), one per group.
@@ -401,7 +438,7 @@ export class PgCutRepository implements CutRepositoryPort {
       await this.markCalcFailed(
         error,
         command,
-        { orderIds: allOrderIds, materialIds: allMaterialIds, sheetMaterialTypeIds: allSheetMaterialTypeIds },
+        { orderIds: allOrderIds, sheetMaterialTypeIds: allSheetMaterialTypeIds },
         prep.expectedVersion,
       );
     }
@@ -474,10 +511,10 @@ export class PgCutRepository implements CutRepositoryPort {
       await tx.query(
         `
         UPDATE cut_job
-        SET status = 'ready', request_hash = $2, params = $3::jsonb, version = version + 1, updated_at = now()
+        SET status = 'ready', request_hash = $2, version = version + 1, updated_at = now()
         WHERE cut_job_id = $1
         `,
-        [command.cutJobId, requestHash, JSON.stringify(prep.params)],
+        [command.cutJobId, requestHash],
       );
 
       await this.audit(tx, command.currentUser, {
@@ -486,7 +523,6 @@ export class PgCutRepository implements CutRepositoryPort {
         requestId: command.requestId,
         related: {
           orderIds: allOrderIds,
-          materialIds: allMaterialIds,
           sheetMaterialTypeIds: allSheetMaterialTypeIds,
           cutGroupIds,
         },
@@ -605,11 +641,14 @@ export class PgCutRepository implements CutRepositoryPort {
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, command.version);
 
-      const released = await tx.query<{ order_id: string | number }>(
+      const released = await tx.query<{ order_id: string | number; sheet_material_type_id: string | number | null }>(
         `
-        UPDATE cut_job_item SET is_active = false, updated_at = now()
-        WHERE cut_job_id = $1 AND is_active = true
-        RETURNING order_id
+        UPDATE cut_job_item cji
+        SET is_active = false, updated_at = now()
+        FROM order_details od
+        WHERE cji.cut_job_id = $1 AND cji.is_active = true
+          AND od.detail_id = cji.order_detail_id
+        RETURNING cji.order_id, od.sheet_material_type_id
         `,
         [command.cutJobId],
       );
@@ -618,11 +657,21 @@ export class PgCutRepository implements CutRepositoryPort {
         [command.cutJobId],
       );
 
+      const archivedSheetTypeIds = [
+        ...new Set(
+          released.rows
+            .map((row) => (row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id)))
+            .filter((id): id is number => id !== null),
+        ),
+      ];
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.archived,
         cutJobId: command.cutJobId,
         requestId: command.requestId,
-        related: { orderIds: released.rows.map((row) => toNum(row.order_id)) },
+        related: {
+          orderIds: released.rows.map((row) => toNum(row.order_id)),
+          sheetMaterialTypeIds: archivedSheetTypeIds,
+        },
         metadata: { releasedCount: released.rowCount ?? 0 },
       });
 
@@ -649,10 +698,12 @@ export class PgCutRepository implements CutRepositoryPort {
       `SELECT cut_job_id FROM cut_job WHERE ${conditions.join(' AND ')} ORDER BY cut_job_id DESC LIMIT 200`,
       params,
     );
+    const ids = result.rows.map((row) => toNum(row.cut_job_id));
+    const totalsById = await computeTotals(this.database, ids);
     const jobs: CutJobDto[] = [];
-    for (const row of result.rows) {
+    for (const id of ids) {
       // List only renders item/group counts -> skip the per-item detail joins.
-      jobs.push(await loadJob(this.database, toNum(row.cut_job_id), false));
+      jobs.push(await loadJob(this.database, id, false, totalsById.get(id)));
     }
     return jobs;
   }
@@ -669,7 +720,7 @@ export class PgCutRepository implements CutRepositoryPort {
       }
     };
     addArrayFilter('od.order_id', query.criteria.orderIds);
-    addArrayFilter('od.material_id', query.criteria.materialIds);
+    addArrayFilter('od.sheet_material_type_id', query.criteria.sheetMaterialTypeIds);
     addArrayFilter('od.film_id', query.criteria.filmIds);
     if (query.criteria.productionStatusIds && query.criteria.productionStatusIds.length > 0) {
       // Operator override: explicit status filter wins over the ready-set default.
@@ -690,10 +741,11 @@ export class PgCutRepository implements CutRepositoryPort {
     const result = await this.database.query<EligibleRow>(
       `
       SELECT od.detail_id, od.order_id, od.quantity, od.material_id,
-             COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id,
-             od.film_id, od.production_status_id, od.delete_flag
+             od.sheet_material_type_id,
+             od.film_id, od.production_status_id, od.delete_flag,
+             s.is_cuttable
       FROM order_details od
-      JOIN materials m ON m.material_id = od.material_id
+      LEFT JOIN sheet_material_types s ON s.sheet_material_type_id = od.sheet_material_type_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY od.detail_id
       LIMIT 2000
@@ -716,6 +768,11 @@ export class PgCutRepository implements CutRepositoryPort {
         deleteFlag: Boolean(row.delete_flag),
         productionStatusId: row.production_status_id === null ? null : toNum(row.production_status_id),
         sheetMaterialTypeId: row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id),
+        // When sheet_material_type_id is null (no_sheet_spec path), is_cuttable comes
+        // back null from the LEFT JOIN. Default to true so the not_cuttable guard never
+        // fires before no_sheet_spec handles the missing-spec case.
+        // Also treat undefined (absent column in test stubs) as true for the same reason.
+        isCuttable: row.is_cuttable == null ? true : Boolean(row.is_cuttable),
       };
       const { eligible, reason } = classifyDetailEligibility(candidate, { readyStatusIds });
       if (reason === 'no_sheet_spec') {
@@ -726,7 +783,7 @@ export class PgCutRepository implements CutRepositoryPort {
         orderDetailId: candidate.detailId,
         orderId: toNum(row.order_id),
         quantity: toNum(row.quantity),
-        materialId: toNum(row.material_id),
+        materialId: row.material_id === null || row.material_id === undefined ? null : toNum(row.material_id),
         sheetMaterialTypeId: candidate.sheetMaterialTypeId,
         filmId: row.film_id === null ? null : toNum(row.film_id),
         eligible,
@@ -796,11 +853,10 @@ export class PgCutRepository implements CutRepositoryPort {
       `
       SELECT od.detail_id
       FROM order_details od
-      JOIN materials m ON m.material_id = od.material_id
       WHERE od.detail_id = ANY($1::bigint[])
         AND od.delete_flag = false
         AND od.production_status_id = ANY($2::smallint[])
-        AND COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) IS NOT NULL
+        AND od.sheet_material_type_id IS NOT NULL
       `,
       [[...detailIds], readyStatusIds],
     );
@@ -899,6 +955,36 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   /**
+   * Cut-gated sheet-type lookup (Variant B Task 11). Returns the minimal set of
+   * fields needed for the /cut filter: id, name, dims, is_cuttable.
+   * Active types only — inactive types are not selectable as cut criteria.
+   * No cut.manage or sheet_materials.view required — cut.view is sufficient.
+   */
+  async listSheetTypesForCut(
+    _query: import('../application/cut-command.types').ListSheetTypesForCutQuery,
+  ): Promise<import('../application/cut-command.types').CutSheetTypeOption[]> {
+    const result = await this.database.query<{
+      sheet_material_type_id: string | number;
+      name: string;
+      width_mm: string | number;
+      height_mm: string | number;
+      is_cuttable: boolean | null;
+    }>(
+      `SELECT sheet_material_type_id, name, width_mm, height_mm, is_cuttable
+       FROM sheet_material_types
+       WHERE is_active = true AND is_cuttable = true
+       ORDER BY name`,
+    );
+    return result.rows.map((row) => ({
+      sheetMaterialTypeId: toNum(row.sheet_material_type_id),
+      name: row.name,
+      widthMm: toNum(row.width_mm),
+      heightMm: toNum(row.height_mm),
+      isCuttable: row.is_cuttable == null ? true : Boolean(row.is_cuttable),
+    }));
+  }
+
+  /**
    * Load every sheet of a group as a ready-to-render SVG, with a per-group label
    * context (order/detail + "instance N/qty"). Shared by PNG/SVG/PDF render.
    */
@@ -923,11 +1009,18 @@ export class PgCutRepository implements CutRepositoryPort {
       orderByDetail.set(toNum(row.order_detail_id), toNum(row.order_id));
     }
 
-    const labelFor = (piece: FreecutPlacement): string => {
+    const labelFor = (piece: FreecutPlacement): string[] => {
       const detailId = parseFreecutItemId(piece.item_id);
       const orderId = detailId === null ? null : orderByDetail.get(detailId) ?? null;
-      const base = orderId !== null ? `№${orderId}-${detailId}` : `${piece.item_id}`;
-      return formatPieceLabel(base, piece.instance, quantities.get(piece.item_id) ?? 1);
+      // Order on line 1, detail (+ instance N/qty) on line 2 — rendered as
+      // separate <tspan> lines by buildSheetSvg.
+      return composePieceLabelLines({
+        orderId,
+        detailId,
+        itemId: piece.item_id,
+        instance: piece.instance,
+        qty: quantities.get(piece.item_id) ?? 1,
+      });
     };
 
     return {
@@ -944,21 +1037,23 @@ export class PgCutRepository implements CutRepositoryPort {
     cutJobId: number,
     detailId: number,
     readyStatusIds: readonly number[],
-  ): Promise<{ orderId: number; inserted: boolean }> {
-    // Resolve the detail WITH its eligibility inputs (status + sheet spec) so the
-    // backend enforces eligibility itself — never trusting the frontend's list
-    // (Critic BLOCKER). delete_flag / wrong_status / no_sheet_spec are rejected here.
+  ): Promise<{ orderId: number; sheetMaterialTypeId: number | null; inserted: boolean }> {
+    // Resolve the detail WITH its eligibility inputs (status + sheet spec + is_cuttable)
+    // so the backend enforces eligibility itself — never trusting the frontend's list
+    // (Critic BLOCKER). delete_flag / wrong_status / not_cuttable / no_sheet_spec are
+    // rejected here.
     const detail = await tx.query<{
       order_id: string | number;
       quantity: string | number;
       production_status_id: number | null;
       delete_flag: boolean;
       sheet_material_type_id: string | number | null;
+      is_cuttable: boolean | null;
     }>(
       `SELECT od.order_id, od.quantity, od.production_status_id, od.delete_flag,
-              COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id
+              od.sheet_material_type_id, s.is_cuttable
        FROM order_details od
-       JOIN materials m ON m.material_id = od.material_id
+       LEFT JOIN sheet_material_types s ON s.sheet_material_type_id = od.sheet_material_type_id
        WHERE od.detail_id = $1`,
       [detailId],
     );
@@ -966,12 +1061,14 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new CutOrderDetailNotFoundError(detailId);
     }
     const row = detail.rows[0];
+    const sheetMaterialTypeId = row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id);
     const eligibility = classifyDetailEligibility(
       {
         detailId,
         deleteFlag: row.delete_flag,
         productionStatusId: row.production_status_id === null ? null : toNum(row.production_status_id),
-        sheetMaterialTypeId: row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id),
+        sheetMaterialTypeId,
+        isCuttable: row.is_cuttable == null ? true : Boolean(row.is_cuttable),
       },
       { readyStatusIds },
     );
@@ -994,7 +1091,7 @@ export class PgCutRepository implements CutRepositoryPort {
       `,
       [cutJobId, detailId, orderId, quantity, freecutItemId(detailId)],
     );
-    return { orderId, inserted: (insert.rowCount ?? 0) > 0 };
+    return { orderId, sheetMaterialTypeId, inserted: (insert.rowCount ?? 0) > 0 };
   }
 
   private async resolveReadyStatusIds(): Promise<number[]> {
@@ -1015,11 +1112,13 @@ export class PgCutRepository implements CutRepositoryPort {
       requestId?: string;
       related?: {
         orderIds?: number[];
-        materialIds?: Array<number | null>;
         sheetMaterialTypeIds?: Array<number | null>;
         cutGroupIds?: number[];
       };
       metadata?: Record<string, unknown> | null;
+      before?: Record<string, unknown> | null;
+      after?: Record<string, unknown> | null;
+      diff?: Record<string, unknown> | null;
     },
   ): Promise<void> {
     const actor: CutAuditActor = {
@@ -1037,13 +1136,84 @@ export class PgCutRepository implements CutRepositoryPort {
         source: AUDIT_SOURCE,
         related: {
           orderIds: cleanIds(input.related?.orderIds),
-          materialIds: cleanIds(input.related?.materialIds),
           sheetMaterialTypeIds: cleanIds(input.related?.sheetMaterialTypeIds),
           cutGroupIds: cleanIds(input.related?.cutGroupIds),
         },
         metadata: input.metadata ?? null,
+        before: input.before ?? null,
+        after: input.after ?? null,
+        diff: input.diff ?? null,
       }),
     );
+  }
+
+  setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ cut_job_id: string | number; status: string; version: string | number; param_profile_id: string | number | null }>(
+        `SELECT cut_job_id, status, version, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      if (command.paramProfileId !== null) {
+        const exists = await tx.query(
+          `SELECT 1 FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true LIMIT 1`,
+          [command.paramProfileId],
+        );
+        if (exists.rows.length === 0) throw new CutParamProfileNotFoundError(command.paramProfileId);
+      }
+      const beforeProfileId = row.param_profile_id === null ? null : toNum(row.param_profile_id);
+
+      // No-op short-circuit (fixes [AUDIT-DEBT]/[NOTIFICATION-DEBT]): an unchanged
+      // selection must NOT bump version, write audit, or emit an outbox event —
+      // mirrors the repo's existing no-op handling and prevents fake
+      // profile_changed rows + needless stale-version conflicts on replays.
+      if (beforeProfileId === command.paramProfileId) {
+        return loadJob(tx, command.cutJobId);
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET param_profile_id = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, command.paramProfileId],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.profileChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { paramProfileId: beforeProfileId },
+        after: { paramProfileId: command.paramProfileId },
+        metadata: { beforeProfileId, afterProfileId: command.paramProfileId },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.profileChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeProfileId,
+            afterProfileId: command.paramProfileId,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          profileChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+
+      return loadJob(tx, command.cutJobId);
+    });
   }
 }
 
@@ -1051,11 +1221,13 @@ interface EligibleRow extends QueryResultRow {
   detail_id: string | number;
   order_id: string | number;
   quantity: string | number;
-  material_id: string | number;
+  material_id: string | number | null;
   sheet_material_type_id: string | number | null;
   film_id: string | number | null;
   production_status_id: string | number | null;
   delete_flag: boolean;
+  /** NULL when sheet_material_type_id is NULL (LEFT JOIN produces no row). */
+  is_cuttable: boolean | null;
 }
 
 interface CuttableGroup {
@@ -1065,7 +1237,6 @@ interface CuttableGroup {
   smtWidthMm: number | null;
   smtHeightMm: number | null;
   orderIds: number[];
-  materialIds: number[];
   items: Array<{ orderDetailId: number; orderId: number; qty: number; widthMm: number; heightMm: number; filmTexture: boolean | null }>;
 }
 
@@ -1084,16 +1255,12 @@ function groupByCuttableKey(rows: CalcItemRow[]): Map<string, CuttableGroup> {
         smtWidthMm: row.smt_width_mm === null ? null : toNum(row.smt_width_mm),
         smtHeightMm: row.smt_height_mm === null ? null : toNum(row.smt_height_mm),
         orderIds: [],
-        materialIds: [],
         items: [],
       };
       groups.set(key, group);
     }
     const orderId = toNum(row.order_id);
     group.orderIds.push(orderId);
-    if (row.material_id !== undefined && row.material_id !== null) {
-      group.materialIds.push(toNum(row.material_id));
-    }
     group.items.push({
       orderDetailId: toNum(row.order_detail_id),
       orderId,
@@ -1111,12 +1278,11 @@ async function loadCalcItems(tx: TransactionClient, cutJobId: number): Promise<C
     `
     SELECT cji.cut_job_item_id, cji.order_detail_id, cji.order_id, cji.qty,
            od.width AS width_mm, od.height AS height_mm, od.material_id,
-           COALESCE(od.sheet_material_type_id, m.sheet_material_type_id) AS sheet_material_type_id, od.film_id, f.film_texture,
+           od.sheet_material_type_id, od.film_id, f.film_texture,
            smt.width_mm AS smt_width_mm, smt.height_mm AS smt_height_mm
     FROM cut_job_item cji
     JOIN order_details od ON od.detail_id = cji.order_detail_id
-    JOIN materials m ON m.material_id = od.material_id
-    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = COALESCE(od.sheet_material_type_id, m.sheet_material_type_id)
+    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
     LEFT JOIN films f ON f.film_id = od.film_id
     WHERE cji.cut_job_id = $1 AND cji.is_active = true
     ORDER BY cji.cut_job_item_id
@@ -1133,9 +1299,10 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   source: string;
   version: number;
   params: Record<string, unknown> | null;
+  paramProfileId: number | null;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -1149,6 +1316,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     source: row.source,
     version: toNum(row.version),
     params: row.params,
+    paramProfileId: row.param_profile_id === null || row.param_profile_id === undefined ? null : toNum(row.param_profile_id),
   };
 }
 
@@ -1180,6 +1348,7 @@ interface JobRow extends QueryResultRow {
   pdf_prewarm_state: string;
   failure_code: string | null;
   failure_reason: string | null;
+  param_profile_id: string | number | null;
 }
 
 interface ItemRow extends QueryResultRow {
@@ -1304,19 +1473,42 @@ interface SheetRow extends QueryResultRow {
   placements: SheetPlacementsJson;
 }
 
+async function computeTotals(client: DatabaseClient, cutJobIds: number[]): Promise<Map<number, CutJobTotals>> {
+  const out = new Map<number, CutJobTotals>();
+  for (const id of cutJobIds) out.set(id, { positions: 0, details: 0, area: 0, sheets: 0 });
+  if (cutJobIds.length === 0) return out;
+  // SEQUENTIAL, not Promise.all: loadJob/computeTotals run inside command
+  // transactions on a single pg client/connection. Two concurrent queries on one
+  // connection corrupt the wire protocol — await them one at a time.
+  const agg = await client.query<TotalsRow & { cut_job_id: string | number }>(TOTALS_BY_JOB_SQL, [cutJobIds]);
+  const sheets = await client.query<{ cut_job_id: string | number; sheets: string | number }>(SHEETS_BY_JOB_SQL, [cutJobIds]);
+  for (const row of agg.rows) {
+    const id = toNum(row.cut_job_id);
+    out.set(id, mapTotalsRow({ ...row, sheets: out.get(id)?.sheets ?? 0 }));
+  }
+  for (const row of sheets.rows) {
+    const id = toNum(row.cut_job_id);
+    const cur = out.get(id) ?? { positions: 0, details: 0, area: 0, sheets: 0 };
+    out.set(id, { ...cur, sheets: toNum(row.sheets) });
+  }
+  return out;
+}
+
 async function loadJob(
   client: DatabaseClient,
   cutJobId: number,
   includeItemDetails = true,
+  totals?: CutJobTotals,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
   if (!jobRow) {
     throw new CutJobNotFoundError(cutJobId);
   }
+  const resolvedTotals = totals ?? (await computeTotals(client, [cutJobId])).get(cutJobId)!;
 
   // The list view only needs item counts, so it opts out of the dictionary joins
   // (it loads up to 200 jobs); single-job reads enrich each item with full detail.
@@ -1364,6 +1556,8 @@ async function loadJob(
     pdfPrewarmState: jobRow.pdf_prewarm_state,
     failureCode: jobRow.failure_code,
     failureReason: jobRow.failure_reason,
+    paramProfileId: jobRow.param_profile_id === null || jobRow.param_profile_id === undefined ? null : toNum(jobRow.param_profile_id),
+    totals: resolvedTotals,
     items: itemsResult.rows.map((row) => ({
       cutJobItemId: toNum(row.cut_job_item_id),
       orderDetailId: toNum(row.order_detail_id),

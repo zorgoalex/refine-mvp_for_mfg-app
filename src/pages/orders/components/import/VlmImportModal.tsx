@@ -66,10 +66,12 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
   });
 
-  const { data: materialsData } = useList({
-    resource: 'materials',
+  // Variant B: material resolution uses sheet_material_types (cuttable only)
+  const { data: sheetMaterialTypesData } = useList({
+    resource: 'sheet_material_types',
     pagination: { pageSize: 10000 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    meta: { fields: ['sheet_material_type_id', 'name', 'is_cuttable'] },
   });
 
   const { data: millingTypesData } = useList({
@@ -89,17 +91,19 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
         id: item.film_id,
         name: item.film_name,
       })),
-      materials: (materialsData?.data || []).map((item: any) => ({
-        id: item.material_id,
-        name: item.material_name,
-      })),
       millingTypes: (millingTypesData?.data || []).map((item: any) => ({
         id: item.milling_type_id,
         name: item.milling_type_name,
       })),
+      // Variant B: material resolution uses sheet_material_types
+      sheetMaterialTypes: (sheetMaterialTypesData?.data || []).map((item: any) => ({
+        id: item.sheet_material_type_id,
+        name: item.name,
+        isCuttable: item.is_cuttable != null ? Boolean(item.is_cuttable) : true,
+      })),
     };
     importValidation.setReferenceData(refData);
-  }, [edgeTypesData, filmsData, materialsData, millingTypesData]);
+  }, [edgeTypesData, filmsData, sheetMaterialTypesData, millingTypesData]);
 
   const currentStepIndex = STEPS.findIndex(s => s.key === currentStep);
 
@@ -170,7 +174,9 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
         area,
         edge_type_id: row.edge_type_id || IMPORT_DEFAULTS.edge_type_id,
         film_id: row.film_id || null,
-        material_id: row.material_id || IMPORT_DEFAULTS.material_id,
+        // Variant B: material_id is always null; sheet_material_type_id carries the reference
+        material_id: null,
+        sheet_material_type_id: row.sheet_material_type_id || null,
         milling_type_id: row.milling_type_id || IMPORT_DEFAULTS.milling_type_id,
         priority: IMPORT_DEFAULTS.priority,
         note: row.note || null,

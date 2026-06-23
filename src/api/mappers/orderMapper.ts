@@ -89,7 +89,9 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
 
       managerId: optionalNumber(header.manager_id),
 
-      materialId: optionalNumber(header.material_id),
+      // Variant B: header materialId is sunsetted; always emit null.
+      // The legacy header material picker is removed in Task 9.
+      materialId: null,
       sheetMaterialTypeId: optionalNumber(header.sheet_material_type_id),
       millingTypeId: optionalNumber(header.milling_type_id),
       edgeTypeId: optionalNumber(header.edge_type_id),
@@ -238,8 +240,24 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     manager_id: item.managerId ?? null,
     notes: item.notes ?? null,
     material_ids: item.materialIds ?? [],
-    material_names: item.materialNames ?? [],
-    material_name: item.materialNames?.join(', ') ?? null,
+    // SP3/R8: for header-only orders (no details) materialNames is empty; fall back to
+    // the header material name so the orders list shows a non-blank material column.
+    material_names:
+      (item.materialNames ?? []).length > 0
+        ? (item.materialNames ?? [])
+        : item.headerMaterialName
+          ? [item.headerMaterialName]
+          : [],
+    sheet_material_type_ids:
+      (item.sheetMaterialTypeIds ?? []).length > 0
+        ? (item.sheetMaterialTypeIds ?? [])
+        : item.headerSheetMaterialTypeId != null
+          ? [item.headerSheetMaterialTypeId]
+          : [],
+    material_name:
+      (item.materialNames ?? []).length > 0
+        ? (item.materialNames ?? []).join(', ')
+        : (item.headerMaterialName ?? null),
     milling_type_id: item.millingTypeId ?? null,
     milling_type_name: item.millingTypeName ?? null,
     doweling_order_id: item.dowelingOrderId ?? null,
@@ -353,11 +371,11 @@ function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
       width: requiredNumber(detail.width, 'detail.width'),
       quantity: requiredNumber(detail.quantity, 'detail.quantity'),
 
-      // SP3: a sheet-only detail may have no legacy material_id — the backend
-      // resolves the shadow materialId authoritatively. Emit 0 in that case; a
-      // legacy detail still requires a real material_id.
+      // Variant B: every order detail is sheet-bearing; materialId is always null.
+      // The else-branch is a defensive guard for pre-034 legacy orders (unreachable
+      // once migration 034 is applied and all details have sheet_material_type_id).
       materialId: isSheetDetail(detail)
-        ? (optionalNumber(detail.material_id) ?? 0)
+        ? null
         : requiredNumber(detail.material_id, 'detail.material_id'),
       sheetMaterialTypeId: optionalNumber(detail.sheet_material_type_id),
       millingTypeId: requiredNumber(detail.milling_type_id, 'detail.milling_type_id'),

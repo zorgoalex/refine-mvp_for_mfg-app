@@ -145,10 +145,12 @@ export interface MillingTypeLookup extends IdNameLookup {
 }
 
 // SP3: present only when the caller has sheet_materials.view (service-masked).
+// Variant B: isCuttable=false = header-only material; DETAIL picker must exclude these.
 export interface SheetMaterialTypeLookup extends IdNameLookup {
   widthMm: number | null;
   heightMm: number | null;
   isActive: boolean;
+  isCuttable: boolean;
 }
 
 export interface StatusLookup extends IdNameLookup {
@@ -206,6 +208,7 @@ export interface SaveOrderHeaderDto {
 
   managerId?: number | null;
 
+  /** @deprecated Variant B: always null; sheet_material_type_id is the authoritative order-material reference */
   materialId?: number | null;
   sheetMaterialTypeId?: number | null;
   millingTypeId?: number | null;
@@ -232,10 +235,8 @@ export interface SaveOrderDetailDto {
   width: number;
   quantity: number;
 
-  // SP3: a detail carries EITHER a legacy material OR a sheet material. When a
-  // sheet material is set the backend authoritatively resolves materialId (shadow
-  // row), so the FE may send materialId 0/omitted for a sheet-only detail.
-  materialId: number;
+  /** @deprecated Variant B: always null for sheet details; sheetMaterialTypeId is the authoritative order-material reference */
+  materialId?: number | null;
   sheetMaterialTypeId?: number | null;
   millingTypeId: number;
   edgeTypeId: number;
@@ -397,7 +398,8 @@ export interface OrderDetailDto {
   width: number;
   quantity: number;
   area?: number | null;
-  materialId: number;
+  /** Variant B: null for sheet-bearing details post-034 (material_id sunset). */
+  materialId: number | null;
   sheetMaterialTypeId?: number | null;
   /** SP3: server-resolved COALESCE(sheet name, material name) for per-detail display. */
   materialName?: string | null;
@@ -524,8 +526,15 @@ export interface OrderListItemDto {
   managerId?: number | null;
   priority?: number | null;
   notes?: string | null;
+  /** @deprecated Variant B: always empty post-034; use sheetMaterialTypeIds. */
   materialIds?: number[];
   materialNames?: string[];
+  /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
+  sheetMaterialTypeIds?: number[];
+  /** SP3/R8: header material name fallback for header-only orders with no details. */
+  headerMaterialName?: string | null;
+  /** SP3/R8: header sheet material type id fallback for header-only orders with no details. */
+  headerSheetMaterialTypeId?: number | null;
   millingTypeId?: number | null;
   millingTypeName?: string | null;
   dowelingOrderId?: number | null;

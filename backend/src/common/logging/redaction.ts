@@ -34,7 +34,11 @@ function redactString(value: string): string {
     .replace(INLINE_SECRET_ASSIGNMENT_PATTERN, '$1$2[REDACTED]');
 }
 
-export function redactLogValue(value: unknown, seen = new WeakSet<object>()): unknown {
+export function redactLogValue(
+  value: unknown,
+  seen = new WeakSet<object>(),
+  allowKeys: ReadonlySet<string> = new Set(),
+): unknown {
   if (typeof value === 'string') {
     return redactString(value);
   }
@@ -48,7 +52,7 @@ export function redactLogValue(value: unknown, seen = new WeakSet<object>()): un
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => redactLogValue(item, seen));
+    return value.map((item) => redactLogValue(item, seen, allowKeys));
   }
 
   if (seen.has(value)) {
@@ -60,12 +64,18 @@ export function redactLogValue(value: unknown, seen = new WeakSet<object>()): un
   const output: Record<string, unknown> = {};
 
   for (const [key, nestedValue] of Object.entries(value)) {
-    output[key] = isSensitiveKey(key) ? REDACTED : redactLogValue(nestedValue, seen);
+    output[key] =
+      !allowKeys.has(key) && isSensitiveKey(key)
+        ? REDACTED
+        : redactLogValue(nestedValue, seen, allowKeys);
   }
 
   return output;
 }
 
-export function redactLogFields(fields: Record<string, unknown>): Record<string, unknown> {
-  return redactLogValue(fields) as Record<string, unknown>;
+export function redactLogFields(
+  fields: Record<string, unknown>,
+  allowKeys: ReadonlySet<string> = new Set(),
+): Record<string, unknown> {
+  return redactLogValue(fields, new WeakSet(), allowKeys) as Record<string, unknown>;
 }

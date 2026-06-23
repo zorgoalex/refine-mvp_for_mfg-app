@@ -71,6 +71,55 @@ describe('PgProjectEntityLinksRepository', () => {
     const linkLoad = database.queries.find((query) => query.text.includes('FROM public.project_entity_links'));
     expect(linkLoad?.params).toContainEqual(['client']);
   });
+
+  it('audit entity_links_changed: secret-shaped fields in before/after/metadata are redacted by AuditService', async () => {
+    const { auditService: svc } = await import('../../../common/audit/audit.service');
+    const captured: Array<readonly unknown[]> = [];
+    const fakeClient = {
+      query: async (text: string, params: readonly unknown[] = []) => {
+        if (text.includes('INSERT INTO audit_log')) captured.push(params);
+        return { rows: [{ audit_id: 'link-audit-1' }], rowCount: 1, command: 'INSERT', oid: 0, fields: [] };
+      },
+    };
+
+    await svc.record(fakeClient as unknown as import('../../../database/database.types').DatabaseClient, {
+      event: 'projects.entity_links_changed',
+      entityType: 'project',
+      entityId: projectId(),
+      actorUserId: 1,
+      actorUsername: 'tester',
+      actorRole: 'admin',
+      requestId: 'req-link-secret',
+      source: 'projects-entity-links',
+      before: { links: [{ entityType: 'client', entityId: '42', api_key: 'SUPER_SECRET' }] },
+      after: { links: [{ entityType: 'order', entityId: '10', token: 'SECRET_TOKEN' }] },
+      diff: { added: [{ entityType: 'order', entityId: '10' }], removed: [{ entityType: 'client', entityId: '42' }], existing: [], skipped: [] },
+      metadata: { idempotencyKey: 'link-key', secret: 'VERY_SECRET', createdCount: 1 },
+    });
+
+    expect(captured).toHaveLength(1);
+    const params = captured[0];
+    // Dimensions
+    expect(params[0]).toBe('projects.entity_links_changed');
+    expect(params[1]).toBe('project');
+    expect(params[2]).toBe(projectId());
+    expect(params[6]).toBe('req-link-secret');
+    expect(params[7]).toBe('projects-entity-links');
+    // before_json: api_key redacted
+    const beforeJson = JSON.parse(params[19] as string);
+    expect(beforeJson.links[0].api_key).toBe('[REDACTED]');
+    expect(JSON.stringify(beforeJson)).not.toContain('SUPER_SECRET');
+    // after_json: token redacted
+    const afterJson = JSON.parse(params[20] as string);
+    expect(afterJson.links[0].token).toBe('[REDACTED]');
+    expect(JSON.stringify(afterJson)).not.toContain('SECRET_TOKEN');
+    // metadata_json: secret redacted, createdCount and idempotencyKey preserved
+    const metaJson = JSON.parse(params[22] as string);
+    expect(metaJson.idempotencyKey).toBe('link-key');
+    expect(metaJson.createdCount).toBe(1);
+    expect(metaJson.secret).toBe('[REDACTED]');
+    expect(JSON.stringify(metaJson)).not.toContain('VERY_SECRET');
+  });
 });
 
 function fakeDatabase() {

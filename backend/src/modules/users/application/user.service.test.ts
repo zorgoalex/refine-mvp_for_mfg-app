@@ -1,14 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { UserDto, UserListResponseDto } from '../dto/user.dto';
+import type { DatabaseService } from '../../../database/database.service';
 import { UserService } from './user.service';
 import type { UserRepositoryPort } from './user-command.types';
 
+const stubDb = { query: vi.fn() } as unknown as DatabaseService;
+
 describe('UserService', () => {
   it('requires users.view before listing users', async () => {
-    const service = new UserService({ users: createRepository() });
+    const service = new UserService({ users: createRepository(), database: stubDb });
 
     await expect(
       service.list({
@@ -40,6 +44,7 @@ describe('UserService', () => {
           return user;
         },
       }),
+      database: stubDb,
     });
 
     await expect(
@@ -52,7 +57,7 @@ describe('UserService', () => {
   });
 
   it('uses user policy for create role escalation', async () => {
-    const service = new UserService({ users: createRepository() });
+    const service = new UserService({ users: createRepository(), database: stubDb });
 
     await expect(
       service.create({
@@ -92,6 +97,7 @@ describe('UserService', () => {
           return { ...target, isActive: true };
         },
       }),
+      database: stubDb,
     });
 
     const actor = currentUser('admin', 'admin-1');
@@ -123,6 +129,7 @@ describe('UserService', () => {
           return userDto({ id: 1, role: 'admin' });
         },
       }),
+      database: stubDb,
     });
 
     await expect(
@@ -132,6 +139,106 @@ describe('UserService', () => {
       code: 'PERMISSION_DENIED',
       details: { requiredPermissions: ['users.deactivate'] },
     } satisfies Partial<ApiError>);
+  });
+
+  describe('denied-audit writes', () => {
+    it('role_hierarchy_denied on update writes one audit row with correct reason and relatedUserId', async () => {
+      // admin (has users.update) trying to update a superadmin → role_hierarchy_denied
+      const recordDenied = vi.spyOn(auditService, 'recordDenied').mockResolvedValue('audit-1');
+      const db = { query: vi.fn().mockResolvedValue({ rows: [{ audit_id: 'audit-1' }] }) } as any;
+      const superadminTarget = userDto({ id: 99, role: 'superadmin' });
+      const service = new UserService({
+        users: createRepository({ async getUserById() { return superadminTarget; } }),
+        database: db,
+      });
+
+      await expect(
+        service.update({ currentUser: currentUser('admin', 'admin-1'), userId: 99, dto: {} }),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+
+      expect(recordDenied).toHaveBeenCalledTimes(1);
+      const [, event] = recordDenied.mock.calls[0];
+      expect(event.reason).toBe('role_hierarchy_denied');
+      expect(event.relatedUserId).toBe(99);
+      recordDenied.mockRestore();
+    });
+
+    it('missing_permission on update writes ZERO audit rows (deferred)', async () => {
+      const recordDenied = vi.spyOn(auditService, 'recordDenied').mockResolvedValue('audit-1');
+      const db = { query: vi.fn().mockResolvedValue({ rows: [{ audit_id: 'audit-1' }] }) } as any;
+      const target = userDto({ id: 5, role: 'worker' });
+      // manager has no users.update permission
+      const service = new UserService({
+        users: createRepository({ async getUserById() { return target; } }),
+        database: db,
+      });
+
+      await expect(
+        service.update({ currentUser: currentUser('manager', 'mgr-1'), userId: 5, dto: {} }),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+
+      expect(recordDenied).not.toHaveBeenCalled();
+      recordDenied.mockRestore();
+    });
+
+    it('self_target_denied on deactivate writes audit row with reason=self_target_denied', async () => {
+      const recordDenied = vi.spyOn(auditService, 'recordDenied').mockResolvedValue('audit-1');
+      const db = { query: vi.fn().mockResolvedValue({ rows: [{ audit_id: 'audit-1' }] }) } as any;
+      const selfTarget = userDto({ id: 1, role: 'admin' });
+      const service = new UserService({
+        users: createRepository({ async getUserById() { return selfTarget; } }),
+        database: db,
+      });
+
+      await expect(
+        service.deactivate({ currentUser: currentUser('admin', '1'), userId: 1 }),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+
+      expect(recordDenied).toHaveBeenCalledTimes(1);
+      const [, event] = recordDenied.mock.calls[0];
+      expect(event.reason).toBe('self_target_denied');
+      expect(event.relatedUserId).toBe(1);
+      recordDenied.mockRestore();
+    });
+
+    it('role_assignment_denied on create writes audit row (targetUserId null → relatedUserId null)', async () => {
+      const recordDenied = vi.spyOn(auditService, 'recordDenied').mockResolvedValue('audit-1');
+      const db = { query: vi.fn().mockResolvedValue({ rows: [{ audit_id: 'audit-1' }] }) } as any;
+      // admin trying to create superadmin → role_assignment_denied
+      const service = new UserService({
+        users: createRepository(),
+        database: db,
+      });
+
+      await expect(
+        service.create({
+          currentUser: currentUser('admin', 'admin-1'),
+          dto: { username: 'newsuper', password: 'pass', role: 'superadmin' },
+        }),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+
+      expect(recordDenied).toHaveBeenCalledTimes(1);
+      const [, event] = recordDenied.mock.calls[0];
+      expect(event.reason).toBe('role_assignment_denied');
+      expect(event.relatedUserId).toBeNull();
+      recordDenied.mockRestore();
+    });
+
+    it('audit sink throw still yields PERMISSION_DENIED (best-effort)', async () => {
+      vi.spyOn(auditService, 'recordDenied').mockRejectedValue(new Error('DB down'));
+      const db = { query: vi.fn().mockResolvedValue({ rows: [{ audit_id: 'audit-1' }] }) } as any;
+      const superadminTarget = userDto({ id: 9, role: 'superadmin' });
+      const service = new UserService({
+        users: createRepository({ async getUserById() { return superadminTarget; } }),
+        database: db,
+      });
+
+      await expect(
+        service.update({ currentUser: currentUser('admin', 'admin-1'), userId: 9, dto: {} }),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+
+      vi.restoreAllMocks();
+    });
   });
 });
 

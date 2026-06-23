@@ -129,9 +129,12 @@ describe('pg-order-snapshot orderHeaderUpdateParams', () => {
     expect(params[12]).toBe(15); // discount
   });
 
-  it('sheetMaterialTypeId=null passes through correctly in update path', () => {
+  it('header materialId is always null regardless of sheetMaterialTypeId (Variant B sunset)', () => {
+    // Variant B: header material_id is fully sunset — ALWAYS null at the param level,
+    // even when sheetMaterialTypeId is absent. The 034 DB invariant chk_orders_material_id_null
+    // enforces NULL; the param helper must not reintroduce a non-null value.
     const params = updateParams(header({ sheetMaterialTypeId: null, materialId: 3 }), totals());
-    expect(params[24]).toBe(3);    // materialId stays when sheetMaterialTypeId is null
+    expect(params[24]).toBeNull(); // materialId always null (Variant B invariant)
     expect(params[29]).toBeNull(); // sheetMaterialTypeId
   });
 });

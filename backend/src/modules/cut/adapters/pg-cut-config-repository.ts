@@ -51,18 +51,26 @@ export class PgCutConfigRepository implements CutConfigPort {
       );
       stored = byDefault.rows[0]?.params;
     }
-    if (!stored) {
-      return { ...DEFAULT_FREECUT_PARAMS };
-    }
-    // Merge over defaults so a profile that omits a key still produces a valid
-    // freecut payload. trim_mm is deep-merged so a partial trim (e.g. {left:5})
-    // can never drop the other sides (freecut requires all four).
+    return this.mergeParams(stored);
+  }
+
+  private mergeParams(stored: Record<string, unknown> | null | undefined): FreecutParams {
+    if (!stored) return { ...DEFAULT_FREECUT_PARAMS };
     const merged = { ...DEFAULT_FREECUT_PARAMS, ...stored } as FreecutParams;
     const storedTrim = (stored as { trim_mm?: Record<string, unknown> }).trim_mm;
     if (storedTrim && typeof storedTrim === 'object') {
       merged.trim_mm = { ...DEFAULT_FREECUT_PARAMS.trim_mm, ...storedTrim } as FreecutParams['trim_mm'];
     }
     return merged;
+  }
+
+  async getParamsByProfileId(id: number): Promise<FreecutParams | null> {
+    const row = await this.database.query<{ params: Record<string, unknown> | null }>(
+      `SELECT params FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true LIMIT 1`,
+      [id],
+    );
+    if (row.rows.length === 0) return null;
+    return this.mergeParams(row.rows[0].params);
   }
 
   async getRenderPresetPx(name: string): Promise<number> {

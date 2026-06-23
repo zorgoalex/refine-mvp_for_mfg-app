@@ -58,6 +58,10 @@ export interface CutConfigPort {
   getGrainRules(): Promise<CutGrainRules>;
   /** Longest-side px for a render preset name, sourced from cut_render_presets. */
   getRenderPresetPx(name: string): Promise<number>;
+  /** Resolve params for a specific active profile id (deep-merged with in-code
+   *  defaults exactly like getDefaultParams). Returns null when the profile does
+   *  not exist or is inactive. */
+  getParamsByProfileId(id: number): Promise<import('./cut-freecut-mapping').FreecutParams | null>;
 }
 
 /** Static config (defaults only) for tests and the unavailable-DB repository. */
@@ -73,5 +77,8 @@ export class StaticCutConfig implements CutConfigPort {
   }
   getRenderPresetPx(name: string): Promise<number> {
     return Promise.resolve(RENDER_PRESETS[name as keyof typeof RENDER_PRESETS] ?? RENDER_PRESETS[DEFAULT_RENDER_PRESET]);
+  }
+  getParamsByProfileId(): Promise<FreecutParams | null> {
+    return Promise.resolve(null); // no profile catalog in static config → unresolved
   }
 }

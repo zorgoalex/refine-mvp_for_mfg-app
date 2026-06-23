@@ -4,6 +4,7 @@ import { OrderValidationError } from '../errors/order.errors';
 import { normalizeSaveOrderDto } from './order-normalizer';
 import { validateSaveOrderDto } from './order-validation';
 
+// VARIANT B: all order details must carry sheetMaterialTypeId; materialId must be null/absent.
 function createOrder(overrides: Partial<SaveOrderDto> = {}): SaveOrderDto {
   return {
     header: {
@@ -20,7 +21,8 @@ function createOrder(overrides: Partial<SaveOrderDto> = {}): SaveOrderDto {
         height: 550,
         width: 200,
         quantity: 2,
-        materialId: 1001,
+        materialId: null,
+        sheetMaterialTypeId: 1001,
         millingTypeId: 1001,
         edgeTypeId: 1001,
         detailCost: 10000,
@@ -88,7 +90,8 @@ describe('validateSaveOrderDto', () => {
             height: 0,
             width: 200,
             quantity: -1,
-            materialId: 0,
+            materialId: null,
+            // VARIANT B: missing sheetMaterialTypeId triggers its own error
             millingTypeId: 1001,
             edgeTypeId: 1001,
           },
@@ -119,7 +122,7 @@ describe('validateSaveOrderDto', () => {
         'header.orderStatusId',
         'details[0].height',
         'details[0].quantity',
-        'details[0].materialId',
+        'details[0].sheetMaterialTypeId',
         'payments[0].amount',
         'payments[0].paymentDate',
       ]),
@@ -298,7 +301,182 @@ describe('validateSaveOrderDto', () => {
   });
 });
 
-describe('validateSaveOrderDto sheetMaterialTypeId (SP3)', () => {
+describe('validateSaveOrderDto Variant B: sheet_material_type_id required, material_id forbidden', () => {
+  it('rejects a detail without a sheet material type', () => {
+    const order = normalizeSaveOrderDto(
+      createOrder({
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            // sheetMaterialTypeId absent → must fail
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 10000,
+          },
+        ],
+      }),
+    );
+
+    let thrown: unknown;
+    try {
+      validateSaveOrderDto(order, { mode: 'create' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(validationErrors(thrown)).toContain('details[0].sheetMaterialTypeId');
+  });
+
+  it('rejects a detail with null sheetMaterialTypeId', () => {
+    const order = normalizeSaveOrderDto(
+      createOrder({
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            sheetMaterialTypeId: null,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+          },
+        ],
+      }),
+    );
+
+    let thrown: unknown;
+    try {
+      validateSaveOrderDto(order, { mode: 'create' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(validationErrors(thrown)).toContain('details[0].sheetMaterialTypeId');
+  });
+
+  it('rejects a detail that still carries material_id', () => {
+    const order = normalizeSaveOrderDto(
+      createOrder({
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: 7,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+          },
+        ],
+      }),
+    );
+
+    let thrown: unknown;
+    try {
+      validateSaveOrderDto(order, { mode: 'create' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(validationErrors(thrown)).toContain('details[0].materialId');
+  });
+
+  it('rejects a header that still carries material_id (Critic R3 B2)', () => {
+    // Note: the normalizer forces header.materialId = null, so we test via the raw
+    // NormalizedSaveOrderDto path by injecting a non-null materialId after normalization.
+    const baseOrder = normalizeSaveOrderDto(createOrder());
+    // Inject non-null materialId on header to bypass normalizer (tests the validation rule directly)
+    const orderWithHeaderMaterialId = {
+      ...baseOrder,
+      header: { ...baseOrder.header, materialId: 5 },
+    };
+
+    let thrown: unknown;
+    try {
+      validateSaveOrderDto(orderWithHeaderMaterialId, { mode: 'create' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(validationErrors(thrown)).toContain('header.materialId');
+  });
+
+  it('accepts a detail with null materialId and valid sheetMaterialTypeId', () => {
+    const order = normalizeSaveOrderDto(
+      createOrder({
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 10000,
+          },
+        ],
+      }),
+    );
+
+    expect(() => validateSaveOrderDto(order, { mode: 'create' })).not.toThrow();
+  });
+
+  it('accepts a detail with absent materialId and valid sheetMaterialTypeId', () => {
+    const order = normalizeSaveOrderDto(
+      createOrder({
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+          } as unknown as SaveOrderDto['details'][number],
+        ],
+      }),
+    );
+
+    expect(() => validateSaveOrderDto(order, { mode: 'create' })).not.toThrow();
+  });
+
+  it('rejects a non-positive sheetMaterialTypeId on a detail', () => {
+    const order = normalizeSaveOrderDto(
+      createOrder({
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            sheetMaterialTypeId: -1,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+          },
+        ],
+      }),
+    );
+
+    let thrown: unknown;
+    try {
+      validateSaveOrderDto(order, { mode: 'create' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(validationErrors(thrown)).toContain('details[0].sheetMaterialTypeId');
+  });
+
   it('rejects non-positive header sheetMaterialTypeId when present', () => {
     const order = normalizeSaveOrderDto(
       createOrder({
@@ -314,63 +492,19 @@ describe('validateSaveOrderDto sheetMaterialTypeId (SP3)', () => {
       }),
     );
 
+    let thrown: unknown;
     try {
       validateSaveOrderDto(order, { mode: 'create' });
-      throw new Error('expected validation error');
     } catch (error) {
-      expect(validationErrors(error)).toContain('header.sheetMaterialTypeId');
+      thrown = error;
     }
+
+    expect(validationErrors(thrown)).toContain('header.sheetMaterialTypeId');
   });
 
   it('allows null/absent header sheetMaterialTypeId', () => {
     const order = normalizeSaveOrderDto(createOrder());
 
     expect(() => validateSaveOrderDto(order, { mode: 'create' })).not.toThrow();
-  });
-
-  it('allows a sheet detail with materialId omitted (shadow resolved in-tx)', () => {
-    const order = normalizeSaveOrderDto(
-      createOrder({
-        details: [
-          {
-            height: 550,
-            width: 200,
-            quantity: 2,
-            millingTypeId: 1001,
-            edgeTypeId: 1001,
-            detailCost: 10000,
-            sheetMaterialTypeId: 7,
-          } as unknown as SaveOrderDto['details'][number],
-        ],
-        deleted: {},
-      }),
-    );
-
-    expect(() => validateSaveOrderDto(order, { mode: 'create' })).not.toThrow();
-  });
-
-  it('rejects a legacy detail (no sheet) with materialId omitted', () => {
-    const order = normalizeSaveOrderDto(
-      createOrder({
-        details: [
-          {
-            height: 550,
-            width: 200,
-            quantity: 2,
-            millingTypeId: 1001,
-            edgeTypeId: 1001,
-            detailCost: 10000,
-          } as unknown as SaveOrderDto['details'][number],
-        ],
-        deleted: {},
-      }),
-    );
-
-    try {
-      validateSaveOrderDto(order, { mode: 'create' });
-      throw new Error('expected validation error');
-    } catch (error) {
-      expect(validationErrors(error)).toContain('details[0].materialId');
-    }
   });
 });

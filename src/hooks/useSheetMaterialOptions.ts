@@ -38,11 +38,15 @@ export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
   // Hasura path only fires when the picker is enabled AND we are not using the
   // backend form-data reference — so a user without sheet_materials.view never
   // issues a sheet reference read in either mode.
+  // NOTE: is_cuttable must be added to the Hasura SELECT-permission allowlist at
+  // cutover (Task 13). The field is requested here unconditionally so the code is
+  // ready; Hasura returns it once the permission column is whitelisted.
   const { queryResult } = useSelect({
     resource: 'sheet_material_types',
     optionLabel: 'name',
     optionValue: 'sheet_material_type_id',
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
+    meta: { fields: ['sheet_material_type_id', 'name', 'width_mm', 'height_mm', 'is_active', 'is_cuttable'] },
     pagination: { mode: 'off' },
     queryOptions: { enabled: enabled && !useBackendReferences },
   });
@@ -59,6 +63,9 @@ export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
       widthMm: row.width_mm != null ? Number(row.width_mm) : null,
       heightMm: row.height_mm != null ? Number(row.height_mm) : null,
       isActive: row.is_active,
+      // Hasura column available after Task 13 allowlist cutover; default true
+      // so that all types remain selectable until the column is whitelisted.
+      isCuttable: row.is_cuttable != null ? Boolean(row.is_cuttable) : true,
     }));
   }, [
     enabled,
@@ -77,6 +84,15 @@ export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
     : Boolean(queryResult?.isLoading);
 
   return { enabled, canViewSheetMaterials, options, byId, isLoading };
+}
+
+/**
+ * Filters a sheet-material option list to cuttable types only.
+ * Use for DETAIL pickers (panels/cuts). The HEADER picker keeps the full list
+ * so a header may legitimately carry a non-cuttable material (e.g. «краска»).
+ */
+export function filterCuttableOptions(options: SheetMaterialTypeOption[]): SheetMaterialTypeOption[] {
+  return options.filter((o) => o.isCuttable === true);
 }
 
 /**

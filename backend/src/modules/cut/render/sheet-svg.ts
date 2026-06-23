@@ -20,6 +20,31 @@ export function formatPieceLabel(baseLabel: string, instance: number, qty: numbe
   return qty > 1 ? `${baseLabel} ${instance}/${qty}` : baseLabel;
 }
 
+export interface PieceLabelInput {
+  /** order_id resolved for the piece, or null when unknown. */
+  orderId: number | null;
+  /** order_detail_id parsed from the freecut item id, or null when unparseable. */
+  detailId: number | null;
+  /** raw freecut item id (fallback label when order/detail are unknown). */
+  itemId: string;
+  instance: number;
+  qty: number;
+}
+
+/**
+ * Two-line piece label: order on line 1 (`№<orderId>`), detail on line 2
+ * (`<detailId>` plus the `N/qty` instance suffix when qty > 1). When the order
+ * can't be resolved we fall back to a single line with the raw item id so the
+ * label is never empty.
+ */
+export function composePieceLabelLines(input: PieceLabelInput): string[] {
+  const { orderId, detailId, itemId, instance, qty } = input;
+  if (orderId === null || detailId === null) {
+    return [formatPieceLabel(itemId, instance, qty)];
+  }
+  return [`№${orderId}`, formatPieceLabel(String(detailId), instance, qty)];
+}
+
 /** Total placed instances per freecut item id across all sheets of a group. */
 export function computeGroupItemQuantities(sheets: readonly BackMappedSheet[]): Map<string, number> {
   const counts = new Map<string, number>();
@@ -33,8 +58,12 @@ export function computeGroupItemQuantities(sheets: readonly BackMappedSheet[]): 
 
 export interface BuildSheetSvgInput {
   sheet: SheetPlacementsJson;
-  /** resolves a human label for a piece (detail/order + instance N/qty). */
-  labelFor: (piece: FreecutPlacement) => string;
+  /**
+   * Resolves a human label for a piece. Return a string for a single line, or
+   * an array of strings to render one `<tspan>` per line (e.g. order on line 1,
+   * detail on line 2).
+   */
+  labelFor: (piece: FreecutPlacement) => string | string[];
   /** font-size in mm for piece labels (scaled with the mm viewBox). */
   labelFontMm?: number;
 }
@@ -64,14 +93,24 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const y = sheet.trim_mm.top + piece.y_mm;
       const cx = x + piece.width_mm / 2;
       const cy = y + piece.height_mm / 2;
-      const label = escapeXml(labelFor(piece));
+      const resolved = labelFor(piece);
+      const lines = Array.isArray(resolved) ? resolved : [resolved];
+      // Vertically centre N lines around cy: the first tspan lifts by
+      // (N-1)/2 line-heights, each subsequent line drops one line-height. em
+      // units keep the spacing proportional to font-size at any raster scale.
+      const tspans = lines
+        .map((line, i) => {
+          const dy = i === 0 ? `${(-(lines.length - 1) / 2).toFixed(3)}em` : '1em';
+          return `<tspan x="${num(cx)}" dy="${dy}">${escapeXml(line)}</tspan>`;
+        })
+        .join('');
       return [
         `<rect x="${num(x)}" y="${num(y)}" width="${num(piece.width_mm)}" height="${num(
           piece.height_mm,
         )}" fill="#eef3f8" stroke="#1f2d3d" stroke-width="2"/>`,
         `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
           fontMm,
-        )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${label}</text>`,
+        )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,
       ].join('');
     })
     .join('');

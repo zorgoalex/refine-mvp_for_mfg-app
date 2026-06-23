@@ -274,7 +274,10 @@ describeIntegration('PgSheetMaterialsRepository (integration, real migration cha
     expect(audit.rows[0].entity_id).toBe('sheet_material_types');
   });
 
-  describe('SP3 eager shadow sync (Task 3b)', () => {
+  // Variant B: eager shadow sync is disabled (Task 7b). The syncShadowForSheetType call
+  // was removed from update/deactivate. These tests assert that catalog edits no longer
+  // create or sync shadow rows or emit materials.shadow_sync audit events.
+  describe('Variant B: no eager shadow sync on catalog edit (Task 7b)', () => {
     async function seedShadow(sheetId: number, name: string): Promise<number> {
       const res = await pool.query<{ material_id: string }>(
         `INSERT INTO materials (material_name, unit_id, material_type_id, is_active, is_sheet_shadow, shadow_of_sheet_material_type_id)
@@ -284,19 +287,37 @@ describeIntegration('PgSheetMaterialsRepository (integration, real migration cha
       return Number(res.rows[0].material_id);
     }
 
-    it('update of a sheet type syncs its linked shadow (name) and audits materials.shadow_sync (source backend-sheet-materials); real SP2 row untouched', async () => {
+    it('does not create or sync a shadow material on sheet-type update, does not emit materials.shadow_sync', async () => {
       await pool.query(`DELETE FROM materials`);
-      const ctx = { currentUser: currentUser(), requestId: 'r-3b' };
+      const ctx = { currentUser: currentUser(), requestId: 'r-7b-update' };
       const created = await repo.create({ ...ctx, input: baseInput });
       const sheetId = created.sheetMaterialTypeId;
-      // A REAL SP2-linked material (must NOT be touched by the eager sync).
-      const real = await pool.query<{ material_id: string }>(
-        `INSERT INTO materials (material_name, unit_id, material_type_id, is_active, is_sheet_shadow, sheet_material_type_id)
-         VALUES ('Реальный SP2 лист', 1, 1, true, false, $1) RETURNING material_id`,
-        [sheetId],
+
+      await repo.update({
+        ...ctx,
+        id: sheetId,
+        expectedVersion: 0,
+        input: { ...baseInput, name: 'МДФ 16мм v2' },
+      });
+
+      // No shadow row must have been created
+      const shadows = await pool.query<{ n: number }>(
+        `SELECT count(*)::int n FROM materials WHERE is_sheet_shadow = true`,
       );
-      const realId = Number(real.rows[0].material_id);
-      const shadowId = await seedShadow(sheetId, 'старое имя [лист #' + sheetId + ']');
+      expect(shadows.rows[0].n).toBe(0);
+
+      // No materials.shadow_sync audit event
+      const audit = await pool.query(`SELECT 1 FROM audit_log WHERE event = 'materials.shadow_sync'`);
+      expect(audit.rowCount).toBe(0);
+    });
+
+    it('does not sync or touch an existing shadow on sheet-type update', async () => {
+      await pool.query(`DELETE FROM materials`);
+      const ctx = { currentUser: currentUser(), requestId: 'r-7b-existing' };
+      const created = await repo.create({ ...ctx, input: baseInput });
+      const sheetId = created.sheetMaterialTypeId;
+      // Pre-seed a shadow row (simulating a pre-034 leftover)
+      const shadowId = await seedShadow(sheetId, `старое имя [лист #${sheetId}]`);
 
       await repo.update({
         ...ctx,
@@ -305,38 +326,33 @@ describeIntegration('PgSheetMaterialsRepository (integration, real migration cha
         input: { ...baseInput, name: 'ЛДСП 18 Орех' },
       });
 
+      // Shadow must NOT have been renamed — catalog edit no longer syncs it
       const shadow = await pool.query<{ material_name: string }>(
         `SELECT material_name FROM materials WHERE material_id = $1`,
         [shadowId],
       );
-      expect(shadow.rows[0].material_name).toBe(`ЛДСП 18 Орех [лист #${sheetId}]`);
-      const realRow = await pool.query<{ material_name: string; is_sheet_shadow: boolean }>(
-        `SELECT material_name, is_sheet_shadow FROM materials WHERE material_id = $1`,
-        [realId],
-      );
-      expect(realRow.rows[0].material_name).toBe('Реальный SP2 лист');
-      expect(realRow.rows[0].is_sheet_shadow).toBe(false);
-      const audit = await pool.query<{ source: string }>(
-        `SELECT source FROM audit_log WHERE event = 'materials.shadow_sync'`,
-      );
-      expect(audit.rowCount).toBe(1);
-      expect(audit.rows[0].source).toBe('backend-sheet-materials');
+      expect(shadow.rows[0].material_name).toBe(`старое имя [лист #${sheetId}]`);
+
+      // No shadow_sync audit
+      const audit = await pool.query(`SELECT 1 FROM audit_log WHERE event = 'materials.shadow_sync'`);
+      expect(audit.rowCount).toBe(0);
     });
 
-    it('deactivate of a sheet type deactivates its linked shadow', async () => {
+    it('deactivate of a sheet type does NOT deactivate its linked shadow', async () => {
       await pool.query(`DELETE FROM materials`);
-      const ctx = { currentUser: currentUser(), requestId: 'r-3b-deact' };
+      const ctx = { currentUser: currentUser(), requestId: 'r-7b-deact' };
       const created = await repo.create({ ...ctx, input: { ...baseInput, name: 'Лист для деактивации' } });
       const sheetId = created.sheetMaterialTypeId;
       const shadowId = await seedShadow(sheetId, `Лист для деактивации [лист #${sheetId}]`);
 
       await repo.deactivate({ ...ctx, id: sheetId, expectedVersion: 0 });
 
+      // Shadow must remain active — catalog deactivate no longer syncs it
       const shadow = await pool.query<{ is_active: boolean }>(
         `SELECT is_active FROM materials WHERE material_id = $1`,
         [shadowId],
       );
-      expect(shadow.rows[0].is_active).toBe(false);
+      expect(shadow.rows[0].is_active).toBe(true);
     });
   });
 });

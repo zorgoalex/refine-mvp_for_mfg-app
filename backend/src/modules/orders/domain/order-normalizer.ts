@@ -110,6 +110,11 @@ function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderD
     linkPdfFile: normalizeOptionalString(raw.linkPdfFile),
     notes: normalizeOptionalString(raw.notes),
     refKey1c: normalizeOptionalString(raw.refKey1c),
+    // VARIANT B: header material_id is sunset. Preserve the raw value so that
+    // validateSaveOrderDto can REJECT a non-null incoming materialId (422).
+    // Nulling happens at the PERSISTENCE layer (pg-order-transaction-manager /
+    // pg-order-snapshot), NOT here — forcing null here would make the validation
+    // check at order-validation.ts:68 dead code and silently accept stale payloads.
     materialId: optionalInteger(raw.materialId, 'header.materialId'),
     sheetMaterialTypeId: optionalInteger(raw.sheetMaterialTypeId, 'header.sheetMaterialTypeId'),
     millingTypeId: optionalInteger(raw.millingTypeId, 'header.millingTypeId'),
@@ -129,7 +134,9 @@ function normalizeDetail(detail: SaveOrderDetailDto): NormalizedSaveOrderDetailD
     height: requiredNumber(raw.height, 'details[].height'),
     width: requiredNumber(raw.width, 'details[].width'),
     quantity: requiredNumber(raw.quantity, 'details[].quantity'),
-    materialId: requiredNumber(raw.materialId, 'details[].materialId'),
+    // VARIANT B: material_id is always NULL for sheet-bearing details (migration 034).
+    // Accept null/absent from client; never coerce to 0.
+    materialId: optionalInteger(raw.materialId, 'details[].materialId'),
     sheetMaterialTypeId: optionalInteger(raw.sheetMaterialTypeId, 'details[].sheetMaterialTypeId'),
     millingTypeId: requiredNumber(raw.millingTypeId, 'details[].millingTypeId'),
     edgeTypeId: requiredNumber(raw.edgeTypeId, 'details[].edgeTypeId'),

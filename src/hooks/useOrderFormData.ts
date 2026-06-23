@@ -11,10 +11,13 @@ export interface ReferenceOption {
 // SP3: richer option for the sheet-material picker — carries dimensions (FE
 // dimension mirror) and is_active (disable, not drop, a deactivated-but-selected
 // sheet). Absent entirely when the caller lacks sheet_materials.view.
+// Variant B: isCuttable=false = header-only material; DETAIL picker must exclude
+// these (HEADER picker keeps the full list).
 export interface SheetMaterialTypeOption extends ReferenceOption {
   widthMm: number | null;
   heightMm: number | null;
   isActive: boolean;
+  isCuttable: boolean;
 }
 
 export interface OrderFormDataReferences {
@@ -134,6 +137,7 @@ export function mapOrderFormDataToReferences(
         widthMm: item.widthMm ?? null,
         heightMm: item.heightMm ?? null,
         isActive: item.isActive,
+        isCuttable: item.isCuttable,
       }))
     : [];
 

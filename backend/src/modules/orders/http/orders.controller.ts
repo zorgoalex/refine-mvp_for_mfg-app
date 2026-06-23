@@ -66,7 +66,8 @@ const orderPaginationSwaggerSchema = {
   },
 } as const;
 
-const saveOrderHeaderSwaggerSchema = {
+// Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
+export const saveOrderHeaderSwaggerSchema = {
   type: 'object',
   required: ['orderName', 'clientId', 'orderDate', 'orderStatusId'],
   properties: {
@@ -92,17 +93,20 @@ const saveOrderHeaderSwaggerSchema = {
     linkPdfFile: nullableStringSwaggerSchema,
     notes: nullableStringSwaggerSchema,
     refKey1c: nullableStringSwaggerSchema,
-    materialId: nullableIntegerSwaggerSchema,
-    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'SP3 sheet material type; when set, materialId is resolved server-side to the sheet shadow and must be omitted or null' },
+    // Variant B: header materialId is always null/absent (sunset); sheet_material_type_id is authoritative.
+    materialId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: always null for order headers; deprecated. Use sheetMaterialTypeId.' },
+    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: authoritative sheet material reference for the order header. materialId is deprecated and always null.' },
     millingTypeId: nullableIntegerSwaggerSchema,
     edgeTypeId: nullableIntegerSwaggerSchema,
     filmId: nullableIntegerSwaggerSchema,
   },
 } as const;
 
-const saveOrderDetailSwaggerSchema = {
+// Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
+export const saveOrderDetailSwaggerSchema = {
   type: 'object',
-  required: ['height', 'width', 'quantity', 'millingTypeId', 'edgeTypeId'],
+  // Variant B: sheetMaterialTypeId is required (authoritative material ref); materialId must be null/absent.
+  required: ['height', 'width', 'quantity', 'sheetMaterialTypeId', 'millingTypeId', 'edgeTypeId'],
   properties: {
     id: { type: 'integer' },
     clientKey: { type: 'string' },
@@ -111,8 +115,8 @@ const saveOrderDetailSwaggerSchema = {
     height: { type: 'number' },
     width: { type: 'number' },
     quantity: { type: 'integer' },
-    materialId: { ...nullableIntegerSwaggerSchema, description: 'Required only when sheetMaterialTypeId is absent; omit or set null for sheet details — the server resolves the shadow material' },
-    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'SP3 sheet material type id; when set, materialId is resolved server-side to the sheet shadow' },
+    materialId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: must be null/absent; sheet_material_type_id is authoritative. Sending a non-null value is rejected with 422.' },
+    sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: required for sheet details; authoritative reference to sheet_material_types. materialId must be null/absent.' },
     millingTypeId: { type: 'integer' },
     edgeTypeId: { type: 'integer' },
     filmId: nullableIntegerSwaggerSchema,
@@ -203,7 +207,8 @@ const saveOrderDowelingLinkSwaggerSchema = {
   },
 } as const;
 
-const orderDetailResponseSwaggerSchema = {
+// Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
+export const orderDetailResponseSwaggerSchema = {
   type: 'object',
   required: [
     'id',
@@ -213,7 +218,8 @@ const orderDetailResponseSwaggerSchema = {
     'height',
     'width',
     'quantity',
-    'materialId',
+    // Variant B: materialId is nullable (NULL post-034); NOT in required.
+    'sheetMaterialTypeId',
     'millingTypeId',
     'edgeTypeId',
     'filmId',
@@ -239,8 +245,9 @@ const orderDetailResponseSwaggerSchema = {
     height: { type: 'number' },
     width: { type: 'number' },
     quantity: { type: 'integer' },
-    materialId: { type: 'integer' },
-    sheetMaterialTypeId: nullableIntegerSwaggerSchema,
+    // Variant B: materialId is NULL post-034 (nullable, NOT in required).
+    materialId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: always null post-migration 034; sheet_material_type_id is authoritative.' },
+    sheetMaterialTypeId: { type: 'integer', description: 'Variant B: required; authoritative sheet material type reference.' },
     millingTypeId: { type: 'integer' },
     edgeTypeId: { type: 'integer' },
     filmId: nullableIntegerSwaggerSchema,
@@ -392,7 +399,8 @@ const orderProjectSummarySwaggerSchema = {
   },
 } as const;
 
-const orderHeaderResponseSwaggerSchema = {
+// Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
+export const orderHeaderResponseSwaggerSchema = {
   type: 'object',
   required: [
     'orderId',
@@ -572,8 +580,10 @@ const orderListItemSwaggerSchema = {
     totalArea: { type: 'number' },
     managerId: nullableIntegerSwaggerSchema,
     notes: nullableStringSwaggerSchema,
-    materialIds: { type: 'array', items: { type: 'integer' } },
+    /** @deprecated Variant B: always empty post-034; use sheetMaterialTypeIds. */
+    materialIds: { type: 'array', items: { type: 'integer' }, deprecated: true },
     materialNames: { type: 'array', items: { type: 'string' } },
+    sheetMaterialTypeIds: { type: 'array', items: { type: 'integer' } },
     millingTypeId: nullableIntegerSwaggerSchema,
     millingTypeName: nullableStringSwaggerSchema,
     dowelingOrderId: nullableIntegerSwaggerSchema,

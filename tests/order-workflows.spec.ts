@@ -26,6 +26,8 @@ test.describe('Order workflows', () => {
         await detailDialog.locator('#width').fill('400');
         await detailDialog.locator('#quantity').fill('2');
         await detailDialog.locator('#milling_cost_per_sqm').fill('10000');
+        // Variant B: sheet picker is the sole material selector — select from it before saving.
+        await selectAntdOption(page, detailDialog.locator('.ant-form-item').filter({ hasText: 'Материал' }).first(), 'МДФ 16 мм (Лист)');
         await detailDialog.getByRole('button', { name: 'Сохранить' }).click();
 
         await expect(detailsCard.getByText('Всего позиций: 1')).toBeVisible();
@@ -63,7 +65,9 @@ test.describe('Order workflows', () => {
             width: 400,
             quantity: 2,
             area: 0.48,
-            material_id: 1,
+            // Variant B: material_id is always null; sheet_material_type_id is authoritative.
+            material_id: null,
+            sheet_material_type_id: 1,
             milling_type_id: 1,
             edge_type_id: 1,
             milling_cost_per_sqm: 10000,
@@ -110,6 +114,11 @@ test.describe('Order workflows', () => {
         await expect(widthInput).toHaveValue(/^400(?:[,.]00)?$/);
         await expect(quantityInput).toHaveValue('2');
         await expect(amountInput).toHaveValue(/4\s?800(?:[,.]00)?/);
+
+        // Variant B: QUICK_ADD_DEFAULTS pre-populates sheet_material_type_id with the first
+        // active cuttable type (МДФ 16 мм (Лист)), so no manual selection is needed.
+        // Assert it is already set so the inline save won't fail validation.
+        await expect(detailsCard.locator('.ant-card-body').getByText('МДФ 16 мм (Лист)').first()).toBeVisible();
 
         await detailsCard.getByRole('button').filter({ has: page.locator('.anticon-check') }).click();
 

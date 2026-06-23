@@ -38,4 +38,28 @@ describe('order snapshot writeAudit', () => {
     const [{ params }] = captured;
     expect(params[9]).toBeNull(); // related_client_id
   });
+
+  it('Variant B: snapshot import writeAudit passes sheet_material_type bridge rows', async () => {
+    const captured: Array<{ text: string; params: readonly unknown[] }> = [];
+    await writeAudit(
+      fakeTx(captured),
+      'orders.snapshot_import',
+      actor,
+      88,
+      null,
+      { requestId: 'req_import' },
+      [5, 12],
+    );
+    const relatedInserts = captured.filter((q) => /INSERT INTO audit_log_related_entity/i.test(q.text));
+    expect(relatedInserts).toHaveLength(2);
+    expect(relatedInserts.some((q) => q.params.includes('sheet_material_type') && q.params.includes(5))).toBe(true);
+    expect(relatedInserts.some((q) => q.params.includes('sheet_material_type') && q.params.includes(12))).toBe(true);
+  });
+
+  it('Variant B: snapshot import writeAudit with no sheet ids writes no bridge rows', async () => {
+    const captured: Array<{ text: string; params: readonly unknown[] }> = [];
+    await writeAudit(fakeTx(captured), 'orders.snapshot_export', actor, 77, 55, { requestId: 'req_s' });
+    const relatedInserts = captured.filter((q) => /INSERT INTO audit_log_related_entity/i.test(q.text));
+    expect(relatedInserts).toHaveLength(0);
+  });
 });

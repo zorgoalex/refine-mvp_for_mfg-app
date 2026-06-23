@@ -127,6 +127,7 @@ interface SheetSpecRow {
   sheet_material_type_id: number | string;
   width_mm: number | string | null;
   height_mm: number | string | null;
+  is_cuttable: boolean;
 }
 
 interface ShadowFlagRow {
@@ -159,7 +160,7 @@ async function collectShadowInjectionErrors(
     materialIds.add(header.materialId);
   }
   for (const detail of details) {
-    if (detail.materialId != null && detail.materialId !== 0) {
+    if (detail.materialId != null) {
       materialIds.add(detail.materialId);
     }
   }
@@ -242,7 +243,7 @@ export async function validateSheetReferences(
   const specById = new Map<number, SheetSpecRow>();
   if (sheetIds.length > 0) {
     const specs = await tx.query<SheetSpecRow>(
-      `SELECT sheet_material_type_id, width_mm, height_mm
+      `SELECT sheet_material_type_id, width_mm, height_mm, is_cuttable
          FROM sheet_material_types WHERE sheet_material_type_id = ANY($1::bigint[])`,
       [sheetIds],
     );
@@ -279,6 +280,20 @@ export async function validateSheetReferences(
       errors.push({
         field: `${detail.label}.height`,
         message: `Размер детали (${detail.height}×${detail.width}) превышает лист (${num(spec.height_mm)}×${num(spec.width_mm)})`,
+      });
+    }
+  });
+
+  // Cuttable enforcement on DETAILS (Critic R21 B1): a detail cannot reference a
+  // non-cuttable sheet material type (e.g. «краска»). Header is exempt — it may hold
+  // paint/coating types as a header-only reference.
+  details.forEach((detail) => {
+    if (detail.sheetMaterialTypeId == null) return;
+    const spec = specById.get(detail.sheetMaterialTypeId);
+    if (spec && spec.is_cuttable === false) {
+      errors.push({
+        field: `${detail.label}.sheetMaterialTypeId`,
+        message: 'a non-cuttable sheet material cannot be used on an order detail',
       });
     }
   });

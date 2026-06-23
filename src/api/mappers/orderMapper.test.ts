@@ -462,6 +462,27 @@ describe('orderMapper', () => {
     expect(form.deletedDowelingLinks).toEqual([]);
   });
 
+  // Variant B: sheet-only material contract
+  it('emits materialId: null for a sheet detail (Variant B)', () => {
+    const form = createFormValues();
+    const sheetDetail = {
+      ...form.details[1],
+      sheet_material_type_id: 2,
+      material_id: null as unknown as number,
+    };
+    form.details = [sheetDetail];
+    const dto = mapOrderFormToSaveOrderDto(form);
+    expect(dto.details[0].materialId).toBeNull();
+    expect(dto.details[0].sheetMaterialTypeId).toBe(2);
+  });
+
+  it('emits materialId: null on the order header (Variant B sunset)', () => {
+    const form = createFormValues();
+    form.header.material_id = null as unknown as number;
+    const dto = mapOrderFormToSaveOrderDto(form);
+    expect(dto.header.materialId).toBeNull();
+  });
+
   it('normalizes dayjs-like dates and strips frontend-only fields', () => {
     expect(normalizeDateOnly({ format: () => '2026-04-30' })).toBe('2026-04-30');
     expect(

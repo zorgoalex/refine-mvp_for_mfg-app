@@ -21,11 +21,8 @@ import type {
   SheetReferenceValidationInput,
   StoredOrderSheetState,
 } from '../application/order-transaction.types';
-import {
-  buildShadowMaterialAuditEvent,
-  resolveShadowMaterialId,
-  type ShadowContext,
-} from './shadow-material';
+// VARIANT B: dead after shadow removal — delete in follow-up
+// (shadow-material module retained as a no-op for one release; types removed here)
 import {
   validateSheetReferences as validateSheetReferencesShared,
   validateNoShadowInjection as validateNoShadowInjectionShared,
@@ -92,6 +89,7 @@ export class PgOrderTransactionManager implements OrderTransactionManagerPort {
 }
 
 class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
+  // VARIANT B: dead after shadow removal — delete in follow-up
   private saveContext: SaveContext | null = null;
 
   constructor(
@@ -99,6 +97,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     private readonly sheetOrdersReads: boolean = true,
   ) {}
 
+  // VARIANT B: dead after shadow removal — delete in follow-up (no-op; no longer read by upsertDetails)
   setSaveContext(context: SaveContext): void {
     this.saveContext = context;
   }
@@ -314,9 +313,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.linkCadFile ?? null,
         input.header.linkPdfFile ?? null,
         input.header.notes ?? null,
-        // Header invariant (§13): a sheet header forces material_id NULL so legacy
-        // material_id consumers never read a material that disagrees with the sheet.
-        input.header.sheetMaterialTypeId != null ? null : input.header.materialId ?? null,
+        // VARIANT B: orders.material_id is always NULL (chk_orders_material_id_null holds).
+        null,
         input.header.millingTypeId ?? null,
         input.header.edgeTypeId ?? null,
         input.header.filmId ?? null,
@@ -387,8 +385,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.linkCadFile ?? null,
         input.header.linkPdfFile ?? null,
         input.header.notes ?? null,
-        // Header invariant (§13): a sheet header forces material_id NULL.
-        input.header.sheetMaterialTypeId != null ? null : input.header.materialId ?? null,
+        // VARIANT B: orders.material_id is always NULL (chk_orders_material_id_null holds).
+        null,
         input.header.millingTypeId ?? null,
         input.header.edgeTypeId ?? null,
         input.header.filmId ?? null,
@@ -400,29 +398,9 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
 
   async upsertDetails(orderId: number, details: readonly CalculatedOrderDetailDto[]): Promise<void> {
     for (const detail of details) {
-      // Variant A: a sheet detail resolves (creates/syncs) its dedicated synthetic shadow
-      // material INSIDE this tx and OVERRIDES material_id with it (order_details.material_id
-      // is NOT NULL). Legacy details keep their provided material_id unchanged.
-      let effective: CalculatedOrderDetailDto = detail;
-      if (detail.sheetMaterialTypeId != null) {
-        const ctx = this.saveContext;
-        const shadowContext: ShadowContext = {
-          actorUserId: ctx?.actorUserId ?? null,
-          requestId: ctx?.requestId,
-          source: ctx?.source ?? SOURCE,
-          clientId: ctx?.clientId ?? null,
-          orderId,
-        };
-        const materialId = await resolveShadowMaterialId(
-          this.tx,
-          detail.sheetMaterialTypeId,
-          shadowContext,
-          async (auditInput) => {
-            await auditService.record(this.tx, buildShadowMaterialAuditEvent(auditInput, shadowContext));
-          },
-        );
-        effective = { ...detail, materialId };
-      }
+      // VARIANT B: order details reference their material solely via
+      // sheet_material_type_id. material_id is always NULL for order rows.
+      const effective: CalculatedOrderDetailDto = { ...detail, materialId: null };
 
       if (effective.id) {
         await this.tx.query(
@@ -759,6 +737,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 
   async writeAuditEvent(event: OrderSaveAuditEvent): Promise<void> {
+    const sheetIds = event.relatedSheetMaterialTypeIds ?? [];
     await auditService.record(this.tx, {
       event: event.action,
       entityType: 'order',
@@ -777,6 +756,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         string,
         unknown
       >,
+      relatedEntities: sheetIds.map((entityId) => ({ entityType: 'sheet_material_type', entityId })),
     });
   }
 

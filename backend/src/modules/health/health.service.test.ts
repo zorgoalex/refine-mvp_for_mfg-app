@@ -14,12 +14,14 @@ function createConfig(values: Partial<BackendEnv>): ConfigService<BackendEnv, tr
 function createDatabase(input: {
   isConfigured: boolean;
   ping?: () => Promise<boolean>;
+  query?: (text: string) => Promise<{ rows: unknown[] }>;
 }): DatabaseService {
   return {
     get isConfigured() {
       return input.isConfigured;
     },
     ping: input.ping ?? vi.fn(),
+    query: input.query ?? vi.fn(async () => ({ rows: [] })),
   } as unknown as DatabaseService;
 }
 
@@ -98,6 +100,85 @@ describe('HealthService readiness', () => {
           status: 'unavailable',
           message: 'database connection failed',
         },
+      },
+    });
+  });
+
+  it('fails readiness when migration 034 is applied but BACKEND_SHEET_ORDERS_READS is false', async () => {
+    const service = new HealthService(
+      createConfig({
+        APP_NAME: 'erp-backend',
+        READINESS_REQUIRE_DATABASE: false,
+        READINESS_REQUIRE_REDIS: false,
+        BACKEND_SHEET_ORDERS_READS: false,
+      }),
+      createDatabase({
+        isConfigured: true,
+        ping: vi.fn(async () => true),
+        query: vi.fn(async () => ({ rows: [{ found: true }] })),
+      }),
+      createRateLimits(),
+    );
+
+    await expect(service.ready()).resolves.toMatchObject({
+      status: 'not_ready',
+      checks: {
+        config: {
+          status: 'unavailable',
+          message: expect.stringContaining('BACKEND_SHEET_ORDERS_READS=false'),
+        },
+      },
+    });
+  });
+
+  it('is ready when migration 034 is applied and BACKEND_SHEET_ORDERS_READS is true', async () => {
+    const queryMock = vi.fn(async () => ({ rows: [{ found: true }] }));
+    const service = new HealthService(
+      createConfig({
+        APP_NAME: 'erp-backend',
+        READINESS_REQUIRE_DATABASE: false,
+        READINESS_REQUIRE_REDIS: false,
+        BACKEND_SHEET_ORDERS_READS: true,
+      }),
+      createDatabase({
+        isConfigured: true,
+        ping: vi.fn(async () => true),
+        // query should NOT be called (flag is ON, no check needed)
+        query: queryMock,
+      }),
+      createRateLimits(),
+    );
+
+    await expect(service.ready()).resolves.toMatchObject({
+      status: 'ready',
+      checks: {
+        config: { status: 'ok' },
+      },
+    });
+    // Short-circuit enforced: flag-ON skips the pg_constraint readiness probe
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('is ready when migration 034 is not applied and BACKEND_SHEET_ORDERS_READS is false', async () => {
+    const service = new HealthService(
+      createConfig({
+        APP_NAME: 'erp-backend',
+        READINESS_REQUIRE_DATABASE: false,
+        READINESS_REQUIRE_REDIS: false,
+        BACKEND_SHEET_ORDERS_READS: false,
+      }),
+      createDatabase({
+        isConfigured: true,
+        ping: vi.fn(async () => true),
+        query: vi.fn(async () => ({ rows: [{ found: false }] })),
+      }),
+      createRateLimits(),
+    );
+
+    await expect(service.ready()).resolves.toMatchObject({
+      status: 'ready',
+      checks: {
+        config: { status: 'ok' },
       },
     });
   });

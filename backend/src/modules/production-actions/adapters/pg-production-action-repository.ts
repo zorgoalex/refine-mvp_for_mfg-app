@@ -79,10 +79,6 @@ interface VersionRow extends QueryResultRow {
   version: string | number;
 }
 
-interface AuditRow extends QueryResultRow {
-  audit_id: string;
-}
-
 interface IdempotencyRow extends QueryResultRow {
   idempotency_key: string;
   request_hash: string;
@@ -2687,45 +2683,28 @@ async function writeAudit(
     metadataJson: Record<string, unknown>;
   },
 ): Promise<string> {
-  const result = await tx.query<AuditRow>(
-    `
-    INSERT INTO audit_log (
-      event, entity_type, entity_id, user_id, request_id, source,
-      related_order_id, related_client_id, related_production_event_id,
-      status_field, status_id, status_name, status_code, stage_code,
-      before_json, after_json, diff_json, metadata_json
-    )
-    VALUES (
-      $1, $2, $3, $4, $5, $6,
-      $7, $8, $9,
-      $10, $11, $12, $13, $14,
-      $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb
-    )
-    RETURNING audit_id
-    `,
-    [
-      input.event,
-      input.entityType ?? 'order',
-      input.entityId ?? String(input.order.orderId),
-      input.actorUserId ?? input.currentUser?.id ?? null,
-      input.requestId,
-      input.source,
-      input.order.orderId,
-      input.order.clientId,
-      input.relatedProductionEventId ?? null,
-      input.statusField ?? null,
-      input.statusId ?? null,
-      input.statusName ?? null,
-      input.statusCode ?? null,
-      input.stageCode ?? null,
-      JSON.stringify(input.beforeJson),
-      JSON.stringify(input.afterJson),
-      JSON.stringify(input.diffJson),
-      JSON.stringify(input.metadataJson),
-    ],
-  );
-
-  return result.rows[0].audit_id;
+  return auditService.record(tx, {
+    event: input.event,
+    entityType: input.entityType ?? 'order',
+    entityId: input.entityId ?? String(input.order.orderId),
+    actorUserId: input.actorUserId ?? input.currentUser?.id ?? null,
+    actorUsername: input.currentUser?.username ?? null,
+    actorRole: input.currentUser?.role ?? null,
+    requestId: input.requestId,
+    source: input.source,
+    relatedOrderId: input.order.orderId,
+    relatedClientId: input.order.clientId ?? null,
+    relatedProductionEventId: input.relatedProductionEventId ?? null,
+    statusField: input.statusField ?? null,
+    statusId: input.statusId ?? null,
+    statusName: input.statusName ?? null,
+    statusCode: input.statusCode ?? null,
+    stageCode: input.stageCode ?? null,
+    before: input.beforeJson,
+    after: input.afterJson,
+    diff: input.diffJson,
+    metadata: input.metadataJson,
+  });
 }
 
 async function enqueueOutbox(

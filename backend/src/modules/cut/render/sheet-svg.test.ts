@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSheetSvg,
+  composePieceLabelLines,
   computeGroupItemQuantities,
   formatPieceLabel,
 } from './sheet-svg';
@@ -20,6 +21,40 @@ describe('formatPieceLabel (§3 instance labels)', () => {
   it('appends instance N/qty only when qty > 1', () => {
     expect(formatPieceLabel('Заказ 5 / деталь 999', 2, 3)).toBe('Заказ 5 / деталь 999 2/3');
     expect(formatPieceLabel('Заказ 5 / деталь 999', 1, 1)).toBe('Заказ 5 / деталь 999');
+  });
+});
+
+describe('composePieceLabelLines (two-line order/detail label)', () => {
+  it('puts the order on line 1 and the detail on line 2', () => {
+    expect(
+      composePieceLabelLines({ orderId: 12, detailId: 45, itemId: 'det-45', instance: 1, qty: 1 }),
+    ).toEqual(['№12', '45']);
+  });
+
+  it('appends instance N/qty to the detail line only', () => {
+    expect(
+      composePieceLabelLines({ orderId: 12, detailId: 45, itemId: 'det-45', instance: 2, qty: 3 }),
+    ).toEqual(['№12', '45 2/3']);
+  });
+
+  it('falls back to a single line when the order is unknown', () => {
+    expect(
+      composePieceLabelLines({ orderId: null, detailId: null, itemId: 'weird', instance: 1, qty: 1 }),
+    ).toEqual(['weird']);
+  });
+});
+
+describe('buildSheetSvg multi-line labels', () => {
+  it('renders each label line as its own <tspan> sharing the piece centre x', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => ['№5', '999'] });
+    // first piece centre: x=10+600/2=310, y=15+400/2=215
+    expect(svg).toMatch(/<tspan x="310"[^>]*>№5<\/tspan>/);
+    expect(svg).toMatch(/<tspan x="310"[^>]*>999<\/tspan>/);
+  });
+
+  it('still accepts a plain string label (single line)', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X' });
+    expect(svg).toContain('>X</tspan>');
   });
 });
 

@@ -3,7 +3,15 @@ import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { FreecutClient } from './freecut-client';
 import type { FreecutOptimizeResponse } from '../application/cut-freecut-mapping';
-import { PgCutRepository } from './pg-cut-repository';
+import type { CutConfigPort } from '../application/cut-config';
+import { StaticCutConfig } from '../application/cut-config';
+import { PgCutRepository, profileChangedOutboxKey } from './pg-cut-repository';
+
+/** Build a CutConfigPort stub with selective overrides (defaults to StaticCutConfig). */
+function stubConfig(overrides: Partial<CutConfigPort> = {}): CutConfigPort {
+  const base = new StaticCutConfig();
+  return { ...base, ...overrides };
+}
 
 function currentUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
   return {
@@ -36,6 +44,8 @@ interface FakeDbOptions {
   reserveConflict?: boolean;
   /** rows for listEligibleDetails */
   eligibleRows?: FakeRow[];
+  /** whether the cut_param_profiles SELECT returns a row (profile is active) */
+  profileActive?: boolean;
 }
 
 function createDatabase(options: FakeDbOptions = {}) {
@@ -54,9 +64,21 @@ function createDatabase(options: FakeDbOptions = {}) {
       return { rows: [{ cut_job_id: 42 }], rowCount: 1 };
     }
 
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
       const base = options.cutJob ?? { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null };
-      return { rows: [{ ...base, version: jobVersion }], rowCount: 1 };
+      return { rows: [{ ...base, version: jobVersion, param_profile_id: options.cutJob?.param_profile_id ?? null }], rowCount: 1 };
+    }
+
+    // setProfile FOR UPDATE: narrower column list (cut_job_id, status, version, param_profile_id)
+    if (sql.startsWith('SELECT cut_job_id, status, version, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
+      const base = options.cutJob ?? { cut_job_id: 42, status: 'ready', version: 0, param_profile_id: null };
+      return { rows: [{ cut_job_id: base.cut_job_id ?? 42, status: base.status ?? 'ready', version: jobVersion, param_profile_id: base.param_profile_id ?? null }], rowCount: 1 };
+    }
+
+    // profile active check
+    if (sql.startsWith('SELECT 1 FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true')) {
+      const active = options.profileActive !== false; // default true
+      return { rows: active ? [{ '?column?': 1 }] : [], rowCount: active ? 1 : 0 };
     }
 
     if (sql.startsWith('SELECT od.order_id, od.quantity, od.production_status_id, od.delete_flag')) {
@@ -115,8 +137,14 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
 
     // loadJob reads
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason FROM cut_job WHERE cut_job_id = $1')) {
-      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id FROM cut_job WHERE cut_job_id = $1')) {
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null }], rowCount: 1 };
+    }
+    if (sql.startsWith('SELECT i.cut_job_id')) {
+      return { rows: [{ cut_job_id: 42, positions: 0, details: 0, area: 0 }], rowCount: 1 };
+    }
+    if (sql.startsWith('SELECT g.cut_job_id')) {
+      return { rows: [{ cut_job_id: 42, sheets: 0 }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item')) {
       return { rows: [], rowCount: 0 };
@@ -440,13 +468,15 @@ describe('PgCutRepository', () => {
     expect(statusUpdate?.params?.[2]).toBe('CUT_NO_SHEET_SPEC');
     expect(String(statusUpdate?.params?.[3])).toMatch(/раскройной спецификации/i);
     // The Phase 1 failure audit keeps query/report-ready related dimensions
-    // (order/material/sheet) captured from the grouped items — not an empty set.
+    // (order/sheet) captured from the grouped items — not an empty set.
+    // Variant B: material_id is NULL post-034; only order + sheet_material_type
+    // dimensions are emitted (no 'material' entity in the related set).
     const relatedPairs = db.queries
       .filter((q) => /INSERT INTO audit_log_related_entity/i.test(q.text))
       .map((q) => `${q.params?.[1]}:${q.params?.[2]}`);
     expect(relatedPairs).toContain('order:9');
-    expect(relatedPairs).toContain('material:5');
     expect(relatedPairs).toContain('sheet_material_type:9');
+    expect(relatedPairs).not.toContain('material:5');
   });
 
   it('calculate: a stale-version precondition does NOT mark the job failed', async () => {
@@ -468,8 +498,8 @@ describe('PgCutRepository', () => {
     const db = createDatabase({
       readyStatusIds: [1, 2, 3],
       eligibleRows: [
-        { detail_id: 1, order_id: 9, quantity: 2, material_id: 5, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false, already_reserved: false },
-        { detail_id: 2, order_id: 9, quantity: 1, material_id: 6, sheet_material_type_id: null, film_id: null, production_status_id: 1, delete_flag: false, already_reserved: false },
+        { detail_id: 1, order_id: 9, quantity: 2, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false },
+        { detail_id: 2, order_id: 9, quantity: 1, sheet_material_type_id: null, film_id: null, production_status_id: 1, delete_flag: false },
       ],
     });
     const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
@@ -481,4 +511,85 @@ describe('PgCutRepository', () => {
     expect(result.details.find((d) => d.orderDetailId === 2)?.ineligibleReason).toBe('no_sheet_spec');
     expect(result.noSheetSpecCount).toBe(1);
   });
+
+  it('Variant B: treats a sheet detail with NULL material_id as eligible (no mandatory materials JOIN)', async () => {
+    // Post-034: order_details.material_id IS NULL; sheet_material_type_id is authoritative.
+    // The inner JOIN materials m ON m.material_id = od.material_id would drop every row.
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 5, order_id: 11, quantity: 1, sheet_material_type_id: 2, film_id: null, production_status_id: 1, delete_flag: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [11] }, requestId: 'r-vb' });
+
+    expect(result.details.map((d) => d.orderDetailId)).toContain(5);
+    expect(result.details.find((d) => d.orderDetailId === 5)?.eligible).toBe(true);
+  });
+
+  it('Variant B: filters eligible details by sheetMaterialTypeIds (replaces materialIds filter)', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 5, order_id: 11, quantity: 1, sheet_material_type_id: 2, film_id: null, production_status_id: 1, delete_flag: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listEligibleDetails({
+      currentUser: currentUser(),
+      criteria: { sheetMaterialTypeIds: [2] },
+      requestId: 'r-vb-filter',
+    });
+
+    // The query must have used od.sheet_material_type_id = ANY(...) — verified by
+    // the fake DB routing: the condition is built against sheetMaterialTypeIds.
+    const sheetFilterQuery = db.queries.find((q) =>
+      normalize(q.text).includes('od.sheet_material_type_id = ANY'),
+    );
+    expect(sheetFilterQuery).toBeDefined();
+    expect(result.details.every((d) => d.sheetMaterialTypeId === 2)).toBe(true);
+  });
+});
+
+describe('profileChangedOutboxKey', () => {
+  it('is stable per (job, requestId), falls back to version', () => {
+    expect(profileChangedOutboxKey(7, 'req-9', 3)).toBe('cut_job.profile_changed:7:req-9');
+    expect(profileChangedOutboxKey(7, undefined, 3)).toBe('cut_job.profile_changed:7:v3');
+  });
+});
+
+it('setProfile no-op (same profile) writes NO update/audit/outbox', async () => {
+  // cutJob FOR UPDATE row already has param_profile_id = 5; target is also 5
+  const db = createDatabase({ cutJob: { cut_job_id: 42, status: 'ready', version: 2, param_profile_id: 5 } });
+  const repo = new PgCutRepository(db.service, /* freecut stub */ { optimize: vi.fn() } as never);
+  await repo.setProfile({ currentUser: currentUser(), cutJobId: 42, paramProfileId: 5, version: 2 });
+  const texts = db.queries.map((q) => normalize(q.text));
+  expect(texts.some((t) => t.startsWith('UPDATE cut_job SET param_profile_id'))).toBe(false);
+  expect(texts.some((t) => t.startsWith('INSERT INTO outbox_events'))).toBe(false);
+  expect(texts.some((t) => t.includes('INTO audit_log'))).toBe(false);
+});
+
+it('setProfile rejects a calculating job with 409 (status gate)', async () => {
+  const db = createDatabase({ cutJob: { cut_job_id: 42, status: 'calculating', version: 2, param_profile_id: null } });
+  const repo = new PgCutRepository(db.service, { optimize: vi.fn() } as never);
+  await expect(repo.setProfile({ currentUser: currentUser(), cutJobId: 42, paramProfileId: 5, version: 2 }))
+    .rejects.toMatchObject({ statusCode: 409 });
+});
+
+it('calculate rejects an inactive chosen profile with 422 (no freecut call)', async () => {
+  const optimize = vi.fn();
+  // cutJob FOR UPDATE row carries param_profile_id = 5; config stub resolves it to null (inactive/removed)
+  const db = createDatabase({
+    cutJob: { cut_job_id: 42, status: 'draft', version: 0, pdf_prewarm_state: 'pending', params: null, param_profile_id: 5 },
+    calcItems: [
+      { cut_job_item_id: 501, order_detail_id: 1, order_id: 9, qty: 1, width_mm: 600, height_mm: 400, sheet_material_type_id: 9, film_id: null, film_texture: null, smt_width_mm: 2800, smt_height_mm: 2070 },
+    ],
+  });
+  const repo = new PgCutRepository(db.service, { optimize } as never, stubConfig({ getParamsByProfileId: async () => null }));
+  await expect(repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0 }))
+    .rejects.toMatchObject({ statusCode: 422 });
+  expect(optimize).not.toHaveBeenCalled();
 });

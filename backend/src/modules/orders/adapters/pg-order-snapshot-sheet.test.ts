@@ -2,12 +2,15 @@
  * Unit tests for SP3 sheet-material support in the snapshot path.
  * Covers:
  *  - mapOrderHeaderSnapshot includes sheetMaterialTypeId on export
- *  - mapDetailSnapshot includes sheetMaterialTypeId on export
+ *  - mapDetailSnapshot includes sheetMaterialTypeId on export (and materialId is null-safe)
  *  - orderHeaderInsertParams / orderHeaderUpdateParams include sheet_material_type_id
  *    and enforce the header invariant (force material_id NULL when sheetMaterialTypeId set)
  *  - detailValues includes sheetMaterialTypeId as the last param
  *  - OrderSnapshotService.importOrderSnapshot gates on sheet_materials.view when
  *    the incoming snapshot payload contains a sheetMaterialTypeId
+ *  - Variant B (Task 4): export materialId is null when DB material_id is NULL (post-034)
+ *  - Variant B (Task 4): import sanitization strips materialId from legacy Variant-A payloads
+ *    when sheetMaterialTypeId is present, before prepareOrderSave/validation
  */
 import JSZip from 'jszip';
 import { describe, expect, it, vi } from 'vitest';
@@ -24,6 +27,8 @@ import {
   _testOnlyOrderHeaderInsertParams as insertParams,
   _testOnlyOrderHeaderUpdateParams as updateParams,
   _testOnlyDetailValues as detailValues,
+  _testOnlyNullifyMaterialIdForSheetEntries as nullifyMaterialIdForSheetEntries,
+  _testOnlySnapshotToSaveOrderDto as snapshotToSaveOrderDto,
   buildSheetValidationDetails,
 } from './pg-order-snapshot';
 import { assertSheetEligibilityAndNoClear } from '../domain/sheet-order-validation';
@@ -230,9 +235,10 @@ describe('orderHeaderInsertParams — sheet_material_type_id', () => {
     expect(params[30]).toBe(42);   // sheetMaterialTypeId
   });
 
-  it('preserves materialId when sheetMaterialTypeId is null', () => {
+  it('always binds null for materialId regardless of sheetMaterialTypeId (Variant B sunset)', () => {
+    // Variant B: header material_id is fully sunset — ALWAYS null, even when sheetMaterialTypeId is absent.
     const params = insertParams(makeNormalizedHeader({ materialId: 3, sheetMaterialTypeId: null }), makeTotals());
-    expect(params[25]).toBe(3);    // materialId preserved
+    expect(params[25]).toBeNull(); // materialId always null (Variant B invariant)
     expect(params[30]).toBeNull(); // sheetMaterialTypeId null
   });
 });
@@ -256,6 +262,13 @@ describe('orderHeaderUpdateParams — sheet_material_type_id', () => {
     const params = updateParams(makeNormalizedHeader({ materialId: 8, sheetMaterialTypeId: 33 }), makeTotals());
     expect(params[24]).toBeNull(); // materialId forced null
     expect(params[29]).toBe(33);  // sheetMaterialTypeId
+  });
+
+  it('always binds null for materialId regardless of sheetMaterialTypeId (Variant B sunset)', () => {
+    // Variant B: header material_id is fully sunset — ALWAYS null, even without a sheet id.
+    const params = updateParams(makeNormalizedHeader({ materialId: 5, sheetMaterialTypeId: null }), makeTotals());
+    expect(params[24]).toBeNull(); // materialId always null (Variant B invariant)
+    expect(params[29]).toBeNull(); // sheetMaterialTypeId null
   });
 });
 
@@ -520,5 +533,165 @@ describe('OrderSnapshotService — sheet_materials.view gate on BATCH import', (
       service.importOrderSnapshotBatch({ currentUser: makeUser({}), zipBase64 }),
     ).resolves.toMatchObject({ success: true });
     expect(snapshots.importOrderSnapshotBatch).toHaveBeenCalled();
+  });
+});
+
+// ── Variant B (Task 4): export null-safe materialId ───────────────────────
+// Post-034 migration, material_id IS NULL in the DB for all order_details.
+// The export serializer must emit materialId: null, not NaN or 0.
+
+describe('mapDetailSnapshot — Variant B: null-safe materialId export', () => {
+  it('exports a sheet detail with materialId null when DB material_id is NULL', () => {
+    const result = mapDetailSnapshot(makeDetailRow({ material_id: null, sheet_material_type_id: 2 }));
+    expect(result.materialId).toBeNull();
+    expect(result.sheetMaterialTypeId).toBe(2);
+  });
+
+  it('exports a non-sheet detail with materialId null when DB material_id is NULL', () => {
+    // Legacy path: post-034 even non-sheet rows have material_id NULL in DB
+    const result = mapDetailSnapshot(makeDetailRow({ material_id: null, sheet_material_type_id: null }));
+    expect(result.materialId).toBeNull();
+  });
+
+  it('still exports a numeric materialId when the DB row has a non-null material_id', () => {
+    // Backward compatibility: existing rows with material_id set still serialize correctly
+    const result = mapDetailSnapshot(makeDetailRow({ material_id: 99, sheet_material_type_id: 5 }));
+    expect(result.materialId).toBe(99);
+    expect(result.sheetMaterialTypeId).toBe(5);
+  });
+});
+
+// ── Variant B (Task 4): import sanitization (Critic R15 B1) ─────────────────
+// A Variant-A export carries a real materialId (shadow) alongside sheetMaterialTypeId.
+// Before prepareOrderSave/validation, the snapshot builder must NULL out materialId
+// for any header/detail that has a non-null sheetMaterialTypeId.
+// Anti-injection guard stays active only for sheetMaterialTypeId==null rows.
+
+describe('nullifyMaterialIdForSheetEntries — import sanitization', () => {
+  it('nulls materialId in a detail when sheetMaterialTypeId is set (Variant-A legacy payload)', () => {
+    const details = [{ materialId: 7, sheetMaterialTypeId: 2 }];
+    const result = nullifyMaterialIdForSheetEntries(details);
+    expect(result[0].materialId).toBeNull();
+    expect(result[0].sheetMaterialTypeId).toBe(2);
+  });
+
+  it('preserves materialId in a detail when sheetMaterialTypeId is null', () => {
+    const details = [{ materialId: 3, sheetMaterialTypeId: null }];
+    const result = nullifyMaterialIdForSheetEntries(details);
+    expect(result[0].materialId).toBe(3);
+  });
+
+  it('handles a detail where materialId is already null and sheetMaterialTypeId is set', () => {
+    const details = [{ materialId: null, sheetMaterialTypeId: 2 }];
+    const result = nullifyMaterialIdForSheetEntries(details);
+    expect(result[0].materialId).toBeNull();
+    expect(result[0].sheetMaterialTypeId).toBe(2);
+  });
+
+  it('handles a detail where materialId is undefined and sheetMaterialTypeId is set', () => {
+    const details = [{ sheetMaterialTypeId: 2 }];
+    const result = nullifyMaterialIdForSheetEntries(details as Array<{ materialId?: number | null; sheetMaterialTypeId?: number | null }>);
+    expect(result[0].materialId).toBeNull();
+  });
+
+  it('processes multiple details: nulls only sheet ones, preserves legacy ones', () => {
+    const details = [
+      { materialId: 7, sheetMaterialTypeId: 2 },   // sheet → null materialId
+      { materialId: 3, sheetMaterialTypeId: null }, // legacy → keep materialId
+      { materialId: null, sheetMaterialTypeId: 5 }, // already null + sheet → stays null
+    ];
+    const result = nullifyMaterialIdForSheetEntries(details);
+    expect(result[0].materialId).toBeNull();
+    expect(result[1].materialId).toBe(3);
+    expect(result[2].materialId).toBeNull();
+  });
+});
+
+// ── Variant B (Critic R2 MAJOR Finding 1): unconditional header materialId null on import ─
+// A header-only legacy snapshot that carries a materialId with NO header sheetMaterialTypeId
+// must import without throwing (the header materialId is always dropped regardless of whether
+// a sheetMaterialTypeId is present). Before the fix, the conditional sanitizer only cleared
+// materialId when sheetMaterialTypeId != null, leaving header-only legacy payloads to fail
+// validation with 422.
+
+describe('snapshotToSaveOrderDto — header-only legacy import (Critic R2 MAJOR Finding 1)', () => {
+  function makeMinimalSnapshot(headerOverrides: Record<string, unknown> = {}): import('../dto/order-snapshot.dto').OrderSnapshotDto {
+    return {
+      schema: ORDER_SNAPSHOT_SCHEMA,
+      formatVersion: ORDER_SNAPSHOT_FORMAT_VERSION,
+      exporterService: {
+        name: 'erp-order-snapshot' as const,
+        version: '1.0.0',
+        compatibleImportVersions: ['1.0.0'],
+      },
+      source: { sourceInstanceId: 'test-inst', exportedAt: '2026-06-22T00:00:00.000Z', payloadHash: '' },
+      identity: {
+        order: { sourceId: '42', refKey1c: null },
+        client: { sourceId: '10', refKey1c: null },
+      },
+      data: {
+        client: { sourceId: '10', clientName: 'Test Client', refKey1c: null, notes: null, isActive: true },
+        clientPhones: [],
+        order: {
+          sourceId: '42',
+          orderName: 'Legacy-Header-Only',
+          clientId: 10,
+          orderDate: '2026-06-22',
+          orderStatusId: 1,
+          ...headerOverrides,
+        } as import('../dto/order-snapshot.dto').OrderSnapshotHeaderDto,
+        details: [],
+        payments: [],
+        workshops: [],
+        requirements: [],
+        dowelingOrders: [],
+        dowelingLinks: [],
+        productionStatusEvents: [],
+        deadlineInstances: [],
+        deadlineEvents: [],
+      },
+      references: {},
+    };
+  }
+
+  it('does not throw when header has materialId set but NO header sheetMaterialTypeId', () => {
+    // Regression: before the fix, this would have produced a DTO with materialId=7 on the
+    // header, which the Task-5 validator then rejected with 422. Now materialId is always
+    // nulled unconditionally on the header, so the DTO passes validation.
+    const snapshot = makeMinimalSnapshot({ materialId: 7, sheetMaterialTypeId: null });
+    expect(() =>
+      snapshotToSaveOrderDto(snapshot, 10, {
+        details: [],
+        payments: [],
+        workshops: [],
+        requirements: [],
+        dowelingLinks: [],
+      }),
+    ).not.toThrow();
+  });
+
+  it('resulting header materialId is null for a header-only legacy snapshot', () => {
+    const snapshot = makeMinimalSnapshot({ materialId: 7, sheetMaterialTypeId: null });
+    const dto = snapshotToSaveOrderDto(snapshot, 10, {
+      details: [],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+    });
+    expect(dto.header.materialId).toBeNull();
+  });
+
+  it('resulting header materialId is null even when sheetMaterialTypeId is also set (Variant-A double-field export)', () => {
+    const snapshot = makeMinimalSnapshot({ materialId: 99, sheetMaterialTypeId: 5 });
+    const dto = snapshotToSaveOrderDto(snapshot, 10, {
+      details: [],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+    });
+    expect(dto.header.materialId).toBeNull();
+    expect(dto.header.sheetMaterialTypeId).toBe(5);
   });
 });

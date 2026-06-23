@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import type {
   CutSelectionCriteriaDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
+import type { CutSheetTypeOption } from '../application/cut-command.types';
 import { CutPdfCache, type PdfEnsureResult } from '../application/cut-pdf-cache';
 import { CutRuntimeConfigService } from './cut-runtime-config.service';
 
@@ -21,7 +22,8 @@ const idArray = z.array(z.number().int().positive()).max(5000);
 
 const criteriaSchema = z
   .object({
-    materialIds: idArray.optional(),
+    /** Variant B: filter by sheet_material_type_id (replaces materialIds post-034). */
+    sheetMaterialTypeIds: idArray.optional(),
     orderIds: idArray.optional(),
     filmIds: idArray.optional(),
     productionStatusIds: idArray.optional(),
@@ -44,6 +46,13 @@ const addItemsRequestSchema = z
   .strict();
 
 const versionBodySchema = z.object({ version: z.number().int().min(0) }).strict();
+
+const setProfileBodySchema = z
+  .object({
+    paramProfileId: z.number().int().positive().nullable(),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
 
 
 @ApiTags('CutJobs')
@@ -91,6 +100,18 @@ export class CutController {
       orderIds: parseCsvIds(query.orderIds),
       requestId: request.requestId,
     });
+  }
+
+  @ApiOperation({
+    operationId: 'listCutSheetTypes',
+    summary: 'List active sheet material types for the cut filter (cut.view only — no sheet_materials.view required)',
+  })
+  @Get('sheet-types')
+  async listSheetTypes(@Req() request: RequestWithCurrentUser): Promise<CutSheetTypeOption[]> {
+    // Registered BEFORE ':cutJobId' so the literal 'sheet-types' path is not captured as an id.
+    // Gated on cut.view: worker can populate the cut filter without sheet_materials.view (Variant B Task 11).
+    const currentUser = this.requireRead(request);
+    return this.cut.listSheetTypesForCut({ currentUser, requestId: request.requestId });
   }
 
   @ApiOperation({ operationId: 'getCutJob', summary: 'Get a cut job manifest' })
@@ -190,6 +211,24 @@ export class CutController {
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
       version: parseVersionBody(body),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'setCutJobProfile', summary: 'Set the cut profile for a job' })
+  @Patch(':cutJobId/profile')
+  async setProfile(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { paramProfileId, version } = parseSetProfileBody(body);
+    return this.cut.setProfile({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      paramProfileId,
+      version,
       requestId: request.requestId,
     });
   }
@@ -386,10 +425,14 @@ export function parseVersionBody(body: unknown): number {
   return parse(versionBodySchema, body).version;
 }
 
+export function parseSetProfileBody(body: unknown): { paramProfileId: number | null; version: number } {
+  return parse(setProfileBodySchema, body);
+}
+
 /** Query CSV (`orderIds=9,10`) → number arrays. */
 export function parseEligibleCriteria(query: Record<string, string>): CutSelectionCriteriaDto {
   return {
-    materialIds: parseCsvIds(query.materialIds),
+    sheetMaterialTypeIds: parseCsvIds(query.sheetMaterialTypeIds),
     orderIds: parseCsvIds(query.orderIds),
     filmIds: parseCsvIds(query.filmIds),
     productionStatusIds: parseCsvIds(query.productionStatusIds),

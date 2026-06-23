@@ -8,9 +8,10 @@ import type {
  * Cut-job audit contract (plan §11, audit-first). All cut commands write
  * audit_log in-tx + normalized related dimensions via the bridge
  * audit_log_related_entity (migration 020). Primary entity = cut_job. Related
- * rows are written per distinct source orderId, material_id /
- * sheet_material_type_id and cut_group_id so "which cut touched order Y" and
- * "which cuts used material X" are direct indexed queries, not JSON scans.
+ * rows are written per distinct source orderId, sheet_material_type_id and
+ * cut_group_id so "which cut touched order Y" and "which cuts used sheet type X"
+ * are direct indexed queries, not JSON scans. Variant B: material_id is retired;
+ * sheet_material_type_id is the sole sheet dimension.
  */
 export const CUT_AUDIT_EVENTS = {
   created: 'cut_job.created',
@@ -20,6 +21,7 @@ export const CUT_AUDIT_EVENTS = {
   archived: 'cut_job.archived',
   calculateFailed: 'cut_job.calculate_failed',
   permissionDenied: 'cut_job.permission_denied',
+  profileChanged: 'cut_job.profile_changed',
 } as const;
 
 export type CutAuditEventName = (typeof CUT_AUDIT_EVENTS)[keyof typeof CUT_AUDIT_EVENTS];
@@ -32,7 +34,6 @@ export interface CutAuditActor {
 
 export interface CutRelatedDimensions {
   orderIds?: readonly number[];
-  materialIds?: readonly number[];
   sheetMaterialTypeIds?: readonly number[];
   cutGroupIds?: readonly number[];
 }
@@ -72,9 +73,6 @@ function buildRelatedEntities(related: CutRelatedDimensions | undefined): AuditR
   const rows: AuditRelatedEntity[] = [];
   for (const entityId of distinct(related.orderIds)) {
     rows.push({ entityType: 'order', entityId });
-  }
-  for (const entityId of distinct(related.materialIds)) {
-    rows.push({ entityType: 'material', entityId });
   }
   for (const entityId of distinct(related.sheetMaterialTypeIds)) {
     rows.push({ entityType: 'sheet_material_type', entityId });

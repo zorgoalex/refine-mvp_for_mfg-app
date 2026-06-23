@@ -25,6 +25,8 @@ export function parseCodesCsv(input: string): string[] {
 export type FreecutObjective = 'min_waste' | 'min_sheets';
 export type FreecutLayoutMode = 'guillotine' | 'nested';
 export type FreecutRetryStrategy = 'disabled' | 'smart';
+export type FreecutQuality = 'fast' | 'balanced' | 'quality';
+export const FREECUT_QUALITIES: FreecutQuality[] = ['fast', 'balanced', 'quality'];
 
 export const FREECUT_OBJECTIVES: FreecutObjective[] = ['min_waste', 'min_sheets'];
 export const FREECUT_LAYOUT_MODES: FreecutLayoutMode[] = ['guillotine', 'nested'];
@@ -43,6 +45,8 @@ export interface ParamProfileForm {
   restarts: number;
   layout_mode: FreecutLayoutMode;
   retry_strategy: FreecutRetryStrategy;
+  quality: FreecutQuality;
+  groupShift: boolean;
 }
 
 /** Defaults = the seeded "default" profile (calibrated prod budget, commit dcfa2db). */
@@ -58,6 +62,8 @@ export const DEFAULT_PARAM_FORM: ParamProfileForm = {
   restarts: 5,
   layout_mode: 'guillotine',
   retry_strategy: 'disabled',
+  quality: 'balanced',
+  groupShift: false,
 };
 
 function num(value: unknown, fallback: number): number {
@@ -66,6 +72,19 @@ function num(value: unknown, fallback: number): number {
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function deriveQuality(p: Record<string, unknown>): FreecutQuality {
+  const sla = p.sla_profile;
+  const ga = p.ga_profile;
+  if (typeof sla === 'string' && sla === ga && (FREECUT_QUALITIES as string[]).includes(sla)) {
+    return sla as FreecutQuality;
+  }
+  return 'balanced';
 }
 
 /** Stored freecut params JSONB -> flat form values, filling gaps with defaults. */
@@ -85,6 +104,8 @@ export function paramsToForm(params: Record<string, unknown> | null | undefined)
     restarts: num(p.restarts, d.restarts),
     layout_mode: oneOf(p.layout_mode, FREECUT_LAYOUT_MODES, d.layout_mode),
     retry_strategy: oneOf(p.retry_strategy, FREECUT_RETRY_STRATEGIES, d.retry_strategy),
+    quality: deriveQuality(p),
+    groupShift: isPlainObject(p.group_shift) && (p.group_shift as { enabled?: unknown }).enabled === true,
   };
 }
 
@@ -99,11 +120,61 @@ export function formToParams(form: ParamProfileForm): Record<string, unknown> {
     restarts: form.restarts,
     layout_mode: form.layout_mode,
     retry_strategy: form.retry_strategy,
+    sla_profile: form.quality,
+    ga_profile: form.quality,
+    ...(form.groupShift ? { group_shift: { enabled: true, min_shift_mm: 5, max_passes: 4 } } : {}),
   };
+}
+
+/**
+ * Resolve which param profile the cut runtime actually treats as the default,
+ * mirroring backend getDefaultParams precedence:
+ *   cut_settings.defaults.param_profile (active, by name) > active is_default > none.
+ * Editing any other row silently diverges saved settings from what cut jobs use.
+ */
+export function resolveRuntimeDefaultProfile<
+  T extends { name: string; isDefault: boolean; isActive: boolean },
+>(profiles: T[], settings: ReadonlyArray<{ key: string; value: unknown }>): T | null {
+  const defaults = settings.find((s) => s.key === 'defaults');
+  const named = (defaults?.value as { param_profile?: unknown } | null | undefined)?.param_profile;
+  if (typeof named === 'string' && named.length > 0) {
+    const byName = profiles.find((p) => p.name === named && p.isActive);
+    if (byName) return byName;
+  }
+  return profiles.find((p) => p.isDefault && p.isActive) ?? null;
 }
 
 /** Day-0 onboarding hint shown when no sheet material types are defined yet. */
 export function sheetSpecOnboardingHint(count: number): string | null {
   if (count > 0) return null;
   return 'Нет раскройных спецификаций материалов. Создайте их и свяжите с материалами — иначе детали не будут отображаться как готовые к раскрою (no_sheet_spec).';
+}
+
+const OBJECTIVE_LABEL: Record<FreecutObjective, string> = {
+  min_waste: 'меньше отхода',
+  min_sheets: 'меньше листов',
+};
+const LAYOUT_LABEL: Record<FreecutLayoutMode, string> = {
+  guillotine: 'гильотинная',
+  nested: 'вложенная',
+};
+const QUALITY_LABEL: Record<FreecutQuality, string> = {
+  fast: 'быстро',
+  balanced: 'баланс',
+  quality: 'качество',
+};
+
+/** Human one-line summary of a stored freecut param set (advanced profiles table). */
+export function summarizeParams(params: Record<string, unknown> | null | undefined): string {
+  const f = paramsToForm(params);
+  const parts = [
+    `kerf ${f.kerf_mm}`,
+    `зазор ${f.spacing_mm}`,
+    OBJECTIVE_LABEL[f.objective],
+    LAYOUT_LABEL[f.layout_mode],
+    QUALITY_LABEL[f.quality],
+    `${f.time_limit_ms}мс`,
+  ];
+  if (f.groupShift) parts.push('сжатие групп');
+  return parts.join(' / ');
 }

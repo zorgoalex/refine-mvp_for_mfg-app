@@ -89,10 +89,24 @@ test.describe('Order finance buttons regression', () => {
         const detailDialog = page.getByRole('dialog', { name: 'Добавить деталь' });
         await expect(detailDialog).toBeVisible({ timeout: 10_000 });
 
+        // Variant B: assert that the legacy materials Select is ABSENT (material_id removed).
+        // The sole material selector is the "Материал" sheet picker (sheet_material_type_id).
+        await expect(
+            detailDialog.locator('#material_id'),
+            'Variant B: legacy material_id Select must be absent from the detail form',
+        ).toHaveCount(0);
+
+        // Variant B: assert that the sheet picker ("Материал" label, sheet_material_type_id) is present.
+        const sheetPickerItem = detailDialog.locator('.ant-form-item').filter({ hasText: 'Материал' }).first();
+        await expect(sheetPickerItem).toBeVisible({ timeout: 10_000 });
+
         await detailDialog.locator('#height').fill('1000');
         await detailDialog.locator('#width').fill('500');
         await detailDialog.locator('#quantity').fill('2');
         await detailDialog.locator('#milling_cost_per_sqm').fill('5000');
+        // Variant B: select from the sheet picker before saving (required field).
+        await selectAntdOption(page, sheetPickerItem, 'МДФ 16 мм (Лист)');
+        await screenshot(page, '00-detail-sheet-picker-filled');
         await detailDialog.getByRole('button', { name: 'Сохранить' }).click();
         await expect(detailDialog).toBeHidden({ timeout: 10_000 });
 

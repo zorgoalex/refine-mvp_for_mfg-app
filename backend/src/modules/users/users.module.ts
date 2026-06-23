@@ -19,6 +19,7 @@ import { UsersController } from './http/users.controller';
           users: database.isConfigured
             ? new PgUserRepository(database)
             : new UnavailableUserRepository(),
+          database,
         }),
       inject: [DatabaseService],
     },

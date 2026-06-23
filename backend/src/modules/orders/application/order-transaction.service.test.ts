@@ -139,7 +139,14 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
 
   async loadStoredOrderSheetState(_orderId: number): Promise<StoredOrderSheetState> {
     this.call('loadStoredOrderSheetState');
-    return { sheetEligible: false, headerSheetMaterialTypeId: null, detailSheetIds: [] };
+    // VARIANT B: all orders are sheet-eligible (sheet_eligible=true); every detail uses
+    // sheetMaterialTypeId. Existing stored detail sheet ids reflect previously saved data.
+    const seededOrder = this.state.orders.get(_orderId);
+    const storedDetailSheetIds = seededOrder?.details.map((d) => ({
+      detailId: d.id as number,
+      sheetMaterialTypeId: (d as typeof d & { sheetMaterialTypeId?: number | null }).sheetMaterialTypeId ?? null,
+    })) ?? [];
+    return { sheetEligible: true, headerSheetMaterialTypeId: null, detailSheetIds: storedDetailSheetIds };
   }
 
   async validateSheetReferences(_input: SheetReferenceValidationInput): Promise<void> {
@@ -400,6 +407,9 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       edgeTypeId: order.header.edgeTypeId ?? null,
       filmId: order.header.filmId ?? null,
       refKey1c: order.header.refKey1c ?? null,
+      // VARIANT B: all seeded orders are sheet-eligible; sheetEligible drives enforceSheetGuards
+      // path selection in OrderTransactionService (storedEligible check at line ~190).
+      sheetEligible: true,
     };
   }
 
@@ -462,7 +472,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
-      'validateNoShadowInjection',
+      'validateSheetReferences',
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',
@@ -539,7 +549,8 @@ describe('OrderTransactionService', () => {
             height: 550,
             width: 200,
             quantity: 2,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 7000,
@@ -549,7 +560,8 @@ describe('OrderTransactionService', () => {
             height: 1000,
             width: 500,
             quantity: 1,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 3000,
@@ -575,12 +587,14 @@ describe('OrderTransactionService', () => {
     expect(updateAuditEvent1.after).toBeTruthy();
     // after reflects the updated orderName
     expect((updateAuditEvent1.after as Record<string, unknown>)?.orderName).toBe('Updated order');
-    expect(transactions.calls.slice(0, 7)).toEqual([
+    expect(transactions.calls.slice(0, 8)).toEqual([
       'begin',
       'setSessionUser',
       'loadOrderForUpdate',
       'loadOrderHeaderSnapshot',
-      'validateNoShadowInjection',
+      // VARIANT B: storedEligible=true (sheetEligible in snapshot) → loadStoredOrderSheetState runs
+      'loadStoredOrderSheetState',
+      'validateSheetReferences',
       'assertChildOwnership',
       'updateOrderHeader',
     ]);
@@ -625,7 +639,8 @@ describe('OrderTransactionService', () => {
             height: 500,
             width: 500,
             quantity: 1,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 5000,
@@ -747,7 +762,8 @@ describe('OrderTransactionService', () => {
             height: 550,
             width: 200,
             quantity: 3,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 15000,
@@ -792,7 +808,8 @@ describe('OrderTransactionService', () => {
             height: 550,
             width: 200,
             quantity: 4,
-            materialId: 1001,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
             millingTypeId: 1001,
             edgeTypeId: 1001,
             detailCost: 20000,
@@ -1084,6 +1101,8 @@ describe('OrderTransactionService', () => {
       'orders.view_financials',
       'payments.create',
       'payments.update',
+      // VARIANT B: all orders touch sheet path (sheetMaterialTypeId on every detail)
+      'sheet_materials.view',
     ]);
 
     const result = await new OrderTransactionService({ transactions }).create({
@@ -1147,7 +1166,8 @@ describe('OrderTransactionService', () => {
           height: 550,
           width: 200,
           quantity: 2,
-          materialId: 1001,
+          materialId: null,
+          sheetMaterialTypeId: 1001,
           millingTypeId: 1001,
           edgeTypeId: 1001,
         },
@@ -1198,13 +1218,76 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
-      'validateNoShadowInjection',
+      'validateSheetReferences',
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',
       'upsertPayments',
       'rollback',
     ]);
+  });
+
+  it('detail sheet change with unchanged header emits detailSheetMaterialChanges in before/after (Critic R7 M2)', async () => {
+    // Scenario: only a detail's sheetMaterialTypeId changes; the order header is identical.
+    // The audit before/after MUST carry detailSheetMaterialChanges so computeDiff() can
+    // emit a queryable diff_json entry (not just opaque metadata).
+    const transactions = new FakeOrderTransactions();
+    // Seed order with detail id=11, sheetMaterialTypeId=777 (before value).
+    transactions.seedOrder({
+      orderId: 42,
+      version: 5,
+      details: [calculatedDetail({ id: 11, sheetMaterialTypeId: 777 })],
+    });
+
+    // Update: same header, only sheetMaterialTypeId on detail 11 changes (777 → 888).
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Test order',  // SAME as default in createSaveDto
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            sheetMaterialTypeId: 888,  // changed
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 10000,
+          },
+        ],
+        payments: [],
+        version: 5,
+      }),
+    });
+
+    expect(transactions.state.auditEvents).toHaveLength(1);
+    const event = transactions.state.auditEvents[0] as OrderSaveAuditEvent;
+
+    // Before snapshot must contain detailSheetMaterialChanges with the stored (before) ref.
+    const beforeObj = event.before as Record<string, unknown> | null;
+    expect(beforeObj).toBeTruthy();
+    expect(Array.isArray(beforeObj!['detailSheetMaterialChanges'])).toBe(true);
+    const beforeRefs = beforeObj!['detailSheetMaterialChanges'] as Array<{ detailId?: number; sheetMaterialTypeId: number | null }>;
+    // The before snapshot should capture the stored sheet id (777) for detail 11.
+    expect(beforeRefs.some((r) => r.detailId === 11 && r.sheetMaterialTypeId === 777)).toBe(true);
+
+    // After snapshot must contain detailSheetMaterialChanges with the new (after) ref.
+    const afterObj = event.after as Record<string, unknown> | null;
+    expect(afterObj).toBeTruthy();
+    expect(Array.isArray(afterObj!['detailSheetMaterialChanges'])).toBe(true);
+    const afterRefs = afterObj!['detailSheetMaterialChanges'] as Array<{ detailId?: number; sheetMaterialTypeId: number | null }>;
+    expect(afterRefs.some((r) => r.detailId === 11 && r.sheetMaterialTypeId === 888)).toBe(true);
   });
 
   it('collects active and deleted child ids for DB ownership checks', () => {
@@ -1255,7 +1338,8 @@ function createSaveDto(overrides: Partial<SaveOrderDto> = {}): SaveOrderDto {
         height: 550,
         width: 200,
         quantity: 2,
-        materialId: 1001,
+        materialId: null,
+        sheetMaterialTypeId: 1001,
         millingTypeId: 1001,
         edgeTypeId: 1001,
         detailCost: 10000,
@@ -1355,7 +1439,8 @@ function calculatedDetail(
     height: 550,
     width: 200,
     quantity: 2,
-    materialId: 1001,
+    materialId: null,
+    sheetMaterialTypeId: 1001,
     millingTypeId: 1001,
     edgeTypeId: 1001,
     filmId: null,
