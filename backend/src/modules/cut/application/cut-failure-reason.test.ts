@@ -85,6 +85,10 @@ describe('shouldMarkCutFailed', () => {
     }
   });
 
+  it('returns false for CUT_PARAM_PROFILE_NOT_FOUND (precondition: operator must fix profile selection)', () => {
+    expect(shouldMarkCutFailed(new ApiError(422, 'CUT_PARAM_PROFILE_NOT_FOUND', 'chosen profile is inactive'))).toBe(false);
+  });
+
   it('returns true for genuine calculation failures (freecut + cut validation)', () => {
     expect(shouldMarkCutFailed(new ApiError(504, 'FREECUT_TIMEOUT', 'x'))).toBe(true);
     expect(shouldMarkCutFailed(new ApiError(422, 'CUT_NO_ITEMS', 'x'))).toBe(true);
