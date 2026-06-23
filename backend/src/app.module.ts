@@ -10,6 +10,7 @@ import { NotificationsEngineModule } from './modules/notifications-engine/notifi
 import { HealthModule } from './modules/health/health.module';
 import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
 import { CrmSyncModule } from './modules/crm-sync/crm-sync.module';
+import { DowelingModule } from './modules/doweling/doweling.module';
 import { CutModule } from './modules/cut/cut.module';
 import { SheetMaterialsModule } from './modules/sheet-materials/sheet-materials.module';
 import { OrdersModule } from './modules/orders/orders.module';
@@ -34,6 +35,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     AuthModule,
     ClientPhonesModule,
     CrmSyncModule,
+    DowelingModule,
     CutModule,
     SheetMaterialsModule,
     DeadlinesModule,

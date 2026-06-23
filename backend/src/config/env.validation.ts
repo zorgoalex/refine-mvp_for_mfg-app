@@ -138,6 +138,8 @@ export const envSchema = z
     // operator enables it in the SAME window as the migration. Distinct from
     // BACKEND_ENABLE_SHEET_MATERIALS (SP1 reference module, already live without 029).
     BACKEND_SHEET_ORDERS_READS: booleanFromEnv.default(false),
+    // §7.5 doweling quick-create command. Default OFF (fail-closed); no cross-dependency.
+    BACKEND_ENABLE_DOWELING_COMMANDS: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
     BACKEND_NOTIFICATION_RULES_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE: booleanFromEnv.default(false),

@@ -1655,6 +1655,123 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/doweling-orders:
+    post:
+      tags:
+        - Doweling
+      operationId: createDowelingOrder
+      summary: Создать присадку (quick-create)
+      security:
+        - bearerAuth: []
+      x-permission: doweling.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - dowelingOrderName
+                - designEngineerId
+                - paymentStatusId
+                - idempotencyKey
+              properties:
+                dowelingOrderName:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                designEngineerId:
+                  type: integer
+                paymentStatusId:
+                  type: integer
+                dowelingOrderDate:
+                  type: string
+                  format: date
+                  nullable: true
+                productionStatusId:
+                  type: integer
+                  nullable: true
+                operatorId:
+                  type: integer
+                  nullable: true
+                partsCount:
+                  type: integer
+                  minimum: 0
+                  nullable: true
+                linkCadFile:
+                  type: string
+                  maxLength: 2000
+                  nullable: true
+                linkPdfFile:
+                  type: string
+                  maxLength: 2000
+                  nullable: true
+                idempotencyKey:
+                  type: string
+                  minLength: 8
+                  maxLength: 200
+      responses:
+        '201':
+          description: Присадка создана
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - dowelingOrder
+                  - requestId
+                properties:
+                  dowelingOrder:
+                    type: object
+                    required:
+                      - dowelingOrderId
+                      - dowelingOrderName
+                      - version
+                    properties:
+                      dowelingOrderId:
+                        type: integer
+                      dowelingOrderName:
+                        type: string
+                      version:
+                        type: integer
+                  auditId:
+                    type: string
+                  requestId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Связанная запись присадки не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          description: >-
+            Idempotency key reused with a different request (IDEMPOTENCY_KEY_REUSED), still processing
+            (IDEMPOTENCY_IN_PROGRESS), or previously failed (IDEMPOTENCY_FAILED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          description: >-
+            Doweling commands API is disabled (SERVICE_UNAVAILABLE) or the database is not configured
+            (DATABASE_UNAVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/client-phones:
     post:
       tags:
