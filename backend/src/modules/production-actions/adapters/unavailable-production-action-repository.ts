@@ -2,6 +2,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type {
   ActivateProductionStageCommand,
   ActivateDetailProductionStageCommand,
+  ChangeBatchDetailProductionStatusCommand,
   ChangeOrderStatusCommand,
   ChangeOrderStatusFromDeadlineCommand,
   ChangePaymentStatusCommand,
@@ -56,6 +57,10 @@ export class UnavailableProductionActionRepository implements ProductionActionRe
   }
 
   enterManualProductionStatus(_command: EnterManualProductionStatusCommand) {
+    return Promise.reject(databaseUnavailable());
+  }
+
+  changeBatchDetailProductionStatus(_command: ChangeBatchDetailProductionStatusCommand) {
     return Promise.reject(databaseUnavailable());
   }
 }

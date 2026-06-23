@@ -841,6 +841,116 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/details/production-status:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    patch:
+      tags:
+        - Production Actions
+      operationId: changeBatchDetailProductionStatus
+      summary: Установить производственный статус для набора деталей заказа
+      description: >-
+        Устанавливает production_status_id для выбранных деталей одного заказа,
+        пересчитывает производный статус заказа только в авто-режиме, бампит
+        version заказа, не пишет production_status_events. Audit + idempotent
+        outbox; stale-safe по version и idempotencyKey.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.change_production_status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - detailIds
+                - productionStatusId
+                - version
+                - idempotencyKey
+              properties:
+                detailIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: integer
+                    minimum: 1
+                productionStatusId:
+                  type: integer
+                  minimum: 1
+                version:
+                  type: integer
+                  minimum: 0
+                idempotencyKey:
+                  type: string
+                  minLength: 8
+                  maxLength: 200
+      responses:
+        '200':
+          description: Changed production status for the selected order details
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - order
+                  - selectedDetailCount
+                  - affectedDetailCount
+                  - requestId
+                properties:
+                  order:
+                    type: object
+                    required:
+                      - orderId
+                      - version
+                    properties:
+                      orderId:
+                        type: integer
+                      productionStatusId:
+                        type: integer
+                      version:
+                        type: integer
+                  selectedDetailCount:
+                    type: integer
+                  affectedDetailCount:
+                    type: integer
+                  auditId:
+                    type: string
+                  requestId:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Заказ или часть выбранных деталей не найдены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+              examples:
+                detailNotFound:
+                  value:
+                    error:
+                      code: ORDER_DETAIL_NOT_FOUND
+                      message: Часть выбранных деталей не найдена в заказе
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/orders/{orderId}/production-status-mode/auto:
     parameters:
       - $ref: '#/components/parameters/OrderId'

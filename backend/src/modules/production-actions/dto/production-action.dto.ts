@@ -66,3 +66,15 @@ export interface ProductionActionResponseDto {
   auditId?: string;
   requestId: string;
 }
+
+export interface BatchDetailProductionStatusRequestDto {
+  detailIds: number[];
+  productionStatusId: number;
+  version: number;
+  idempotencyKey: string;
+}
+
+export interface BatchDetailProductionStatusResponseDto extends ProductionActionResponseDto {
+  selectedDetailCount: number;
+  affectedDetailCount: number;
+}
