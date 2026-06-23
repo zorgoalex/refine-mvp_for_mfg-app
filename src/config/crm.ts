@@ -48,10 +48,16 @@ type HintDocument = Pick<Document, 'head' | 'createElement' | 'querySelector'>;
 
 /**
  * Inject one-time resource hints so the first CRM open is a little faster while
- * the user is already in ERP: warm DNS/TLS to the CRM origin (preconnect) and
- * prefetch its document. Idempotent — re-calling does nothing once the hints
- * exist. Cross-origin limits how much can be prewarmed (the heavy hashed JS
- * lives on another origin), so this trims connection setup, not the SPA parse.
+ * the user is already in ERP: warm DNS/TLS to the CRM origin (dns-prefetch +
+ * preconnect). Idempotent — re-calling does nothing once the hints exist.
+ *
+ * NOTE: we intentionally do NOT inject `<link rel="prefetch" as="document">` for
+ * the full CRM URL. That document prefetch is a cross-origin fetch governed by
+ * the app CSP `default-src 'self'`, so the browser refuses it and logs a CSP
+ * violation on every page carrying the CRM menu. dns-prefetch/preconnect are
+ * connection hints (not fetch directives) → they warm the connection without
+ * tripping CSP. The CRM still opens fine: top-level navigation to the new tab is
+ * not restricted by connect-src/default-src.
  */
 export function ensureCrmResourceHints(
   url: string,
@@ -67,7 +73,6 @@ export function ensureCrmResourceHints(
   const hints: Array<{ rel: string; href: string; crossOrigin?: boolean; as?: string }> = [
     { rel: 'dns-prefetch', href: origin },
     { rel: 'preconnect', href: origin, crossOrigin: true },
-    { rel: 'prefetch', href: url, as: 'document' },
   ];
   for (const hint of hints) {
     if (doc.querySelector(`link[data-crm-hint="${hint.rel}"]`)) continue;

@@ -76,22 +76,24 @@ describe('getCrmMenuConfig', () => {
 });
 
 describe('ensureCrmResourceHints', () => {
-  it('injects dns-prefetch, preconnect and prefetch hints for the CRM origin', () => {
+  it('injects only dns-prefetch + preconnect (NO document prefetch — CSP-safe)', () => {
     const doc = makeFakeDoc();
     ensureCrmResourceHints('https://crm-test.mebelkz.app', doc);
     const rels = doc.links.map((l) => l['attr:data-crm-hint']);
-    expect(rels).toEqual(['dns-prefetch', 'preconnect', 'prefetch']);
-    // preconnect/dns-prefetch target the origin; prefetch targets the full URL
+    // The cross-origin `rel=prefetch as=document` was removed: it violated the
+    // app CSP default-src 'self' and logged an error on every CRM-menu page.
+    expect(rels).toEqual(['dns-prefetch', 'preconnect']);
+    expect(rels).not.toContain('prefetch');
     expect(doc.links[0].rel).toBe('dns-prefetch');
     expect(doc.links[0].href).toBe('https://crm-test.mebelkz.app');
-    expect(doc.links[2].rel).toBe('prefetch');
+    expect(doc.links[1].rel).toBe('preconnect');
   });
 
   it('is idempotent — re-calling does not duplicate hints', () => {
     const doc = makeFakeDoc();
     ensureCrmResourceHints('https://crm-test.mebelkz.app', doc);
     ensureCrmResourceHints('https://crm-test.mebelkz.app', doc);
-    expect(doc.links).toHaveLength(3);
+    expect(doc.links).toHaveLength(2);
   });
 
   it('does nothing for an invalid URL or missing document', () => {

@@ -29,6 +29,7 @@ import { can } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
 import type { CutDetailLastReadyRef } from "../../api/types/cutApi.types";
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
+import { TableTopScroll } from "../../components/TableTopScroll";
 
 type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'additional';
 
@@ -851,9 +852,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 </Space>
               )}
             </div>
+            <TableTopScroll>
             <Table
               dataSource={details}
               rowKey="detail_id"
+              scroll={{ x: 'max-content' }}
               rowSelection={
                 cutSelectMode
                   ? {
@@ -1031,21 +1034,25 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       <Table.Summary.Cell index={7} />
                       {/* Пр-е */}
                       <Table.Summary.Cell index={8} />
+                      {/* Раскрой (conditional — keeps the footer aligned with the
+                          13-column layout when the cut column is shown) */}
+                      {cutColumnEnabled && <Table.Summary.Cell index={9} />}
                       {/* Цена за кв.м. */}
-                      <Table.Summary.Cell index={9} />
+                      <Table.Summary.Cell index={cutColumnEnabled ? 10 : 9} />
                       {/* Сумма */}
-                      <Table.Summary.Cell index={10} align="right">
+                      <Table.Summary.Cell index={cutColumnEnabled ? 11 : 10} align="right">
                         <span style={{ color: '#52c41a' }}>
                           {totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                         </span>
                       </Table.Summary.Cell>
                       {/* Пленка */}
-                      <Table.Summary.Cell index={11} />
+                      <Table.Summary.Cell index={cutColumnEnabled ? 12 : 11} />
                     </Table.Summary.Row>
                   </Table.Summary>
                 );
               }}
             />
+            </TableTopScroll>
           </div>
 
           {/* Скрытый компонент для печати */}

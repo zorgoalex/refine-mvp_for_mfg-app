@@ -9,6 +9,22 @@ describe('cut detail column', () => {
     expect(show).toContain("can('cut.view')");
   });
 
+  it('details table is horizontally scrollable with a synced top scrollbar', () => {
+    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
+    // Wrapped in the top-scrollbar helper + horizontal scroll enabled so the
+    // (now 13-column) details table is reachable without scrolling to the bottom.
+    expect(show).toContain('<TableTopScroll>');
+    expect(show).toContain("scroll={{ x: 'max-content' }}");
+  });
+
+  it('summary row stays aligned when the Раскрой column is shown', () => {
+    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
+    // The conditional Раскрой column needs a matching conditional summary cell,
+    // otherwise the «Сумма» total renders under the wrong column (off-by-one).
+    expect(show).toContain('cutColumnEnabled && <Table.Summary.Cell');
+    expect(show).toContain('index={cutColumnEnabled ? 11 : 10}'); // Сумма total cell
+  });
+
   it('CutPage gates every open-job mutate affordance on isArchivedJob', () => {
     const src = readFileSync('src/pages/cut/CutPage.tsx', 'utf8');
     expect(src).toContain("const isArchivedJob = job?.status === 'archived'");
