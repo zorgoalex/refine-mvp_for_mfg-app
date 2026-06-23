@@ -155,6 +155,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
         milling_type_id: row.milling_type_id || IMPORT_DEFAULTS.milling_type_id,
         priority: IMPORT_DEFAULTS.priority,
         note: row.note || null,
+        basis_project: row.basisProject || null,
+        basis_data: row.basisData || null,
         detail_name: row.detailName || null,
       };
 

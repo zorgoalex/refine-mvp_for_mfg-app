@@ -464,6 +464,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       milling_cost_per_sqm: record.milling_cost_per_sqm ?? null,
       detail_cost: record.detail_cost ?? null,
       note: record.note ?? '',
+      basis_project: record.basis_project ?? '',
+      basis_data: record.basis_data ?? '',
       priority: record.priority,
       production_status_id: record.production_status_id ?? null,
       detail_name: record.detail_name ?? '',
@@ -1045,6 +1047,34 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         ),
     },
     {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис проект</div>,
+      dataIndex: 'basis_project',
+      key: 'basis_project',
+      width: 120,
+      render: (text, record) =>
+        isEditing(record) ? (
+          <Form.Item name="basis_project" style={{ margin: 0, padding: '0 4px' }}>
+            <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '90%' }}>{text || ''}</span>
+        ),
+    },
+    {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис данные</div>,
+      dataIndex: 'basis_data',
+      key: 'basis_data',
+      width: 160,
+      render: (text, record) =>
+        isEditing(record) ? (
+          <Form.Item name="basis_data" style={{ margin: 0, padding: '0 4px' }}>
+            <Input placeholder="Номер/Обозначение/Наименование" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '90%' }}>{text || ''}</span>
+        ),
+    },
+    {
       title: (
         <div style={{ whiteSpace: 'normal', lineHeight: '1.2', textAlign: 'center' }}>
           Название<br />детали
@@ -1586,7 +1616,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           onShowSizeChange: (current, size) => setPageSize(size),
           onChange: (page, size) => setPageSize(size),
         }}
-        scroll={{ x: 1500, y: 500 }}
+        scroll={{ x: 1780, y: 500 }}
         size="small"
         bordered
         rowClassName={(record) => {
@@ -1636,10 +1666,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               <Table.Summary.Cell index={13} />
               {/* Статус */}
               <Table.Summary.Cell index={14} />
-              {/* detail_name */}
+              {/* Базис проект */}
               <Table.Summary.Cell index={15} />
-              {/* Действия */}
+              {/* Базис данные */}
               <Table.Summary.Cell index={16} />
+              {/* detail_name */}
+              <Table.Summary.Cell index={17} />
+              {/* Действия */}
+              <Table.Summary.Cell index={18} />
             </Table.Summary.Row>
           </Table.Summary>
         )}

@@ -91,6 +91,8 @@ export interface ImportRow {
   materialName?: string | null;
   millingTypeName?: string | null;
   note?: string | null;
+  basisProject?: string | null;
+  basisData?: string | null;
   detailName?: string | null;
 }
 

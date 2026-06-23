@@ -118,6 +118,8 @@ export interface OrderDetail {
 
   // Additional
   note?: string | null;
+  basis_project?: string | null;
+  basis_data?: string | null;
   detail_name?: string | null;
   priority: number;
   production_status_id?: number | null;

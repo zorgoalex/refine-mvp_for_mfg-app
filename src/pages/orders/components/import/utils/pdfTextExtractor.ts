@@ -808,6 +808,9 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
     ? result.metadata.material.split(',').map(material => material.trim()).filter(Boolean)
     : [];
   const fallbackMaterial = metadataMaterials.length === 1 ? metadataMaterials[0] : null;
+  const basisProject = [result.metadata.orderNumber ? `№ ${result.metadata.orderNumber}` : '', result.metadata.orderName]
+    .filter(Boolean)
+    .join(' / ') || null;
 
   return result.details.map((detail, index) => ({
     sourceRowIndex: index,
@@ -818,6 +821,8 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
     millingTypeName: detail.milling || null,
     filmName: detail.film || null,
     note: detail.note || null,
+    basisProject,
+    basisData: `${detail.position}/${detail.designation}/${detail.name}`,
     // Format: "position~~designation~~name" (e.g., "1~~11.02~~Бок L")
     detailName: `${detail.position}~~${detail.designation}~~${detail.name}`,
   }));

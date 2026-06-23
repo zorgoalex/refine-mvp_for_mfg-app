@@ -266,4 +266,18 @@ describe('parsePdfContent PDF fixtures', () => {
     expect(wrong2Rows[0].materialName).toBe('МДФ 18 мм');
     expect(wrong2Rows[firstMdf16Index].materialName).toBe('МДФ 16 мм');
   }, 30_000);
+
+  it('fills Basis project and data fields from a Basis PDF', async () => {
+    const result = await parseFixturePdf('teststaff/МДФ-4pages.pdf');
+    const rows = convertToImportRows(result);
+
+    expect(rows[0]).toMatchObject({
+      basisProject: '№ 020 / Respublika',
+      basisData: '1/05/Мойка. Дверь 1',
+    });
+    expect(rows.at(-1)).toMatchObject({
+      basisProject: '№ 020 / Respublika',
+      basisData: '40/140/Тумба 1. Дверь',
+    });
+  }, 30_000);
 });

@@ -1,11 +1,13 @@
 # VPS Bootstrap And Deploy
 
 This folder contains scripts for quickly preparing a new VPS for the ERP stack:
-Traefik, PostgreSQL, Hasura, and the backend service.
+Traefik, PostgreSQL, Hasura, backend, freecut (cut optimizer), cad-service
+(SVG/DXF milling layouts), and the Twenty CRM overlay.
 
-Russian step-by-step guide for the one-command script is maintained in the
-workspace spec folder:
-`../spec_erp/docs/vps-one-command-guide.ru.md`.
+Russian from-scratch deployment runbook for the WHOLE complex (all of the
+above) is maintained in the workspace spec folder:
+`../spec_erp/docs/operations/full-stack-vps-deployment-from-scratch.ru.md`.
+For day-to-day operation of the merged stack use `ops/up-all.sh` (see below).
 
 No real secrets are stored here. Copy `ops/templates/env.vps.example` to `.env`
 on the VPS and fill real values there. `.env` is ignored by git.

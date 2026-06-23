@@ -979,11 +979,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 {
                   title: 'Пленка',
                   key: 'film',
-                  width: 208,
+                  width: 104,
                   render: (_, record) => {
                     if (!record.film_id) return '';
                     const filmName = filmsMap.get(record.film_id);
-                    return <span style={{ fontSize: '0.86em' }}>{filmName || ''}</span>;
+                    return (
+                      <span
+                        style={{ fontSize: '0.86em', wordBreak: 'break-word', whiteSpace: 'normal' }}
+                      >
+                        {filmName || ''}
+                      </span>
+                    );
                   },
                 },
                 // «Раскрой» — last column (after «Пленка»), read-only deep-link.
