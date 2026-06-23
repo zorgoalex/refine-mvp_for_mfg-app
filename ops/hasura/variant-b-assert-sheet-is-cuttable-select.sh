@@ -86,8 +86,12 @@ for source in metadata.get("sources", []):
             continue
         for perm in table.get("select_permissions", []):
             role = perm["role"]
-            cols = set(perm["permission"].get("columns") or [])
+            raw_cols = perm["permission"].get("columns")
             checked.append(role)
+            # columns == "*" is a wildcard that already exposes EVERY column (incl. is_cuttable).
+            if raw_cols == "*":
+                continue
+            cols = set(raw_cols or [])
             if REQUIRED_COLUMN not in cols:
                 missing.append(f"  MISSING: role={role} does not have '{REQUIRED_COLUMN}' in sheet_material_types SELECT allowlist")
 

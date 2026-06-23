@@ -93,7 +93,14 @@ for source in metadata.get("sources", []):
             # allow_aggregations, computed_fields, query_root_fields, etc.
             permission = json.loads(json.dumps(perm["permission"]))
 
-            cols = list(permission.get("columns") or [])
+            raw_cols = permission.get("columns")
+            # WILDCARD: columns == "*" exposes all columns; nothing to remove. Skip
+            # (mirrors the grant script — never drop/recreate a "*" select permission).
+            if raw_cols == "*":
+                print(f"  sheet_material_types/{role}/select: skip (columns=\"*\")", file=sys.stderr)
+                continue
+
+            cols = list(raw_cols or [])
             was_present = COLUMN_TO_REMOVE in cols
             if was_present:
                 cols.remove(COLUMN_TO_REMOVE)

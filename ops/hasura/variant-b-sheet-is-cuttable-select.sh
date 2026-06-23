@@ -109,16 +109,24 @@ for source in metadata.get("sources", []):
             # limit, allow_aggregations, computed_fields, query_root_fields, etc.
             permission = json.loads(json.dumps(perm["permission"]))
 
-            cols = list(permission.get("columns") or [])
-            already_present = COLUMN_TO_ADD in cols
-            if not already_present:
-                cols.append(COLUMN_TO_ADD)
-                permission["columns"] = cols
+            raw_cols = permission.get("columns")
+            # WILDCARD: columns == "*" already exposes EVERY column (incl. is_cuttable).
+            # Do NOT mutate it — appending to the "*" string would build an invalid
+            # ["*","is_cuttable"] payload that Hasura rejects (and a drop-then-failed-create
+            # would leave the role with NO select permission). Skip wildcard roles entirely.
+            if raw_cols == "*":
+                print(f"  sheet_material_types/{role}/select: skip (columns=\"*\" already exposes is_cuttable)", file=sys.stderr)
+                continue
 
-            label = (
-                f"sheet_material_types/{role}/select"
-                f": {'added is_cuttable' if not already_present else 'no-change (already present, recreate for safety)'}"
-            )
+            cols = list(raw_cols or [])
+            already_present = COLUMN_TO_ADD in cols
+            if already_present:
+                print(f"  sheet_material_types/{role}/select: no-change (is_cuttable already present)", file=sys.stderr)
+                continue
+            cols.append(COLUMN_TO_ADD)
+            permission["columns"] = cols
+
+            label = f"sheet_material_types/{role}/select: added is_cuttable"
             print(f"  {label}", file=sys.stderr)
 
             table_ref = {"schema": tbl_schema, "name": tbl_name}
