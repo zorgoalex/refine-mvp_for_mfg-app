@@ -50,7 +50,7 @@ became-ready ordering is ever required, it needs a dedicated `ready_at` column
   existing `/cut-jobs/placements` and `/cut-jobs/eligible-details` reads).
 - Why a new endpoint instead of extending `/cut-jobs/placements`: placements
   returns a flat *union* of jobs across all requested details with no per-detail
-  mapping, no ready filter and no recency ordering, and it is already consumed by
+  mapping, no ready filter and no per-detail ordering, and it is already consumed by
   `AddToCutModal`. A new endpoint is additive and carries zero regression risk
   to that contract.
 - Response shape (only details that have a qualifying ready job appear):
@@ -114,7 +114,7 @@ became-ready ordering is ever required, it needs a dedicated `ready_at` column
 ## Edge cases
 
 - Detail only in draft/calculating/failed/archived jobs ⇒ no ready ⇒ `—`.
-- Detail in several ready jobs ⇒ most recent wins.
+- Detail in several ready jobs ⇒ highest `cut_job_id` (latest created) wins.
 - Job archived after being ready ⇒ column clears.
 - Detail removed from a ready job (`is_active=false`) ⇒ ignored.
 - Empty detail list / feature flag off ⇒ no fetch, no column, legacy behavior.
@@ -122,8 +122,9 @@ became-ready ordering is ever required, it needs a dedicated `ready_at` column
 ## Tests
 
 - Backend unit + real-DB integration (cut-integration, `CUT_INTEGRATION_DATABASE_URL`):
-  per-detail last-ready selection, `is_active` filter, ready-only filter, recency
-  tiebreak, `cut.view` gate, empty input.
+  per-detail latest-created-ready selection (highest `cut_job_id`, incl.
+  immunity to `updated_at` noise), `is_active` filter, ready-only filter,
+  `cut.view` gate, empty input.
 - Frontend pure-helper tests (Vitest node env): map build, label/link render,
   `?job=` query-param parse → `openJob` trigger; source-text guards.
 - Update `tests/order-ui-full-form-coverage.spec.ts` for the new show-page column

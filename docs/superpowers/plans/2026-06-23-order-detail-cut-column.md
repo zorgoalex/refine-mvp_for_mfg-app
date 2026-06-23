@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a read-only «Раскрой» column to the order-show details table that links each detail to its last *ready* cut job, navigable via a `/cut?job=:id` deep-link.
+**Goal:** Add a read-only «Раскрой» column to the order-show details table that links each detail to its latest-created `ready` cut job (highest `cut_job_id`), navigable via a `/cut?job=:id` deep-link.
 
-**Architecture:** A new `cut.view`-gated backend read endpoint `GET /api/v1/cut-jobs/detail-last-ready` returns, per requested detail, the most recent `status='ready'` cut job that still actively contains it. The order-show page batch-fetches this for its details and renders the job name as a react-router `<Link>`. CutPage reads a `?job=` query param on mount and opens that job. No migration, no permission change.
+**Architecture:** A new `cut.view`-gated backend read endpoint `GET /api/v1/cut-jobs/detail-last-ready` returns, per requested detail, the **latest-created** `status='ready'` cut job (highest `cut_job_id`) that still actively contains it. The order-show page batch-fetches this for its details and renders the job name as a react-router `<Link>`. CutPage reads a `?job=` query param on mount and opens that job. No migration, no permission change.
 
 **Tech Stack:** NestJS + `pg` (backend), Zod, Vitest; React + Refine + Ant Design + react-router-dom (frontend).
 
@@ -43,14 +43,14 @@ Append after the `CutDetailPlacementsResponseDto` interface (after line 147):
 
 ```typescript
 
-/** One detail's last ready (calculated) cut job. */
+/** One detail's latest-created ready (calculated) cut job. */
 export interface CutDetailLastReadyRefDto {
   orderDetailId: number;
   cutJobId: number;
   name: string;
 }
 
-/** Per-detail last ready cut job (only details that have one appear). */
+/** Per-detail latest-created ready cut job (only details that have one appear). */
 export interface CutDetailLastReadyResponseDto {
   details: CutDetailLastReadyRefDto[];
 }
@@ -70,7 +70,7 @@ Add after `DetailPlacementsQuery` (after line 116):
 
 export interface DetailLastReadyQuery {
   currentUser: CurrentUser;
-  /** detail ids whose last ready cut job is resolved (one row max per detail) */
+  /** detail ids whose latest-created ready cut job is resolved (one row max per detail) */
   detailIds?: number[];
   requestId?: string;
 }
@@ -123,7 +123,7 @@ git commit -m "feat(cut): add detail-last-ready port contract + DTOs"
 In `pg-cut-repository.integration.ts`, inside the integration `describe`, add a test that: seeds an order + details, creates two cut jobs containing detail A (one calculated to `ready`, one left `draft`), and asserts `listDetailLastReady` returns the ready job for A and nothing for a detail only in a draft. Reuse the file's existing schema/seed helpers and the stubbed FreecutClient `happyResponse` to drive a job to `ready`. Sketch (adapt names to the file's helpers):
 
 ```typescript
-it('listDetailLastReady returns the most recent ready job per detail, ignoring drafts', async () => {
+it('listDetailLastReady returns the latest-created ready job per detail, ignoring drafts', async () => {
   // seed order with detail ids dA, dB using the file's existing seed helper
   // create job1 with [dA], calculate -> ready (status='ready')
   // create job2 with [dA] (draft, NOT calculated)
@@ -139,7 +139,7 @@ Add a second case for `is_active=false`: set dA's item `is_active=false` in the 
 Add a THIRD case proving the selector does NOT depend on `updated_at` (covers the BLOCKER): put dA in TWO ready jobs (jobOld with lower id, jobNew with higher id), then bump `jobOld.updated_at` to `now()` so the *older* job is the most-recently-touched:
 
 ```typescript
-it('listDetailLastReady ignores updated_at noise — picks the latest ready job by id', async () => {
+it('listDetailLastReady ignores updated_at noise — picks the latest-created ready job (highest id)', async () => {
   // jobOld (lower id) and jobNew (higher id) both ready and both contain dA
   await pool.query(
     `UPDATE cut_job SET updated_at = now() WHERE cut_job_id = $1`, [jobOldId],
@@ -268,7 +268,7 @@ In `cut.controller.ts`, add `CutDetailLastReadyResponseDto` to the dto import bl
 ```typescript
   @ApiOperation({
     operationId: 'cutDetailLastReady',
-    summary: 'Per-detail last ready (calculated) cut job, for the order-detail Раскрой column',
+    summary: 'Per-detail latest-created ready (calculated) cut job, for the order-detail Раскрой column',
   })
   @Get('detail-last-ready')
   async detailLastReady(
@@ -346,7 +346,7 @@ In `apiRoutes.ts`, inside `cutJobs` after `placements` (line 58):
 In `cutApi.ts`, import the new types, and add after `listPlacements` (after line 74):
 
 ```typescript
-  /** Per-detail last ready (calculated) cut job, for the order-detail Раскрой column. */
+  /** Per-detail latest-created ready (calculated) cut job, for the order-detail Раскрой column. */
   async listDetailLastReady(detailIds: number[]): Promise<CutDetailLastReadyResponse> {
     const ids = detailIds.filter((id) => Number.isInteger(id) && id > 0);
     if (ids.length === 0) return { details: [] };
@@ -394,7 +394,7 @@ Create `src/pages/orders/cutColumnHelpers.ts`:
 ```typescript
 import type { CutDetailLastReadyRef } from '../../api/types/cutApi.types';
 
-/** Map detail id → its last ready cut job ref (one ref per detail). */
+/** Map detail id → its latest-created ready cut job ref (one ref per detail). */
 export function buildCutJobByDetailId(
   refs: CutDetailLastReadyRef[],
 ): Map<number, CutDetailLastReadyRef> {
@@ -515,18 +515,28 @@ In the details `<Table>` columns array, insert after the «Пр-е» (note) colu
 
 If the columns array is a literal passed directly to `columns={[...]}`, spread the conditional array element inside it at the chosen position. Keep one render path; do not duplicate the column.
 
-- [ ] **Step 3: Add a guard/assertion test**
+- [ ] **Step 3: Create the shared source-text guard (show-page half)**
 
-In `tests/cut-frontend.spec.ts` (mocked Playwright) or a source-text guard under `tests/`, assert the show page exposes the column. If using a source-text guard, add to an existing frontend guard test:
+Create `tests/cut-detail-column.guard.test.ts` with the show-page assertions now
+(the CutPage archived-guard half is added in Task 6 Step 7 — same file). Start
+with:
 
 ```typescript
-const showSrc = readFileSync('src/pages/orders/show.tsx', 'utf8');
-expect(showSrc).toContain("title: 'Раскрой'");
-expect(showSrc).toContain('cutJobDeepLink');
-expect(showSrc).toContain("can('cut.view')");
+import { readFileSync } from 'node:fs';
+import { describe, it, expect } from 'vitest';
+
+describe('cut detail column', () => {
+  it('order show page exposes the cut.view-gated Раскрой deep-link column', () => {
+    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
+    expect(show).toContain("title: 'Раскрой'");
+    expect(show).toContain('cutJobDeepLink');
+    expect(show).toContain("can('cut.view')");
+  });
+});
 ```
 
-(Place it where the repo keeps such source guards; if none exists for show.tsx, add a minimal `tests/cut-detail-column.guard.test.ts` Vitest file.)
+Task 6 Step 7 extends this same file with the CutPage archived-mutate-guard
+assertions.
 
 - [ ] **Step 4: Run frontend unit tests + build**
 
@@ -636,17 +646,19 @@ Add `parseJobQueryParam` to the existing `./cutPageHelpers` import list. Inside 
 
 - [ ] **Step 6: Disable mutate controls for archived jobs**
 
-A deep-linked archived job currently shows enabled "Добавить выбранные" /
-"Рассчитать" / profile `Select` that only fail server-side after a click
-(archived is non-mutable). Make it genuinely read-only. In `CutPage.tsx`, derive
-near the other `job`-based locals:
+A deep-linked archived job currently shows enabled mutate affordances that only
+fail server-side after a click (archived is non-mutable per
+`pg-cut-repository.ts` mutable-status guards ~L1160/L1337). Make it genuinely
+read-only. In `CutPage.tsx`, derive near the other `job`-based locals:
 
 ```typescript
   const isArchivedJob = job?.status === 'archived';
 ```
 
-Then add `|| isArchivedJob` to the existing `disabled` conditions of the three
-mutate affordances in the job toolbar (around lines 782 / 801 / 804):
+Then add `|| isArchivedJob` to the existing `disabled` conditions of **ALL FOUR**
+mutate affordances reachable on an open job. Three are in the job toolbar
+(~lines 782 / 801 / 804), the fourth is the per-item "Убрать" (remove) button in
+the `jobItemColumns` actions column (~line 659):
 
 ```typescript
   // profile Select (~line 782)
@@ -655,22 +667,55 @@ mutate affordances in the job toolbar (around lines 782 / 801 / 804):
   disabled={!canManage || selected.length === 0 || isArchivedJob}
   // "Рассчитать" button (~line 804)
   disabled={!canManage || job.items.length === 0 || isArchivedJob}
+  // per-item "Убрать" remove button inside jobItemColumns (~line 659)
+  disabled={busy || isArchivedJob}
+```
+
+IMPORTANT: `jobItemColumns` is a `useMemo` with deps `[busy, canManage,
+removeJobItem, show]` (~line 665) — it does NOT currently close over `job`. Add
+`isArchivedJob` to that dependency array so the remove button re-renders disabled
+when the open job is archived:
+
+```typescript
+  }, [busy, canManage, isArchivedJob, removeJobItem, show]);
 ```
 
 Leave read affordances (open, "Загрузить подходящие детали" preview, PDF
-download, sheet previews) enabled. Do not change any other CutPage behavior.
+download, sheet previews, file links) enabled. There is no other mutate path on
+an open job (create/archive act on the job LIST, not the open archived job; load
+list and `loadEligible` are reads). Do not change any other CutPage behavior.
 
 - [ ] **Step 7: Add archived-guard source assertion**
 
-In `src/pages/cut/cutPageHelpers.test.ts` is not the right place (this is JSX
-state). Add a small source-text guard (Vitest, node env) — extend or create
+Add a source-text guard (Vitest, node env) that locks ALL four mutate
+affordances to `isArchivedJob`, not just text presence — extend or create
 `tests/cut-detail-column.guard.test.ts`:
 
 ```typescript
-const cutPageSrc = readFileSync('src/pages/cut/CutPage.tsx', 'utf8');
-expect(cutPageSrc).toContain("const isArchivedJob = job?.status === 'archived'");
-expect(cutPageSrc).toContain('isArchivedJob');
-expect(cutPageSrc).toContain('parseJobQueryParam');
+import { readFileSync } from 'node:fs';
+import { describe, it, expect } from 'vitest';
+
+describe('cut detail column + archived guard', () => {
+  it('CutPage gates every open-job mutate affordance on isArchivedJob', () => {
+    const src = readFileSync('src/pages/cut/CutPage.tsx', 'utf8');
+    expect(src).toContain("const isArchivedJob = job?.status === 'archived'");
+    expect(src).toContain('parseJobQueryParam');
+    // every `disabled={...}` on a mutate control must reference isArchivedJob:
+    const mutateDisabledLines = src
+      .split('\n')
+      .filter((l) => l.includes('disabled={') && /canManage|removeJobItem|busy \|\| isArchivedJob/.test(l));
+    // 4 mutate affordances: profile select, add, calculate, remove-item
+    const guarded = src.match(/isArchivedJob/g) ?? [];
+    expect(guarded.length).toBeGreaterThanOrEqual(5); // decl + 4 usages
+  });
+
+  it('order show page exposes the cut.view-gated Раскрой deep-link column', () => {
+    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
+    expect(show).toContain("title: 'Раскрой'");
+    expect(show).toContain('cutJobDeepLink');
+    expect(show).toContain("can('cut.view')");
+  });
+});
 ```
 
 - [ ] **Step 8: Run tests + build**
