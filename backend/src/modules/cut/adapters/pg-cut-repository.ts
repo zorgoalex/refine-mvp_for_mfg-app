@@ -36,6 +36,7 @@ import type {
   CalculateCutJobCommand,
   CreateCutJobCommand,
   CutRepositoryPort,
+  DetailLastReadyQuery,
   DetailPlacementsQuery,
   EligibleDetailsQuery,
   GetCutJobQuery,
@@ -50,6 +51,7 @@ import type {
 } from '../application/cut-command.types';
 import type {
   CutDetailInfoDto,
+  CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutGroupDto,
   CutJobDto,
@@ -890,6 +892,41 @@ export class PgCutRepository implements CutRepositoryPort {
     }
     const jobs = [...jobsById.values()].sort((a, b) => a.cutJobId - b.cutJobId);
     return { jobs, hasArchived };
+  }
+
+  async listDetailLastReady(query: DetailLastReadyQuery): Promise<CutDetailLastReadyResponseDto> {
+    const detailIds = query.detailIds ?? [];
+    if (detailIds.length === 0) return { details: [] };
+    // One row per detail: the latest READY (calculated) job (by creation order,
+    // cut_job_id DESC) that still actively contains it. Archiving overwrites
+    // status off 'ready', so archived jobs are naturally excluded. We order by
+    // cut_job_id (monotonic, immutable) NOT updated_at, which is bumped by
+    // prewarm/profile/ready events and would yield "last touched" not the
+    // latest-created ready job. Uses idx_cut_job_item_order_detail (migr 031).
+    const rows = await this.database.query<{
+      order_detail_id: string | number;
+      cut_job_id: string | number;
+      name: string;
+    }>(
+      `
+      SELECT DISTINCT ON (cji.order_detail_id)
+             cji.order_detail_id, cj.cut_job_id, cj.name
+      FROM cut_job_item cji
+      JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+      WHERE cji.order_detail_id = ANY($1::bigint[])
+        AND cji.is_active = true
+        AND cj.status = 'ready'
+      ORDER BY cji.order_detail_id, cj.cut_job_id DESC
+      `,
+      [[...detailIds]],
+    );
+    return {
+      details: rows.rows.map((row) => ({
+        orderDetailId: toNum(row.order_detail_id),
+        cutJobId: toNum(row.cut_job_id),
+        name: row.name,
+      })),
+    };
   }
 
   async renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer> {
