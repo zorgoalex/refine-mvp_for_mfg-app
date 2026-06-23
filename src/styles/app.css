@@ -277,6 +277,18 @@
    Scoped to .workspace-tabs so order-form / configuration inner
    tabs keep their default sizing.
    ============================================================ */
+/* Keep the workspace tab-bar pinned to the top of the scrolling content area
+   so it stays visible while the page below scrolls. The scroll container is
+   .ant-layout-content (overflow-y:auto on desktop; body on mobile); the app
+   header is a separate sibling above the content, so top:0 pins the bar just
+   under it. Background + border keep page content from showing through. */
+.workspace-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+}
 .workspace-tabs .ant-tabs-nav {
   margin: 0;
 }
