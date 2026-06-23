@@ -1,6 +1,6 @@
 {
   "name": "front_refine_v1",
-  "version": "1.0.0",
+  "version": "0.5.0",
   "main": "index.js",
   "scripts": {
     "dev": "node --max-old-space-size=4096 node_modules/vite/bin/vite.js",
@@ -68,6 +68,7 @@
     "smoke:runtime-config": "node scripts/smoke-runtime-config.js",
     "smoke:staging-gates": "node scripts/smoke-staging-gates.js",
     "smoke:stage-cutover": "node scripts/stage-cutover-smoke.js",
+    "version:daily": "node scripts/bump-version-if-changed.js",
     "test:e2e:regression": "playwright test tests/regression tests/frontend-pages-smoke.spec.ts tests/frontend-runtime-config.spec.ts tests/order-workflows.spec.ts tests/reference-workflows.spec.ts --project=chromium",
     "test:backend:sheet-integration": "vitest run --config vitest.sheet-materials-integration.config.ts"
   },

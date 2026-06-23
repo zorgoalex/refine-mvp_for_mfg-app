@@ -406,6 +406,9 @@ npm run dev:full
 - `npm run dev:full` — UI и API вместе.
 - `npm run build` — production build.
 - `npm run preview` — preview build.
+- `npm run version:daily` — если с последнего дневного обновления были изменения
+  в коде, увеличивает patch-версию (`0.5.x`) на единицу и синхронизирует
+  `package.json`, `package-lock.json` и `src/version.ts`.
 - `npm run test` — unit/API tests через Vitest.
 - `npm run test:e2e` — Playwright tests.
 - `npm run test:e2e:frontend-pages` — Playwright smoke для всех зарегистрированных frontend routes.
