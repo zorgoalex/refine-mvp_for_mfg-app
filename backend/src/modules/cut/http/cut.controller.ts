@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
@@ -46,6 +46,13 @@ const addItemsRequestSchema = z
   .strict();
 
 const versionBodySchema = z.object({ version: z.number().int().min(0) }).strict();
+
+const setProfileBodySchema = z
+  .object({
+    paramProfileId: z.number().int().positive().nullable(),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
 
 
 @ApiTags('CutJobs')
@@ -204,6 +211,24 @@ export class CutController {
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
       version: parseVersionBody(body),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'setCutJobProfile', summary: 'Set the cut profile for a job' })
+  @Patch(':cutJobId/profile')
+  async setProfile(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { paramProfileId, version } = parseSetProfileBody(body);
+    return this.cut.setProfile({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      paramProfileId,
+      version,
       requestId: request.requestId,
     });
   }
@@ -398,6 +423,10 @@ export function parseAddItemsRequest(body: unknown) {
 
 export function parseVersionBody(body: unknown): number {
   return parse(versionBodySchema, body).version;
+}
+
+export function parseSetProfileBody(body: unknown): { paramProfileId: number | null; version: number } {
+  return parse(setProfileBodySchema, body);
 }
 
 /** Query CSV (`orderIds=9,10`) → number arrays. */
