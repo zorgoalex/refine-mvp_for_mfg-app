@@ -73,6 +73,17 @@ describe('cutApi', () => {
     await expect(cutApi.get(1.5)).rejects.toThrow('Invalid cutJobId');
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('setProfile PATCHes the profile route with { paramProfileId, version }', async () => {
+    const job = jobDto(); // file's CutJobDto fixture (now incl. paramProfileId + totals)
+    const fetchMock = mockFetch(job, job);
+    await cutApi.setProfile(42, 5, 2);
+    await cutApi.setProfile(42, null, 3);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/profile');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ paramProfileId: 5, version: 2 });
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({ paramProfileId: null, version: 3 });
+  });
 });
 
 function mockFetch(...bodies: unknown[]) {
