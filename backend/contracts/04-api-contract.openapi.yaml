@@ -1751,10 +1751,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          description: >-
+            Idempotency key reused with a different request (IDEMPOTENCY_KEY_REUSED), still processing
+            (IDEMPOTENCY_IN_PROGRESS), or previously failed (IDEMPOTENCY_FAILED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
-          $ref: '#/components/responses/FeatureDisabled'
+          description: >-
+            Doweling commands API is disabled (SERVICE_UNAVAILABLE) or the database is not configured
+            (DATABASE_UNAVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '500':
           $ref: '#/components/responses/InternalError'
 

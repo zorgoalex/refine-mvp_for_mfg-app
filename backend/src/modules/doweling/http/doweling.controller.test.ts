@@ -38,6 +38,20 @@ describe('DowelingController', () => {
     );
   });
 
+  it('parseCreateDowelingRequest rejects an impossible calendar date with 422', () => {
+    for (const bad of ['2026-99-99', '2026-02-30', '2026-13-01']) {
+      expect(() => parseCreateDowelingRequest({ ...validBody, dowelingOrderDate: bad })).toThrow(
+        expect.objectContaining({ statusCode: 422, code: 'VALIDATION_ERROR' }),
+      );
+    }
+  });
+
+  it('parseCreateDowelingRequest accepts a real ISO date', () => {
+    expect(parseCreateDowelingRequest({ ...validBody, dowelingOrderDate: '2026-02-28' })).toMatchObject({
+      dowelingOrderDate: '2026-02-28',
+    });
+  });
+
   it('parseCreateDowelingRequest trims name and passes a valid body', () => {
     expect(parseCreateDowelingRequest({ ...validBody, dowelingOrderName: '  Тест присадка  ' })).toMatchObject({
       dowelingOrderName: 'Тест присадка',

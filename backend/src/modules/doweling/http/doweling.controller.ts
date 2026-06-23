@@ -10,6 +10,16 @@ import { DowelingRuntimeConfigService } from './doweling-runtime-config.service'
 
 const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
+// Validate a real calendar date (regex alone accepts 2026-99-99 / 2026-02-30, which Postgres ::date
+// would reject as a 500). Reject impossible dates at the 422 validation boundary instead.
+function isRealCalendarDate(value: string): boolean {
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
+
 const createDowelingRequestSchema = z.object({
   dowelingOrderName: z.string().trim().min(1).max(200),
   designEngineerId: z.number().int().positive(),
@@ -18,6 +28,7 @@ const createDowelingRequestSchema = z.object({
     .string()
     .trim()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
+    .refine(isRealCalendarDate, 'Invalid calendar date')
     .nullish(),
   productionStatusId: z.number().int().positive().nullish(),
   operatorId: z.number().int().positive().nullish(),

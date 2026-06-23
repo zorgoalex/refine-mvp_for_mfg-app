@@ -41,12 +41,19 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
       const idempotency = await reconcileIdempotency(tx, {
         idempotencyKey: command.dto.idempotencyKey,
         currentUser: command.currentUser,
+        // Hash EVERY persisted field so reusing a key with any changed input is a 409, not a false replay.
         requestShape: {
           actorUserId: command.currentUser.id,
           commandName: COMMAND_NAME,
           dowelingOrderName: command.dto.dowelingOrderName.trim(),
           designEngineerId: command.dto.designEngineerId,
           paymentStatusId: command.dto.paymentStatusId,
+          dowelingOrderDate: command.dto.dowelingOrderDate ?? null,
+          productionStatusId: command.dto.productionStatusId ?? null,
+          operatorId: command.dto.operatorId ?? null,
+          partsCount: command.dto.partsCount ?? null,
+          linkCadFile: command.dto.linkCadFile ?? null,
+          linkPdfFile: command.dto.linkPdfFile ?? null,
         },
       });
       if (idempotency.completedResponse) {

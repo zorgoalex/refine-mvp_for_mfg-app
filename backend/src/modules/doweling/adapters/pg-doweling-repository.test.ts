@@ -73,6 +73,20 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
     expect(sql).not.toContain('INSERT INTO outbox_events'); // no duplicate domain event on replay
   });
 
+  it('idempotency request hash covers optional fields (changing partsCount changes the stored hash)', async () => {
+    const base = createDatabase({ insertedDoweling: { doweling_order_id: 1, doweling_order_name: 'x', version: 0 } });
+    await new PgDowelingRepository(base.service).createDowelingOrder({ currentUser: currentUser(), requestId: 'r', dto });
+
+    const changed = createDatabase({ insertedDoweling: { doweling_order_id: 2, doweling_order_name: 'x', version: 0 } });
+    await new PgDowelingRepository(changed.service).createDowelingOrder({
+      currentUser: currentUser(),
+      requestId: 'r',
+      dto: { ...dto, partsCount: 5 },
+    });
+
+    expect(idempotencyHash(base.queries)).not.toBe(idempotencyHash(changed.queries));
+  });
+
   it('maps FK violation (23503) to 404 DOWELING_REFERENCE_NOT_FOUND', async () => {
     const database = createDatabase({ throwOnDowelingInsert: { code: '23503' } });
     await expect(
@@ -153,6 +167,11 @@ function createDatabase(
 
 function currentUser(role: CurrentUser['role'] = 'manager'): CurrentUser {
   return { id: '1', username: role, role, roleId: 1, permissions: getPermissionsForRole(role) };
+}
+
+function idempotencyHash(queries: Array<{ text: string; params: readonly unknown[] }>): unknown {
+  const insert = queries.find((q) => normalizeSql(q.text).startsWith('INSERT INTO command_idempotency_keys'));
+  return insert?.params[5]; // request_hash column
 }
 
 function normalizedSql(queries: Array<{ text: string }>): string {
