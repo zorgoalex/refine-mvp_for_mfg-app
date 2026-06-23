@@ -12,26 +12,33 @@ ready* cut job, the cell shows that job's name as a clickable link. Clicking it
 navigates to the cut page opened on that specific job. Details with no ready cut
 job show an em dash (`—`).
 
-## Definition: "последнее актуальное задание"
+## Definition: "последнее актуальное задание" = latest *created* ready job
 
-"Last actual cut job" for a detail = the most recent **ready** cut job that
-still actively contains the detail:
+"Last actual cut job" for a detail is defined precisely as the **latest-created
+`ready` cut job that still actively contains the detail**:
 
 - `cut_job.status = 'ready'` (calculated). Drafts / calculating / failed /
   archived jobs do NOT qualify. Archiving a job overwrites its status away from
-  `ready`, so the column naturally clears when the job is archived — this
-  matches the "actual" intent.
+  `ready`, so the column naturally clears when the job is archived.
 - `cut_job_item.is_active = true` (the detail has not been removed from that
   job's layout).
-- When a detail is in multiple ready jobs, pick the latest by **`cut_job_id
-  DESC`** (creation order). We deliberately do NOT order by `cut_job.updated_at`:
-  that column is bumped by non-ready events (PDF prewarm bookkeeping while status
-  stays `ready`, profile changes, the ready transition itself), so it reflects
-  "last touched" not "became ready last". `cut_job_id` is monotonic at creation
-  and never mutated, so the highest-id ready job is the most recently *created*
-  ready job. Accepted tradeoff: a job calculated to `ready` out of creation order
-  (rare) is ordered by creation, not by ready time — acceptable for an
-  informational link.
+- When a detail is in multiple ready jobs, pick the one with the highest
+  `cut_job_id` (most recently *created*).
+
+**Explicit semantic — created-order, NOT became-ready-order.** There is no
+persisted "became ready" timestamp on `cut_job`, and adding one would require a
+migration (out of scope). The two available timestamps are unsuitable:
+`updated_at` is bumped by non-ready events (PDF prewarm bookkeeping while status
+stays `ready`, profile changes, the ready transition itself) so it means "last
+touched"; `created_at` equals creation order, i.e. `cut_job_id`. We therefore
+order by the immutable, monotonic `cut_job_id DESC` and define the contract as
+*latest-created ready job*. Known tradeoff (documented, accepted): if an
+older (lower-id) job is recalculated to `ready` AFTER a newer (higher-id) job
+already became ready, this picks the newer-created job, not the later-became-
+ready one. For an informational "newest cut task containing this detail" link
+this is the intuitive result, and it is stable/predictable. If true
+became-ready ordering is ever required, it needs a dedicated `ready_at` column
+(migration) — noted as a future option, not implemented here.
 
 ## Backend
 
@@ -87,16 +94,22 @@ still actively contains the detail:
     `detail_id`, one batched fetch builds `Map<detailId, {cutJobId, name}>`.
   - New column «Раскрой» renders a react-router `<Link to={`/cut?job=${id}`}>`
     with the job name, or `—` when absent. Same-tab navigation.
-- `src/pages/cut/CutPage.tsx`: on mount, read the `job` query param; if present,
-  call the existing `openJob(jobId)`. Behavior of `openJob`: it calls
-  `cutApi.get(id)` then `setJob`; a missing/invalid id throws and is caught by
-  `openJob`'s existing `handleError` toast. NOTE (corrected): `getJob`/`loadJob`
-  do **not** filter archived jobs, so a deep-link to an *archived* job loads and
-  displays it read-only rather than failing. This is benign: the column only ever
-  links `ready` jobs, so the normal flow never deep-links an archived job; only a
-  stale/hand-edited URL (or a job archived after the page rendered) can, and
-  viewing an archived layout read-only is acceptable. No new rejection logic is
-  added. No route change — `/cut` already exists.
+- `src/pages/cut/CutPage.tsx`:
+  - On mount, read the `job` query param; if present, call the existing
+    `openJob(jobId)`. `openJob` calls `cutApi.get(id)` then `setJob`; a
+    missing/invalid id throws and is caught by `openJob`'s `handleError` toast.
+  - `getJob`/`loadJob` do **not** filter archived jobs, so a deep-link to an
+    *archived* job loads it. The column only ever links `ready` jobs, so the
+    normal flow never deep-links archived — only a stale/hand-edited URL (or a
+    job archived after the page rendered) can. To make that genuinely read-only
+    instead of "buttons that error server-side after a click", **disable the
+    mutate affordances when `job.status === 'archived'`**: the profile `Select`,
+    "Добавить выбранные", and "Рассчитать" buttons get `|| isArchived` added to
+    their existing `disabled` conditions (`isArchived = job?.status ===
+    'archived'`). Read affordances (open, load-eligible preview, PDF download,
+    sheet previews) stay enabled. This also hardens the pre-existing latent gap
+    that archived jobs were never reachable-by-id in the UI before this feature.
+  - No route change — `/cut` already exists.
 
 ## Edge cases
 

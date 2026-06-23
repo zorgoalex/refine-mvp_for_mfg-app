@@ -15,7 +15,7 @@
 - Backend owns the cut command/read API (CLAUDE.md principle 2); RBAC checked server-side. Reads require `cut.view`.
 - This endpoint is read-only ⇒ no audit/outbox writes (consistent with `/cut-jobs/placements`, `/cut-jobs/eligible-details`). Do NOT add audit/notification code.
 - No migration. Use existing tables `cut_job`, `cut_job_item` and existing index `idx_cut_job_item_order_detail`.
-- "Last ready" = `cut_job.status='ready'` AND `cut_job_item.is_active=true`, latest by `cut_job_id DESC` (creation order). Do NOT order by `cut_job.updated_at` — it is bumped by PDF prewarm bookkeeping (`pg-cut-repository.ts:951`), profile changes (`:1181`) and the ready transition (`:514`), so it means "last touched ready job", not "became ready last". `cut_job_id` is monotonic at creation and never mutated.
+- Contract = **latest *created* ready job**: `cut_job.status='ready'` AND `cut_job_item.is_active=true`, picked by `cut_job_id DESC` (immutable creation order). This is explicitly created-order, NOT became-ready-order — no `ready_at` column exists and adding one is out of scope (migration). Do NOT order by `cut_job.updated_at` (bumped by prewarm `pg-cut-repository.ts:951`, profile `:1181`, ready transition `:514` → "last touched"). Known accepted tradeoff: an older job recalculated to ready after a newer job became ready is still ordered by creation. Use the exact phrase "latest created ready job" in DTO/code comments.
 - Frontend unit tests run under Vitest `environment=node` (no jsdom/testing-library): test pure helpers + source-text guards, not React rendering.
 - Money/area/React rendering conventions unchanged; this is additive.
 - Review gate: Codex gpt-5.4 high Aggressive Critic — plan review then code review. Any ERP marker / BLOCKER ⇒ CHANGES_REQUESTED.
@@ -549,13 +549,14 @@ git commit -m "feat(cut): Раскрой column on order show page with deep-lin
 ### Task 6: Frontend — CutPage `?job=` deep-link
 
 **Files:**
-- Modify: `src/pages/cut/CutPage.tsx` (add a one-shot mount effect after the `loadJobs` mount effect ~line 216; import `useSearchParams`)
+- Modify: `src/pages/cut/CutPage.tsx` (one-shot mount effect after the `loadJobs` effect ~line 216, import `useSearchParams`; `isArchivedJob` mutate-guard ~lines 782/801/804)
 - Modify: `src/pages/cut/cutPageHelpers.ts` (add `parseJobQueryParam`)
-- Test: `src/pages/cut/cutPageHelpers.test.ts` (add cases) — check the file exists; if not, create it.
+- Test: `src/pages/cut/cutPageHelpers.test.ts` (add cases) — create if missing.
+- Test: `tests/cut-detail-column.guard.test.ts` (source-text guard, shared with Task 5).
 
 **Interfaces:**
-- Consumes: existing `openJob` (CutPage), `can('cut.view')`.
-- Produces: `parseJobQueryParam(search: string): number | null`; CutPage auto-opens the job from `?job=` once on mount.
+- Consumes: existing `openJob` (CutPage), `can('cut.view')`, `job.status`.
+- Produces: `parseJobQueryParam(search: string): number | null`; CutPage auto-opens the `?job=` job once on mount and is read-only for archived jobs.
 
 - [ ] **Step 1: Write the failing helper test**
 
@@ -615,10 +616,10 @@ Add `parseJobQueryParam` to the existing `./cutPageHelpers` import list. Inside 
   // Deep-link: /cut?job=<id> opens that job once on mount (e.g. from the order
   // show page «Раскрой» column). Guarded so it fires a single time per mount.
   // openJob(id) loads ANY existing job by id (getJob/loadJob do not filter
-  // archived) and shows it read-only; a missing/invalid id throws and is caught
-  // by openJob's handleError toast. The column only links ready jobs, so the
-  // normal flow never deep-links archived — only a stale/hand-edited URL can,
-  // and viewing an archived layout read-only is acceptable (no rejection added).
+  // archived) and shows it; a missing/invalid id throws and is caught by
+  // openJob's handleError toast. The column only links ready jobs, so the normal
+  // flow never deep-links archived — only a stale/hand-edited URL can. Mutate
+  // controls are disabled for archived jobs (Step 6) so this is truly read-only.
   const [searchParams] = useSearchParams();
   const deepLinkHandledRef = useRef(false);
   useEffect(() => {
@@ -633,16 +634,55 @@ Add `parseJobQueryParam` to the existing `./cutPageHelpers` import list. Inside 
 
 (`useRef`, `useEffect`, `can` are already imported. `openJob` is defined above this point.)
 
-- [ ] **Step 6: Run tests + build**
+- [ ] **Step 6: Disable mutate controls for archived jobs**
 
-Run: `npx vitest run src/pages/cut/cutPageHelpers.test.ts && npm run build`
+A deep-linked archived job currently shows enabled "Добавить выбранные" /
+"Рассчитать" / profile `Select` that only fail server-side after a click
+(archived is non-mutable). Make it genuinely read-only. In `CutPage.tsx`, derive
+near the other `job`-based locals:
+
+```typescript
+  const isArchivedJob = job?.status === 'archived';
+```
+
+Then add `|| isArchivedJob` to the existing `disabled` conditions of the three
+mutate affordances in the job toolbar (around lines 782 / 801 / 804):
+
+```typescript
+  // profile Select (~line 782)
+  disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+  // "Добавить выбранные" button (~line 801)
+  disabled={!canManage || selected.length === 0 || isArchivedJob}
+  // "Рассчитать" button (~line 804)
+  disabled={!canManage || job.items.length === 0 || isArchivedJob}
+```
+
+Leave read affordances (open, "Загрузить подходящие детали" preview, PDF
+download, sheet previews) enabled. Do not change any other CutPage behavior.
+
+- [ ] **Step 7: Add archived-guard source assertion**
+
+In `src/pages/cut/cutPageHelpers.test.ts` is not the right place (this is JSX
+state). Add a small source-text guard (Vitest, node env) — extend or create
+`tests/cut-detail-column.guard.test.ts`:
+
+```typescript
+const cutPageSrc = readFileSync('src/pages/cut/CutPage.tsx', 'utf8');
+expect(cutPageSrc).toContain("const isArchivedJob = job?.status === 'archived'");
+expect(cutPageSrc).toContain('isArchivedJob');
+expect(cutPageSrc).toContain('parseJobQueryParam');
+```
+
+- [ ] **Step 8: Run tests + build**
+
+Run: `npx vitest run src/pages/cut/cutPageHelpers.test.ts tests/cut-detail-column.guard.test.ts && npm run build`
 Expected: PASS, build clean.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/pages/cut/CutPage.tsx src/pages/cut/cutPageHelpers.ts src/pages/cut/cutPageHelpers.test.ts
-git commit -m "feat(cut): CutPage ?job= deep-link auto-open"
+git add src/pages/cut/CutPage.tsx src/pages/cut/cutPageHelpers.ts src/pages/cut/cutPageHelpers.test.ts tests/cut-detail-column.guard.test.ts
+git commit -m "feat(cut): CutPage ?job= deep-link auto-open + archived read-only guard"
 ```
 
 ---
@@ -679,7 +719,8 @@ Fast-forward/merge the feature branch back into `feat/backend-erp-stage1` only a
 ## Self-Review
 
 **Spec coverage:**
-- Last-ready definition (ready + is_active + recency) → Task 2 SQL + tests. ✓
+- Last-ready definition = latest *created* ready job (ready + is_active + `cut_job_id DESC`, explicitly created-order not became-ready) → Task 2 SQL + tests (incl. updated_at-noise immunity). ✓
+- Archived deep-link genuinely read-only (mutate controls disabled when archived) → Task 6 Step 6 + guard. ✓
 - New `cut.view` endpoint → Task 3. ✓
 - No migration / reuse index → Global Constraints + Task 2 comment. ✓
 - No audit/outbox (read) → Global Constraints; no audit code in any task. ✓
