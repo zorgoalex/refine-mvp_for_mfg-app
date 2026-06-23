@@ -2,6 +2,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type {
   AddCutItemsRequestDto,
   CreateCutJobRequestDto,
+  CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutJobDto,
   EligibleDetailsResponseDto,
@@ -115,6 +116,13 @@ export interface DetailPlacementsQuery {
   requestId?: string;
 }
 
+export interface DetailLastReadyQuery {
+  currentUser: CurrentUser;
+  /** detail ids whose latest-created ready cut job is resolved (one row max per detail) */
+  detailIds?: number[];
+  requestId?: string;
+}
+
 /** Minimal sheet-type data returned by the cut-gated sheet-lookup endpoint. */
 export interface CutSheetTypeOption {
   sheetMaterialTypeId: number;
@@ -152,6 +160,7 @@ export interface CutRepositoryPort {
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;
   listDetailPlacements(query: DetailPlacementsQuery): Promise<CutDetailPlacementsResponseDto>;
+  listDetailLastReady(query: DetailLastReadyQuery): Promise<CutDetailLastReadyResponseDto>;
   renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer>;
   renderSheetSvg(query: RenderSheetSvgQuery): Promise<string>;
   renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer>;

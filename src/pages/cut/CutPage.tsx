@@ -28,6 +28,7 @@ import type {
 } from '../../api/types/cutApi.types';
 import { can } from '../../utils/permissions';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
+import { useTabStore } from '../../stores/tabStore';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
   CUT_JOB_STATUS_FILTER_OPTIONS,
@@ -39,6 +40,7 @@ import {
   formatGroupSummary,
   noSheetSpecMessage,
   parseIdCsv,
+  parseJobQueryParam,
   pollPdf,
   safeHttpHref,
   selectableDetailIds,
@@ -215,11 +217,18 @@ export const CutPage: React.FC = () => {
     if (can('cut.view')) void loadJobs();
   }, [loadJobs]);
 
+  // Last-write-wins guard for openJob: a stale in-flight cutApi.get (e.g. rapid
+  // deep-link /cut?job=45 -> 46, or fast successive row opens) must not overwrite
+  // the UI with an older job after a newer open started. Each call captures its
+  // sequence; only the latest applies its result/error/busy reset.
+  const openSeqRef = useRef(0);
   const openJob = useCallback(
     async (cutJobId: number) => {
+      const seq = ++openSeqRef.current;
       setBusy(true);
       try {
         const fresh = await cutApi.get(cutJobId);
+        if (openSeqRef.current !== seq) return; // superseded by a newer openJob
         setJob(fresh);
         // Prefill the eligible-load criteria with the order(s) this job was built
         // from (the reserved items' orders) so "Загрузить подходящие детали" is
@@ -236,13 +245,49 @@ export const CutPage: React.FC = () => {
         setSelected([]);
         resetSheetViews();
       } catch (error) {
+        if (openSeqRef.current !== seq) return; // superseded; swallow the stale error
         handleError(error, 'Не удалось открыть раскрой');
       } finally {
-        setBusy(false);
+        if (openSeqRef.current === seq) setBusy(false);
       }
     },
     [form, handleError, resetSheetViews],
   );
+
+  // Deep-link: /cut?job=<id> opens that job (e.g. from the order show page
+  // «Раскрой» column). The workspace keeps /cut mounted (keyed by pathname), so
+  // subscribe to the /cut tab's stored path (updated by useTabSync on every query
+  // change) rather than reading window.location once — otherwise a deep-link
+  // clicked while /cut is already open would not reopen. Per-job-id one-shot:
+  // opens when the parsed id changes to a new value. openJob loads ANY existing
+  // job by id (getJob/loadJob do not filter archived) and shows it; a missing/
+  // invalid id throws and is caught by openJob's handleError toast. The column
+  // only links ready jobs, so the normal flow never deep-links archived — only a
+  // stale/hand-edited URL can, and mutate controls are disabled for archived jobs
+  // (isArchivedJob guard) so that is truly read-only.
+  const cutTabPath = useTabStore((s) => s.tabs.find((t) => t.key === '/cut')?.path);
+  const storeDeepLinkJobId = parseJobQueryParam(
+    cutTabPath && cutTabPath.includes('?') ? cutTabPath.slice(cutTabPath.indexOf('?')) : '',
+  );
+  // Cross-check against the LIVE url: the tab store rehydrates from sessionStorage
+  // and is only rewritten by useTabSync after mount, so on a fresh /cut?job=45
+  // load the store may briefly hold a stale persisted /cut path. Acting on it would
+  // openJob(staleId) and then race openJob(45). Only honor the deep-link once the
+  // store path's id agrees with the live url, so the stale value is skipped until
+  // useTabSync catches up. window.location is a plain DOM read, not a router hook.
+  const liveDeepLinkJobId = parseJobQueryParam(
+    typeof window !== 'undefined' ? window.location.search : '',
+  );
+  const deepLinkJobId =
+    storeDeepLinkJobId !== null && storeDeepLinkJobId === liveDeepLinkJobId ? storeDeepLinkJobId : null;
+  const lastDeepLinkRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!can('cut.view')) return;
+    if (deepLinkJobId === null) return;
+    if (lastDeepLinkRef.current === deepLinkJobId) return;
+    lastDeepLinkRef.current = deepLinkJobId;
+    void openJob(deepLinkJobId);
+  }, [deepLinkJobId, openJob]);
 
   const archiveJob = useCallback(
     async (target: CutJobDto) => {
@@ -560,6 +605,11 @@ export const CutPage: React.FC = () => {
     [],
   );
 
+  // Archived jobs are genuinely read-only: all mutate controls are disabled so
+  // an operator deep-linked to an archived job (e.g. from the order show Раскрой
+  // column via a stale/hand-edited URL) cannot accidentally mutate it.
+  const isArchivedJob = job?.status === 'archived';
+
   // The details an operator actually reserved into this job (cut_job_item rows),
   // including those staged from the Orders "Добавить в раскрой" action. Showing
   // them is what makes a reopened job legible: "Загрузить подходящие детали" only
@@ -656,13 +706,13 @@ export const CutPage: React.FC = () => {
         fixed: 'right',
         render: (_: unknown, row: CutJobItemDto) =>
           canManage ? (
-            <Button size="small" type="link" danger onClick={() => removeJobItem(row.cutJobItemId)} disabled={busy}>
+            <Button size="small" type="link" danger onClick={() => removeJobItem(row.cutJobItemId)} disabled={busy || isArchivedJob}>
               Убрать
             </Button>
           ) : null,
       },
     ];
-  }, [busy, canManage, removeJobItem, show]);
+  }, [busy, canManage, isArchivedJob, removeJobItem, show]);
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
 
@@ -779,7 +829,7 @@ export const CutPage: React.FC = () => {
                   <Select<number | null>
                     value={job.paramProfileId}
                     onChange={(v) => void setJobProfile(v ?? null)}
-                    disabled={!canManage || busy || job.status === 'calculating'}
+                    disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
                     style={{ minWidth: 240 }}
                     placeholder={resolveProfileLabel(null, profiles, cutSettings)}
                     allowClear
@@ -798,10 +848,10 @@ export const CutPage: React.FC = () => {
             <Button onClick={loadEligible} loading={busy}>
               Загрузить подходящие детали
             </Button>
-            <Button onClick={addToBasket} disabled={!canManage || selected.length === 0} loading={busy}>
+            <Button onClick={addToBasket} disabled={!canManage || selected.length === 0 || isArchivedJob} loading={busy}>
               Добавить выбранные ({selected.length})
             </Button>
-            <Button type="primary" onClick={calculate} disabled={!canManage || job.items.length === 0} loading={busy}>
+            <Button type="primary" onClick={calculate} disabled={!canManage || job.items.length === 0 || isArchivedJob} loading={busy}>
               {job.status === 'failed' ? 'Повторить расчёт' : 'Рассчитать'}
             </Button>
             <Select<string>

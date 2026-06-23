@@ -960,4 +960,74 @@ describeIntegration('PgCutRepository (integration)', () => {
       await pool.query('UPDATE order_details SET delete_flag = false WHERE detail_id = 102');
     }
   });
+
+  // --- listDetailLastReady integration tests (Task 2) ---
+
+  it('listDetailLastReady returns the latest-created ready job per detail, ignoring drafts', async () => {
+    // dA = detail 1 (sheet type 1, eligible); dB = detail 2 (sheet type 1, eligible).
+    // job1: contains dA, calculated → ready.
+    // job2: contains dA, NOT calculated → stays draft.
+    // Result: dA maps to job1 (the ready one); dB (no ready job) is absent.
+    const dA = 1;
+    const dB = 2;
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job1 = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Ready A', detailIds: [dA] }, requestId: 'ldr-c1' });
+    const readyJob = await repo.calculate({ currentUser: currentUser(), cutJobId: job1.cutJobId, version: job1.version, requestId: 'ldr-calc1' });
+    expect(readyJob.status).toBe('ready');
+    const readyJobId = job1.cutJobId;
+
+    // job2 with the same dA: draft only.
+    const job2 = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Draft A', detailIds: [dA] }, requestId: 'ldr-c2' });
+    expect(job2.cutJobId).toBeGreaterThan(readyJobId); // sanity
+
+    const res = await repo.listDetailLastReady({ currentUser: currentUser(), detailIds: [dA, dB] });
+    const byDetail = new Map(res.details.map((d) => [d.orderDetailId, d]));
+    expect(byDetail.get(dA)?.cutJobId).toBe(readyJobId);
+    expect(byDetail.has(dB)).toBe(false);
+  });
+
+  it('listDetailLastReady excludes items where is_active=false', async () => {
+    // dA = detail 1. Create a ready job, then mark dA's item is_active=false.
+    // listDetailLastReady must return nothing for dA.
+    const dA = 1;
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Ready inactive', detailIds: [dA] }, requestId: 'ldr-ia-c' });
+    await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'ldr-ia-calc' });
+
+    // Deactivate the item directly (simulates what archive/remove does internally).
+    await pool.query(
+      `UPDATE cut_job_item SET is_active = false WHERE cut_job_id = $1 AND order_detail_id = $2`,
+      [job.cutJobId, dA],
+    );
+
+    const res = await repo.listDetailLastReady({ currentUser: currentUser(), detailIds: [dA] });
+    expect(res.details).toHaveLength(0);
+  });
+
+  it('listDetailLastReady ignores updated_at noise — picks the latest-created ready job (highest id)', async () => {
+    // dA = detail 1. Two ready jobs: jobOld (lower id) and jobNew (higher id).
+    // After calculation, bump jobOld.updated_at to now() so it is the most-recently-
+    // touched — but listDetailLastReady must still return jobNew (higher cut_job_id).
+    const dA = 1;
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+
+    const createdOld = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Old ready', detailIds: [dA] }, requestId: 'ldr-upd-c1' });
+    const readyOld = await repo.calculate({ currentUser: currentUser(), cutJobId: createdOld.cutJobId, version: createdOld.version, requestId: 'ldr-upd-calc1' });
+    expect(readyOld.status).toBe('ready');
+    const jobOldId = createdOld.cutJobId;
+
+    const createdNew = await repo.createJob({ currentUser: currentUser(), dto: { name: 'New ready', detailIds: [dA] }, requestId: 'ldr-upd-c2' });
+    const readyNew = await repo.calculate({ currentUser: currentUser(), cutJobId: createdNew.cutJobId, version: createdNew.version, requestId: 'ldr-upd-calc2' });
+    expect(readyNew.status).toBe('ready');
+    const jobNewId = createdNew.cutJobId;
+
+    expect(jobNewId).toBeGreaterThan(jobOldId); // sanity: identity sequence is monotonic
+
+    // Bump jobOld's updated_at to now() so it is the most-recently-touched job.
+    await pool.query(`UPDATE cut_job SET updated_at = now() WHERE cut_job_id = $1`, [jobOldId]);
+
+    // Despite jobOld having the newest updated_at, the HIGHER-id job must win.
+    const res = await repo.listDetailLastReady({ currentUser: currentUser(), detailIds: [dA] });
+    expect(res.details.find((d) => d.orderDetailId === dA)?.cutJobId).toBe(jobNewId);
+  });
 });
