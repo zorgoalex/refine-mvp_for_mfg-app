@@ -2,7 +2,7 @@
 import { Button, Drawer, Layout, List, Space, Tag, Tooltip, Typography } from "antd";
 import { NotificationOutlined } from "@ant-design/icons";
 import { authStorage } from "../utils/auth";
-import { releaseNotes, SERVICE_LABELS } from "../releaseNotes";
+import { releaseNotes, REPOSITORY_LABELS, SERVICE_LABELS } from "../releaseNotes";
 import { APP_VERSION } from "../version";
 
 const decodeJwtPayload = (token: string): Record<string, any> | null => {
@@ -110,6 +110,15 @@ export const AppFooter: React.FC = () => {
                     <Tag key={service}>{SERVICE_LABELS[service]}</Tag>
                   ))}
                 </Space>
+                {entry.repositories?.length ? (
+                  <Space size={[4, 4]} wrap>
+                    {entry.repositories.map((repository) => (
+                      <Tag key={repository} color="blue">
+                        {REPOSITORY_LABELS[repository]}
+                      </Tag>
+                    ))}
+                  </Space>
+                ) : null}
                 {entry.added?.length ? <ReleaseNoteSection title="Добавлено" items={entry.added} /> : null}
                 {entry.changed?.length ? <ReleaseNoteSection title="Изменено" items={entry.changed} /> : null}
                 {entry.fixed?.length ? <ReleaseNoteSection title="Исправлено" items={entry.fixed} /> : null}
