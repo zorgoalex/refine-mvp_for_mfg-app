@@ -862,34 +862,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         ),
     },
     {
-      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис проект</div>,
-      dataIndex: 'basis_project',
-      key: 'basis_project',
-      width: 120,
-      render: (text, record) =>
-        isEditing(record) ? (
-          <Form.Item name="basis_project" style={{ margin: 0, padding: '0 4px' }}>
-            <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
-          </Form.Item>
-        ) : (
-          <span style={{ fontSize: '90%' }}>{text || ''}</span>
-        ),
-    },
-    {
-      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис данные</div>,
-      dataIndex: 'basis_data',
-      key: 'basis_data',
-      width: 160,
-      render: (text, record) =>
-        isEditing(record) ? (
-          <Form.Item name="basis_data" style={{ margin: 0, padding: '0 4px' }}>
-            <Input placeholder="Номер/Обозначение/Наименование" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
-          </Form.Item>
-        ) : (
-          <span style={{ fontSize: '90%' }}>{text || ''}</span>
-        ),
-    },
-    {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Цена за кв.м.</div>,
       dataIndex: 'milling_cost_per_sqm',
       key: 'milling_cost_per_sqm',
@@ -1072,6 +1044,34 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               loading={referencesLoading}
             />
           ) : <Tag>Не назначен</Tag>
+        ),
+    },
+    {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис проект</div>,
+      dataIndex: 'basis_project',
+      key: 'basis_project',
+      width: 120,
+      render: (text, record) =>
+        isEditing(record) ? (
+          <Form.Item name="basis_project" style={{ margin: 0, padding: '0 4px' }}>
+            <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '90%' }}>{text || ''}</span>
+        ),
+    },
+    {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис данные</div>,
+      dataIndex: 'basis_data',
+      key: 'basis_data',
+      width: 160,
+      render: (text, record) =>
+        isEditing(record) ? (
+          <Form.Item name="basis_data" style={{ margin: 0, padding: '0 4px' }}>
+            <Input placeholder="Номер/Обозначение/Наименование" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '90%' }}>{text || ''}</span>
         ),
     },
     {
@@ -1654,21 +1654,21 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               <Table.Summary.Cell index={8} />
               {/* Примечание */}
               <Table.Summary.Cell index={9} />
-              {/* Базис проект */}
-              <Table.Summary.Cell index={10} />
-              {/* Базис данные */}
-              <Table.Summary.Cell index={11} />
               {/* Цена за кв.м. */}
-              <Table.Summary.Cell index={12} />
+              <Table.Summary.Cell index={10} />
               {/* Сумма */}
-              <Table.Summary.Cell index={13} align="right">
+              <Table.Summary.Cell index={11} align="right">
                 <FitSummaryText align="right" style={{ color: '#52c41a' }}>{formatNumber(totals.detail_cost, 2)}</FitSummaryText>
               </Table.Summary.Cell>
               {/* Пленка */}
-              <Table.Summary.Cell index={14} />
+              <Table.Summary.Cell index={12} />
               {/* Пр-т */}
-              <Table.Summary.Cell index={15} />
+              <Table.Summary.Cell index={13} />
               {/* Статус */}
+              <Table.Summary.Cell index={14} />
+              {/* Базис проект */}
+              <Table.Summary.Cell index={15} />
+              {/* Базис данные */}
               <Table.Summary.Cell index={16} />
               {/* detail_name */}
               <Table.Summary.Cell index={17} />
