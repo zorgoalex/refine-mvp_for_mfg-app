@@ -1007,46 +1007,56 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 const totalArea = details.reduce((sum, d) => sum + (d.area || 0), 0);
                 const totalCost = details.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
 
+                // Footer cells must line up with the RENDERED columns. Two
+                // optional leading/extra columns shift everything:
+                //  - rowSelection (cutSelectMode) prepends a checkbox column,
+                //  - cutColumnEnabled inserts the «Раскрой» column after «Пр-е».
+                // `base` is the offset from the leading selection column; the
+                // «Раскрой» gap adds one more to every column at/after «Цена».
+                const base = cutSelectMode ? 1 : 0;
+                const cutGap = cutColumnEnabled ? 1 : 0;
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ backgroundColor: '#fafafa', fontWeight: 'bold' }}>
+                      {/* leading checkbox column (only while selecting for cut) */}
+                      {cutSelectMode && <Table.Summary.Cell index={0} />}
                       {/* № - количество позиций */}
-                      <Table.Summary.Cell index={0} align="center">
+                      <Table.Summary.Cell index={base + 0} align="center">
                         <span style={{ color: '#1890ff' }}>{totalCount}</span>
                       </Table.Summary.Cell>
                       {/* Высота */}
-                      <Table.Summary.Cell index={1} />
+                      <Table.Summary.Cell index={base + 1} />
                       {/* Ширина */}
-                      <Table.Summary.Cell index={2} />
+                      <Table.Summary.Cell index={base + 2} />
                       {/* Кол-во */}
-                      <Table.Summary.Cell index={3} align="center">
+                      <Table.Summary.Cell index={base + 3} align="center">
                         <span style={{ color: '#1890ff' }}>{totalQuantity}</span>
                       </Table.Summary.Cell>
                       {/* м² */}
-                      <Table.Summary.Cell index={4} align="center">
+                      <Table.Summary.Cell index={base + 4} align="center">
                         <span style={{ color: '#1890ff' }}>{totalArea.toFixed(2)}</span>
                       </Table.Summary.Cell>
                       {/* Фрезеровка */}
-                      <Table.Summary.Cell index={5} />
+                      <Table.Summary.Cell index={base + 5} />
                       {/* Обкат */}
-                      <Table.Summary.Cell index={6} />
+                      <Table.Summary.Cell index={base + 6} />
                       {/* Материал */}
-                      <Table.Summary.Cell index={7} />
+                      <Table.Summary.Cell index={base + 7} />
                       {/* Пр-е */}
-                      <Table.Summary.Cell index={8} />
+                      <Table.Summary.Cell index={base + 8} />
                       {/* Раскрой (conditional — keeps the footer aligned with the
                           13-column layout when the cut column is shown) */}
-                      {cutColumnEnabled && <Table.Summary.Cell index={9} />}
+                      {cutColumnEnabled && <Table.Summary.Cell index={base + 9} />}
                       {/* Цена за кв.м. */}
-                      <Table.Summary.Cell index={cutColumnEnabled ? 10 : 9} />
+                      <Table.Summary.Cell index={base + 9 + cutGap} />
                       {/* Сумма */}
-                      <Table.Summary.Cell index={cutColumnEnabled ? 11 : 10} align="right">
+                      <Table.Summary.Cell index={base + 10 + cutGap} align="right">
                         <span style={{ color: '#52c41a' }}>
                           {totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                         </span>
                       </Table.Summary.Cell>
                       {/* Пленка */}
-                      <Table.Summary.Cell index={cutColumnEnabled ? 12 : 11} />
+                      <Table.Summary.Cell index={base + 11 + cutGap} />
                     </Table.Summary.Row>
                   </Table.Summary>
                 );
