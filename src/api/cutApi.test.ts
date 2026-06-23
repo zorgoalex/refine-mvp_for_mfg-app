@@ -94,6 +94,8 @@ function jobDto(overrides: Partial<CutJobDto> = {}): CutJobDto {
     source: 'manual',
     version: 0,
     pdfPrewarmState: 'pending',
+    paramProfileId: null,
+    totals: { positions: 0, details: 0, area: 0, sheets: 0 },
     items: [],
     groups: [],
     ...overrides,

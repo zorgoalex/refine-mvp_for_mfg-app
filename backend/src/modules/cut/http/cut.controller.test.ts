@@ -25,6 +25,10 @@ function jobDto(): CutJobDto {
     source: 'manual',
     version: 0,
     pdfPrewarmState: 'pending',
+    failureCode: null,
+    failureReason: null,
+    paramProfileId: null,
+    totals: { positions: 0, details: 0, area: 0, sheets: 0 },
     items: [],
     groups: [],
   };

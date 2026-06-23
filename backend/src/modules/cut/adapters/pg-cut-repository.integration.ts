@@ -142,6 +142,7 @@ async function createSchema(pool: Pool): Promise<void> {
       pdf_prewarm_failure_reason TEXT,
       failure_code TEXT,
       failure_reason TEXT,
+      param_profile_id BIGINT,
       created_by BIGINT,
       version INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT now(),
@@ -273,6 +274,22 @@ function makeDatabase(pool: Pool): DatabaseService {
 
 function stubFreecut(impl: () => Promise<FreecutOptimizeResponse>) {
   return { optimize: impl };
+}
+
+async function insertProfile(pool: Pool, name: string, params: Record<string, unknown>, isDefault = false): Promise<number> {
+  const r = await pool.query(
+    `INSERT INTO cut_param_profiles (name, params, is_default, is_active) VALUES ($1, $2::jsonb, $3, true) RETURNING cut_param_profile_id`,
+    [name, JSON.stringify(params), isDefault],
+  );
+  return Number(r.rows[0].cut_param_profile_id);
+}
+
+async function seedDetail(pool: Pool, opts: { detailId: number; area: number; quantity: number }): Promise<void> {
+  await pool.query(
+    `INSERT INTO order_details (detail_id, order_id, quantity, width, height, area, material_id, production_status_id, sheet_material_type_id)
+     VALUES ($1, 9, $2, 600, 400, $3, NULL, 1, 1)`,
+    [opts.detailId, opts.quantity, opts.area],
+  );
 }
 
 describeIntegration('PgCutRepository (integration)', () => {
@@ -812,5 +829,25 @@ describeIntegration('PgCutRepository (integration)', () => {
     const sheetRows = bridge.rows.filter((r) => r.entity_type === 'sheet_material_type');
     const sheetIds = sheetRows.map((r) => Number(r.entity_id)).sort();
     expect(sheetIds).toEqual([1, 2]);
+  });
+
+  it('totals: positions excludes deleted details; details=Σqty; area=Σ(area*qty); sheets pre-calc=0', async () => {
+    // Seed two details with known area/qty mirroring createSchema's detail-seed INSERT
+    // (use fresh detail ids, e.g. 101 area=1.5 qty=2 and 102 area=0.5 qty=3, with the
+    // ready status + sheet spec the harness gives details 1/2 so they are eligible).
+    await seedDetail(pool, { detailId: 101, area: 1.5, quantity: 2 });
+    await seedDetail(pool, { detailId: 102, area: 0.5, quantity: 3 });
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест totals', detailIds: [101, 102] }, requestId: 't1' });
+    try {
+      await pool.query('UPDATE order_details SET delete_flag = true WHERE detail_id = 102');
+      const reread = await repo.getJob({ currentUser: currentUser(), cutJobId: job.cutJobId, requestId: 't2' });
+      expect(reread.totals.positions).toBe(1);          // deleted (102) excluded
+      expect(reread.totals.details).toBe(2);            // only 101's qty
+      expect(reread.totals.area).toBeCloseTo(3.0, 2);   // 1.5 * 2
+      expect(reread.totals.sheets).toBe(0);
+    } finally {
+      await pool.query('UPDATE order_details SET delete_flag = false WHERE detail_id = 102');
+    }
   });
 });

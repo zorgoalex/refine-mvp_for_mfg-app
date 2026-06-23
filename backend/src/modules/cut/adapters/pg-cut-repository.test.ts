@@ -115,8 +115,14 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
 
     // loadJob reads
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason FROM cut_job WHERE cut_job_id = $1')) {
-      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id FROM cut_job WHERE cut_job_id = $1')) {
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null }], rowCount: 1 };
+    }
+    if (sql.startsWith('SELECT i.cut_job_id')) {
+      return { rows: [{ cut_job_id: 42, positions: 0, details: 0, area: 0 }], rowCount: 1 };
+    }
+    if (sql.startsWith('SELECT g.cut_job_id')) {
+      return { rows: [{ cut_job_id: 42, sheets: 0 }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item')) {
       return { rows: [], rowCount: 0 };

@@ -81,6 +81,17 @@ export interface CutGroupDto {
   sheets: CutGroupSheetDto[];
 }
 
+export interface CutJobTotals {
+  /** count of active cut_job_item rows (one row per reserved detail) */
+  positions: number;
+  /** SUM(order_details.quantity) over the job's active items */
+  details: number;
+  /** SUM(order_details.area * order_details.quantity), rounded to 2 dp */
+  area: number;
+  /** count of cut_group_sheet rows across the job's groups (0 unless ready) */
+  sheets: number;
+}
+
 export interface CutJobDto {
   cutJobId: number;
   name: string;
@@ -92,6 +103,8 @@ export interface CutJobDto {
   failureCode: string | null;
   /** Operator-facing Russian explanation when status === 'failed' (else null). */
   failureReason: string | null;
+  paramProfileId: number | null;
+  totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;

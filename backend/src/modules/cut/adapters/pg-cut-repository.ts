@@ -52,9 +52,11 @@ import type {
   CutGroupDto,
   CutJobDto,
   CutJobRefDto,
+  CutJobTotals,
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
+import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, type TotalsRow } from './cut-totals';
 import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import { buildSheetsPdf } from '../render/sheet-pdf';
@@ -669,10 +671,12 @@ export class PgCutRepository implements CutRepositoryPort {
       `SELECT cut_job_id FROM cut_job WHERE ${conditions.join(' AND ')} ORDER BY cut_job_id DESC LIMIT 200`,
       params,
     );
+    const ids = result.rows.map((row) => toNum(row.cut_job_id));
+    const totalsById = await computeTotals(this.database, ids);
     const jobs: CutJobDto[] = [];
-    for (const row of result.rows) {
+    for (const id of ids) {
       // List only renders item/group counts -> skip the per-item detail joins.
-      jobs.push(await loadJob(this.database, toNum(row.cut_job_id), false));
+      jobs.push(await loadJob(this.database, id, false, totalsById.get(id)));
     }
     return jobs;
   }
@@ -1240,6 +1244,7 @@ interface JobRow extends QueryResultRow {
   pdf_prewarm_state: string;
   failure_code: string | null;
   failure_reason: string | null;
+  param_profile_id: string | number | null;
 }
 
 interface ItemRow extends QueryResultRow {
@@ -1364,19 +1369,42 @@ interface SheetRow extends QueryResultRow {
   placements: SheetPlacementsJson;
 }
 
+async function computeTotals(client: DatabaseClient, cutJobIds: number[]): Promise<Map<number, CutJobTotals>> {
+  const out = new Map<number, CutJobTotals>();
+  for (const id of cutJobIds) out.set(id, { positions: 0, details: 0, area: 0, sheets: 0 });
+  if (cutJobIds.length === 0) return out;
+  // SEQUENTIAL, not Promise.all: loadJob/computeTotals run inside command
+  // transactions on a single pg client/connection. Two concurrent queries on one
+  // connection corrupt the wire protocol — await them one at a time.
+  const agg = await client.query<TotalsRow & { cut_job_id: string | number }>(TOTALS_BY_JOB_SQL, [cutJobIds]);
+  const sheets = await client.query<{ cut_job_id: string | number; sheets: string | number }>(SHEETS_BY_JOB_SQL, [cutJobIds]);
+  for (const row of agg.rows) {
+    const id = toNum(row.cut_job_id);
+    out.set(id, mapTotalsRow({ ...row, sheets: out.get(id)?.sheets ?? 0 }));
+  }
+  for (const row of sheets.rows) {
+    const id = toNum(row.cut_job_id);
+    const cur = out.get(id) ?? { positions: 0, details: 0, area: 0, sheets: 0 };
+    out.set(id, { ...cur, sheets: toNum(row.sheets) });
+  }
+  return out;
+}
+
 async function loadJob(
   client: DatabaseClient,
   cutJobId: number,
   includeItemDetails = true,
+  totals?: CutJobTotals,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
   if (!jobRow) {
     throw new CutJobNotFoundError(cutJobId);
   }
+  const resolvedTotals = totals ?? (await computeTotals(client, [cutJobId])).get(cutJobId)!;
 
   // The list view only needs item counts, so it opts out of the dictionary joins
   // (it loads up to 200 jobs); single-job reads enrich each item with full detail.
@@ -1424,6 +1452,8 @@ async function loadJob(
     pdfPrewarmState: jobRow.pdf_prewarm_state,
     failureCode: jobRow.failure_code,
     failureReason: jobRow.failure_reason,
+    paramProfileId: jobRow.param_profile_id === null || jobRow.param_profile_id === undefined ? null : toNum(jobRow.param_profile_id),
+    totals: resolvedTotals,
     items: itemsResult.rows.map((row) => ({
       cutJobItemId: toNum(row.cut_job_item_id),
       orderDetailId: toNum(row.order_detail_id),
