@@ -7,10 +7,11 @@ Status: approved (brainstorming)
 ## Goal
 
 On the order show page (карточка заказа, `/orders/show/:id`), the order-details
-table gets a new column **«Раскрой»**. For each detail that belongs to its *last
-ready* cut job, the cell shows that job's name as a clickable link. Clicking it
-navigates to the cut page opened on that specific job. Details with no ready cut
-job show an em dash (`—`).
+table gets a new column **«Раскрой»**. For each detail that belongs to its
+latest-created `ready` cut job (highest `cut_job_id`, see the definition below),
+the cell shows that job's name as a clickable link. Clicking it navigates to the
+cut page opened on that specific job. Details with no ready cut job show an em
+dash (`—`).
 
 ## Definition: "последнее актуальное задание" = latest *created* ready job
 
@@ -102,13 +103,15 @@ became-ready ordering is ever required, it needs a dedicated `ready_at` column
     *archived* job loads it. The column only ever links `ready` jobs, so the
     normal flow never deep-links archived — only a stale/hand-edited URL (or a
     job archived after the page rendered) can. To make that genuinely read-only
-    instead of "buttons that error server-side after a click", **disable the
-    mutate affordances when `job.status === 'archived'`**: the profile `Select`,
-    "Добавить выбранные", and "Рассчитать" buttons get `|| isArchived` added to
-    their existing `disabled` conditions (`isArchived = job?.status ===
-    'archived'`). Read affordances (open, load-eligible preview, PDF download,
-    sheet previews) stay enabled. This also hardens the pre-existing latent gap
-    that archived jobs were never reachable-by-id in the UI before this feature.
+    instead of "buttons that error server-side after a click", **disable all
+    four open-job mutate affordances when `job.status === 'archived'`**: the
+    profile `Select`, "Добавить выбранные", "Рассчитать", AND the per-item
+    "Убрать" (remove) button in the job-items table each get `|| isArchivedJob`
+    added to their existing `disabled` conditions (`isArchivedJob = job?.status
+    === 'archived'`; the items column's `useMemo` deps also gain `isArchivedJob`).
+    Read affordances (open, load-eligible preview, PDF download, sheet previews,
+    file links) stay enabled. This also hardens the pre-existing latent gap that
+    archived jobs were never reachable-by-id in the UI before this feature.
   - No route change — `/cut` already exists.
 
 ## Edge cases

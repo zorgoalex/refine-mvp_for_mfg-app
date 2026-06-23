@@ -167,8 +167,8 @@ Add to `pg-cut-repository.ts` after `listDetailPlacements` (after line 893):
     // cut_job_id DESC) that still actively contains it. Archiving overwrites
     // status off 'ready', so archived jobs are naturally excluded. We order by
     // cut_job_id (monotonic, immutable) NOT updated_at, which is bumped by
-    // prewarm/profile/ready events and would yield "last touched" not "last
-    // ready". Uses idx_cut_job_item_order_detail (migr 031).
+    // prewarm/profile/ready events and would yield "last touched" not the
+    // latest-created ready job. Uses idx_cut_job_item_order_detail (migr 031).
     const rows = await this.database.query<{
       order_detail_id: string | number;
       cut_job_id: string | number;
@@ -687,35 +687,34 @@ list and `loadEligible` are reads). Do not change any other CutPage behavior.
 
 - [ ] **Step 7: Add archived-guard source assertion**
 
-Add a source-text guard (Vitest, node env) that locks ALL four mutate
-affordances to `isArchivedJob`, not just text presence — extend or create
-`tests/cut-detail-column.guard.test.ts`:
+Add a SECOND `it` to the EXISTING `describe('cut detail column', ...)` block in
+`tests/cut-detail-column.guard.test.ts` (created in Task 5 Step 3 with the
+show-page `it`). Do not redeclare the file or the show-page test. This locks ALL
+four mutate `disabled` conditions to `isArchivedJob` verbatim — not a weak text
+count:
 
 ```typescript
-import { readFileSync } from 'node:fs';
-import { describe, it, expect } from 'vitest';
-
-describe('cut detail column + archived guard', () => {
   it('CutPage gates every open-job mutate affordance on isArchivedJob', () => {
     const src = readFileSync('src/pages/cut/CutPage.tsx', 'utf8');
     expect(src).toContain("const isArchivedJob = job?.status === 'archived'");
     expect(src).toContain('parseJobQueryParam');
-    // every `disabled={...}` on a mutate control must reference isArchivedJob:
-    const mutateDisabledLines = src
-      .split('\n')
-      .filter((l) => l.includes('disabled={') && /canManage|removeJobItem|busy \|\| isArchivedJob/.test(l));
-    // 4 mutate affordances: profile select, add, calculate, remove-item
-    const guarded = src.match(/isArchivedJob/g) ?? [];
-    expect(guarded.length).toBeGreaterThanOrEqual(5); // decl + 4 usages
+    // Each of the FOUR mutate `disabled` conditions must reference isArchivedJob
+    // verbatim. Dropping any single guard fails this test (a weak occurrence
+    // count would miss a real guard removed + a stray mention added elsewhere).
+    // Keep these strings in sync with Step 6 if the conditions change.
+    const requiredDisabled = [
+      "disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}", // profile Select
+      'disabled={!canManage || selected.length === 0 || isArchivedJob}',                 // Добавить выбранные
+      'disabled={!canManage || job.items.length === 0 || isArchivedJob}',                // Рассчитать
+      'disabled={busy || isArchivedJob}',                                                // per-item Убрать
+    ];
+    for (const fragment of requiredDisabled) {
+      expect(src, `missing archived guard: ${fragment}`).toContain(fragment);
+    }
+    // jobItemColumns useMemo must depend on isArchivedJob so the remove button
+    // re-renders disabled when the open job is archived.
+    expect(src).toMatch(/\[busy, canManage, isArchivedJob, removeJobItem, show\]/);
   });
-
-  it('order show page exposes the cut.view-gated Раскрой deep-link column', () => {
-    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
-    expect(show).toContain("title: 'Раскрой'");
-    expect(show).toContain('cutJobDeepLink');
-    expect(show).toContain("can('cut.view')");
-  });
-});
 ```
 
 - [ ] **Step 8: Run tests + build**
@@ -764,7 +763,7 @@ Fast-forward/merge the feature branch back into `feat/backend-erp-stage1` only a
 ## Self-Review
 
 **Spec coverage:**
-- Last-ready definition = latest *created* ready job (ready + is_active + `cut_job_id DESC`, explicitly created-order not became-ready) → Task 2 SQL + tests (incl. updated_at-noise immunity). ✓
+- Latest-created-ready definition = latest *created* ready job (ready + is_active + `cut_job_id DESC`, explicitly created-order not became-ready) → Task 2 SQL + tests (incl. updated_at-noise immunity). ✓
 - Archived deep-link genuinely read-only (mutate controls disabled when archived) → Task 6 Step 6 + guard. ✓
 - New `cut.view` endpoint → Task 3. ✓
 - No migration / reuse index → Global Constraints + Task 2 comment. ✓
