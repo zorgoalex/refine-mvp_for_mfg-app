@@ -23,9 +23,14 @@ function walk(dir: string, acc: string[] = []): string[] {
 }
 const rawCount = (s: string) => (s.match(/INSERT\s+INTO\s+audit_log\b/gi) ?? []).length; // \b excludes audit_log_related_entity
 
+// Anchor the scan to backend/src via this file's own location so the count is
+// cwd-independent (this test runs under both the backend config AND the root
+// vitest config; a cwd-relative 'src' scans the frontend tree under the latter).
+const SRC_ROOT = join(__dirname, '..', '..'); // backend/src/common/audit -> backend/src
+
 describe('audit_log raw writes are centralized + redacted (exact per-file counts)', () => {
   const counts = new Map<string, number>();
-  for (const f of walk('src')) { const n = rawCount(readFileSync(f, 'utf8')); if (n > 0) counts.set(f.replace(/\\/g, '/'), n); }
+  for (const f of walk(SRC_ROOT)) { const n = rawCount(readFileSync(f, 'utf8')); if (n > 0) counts.set(f.replace(/\\/g, '/'), n); }
 
   it('every non-allowlisted file has zero raw audit_log writers', () => {
     const offenders = [...counts.keys()].filter((rel) => !Object.keys(ALLOWLIST).some((a) => rel.endsWith(a)));
