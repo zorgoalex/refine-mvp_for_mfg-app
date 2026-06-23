@@ -9,13 +9,18 @@ import { runSheetCopy, reverseSheetCopy, SheetCopyConflictError, SheetCopySource
 // Poll until the EXACT session under test (identified by its libpq application_name) is waiting on a
 // lock — NOT any ungranted lock in the whole DB, which an unrelated/parallel backend could satisfy early
 // and make these tests false-positive (tier2). Deterministically sequences a blocked-then-released op.
-async function waitForBlockedQuery(pg: Pool, appName: string, max = 300): Promise<void> {
+// Returns as soon as the blocked state is observed, so the ceiling only bounds the worst case: it must be
+// generous because under the full parallel integration suite the under-test pool's connection setup +
+// reaching the blocking lock can take well over the old 3s budget (the failure mode was a spurious
+// timeout, not a missing block). A 50ms interval (vs 10ms) also avoids spamming pg_stat_activity on an
+// already-contended DB. 50ms * 600 = 30s ceiling.
+async function waitForBlockedQuery(pg: Pool, appName: string, max = 600): Promise<void> {
   for (let i = 0; i < max; i += 1) {
     const n = (await pg.query(
       `SELECT count(*)::int n FROM pg_stat_activity a JOIN pg_locks l ON l.pid = a.pid
        WHERE a.application_name = $1 AND NOT l.granted`, [appName])).rows[0].n;
     if (n > 0) return;
-    await new Promise((res) => setTimeout(res, 10));
+    await new Promise((res) => setTimeout(res, 50));
   }
   throw new Error(`expected a blocked query for application_name=${appName} but none appeared`);
 }
