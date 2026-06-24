@@ -161,19 +161,21 @@ case "$cmd" in
         *) die "unknown provision flag '$1'" ;;
       esac
     done
+    case "$MIGRATE" in apply|baseline|skip) ;; *) die "invalid --migrate '$MIGRATE' (apply|baseline|skip)" ;; esac
+    case "$HASURA" in bundled|track|skip|apply:*) ;; *) die "invalid --hasura '$HASURA' (bundled|track|apply:PATH|skip)" ;; esac
     echo "provision plan (project $PROJECT, root $ROOT):"
     echo "  1. ensure-build-repos (freecut + svgdxf)"
-    echo "  2. check-env $([ $DO_CHECK -eq 1 ] || echo '(skipped)')"
+    echo "  2. check-env$([ $DO_CHECK -eq 0 ] && echo ' (skipped)')"
     echo "  3. twenty preflight (data/twenty/server-storage, uid 1000)"
     echo "  4. compose up -d (whole complex)"
     echo "  5. migrate: $MIGRATE (apply-migrations.sh)"
     echo "  6. hasura: $HASURA"
-    echo "  7. smoke $([ $DO_SMOKE -eq 1 ] || echo '(skipped)')"
+    echo "  7. smoke$([ $DO_SMOKE -eq 0 ] && echo ' (skipped)')"
     if [ $DRY -eq 1 ]; then echo; echo "(dry-run: nothing executed)"; exit 0; fi
     if [ $YES -ne 1 ]; then read -r -p "Proceed? [y/N] " a; [ "$a" = "y" ] || die "aborted"; fi
 
     bash "$SCRIPT_PATH/ensure-build-repos.sh"
-    [ $DO_CHECK -eq 1 ] && bash "$SCRIPT_PATH/check-env.sh" --env-file "$ENV_FILE" --compose-file "$VPS_FILE" || true
+    if [ $DO_CHECK -eq 1 ]; then bash "$SCRIPT_PATH/check-env.sh" --env-file "$ENV_FILE" --compose-file "$VPS_FILE"; fi
     twenty_preflight
     preflight
     compose up -d
@@ -197,7 +199,7 @@ case "$cmd" in
       *) die "invalid --hasura '$HASURA' (bundled|track|apply:PATH|skip)" ;;
     esac
 
-    [ $DO_SMOKE -eq 1 ] && bash "$SCRIPT_PATH/smoke-vps.sh" --project-dir "$ROOT" --env-file "$ENV_FILE" --compose-file "$VPS_FILE" || true
+    if [ $DO_SMOKE -eq 1 ]; then bash "$SCRIPT_PATH/smoke-vps.sh" --project-dir "$ROOT" --env-file "$ENV_FILE" --compose-file "$VPS_FILE"; fi
     echo "provision: done."
     ;;
 
