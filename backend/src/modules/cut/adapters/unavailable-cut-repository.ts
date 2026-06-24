@@ -75,6 +75,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
   setProfile() {
     return Promise.reject(unavailable());
   }
+
+  setSheetMaterial() {
+    return Promise.reject(unavailable());
+  }
 }
 
 function unavailable(): ApiError {

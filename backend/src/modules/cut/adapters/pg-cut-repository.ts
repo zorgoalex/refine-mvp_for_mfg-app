@@ -47,6 +47,7 @@ import type {
   RenderSheetPngQuery,
   RenderSheetSvgQuery,
   SetCutJobProfileCommand,
+  SetCutJobSheetMaterialCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
@@ -74,6 +75,7 @@ import {
   CutNoSheetSpecError,
   CutOrderDetailNotFoundError,
   CutParamProfileNotFoundError,
+  CutSheetMaterialNotCuttableError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
 
@@ -1262,6 +1264,74 @@ export class PgCutRepository implements CutRepositoryPort {
       return loadJob(tx, command.cutJobId);
     });
   }
+
+  setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; sheet_material_type_id: string | number | null }>(
+        `SELECT status, version, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      if (command.sheetMaterialTypeId !== null) {
+        const exists = await tx.query(
+          `SELECT 1 FROM sheet_material_types WHERE sheet_material_type_id = $1 AND is_active = true AND is_cuttable = true LIMIT 1`,
+          [command.sheetMaterialTypeId],
+        );
+        if (exists.rows.length === 0) throw new CutSheetMaterialNotCuttableError(command.sheetMaterialTypeId);
+      }
+      const beforeId = row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id);
+
+      // No-op short-circuit: an unchanged selection must NOT bump version,
+      // write audit, or emit an outbox event.
+      if (beforeId === command.sheetMaterialTypeId) {
+        return loadJob(tx, command.cutJobId);
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET sheet_material_type_id = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, command.sheetMaterialTypeId],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.sheetMaterialChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        related: { sheetMaterialTypeIds: [beforeId, command.sheetMaterialTypeId] },
+        before: { sheetMaterialTypeId: beforeId },
+        after: { sheetMaterialTypeId: command.sheetMaterialTypeId },
+        metadata: { beforeSheetMaterialTypeId: beforeId, afterSheetMaterialTypeId: command.sheetMaterialTypeId },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.sheetMaterialChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeSheetMaterialTypeId: beforeId,
+            afterSheetMaterialTypeId: command.sheetMaterialTypeId,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          sheetMaterialChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+
+      return loadJob(tx, command.cutJobId);
+    });
+  }
 }
 
 interface EligibleRow extends QueryResultRow {
@@ -1347,9 +1417,10 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   version: number;
   params: Record<string, unknown> | null;
   paramProfileId: number | null;
+  sheetMaterialTypeId: number | null;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -1364,6 +1435,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     version: toNum(row.version),
     params: row.params,
     paramProfileId: row.param_profile_id === null || row.param_profile_id === undefined ? null : toNum(row.param_profile_id),
+    sheetMaterialTypeId: row.sheet_material_type_id === null || row.sheet_material_type_id === undefined ? null : toNum(row.sheet_material_type_id),
   };
 }
 
@@ -1396,6 +1468,7 @@ interface JobRow extends QueryResultRow {
   failure_code: string | null;
   failure_reason: string | null;
   param_profile_id: string | number | null;
+  sheet_material_type_id: string | number | null;
 }
 
 interface ItemRow extends QueryResultRow {
@@ -1548,7 +1621,7 @@ async function loadJob(
   totals?: CutJobTotals,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
@@ -1604,6 +1677,7 @@ async function loadJob(
     failureCode: jobRow.failure_code,
     failureReason: jobRow.failure_reason,
     paramProfileId: jobRow.param_profile_id === null || jobRow.param_profile_id === undefined ? null : toNum(jobRow.param_profile_id),
+    sheetMaterialTypeId: jobRow.sheet_material_type_id === null || jobRow.sheet_material_type_id === undefined ? null : toNum(jobRow.sheet_material_type_id),
     totals: resolvedTotals,
     items: itemsResult.rows.map((row) => ({
       cutJobItemId: toNum(row.cut_job_item_id),
