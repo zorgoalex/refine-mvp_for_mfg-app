@@ -84,6 +84,24 @@ describe('cutApi', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ paramProfileId: 5, version: 2 });
     expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({ paramProfileId: null, version: 3 });
   });
+
+  it('setSheetMaterial PATCHes the sheet-material route with body', async () => {
+    const job = jobDto({ sheetMaterialTypeId: 9 });
+    const fetchMock = mockFetch(job);
+    await cutApi.setSheetMaterial(3, 9, 5);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/3/sheet-material');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ sheetMaterialTypeId: 9, version: 5 });
+  });
+
+  it('setSheetMaterial sends null to clear the override', async () => {
+    const job = jobDto({ sheetMaterialTypeId: null });
+    const fetchMock = mockFetch(job);
+    await cutApi.setSheetMaterial(3, null, 6);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/3/sheet-material');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ sheetMaterialTypeId: null, version: 6 });
+  });
 });
 
 function mockFetch(...bodies: unknown[]) {
@@ -106,6 +124,7 @@ function jobDto(overrides: Partial<CutJobDto> = {}): CutJobDto {
     version: 0,
     pdfPrewarmState: 'pending',
     paramProfileId: null,
+    sheetMaterialTypeId: null,
     totals: { positions: 0, details: 0, area: 0, sheets: 0 },
     items: [],
     groups: [],

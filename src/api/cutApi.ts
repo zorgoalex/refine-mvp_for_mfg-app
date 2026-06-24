@@ -136,6 +136,13 @@ export const cutApi = {
       version,
     });
   },
+
+  async setSheetMaterial(cutJobId: number, sheetMaterialTypeId: number | null, version: number): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.sheetMaterial(validateCutJobId(cutJobId)), {
+      sheetMaterialTypeId,
+      version,
+    });
+  },
 };
 
 export type CutPdfResult = { pending: true } | { pending: false; blob: Blob; fileName: string | null };

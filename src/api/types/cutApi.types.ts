@@ -112,6 +112,7 @@ export interface CutJobDto {
   /** Operator-facing Russian explanation when status === 'failed' (else null/absent). */
   failureReason?: string | null;
   paramProfileId: number | null;
+  sheetMaterialTypeId: number | null;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
@@ -179,4 +180,8 @@ export interface CutSheetTypeOption {
   heightMm: number;
   /** Only cuttable types are eligible cut criteria. */
   isCuttable: boolean;
+  /** Source material type id (matches backend CutSheetTypeOption). */
+  materialTypeId: number;
+  /** Sheet thickness in mm (matches backend CutSheetTypeOption). */
+  thicknessMm: number;
 }
