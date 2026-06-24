@@ -44,14 +44,13 @@ describe('CutDefaultSettingsCard', () => {
   });
 
   it('vacuum-direction control is gated on form.layout_mode === vacuum_table (structural guard)', () => {
-    // Must contain a conditional that gates the vacuum-direction element on vacuum_table
-    expect(src).toMatch(/form\.layout_mode\s*===\s*['"]vacuum_table['"]/);
-    // And the vacuum direction selector must be inside that conditional block
-    const vacuumGateIdx = src.search(/form\.layout_mode\s*===\s*['"]vacuum_table['"]/);
-    const vacuumControlIdx = src.search(/vacuum.*direction|direction.*vacuum|Направление|авто|вдоль|поперёк/i);
-    expect(vacuumGateIdx).toBeGreaterThanOrEqual(0);
-    expect(vacuumControlIdx).toBeGreaterThanOrEqual(0);
-    // The conditional must appear before the vacuum control element
-    expect(vacuumGateIdx).toBeLessThan(vacuumControlIdx);
+    // The gate and the distinctive control token must appear together in one conditional block.
+    // setField('vacuum', { direction: exists ONLY on the actual Radio.Group control, not on tooltip constants.
+    // The regex matches: the gate `form.layout_mode === 'vacuum_table' && (` then zero or more characters
+    // that do NOT contain `)}` (which would close the && expression), then the control's unique token.
+    // If the gate were removed, the first part of the regex would not match, so the whole regex would fail.
+    expect(src).toMatch(
+      /form\.layout_mode\s*===\s*['"]vacuum_table['"]\s*&&\s*\((?:(?!\)\}).)*setField\('vacuum',\s*\{/s,
+    );
   });
 });

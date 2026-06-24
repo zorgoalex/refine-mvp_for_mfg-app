@@ -69,13 +69,13 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
   });
 
   it('vacuum-direction control is gated on params.layout_mode === vacuum_table in ProfileModal (structural guard)', () => {
-    // Must contain a conditional that gates the vacuum-direction element on vacuum_table
-    expect(tabSrc).toMatch(/params\.layout_mode\s*===\s*['"]vacuum_table['"]/);
-    // The conditional and vacuum control must both exist
-    const vacuumGateIdx = tabSrc.search(/params\.layout_mode\s*===\s*['"]vacuum_table['"]/);
-    const vacuumControlIdx = tabSrc.search(/vacuum.*direction|direction.*vacuum|Направление|авто|вдоль|поперёк/i);
-    expect(vacuumGateIdx).toBeGreaterThanOrEqual(0);
-    expect(vacuumControlIdx).toBeGreaterThanOrEqual(0);
-    expect(vacuumGateIdx).toBeLessThan(vacuumControlIdx);
+    // The gate and the distinctive control token must appear together in one conditional block.
+    // setField('vacuum', { direction: exists ONLY on the actual Radio.Group control, not on VACUUM_DIRECTION_META constants.
+    // The regex matches: the gate `params.layout_mode === 'vacuum_table' && (` then zero or more characters
+    // that do NOT contain `)}` (which would close the && expression), then the control's unique token.
+    // If the gate were removed, the first part of the regex would not match, so the whole regex would fail.
+    expect(tabSrc).toMatch(
+      /params\.layout_mode\s*===\s*['"]vacuum_table['"]\s*&&\s*\((?:(?!\)\}).)*setField\('vacuum',\s*\{/s,
+    );
   });
 });
