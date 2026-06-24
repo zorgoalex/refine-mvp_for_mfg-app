@@ -75,7 +75,7 @@ export function validateSettingValue(key: string, value: unknown): Record<string
   return v;
 }
 
-const LAYOUT_MODES = ['guillotine', 'nested'];
+const LAYOUT_MODES = ['guillotine', 'nested', 'vacuum_table'];
 const OBJECTIVES = ['min_waste', 'min_sheets'];
 const RETRY_STRATEGIES = ['disabled', 'smart'];
 const QUALITY_PROFILES = ['fast', 'balanced', 'quality'];
@@ -129,6 +129,16 @@ function validateFreecutParams(params: Record<string, unknown>): void {
     }
     if (g.debug_artifacts !== undefined && typeof g.debug_artifacts !== 'boolean') {
       invalid('params.group_shift.debug_artifacts', 'group_shift.debug_artifacts должен быть boolean');
+    }
+  }
+  if (params.vacuum !== undefined) {
+    if (!isObject(params.vacuum)) invalid('params.vacuum', 'vacuum должен быть объектом');
+    const vac = params.vacuum as Record<string, unknown>;
+    const VACUUM_DIRECTIONS = ['optimal', 'width', 'height'];
+    if (vac.direction !== undefined) {
+      if (typeof vac.direction !== 'string' || !VACUUM_DIRECTIONS.includes(vac.direction)) {
+        invalid('params.vacuum.direction', `vacuum.direction должен быть одним из: ${VACUUM_DIRECTIONS.join(', ')}`);
+      }
     }
   }
   if (params.trim_mm !== undefined) {

@@ -102,4 +102,43 @@ describe('cut-config validation', () => {
     expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { max_passes: 99 } } })).toThrow();
     expect(() => validateParamProfileInput({ name: 'bad', params: { group_shift: { debug_artifacts: 'yes' } } })).toThrow();
   });
+
+  it('accepts vacuum_table layout_mode with each valid direction and without vacuum', () => {
+    // layout_mode: 'vacuum_table' alone
+    expect(
+      validateParamProfileInput({ name: 'ok', params: { layout_mode: 'vacuum_table' } }).name,
+    ).toBe('ok');
+    // with each valid direction
+    for (const dir of ['optimal', 'width', 'height']) {
+      expect(
+        validateParamProfileInput({ name: 'ok', params: { layout_mode: 'vacuum_table', vacuum: { direction: dir } } }).name,
+      ).toBe('ok');
+    }
+    // vacuum present but direction omitted
+    expect(
+      validateParamProfileInput({ name: 'ok', params: { layout_mode: 'vacuum_table', vacuum: {} } }).name,
+    ).toBe('ok');
+    // vacuum omitted entirely (existing modes unaffected)
+    expect(
+      validateParamProfileInput({ name: 'ok', params: { layout_mode: 'guillotine' } }).name,
+    ).toBe('ok');
+    expect(
+      validateParamProfileInput({ name: 'ok', params: { layout_mode: 'nested' } }).name,
+    ).toBe('ok');
+    // no layout_mode at all still fine
+    expect(
+      validateParamProfileInput({ name: 'ok', params: {} }).name,
+    ).toBe('ok');
+  });
+
+  it('rejects invalid vacuum values (no bad vacuum reaches freecut)', () => {
+    // vacuum: null must be rejected
+    expect(() => validateParamProfileInput({ name: 'bad', params: { vacuum: null } })).toThrow();
+    // vacuum: [] must be rejected (array is not a plain object)
+    expect(() => validateParamProfileInput({ name: 'bad', params: { vacuum: [] } })).toThrow();
+    // vacuum.direction as a number must be rejected
+    expect(() => validateParamProfileInput({ name: 'bad', params: { vacuum: { direction: 5 } } })).toThrow();
+    // vacuum.direction as unknown string must be rejected
+    expect(() => validateParamProfileInput({ name: 'bad', params: { vacuum: { direction: 'diagonal' } } })).toThrow();
+  });
 });

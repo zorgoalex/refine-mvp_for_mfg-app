@@ -83,7 +83,8 @@ export interface FreecutParams {
   time_limit_ms?: number;
   restarts?: number;
   seed?: number;
-  layout_mode?: 'guillotine' | 'nested';
+  layout_mode?: 'guillotine' | 'nested' | 'vacuum_table';
+  vacuum?: { direction?: 'optimal' | 'width' | 'height' };
   /** Quality knobs (freecut API). Set together by the UI "Качество" control. */
   sla_profile?: 'fast' | 'balanced' | 'quality';
   ga_profile?: 'fast' | 'balanced' | 'quality';
