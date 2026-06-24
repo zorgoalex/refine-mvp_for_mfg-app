@@ -13,4 +13,7 @@ describe('CutPage sheet-variant selector wiring', () => {
     expect(src).toMatch(/isMixedMaterialSelection/);
     expect(src).toMatch(/раскроены на одном выбранном листе/);
   });
+  it('reads each detail material via the nested detail field (not a non-existent top-level field)', () => {
+    expect(src).toMatch(/items\.map\([\s\S]*?detail\??\.sheetMaterialTypeId/);
+  });
 });

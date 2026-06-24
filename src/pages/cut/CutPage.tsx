@@ -861,7 +861,7 @@ export const CutPage: React.FC = () => {
                   )}
                 </div>
                 {(() => {
-                  const jobMt = jobMaterialTypeIds(job.items.map((i) => i.sheetMaterialTypeId), sheetOptions);
+                  const jobMt = jobMaterialTypeIds(job.items.map((i) => i.detail?.sheetMaterialTypeId ?? null), sheetOptions);
                   const { preferred, others } = partitionSheetOptions(sheetOptions, jobMt);
                   const grouped = [
                     ...(preferred.length ? [{ label: 'Материал деталей', options: preferred.map((o) => ({ value: o.sheetMaterialTypeId, label: formatSheetOptionLabel(o) })) }] : []),
