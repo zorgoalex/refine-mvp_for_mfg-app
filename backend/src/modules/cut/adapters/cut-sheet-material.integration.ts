@@ -424,30 +424,61 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     // The new sheet type id must appear in the bridge.
     expect(sheetBridge.some((r) => Number(r.entity_id) === 1)).toBe(true);
 
-    // Exactly one outbox row.
+    // Exactly one outbox row, keyed by requestId (sheetMaterialChangedOutboxKey).
+    const expectedKey = `${CUT_AUDIT_EVENTS.sheetMaterialChanged}:${job.cutJobId}:s1-set`;
     const outboxRows = await pool.query(
       `SELECT idempotency_key FROM outbox_events WHERE event_type = $1`,
       [CUT_AUDIT_EVENTS.sheetMaterialChanged],
     );
     expect(outboxRows.rows).toHaveLength(1);
-    expect(String(outboxRows.rows[0].idempotency_key)).toContain(
-      `${CUT_AUDIT_EVENTS.sheetMaterialChanged}:${job.cutJobId}:s1-set`,
-    );
+    expect(String(outboxRows.rows[0].idempotency_key)).toBe(expectedKey);
 
-    // Idempotency: replaying the SAME requestId (same version = 0 fallback) must not
-    // produce a second outbox row. We simulate via a direct DB insert with the same key.
-    const idemKey = outboxRows.rows[0].idempotency_key as string;
-    await pool.query(
-      `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
-       VALUES ($1, $2, $3, '{}'::jsonb, $4)
-       ON CONFLICT (idempotency_key) DO NOTHING`,
-      [CUT_AUDIT_EVENTS.sheetMaterialChanged, 'cut_job', String(job.cutJobId), idemKey],
-    );
+    // ── End-to-end command-path idempotency ──────────────────────────────────
+    // The outbox idempotency_key is derived from requestId, so a transport-level
+    // duplicate of the SAME request (same requestId) must NOT emit a second outbox
+    // row even though it flows through the real command path. Drive this through
+    // repo.setSheetMaterial (NOT a hand-inserted row).
+    //
+    // First-line dedupe: a literal retry of the SAME (requestId, version) hits the
+    // optimistic version guard — the first call already bumped 0 -> 1, so a retry
+    // at the original version is rejected 409 before any write.
+    await expect(
+      repo.setSheetMaterial({
+        currentUser: currentUser(),
+        cutJobId: job.cutJobId,
+        sheetMaterialTypeId: 1,
+        version: beforeVersion, // stale: already consumed by the first call
+        requestId: 's1-set',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_STALE_VERSION' });
+
+    // Second-line dedupe (the outbox ON CONFLICT path): a duplicate that DOES pass
+    // the version guard and IS a real change (1 -> 2) but reuses the SAME requestId
+    // must still collide on the requestId-derived outbox key -> ON CONFLICT DO
+    // NOTHING. This exercises the command's outbox insert end-to-end: no second row
+    // with that key is created.
+    const replay = await repo.setSheetMaterial({
+      currentUser: currentUser(),
+      cutJobId: job.cutJobId,
+      sheetMaterialTypeId: 2, // genuine change so it is not the no-op short-circuit
+      version: updated.version, // current version after the first bump
+      requestId: 's1-set', // SAME requestId -> SAME outbox key
+    });
+    expect(replay.sheetMaterialTypeId).toBe(2);
+
+    // Outbox: still exactly ONE row with the requestId-derived key (the second
+    // command call hit ON CONFLICT DO NOTHING — proven through the command path).
     const outboxAfterReplay = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM outbox_events WHERE idempotency_key = $1`,
+      [expectedKey],
+    );
+    expect(outboxAfterReplay.rows[0].n).toBe(1);
+    // And no other sheet-material outbox row leaked under a different key.
+    const outboxTotal = await pool.query(
       `SELECT COUNT(*)::int AS n FROM outbox_events WHERE event_type = $1`,
       [CUT_AUDIT_EVENTS.sheetMaterialChanged],
     );
-    expect(outboxAfterReplay.rows[0].n).toBe(1);
+    expect(outboxTotal.rows[0].n).toBe(1);
   });
 
   // ── Scenario 2: setSheetMaterial to a non-cuttable sheet ────────────────
