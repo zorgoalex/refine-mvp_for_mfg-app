@@ -127,6 +127,8 @@ export interface DetailLastReadyQuery {
 export interface CutSheetTypeOption {
   sheetMaterialTypeId: number;
   name: string;
+  materialTypeId: number;
+  thicknessMm: number;
   widthMm: number;
   heightMm: number;
   /** Only cuttable sheet types are included in the cut filter. */

@@ -1009,11 +1009,13 @@ export class PgCutRepository implements CutRepositoryPort {
     const result = await this.database.query<{
       sheet_material_type_id: string | number;
       name: string;
+      material_type_id: string | number;
+      thickness_mm: string | number;
       width_mm: string | number;
       height_mm: string | number;
       is_cuttable: boolean | null;
     }>(
-      `SELECT sheet_material_type_id, name, width_mm, height_mm, is_cuttable
+      `SELECT sheet_material_type_id, name, material_type_id, thickness_mm, width_mm, height_mm, is_cuttable
        FROM sheet_material_types
        WHERE is_active = true AND is_cuttable = true
        ORDER BY name`,
@@ -1021,6 +1023,8 @@ export class PgCutRepository implements CutRepositoryPort {
     return result.rows.map((row) => ({
       sheetMaterialTypeId: toNum(row.sheet_material_type_id),
       name: row.name,
+      materialTypeId: toNum(row.material_type_id),
+      thicknessMm: toNum(row.thickness_mm),
       widthMm: toNum(row.width_mm),
       heightMm: toNum(row.height_mm),
       isCuttable: row.is_cuttable == null ? true : Boolean(row.is_cuttable),
