@@ -57,4 +57,15 @@ describe('order labels UI wiring', () => {
   it('shows the effective generated comment fallback before writing explicit overrides', () => {
     expect(dataEditorSrc).toMatch(/detail\.bazisFields\['bazis\.comment'\] \?\? detail\.note \?\? ''/);
   });
+
+  it('previews one fitted label and can filter preview by clicked order detail', () => {
+    expect(dataEditorSrc).toMatch(/selectedDetailId/);
+    expect(dataEditorSrc).toMatch(/onRow=\{\(detail\) => \(\{/);
+    expect(dataEditorSrc).toMatch(/initialDetailId=\{selectedDetailId\}/);
+    expect(dataEditorSrc).toMatch(/detailOptions=\{detailPreviewOptions\}/);
+    expect(generateSrc).toMatch(/detailFilters/);
+    expect(generateSrc).toMatch(/slice\(0,\s*1\)/);
+    expect(generateSrc).toMatch(/order-label-preview-fit/);
+    expect(generateSrc).not.toMatch(/maxHeight: 220, overflow: 'auto'/);
+  });
 });

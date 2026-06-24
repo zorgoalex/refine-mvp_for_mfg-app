@@ -19,6 +19,7 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [data, setData] = useState<OrderLabelData | null>(null);
+  const [selectedDetailId, setSelectedDetailId] = useState<number | null>(null);
   const [commentsByDetailId, setCommentsByDetailId] = useState<Record<number, string>>({});
   const [dirtyDetailIds, setDirtyDetailIds] = useState<Set<number>>(new Set());
   const labelDataDirty = dirtyDetailIds.size > 0;
@@ -46,6 +47,11 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
     labelsApi.getOrderLabelData(orderId, templateId)
       .then((next) => {
         setData(next);
+        setSelectedDetailId((current) =>
+          current && next.details.some((detail) => detail.detailId === current)
+            ? current
+            : next.details[0]?.detailId ?? null,
+        );
         setCommentsByDetailId(Object.fromEntries(
           next.details.map((detail) => [detail.detailId, String(detail.bazisFields['bazis.comment'] ?? detail.note ?? '')]),
         ));
@@ -88,6 +94,16 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
     return <Alert type="info" showIcon message="Бирки доступны после сохранения заказа" />;
   }
 
+  const detailPreviewOptions = (data?.details ?? []).map((detail) => {
+    const parsed = parseBasisDataView(detail.basisData);
+    const position = parsed.position ?? detail.detailNumber ?? detail.detailId;
+    const name = detail.detailName ?? parsed.name ?? 'Деталь';
+    return {
+      detailId: detail.detailId,
+      label: `Позиция ${position}: ${name}`,
+    };
+  });
+
   return (
     <Card size="small" title="Бирки">
       <Space direction="vertical" style={{ width: '100%' }} size={12}>
@@ -108,14 +124,28 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
           <Button icon={<SaveOutlined />} onClick={save} loading={loading} disabled={!canWrite || isOrderDirty || !data || !labelDataDirty}>
             Сохранить данные бирок
           </Button>
-          <OrderLabelGenerateAction orderId={orderId} isOrderDirty={isOrderDirty || labelDataDirty} compact />
+          <OrderLabelGenerateAction
+            orderId={orderId}
+            isOrderDirty={isOrderDirty || labelDataDirty}
+            compact
+            initialDetailId={selectedDetailId}
+            detailOptions={detailPreviewOptions}
+          />
         </Space>
+        {selectedDetailId && (
+          <Text type="secondary">Выбрана для предпросмотра: {detailPreviewOptions.find((detail) => detail.detailId === selectedDetailId)?.label}</Text>
+        )}
         <Table
           rowKey="detailId"
           size="small"
           loading={loading}
           dataSource={data?.details ?? []}
           pagination={false}
+          rowClassName={(detail) => detail.detailId === selectedDetailId ? 'ant-table-row-selected' : ''}
+          onRow={(detail) => ({
+            onClick: () => setSelectedDetailId(detail.detailId),
+            style: { cursor: 'pointer' },
+          })}
           columns={[
             {
               title: 'Позиция',

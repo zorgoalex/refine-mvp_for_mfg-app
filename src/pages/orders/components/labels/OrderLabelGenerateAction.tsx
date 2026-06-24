@@ -8,18 +8,33 @@ import { saveLabelBlob } from './labelDownloads';
 
 const { Text } = Typography;
 
+interface LabelPreviewDetailOption {
+  detailId: number;
+  label: string;
+}
+
 interface OrderLabelGenerateActionProps {
   orderId: number;
   isOrderDirty?: boolean;
   compact?: boolean;
   onGenerated?: () => void;
+  initialDetailId?: number | null;
+  detailOptions?: LabelPreviewDetailOption[];
 }
 
-export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> = ({ orderId, isOrderDirty = false, compact = false, onGenerated }) => {
+export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> = ({
+  orderId,
+  isOrderDirty = false,
+  compact = false,
+  onGenerated,
+  initialDetailId = null,
+  detailOptions = [],
+}) => {
   const canGenerate = can('labels.generate');
   const [open, setOpen] = useState(false);
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
+  const [previewDetailId, setPreviewDetailId] = useState<number | null>(initialDetailId);
   const [preview, setPreview] = useState<OrderLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -30,6 +45,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
 
   useEffect(() => {
     if (!open) return;
+    setPreviewDetailId(initialDetailId);
     setLoading(true);
     labelsApi.listTemplates(true)
       .then((next) => {
@@ -38,7 +54,9 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
       })
       .catch(() => message.error('Не удалось загрузить шаблоны бирок'))
       .finally(() => setLoading(false));
-  }, [open]);
+  }, [initialDetailId, open]);
+
+  const detailFilters = previewDetailId ? { detailIds: [previewDetailId] } : undefined;
 
   const runPreview = async () => {
     if (!selectedTemplate || isOrderDirty) return;
@@ -47,6 +65,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
       setPreview(await labelsApi.previewOrderLabels(orderId, {
         templateId: selectedTemplate.labelTemplateId,
         templateVersion: selectedTemplate.version,
+        detailFilters,
       }));
     } catch {
       message.error('Не удалось построить предпросмотр бирок');
@@ -64,6 +83,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         templateVersion: selectedTemplate.version,
         previewToken: preview.previewToken,
         exportFormats: selectedTemplate.defaultExportFormats,
+        detailFilters,
         idempotencyKey: `order-labels-generate-${orderId}-${Date.now()}`,
       });
       const downloaded = await labelsApi.downloadGeneration(orderId, generation.generationId);
@@ -101,8 +121,18 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             Сформировать и скачать
           </Button>,
         ]}
+        width={680}
         destroyOnClose
       >
+        <style>{`
+          .order-label-preview-fit svg {
+            display: block;
+            max-width: 100%;
+            max-height: 58vh;
+            width: auto;
+            height: auto;
+          }
+        `}</style>
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           {isOrderDirty && <Alert type="warning" showIcon message="Сначала сохраните заказ" />}
           <Select
@@ -119,13 +149,37 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             }))}
             placeholder="Шаблон"
           />
+          {detailOptions.length > 0 && (
+            <Select
+              style={{ width: '100%' }}
+              value={previewDetailId ?? 0}
+              onChange={(value) => {
+                setPreviewDetailId(value || null);
+                setPreview(null);
+              }}
+              options={[
+                { value: 0, label: 'Все позиции: показать первую бирку' },
+                ...detailOptions.map((detail) => ({ value: detail.detailId, label: detail.label })),
+              ]}
+              placeholder="Позиция для предпросмотра"
+            />
+          )}
           {preview && (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Text type="secondary">Бирок: {preview.labelCount}</Text>
-              {preview.svgPages.slice(0, 2).map((svg, index) => (
+              <Text type="secondary">Бирок: {preview.labelCount}. Показана первая.</Text>
+              {preview.svgPages.slice(0, 1).map((svg, index) => (
                 <div
                   key={index}
-                  style={{ border: '1px solid #d9d9d9', maxHeight: 220, overflow: 'auto' }}
+                  className="order-label-preview-fit"
+                  style={{
+                    alignItems: 'center',
+                    border: '1px solid #d9d9d9',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    minHeight: 260,
+                    overflow: 'hidden',
+                    padding: 12,
+                  }}
                   dangerouslySetInnerHTML={{ __html: svg }}
                 />
               ))}
