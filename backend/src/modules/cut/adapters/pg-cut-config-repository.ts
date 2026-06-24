@@ -39,14 +39,18 @@ export class PgCutConfigRepository implements CutConfigPort {
     );
     const namedProfile = defaultsRow.rows[0]?.value?.param_profile;
     let stored: Record<string, unknown> | null | undefined;
+    let foundNamedProfile = false;
     if (typeof namedProfile === 'string' && namedProfile.length > 0) {
       const byName = await this.database.query<{ params: Record<string, unknown> | null }>(
         `SELECT params FROM cut_param_profiles WHERE name = $1 AND is_active = true LIMIT 1`,
         [namedProfile],
       );
-      stored = byName.rows[0]?.params;
+      if (byName.rows.length > 0) {
+        foundNamedProfile = true;
+        stored = byName.rows[0].params; // may be false/0/""/null — pass through to mergeParams as-is
+      }
     }
-    if (!stored) {
+    if (!foundNamedProfile) {
       const byDefault = await this.database.query<{ params: Record<string, unknown> | null }>(
         `SELECT params FROM cut_param_profiles WHERE is_default = true AND is_active = true LIMIT 1`,
       );

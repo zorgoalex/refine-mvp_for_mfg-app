@@ -205,3 +205,56 @@ describe('mergeParams read-side validation (via getDefaultParams)', () => {
     expect(await repo.getDefaultParams()).toEqual(DEFAULT_FREECUT_PARAMS);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 1b — named-profile fallback gating fix ([DATA-INTEGRITY-DEBT])
+// ---------------------------------------------------------------------------
+
+describe('getDefaultParams named-profile fallback gating', () => {
+  // Helper: stub the three sequential queries for getDefaultParams.
+  // - defaults row  → matched by "key = 'defaults'"
+  // - by-name query → matched by "name = $1"
+  // - by-default    → matched by "is_default = true"
+  function makeRepo(
+    namedProfileName: string,
+    byNameRows: Array<Record<string, unknown>>,
+    byDefaultRows: Array<Record<string, unknown>>,
+  ) {
+    return new PgCutConfigRepository(
+      fakeDatabase({
+        "key = 'defaults'": [{ value: { param_profile: namedProfileName } }],
+        'name = $1': byNameRows,
+        'is_default = true': byDefaultRows,
+      }),
+    );
+  }
+
+  it('named profile row present with params=false → rejects with 422 (no silent fallback)', async () => {
+    const repo = makeRepo('named-profile', [{ params: false }], [{ params: { time_limit_ms: 9999 } }]);
+    await expect(repo.getDefaultParams()).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('named profile row present with params=0 → rejects with 422 (no silent fallback)', async () => {
+    const repo = makeRepo('named-profile', [{ params: 0 }], [{ params: { time_limit_ms: 9999 } }]);
+    await expect(repo.getDefaultParams()).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('named profile row present with params="" → rejects with 422 (no silent fallback)', async () => {
+    const repo = makeRepo('named-profile', [{ params: '' }], [{ params: { time_limit_ms: 9999 } }]);
+    await expect(repo.getDefaultParams()).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('named profile row ABSENT → falls back to is_default profile (precedence preserved)', async () => {
+    const repo = makeRepo('missing-profile', [], [{ params: { time_limit_ms: 7777 } }]);
+    const params = await repo.getDefaultParams();
+    expect(params.time_limit_ms).toBe(7777);
+    expect(params.kerf_mm).toBe(DEFAULT_FREECUT_PARAMS.kerf_mm);
+  });
+
+  it('named profile row present with VALID params → used (no regression)', async () => {
+    const repo = makeRepo('fast', [{ params: { time_limit_ms: 800 } }], [{ params: { time_limit_ms: 9999 } }]);
+    const params = await repo.getDefaultParams();
+    expect(params.time_limit_ms).toBe(800);
+    expect(params.kerf_mm).toBe(DEFAULT_FREECUT_PARAMS.kerf_mm);
+  });
+});
