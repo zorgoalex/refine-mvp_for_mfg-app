@@ -68,4 +68,12 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/toTemplateElementInput\(elements\)/);
     expect(tabSrc).toMatch(/labelTemplateElementId: _labelTemplateElementId/);
   });
+
+  it('can create a copy from the current edited template through Save As', () => {
+    expect(tabSrc).toMatch(/Сохранить как/);
+    expect(tabSrc).toMatch(/Сохранить шаблон как/);
+    expect(tabSrc).toMatch(/saveTemplateAs/);
+    expect(tabSrc).toMatch(/labelsApi\.createTemplate\(buildTemplatePayload\(values, name\)\)/);
+    expect(tabSrc).toMatch(/Создать копию/);
+  });
 });

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
-import { EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { CopyOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../api/labelsApi';
 import type {
   LabelElementKind,
@@ -58,6 +58,8 @@ export const LabelsConfigTab: React.FC = () => {
   const [importFileName, setImportFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
+  const [saveAsName, setSaveAsName] = useState('');
   const [selectedElementKey, setSelectedElementKey] = useState<string | null>(null);
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
@@ -128,22 +130,26 @@ export const LabelsConfigTab: React.FC = () => {
     });
   };
 
+  const buildTemplatePayload = (values: TemplateFormValues, name = values.name): LabelTemplateInput => {
+    const customFieldSchema = parseCustomSchema(customSchemaText);
+    return {
+      name: name.trim(),
+      description: values.description?.trim() || null,
+      canvasWidthMm: values.canvasWidthMm,
+      canvasHeightMm: values.canvasHeightMm,
+      dpi: values.dpi,
+      defaultExportFormats: values.defaultExportFormats,
+      customFieldSchema,
+      elements: toTemplateElementInput(elements),
+      idempotencyKey: `label-template-${Date.now()}`,
+    };
+  };
+
   const saveTemplate = async (values: TemplateFormValues) => {
     if (!canManage) return;
     setSaving(true);
     try {
-      const customFieldSchema = parseCustomSchema(customSchemaText);
-      const payload: LabelTemplateInput = {
-        name: values.name.trim(),
-        description: values.description?.trim() || null,
-        canvasWidthMm: values.canvasWidthMm,
-        canvasHeightMm: values.canvasHeightMm,
-        dpi: values.dpi,
-        defaultExportFormats: values.defaultExportFormats,
-        customFieldSchema,
-        elements: toTemplateElementInput(elements),
-        idempotencyKey: `label-template-${Date.now()}`,
-      };
+      const payload = buildTemplatePayload(values);
       if (selectedTemplate) {
         await labelsApi.updateTemplate(selectedTemplate.labelTemplateId, { ...payload, version: selectedTemplate.version });
         message.success('Шаблон обновлён');
@@ -155,6 +161,38 @@ export const LabelsConfigTab: React.FC = () => {
       startNew();
     } catch {
       message.error('Не удалось сохранить шаблон');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openSaveAs = async () => {
+    if (!canManage) return;
+    const values = await form.validateFields();
+    setSaveAsName(`${values.name.trim() || selectedTemplate?.name || 'Шаблон'} — копия`);
+    setSaveAsOpen(true);
+  };
+
+  const saveTemplateAs = async () => {
+    if (!canManage) return;
+    const name = saveAsName.trim();
+    if (!name) {
+      message.error('Введите название копии');
+      return;
+    }
+    setSaving(true);
+    try {
+      const values = await form.validateFields();
+      const created = await labelsApi.createTemplate(buildTemplatePayload(values, name));
+      message.success('Копия шаблона создана');
+      setSaveAsOpen(false);
+      setSaveAsName('');
+      await load();
+      setSelectedTemplate(created);
+      setElements(created.elements);
+      setCustomSchemaText(JSON.stringify(created.customFieldSchema ?? {}, null, 2));
+    } catch {
+      message.error('Не удалось создать копию шаблона');
     } finally {
       setSaving(false);
     }
@@ -370,9 +408,14 @@ export const LabelsConfigTab: React.FC = () => {
               <Form.Item label="Пользовательские поля JSON">
                 <Input.TextArea value={customSchemaText} onChange={(event) => setCustomSchemaText(event.target.value)} autoSize={{ minRows: 3, maxRows: 6 }} />
               </Form.Item>
-              <Button htmlType="submit" type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage}>
-                Сохранить шаблон
-              </Button>
+              <Space wrap>
+                <Button htmlType="submit" type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage}>
+                  Сохранить шаблон
+                </Button>
+                <Button icon={<CopyOutlined />} loading={saving} disabled={!canManage || !selectedTemplate || elements.length === 0} onClick={() => void openSaveAs()}>
+                  Сохранить как
+                </Button>
+              </Space>
             </Form>
           </Card>
           <Table
@@ -473,6 +516,24 @@ export const LabelsConfigTab: React.FC = () => {
       <div>
         <Text type="secondary">Доступно полей: {fields.length}; категорий: {fieldCategories}</Text>
       </div>
+
+      <Modal
+        title="Сохранить шаблон как"
+        open={saveAsOpen}
+        okText="Создать копию"
+        cancelText="Отмена"
+        confirmLoading={saving}
+        onOk={() => void saveTemplateAs()}
+        onCancel={() => setSaveAsOpen(false)}
+      >
+        <Input
+          autoFocus
+          value={saveAsName}
+          placeholder="Новое название шаблона"
+          onChange={(event) => setSaveAsName(event.target.value)}
+          onPressEnter={() => void saveTemplateAs()}
+        />
+      </Modal>
     </Space>
   );
 };
