@@ -101,6 +101,30 @@ merged stack (that would stop ERP too); use `down-crm` for the CRM, or the
 Preflight checks (`.env` present, Twenty upload dir owned by uid 1000, no
 `REPLACE_ME` placeholders) are warn-only, since `erp_test` is the test contour.
 
+## apply-migrations.sh — ledgered DB migration runner
+
+The backend has no built-in migration runner; schema lands from a DB dump
+restore or by applying `backend/db/migrations/[0-9]*.sql` in order.
+`ops/apply-migrations.sh` does the latter safely, tracking applied files in a
+`schema_migrations` ledger so re-runs are idempotent. It reaches Postgres via
+`docker exec` and resolves the user/db from the container env, so no DB password
+enters the host shell.
+
+```bash
+cd ~/projects/erp_dev/repo_erp
+
+ops/apply-migrations.sh                 # dry-run (default): what is pending? read-only
+ops/apply-migrations.sh status          # applied vs pending + checksum drift, read-only
+ops/apply-migrations.sh apply --yes     # apply pending in order, record in ledger
+ops/apply-migrations.sh baseline --yes  # adopt the ledger on an ALREADY-migrated DB
+                                        # (record history as applied WITHOUT running it)
+```
+
+Run `baseline` once on a DB that was migrated before this ledger existed (e.g.
+the live `erp_test` / a restored dump) so `apply` does not try to replay history.
+Selection excludes the manual Variant-B side files (`*_preflight/_verify/_rollback.sql`)
+and `*.test.ts`. Override the target with `--container`, `--user`, `--db`, `--dir`.
+
 ## One Script Flow
 
 Use one command on the VPS:
