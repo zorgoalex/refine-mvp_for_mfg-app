@@ -44,6 +44,22 @@ describe('QuickCreateDowelingModal source guards', () => {
     expect(modal).toMatch(/endsWith\(' '\)/);
   });
 
+  it('blocks every close path while a create is in-flight (busy)', () => {
+    expect(modal).toContain('closable={!busy}');
+    expect(modal).toContain('maskClosable={!busy}');
+    expect(modal).toContain('keyboard={!busy}');
+    expect(modal).toMatch(/cancelButtonProps=\{\{\s*disabled: busy/);
+    // onCancel itself no-ops while busy
+    expect(modal).toMatch(/onCancel=\{\(\)\s*=>\s*\{[\s\S]*?if \(!busy\)[\s\S]*?onClose\(\)/);
+  });
+
+  it('ignores a stale-session completion (open-session generation guard)', () => {
+    expect(modal).toContain('openSessionRef');
+    expect(modal).toMatch(/openSessionRef\.current \+= 1/); // bumped on open
+    expect(modal).toMatch(/const session = openSessionRef\.current/); // captured before await
+    expect(modal).toMatch(/if \(session !== openSessionRef\.current\)/); // guarded after await
+  });
+
   it('posts through the backend command client (no page-level Hasura write)', () => {
     expect(modal).toContain("from '../../api/dowelingApi'");
     expect(modal).toContain('dowelingApi.create(');

@@ -45,11 +45,15 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
   const [form] = Form.useForm<QuickCreateFormValues>();
   const [busy, setBusy] = useState(false);
   const idempotencyKeyRef = useRef<string>('');
+  // Monotonic open-session token: bumped on each OPEN. A create that resolves after its session is no
+  // longer current (modal was reopened) MUST NOT close/refetch — guards the stale-success race.
+  const openSessionRef = useRef(0);
 
   // Regenerate the idempotency key once per OPEN (not per keystroke, not per submit): re-clicking after a
   // transient failure replays the SAME key -> idempotent, no duplicate row/outbox.
   useEffect(() => {
     if (open) {
+      openSessionRef.current += 1;
       idempotencyKeyRef.current = createDowelingIdempotencyKey();
       form.resetFields();
     }
@@ -80,6 +84,7 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
       return; // validation errors are shown inline by AntD; keep the modal open
     }
 
+    const session = openSessionRef.current;
     setBusy(true);
     try {
       await dowelingApi.create(
@@ -90,6 +95,10 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
           idempotencyKey: idempotencyKeyRef.current,
         }),
       );
+      // Ignore a completion whose open-session is stale (modal was closed + reopened mid-flight).
+      if (session !== openSessionRef.current) {
+        return;
+      }
       message.success('Присадка создана');
       form.resetFields();
       onCreated();
@@ -107,12 +116,22 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
       title="Быстрое создание присадки"
       open={open}
       onOk={handleOk}
-      onCancel={onClose}
+      onCancel={() => {
+        if (!busy) {
+          onClose();
+        }
+      }}
       confirmLoading={busy}
       okText="Создать"
       cancelText="Отмена"
       width={500}
       destroyOnClose
+      // While a create is in-flight, block every close path so the modal cannot be reopened mid-request
+      // (defends the stale-success race together with the open-session guard above).
+      closable={!busy}
+      maskClosable={!busy}
+      keyboard={!busy}
+      cancelButtonProps={{ disabled: busy }}
     >
       <Form form={form} layout="vertical">
         <Form.Item
