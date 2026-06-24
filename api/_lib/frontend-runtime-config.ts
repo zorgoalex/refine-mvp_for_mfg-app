@@ -15,6 +15,7 @@ export interface FrontendRuntimeConfigResponse {
     backendVlm: boolean;
     backendReferences: boolean;
     backendCut: boolean;
+    labels: boolean;
     enableLegacyHasura: boolean;
   };
 }
@@ -53,6 +54,7 @@ export function buildFrontendRuntimeConfig(
       backendVlm: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_VLM, false),
       backendReferences: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_REFERENCES, false),
       backendCut: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_CUT, false),
+      labels: readBooleanEnv(env.RUNTIME_CONFIG_LABELS, false),
       enableLegacyHasura: readBooleanEnv(env.RUNTIME_CONFIG_ENABLE_LEGACY_HASURA, true),
     },
   };

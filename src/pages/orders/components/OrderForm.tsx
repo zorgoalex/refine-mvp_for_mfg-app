@@ -23,6 +23,7 @@ import { useOrderExport } from '../../../hooks/useOrderExport';
 import { OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
+import { can } from '../../../utils/permissions';
 import dayjs from 'dayjs';
 
 // Sections
@@ -35,6 +36,7 @@ import { OrderMaterialsTab } from './sections/OrderMaterialsTab';
 import { OrderLegacySection } from './sections/OrderLegacySection';
 import { OrderFilesSection } from './sections/OrderFilesSection';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
+import { OrderLabelDataEditor } from './labels/OrderLabelDataEditor';
 
 // Tabs
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
@@ -109,6 +111,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const [activeTab, setActiveTab] = useState(activeTabFromUrl);
   const [backendOrderLoading, setBackendOrderLoading] = useState(false);
   const useBackendOrderRead = featureFlags.useBackendOrdersRead;
+  const labelsEnabled = featureFlags.labels && can('labels.view');
 
   // React to deep-link/sub-tab jumps into an already-open order tab.
   useEffect(() => {
@@ -994,11 +997,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <OrderLegacySection />
             <OrderFilesSection />
+            {labelsEnabled && (
+              <OrderLabelDataEditor orderId={header.order_id ?? orderId} isOrderDirty={isDirty} />
+            )}
           </Space>
         ),
       },
     ],
-    [mode, header.order_id]
+    [mode, header.order_id, orderId, labelsEnabled, isDirty]
   );
 
   const enabledTabKeys = useMemo(

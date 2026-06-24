@@ -24,6 +24,7 @@ describe('backend env validation', () => {
       BACKEND_ENABLE_PROJECTS_BATCH_LINK_WRITE: false,
       BACKEND_ENABLE_PAYMENTS: false,
       BACKEND_ENABLE_PRODUCTION_ACTIONS: false,
+      BACKEND_ENABLE_LABELS: false,
       BACKEND_DEADLINES_READ_ONLY: true,
       BACKEND_PROJECTS_READ_ONLY: true,
       BACKEND_ENABLE_DEADLINE_WORKER: false,
@@ -525,6 +526,23 @@ describe('backend env validation', () => {
       }),
     ).toMatchObject({
       BACKEND_ENABLE_NOTIFICATION_ENGINE: true,
+    });
+  });
+
+  it('requires DATABASE_URL when labels are enabled', () => {
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_LABELS: 'true',
+      }),
+    ).toThrow(/DATABASE_URL is required when BACKEND_ENABLE_LABELS is true/);
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_LABELS: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_LABELS: true,
     });
   });
 

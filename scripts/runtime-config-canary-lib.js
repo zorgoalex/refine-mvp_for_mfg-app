@@ -14,6 +14,7 @@ const ROLLOUT_FEATURE_KEYS = [
   'backendUsers',
   'backendVlm',
   'backendReferences',
+  'labels',
 ];
 
 const STATIC_FEATURE_EXPECTATIONS = {

@@ -131,6 +131,7 @@ export const envSchema = z
     BACKEND_ENABLE_CUT_JOBS: booleanFromEnv.default(false),
     BACKEND_CUT_JOBS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_CUT_AUTO_TRIGGER: booleanFromEnv.default(false),
+    BACKEND_ENABLE_LABELS: booleanFromEnv.default(false),
     BACKEND_ENABLE_SHEET_MATERIALS: booleanFromEnv.default(false),
     // SP3: gate the migration-029-dependent sheet columns in backend ORDER reads
     // (sheet_material_type_id / sheet_eligible / is_sheet_shadow + COALESCE joins).
@@ -338,6 +339,14 @@ export const envSchema = z
       ctx.addIssue({
         code: 'custom',
         message: 'DATABASE_URL is required when BACKEND_ENABLE_NOTIFICATION_ENGINE is true',
+        path: ['DATABASE_URL'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_LABELS && !env.DATABASE_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'DATABASE_URL is required when BACKEND_ENABLE_LABELS is true',
         path: ['DATABASE_URL'],
       });
     }

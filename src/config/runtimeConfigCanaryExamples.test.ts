@@ -25,6 +25,7 @@ const EXPECTED_FEATURE_KEYS = [
   'backendUsers',
   'backendVlm',
   'backendReferences',
+  'labels',
   'enableLegacyHasura',
 ];
 

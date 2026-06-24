@@ -38,6 +38,9 @@ export type PermissionName =
   | 'cut.manage'
   | 'sheet_materials.view'
   | 'sheet_materials.manage'
+  | 'labels.view'
+  | 'labels.manage_templates'
+  | 'labels.generate'
   | 'doweling.create'
   | string;
 

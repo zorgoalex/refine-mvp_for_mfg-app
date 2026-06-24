@@ -48,6 +48,8 @@ tags:
     description: Управление пользователями
   - name: VLM
     description: Загрузка изображений и VLM-анализ
+  - name: Labels
+    description: Bazis-compatible label templates and order label generation
   - name: Health
     description: Liveness/readiness проверки backend-сервиса
 
@@ -5081,6 +5083,468 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/label-fields:
+    get:
+      tags:
+        - Labels
+      operationId: listLabelFields
+      summary: Label field catalog
+      security:
+        - bearerAuth: []
+      x-permission: labels.view
+      responses:
+        '200':
+          description: Field catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/label-templates:
+    get:
+      tags:
+        - Labels
+      operationId: listLabelTemplates
+      summary: List label templates
+      security:
+        - bearerAuth: []
+      x-permission: labels.view
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Label templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Labels
+      operationId: createLabelTemplate
+      summary: Create label template
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Created template
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/label-templates/{templateId}:
+    get:
+      tags:
+        - Labels
+      operationId: getLabelTemplate
+      summary: Get label template
+      security:
+        - bearerAuth: []
+      x-permission: labels.view
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Label template
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Labels
+      operationId: updateLabelTemplate
+      summary: Update label template
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Labels
+      operationId: deleteLabelTemplate
+      summary: Soft-delete label template
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - version
+                - idempotencyKey
+              properties:
+                version:
+                  type: integer
+                idempotencyKey:
+                  type: string
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/label-data:
+    get:
+      tags:
+        - Labels
+      operationId: getOrderLabelData
+      summary: Get order label data
+      security:
+        - bearerAuth: []
+      x-permissions-any:
+        - labels.view
+        - labels.generate
+        - labels.manage_templates
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: templateId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Order label data
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Labels
+      operationId: updateOrderLabelData
+      summary: Update order label data
+      security:
+        - bearerAuth: []
+      x-permissions-any:
+        - labels.generate
+        - labels.manage_templates
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated order label data
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/labels/preview:
+    post:
+      tags:
+        - Labels
+      operationId: previewOrderLabels
+      summary: Preview order labels
+      security:
+        - bearerAuth: []
+      x-permissions-any:
+        - labels.view
+        - labels.generate
+        - labels.manage_templates
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Label preview
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/labels/generate:
+    post:
+      tags:
+        - Labels
+      operationId: generateOrderLabels
+      summary: Generate order label snapshot
+      description: |
+        Export format `emf` follows observed Bazis samples: BMP bytes with
+        `.emf` filename extension. True vector EMF is out of MVP scope.
+      security:
+        - bearerAuth: []
+      x-permission: labels.generate
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Label generation
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/labels/latest:
+    get:
+      tags:
+        - Labels
+      operationId: getLatestOrderLabels
+      summary: Get latest generated labels preview
+      security:
+        - bearerAuth: []
+      x-permissions-any:
+        - labels.view
+        - labels.generate
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Latest label preview
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/labels/latest/export:
+    get:
+      tags:
+        - Labels
+      operationId: exportLatestOrderLabels
+      summary: Export latest generated labels ZIP
+      description: |
+        Export format `emf` follows observed Bazis samples: BMP bytes with
+        `.emf` filename extension. True vector EMF is out of MVP scope.
+      security:
+        - bearerAuth: []
+      x-permission: labels.generate
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Labels ZIP
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/labels/generations/{generationId}/export:
+    get:
+      tags:
+        - Labels
+      operationId: exportOrderLabelGeneration
+      summary: Export a specific label generation ZIP
+      description: |
+        Export format `emf` follows observed Bazis samples: BMP bytes with
+        `.emf` filename extension. True vector EMF is out of MVP scope.
+      security:
+        - bearerAuth: []
+      x-permission: labels.generate
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: generationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Labels ZIP
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/cut-jobs:
     post:
       tags:
@@ -6355,6 +6819,9 @@ components:
         - users.activate
         - references.view
         - references.manage
+        - labels.view
+        - labels.manage_templates
+        - labels.generate
         - sheet_materials.view
         - sheet_materials.manage
         - analytics.view

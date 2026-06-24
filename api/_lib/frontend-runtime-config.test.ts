@@ -20,6 +20,7 @@ describe('frontend runtime config delivery', () => {
         backendVlm: false,
         backendReferences: false,
         backendCut: false,
+        labels: false,
         enableLegacyHasura: true,
       },
     });
@@ -62,6 +63,7 @@ describe('frontend runtime config delivery', () => {
         backendVlm: true,
         backendReferences: false,
         backendCut: false,
+        labels: false,
         enableLegacyHasura: false,
       },
     });
@@ -77,6 +79,11 @@ describe('frontend runtime config delivery', () => {
       backendOrdersRead: true,
       backendOrdersWrite: false,
     });
+  });
+
+  it('maps labels runtime flag default-off and true', () => {
+    expect(buildFrontendRuntimeConfig({}).features.labels).toBe(false);
+    expect(buildFrontendRuntimeConfig({ RUNTIME_CONFIG_LABELS: 'true' }).features.labels).toBe(true);
   });
 
   it('fails closed for backend client phones until production actions are enabled', () => {

@@ -13,6 +13,7 @@
     "backendUsers": true,
     "backendVlm": false,
     "backendReferences": false,
+    "labels": false,
     "enableLegacyHasura": true
   }
 }

@@ -63,6 +63,21 @@ describe('permissions foundation', () => {
     expect(can('viewer', 'cut.view')).toBe(true);
   });
 
+  it('assigns label permissions to approved order roles only', () => {
+    expect(can('superadmin', 'labels.manage_templates')).toBe(true);
+    expect(can('admin', 'labels.manage_templates')).toBe(true);
+    expect(can('top_manager', 'labels.manage_templates')).toBe(true);
+    expect(can('manager', 'labels.manage_templates')).toBe(false);
+    expect(can('operator', 'labels.manage_templates')).toBe(false);
+
+    expect(can('manager', 'labels.view')).toBe(true);
+    expect(can('manager', 'labels.generate')).toBe(true);
+    expect(can('operator', 'labels.view')).toBe(true);
+    expect(can('operator', 'labels.generate')).toBe(true);
+    expect(can('worker', 'labels.view')).toBe(false);
+    expect(can('viewer', 'labels.view')).toBe(false);
+  });
+
   it('assigns deadline permissions by role without giving worker controls to service admin', () => {
     expect(can('superadmin', 'deadlines.worker.manage')).toBe(true);
     expect(can('superadmin', 'deadlines.worker.schedule')).toBe(true);
@@ -225,6 +240,19 @@ describe('permissions foundation', () => {
       'projects.participants.manage',
     ]);
     expect(contractPermissions).toEqual(expect.arrayContaining(projectPermissions));
+  });
+
+  it('keeps label permissions in the static OpenAPI PermissionName enum', () => {
+    const contract = readOpenApiContract();
+    const contractPermissions = readPermissionNameEnum(contract);
+    const labelPermissions = PERMISSIONS.filter((permission) => permission.startsWith('labels.'));
+
+    expect(labelPermissions).toEqual([
+      'labels.view',
+      'labels.manage_templates',
+      'labels.generate',
+    ]);
+    expect(contractPermissions).toEqual(expect.arrayContaining(labelPermissions));
   });
 
   it('keeps finance visibility permissions in the static OpenAPI PermissionName enum', () => {
