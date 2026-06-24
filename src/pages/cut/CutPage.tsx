@@ -19,7 +19,7 @@ import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
-import { resolveProfileLabel, formatArea } from './cutProfileHelpers';
+import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -810,11 +810,12 @@ export const CutPage: React.FC = () => {
           {(() => {
             const activeOptions = profiles
               .filter((p) => p.isActive)
-              .map((p) => ({ value: p.cutParamProfileId, label: resolveProfileLabel(p.cutParamProfileId, profiles, cutSettings) }));
+              .map((p) => ({ value: p.cutParamProfileId, label: (<Tooltip title={describeCutProfile(p.params)}>{resolveProfileLabel(p.cutParamProfileId, profiles, cutSettings)}</Tooltip>) }));
             const chosen = job.paramProfileId;
             const chosenInactive = chosen !== null && !profiles.some((p) => p.cutParamProfileId === chosen && p.isActive);
+            const chosenInactiveProfile = chosenInactive ? profiles.find((p) => p.cutParamProfileId === chosen) : undefined;
             const profileOptions = chosenInactive
-              ? [...activeOptions, { value: chosen, label: resolveProfileLabel(chosen, profiles, cutSettings), disabled: true }]
+              ? [...activeOptions, { value: chosen, label: (<Tooltip title={describeCutProfile(chosenInactiveProfile?.params ?? {})}>{resolveProfileLabel(chosen, profiles, cutSettings)}</Tooltip>), disabled: true }]
               : activeOptions;
             return (
               <>

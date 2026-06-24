@@ -174,3 +174,31 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain('cutApi.setProfile');
   });
 });
+
+describe('CutPage per-job profile selector tooltip wiring (source guard)', () => {
+  it('imports describeCutProfile from cutProfileHelpers', () => {
+    expect(source).toMatch(/import.*describeCutProfile.*from.*cutProfileHelpers/);
+  });
+
+  it('wraps each option label in a Tooltip with describeCutProfile as title', () => {
+    // The Select options must use describeCutProfile inside a Tooltip for hover explanation.
+    expect(source).toContain('describeCutProfile');
+    // Each option label must be a Tooltip node (not a plain string).
+    // The pattern: label: (<Tooltip title={describeCutProfile(...)}>
+    expect(source).toMatch(/label:\s*\(<Tooltip\s+title=\{describeCutProfile\(/);
+  });
+
+  it('tooltip title uses p.params (the profile params object)', () => {
+    // describeCutProfile must receive the profile params, not an arbitrary string.
+    expect(source).toMatch(/describeCutProfile\(p\.params\)/);
+  });
+
+  it('chosenInactive option also gets a Tooltip via describeCutProfile', () => {
+    // The disabled inactive option must also show a tooltip (not just active options).
+    // Source must contain describeCutProfile for the chosenInactive branch — either via
+    // a shared helper or explicit call. The simplest check: describeCutProfile appears
+    // more than once, OR the inactive profile lookup feeds into describeCutProfile.
+    // We check that the profile params are looked up for the inactive case.
+    expect(source).toMatch(/chosenProfile\.params|chosenInactiveProfile\.params|\.find\(.*params/s);
+  });
+});

@@ -33,3 +33,34 @@ export function resolveProfileLabel(
 export function formatArea(area: number): string {
   return (Number.isFinite(area) ? area : 0).toFixed(2);
 }
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Returns a Russian tooltip string explaining what each cut profile layout does.
+ *  Reads `params.layout_mode` and `params.vacuum.direction`.
+ *  Unknown / absent layout_mode falls back to the guillotine text. */
+export function describeCutProfile(params: Record<string, unknown>): string {
+  const mode = params.layout_mode;
+
+  if (mode === 'vacuum_table') {
+    const vacuum = params.vacuum;
+    const direction = isPlainObject(vacuum) ? vacuum.direction : undefined;
+    if (direction === 'width') {
+      return 'Вакуумный стол (вдоль): ряды деталей идут вдоль ширины листа — жёсткая ориентация рядов (под канавки/подачу стола).';
+    }
+    if (direction === 'height') {
+      return 'Вакуумный стол (поперёк): ряды идут вдоль высоты листа — жёсткая ориентация рядов.';
+    }
+    // optimal or missing direction → авто
+    return 'Вакуумный стол (авто): пробует ряды и вдоль, и поперёк листа, берёт вариант с большим заполнением (≥ вдоль/поперёк по эффективности).';
+  }
+
+  if (mode === 'nested') {
+    return 'Вложенный раскрой: детали плотно вкладываются друг в друга.';
+  }
+
+  // guillotine + unknown/absent layout_mode
+  return 'Гильотинный рез: сквозные прямые резы (полосами).';
+}
