@@ -86,6 +86,15 @@ preflight() {
   fi
 }
 
+twenty_preflight() {
+  local storage="$ROOT/data/twenty/server-storage"
+  mkdir -p "$storage"
+  if [ "$(stat -c %u "$storage" 2>/dev/null || echo -1)" != "1000" ]; then
+    if [ "$(id -u)" -eq 0 ]; then chown -R 1000:1000 "$storage"
+    else warn "$storage not owned by uid 1000 and not root — run: sudo chown -R 1000:1000 $storage"; fi
+  fi
+}
+
 usage() { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # --- Dispatch ----------------------------------------------------------------
@@ -137,6 +146,59 @@ case "$cmd" in
 
   -h|--help|help)
     usage
+    ;;
+
+  provision)
+    DRY=0; YES=0; DO_CHECK=1; DO_SMOKE=1; MIGRATE=skip; HASURA=bundled
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --dry-run) DRY=1; shift ;;
+        --yes|-y) YES=1; shift ;;
+        --skip-check) DO_CHECK=0; shift ;;
+        --skip-smoke) DO_SMOKE=0; shift ;;
+        --migrate) MIGRATE="${2:?}"; shift 2 ;;
+        --hasura) HASURA="${2:?}"; shift 2 ;;
+        *) die "unknown provision flag '$1'" ;;
+      esac
+    done
+    echo "provision plan (project $PROJECT, root $ROOT):"
+    echo "  1. ensure-build-repos (freecut + svgdxf)"
+    echo "  2. check-env $([ $DO_CHECK -eq 1 ] || echo '(skipped)')"
+    echo "  3. twenty preflight (data/twenty/server-storage, uid 1000)"
+    echo "  4. compose up -d (whole complex)"
+    echo "  5. migrate: $MIGRATE (apply-migrations.sh)"
+    echo "  6. hasura: $HASURA"
+    echo "  7. smoke $([ $DO_SMOKE -eq 1 ] || echo '(skipped)')"
+    if [ $DRY -eq 1 ]; then echo; echo "(dry-run: nothing executed)"; exit 0; fi
+    if [ $YES -ne 1 ]; then read -r -p "Proceed? [y/N] " a; [ "$a" = "y" ] || die "aborted"; fi
+
+    bash "$SCRIPT_PATH/ensure-build-repos.sh"
+    [ $DO_CHECK -eq 1 ] && bash "$SCRIPT_PATH/check-env.sh" --env-file "$ENV_FILE" --compose-file "$VPS_FILE" || true
+    twenty_preflight
+    preflight
+    compose up -d
+
+    case "$MIGRATE" in
+      apply|baseline) bash "$SCRIPT_PATH/apply-migrations.sh" "$MIGRATE" --yes ;;
+      skip) echo "provision: migrations NOT applied. Review + run:"; \
+            bash "$SCRIPT_PATH/apply-migrations.sh" dry-run || true; \
+            echo "  -> repo_erp/ops/apply-migrations.sh apply --yes   (fresh DB)"; \
+            echo "  -> repo_erp/ops/apply-migrations.sh baseline --yes (restored DB)" ;;
+      *) die "invalid --migrate '$MIGRATE' (apply|baseline|skip)" ;;
+    esac
+
+    case "$HASURA" in
+      bundled) bash "$SCRIPT_PATH/apply-hasura-metadata.sh" --metadata "$ROOT/repo_erp/ops/hasura/metadata.json" --env-file "$ENV_FILE" ;;
+      track) bash "$SCRIPT_PATH/track-hasura-public-schema.sh" --project-dir "$ROOT" --env-file "$ENV_FILE" --compose-file "$VPS_FILE" ;;
+      apply:*) bash "$SCRIPT_PATH/apply-hasura-metadata.sh" --metadata "${HASURA#apply:}" --env-file "$ENV_FILE" ;;
+      skip) echo "provision: Hasura metadata NOT applied. Run one of:"; \
+            echo "  -> repo_erp/ops/apply-hasura-metadata.sh --metadata repo_erp/ops/hasura/metadata.json"; \
+            echo "  -> repo_erp/ops/track-hasura-public-schema.sh --project-dir $ROOT --env-file $ENV_FILE" ;;
+      *) die "invalid --hasura '$HASURA' (bundled|track|apply:PATH|skip)" ;;
+    esac
+
+    [ $DO_SMOKE -eq 1 ] && bash "$SCRIPT_PATH/smoke-vps.sh" --project-dir "$ROOT" --env-file "$ENV_FILE" --compose-file "$VPS_FILE" || true
+    echo "provision: done."
     ;;
 
   *)
