@@ -27,19 +27,18 @@ describe('i18nProvider.translate', () => {
     }
   });
 
-  it('maps the other action title suffixes to Russian', () => {
-    expect(t('whatever.titles.create', 'Create')).toBe('Создать');
-    expect(t('whatever.titles.edit', 'Edit')).toBe('Редактировать');
-    expect(t('whatever.titles.show', 'Show')).toBe('Просмотр');
-    expect(t('whatever.titles.clone', 'Clone')).toBe('Клонировать');
+  it('NARROW scope: does NOT remap create/edit/show/clone titles (Refine uses them for page H3 headers)', () => {
+    // These must fall through to Refine's defaultMessage so resource-specific page headers are preserved.
+    expect(t('clients.titles.create', 'Создать клиента')).toBe('Создать клиента');
+    expect(t('whatever.titles.edit', 'Edit Whatever')).toBe('Edit Whatever');
+    expect(t('whatever.titles.show', 'Show Whatever')).toBe('Show Whatever');
+    expect(t('whatever.titles.clone', 'Clone Whatever')).toBe('Clone Whatever');
   });
 
   it('does not hijack unrelated keys — falls back to defaultMessage then key', () => {
     expect(t('buttons.unknownThing', 'Fallback')).toBe('Fallback');
     expect(t('totally.unknown.key')).toBe('totally.unknown.key');
-    // not a *.titles.<suffix> shape → no generic mapping
     expect(t('titles.list')).toBe('Список'); // this exact key IS in the dict
-    expect(t('foo.titles.unknownsuffix', 'X')).toBe('X');
   });
 
   it('reports ru locale', () => {
