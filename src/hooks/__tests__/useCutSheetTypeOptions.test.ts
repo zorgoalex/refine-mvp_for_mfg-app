@@ -58,4 +58,19 @@ describe('useCutSheetTypeOptions gating (source guard)', () => {
     expect(source).toContain('value');
     expect(source).toContain('label');
   });
+
+  // Codex regression fix: the rawOptions fetch (per-job sheet SELECTOR source) is
+  // backend cut.view-gated data, NOT Hasura, so it must load on cut.view alone —
+  // independent of the sheetMaterialsReads Hasura flag (which only gates the FILTER).
+  it('fetches rawOptions gated on cut.view only, distinct from the enabled (filter) gate', () => {
+    // A cut.view-only gate variable exists, separate from `enabled`.
+    expect(source).toMatch(/const\s+canViewCut\s*=\s*can\(['"]cut\.view['"]\)/);
+    // The fetch effect early-returns on the cut.view-only gate (not on `enabled`).
+    expect(source).toMatch(/if\s*\(\s*!canViewCut\s*\)/);
+    // The effect depends on the cut.view-only gate, so sheetMaterialsReads does not clear rawOptions.
+    expect(source).toMatch(/\}\s*,\s*\[canViewCut\]\s*\)/);
+    // Guard against a regression that re-gates the fetch effect on `enabled`.
+    expect(source).not.toMatch(/if\s*\(\s*!enabled\s*\)/);
+    expect(source).not.toMatch(/\}\s*,\s*\[enabled\]\s*\)/);
+  });
 });
