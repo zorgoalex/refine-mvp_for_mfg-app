@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../api/labelsApi';
@@ -15,14 +15,17 @@ import { can } from '../../../utils/permissions';
 const { Text } = Typography;
 const EXPORT_FORMATS: LabelExportFormat[] = ['bmp', 'png', 'emf'];
 const PREVIEW_FIELD_VALUES: Record<string, string> = {
-  'bazis.order_number': 'Заказ 0001',
-  'bazis.position': '12',
-  'bazis.quantity': '2',
+  'bazis.order_number': '548-16мм МДФ',
+  'bazis.detail_id': '2590',
+  'bazis.position': '27',
+  'bazis.quantity': '1',
   'bazis.name': 'Фасад левый',
-  'bazis.detail_length': '720',
-  'bazis.detail_width': '396',
+  'bazis.detail_length': '902',
+  'bazis.detail_width': '596',
   'bazis.material': 'МДФ 16 мм',
-  'bazis.comment': 'Кромка по периметру',
+  'bazis.comment': '',
+  'date.today': '24.06.2026',
+  'label.counter_text': 'Бир.№    1 / 0',
 };
 
 interface TemplateFormValues {
@@ -55,6 +58,7 @@ export const LabelsConfigTab: React.FC = () => {
   const [importFileName, setImportFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [selectedElementKey, setSelectedElementKey] = useState<string | null>(null);
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
 
@@ -117,8 +121,8 @@ export const LabelsConfigTab: React.FC = () => {
     form.setFieldsValue({
       name: '',
       description: '',
-      canvasWidthMm: 84,
-      canvasHeightMm: 55,
+      canvasWidthMm: 85,
+      canvasHeightMm: 88,
       dpi: 203,
       defaultExportFormats: ['bmp', 'png', 'emf'],
     });
@@ -157,10 +161,11 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const addElement = (kind: LabelElementKind) => {
+    const elementKey = `${kind}-${Date.now()}`;
     setElements((current) => [
       ...current,
       {
-        elementKey: `${kind}-${Date.now()}`,
+        elementKey,
         kind,
         sourceField: kind === 'text' ? 'bazis.name' : null,
         staticText: kind === 'text' ? null : null,
@@ -174,10 +179,21 @@ export const LabelsConfigTab: React.FC = () => {
         condition: {},
       },
     ]);
+    setSelectedElementKey(elementKey);
   };
 
   const patchElement = (index: number, patch: Partial<LabelTemplateElement>) => {
     setElements((current) => current.map((element, i) => (i === index ? { ...element, ...patch } : element)));
+  };
+
+  const moveElement = (elementKey: string, xMm: number, yMm: number) => {
+    setElements((current) =>
+      current.map((element) =>
+        element.elementKey === elementKey
+          ? { ...element, xMm: roundMm(xMm), yMm: roundMm(yMm) }
+          : element,
+      ),
+    );
   };
 
   const handleBazisImportFile = async (file: File | null) => {
@@ -273,44 +289,57 @@ export const LabelsConfigTab: React.FC = () => {
         </Space>
       </Card>
 
-      <Row gutter={16}>
-        <Col xs={24} lg={14}>
-          <Table
-            rowKey="labelTemplateId"
-            loading={loading}
-            dataSource={templates}
-            pagination={false}
-            size="small"
-            rowClassName={(template) => (selectedTemplate?.labelTemplateId === template.labelTemplateId ? 'ant-table-row-selected' : '')}
-            onRow={(template) => ({
-              onClick: () => setSelectedTemplate(template),
-              style: { cursor: 'pointer' },
-            })}
-            columns={[
-              { title: 'Название', dataIndex: 'name' },
-              { title: 'Версия', dataIndex: 'version', width: 90 },
-              {
-                title: 'Форматы',
-                dataIndex: 'defaultExportFormats',
-                width: 180,
-                render: (formats: string[]) => formats.map((format) => <Tag key={format}>{format}</Tag>),
-              },
-              {
-                title: 'Статус',
-                dataIndex: 'isActive',
-                width: 120,
-                render: (active: boolean) => <Tag color={active ? 'green' : 'default'}>{active ? 'Активен' : 'Отключен'}</Tag>,
-              },
-              {
-                title: '',
-                width: 48,
-                render: () => <Button icon={<EditOutlined />} size="small" disabled={!canManage} />,
-              },
-            ]}
-          />
-        </Col>
-        <Col xs={24} lg={10}>
-          <Card size="small" title={selectedTemplate ? 'Редактирование шаблона' : 'Новый шаблон'}>
+      <Card size="small" title="Шаблоны">
+        <Table
+          rowKey="labelTemplateId"
+          loading={loading}
+          dataSource={templates}
+          pagination={false}
+          size="small"
+          scroll={{ y: 430 }}
+          rowClassName={(template) => (selectedTemplate?.labelTemplateId === template.labelTemplateId ? 'ant-table-row-selected' : '')}
+          onRow={(template) => ({
+            onClick: () => setSelectedTemplate(template),
+            style: { cursor: 'pointer' },
+          })}
+          columns={[
+            { title: 'Название', dataIndex: 'name' },
+            { title: 'Версия', dataIndex: 'version', width: 90 },
+            {
+              title: 'Форматы',
+              dataIndex: 'defaultExportFormats',
+              width: 180,
+              render: (formats: string[]) => formats.map((format) => <Tag key={format}>{format}</Tag>),
+            },
+            {
+              title: 'Статус',
+              dataIndex: 'isActive',
+              width: 120,
+              render: (active: boolean) => <Tag color={active ? 'green' : 'default'}>{active ? 'Активен' : 'Отключен'}</Tag>,
+            },
+            {
+              title: '',
+              width: 48,
+              render: () => <Button icon={<EditOutlined />} size="small" disabled={!canManage} />,
+            },
+          ]}
+        />
+      </Card>
+
+      <Card size="small" title="Просмотр текущего шаблона">
+        <LabelTemplatePreview
+          widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
+          heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
+          elements={elements}
+          fields={fields}
+          selectedElementKey={selectedElementKey}
+          canDrag={false}
+        />
+      </Card>
+
+      <Row gutter={16} align="top">
+        <Col xs={24} lg={9}>
+          <Card size="small" title={selectedTemplate ? 'Редактирование шаблона' : 'Новый шаблон'} style={{ marginBottom: 16 }}>
             <Form form={form} layout="vertical" onFinish={saveTemplate} disabled={!canManage || saving}>
               <Form.Item name="name" label="Название" rules={[{ required: true, whitespace: true }]}>
                 <Input />
@@ -346,86 +375,100 @@ export const LabelsConfigTab: React.FC = () => {
               </Button>
             </Form>
           </Card>
-          <Card size="small" title="Визуал бирки" style={{ marginTop: 16 }}>
+          <Table
+            rowKey="elementKey"
+            title={() => (
+              <Space wrap>
+                <Text strong>Элементы</Text>
+                <Button disabled={!canManage} onClick={() => addElement('text')}>Текст</Button>
+                <Button disabled={!canManage} onClick={() => addElement('line')}>Линия</Button>
+                <Button disabled={!canManage} onClick={() => addElement('rect')}>Прямоугольник</Button>
+              </Space>
+            )}
+            size="small"
+            pagination={false}
+            dataSource={elements}
+            scroll={{ y: 360, x: 720 }}
+            rowClassName={(element) => (selectedElementKey === element.elementKey ? 'ant-table-row-selected' : '')}
+            onRow={(element) => ({
+              onClick: () => setSelectedElementKey(element.elementKey),
+              style: { cursor: 'pointer' },
+            })}
+            columns={[
+              {
+                title: 'Тип',
+                width: 120,
+                render: (_, element, index) => (
+                  <Select
+                    value={element.kind}
+                    disabled={!canManage}
+                    style={{ width: '100%' }}
+                    onChange={(kind) => patchElement(index, { kind })}
+                    options={[
+                      { value: 'text', label: 'Текст' },
+                      { value: 'line', label: 'Линия' },
+                      { value: 'rect', label: 'Прямоугольник' },
+                    ]}
+                  />
+                ),
+              },
+              {
+                title: 'Поле',
+                width: 220,
+                render: (_, element, index) => (
+                  <Select
+                    showSearch
+                    allowClear
+                    value={element.sourceField ?? undefined}
+                    disabled={!canManage || element.kind !== 'text'}
+                    style={{ width: '100%' }}
+                    onChange={(sourceField) => patchElement(index, { sourceField: sourceField ?? null })}
+                    options={fields.map((field) => ({ value: field.id, label: field.label }))}
+                  />
+                ),
+              },
+              {
+                title: 'Текст',
+                width: 180,
+                render: (_, element, index) => (
+                  <Input
+                    value={element.staticText ?? ''}
+                    disabled={!canManage || element.kind !== 'text'}
+                    onChange={(event) => patchElement(index, { staticText: event.target.value || null })}
+                  />
+                ),
+              },
+              ...(['xMm', 'yMm', 'widthMm', 'heightMm'] as const).map((key) => ({
+                title: key,
+                width: 95,
+                render: (_: unknown, element: LabelTemplateElement, index: number) => (
+                  <InputNumber
+                    value={element[key]}
+                    min={0}
+                    disabled={!canManage}
+                    style={{ width: '100%' }}
+                    onChange={(value) => patchElement(index, { [key]: Number(value ?? 0) })}
+                  />
+                ),
+              })),
+            ]}
+          />
+        </Col>
+        <Col xs={24} lg={15}>
+          <Card size="small" title="Визуал бирки">
             <LabelTemplatePreview
-              widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 84)}
-              heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 55)}
+              widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
+              heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
               elements={elements}
               fields={fields}
+              selectedElementKey={selectedElementKey}
+              canDrag={canManage}
+              onSelectElement={setSelectedElementKey}
+              onMoveElement={moveElement}
             />
           </Card>
         </Col>
       </Row>
-
-      <Card size="small" title="Элементы шаблона">
-        <Space wrap style={{ marginBottom: 12 }}>
-          <Button disabled={!canManage} onClick={() => addElement('text')}>Текст</Button>
-          <Button disabled={!canManage} onClick={() => addElement('line')}>Линия</Button>
-          <Button disabled={!canManage} onClick={() => addElement('rect')}>Прямоугольник</Button>
-        </Space>
-        <Table
-          rowKey="elementKey"
-          size="small"
-          pagination={false}
-          dataSource={elements}
-          columns={[
-            {
-              title: 'Тип',
-              width: 150,
-              render: (_, element, index) => (
-                <Select
-                  value={element.kind}
-                  disabled={!canManage}
-                  style={{ width: '100%' }}
-                  onChange={(kind) => patchElement(index, { kind })}
-                  options={[
-                    { value: 'text', label: 'Текст' },
-                    { value: 'line', label: 'Линия' },
-                    { value: 'rect', label: 'Прямоугольник' },
-                  ]}
-                />
-              ),
-            },
-            {
-              title: 'Поле',
-              render: (_, element, index) => (
-                <Select
-                  showSearch
-                  allowClear
-                  value={element.sourceField ?? undefined}
-                  disabled={!canManage || element.kind !== 'text'}
-                  style={{ width: '100%' }}
-                  onChange={(sourceField) => patchElement(index, { sourceField: sourceField ?? null })}
-                  options={fields.map((field) => ({ value: field.id, label: field.label }))}
-                />
-              ),
-            },
-            {
-              title: 'Текст',
-              render: (_, element, index) => (
-                <Input
-                  value={element.staticText ?? ''}
-                  disabled={!canManage || element.kind !== 'text'}
-                  onChange={(event) => patchElement(index, { staticText: event.target.value || null })}
-                />
-              ),
-            },
-            ...(['xMm', 'yMm', 'widthMm', 'heightMm'] as const).map((key) => ({
-              title: key,
-              width: 110,
-              render: (_: unknown, element: LabelTemplateElement, index: number) => (
-                <InputNumber
-                  value={element[key]}
-                  min={0}
-                  disabled={!canManage}
-                  style={{ width: '100%' }}
-                  onChange={(value) => patchElement(index, { [key]: Number(value ?? 0) })}
-                />
-              ),
-            })),
-          ]}
-        />
-      </Card>
 
       <div>
         <Text type="secondary">Доступно полей: {fields.length}; категорий: {fieldCategories}</Text>
@@ -439,37 +482,108 @@ function LabelTemplatePreview({
   heightMm,
   elements,
   fields,
+  selectedElementKey,
+  canDrag,
+  onSelectElement,
+  onMoveElement,
 }: {
   widthMm: number;
   heightMm: number;
   elements: LabelTemplateElement[];
   fields: LabelFieldCatalogItem[];
+  selectedElementKey?: string | null;
+  canDrag?: boolean;
+  onSelectElement?: (elementKey: string) => void;
+  onMoveElement?: (elementKey: string, xMm: number, yMm: number) => void;
 }) {
-  const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 84;
-  const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 55;
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [drag, setDrag] = useState<{ elementKey: string; offsetX: number; offsetY: number } | null>(null);
+  const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 85;
+  const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 88;
   const fieldLabels = new Map(fields.map((field) => [field.id, field.label]));
   const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
+  const previewWidth = Math.min(680, Math.max(360, safeWidth * 6));
+  const pointFromEvent = (event: React.MouseEvent<Element>) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const rect = svg.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * safeWidth,
+      y: ((event.clientY - rect.top) / rect.height) * safeHeight,
+    };
+  };
+
+  const handleMove = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (!drag || !onMoveElement) return;
+    const point = pointFromEvent(event);
+    const element = elements.find((item) => item.elementKey === drag.elementKey);
+    if (!element) return;
+    const maxX = Math.max(0, safeWidth - Number(element.widthMm ?? 0));
+    const maxY = Math.max(0, safeHeight - Number(element.heightMm ?? 0));
+    onMoveElement(drag.elementKey, clamp(point.x - drag.offsetX, 0, maxX), clamp(point.y - drag.offsetY, 0, maxY));
+  };
 
   return (
     <div
       style={{
         width: '100%',
-        maxWidth: 520,
+        maxWidth: previewWidth,
         aspectRatio: `${safeWidth} / ${safeHeight}`,
         border: '1px solid #d9d9d9',
         background: '#fff',
         overflow: 'hidden',
+        touchAction: 'none',
       }}
     >
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${safeWidth} ${safeHeight}`} width="100%" height="100%">
+      <svg
+        ref={svgRef}
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox={`0 0 ${safeWidth} ${safeHeight}`}
+        width="100%"
+        height="100%"
+        onMouseMove={handleMove}
+        onMouseUp={() => setDrag(null)}
+        onMouseLeave={() => setDrag(null)}
+      >
         <rect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" />
-        {sorted.map((element) => renderPreviewElement(element, fieldLabels))}
+        {sorted.map((element) =>
+          renderPreviewElement({
+            element,
+            fieldLabels,
+            selected: selectedElementKey === element.elementKey,
+            draggable: Boolean(canDrag),
+            onMouseDown: (event) => {
+              if (!canDrag) return;
+              event.preventDefault();
+              event.stopPropagation();
+              const point = pointFromEvent(event);
+              onSelectElement?.(element.elementKey);
+              setDrag({
+                elementKey: element.elementKey,
+                offsetX: point.x - Number(element.xMm ?? 0),
+                offsetY: point.y - Number(element.yMm ?? 0),
+              });
+            },
+          }),
+        )}
       </svg>
     </div>
   );
 }
 
-function renderPreviewElement(element: LabelTemplateElement, fieldLabels: Map<string, string>) {
+function renderPreviewElement({
+  element,
+  fieldLabels,
+  selected,
+  draggable,
+  onMouseDown,
+}: {
+  element: LabelTemplateElement;
+  fieldLabels: Map<string, string>;
+  selected: boolean;
+  draggable: boolean;
+  onMouseDown: (event: React.MouseEvent<SVGGElement>) => void;
+}) {
   const x = Number(element.xMm ?? 0);
   const y = Number(element.yMm ?? 0);
   const w = Number(element.widthMm ?? 0);
@@ -479,31 +593,65 @@ function renderPreviewElement(element: LabelTemplateElement, fieldLabels: Map<st
     ? `rotate(${Number(element.rotationDeg ?? 0)} ${x} ${y})`
     : undefined;
 
+  const clipId = `label-preview-clip-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  const selectionBox = selected ? (
+    <rect x={x} y={y} width={Math.max(w, 2)} height={Math.max(h, 2)} fill="none" stroke="#1677ff" strokeWidth={0.45} strokeDasharray="1 1" />
+  ) : null;
+  const common = {
+    transform,
+    onMouseDown,
+    style: { cursor: draggable ? 'move' : 'default' },
+  };
   if (element.kind === 'line') {
-    return <line key={key} x1={x} y1={y} x2={x + w} y2={y + h} stroke="black" strokeWidth={0.35} transform={transform} />;
+    return (
+      <g key={key} {...common}>
+        <line x1={x} y1={y} x2={x + w} y2={y + h} stroke="black" strokeWidth={0.45} />
+        {selectionBox}
+      </g>
+    );
   }
   if (element.kind === 'rect') {
-    return <rect key={key} x={x} y={y} width={w} height={h} fill="none" stroke="black" strokeWidth={Number(element.style?.strokeWidth ?? 0.35)} transform={transform} />;
+    return (
+      <g key={key} {...common}>
+        <rect x={x} y={y} width={w} height={h} fill="none" stroke="black" strokeWidth={Number(element.style?.strokeWidth ?? 0.45)} />
+        {selectionBox}
+      </g>
+    );
   }
 
-  const fontSize = Number(element.style?.fontSize ?? 10);
+  const fontSize = Math.max(1.8, Number(element.style?.fontSize ?? 10) * 0.35);
   const text = element.sourceField
     ? PREVIEW_FIELD_VALUES[element.sourceField] ?? fieldLabels.get(element.sourceField) ?? element.sourceField
     : element.staticText ?? '';
   return (
-    <text
-      key={key}
-      x={x}
-      y={y + Math.max(fontSize, h)}
-      fontFamily="Arial, sans-serif"
-      fontSize={fontSize}
-      fontWeight={String(element.style?.fontWeight ?? 'normal')}
-      fill="black"
-      transform={transform}
-    >
-      {text}
-    </text>
+    <g key={key} {...common}>
+      <defs>
+        <clipPath id={clipId}>
+          <rect x={x} y={y} width={Math.max(w, 1)} height={Math.max(h, fontSize + 1)} />
+        </clipPath>
+      </defs>
+      <text
+        x={x}
+        y={y + fontSize}
+        fontFamily="Arial, sans-serif"
+        fontSize={fontSize}
+        fontWeight={String(element.style?.fontWeight ?? 'normal')}
+        fill="black"
+        clipPath={`url(#${clipId})`}
+      >
+        {text}
+      </text>
+      {selectionBox}
+    </g>
   );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function roundMm(value: number): number {
+  return Math.round(value * 10) / 10;
 }
 
 function parseBazisTemplateVariants(xmlText: string, fileName: string): BazisImportVariant[] {
@@ -583,22 +731,18 @@ function buildStandardBazisElements(): LabelTemplateElement[] {
       style: { strokeWidth: 1 },
       condition: {},
     },
-    text('order-label', null, 'Заказ', 4, 4, 16, 5, 10, 1),
-    text('order-value', 'bazis.order_number', null, 21, 4, 58, 5, 10, 2),
-    text('position-label', null, 'Поз.', 4, 12, 14, 5, 10, 3),
-    text('position-value', 'bazis.position', null, 18, 12, 20, 5, 12, 4),
-    text('qty-label', null, 'Кол-во', 48, 12, 18, 5, 10, 5),
-    text('qty-value', 'bazis.quantity', null, 67, 12, 12, 5, 12, 6),
-    text('name-label', null, 'Деталь', 4, 21, 18, 5, 10, 7),
-    text('name-value', 'bazis.name', null, 4, 27, 76, 10, 14, 8),
-    text('size-label', null, 'Размер', 4, 42, 20, 5, 10, 9),
-    text('length-value', 'bazis.detail_length', null, 25, 42, 18, 5, 12, 10),
-    text('size-x', null, 'x', 44, 42, 4, 5, 12, 11),
-    text('width-value', 'bazis.detail_width', null, 49, 42, 18, 5, 12, 12),
-    text('material-label', null, 'Материал', 4, 51, 24, 5, 10, 13),
-    text('material-value', 'bazis.material', null, 4, 57, 76, 8, 12, 14),
-    text('comment-label', null, 'Комментарий', 4, 70, 32, 5, 10, 15),
-    text('comment-value', 'bazis.comment', null, 4, 76, 76, 8, 10, 16),
+    text('detail-id-label', null, '№:', 2, 4, 14, 8, 13, 1),
+    text('detail-id-value', 'bazis.detail_id', null, 36, 6, 30, 10, 18, 2),
+    text('order-label', null, 'Заказ№:', 2, 18, 22, 7, 11, 3),
+    text('order-value', 'bazis.order_number', null, 24, 18, 56, 7, 11, 4),
+    text('position-label', null, 'Поз.', 2, 28, 13, 7, 11, 5),
+    text('position-value', 'bazis.position', null, 15, 28, 20, 7, 11, 6),
+    text('material-value', 'bazis.material', null, 31, 38, 34, 6, 9, 7),
+    text('length-value', 'bazis.detail_length', null, 27, 47, 18, 8, 16, 8),
+    text('size-x', null, 'x', 45, 47, 7, 8, 16, 9),
+    text('width-value', 'bazis.detail_width', null, 52, 47, 18, 8, 16, 10),
+    text('date-value', 'date.today', null, 2, 80, 29, 7, 10, 11),
+    text('counter-value', 'label.counter_text', null, 41, 80, 38, 7, 10, 12),
   ];
 }
 

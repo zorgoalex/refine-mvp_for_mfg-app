@@ -29,7 +29,7 @@ describe('LabelsConfigTab wiring', () => {
   });
 
   it('exposes editable template elements and custom schema so created templates are not blank-only', () => {
-    expect(tabSrc).toMatch(/Элементы шаблона/);
+    expect(tabSrc).toMatch(/Элементы/);
     expect(tabSrc).toMatch(/addElement\('text'\)/);
     expect(tabSrc).toMatch(/addElement\('line'\)/);
     expect(tabSrc).toMatch(/addElement\('rect'\)/);
@@ -52,5 +52,15 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/rowClassName=.*ant-table-row-selected/);
     expect(tabSrc).toMatch(/renderPreviewElement/);
     expect(tabSrc).toMatch(/PREVIEW_FIELD_VALUES/);
+  });
+
+  it('keeps the template list full-width with scroll and supports visual drag editing', () => {
+    expect(tabSrc).toMatch(/title="Шаблоны"/);
+    expect(tabSrc).toMatch(/scroll=\{\{ y: 430 \}\}/);
+    expect(tabSrc).toMatch(/title="Просмотр текущего шаблона"/);
+    expect(tabSrc).toMatch(/onMoveElement/);
+    expect(tabSrc).toMatch(/onMouseDown/);
+    expect(tabSrc).toMatch(/setDrag/);
+    expect(tabSrc).toMatch(/clamp\(point\.x - drag\.offsetX/);
   });
 });

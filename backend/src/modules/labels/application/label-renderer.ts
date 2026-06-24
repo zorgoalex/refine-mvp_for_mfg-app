@@ -18,7 +18,7 @@ export function renderSvgPages(template: LabelTemplateDto, rows: LabelRow[]): Re
       .filter((element) => conditionPasses(element.condition, row.values))
       .map((element) => renderElement(element, row.values))
       .join('');
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${template.canvasWidthMm} ${template.canvasHeightMm}">${body}</svg>`;
   });
   return { pages };
 }
@@ -82,7 +82,7 @@ function renderBitmap(template: LabelTemplateDto, row: LabelRow) {
       drawRect(bitmap, x, y, w, h);
     } else {
       const value = element.sourceField ? row.values[element.sourceField] : element.staticText;
-      drawTextBlocks(bitmap, x, y, w, h, value == null ? '' : String(value), Number(element.style.fontSize ?? 12), scale);
+      drawTextBlocks(bitmap, x, y, w, h, value == null ? '' : String(value), fontSizeMm(element.style.fontSize), scale);
     }
   }
   return bitmap;
@@ -95,10 +95,10 @@ function drawTextBlocks(
   width: number,
   height: number,
   text: string,
-  fontSizeMm: number,
+  fontSizeMmValue: number,
   scale: number,
 ): void {
-  const glyphHeight = Math.max(3, Math.min(height, Math.round(fontSizeMm * scale)));
+  const glyphHeight = Math.max(3, Math.min(height, Math.round(fontSizeMmValue * scale)));
   const glyphWidth = Math.max(2, Math.round(glyphHeight * 0.45));
   const gap = Math.max(1, Math.round(glyphWidth * 0.3));
   let cursor = x;
@@ -173,7 +173,8 @@ function renderElement(
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="black"/>`;
   }
   const value = element.sourceField ? values[element.sourceField] : element.staticText;
-  return `<text x="${x}" y="${y + h}" font-family="Arial" font-size="${Number(element.style.fontSize ?? 12)}">${escapeXml(
+  const sizeMm = fontSizeMm(element.style.fontSize);
+  return `<text x="${x}" y="${y + sizeMm}" font-family="Arial" font-size="${sizeMm}">${escapeXml(
     value == null ? '' : String(value),
   )}</text>`;
 }
@@ -192,6 +193,11 @@ function conditionPasses(condition: Record<string, unknown>, values: Record<stri
 
 function px(mm: number, dpi: number): number {
   return Math.max(1, Math.round((mm * dpi) / 25.4));
+}
+
+function fontSizeMm(value: unknown): number {
+  const sizePt = Number(value ?? 10);
+  return Math.max(1.8, sizePt * 0.3528);
 }
 
 function escapeXml(value: string): string {
