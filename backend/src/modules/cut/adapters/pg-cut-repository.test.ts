@@ -64,9 +64,9 @@ function createDatabase(options: FakeDbOptions = {}) {
       return { rows: [{ cut_job_id: 42 }], rowCount: 1 };
     }
 
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
       const base = options.cutJob ?? { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null };
-      return { rows: [{ ...base, version: jobVersion, param_profile_id: options.cutJob?.param_profile_id ?? null }], rowCount: 1 };
+      return { rows: [{ ...base, version: jobVersion, param_profile_id: options.cutJob?.param_profile_id ?? null, sheet_material_type_id: options.cutJob?.sheet_material_type_id ?? null }], rowCount: 1 };
     }
 
     // setProfile FOR UPDATE: narrower column list (cut_job_id, status, version, param_profile_id)
@@ -137,8 +137,8 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
 
     // loadJob reads
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id FROM cut_job WHERE cut_job_id = $1')) {
-      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1')) {
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) {
       return { rows: [{ cut_job_id: 42, positions: 0, details: 0, area: 0 }], rowCount: 1 };
