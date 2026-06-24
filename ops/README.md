@@ -101,6 +101,31 @@ merged stack (that would stop ERP too); use `down-crm` for the CRM, or the
 Preflight checks (`.env` present, Twenty upload dir owned by uid 1000, no
 `REPLACE_ME` placeholders) are warn-only, since `erp_test` is the test contour.
 
+## gen-secrets.sh, ensure-build-repos.sh, up-all.sh provision
+
+`gen-secrets.sh` fills the cryptographic `REPLACE_ME_*` placeholders in `<root>/.env`
+(idempotent; never overwrites set values; prints the CAD basic-auth password once;
+leaves domains/email/TWENTY_TAG/TWENTY_SYNC_API_KEY for the operator).
+
+`ensure-build-repos.sh` clones `repo_freecut` and `repo_svgdxf` next to `repo_erp`
+if missing (`--dry-run` supported). Closes the cad-service clone gap that
+`setup-vps.sh` (freecut-only) leaves open.
+
+`up-all.sh provision` is the first-time orchestrator: ensure-build-repos →
+check-env → twenty preflight (uid 1000) → bring up the whole complex → Hasura
+metadata → smoke. DB migrations are gated behind `--migrate <apply|baseline|skip>`
+(default `skip`, printing the exact follow-up command). Hasura metadata defaults
+to `--hasura bundled` (imports `ops/hasura/metadata.json`); override with
+`track`, `apply:PATH`, or `skip`. `--dry-run` prints the ordered plan without
+running anything. This is the scripted path; the manual step-by-step is the
+"First VPS Run" section below.
+
+`ops/hasura/metadata.json` is a captured baseline of the live Hasura metadata
+(`version 3`, all tracked tables + role permissions, no secret values) that
+provision imports on a fresh instance. Refresh it after metadata changes with
+`ops/export-hasura-metadata.sh` (reads the admin secret inside the Hasura
+container; never prints it; `--dry-run` supported).
+
 ## apply-migrations.sh — ledgered DB migration runner
 
 The backend has no built-in migration runner; schema lands from a DB dump

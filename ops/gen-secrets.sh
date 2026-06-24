@@ -6,7 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="$ROOT/.env"
-[ "${1:-}" = "--env-file" ] && { ENV_FILE="${2:?}"; shift 2; }
+if [ "${1:-}" = "--env-file" ]; then ENV_FILE="${2:?}"; shift 2
+elif [ -n "${1:-}" ]; then echo "gen-secrets: unknown argument '$1' (use: --env-file PATH)" >&2; exit 2; fi
 [ -f "$ENV_FILE" ] || { echo "gen-secrets: .env not found: $ENV_FILE" >&2; exit 1; }
 
 # token -> freshly generated value; one global replace per token (only acts on
