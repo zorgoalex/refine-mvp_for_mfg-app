@@ -20,6 +20,7 @@ import { cutConfigApi } from '../../api/cutConfigApi';
 import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
+import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -86,7 +87,7 @@ export const CutPage: React.FC = () => {
   const canManage = can('cut.manage');
   // Variant B Task 11: cut.view-gated sheet-type options for the filter Select.
   // Gated on cut.view only — no sheet_materials.view required (worker can use filter).
-  const { enabled: sheetFilterEnabled, options: sheetTypeOptions } = useCutSheetTypeOptions();
+  const { enabled: sheetFilterEnabled, options: sheetTypeOptions, rawOptions: sheetOptions } = useCutSheetTypeOptions();
   // Open orders inside the app's keep-alive workspace tabs (same as the orders
   // list double-click), not a new browser tab.
   const { show } = useNavigation();
@@ -208,6 +209,23 @@ export const CutPage: React.FC = () => {
       }
     },
     [job, loadJobs, handleError],
+  );
+
+  const setJobSheetMaterial = useCallback(
+    async (sheetMaterialTypeId: number | null) => {
+      if (!job) return;
+      setBusy(true);
+      try {
+        const updated = await cutApi.setSheetMaterial(job.cutJobId, sheetMaterialTypeId, job.version);
+        setJob(updated);
+        void loadJobs();
+      } catch (error) {
+        handleError(error, 'Не удалось изменить лист раскроя');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [job, handleError, loadJobs],
   );
 
   // Load the existing (non-archived) jobs on mount so an operator can reopen a
@@ -842,6 +860,37 @@ export const CutPage: React.FC = () => {
                     </span>
                   )}
                 </div>
+                {(() => {
+                  const jobMt = jobMaterialTypeIds(job.items.map((i) => i.sheetMaterialTypeId), sheetOptions);
+                  const { preferred, others } = partitionSheetOptions(sheetOptions, jobMt);
+                  const grouped = [
+                    ...(preferred.length ? [{ label: 'Материал деталей', options: preferred.map((o) => ({ value: o.sheetMaterialTypeId, label: formatSheetOptionLabel(o) })) }] : []),
+                    ...(others.length ? [{ label: 'Другие листы', options: others.map((o) => ({ value: o.sheetMaterialTypeId, label: formatSheetOptionLabel(o) })) }] : []),
+                  ];
+                  const mixed = isMixedMaterialSelection(job.sheetMaterialTypeId, sheetOptions, jobMt);
+                  return (
+                    <div style={{ marginBottom: 12 }}>
+                      <span style={{ marginRight: 8 }}>Лист раскроя:</span>
+                      <Select<number | null>
+                        value={job.sheetMaterialTypeId}
+                        onChange={(v) => void setJobSheetMaterial(v ?? null)}
+                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                        style={{ minWidth: 280 }}
+                        placeholder="Как у деталей"
+                        allowClear
+                        options={grouped}
+                      />
+                      {mixed && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          style={{ marginTop: 8 }}
+                          message="Детали разных материалов будут раскроены на одном выбранном листе"
+                        />
+                      )}
+                    </div>
+                  );
+                })()}
               </>
             );
           })()}

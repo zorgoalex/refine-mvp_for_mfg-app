@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { can } from '../utils/permissions';
 import { featureFlags } from '../config/featureFlags';
 import { cutApi } from '../api/cutApi';
+import type { CutSheetTypeOption } from '../api/types/cutApi.types';
 
 export interface SheetTypeOption {
   value: number;
@@ -16,6 +17,8 @@ export interface UseCutSheetTypeOptionsResult {
   enabled: boolean;
   options: SheetTypeOption[];
   byId: Map<number, SheetTypeOption>;
+  /** Full raw option objects including materialTypeId, thicknessMm, widthMm, heightMm. */
+  rawOptions: CutSheetTypeOption[];
 }
 
 /**
@@ -29,11 +32,11 @@ export interface UseCutSheetTypeOptionsResult {
  */
 export function useCutSheetTypeOptions(): UseCutSheetTypeOptionsResult {
   const enabled = can('cut.view') && featureFlags.sheetMaterialsReads;
-  const [options, setOptions] = useState<SheetTypeOption[]>([]);
+  const [rawOptions, setRawOptions] = useState<CutSheetTypeOption[]>([]);
 
   useEffect(() => {
     if (!enabled) {
-      setOptions([]);
+      setRawOptions([]);
       return;
     }
     let cancelled = false;
@@ -41,20 +44,21 @@ export function useCutSheetTypeOptions(): UseCutSheetTypeOptionsResult {
       .listSheetTypes()
       .then((types) => {
         if (!cancelled) {
-          setOptions(types.map((t) => ({ value: t.sheetMaterialTypeId, label: t.name })));
+          setRawOptions(types);
         }
       })
       .catch(() => {
         // Best-effort: if the endpoint is unavailable the filter shows no options
         // (the cut job can still be created without a sheet-type filter).
-        if (!cancelled) setOptions([]);
+        if (!cancelled) setRawOptions([]);
       });
     return () => {
       cancelled = true;
     };
   }, [enabled]);
 
+  const options = rawOptions.map((t) => ({ value: t.sheetMaterialTypeId, label: t.name }));
   const byId = new Map(options.map((o) => [o.value, o]));
 
-  return { enabled, options, byId };
+  return { enabled, options, byId, rawOptions };
 }
