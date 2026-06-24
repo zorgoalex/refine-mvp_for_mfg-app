@@ -50,9 +50,20 @@ const translations: Record<string, string> = {
     "suppliers.titles.list": "Список",
 };
 
+// Generic ru fallback for ONLY the per-resource list title `${resource}.titles.list` — the key Refine's
+// "back to list" ListButton resolves. When the exact key is absent Refine falls back to the ENGLISH
+// userFriendlyResourceName (e.g. "Doweling Orders"); enumerating every resource is brittle (new resources
+// regress to English), so one suffix rule keeps the back-to-list button Russian everywhere.
+// Scope is intentionally NARROW: do NOT map create/edit/show/clone — Refine reuses those same
+// `${resource}.titles.<action>` keys for create/edit/show PAGE HEADER (H3) titles on pages that pass no
+// explicit `title`, and overriding them would replace resource-specific headers with generic words.
+function resolveListTitle(key: string): string | undefined {
+    return /\.titles\.list$/.test(key) ? "Список" : undefined;
+}
+
 export const i18nProvider: I18nProvider = {
     translate: (key: string, params?: any, defaultMessage?: string) => {
-        return translations[key] || defaultMessage || key;
+        return translations[key] || resolveListTitle(key) || defaultMessage || key;
     },
     changeLocale: (lang: string) => Promise.resolve(),
     getLocale: () => "ru",
