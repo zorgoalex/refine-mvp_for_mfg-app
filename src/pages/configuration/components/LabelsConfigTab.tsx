@@ -141,7 +141,7 @@ export const LabelsConfigTab: React.FC = () => {
         dpi: values.dpi,
         defaultExportFormats: values.defaultExportFormats,
         customFieldSchema,
-        elements,
+        elements: toTemplateElementInput(elements),
         idempotencyKey: `label-template-${Date.now()}`,
       };
       if (selectedTemplate) {
@@ -652,6 +652,10 @@ function clamp(value: number, min: number, max: number): number {
 
 function roundMm(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+function toTemplateElementInput(elements: LabelTemplateElement[]): LabelTemplateElement[] {
+  return elements.map(({ labelTemplateElementId: _labelTemplateElementId, ...element }) => element);
 }
 
 function parseBazisTemplateVariants(xmlText: string, fileName: string): BazisImportVariant[] {

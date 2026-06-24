@@ -63,4 +63,9 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/setDrag/);
     expect(tabSrc).toMatch(/clamp\(point\.x - drag\.offsetX/);
   });
+
+  it('strips read-only element ids before create or update payloads', () => {
+    expect(tabSrc).toMatch(/toTemplateElementInput\(elements\)/);
+    expect(tabSrc).toMatch(/labelTemplateElementId: _labelTemplateElementId/);
+  });
 });
