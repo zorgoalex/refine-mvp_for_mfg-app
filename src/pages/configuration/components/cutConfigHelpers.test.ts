@@ -106,6 +106,48 @@ describe('cutConfigHelpers', () => {
     expect(s).not.toContain('{');
   });
 
+  // --- vacuum_table ---
+
+  it('LAYOUT_LABEL contains vacuum_table (via summarizeParams)', () => {
+    const s = summarizeParams({ layout_mode: 'vacuum_table', sla_profile: 'balanced', ga_profile: 'balanced' });
+    expect(s).toContain('Вакуумный стол');
+  });
+
+  it('paramsToForm reads vacuum.direction into form.vacuum', () => {
+    const form = paramsToForm({ layout_mode: 'vacuum_table', vacuum: { direction: 'width' } });
+    expect(form.layout_mode).toBe('vacuum_table');
+    expect(form.vacuum?.direction).toBe('width');
+  });
+
+  it('paramsToForm leaves form.vacuum undefined when stored params have no vacuum object', () => {
+    const form = paramsToForm({ layout_mode: 'guillotine' });
+    expect(form.vacuum).toBeUndefined();
+  });
+
+  it('formToParams writes vacuum back round-trip when layout_mode is vacuum_table', () => {
+    const form = { ...DEFAULT_PARAM_FORM, layout_mode: 'vacuum_table' as const, vacuum: { direction: 'height' as const } };
+    const params = formToParams(form);
+    expect(params.layout_mode).toBe('vacuum_table');
+    expect((params.vacuum as { direction: string } | undefined)?.direction).toBe('height');
+    // round-trip: paramsToForm should recover the same form
+    const roundTripped = paramsToForm(params);
+    expect(roundTripped.layout_mode).toBe('vacuum_table');
+    expect(roundTripped.vacuum?.direction).toBe('height');
+  });
+
+  it('formToParams OMITS vacuum key when layout_mode is NOT vacuum_table', () => {
+    const form = { ...DEFAULT_PARAM_FORM, layout_mode: 'guillotine' as const, vacuum: { direction: 'width' as const } };
+    const params = formToParams(form);
+    expect('vacuum' in params).toBe(false);
+  });
+
+  it('summarizeParams includes vacuum direction for a vacuum profile', () => {
+    const params = formToParams({ ...DEFAULT_PARAM_FORM, layout_mode: 'vacuum_table' as const, vacuum: { direction: 'optimal' as const } });
+    const s = summarizeParams(params);
+    expect(s).toContain('Вакуумный стол');
+    expect(s).toContain('авто'); // optimal -> авто
+  });
+
   describe('resolveRuntimeDefaultProfile', () => {
     const P = (name: string, isDefault: boolean, isActive = true) => ({ name, isDefault, isActive });
     it('prefers the active profile named by cut_settings.defaults.param_profile', () => {

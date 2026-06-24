@@ -416,9 +416,30 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
                 options={[
                   { value: 'guillotine', label: 'Гильотинная' },
                   { value: 'nested', label: 'Вложенная' },
+                  { value: 'vacuum_table', label: 'Вакуумный стол' },
                 ]}
               />
             </Form.Item>
+            {params.layout_mode === 'vacuum_table' && (
+              <Form.Item
+                label="Направление подачи"
+                tooltip="Авто — оптимизатор выбирает направление. Вдоль — детали укладываются вдоль длинной стороны листа. Поперёк — поперёк длинной стороны."
+                extra={VACUUM_DIRECTION_META.short}
+                style={{ marginBottom: 12 }}
+              >
+                <Radio.Group
+                  optionType="button"
+                  buttonStyle="solid"
+                  value={params.vacuum?.direction ?? 'optimal'}
+                  onChange={(e) => setField('vacuum', { direction: e.target.value as 'optimal' | 'width' | 'height' })}
+                  options={[
+                    { value: 'optimal', label: 'Авто' },
+                    { value: 'width', label: 'Вдоль' },
+                    { value: 'height', label: 'Поперёк' },
+                  ]}
+                />
+              </Form.Item>
+            )}
           </Col>
         </Row>
         <Row gutter={12}>
@@ -500,6 +521,10 @@ const LAYOUT_META = {
 const RETRY_META = {
   short: 'Поведение при нехватке времени',
   tooltip: 'Отключены — вернуть лучший результат в рамках лимита времени (стабильно ~1.5 с). Умные — дополнительные попытки при таймауте слайса (может удлинить расчёт до ~3 с).',
+};
+const VACUUM_DIRECTION_META = {
+  short: 'Ориентация деталей на вакуумном столе',
+  tooltip: 'Авто — оптимизатор выбирает направление. Вдоль — детали укладываются вдоль длинной стороны листа. Поперёк — поперёк длинной стороны.',
 };
 
 interface PresetModalProps {

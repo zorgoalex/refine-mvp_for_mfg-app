@@ -62,4 +62,20 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/summarizeParams\(/);
     expect(tabSrc).not.toMatch(/JSON\.stringify\(r\.params\)/);
   });
+
+  it('vacuum_table option exists in the ProfileModal layout_mode control', () => {
+    expect(tabSrc).toMatch(/vacuum_table/);
+    expect(tabSrc).toMatch(/Вакуумный стол/);
+  });
+
+  it('vacuum-direction control is gated on params.layout_mode === vacuum_table in ProfileModal (structural guard)', () => {
+    // Must contain a conditional that gates the vacuum-direction element on vacuum_table
+    expect(tabSrc).toMatch(/params\.layout_mode\s*===\s*['"]vacuum_table['"]/);
+    // The conditional and vacuum control must both exist
+    const vacuumGateIdx = tabSrc.search(/params\.layout_mode\s*===\s*['"]vacuum_table['"]/);
+    const vacuumControlIdx = tabSrc.search(/vacuum.*direction|direction.*vacuum|Направление|авто|вдоль|поперёк/i);
+    expect(vacuumGateIdx).toBeGreaterThanOrEqual(0);
+    expect(vacuumControlIdx).toBeGreaterThanOrEqual(0);
+    expect(vacuumGateIdx).toBeLessThan(vacuumControlIdx);
+  });
 });

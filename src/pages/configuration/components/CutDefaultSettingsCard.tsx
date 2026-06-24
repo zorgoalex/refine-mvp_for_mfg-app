@@ -233,9 +233,31 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
                 options={[
                   { value: 'guillotine', label: 'Гильотинная' },
                   { value: 'nested', label: 'Вложенная' },
+                  { value: 'vacuum_table', label: 'Вакуумный стол' },
                 ]}
               />
             </Form.Item>
+            {form.layout_mode === 'vacuum_table' && (
+              <Form.Item
+                label="Направление подачи"
+                tooltip="Авто — оптимизатор выбирает направление. Вдоль — детали укладываются вдоль длинной стороны листа. Поперёк — поперёк длинной стороны."
+                extra={<Text type="secondary" style={{ fontSize: 12 }}>Ориентация деталей на вакуумном столе</Text>}
+                style={{ marginBottom: 12 }}
+              >
+                <Radio.Group
+                  optionType="button"
+                  buttonStyle="solid"
+                  value={form.vacuum?.direction ?? 'optimal'}
+                  onChange={(e) => setField('vacuum', { direction: e.target.value as 'optimal' | 'width' | 'height' })}
+                  disabled={!canManage}
+                  options={[
+                    { value: 'optimal', label: 'Авто' },
+                    { value: 'width', label: 'Вдоль' },
+                    { value: 'height', label: 'Поперёк' },
+                  ]}
+                />
+              </Form.Item>
+            )}
           </Col>
         </Row>
 

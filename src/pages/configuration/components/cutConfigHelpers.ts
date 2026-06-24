@@ -23,13 +23,13 @@ export function parseCodesCsv(input: string): string[] {
 // --- freecut param profile: structured form (no raw JSON in the UI) ---
 
 export type FreecutObjective = 'min_waste' | 'min_sheets';
-export type FreecutLayoutMode = 'guillotine' | 'nested';
+export type FreecutLayoutMode = 'guillotine' | 'nested' | 'vacuum_table';
 export type FreecutRetryStrategy = 'disabled' | 'smart';
 export type FreecutQuality = 'fast' | 'balanced' | 'quality';
 export const FREECUT_QUALITIES: FreecutQuality[] = ['fast', 'balanced', 'quality'];
 
 export const FREECUT_OBJECTIVES: FreecutObjective[] = ['min_waste', 'min_sheets'];
-export const FREECUT_LAYOUT_MODES: FreecutLayoutMode[] = ['guillotine', 'nested'];
+export const FREECUT_LAYOUT_MODES: FreecutLayoutMode[] = ['guillotine', 'nested', 'vacuum_table'];
 export const FREECUT_RETRY_STRATEGIES: FreecutRetryStrategy[] = ['disabled', 'smart'];
 
 /** Flat form shape for the param-profile editor (one field per freecut param). */
@@ -47,6 +47,7 @@ export interface ParamProfileForm {
   retry_strategy: FreecutRetryStrategy;
   quality: FreecutQuality;
   groupShift: boolean;
+  vacuum?: { direction?: 'optimal' | 'width' | 'height' };
 }
 
 /** Defaults = the seeded "default" profile (calibrated prod budget, commit dcfa2db). */
@@ -106,6 +107,9 @@ export function paramsToForm(params: Record<string, unknown> | null | undefined)
     retry_strategy: oneOf(p.retry_strategy, FREECUT_RETRY_STRATEGIES, d.retry_strategy),
     quality: deriveQuality(p),
     groupShift: isPlainObject(p.group_shift) && (p.group_shift as { enabled?: unknown }).enabled === true,
+    ...(isPlainObject(p.vacuum)
+      ? { vacuum: { direction: oneOf((p.vacuum as Record<string, unknown>).direction, ['optimal', 'width', 'height'] as const, 'optimal') } }
+      : {}),
   };
 }
 
@@ -123,6 +127,7 @@ export function formToParams(form: ParamProfileForm): Record<string, unknown> {
     sla_profile: form.quality,
     ga_profile: form.quality,
     ...(form.groupShift ? { group_shift: { enabled: true, min_shift_mm: 5, max_passes: 4 } } : {}),
+    ...(form.layout_mode === 'vacuum_table' ? { vacuum: { direction: form.vacuum?.direction ?? 'optimal' } } : {}),
   };
 }
 
@@ -157,6 +162,13 @@ const OBJECTIVE_LABEL: Record<FreecutObjective, string> = {
 const LAYOUT_LABEL: Record<FreecutLayoutMode, string> = {
   guillotine: 'гильотинная',
   nested: 'вложенная',
+  vacuum_table: 'Вакуумный стол',
+};
+
+const VACUUM_DIRECTION_LABEL: Record<'optimal' | 'width' | 'height', string> = {
+  optimal: 'авто',
+  width: 'вдоль',
+  height: 'поперёк',
 };
 const QUALITY_LABEL: Record<FreecutQuality, string> = {
   fast: 'быстро',
@@ -176,5 +188,8 @@ export function summarizeParams(params: Record<string, unknown> | null | undefin
     `${f.time_limit_ms}мс`,
   ];
   if (f.groupShift) parts.push('сжатие групп');
+  if (f.layout_mode === 'vacuum_table' && f.vacuum?.direction) {
+    parts.push(VACUUM_DIRECTION_LABEL[f.vacuum.direction]);
+  }
   return parts.join(' / ');
 }

@@ -37,4 +37,21 @@ describe('CutDefaultSettingsCard', () => {
     expect(src).toMatch(/canManage/);
     expect(src).toMatch(/disabled/);
   });
+
+  it('vacuum_table option exists in the layout_mode control', () => {
+    expect(src).toMatch(/vacuum_table/);
+    expect(src).toMatch(/Вакуумный стол/);
+  });
+
+  it('vacuum-direction control is gated on form.layout_mode === vacuum_table (structural guard)', () => {
+    // Must contain a conditional that gates the vacuum-direction element on vacuum_table
+    expect(src).toMatch(/form\.layout_mode\s*===\s*['"]vacuum_table['"]/);
+    // And the vacuum direction selector must be inside that conditional block
+    const vacuumGateIdx = src.search(/form\.layout_mode\s*===\s*['"]vacuum_table['"]/);
+    const vacuumControlIdx = src.search(/vacuum.*direction|direction.*vacuum|Направление|авто|вдоль|поперёк/i);
+    expect(vacuumGateIdx).toBeGreaterThanOrEqual(0);
+    expect(vacuumControlIdx).toBeGreaterThanOrEqual(0);
+    // The conditional must appear before the vacuum control element
+    expect(vacuumGateIdx).toBeLessThan(vacuumControlIdx);
+  });
 });
