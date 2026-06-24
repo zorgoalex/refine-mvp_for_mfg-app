@@ -1,15 +1,18 @@
-import React from "react";
+import React, { useState } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { useTable, ShowButton, EditButton } from "@refinedev/antd";
-import { Space, Table, Tooltip } from "antd";
-import { EyeOutlined, EditOutlined } from "@ant-design/icons";
+import { useTable, ShowButton, EditButton, List } from "@refinedev/antd";
+import { Button, Space, Table, Tooltip } from "antd";
+import { EyeOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
-import { LocalizedList } from "../../components/LocalizedList";
+import { can } from "../../utils/permissions";
+import { QuickCreateDowelingModal } from "./QuickCreateDowelingModal";
 
 export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
-  // Используем doweling_orders_view - одна строка = одна пара присадка-заказ (через order_doweling_links)
-  const { tableProps } = useTable({
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  // Используем doweling_orders_view - одна строка = одна пара присадка-заказ (через order_doweling_links);
+  // standalone присадки (без связи) показываются одной строкой с NULL order-колонками (LEFT JOIN).
+  const { tableProps, tableQueryResult } = useTable({
     resource: "doweling_orders_view",
     syncWithLocation: true,
     sorters: {
@@ -48,7 +51,27 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
   };
 
   return (
-    <LocalizedList title="Присадка">
+    <List
+      title="Присадка"
+      headerButtons={() =>
+        can("doweling.create") ? (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setQuickCreateOpen(true)}
+          >
+            Быстрое создание присадки
+          </Button>
+        ) : null
+      }
+    >
+      <QuickCreateDowelingModal
+        open={quickCreateOpen}
+        onClose={() => setQuickCreateOpen(false)}
+        onCreated={() => {
+          void tableQueryResult.refetch();
+        }}
+      />
       <Table
         {...tableProps}
         rowKey={(record: any) => `${record.doweling_order_id}-${record.order_id}`}
@@ -230,6 +253,6 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
-    </LocalizedList>
+    </List>
   );
 };

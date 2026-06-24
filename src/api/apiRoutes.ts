@@ -91,6 +91,9 @@ export const apiRoutes = {
     list: backendApiPath('/client-phones'),
     byId: (phoneId: number) => backendApiPath(`/client-phones/${phoneId}`),
   },
+  dowelingOrders: {
+    create: backendApiPath('/doweling-orders'),
+  },
   deadlines: {
     list: backendApiPath('/deadlines'),
     byId: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}`),

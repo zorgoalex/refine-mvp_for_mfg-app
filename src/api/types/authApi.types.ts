@@ -38,6 +38,7 @@ export type PermissionName =
   | 'cut.manage'
   | 'sheet_materials.view'
   | 'sheet_materials.manage'
+  | 'doweling.create'
   | string;
 
 export interface BackendUserIdentity {
