@@ -26,7 +26,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
     },
   });
 
-  const { edit } = useNavigation();
+  const { show } = useNavigation();
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -86,7 +86,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         }}
         onRow={(record) => ({
           onDoubleClick: () => {
-            edit("doweling_orders", record.doweling_order_id);
+            show("doweling_orders", record.doweling_order_id);
           },
         })}
       >
