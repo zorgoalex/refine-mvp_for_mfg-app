@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
-import { EditOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import { EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../api/labelsApi';
 import type {
   LabelElementKind,
@@ -24,6 +24,15 @@ interface TemplateFormValues {
   defaultExportFormats: LabelExportFormat[];
 }
 
+interface BazisImportVariant {
+  key: string;
+  name: string;
+  description: string;
+  elements: LabelTemplateElement[];
+  rowCount: number;
+  templateFiles: string[];
+}
+
 export const LabelsConfigTab: React.FC = () => {
   const canManage = can('labels.manage_templates');
   const [form] = Form.useForm<TemplateFormValues>();
@@ -32,6 +41,8 @@ export const LabelsConfigTab: React.FC = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<LabelTemplate | null>(null);
   const [elements, setElements] = useState<LabelTemplateElement[]>([]);
   const [customSchemaText, setCustomSchemaText] = useState('{}');
+  const [importVariants, setImportVariants] = useState<BazisImportVariant[]>([]);
+  const [importFileName, setImportFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -157,6 +168,37 @@ export const LabelsConfigTab: React.FC = () => {
     setElements((current) => current.map((element, i) => (i === index ? { ...element, ...patch } : element)));
   };
 
+  const handleBazisImportFile = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const variants = parseBazisTemplateVariants(text, file.name);
+      setImportFileName(file.name);
+      setImportVariants(variants);
+      if (variants.length === 0) {
+        message.warning('В файле не найдено вариантов шаблонов бирок');
+      } else {
+        message.success(`Найдено вариантов: ${variants.length}`);
+      }
+    } catch {
+      message.error('Не удалось разобрать Bazis .xbir файл');
+    }
+  };
+
+  const applyImportVariant = (variant: BazisImportVariant) => {
+    setSelectedTemplate(null);
+    setElements(variant.elements);
+    setCustomSchemaText('{}');
+    form.setFieldsValue({
+      name: variant.name,
+      description: variant.description,
+      canvasWidthMm: 85,
+      canvasHeightMm: 88,
+      dpi: 203,
+      defaultExportFormats: ['bmp', 'png', 'emf'],
+    });
+  };
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Space wrap>
@@ -173,6 +215,51 @@ export const LabelsConfigTab: React.FC = () => {
           message="Шаблоны доступны только для просмотра"
         />
       )}
+
+      <Card size="small" title="Импорт из Bazis .xbir">
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap>
+            <input
+              type="file"
+              accept=".xbir,.xml,text/xml,application/xml"
+              disabled={!canManage}
+              onChange={(event) => void handleBazisImportFile(event.target.files?.[0] ?? null)}
+            />
+            {importFileName && <Text type="secondary">{importFileName}</Text>}
+          </Space>
+          <Alert
+            type="info"
+            showIcon
+            message="Импорт читает .xbir, группирует строки по полю «Шаблон бирки» и предлагает варианты ERP-шаблона. Файлы .brx пока не читаются напрямую."
+          />
+          {importVariants.length > 0 && (
+            <Table
+              rowKey="key"
+              size="small"
+              pagination={false}
+              dataSource={importVariants}
+              columns={[
+                { title: 'Вариант', dataIndex: 'name' },
+                { title: 'Строк', dataIndex: 'rowCount', width: 90 },
+                {
+                  title: 'Bazis файл',
+                  dataIndex: 'templateFiles',
+                  render: (files: string[]) => files.map((file) => <Tag key={file}>{file}</Tag>),
+                },
+                {
+                  title: '',
+                  width: 150,
+                  render: (_, variant) => (
+                    <Button icon={<ImportOutlined />} disabled={!canManage} onClick={() => applyImportVariant(variant)}>
+                      В форму
+                    </Button>
+                  ),
+                },
+              ]}
+            />
+          )}
+        </Space>
+      </Card>
 
       <Row gutter={16}>
         <Col xs={24} lg={14}>
@@ -322,6 +409,102 @@ export const LabelsConfigTab: React.FC = () => {
     </Space>
   );
 };
+
+function parseBazisTemplateVariants(xmlText: string, fileName: string): BazisImportVariant[] {
+  const document = new DOMParser().parseFromString(xmlText, 'application/xml');
+  const parseError = document.querySelector('parsererror');
+  if (parseError) throw new Error('invalid xbir xml');
+
+  const columns = Array.from(document.querySelectorAll('Cols Col')).sort(
+    (a, b) => Number(a.getAttribute('Index') ?? 0) - Number(b.getAttribute('Index') ?? 0),
+  );
+  const templateIndex = columns.findIndex((column) => column.getAttribute('Name') === 'Шаблон бирки');
+  const rows = Array.from(document.querySelectorAll('Rows Row')).map((row) => row.textContent?.split('\t') ?? []);
+  const grouped = new Map<string, string[][]>();
+
+  for (const row of rows) {
+    const templatePath = templateIndex >= 0 ? normalizeBazisTemplatePath(row[templateIndex]) : '';
+    const key = templatePath || 'Встроенный стандарт';
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+  }
+
+  return Array.from(grouped.entries()).map(([templatePath, templateRows], index) => {
+    const templateName = templatePath === 'Встроенный стандарт' ? templatePath : templatePath.split(/[\\/]/).pop() ?? templatePath;
+    const baseName = fileName.replace(/\.(xbir|xml)$/i, '');
+    return {
+      key: `${templatePath}-${index}`,
+      name: `Импорт Bazis ${templateName}`,
+      description: `Создано из ${baseName}: ${templateRows.length} строк, источник ${templatePath}.`,
+      rowCount: templateRows.length,
+      templateFiles: [templatePath],
+      elements: buildStandardBazisElements(),
+    };
+  });
+}
+
+function normalizeBazisTemplatePath(value: string | undefined): string {
+  return String(value ?? '').trim();
+}
+
+function buildStandardBazisElements(): LabelTemplateElement[] {
+  const text = (
+    elementKey: string,
+    sourceField: string | null,
+    staticText: string | null,
+    xMm: number,
+    yMm: number,
+    widthMm: number,
+    heightMm: number,
+    fontSize = 10,
+    zIndex = 1,
+  ): LabelTemplateElement => ({
+    elementKey,
+    kind: 'text',
+    sourceField,
+    staticText,
+    xMm,
+    yMm,
+    widthMm,
+    heightMm,
+    rotationDeg: 0,
+    zIndex,
+    style: { fontSize },
+    condition: {},
+  });
+
+  return [
+    {
+      elementKey: 'border',
+      kind: 'rect',
+      sourceField: null,
+      staticText: null,
+      xMm: 1,
+      yMm: 1,
+      widthMm: 83,
+      heightMm: 86,
+      rotationDeg: 0,
+      zIndex: 0,
+      style: { strokeWidth: 1 },
+      condition: {},
+    },
+    text('order-label', null, 'Заказ', 4, 4, 16, 5, 10, 1),
+    text('order-value', 'bazis.order_number', null, 21, 4, 58, 5, 10, 2),
+    text('position-label', null, 'Поз.', 4, 12, 14, 5, 10, 3),
+    text('position-value', 'bazis.position', null, 18, 12, 20, 5, 12, 4),
+    text('qty-label', null, 'Кол-во', 48, 12, 18, 5, 10, 5),
+    text('qty-value', 'bazis.quantity', null, 67, 12, 12, 5, 12, 6),
+    text('name-label', null, 'Деталь', 4, 21, 18, 5, 10, 7),
+    text('name-value', 'bazis.name', null, 4, 27, 76, 10, 14, 8),
+    text('size-label', null, 'Размер', 4, 42, 20, 5, 10, 9),
+    text('length-value', 'bazis.detail_length', null, 25, 42, 18, 5, 12, 10),
+    text('size-x', null, 'x', 44, 42, 4, 5, 12, 11),
+    text('width-value', 'bazis.detail_width', null, 49, 42, 18, 5, 12, 12),
+    text('material-label', null, 'Материал', 4, 51, 24, 5, 10, 13),
+    text('material-value', 'bazis.material', null, 4, 57, 76, 8, 12, 14),
+    text('comment-label', null, 'Комментарий', 4, 70, 32, 5, 10, 15),
+    text('comment-value', 'bazis.comment', null, 4, 76, 76, 8, 10, 16),
+  ];
+}
 
 function parseCustomSchema(value: string): Record<string, unknown> {
   const parsed = JSON.parse(value || '{}') as unknown;

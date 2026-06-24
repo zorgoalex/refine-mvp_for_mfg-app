@@ -36,4 +36,12 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/customFieldSchema/);
     expect(tabSrc).toMatch(/elements,/);
   });
+
+  it('offers Bazis .xbir import variants that can be applied to the template form', () => {
+    expect(tabSrc).toMatch(/Импорт из Bazis \.xbir/);
+    expect(tabSrc).toMatch(/parseBazisTemplateVariants/);
+    expect(tabSrc).toMatch(/Шаблон бирки/);
+    expect(tabSrc).toMatch(/applyImportVariant/);
+    expect(tabSrc).toMatch(/buildStandardBazisElements/);
+  });
 });
