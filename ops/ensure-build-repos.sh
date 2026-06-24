@@ -4,7 +4,8 @@
 # closes the cad-service (repo_svgdxf) gap too.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# ENSURE_BUILD_REPOS_ROOT overrides the runtime root (used by tests).
+ROOT="${ENSURE_BUILD_REPOS_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 DRY=0
 case "${1:-}" in
   --dry-run) DRY=1 ;;
