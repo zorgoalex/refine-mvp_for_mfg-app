@@ -81,6 +81,20 @@ describe('freecut optimize request builder (§6)', () => {
     });
     expect(request.params.retry_strategy).toBe('disabled');
   });
+
+  it('forwards vacuum layout mode and direction from params to optimize request', () => {
+    const request = buildOptimizeRequest({
+      stock,
+      items,
+      params: {
+        ...params,
+        layout_mode: 'vacuum_table',
+        vacuum: { direction: 'optimal' },
+      },
+    });
+    expect(request.params.layout_mode).toBe('vacuum_table');
+    expect(request.params.vacuum?.direction).toBe('optimal');
+  });
 });
 
 describe('pre-call guards (BLOCKER-3 / MAJOR-6)', () => {
