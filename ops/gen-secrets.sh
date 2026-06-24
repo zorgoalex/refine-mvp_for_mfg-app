@@ -23,7 +23,7 @@ declare -A MAP=(
 )
 
 # Escape replacement for sed (slashes, ampersands, backslashes).
-sed_escape() { printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'; }
+sed_escape() { printf '%s' "$1" | sed -e 's/[\/\\&]/\\&/g'; }
 
 tmp="$(mktemp)"; cp "$ENV_FILE" "$tmp"
 for tok in "${!MAP[@]}"; do
