@@ -333,9 +333,29 @@ export class PgCutRepository implements CutRepositoryPort {
       assertVersion(job, command.version);
       assertMutable(job);
 
-      const items = await loadCalcItems(tx, command.cutJobId);
+      let items = await loadCalcItems(tx, command.cutJobId);
       if (items.length === 0) {
         throw new CutNoItemsError(command.cutJobId);
+      }
+
+      // Per-job sheet override (migration 040): when set, cut EVERY detail on the
+      // chosen sheet. Validate it is still active + cuttable (it may have been
+      // deactivated after selection) — reject with 422, precondition passthrough
+      // (job is NOT marked failed), mirroring the chosen-but-inactive profile path.
+      if (job.sheetMaterialTypeId !== null) {
+        const sheetRes = await tx.query<{ width_mm: string | number; height_mm: string | number }>(
+          `SELECT width_mm, height_mm FROM sheet_material_types
+           WHERE sheet_material_type_id = $1 AND is_active = true AND is_cuttable = true`,
+          [job.sheetMaterialTypeId],
+        );
+        if (sheetRes.rows.length === 0) {
+          throw new CutSheetMaterialNotCuttableError(job.sheetMaterialTypeId);
+        }
+        items = applySheetOverride(items, {
+          sheetMaterialTypeId: job.sheetMaterialTypeId,
+          widthMm: toNum(sheetRes.rows[0].width_mm),
+          heightMm: toNum(sheetRes.rows[0].height_mm),
+        });
       }
 
       // Recalculation: drop the PREVIOUS result set under the lock so a re-cut
@@ -1356,6 +1376,22 @@ interface CuttableGroup {
   smtHeightMm: number | null;
   orderIds: number[];
   items: Array<{ orderDetailId: number; orderId: number; qty: number; widthMm: number; heightMm: number; filmTexture: boolean | null }>;
+}
+
+/** Per-job sheet override (migration 040). When a job has a chosen sheet, every
+ *  item is cut on it: rewrite sheet id + stock dims on each row, leaving film_id
+ *  per-detail so grain fan-out is preserved. no_sheet_spec rows inherit the
+ *  chosen sheet and become cuttable. */
+export function applySheetOverride(
+  rows: CalcItemRow[],
+  override: { sheetMaterialTypeId: number; widthMm: number; heightMm: number },
+): CalcItemRow[] {
+  return rows.map((row) => ({
+    ...row,
+    sheet_material_type_id: override.sheetMaterialTypeId,
+    smt_width_mm: override.widthMm,
+    smt_height_mm: override.heightMm,
+  }));
 }
 
 function groupByCuttableKey(rows: CalcItemRow[]): Map<string, CuttableGroup> {

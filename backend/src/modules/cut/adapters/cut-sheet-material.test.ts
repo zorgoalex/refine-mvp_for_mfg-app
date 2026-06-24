@@ -3,7 +3,7 @@ import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { CutSheetMaterialNotCuttableError } from '../errors/cut.errors';
 import { CUT_AUDIT_EVENTS } from '../application/cut-audit';
-import { sheetMaterialChangedOutboxKey, PgCutRepository } from './pg-cut-repository';
+import { sheetMaterialChangedOutboxKey, PgCutRepository, applySheetOverride } from './pg-cut-repository';
 import type { SetCutJobSheetMaterialCommand } from '../application/cut-command.types';
 
 const anyUser: CurrentUser = {
@@ -149,6 +149,30 @@ function makeRepoForSetSheet(opts: {
   repo.auditCalls = auditCalls;
   return repo;
 }
+
+// ─── applySheetOverride unit tests ───────────────────────────────────────────
+
+describe('applySheetOverride', () => {
+  const base = (over: Partial<any> = {}) => ({
+    cut_job_item_id: 1, order_detail_id: 10, order_id: 100, qty: 2,
+    width_mm: 600, height_mm: 400, material_id: null,
+    sheet_material_type_id: 55, film_id: 3, film_texture: true,
+    smt_width_mm: 2800, smt_height_mm: 2070, ...over,
+  });
+
+  it('overrides sheet id + dims on every row, including no_sheet_spec rows', () => {
+    const rows = [base(), base({ sheet_material_type_id: null, smt_width_mm: null, smt_height_mm: null, film_id: 9 })];
+    const out = applySheetOverride(rows as any, { sheetMaterialTypeId: 77, widthMm: 2440, heightMm: 1830 });
+    expect(out.every((r) => r.sheet_material_type_id === 77)).toBe(true);
+    expect(out.every((r) => r.smt_width_mm === 2440 && r.smt_height_mm === 1830)).toBe(true);
+  });
+
+  it('leaves film_id per-detail (grain grouping preserved)', () => {
+    const rows = [base({ film_id: 3 }), base({ film_id: 9 })];
+    const out = applySheetOverride(rows as any, { sheetMaterialTypeId: 77, widthMm: 2440, heightMm: 1830 });
+    expect(out.map((r) => r.film_id)).toEqual([3, 9]);
+  });
+});
 
 describe('setSheetMaterial', () => {
   it('rejects a non-cuttable/inactive sheet with 422', async () => {
