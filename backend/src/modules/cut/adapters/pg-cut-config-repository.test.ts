@@ -131,3 +131,77 @@ describe('getParamsByProfileId', () => {
     expect(p?.trim_mm.right).toBeTypeOf('number'); // not dropped
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 1b — read-side validation of stored cut-param profiles
+// ---------------------------------------------------------------------------
+
+describe('mergeParams read-side validation (via getParamsByProfileId)', () => {
+  it('rejects vacuum.direction with an invalid enum value (e.g. diagonal)', async () => {
+    const repo = new PgCutConfigRepository(
+      stubDb([{ params: { layout_mode: 'vacuum_table', vacuum: { direction: 'diagonal' } } }]),
+    );
+    await expect(repo.getParamsByProfileId(1)).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('rejects stored vacuum when it is an array', async () => {
+    const repo = new PgCutConfigRepository(stubDb([{ params: { vacuum: [] } }]));
+    await expect(repo.getParamsByProfileId(1)).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('rejects stored vacuum when it is null', async () => {
+    const repo = new PgCutConfigRepository(stubDb([{ params: { vacuum: null } }]));
+    await expect(repo.getParamsByProfileId(1)).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('rejects top-level stored = false (non-object)', async () => {
+    const repo = new PgCutConfigRepository(stubDb([{ params: false }]));
+    await expect(repo.getParamsByProfileId(1)).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('rejects top-level stored = "x" (string)', async () => {
+    const repo = new PgCutConfigRepository(stubDb([{ params: 'x' }]));
+    await expect(repo.getParamsByProfileId(1)).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('rejects stored trim_mm when it is an array', async () => {
+    const repo = new PgCutConfigRepository(stubDb([{ params: { trim_mm: [] } }]));
+    await expect(repo.getParamsByProfileId(1)).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('reads a valid vacuum profile cleanly', async () => {
+    const repo = new PgCutConfigRepository(
+      stubDb([{ params: { layout_mode: 'vacuum_table', vacuum: { direction: 'optimal' } } }]),
+    );
+    const p = await repo.getParamsByProfileId(1);
+    expect(p?.layout_mode).toBe('vacuum_table');
+    expect((p as unknown as Record<string, unknown>).vacuum).toEqual({ direction: 'optimal' });
+  });
+
+  it('null stored params still returns defaults cleanly', async () => {
+    const repo = new PgCutConfigRepository(stubDb([{ params: null }]));
+    const p = await repo.getParamsByProfileId(1);
+    expect(p).toEqual(DEFAULT_FREECUT_PARAMS);
+  });
+
+  it('partial plain-object trim_mm overlay (left:5) still reads CLEAN (no regression)', async () => {
+    const repo = new PgCutConfigRepository(stubDb([{ params: { kerf_mm: 4, trim_mm: { left: 5 } } }]));
+    const p = await repo.getParamsByProfileId(1);
+    expect(p?.trim_mm.left).toBe(5);
+    expect(p?.trim_mm.right).toBeTypeOf('number');
+  });
+});
+
+describe('mergeParams read-side validation (via getDefaultParams)', () => {
+  it('rejects vacuum.direction diagonal via getDefaultParams path too', async () => {
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({ 'FROM cut_param_profiles': [{ params: { vacuum: { direction: 'diagonal' } } }] }),
+    );
+    await expect(repo.getDefaultParams()).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('returns defaults when stored params is null via getDefaultParams', async () => {
+    const repo = new PgCutConfigRepository(fakeDatabase({}));
+    expect(await repo.getDefaultParams()).toEqual(DEFAULT_FREECUT_PARAMS);
+  });
+});

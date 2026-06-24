@@ -8,6 +8,7 @@ import {
   DEFAULT_RENDER_PRESET,
 } from '../application/cut-config';
 import { type FreecutParams, validateGrainRule } from '../application/cut-freecut-mapping';
+import { validateFreecutParams, validateStoredFreecutParamsRaw } from '../application/cut-config-validation';
 import { RENDER_PRESETS } from '../render/sheet-png';
 
 /**
@@ -54,13 +55,32 @@ export class PgCutConfigRepository implements CutConfigPort {
     return this.mergeParams(stored);
   }
 
-  private mergeParams(stored: Record<string, unknown> | null | undefined): FreecutParams {
-    if (!stored) return { ...DEFAULT_FREECUT_PARAMS };
-    const merged = { ...DEFAULT_FREECUT_PARAMS, ...stored } as FreecutParams;
-    const storedTrim = (stored as { trim_mm?: Record<string, unknown> }).trim_mm;
-    if (storedTrim && typeof storedTrim === 'object') {
+  private mergeParams(stored: unknown): FreecutParams {
+    // Genuine absence → return defaults unchanged (no error).
+    if (stored === null || stored === undefined) return { ...DEFAULT_FREECUT_PARAMS };
+
+    // RAW stage: reject non-plain-object shapes that the merge would otherwise
+    // silently launder into the defaults (false/"x"/[]/etc.). Also rejects
+    // non-plain-object trim_mm and vacuum, plus invalid vacuum.direction enum.
+    // Partial plain-object trim_mm overlays are still allowed here.
+    validateStoredFreecutParamsRaw(stored);
+
+    // stored is now guaranteed to be a plain object.
+    const s = stored as Record<string, unknown>;
+    const merged = { ...DEFAULT_FREECUT_PARAMS, ...s } as FreecutParams;
+
+    // Deep-merge trim_mm: a partial stored overlay (e.g. {left:5}) fills the
+    // other sides from the defaults. Arrays are already rejected by the RAW stage.
+    const storedTrim = s.trim_mm as Record<string, unknown> | undefined;
+    if (storedTrim !== undefined) {
       merged.trim_mm = { ...DEFAULT_FREECUT_PARAMS.trim_mm, ...storedTrim } as FreecutParams['trim_mm'];
     }
+
+    // MERGED stage: full structural check on the deep-merged result so
+    // layout_mode / objective / all-4-trim-sides / vacuum.direction / etc. are
+    // well-formed before reaching freecut (mirrors getGrainRules pattern).
+    validateFreecutParams(merged as unknown as Record<string, unknown>);
+
     return merged;
   }
 

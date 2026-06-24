@@ -85,8 +85,11 @@ const QUALITY_PROFILES = ['fast', 'balanced', 'quality'];
  * never push an out-of-range value (e.g. negative kerf, unknown layout_mode) to
  * freecut and 422 at calculate time. Unknown extra keys are tolerated (freecut
  * ignores them); known keys, when present, must be well-formed.
+ *
+ * Exported so the read path (pg-cut-config-repository mergeParams) can run the
+ * same check on the merged result without duplicating logic.
  */
-function validateFreecutParams(params: Record<string, unknown>): void {
+export function validateFreecutParams(params: Record<string, unknown>): void {
   for (const key of ['kerf_mm', 'spacing_mm', 'time_limit_ms', 'restarts']) {
     const value = params[key];
     if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
@@ -150,6 +153,53 @@ function validateFreecutParams(params: Record<string, unknown>): void {
       const value = (params.trim_mm as Record<string, unknown>)[side];
       if (typeof value !== 'number' || value < 0) {
         invalid(`params.trim_mm.${side}`, `trim_mm.${side} должен быть неотрицательным числом (укажите все 4 стороны)`);
+      }
+    }
+  }
+}
+
+const VACUUM_DIRECTIONS_RAW = ['optimal', 'width', 'height'] as const;
+
+/**
+ * RAW-stage guard for stored (un-merged) cut param rows read from the DB.
+ * Rejects non-object shapes that the merge step would otherwise silently
+ * launder into the defaults, without validating partial / overlayable values
+ * (those are handled after merge by validateFreecutParams).
+ *
+ * Checks (in order):
+ *   1. top-level `stored` must be a plain object (false/scalar/array → 422).
+ *   2. `stored.trim_mm`, when present, must be a plain object (array/null → 422).
+ *   3. `stored.vacuum`,  when present, must be a plain object (array/null → 422);
+ *      `vacuum.direction`, when present, must be a string ∈ {optimal,width,height}.
+ *
+ * Partial plain-object trim_mm overlays (e.g. {left:5}) remain ALLOWED here;
+ * the four-side completeness check is enforced only by validateFreecutParams on
+ * the fully-merged result.
+ */
+export function validateStoredFreecutParamsRaw(stored: unknown): void {
+  if (!isObject(stored)) {
+    invalid('params', 'Хранимые параметры профиля должны быть объектом');
+  }
+  const s = stored as Record<string, unknown>;
+
+  if (s.trim_mm !== undefined && !isObject(s.trim_mm)) {
+    invalid('params.trim_mm', 'trim_mm должен быть объектом');
+  }
+
+  if (s.vacuum !== undefined) {
+    if (!isObject(s.vacuum)) {
+      invalid('params.vacuum', 'vacuum должен быть объектом');
+    }
+    const vac = s.vacuum as Record<string, unknown>;
+    if (vac.direction !== undefined) {
+      if (
+        typeof vac.direction !== 'string' ||
+        !(VACUUM_DIRECTIONS_RAW as readonly string[]).includes(vac.direction)
+      ) {
+        invalid(
+          'params.vacuum.direction',
+          `vacuum.direction должен быть одним из: ${VACUUM_DIRECTIONS_RAW.join(', ')}`,
+        );
       }
     }
   }
