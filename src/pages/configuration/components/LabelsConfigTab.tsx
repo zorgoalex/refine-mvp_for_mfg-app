@@ -14,6 +14,16 @@ import { can } from '../../../utils/permissions';
 
 const { Text } = Typography;
 const EXPORT_FORMATS: LabelExportFormat[] = ['bmp', 'png', 'emf'];
+const PREVIEW_FIELD_VALUES: Record<string, string> = {
+  'bazis.order_number': 'Заказ 0001',
+  'bazis.position': '12',
+  'bazis.quantity': '2',
+  'bazis.name': 'Фасад левый',
+  'bazis.detail_length': '720',
+  'bazis.detail_width': '396',
+  'bazis.material': 'МДФ 16 мм',
+  'bazis.comment': 'Кромка по периметру',
+};
 
 interface TemplateFormValues {
   name: string;
@@ -45,6 +55,8 @@ export const LabelsConfigTab: React.FC = () => {
   const [importFileName, setImportFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const previewWidthMm = Form.useWatch('canvasWidthMm', form);
+  const previewHeightMm = Form.useWatch('canvasHeightMm', form);
 
   const load = async () => {
     setLoading(true);
@@ -269,7 +281,11 @@ export const LabelsConfigTab: React.FC = () => {
             dataSource={templates}
             pagination={false}
             size="small"
-            onRow={(template) => ({ onClick: () => setSelectedTemplate(template) })}
+            rowClassName={(template) => (selectedTemplate?.labelTemplateId === template.labelTemplateId ? 'ant-table-row-selected' : '')}
+            onRow={(template) => ({
+              onClick: () => setSelectedTemplate(template),
+              style: { cursor: 'pointer' },
+            })}
             columns={[
               { title: 'Название', dataIndex: 'name' },
               { title: 'Версия', dataIndex: 'version', width: 90 },
@@ -329,6 +345,14 @@ export const LabelsConfigTab: React.FC = () => {
                 Сохранить шаблон
               </Button>
             </Form>
+          </Card>
+          <Card size="small" title="Визуал бирки" style={{ marginTop: 16 }}>
+            <LabelTemplatePreview
+              widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 84)}
+              heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 55)}
+              elements={elements}
+              fields={fields}
+            />
           </Card>
         </Col>
       </Row>
@@ -409,6 +433,78 @@ export const LabelsConfigTab: React.FC = () => {
     </Space>
   );
 };
+
+function LabelTemplatePreview({
+  widthMm,
+  heightMm,
+  elements,
+  fields,
+}: {
+  widthMm: number;
+  heightMm: number;
+  elements: LabelTemplateElement[];
+  fields: LabelFieldCatalogItem[];
+}) {
+  const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 84;
+  const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 55;
+  const fieldLabels = new Map(fields.map((field) => [field.id, field.label]));
+  const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
+
+  return (
+    <div
+      style={{
+        width: '100%',
+        maxWidth: 520,
+        aspectRatio: `${safeWidth} / ${safeHeight}`,
+        border: '1px solid #d9d9d9',
+        background: '#fff',
+        overflow: 'hidden',
+      }}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${safeWidth} ${safeHeight}`} width="100%" height="100%">
+        <rect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" />
+        {sorted.map((element) => renderPreviewElement(element, fieldLabels))}
+      </svg>
+    </div>
+  );
+}
+
+function renderPreviewElement(element: LabelTemplateElement, fieldLabels: Map<string, string>) {
+  const x = Number(element.xMm ?? 0);
+  const y = Number(element.yMm ?? 0);
+  const w = Number(element.widthMm ?? 0);
+  const h = Number(element.heightMm ?? 0);
+  const key = element.elementKey;
+  const transform = Number(element.rotationDeg ?? 0)
+    ? `rotate(${Number(element.rotationDeg ?? 0)} ${x} ${y})`
+    : undefined;
+
+  if (element.kind === 'line') {
+    return <line key={key} x1={x} y1={y} x2={x + w} y2={y + h} stroke="black" strokeWidth={0.35} transform={transform} />;
+  }
+  if (element.kind === 'rect') {
+    return <rect key={key} x={x} y={y} width={w} height={h} fill="none" stroke="black" strokeWidth={Number(element.style?.strokeWidth ?? 0.35)} transform={transform} />;
+  }
+
+  const fontSize = Number(element.style?.fontSize ?? 10);
+  const text = element.sourceField
+    ? PREVIEW_FIELD_VALUES[element.sourceField] ?? fieldLabels.get(element.sourceField) ?? element.sourceField
+    : element.staticText ?? '';
+  return (
+    <text
+      key={key}
+      x={x}
+      y={y + Math.max(fontSize, h)}
+      fontFamily="Arial, sans-serif"
+      fontSize={fontSize}
+      fontWeight={String(element.style?.fontWeight ?? 'normal')}
+      fill="black"
+      transform={transform}
+    >
+      {text}
+    </text>
+  );
+}
 
 function parseBazisTemplateVariants(xmlText: string, fileName: string): BazisImportVariant[] {
   const document = new DOMParser().parseFromString(xmlText, 'application/xml');

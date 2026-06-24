@@ -44,4 +44,13 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/applyImportVariant/);
     expect(tabSrc).toMatch(/buildStandardBazisElements/);
   });
+
+  it('shows an active SVG label preview for the selected or edited template', () => {
+    expect(tabSrc).toMatch(/Визуал бирки/);
+    expect(tabSrc).toMatch(/LabelTemplatePreview/);
+    expect(tabSrc).toMatch(/Form\.useWatch\('canvasWidthMm'/);
+    expect(tabSrc).toMatch(/rowClassName=.*ant-table-row-selected/);
+    expect(tabSrc).toMatch(/renderPreviewElement/);
+    expect(tabSrc).toMatch(/PREVIEW_FIELD_VALUES/);
+  });
 });
