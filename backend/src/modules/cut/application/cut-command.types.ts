@@ -148,6 +148,16 @@ export interface SetCutJobProfileCommand {
   requestId?: string;
 }
 
+export interface SetCutJobSheetMaterialCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  /** null = clear the override; calculate then resolves each detail's own sheet
+   *  from order_details.sheet_material_type_id (current behavior). */
+  sheetMaterialTypeId: number | null;
+  version: number;
+  requestId?: string;
+}
+
 export interface CutRepositoryPort {
   createJob(command: CreateCutJobCommand): Promise<CutJobDto>;
   recordPermissionDenied(input: CutPermissionDeniedInput): Promise<void>;
@@ -156,6 +166,7 @@ export interface CutRepositoryPort {
   calculate(command: CalculateCutJobCommand): Promise<CutJobDto>;
   archive(command: ArchiveCutJobCommand): Promise<CutJobDto>;
   setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto>;
+  setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto>;
   getJob(query: GetCutJobQuery): Promise<CutJobDto>;
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;

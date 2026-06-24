@@ -145,6 +145,12 @@ export function profileChangedOutboxKey(cutJobId: number, requestId: string | un
   return `${CUT_AUDIT_EVENTS.profileChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
+/** Idempotency key for the sheet-material-changed outbox event. Same stability
+ *  rule as profileChangedOutboxKey: stable per (job, request), version fallback. */
+export function sheetMaterialChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.sheetMaterialChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
 export class PgCutRepository implements CutRepositoryPort {
   private readonly config: CutConfigPort;
 
