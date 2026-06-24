@@ -87,6 +87,18 @@ export const apiRoutes = {
     list: backendApiPath('/sheet-material-types'),
     byId: (id: number) => backendApiPath(`/sheet-material-types/${id}`),
   },
+  labels: {
+    fields: backendApiPath('/label-fields'),
+    templates: backendApiPath('/label-templates'),
+    template: (id: number) => backendApiPath(`/label-templates/${id}`),
+    orderData: (orderId: number) => backendApiPath(`/orders/${orderId}/label-data`),
+    orderPreview: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/preview`),
+    orderGenerate: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/generate`),
+    latest: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/latest`),
+    latestExport: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/latest/export`),
+    generationExport: (orderId: number, generationId: number) =>
+      backendApiPath(`/orders/${orderId}/labels/generations/${generationId}/export`),
+  },
   clientPhones: {
     list: backendApiPath('/client-phones'),
     byId: (phoneId: number) => backendApiPath(`/client-phones/${phoneId}`),

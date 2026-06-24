@@ -12,6 +12,7 @@ import { ClientPhonesModule } from './modules/client-phones/client-phones.module
 import { CrmSyncModule } from './modules/crm-sync/crm-sync.module';
 import { DowelingModule } from './modules/doweling/doweling.module';
 import { CutModule } from './modules/cut/cut.module';
+import { LabelsModule } from './modules/labels/labels.module';
 import { SheetMaterialsModule } from './modules/sheet-materials/sheet-materials.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -37,6 +38,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     CrmSyncModule,
     DowelingModule,
     CutModule,
+    LabelsModule,
     SheetMaterialsModule,
     DeadlinesModule,
     NotificationsModule,

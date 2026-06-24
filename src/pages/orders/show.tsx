@@ -25,11 +25,12 @@ import { ordersApi } from "../../api/ordersApi";
 import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { ProjectLinksEditor } from "./components/projects/ProjectLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
-import { can } from "../../utils/permissions";
+import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
 import type { CutDetailLastReadyRef } from "../../api/types/cutApi.types";
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 import { TableTopScroll } from "../../components/TableTopScroll";
+import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 
 type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'additional';
 
@@ -95,6 +96,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const record = data?.data;
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
+  const labelsEnabled = featureFlags.labels && canAny(['labels.view', 'labels.generate']);
 
   // Enrich the workspace tab label once the order record is loaded.
   const location = useLocation();
@@ -800,7 +802,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
                       <OrderFilesBlock record={record} compact />
                     </div>
-                    
+
+                    {labelsEnabled && record?.order_id && (
+                      <OrderLatestLabelsPreview orderId={record.order_id} />
+                    )}
+
                     {/* Служебная информация */}
                     <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#8c8c8c', marginBottom: 3 }}>

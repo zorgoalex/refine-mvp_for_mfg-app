@@ -25,6 +25,7 @@ describe('featureFlags', () => {
       useBackendVlm: false,
       useBackendReferences: false,
       useBackendCut: false,
+      labels: false,
       sheetMaterialsReads: false,
       enableLegacyHasura: true,
     });
@@ -49,6 +50,12 @@ describe('featureFlags', () => {
     expect(
       getFeatureFlags({ VITE_USE_BACKEND_CUT: 'false' }, { backendCut: true }).useBackendCut,
     ).toBe(true);
+  });
+
+  it('reads labels flag from env and runtime config with a safe default', () => {
+    expect(getFeatureFlags({}).labels).toBe(false);
+    expect(getFeatureFlags({ VITE_USE_BACKEND_LABELS: 'true' }).labels).toBe(true);
+    expect(getFeatureFlags({ VITE_USE_BACKEND_LABELS: 'false' }, { labels: true }).labels).toBe(true);
   });
 
   it('supports split read/write orders flags', () => {

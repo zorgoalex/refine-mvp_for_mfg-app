@@ -14,6 +14,7 @@ import {
   BellOutlined,
   ApartmentOutlined,
   ScissorOutlined,
+  TagsOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { featureFlags } from '../../config/featureFlags';
@@ -23,6 +24,8 @@ import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRu
 import { NotificationRulesConfig } from './components/NotificationRulesConfig';
 import { OrgStructureConfig } from './components/OrgStructureConfig';
 import { CutConfigTab } from './components/CutConfigTab';
+import { LabelsConfigTab } from './components/LabelsConfigTab';
+import { can } from '../../utils/permissions';
 import {
   buildInitialResourceVisibility,
   getMenuResources,
@@ -559,6 +562,20 @@ export const ConfigurationPage: React.FC = () => {
               </span>
             ),
             children: <CutConfigTab />,
+          },
+        ]
+      : []),
+    ...(featureFlags.labels && can('labels.view')
+      ? [
+          {
+            key: 'labels',
+            label: (
+              <span>
+                <TagsOutlined />
+                Бирки
+              </span>
+            ),
+            children: <LabelsConfigTab />,
           },
         ]
       : []),
