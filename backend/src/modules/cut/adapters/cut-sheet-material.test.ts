@@ -165,6 +165,10 @@ describe('applySheetOverride', () => {
     const out = applySheetOverride(rows as any, { sheetMaterialTypeId: 77, widthMm: 2440, heightMm: 1830 });
     expect(out.every((r) => r.sheet_material_type_id === 77)).toBe(true);
     expect(out.every((r) => r.smt_width_mm === 2440 && r.smt_height_mm === 1830)).toBe(true);
+    // pure: returns NEW row objects, leaving the inputs untouched
+    expect(out[0]).not.toBe(rows[0]);
+    expect(rows[0].sheet_material_type_id).toBe(55);
+    expect(rows[0].smt_width_mm).toBe(2800);
   });
 
   it('leaves film_id per-detail (grain grouping preserved)', () => {

@@ -43,6 +43,9 @@ const PASSTHROUGH_CODES = new Set<string>([
   // Precondition: the chosen cut profile was deactivated after selection;
   // operator must clear or re-pick the profile before recalculating — no solve was attempted.
   'CUT_PARAM_PROFILE_NOT_FOUND',
+  // Precondition: the chosen sheet was deactivated/made non-cuttable after selection;
+  // operator must re-pick an active cuttable sheet before recalculating — no solve was attempted.
+  'CUT_SHEET_MATERIAL_NOT_CUTTABLE',
   'PERMISSION_DENIED',
   'AUTH_REQUIRED',
 ]);
@@ -73,6 +76,8 @@ const REASON_BY_CODE: Record<string, string> = {
     'Слишком много деталей (с учётом количества) для одного раскроя. Разбейте задание на несколько меньших.',
   CUT_INVALID_GRAIN_RULE:
     'Некорректная настройка направления текстуры (grain) в конфигурации раскроя. Проверьте параметры раскроя.',
+  CUT_SHEET_MATERIAL_NOT_CUTTABLE:
+    'Выбранный лист материала неактивен или не допускает раскрой. Выберите другой лист и повторите расчёт.',
 };
 
 /** Read a string `code` off an unknown error without assuming its type. */
