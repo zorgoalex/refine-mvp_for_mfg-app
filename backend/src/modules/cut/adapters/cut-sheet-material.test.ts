@@ -77,9 +77,10 @@ function makeRepoForSetSheet(opts: {
   version: number;
   current: number | null;
   sheetExists: boolean;
-}): PgCutRepository & { updateCalls: string[]; outboxCalls: string[] } {
+}): PgCutRepository & { updateCalls: string[]; outboxCalls: string[]; auditCalls: string[] } {
   const updateCalls: string[] = [];
   const outboxCalls: string[] = [];
+  const auditCalls: string[] = [];
 
   function normalize(text: string): string {
     return text.replace(/\s+/g, ' ').trim();
@@ -109,9 +110,13 @@ function makeRepoForSetSheet(opts: {
       return { rows: [], rowCount: 1 };
     }
 
-    // audit_log insert
-    if (sql.startsWith('INSERT INTO audit_log')) return { rows: [{ audit_id: 'aud-1' }], rowCount: 1 };
+    // audit_log insert (the related-entity insert is a follow-on; count only the
+    // primary audit_log write as one audit event)
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 0 };
+    if (sql.startsWith('INSERT INTO audit_log')) {
+      auditCalls.push(text);
+      return { rows: [{ audit_id: 'aud-1' }], rowCount: 1 };
+    }
 
     // outbox insert
     if (sql.startsWith('INSERT INTO outbox_events')) {
@@ -138,9 +143,10 @@ function makeRepoForSetSheet(opts: {
   } as unknown as DatabaseService;
 
   const freecutStub = { optimize: () => Promise.reject(new Error('not used')) } as never;
-  const repo = new PgCutRepository(service, freecutStub) as PgCutRepository & { updateCalls: string[]; outboxCalls: string[] };
+  const repo = new PgCutRepository(service, freecutStub) as PgCutRepository & { updateCalls: string[]; outboxCalls: string[]; auditCalls: string[] };
   repo.updateCalls = updateCalls;
   repo.outboxCalls = outboxCalls;
+  repo.auditCalls = auditCalls;
   return repo;
 }
 
@@ -164,5 +170,15 @@ describe('setSheetMaterial', () => {
     await expect(
       repo.setSheetMaterial({ currentUser: anyUser, cutJobId: 9, sheetMaterialTypeId: 1, version: 4 } as SetCutJobSheetMaterialCommand),
     ).rejects.toMatchObject({ code: 'CUT_STALE_VERSION' });
+  });
+
+  it('on change (null -> 55) writes exactly one UPDATE (+version bump), one audit, one outbox', async () => {
+    const repo = makeRepoForSetSheet({ status: 'draft', version: 3, current: null, sheetExists: true });
+    await repo.setSheetMaterial({ currentUser: anyUser, cutJobId: 9, sheetMaterialTypeId: 55, version: 3 } as SetCutJobSheetMaterialCommand);
+    expect(repo.updateCalls).toHaveLength(1);
+    // the UPDATE both sets the column and bumps version in one statement
+    expect(repo.updateCalls[0].replace(/\s+/g, ' ')).toContain('version = version + 1');
+    expect(repo.auditCalls).toHaveLength(1);
+    expect(repo.outboxCalls).toHaveLength(1);
   });
 });

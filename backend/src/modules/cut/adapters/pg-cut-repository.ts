@@ -123,6 +123,7 @@ interface CutJobLockRow extends QueryResultRow {
   pdf_prewarm_state: string;
   params: Record<string, unknown> | null;
   param_profile_id: string | number | null;
+  sheet_material_type_id: string | number | null;
 }
 
 interface CalcItemRow extends QueryResultRow {
