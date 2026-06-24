@@ -30,6 +30,12 @@ describe('keep-alive policy', () => {
     expect(next.has('/orders')).toBe(true);
     expect(next.has('/clients/edit/3')).toBe(false); // clean + inactive → evicted
   });
+  it('evicts active clean dirty-only entry so outlet is not rendered twice', () => {
+    const cache = new Set(['/orders/edit/42']);
+    const tabs = [{ key: '/orders/edit/42', dirty: false }];
+    const next = nextKeepAliveCache(cache, { activeKey: '/orders/edit/42', tabs });
+    expect(next.has('/orders/edit/42')).toBe(false);
+  });
   it('drops entries whose tab was closed', () => {
     const cache = new Set(['/orders', '/clients/edit/3']);
     const next = nextKeepAliveCache(cache, { activeKey: '/orders', tabs: [{ key: '/orders', dirty: false }] });

@@ -21,7 +21,6 @@ export const nextKeepAliveCache = (cache: Set<string>, { activeKey, tabs }: Cach
   for (const key of cache) {
     const tab = open.get(key);
     if (!tab) continue;                               // tab closed → drop
-    if (key === activeKey) { next.add(key); continue; } // active always retained
     if (isKeepAliveEligible(key, { dirty: tab.dirty })) next.add(key);
   }
   // ensure the active eligible key is present

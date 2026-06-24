@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-06-24",
+    title: "Карточка заказа: переход к редактированию",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Исправлено дублирование формы редактирования заказа после двойного клика по строке детали в карточке просмотра.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-06-24",
     title: "Присадки: быстрое создание и карточка",
     services: ["ERP"],
     repositories: ["repo_erp"],
