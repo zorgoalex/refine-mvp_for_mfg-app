@@ -5853,6 +5853,50 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/{cutJobId}/sheet-material:
+    patch:
+      tags:
+        - CutJobs
+      operationId: setCutJobSheetMaterial
+      summary: Set the sheet variant for a job
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sheetMaterialTypeId
+                - version
+              properties:
+                sheetMaterialTypeId:
+                  type: integer
+                  nullable: true
+                version:
+                  type: integer
+                  minimum: 0
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex.png}:
     get:
       tags:

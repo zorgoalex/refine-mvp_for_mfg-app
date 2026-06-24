@@ -21,6 +21,7 @@ import type {
   RenderSheetPngQuery,
   RenderSheetSvgQuery,
   SetCutJobProfileCommand,
+  SetCutJobSheetMaterialCommand,
   SetPdfPrewarmStateQuery,
 } from './cut-command.types';
 
@@ -129,6 +130,11 @@ export class CutService {
   async setProfile(command: SetCutJobProfileCommand) {
     this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
     return this.ports.cut.setProfile(command);
+  }
+
+  async setSheetMaterial(command: SetCutJobSheetMaterialCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.setSheetMaterial(command);
   }
 
   private require(
