@@ -86,7 +86,11 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         }}
         onRow={(record) => ({
           onDoubleClick: () => {
-            show("doweling_orders", record.doweling_order_id);
+            // Navigate via the resource that actually owns the show route
+            // ("doweling_orders_view" → /doweling-orders/show/:id). The bare "doweling_orders"
+            // resource has no show route, so show(...) silently no-ops (the prior edit handler
+            // was broken the same way).
+            show("doweling_orders_view", record.doweling_order_id);
           },
         })}
       >

@@ -20,7 +20,10 @@ describe('doweling show card', () => {
 describe('doweling list', () => {
   it('opens the SHOW card on row double-click (not edit)', () => {
     expect(list).toContain('const { show } = useNavigation()');
-    expect(list).toMatch(/onDoubleClick:[\s\S]*?show\("doweling_orders"/);
-    expect(list).not.toMatch(/onDoubleClick:[\s\S]*?edit\("doweling_orders"/);
+    // must target "doweling_orders_view" (owns show:/doweling-orders/show/:id); the bare
+    // "doweling_orders" resource has no show route → navigation would silently no-op.
+    expect(list).toMatch(/onDoubleClick:[\s\S]*?show\("doweling_orders_view"/);
+    expect(list).not.toMatch(/show\("doweling_orders",/);
+    expect(list).not.toMatch(/onDoubleClick:[\s\S]*?edit\(/);
   });
 });
