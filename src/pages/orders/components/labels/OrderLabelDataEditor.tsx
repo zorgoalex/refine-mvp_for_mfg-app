@@ -24,6 +24,9 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
   const [dirtyDetailIds, setDirtyDetailIds] = useState<Set<number>>(new Set());
   const labelDataDirty = dirtyDetailIds.size > 0;
   const [loading, setLoading] = useState(false);
+  const [latestPreviewSvg, setLatestPreviewSvg] = useState<string | null>(null);
+  const [latestPreviewLoading, setLatestPreviewLoading] = useState(false);
+  const [latestPreviewRefreshKey, setLatestPreviewRefreshKey] = useState(0);
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
     [templateId, templates],
@@ -60,6 +63,42 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
       .catch(() => message.error('Не удалось загрузить данные бирок'))
       .finally(() => setLoading(false));
   }, [orderId, templateId]);
+
+  useEffect(() => {
+    const firstDetailId = data?.details[0]?.detailId;
+    if (!orderId || !firstDetailId) {
+      setLatestPreviewSvg(null);
+      return;
+    }
+    let cancelled = false;
+    setLatestPreviewLoading(true);
+    labelsApi.getLatest(orderId)
+      .then(async (latest) => {
+        try {
+          const preview = await labelsApi.previewOrderLabels(orderId, {
+            templateId: latest.templateId,
+            templateVersion: latest.templateVersion,
+            detailFilters: { detailIds: [firstDetailId] },
+          });
+          if (!cancelled) {
+            setLatestPreviewSvg(preview.svgPages[0] ?? latest.svgPages[0] ?? null);
+          }
+        } catch {
+          if (!cancelled) {
+            setLatestPreviewSvg(latest.svgPages[0] ?? null);
+          }
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLatestPreviewSvg(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLatestPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [data, latestPreviewRefreshKey, orderId]);
 
   const save = async () => {
     if (!orderId || !data || !templateId || isOrderDirty) return;
@@ -106,6 +145,15 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
 
   return (
     <Card size="small" title="Бирки">
+      <style>{`
+        .order-label-inline-preview-fit svg {
+          display: block;
+          max-width: 100%;
+          max-height: 260px;
+          width: auto;
+          height: auto;
+        }
+      `}</style>
       <Space direction="vertical" style={{ width: '100%' }} size={12}>
         {isOrderDirty && <Alert type="warning" showIcon message="Сначала сохраните заказ" />}
         {labelDataDirty && <Alert type="warning" showIcon message="Сначала сохраните данные бирок" />}
@@ -130,8 +178,31 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
             compact
             initialDetailId={selectedDetailId}
             detailOptions={detailPreviewOptions}
+            onGenerated={() => setLatestPreviewRefreshKey((current) => current + 1)}
           />
         </Space>
+        {(latestPreviewSvg || latestPreviewLoading) && (
+          <Space direction="vertical" size={6} style={{ width: '100%' }}>
+            <Text type="secondary">Превью последней генерации: первая позиция</Text>
+            {latestPreviewLoading ? (
+              <Text type="secondary">Загрузка превью...</Text>
+            ) : (
+              <div
+                className="order-label-inline-preview-fit"
+                style={{
+                  alignItems: 'center',
+                  border: '1px solid #d9d9d9',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  minHeight: 180,
+                  overflow: 'hidden',
+                  padding: 12,
+                }}
+                dangerouslySetInnerHTML={{ __html: latestPreviewSvg ?? '' }}
+              />
+            )}
+          </Space>
+        )}
         {selectedDetailId && (
           <Text type="secondary">Выбрана для предпросмотра: {detailPreviewOptions.find((detail) => detail.detailId === selectedDetailId)?.label}</Text>
         )}

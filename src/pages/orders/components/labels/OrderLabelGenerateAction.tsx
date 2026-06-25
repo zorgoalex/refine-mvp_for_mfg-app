@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Modal, Select, Space, Typography, message } from 'antd';
 import { DownloadOutlined, TagsOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../../api/labelsApi';
@@ -39,9 +39,14 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   const [preview, setPreview] = useState<OrderLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const previewRequestRef = useRef(0);
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
     [templateId, templates],
+  );
+  const detailFilters = useMemo(
+    () => previewDetailId ? { detailIds: [previewDetailId] } : undefined,
+    [previewDetailId],
   );
 
   useEffect(() => {
@@ -57,24 +62,36 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
       .finally(() => setLoading(false));
   }, [initialDetailId, open]);
 
-  const detailFilters = previewDetailId ? { detailIds: [previewDetailId] } : undefined;
-
-  const runPreview = async () => {
+  const runPreview = useCallback(async () => {
     if (!selectedTemplate || isOrderDirty) return;
+    const requestId = previewRequestRef.current + 1;
+    previewRequestRef.current = requestId;
     setLoading(true);
     try {
-      setPreview(await labelsApi.previewOrderLabels(orderId, {
+      const nextPreview = await labelsApi.previewOrderLabels(orderId, {
         templateId: selectedTemplate.labelTemplateId,
         templateVersion: selectedTemplate.version,
         detailFilters,
         useBasisFields,
-      }));
+      });
+      if (previewRequestRef.current === requestId) {
+        setPreview(nextPreview);
+      }
     } catch {
-      message.error('Не удалось построить предпросмотр бирок');
+      if (previewRequestRef.current === requestId) {
+        message.error('Не удалось построить предпросмотр бирок');
+      }
     } finally {
-      setLoading(false);
+      if (previewRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
-  };
+  }, [detailFilters, isOrderDirty, orderId, selectedTemplate, useBasisFields]);
+
+  useEffect(() => {
+    if (!open || !selectedTemplate || isOrderDirty || generating) return;
+    void runPreview();
+  }, [generating, open, previewDetailId, runPreview, selectedTemplate, isOrderDirty, useBasisFields]);
 
   const runGenerate = async () => {
     if (!selectedTemplate || !preview || isOrderDirty) return;
@@ -144,7 +161,6 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             loading={loading}
             onChange={(value) => {
               setTemplateId(value);
-              setPreview(null);
             }}
             options={templates.map((template) => ({
               value: template.labelTemplateId,
@@ -158,7 +174,6 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
               value={previewDetailId ?? 0}
               onChange={(value) => {
                 setPreviewDetailId(value || null);
-                setPreview(null);
               }}
               options={[
                 { value: 0, label: 'Все позиции: показать первую бирку' },
@@ -171,7 +186,6 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             checked={useBasisFields}
             onChange={(event) => {
               setUseBasisFields(event.target.checked);
-              setPreview(null);
             }}
           >
             Использовать поля базис проекта

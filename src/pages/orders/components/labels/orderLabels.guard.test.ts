@@ -69,11 +69,27 @@ describe('order labels UI wiring', () => {
     expect(generateSrc).not.toMatch(/maxHeight: 220, overflow: 'auto'/);
   });
 
+  it('updates modal preview automatically when preview inputs change', () => {
+    expect(generateSrc).toMatch(/useCallback/);
+    expect(generateSrc).toMatch(/void runPreview\(\)/);
+    expect(generateSrc).toMatch(/previewDetailId/);
+    expect(generateSrc).toMatch(/useBasisFields/);
+    expect(generateSrc).not.toMatch(/setPreview\(null\);\s*\n\s*}\s*}\s*options/s);
+  });
+
   it('lets order label generation choose whether Basis project/data columns feed the preview', () => {
     expect(generateSrc).toMatch(/Использовать поля базис проекта/);
     expect(generateSrc).toMatch(/useBasisFields/);
     expect(generateSrc).toMatch(/setUseBasisFields\(event\.target\.checked\)/);
     expect(generateSrc).toMatch(/labelsApi\.previewOrderLabels[\s\S]*useBasisFields/);
     expect(generateSrc).toMatch(/labelsApi\.generateOrderLabels[\s\S]*useBasisFields/);
+  });
+
+  it('shows latest generated label template preview inside the order edit labels block', () => {
+    expect(dataEditorSrc).toMatch(/labelsApi\.getLatest\(orderId\)/);
+    expect(dataEditorSrc).toMatch(/labelsApi\.previewOrderLabels\(orderId,\s*\{/);
+    expect(dataEditorSrc).toMatch(/data\?\.details\[0\]\?\.detailId/);
+    expect(dataEditorSrc).toMatch(/Превью последней генерации: первая позиция/);
+    expect(dataEditorSrc).toMatch(/order-label-inline-preview-fit/);
   });
 });
