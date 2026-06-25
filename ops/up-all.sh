@@ -167,7 +167,7 @@ case "$cmd" in
     echo "  1. ensure-build-repos (freecut + svgdxf)"
     echo "  2. check-env$([ $DO_CHECK -eq 0 ] && echo ' (skipped)')"
     echo "  3. twenty preflight (data/twenty/server-storage, uid 1000)"
-    echo "  4. compose up -d (whole complex)"
+    echo "  4. compose up -d --build (whole complex; builds source images)"
     echo "  5. migrate: $MIGRATE (apply-migrations.sh)"
     echo "  6. hasura: $HASURA"
     echo "  7. smoke$([ $DO_SMOKE -eq 0 ] && echo ' (skipped)')"
@@ -178,7 +178,11 @@ case "$cmd" in
     if [ $DO_CHECK -eq 1 ]; then bash "$SCRIPT_PATH/check-env.sh" --env-file "$ENV_FILE" --compose-file "$VPS_FILE"; fi
     twenty_preflight
     preflight
-    compose up -d
+    # --build: first-time bring-up must BUILD the source images (backend, freecut,
+    # cad-service). cad-service has an explicit `image: cad-service:local`, so a
+    # plain `up` would try to PULL that tag (registry has no cad-service:local →
+    # "pull access denied") instead of building it.
+    compose up -d --build
 
     case "$MIGRATE" in
       apply|baseline) bash "$SCRIPT_PATH/apply-migrations.sh" "$MIGRATE" --yes ;;
