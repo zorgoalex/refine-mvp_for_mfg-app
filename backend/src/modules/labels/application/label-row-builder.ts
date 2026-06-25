@@ -13,6 +13,7 @@ export interface LabelRow {
 
 export function buildLabelRows(input: {
   orderName: string | null;
+  orderFields?: Record<string, unknown>;
   template: Pick<LabelTemplateDto, 'customFieldSchema'>;
   details: OrderLabelDataDetailDto[];
   useBasisFields?: boolean;
@@ -28,7 +29,7 @@ export function buildLabelRows(input: {
         orderId: detail.orderId,
         copyIndex,
         copyCount,
-        values: buildBaseValues(input.orderName, detail, input.useBasisFields ?? true),
+        values: buildBaseValues(input.orderName, input.orderFields ?? {}, input.template.customFieldSchema, detail, input.useBasisFields ?? true),
       });
     }
   }
@@ -50,6 +51,8 @@ export function hashLabelRows(rows: LabelRow[]): string {
 
 function buildBaseValues(
   orderName: string | null,
+  orderFields: Record<string, unknown>,
+  customFieldSchema: Record<string, unknown>,
   detail: OrderLabelDataDetailDto,
   useBasisFields: boolean,
 ): Record<string, string | number | boolean | null> {
@@ -83,10 +86,28 @@ function buildBaseValues(
   for (const [key, value] of Object.entries(detail.bazisFields)) {
     values[key] = normalizeValue(value);
   }
+  for (const [key, value] of Object.entries(detail.detailFields)) {
+    values[`detail.${key}`] = normalizeValue(value);
+  }
+  for (const [key, value] of Object.entries(orderFields)) {
+    values[`order.${key}`] = normalizeValue(value);
+  }
+  for (const [key, schema] of Object.entries(customFieldSchema)) {
+    const sourceField = readCustomSourceField(schema);
+    if (sourceField && values[sourceField] !== undefined) {
+      values[key] = values[sourceField];
+    }
+  }
   for (const [key, value] of Object.entries(detail.customFields)) {
     values[key] = normalizeValue(value);
   }
   return values;
+}
+
+function readCustomSourceField(schema: unknown): string | null {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return null;
+  const value = (schema as Record<string, unknown>).sourceField;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function normalizeValue(value: unknown): string | number | boolean | null {

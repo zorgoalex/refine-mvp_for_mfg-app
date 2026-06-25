@@ -2,7 +2,7 @@ export type LabelFieldType = 'string' | 'number' | 'boolean' | 'date';
 
 export interface LabelFieldCatalogItem {
   id: string;
-  source: 'bazis' | 'dynamic';
+  source: 'bazis' | 'dynamic' | 'detail' | 'order';
   sourceColumn: string | null;
   label: string;
   type: LabelFieldType;
@@ -186,6 +186,79 @@ export const DYNAMIC_LABEL_FIELDS: readonly LabelFieldCatalogItem[] = [
   },
 ];
 
+const DETAIL_FIELD_LABELS: Record<string, string> = {
+  detail_id: 'ID детали',
+  order_id: 'ID заказа',
+  detail_number: 'Номер/позиция детали',
+  detail_name: 'Название детали',
+  height: 'Высота',
+  width: 'Ширина',
+  quantity: 'Количество',
+  area: 'Площадь',
+  material_id: 'ID материала',
+  sheet_material_type_id: 'ID листового материала',
+  material_name: 'Материал',
+  milling_type_id: 'ID фрезеровки',
+  edge_type_id: 'ID кромки',
+  film_id: 'ID пленки',
+  milling_cost_per_sqm: 'Фрезеровка за м2',
+  detail_cost: 'Стоимость детали',
+  priority: 'Приоритет',
+  production_status_id: 'ID статуса производства',
+  joint_order_id: 'ID объединенного заказа',
+  note: 'Примечание детали',
+  link_cutting_file: 'Файл раскроя',
+  link_cutting_image_file: 'Картинка раскроя',
+  link_cad_file: 'CAD файл',
+  link_pdf_file: 'PDF файл',
+  ref_key_1c: 'Ключ 1C детали',
+  basis_project: 'Базис проект',
+  basis_data: 'Базис данные',
+};
+
+const ORDER_FIELD_LABELS: Record<string, string> = {
+  order_id: 'ID заказа',
+  order_name: 'Номер заказа',
+  order_name_numeric: 'Номер заказа числом',
+  client_id: 'ID клиента',
+  client_name: 'Клиент',
+  order_date: 'Дата заказа',
+  priority: 'Приоритет',
+  doweling_order_id: 'ID присадки',
+  doweling_order_name: 'Присадка',
+  design_engineer: 'Конструктор',
+  completion_date: 'Дата выполнения',
+  planned_completion_date: 'Плановая дата выполнения',
+  order_status_name: 'Статус заказа',
+  payment_status_name: 'Статус оплаты',
+  production_status_name: 'Статус производства',
+  issue_date: 'Дата выдачи',
+  total_amount: 'Сумма',
+  final_amount: 'Итоговая сумма',
+  discount: 'Скидка',
+  surcharge: 'Наценка',
+  paid_amount: 'Оплачено',
+  payment_date: 'Дата оплаты',
+  parts_count: 'Количество деталей',
+  total_area: 'Площадь итого',
+  milling_type_name: 'Фрезеровка',
+  edge_type_name: 'Кромка',
+  film_name: 'Пленка',
+  material_name: 'Материал заказа',
+  notes: 'Примечание заказа',
+  link_cutting_file: 'Файл раскроя заказа',
+  link_cutting_image_file: 'Картинка раскроя заказа',
+  order_ref_key_1c: 'Ключ 1C заказа',
+  client_ref_key_1c: 'Ключ 1C клиента',
+  manager_id: 'ID менеджера',
+  created_by: 'Создал',
+  edited_by: 'Изменил',
+  created_at: 'Создан',
+  updated_at: 'Обновлен',
+  version: 'Версия',
+  sheet_material_type_id: 'ID листового материала заказа',
+};
+
 export const BAZIS_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = BAZIS_COLUMN_LABELS.map((label, index) => ({
   id: `bazis.${SEMANTIC_IDS[label] ?? `col_${String(index + 1).padStart(3, '0')}`}`,
   source: 'bazis',
@@ -195,8 +268,28 @@ export const BAZIS_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = BAZIS_COLUM
   category: inferCategory(label),
 }));
 
+export const DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(DETAIL_FIELD_LABELS).map(([column, label]) => ({
+  id: `detail.${column}`,
+  source: 'detail',
+  sourceColumn: column,
+  label,
+  type: inferViewFieldType(column),
+  category: 'Деталь',
+}));
+
+export const ORDER_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(ORDER_FIELD_LABELS).map(([column, label]) => ({
+  id: `order.${column}`,
+  source: 'order',
+  sourceColumn: column,
+  label,
+  type: inferViewFieldType(column),
+  category: 'Заказ',
+}));
+
 export const LABEL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = [
   ...BAZIS_FIELD_CATALOG,
+  ...DETAIL_FIELD_CATALOG,
+  ...ORDER_FIELD_CATALOG,
   ...DYNAMIC_LABEL_FIELDS,
 ] as const;
 
@@ -250,4 +343,14 @@ function inferCategory(label: string): string {
   if (label.includes('отв.') || label.includes('паз') || label.includes('выемок')) return 'Обработка';
   if (/^(Номер заказа|Примечание к заказу|Проект|Заказ модели|Имя модели|Артикул модели)/.test(label)) return 'Заказ';
   return 'Деталь';
+}
+
+function inferViewFieldType(column: string): LabelFieldType {
+  if (/(^|_)(id|count|amount|area|height|width|quantity|cost|priority|discount|surcharge|version|numeric)$/.test(column)) {
+    return 'number';
+  }
+  if (/(^|_)(date|created_at|updated_at)$/.test(column)) {
+    return 'date';
+  }
+  return 'string';
 }

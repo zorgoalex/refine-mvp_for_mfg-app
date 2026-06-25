@@ -101,6 +101,54 @@ describe('LabelsService', () => {
     expect(repo.createTemplate).toHaveBeenCalledOnce();
   });
 
+  it('accepts detail and order field bindings and custom field source mappings', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      customFieldSchema: {
+        'custom.client': { type: 'string', sourceField: 'order.client_name' },
+      },
+      elements: [
+        {
+          elementKey: 'detail-name',
+          kind: 'text',
+          sourceField: 'detail.detail_name',
+          xMm: 0,
+          yMm: 0,
+          widthMm: 20,
+          heightMm: 5,
+        },
+        {
+          elementKey: 'custom-client',
+          kind: 'text',
+          sourceField: 'custom.client',
+          xMm: 0,
+          yMm: 6,
+          widthMm: 20,
+          heightMm: 5,
+        },
+      ],
+    });
+
+    await service.createTemplate({ currentUser: templateManager, requestId: 'req-1', input });
+    expect(repo.createTemplate).toHaveBeenCalledOnce();
+  });
+
+  it('rejects custom field source mappings outside the label field catalog', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      customFieldSchema: {
+        'custom.bad': { type: 'string', sourceField: 'orders.raw_sql' },
+      },
+    });
+
+    await expect(
+      service.createTemplate({ currentUser: templateManager, requestId: 'req-1', input }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'LABEL_FIELD_BINDING_INVALID' });
+    expect(repo.createTemplate).not.toHaveBeenCalled();
+  });
+
   it('allows labels.view to read latest preview but requires labels.generate for ZIP export', async () => {
     const repo = fakeRepo();
     const service = new LabelsService({ repo });

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
-import { CopyOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../api/labelsApi';
 import type {
   LabelElementKind,
@@ -14,6 +14,7 @@ import { can } from '../../../utils/permissions';
 
 const { Text } = Typography;
 const EXPORT_FORMATS: LabelExportFormat[] = ['bmp', 'png', 'emf'];
+const CUSTOM_FIELD_TYPE_OPTIONS = ['string', 'number', 'boolean', 'date'].map((type) => ({ value: type, label: type }));
 const PREVIEW_FIELD_VALUES: Record<string, string> = {
   'bazis.order_number': '548-16мм МДФ',
   'bazis.detail_id': '2590',
@@ -44,6 +45,13 @@ interface BazisImportVariant {
   elements: LabelTemplateElement[];
   rowCount: number;
   templateFiles: string[];
+}
+
+interface CustomFieldSchemaRow {
+  fieldId: string;
+  label: string;
+  type: string;
+  sourceField: string | null;
 }
 
 export const LabelsConfigTab: React.FC = () => {
@@ -100,6 +108,21 @@ export const LabelsConfigTab: React.FC = () => {
   }, [form, selectedTemplate]);
 
   const fieldCategories = useMemo(() => new Set(fields.map((field) => field.category)).size, [fields]);
+  const customSchemaRows = useMemo(() => parseCustomSchemaRows(customSchemaText), [customSchemaText]);
+  const sourceFields = useMemo<LabelFieldCatalogItem[]>(
+    () => [
+      ...fields,
+      ...customSchemaRows.rows.map((row) => ({
+        id: row.fieldId,
+        source: 'dynamic' as const,
+        sourceColumn: null,
+        label: row.label || row.fieldId,
+        type: (CUSTOM_FIELD_TYPE_OPTIONS.some((option) => option.value === row.type) ? row.type : 'string') as LabelFieldCatalogItem['type'],
+        category: 'Кастомные',
+      })),
+    ],
+    [customSchemaRows.rows, fields],
+  );
 
   const startNew = () => {
     setSelectedTemplate(null);
@@ -222,6 +245,28 @@ export const LabelsConfigTab: React.FC = () => {
 
   const patchElement = (index: number, patch: Partial<LabelTemplateElement>) => {
     setElements((current) => current.map((element, i) => (i === index ? { ...element, ...patch } : element)));
+  };
+
+  const addCustomField = () => {
+    const schema = parseEditableCustomSchema(customSchemaText);
+    const fieldId = `custom.field_${Date.now()}`;
+    schema[fieldId] = { type: 'string', label: 'Новое поле', sourceField: 'detail.detail_name' };
+    setCustomSchemaText(JSON.stringify(schema, null, 2));
+  };
+
+  const patchCustomField = (fieldId: string, patch: Partial<CustomFieldSchemaRow>) => {
+    const schema = parseEditableCustomSchema(customSchemaText);
+    const current = normalizeCustomFieldSchemaEntry(schema[fieldId]);
+    const next = { ...current, ...patch };
+    if (!next.sourceField) delete next.sourceField;
+    schema[fieldId] = next;
+    setCustomSchemaText(JSON.stringify(schema, null, 2));
+  };
+
+  const deleteCustomField = (fieldId: string) => {
+    const schema = parseEditableCustomSchema(customSchemaText);
+    delete schema[fieldId];
+    setCustomSchemaText(JSON.stringify(schema, null, 2));
   };
 
   const moveElement = (elementKey: string, xMm: number, yMm: number) => {
@@ -369,7 +414,7 @@ export const LabelsConfigTab: React.FC = () => {
           widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
           heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
           elements={elements}
-          fields={fields}
+          fields={sourceFields}
           selectedElementKey={selectedElementKey}
           canDrag={false}
         />
@@ -408,6 +453,70 @@ export const LabelsConfigTab: React.FC = () => {
               <Form.Item label="Пользовательские поля JSON">
                 <Input.TextArea value={customSchemaText} onChange={(event) => setCustomSchemaText(event.target.value)} autoSize={{ minRows: 3, maxRows: 6 }} />
               </Form.Item>
+              <Table
+                rowKey="fieldId"
+                size="small"
+                pagination={false}
+                dataSource={customSchemaRows.rows}
+                title={() => (
+                  <Space wrap>
+                    <Text strong>Кастомные поля</Text>
+                    <Button size="small" icon={<PlusOutlined />} disabled={!canManage || !customSchemaRows.valid} onClick={addCustomField}>
+                      Поле
+                    </Button>
+                    {!customSchemaRows.valid && <Text type="danger">JSON некорректен</Text>}
+                  </Space>
+                )}
+                columns={[
+                  { title: 'Ключ', dataIndex: 'fieldId', width: 170 },
+                  {
+                    title: 'Название',
+                    width: 170,
+                    render: (_, row) => (
+                      <Input
+                        value={row.label}
+                        disabled={!canManage}
+                        onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })}
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Тип',
+                    width: 110,
+                    render: (_, row) => (
+                      <Select
+                        value={row.type}
+                        disabled={!canManage}
+                        style={{ width: '100%' }}
+                        options={CUSTOM_FIELD_TYPE_OPTIONS}
+                        onChange={(type) => patchCustomField(row.fieldId, { type })}
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Источник',
+                    width: 220,
+                    render: (_, row) => (
+                      <Select
+                        showSearch
+                        allowClear
+                        value={row.sourceField ?? undefined}
+                        disabled={!canManage}
+                        style={{ width: '100%' }}
+                        options={fields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+                        onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField: sourceField ?? null })}
+                      />
+                    ),
+                  },
+                  {
+                    title: '',
+                    width: 48,
+                    render: (_, row) => (
+                      <Button danger size="small" icon={<DeleteOutlined />} disabled={!canManage} onClick={() => deleteCustomField(row.fieldId)} />
+                    ),
+                  },
+                ]}
+              />
               <Space wrap>
                 <Button htmlType="submit" type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage}>
                   Сохранить шаблон
@@ -466,7 +575,7 @@ export const LabelsConfigTab: React.FC = () => {
                     disabled={!canManage || element.kind !== 'text'}
                     style={{ width: '100%' }}
                     onChange={(sourceField) => patchElement(index, { sourceField: sourceField ?? null })}
-                    options={fields.map((field) => ({ value: field.id, label: field.label }))}
+                    options={sourceFields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
                   />
                 ),
               },
@@ -503,7 +612,7 @@ export const LabelsConfigTab: React.FC = () => {
               widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
               heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
               elements={elements}
-              fields={fields}
+              fields={sourceFields}
               selectedElementKey={selectedElementKey}
               canDrag={canManage}
               onSelectElement={setSelectedElementKey}
@@ -809,6 +918,42 @@ function buildStandardBazisElements(): LabelTemplateElement[] {
     text('date-value', 'date.today', null, 2, 80, 29, 7, 10, 11),
     text('counter-value', 'label.counter_text', null, 41, 80, 38, 7, 10, 12),
   ];
+}
+
+function parseCustomSchemaRows(value: string): { valid: boolean; rows: CustomFieldSchemaRow[] } {
+  try {
+    const schema = parseCustomSchema(value);
+    return {
+      valid: true,
+      rows: Object.entries(schema).map(([fieldId, entry]) => ({
+        fieldId,
+        ...normalizeCustomFieldSchemaEntry(entry),
+      })),
+    };
+  } catch {
+    return { valid: false, rows: [] };
+  }
+}
+
+function parseEditableCustomSchema(value: string): Record<string, unknown> {
+  try {
+    return parseCustomSchema(value);
+  } catch {
+    message.error('Сначала исправьте JSON пользовательских полей');
+    return {};
+  }
+}
+
+function normalizeCustomFieldSchemaEntry(entry: unknown): Omit<CustomFieldSchemaRow, 'fieldId'> {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return { label: '', type: 'string', sourceField: null };
+  }
+  const value = entry as Record<string, unknown>;
+  return {
+    label: typeof value.label === 'string' ? value.label : '',
+    type: typeof value.type === 'string' ? value.type : 'string',
+    sourceField: typeof value.sourceField === 'string' && value.sourceField ? value.sourceField : null,
+  };
 }
 
 function parseCustomSchema(value: string): Record<string, unknown> {

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   BAZIS_COLUMN_LABELS,
   BAZIS_FIELD_CATALOG,
+  DETAIL_FIELD_CATALOG,
   DYNAMIC_LABEL_FIELDS,
+  ORDER_FIELD_CATALOG,
   isSupportedFieldBinding,
   LABEL_FIELD_CATALOG,
 } from './bazis-field-catalog';
@@ -31,6 +33,21 @@ describe('Bazis label field catalog', () => {
       'label.counter_total',
       'label.counter_text',
     ]);
+  });
+
+  it('includes generic order and detail view fields for template mappings', () => {
+    expect(DETAIL_FIELD_CATALOG).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'detail.detail_name', source: 'detail', sourceColumn: 'detail_name' }),
+        expect.objectContaining({ id: 'detail.material_name', source: 'detail', sourceColumn: 'material_name' }),
+      ]),
+    );
+    expect(ORDER_FIELD_CATALOG).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'order.order_name', source: 'order', sourceColumn: 'order_name' }),
+        expect.objectContaining({ id: 'order.client_name', source: 'order', sourceColumn: 'client_name' }),
+      ]),
+    );
   });
 
   it('uses one catalog source for field binding validation', () => {

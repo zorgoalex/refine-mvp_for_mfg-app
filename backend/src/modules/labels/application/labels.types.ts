@@ -72,6 +72,8 @@ export interface OrderLabelDataDetailDto {
   note: string | null;
   basisProject: string | null;
   basisData: string | null;
+  detailFields: Record<string, unknown>;
+  orderFields: Record<string, unknown>;
   bazisFields: Record<string, unknown>;
   customFields: Record<string, unknown>;
   customFieldSchemaSnapshot: Record<string, unknown>;

@@ -80,14 +80,15 @@ interface OrderLabelDetailRow extends QueryResultRow {
   note: string | null;
   basis_project: string | null;
   basis_data: string | null;
+  detail_fields: Record<string, unknown> | null;
   bazis_fields: Record<string, unknown> | null;
   custom_fields: Record<string, unknown> | null;
   custom_field_schema_snapshot: Record<string, unknown> | null;
   version: string | number | null;
 }
 
-interface OrderNameRow extends QueryResultRow {
-  order_name: string | null;
+interface OrderFieldsRow extends QueryResultRow {
+  order_fields: Record<string, unknown> | null;
 }
 
 interface GenerationRow extends QueryResultRow {
@@ -437,12 +438,13 @@ export class PgLabelsRepository implements LabelsPort {
     const detailIds = command.input.detailFilters?.detailIds ?? [];
     const useBasisFields = command.input.useBasisFields ?? true;
     await assertDetailsBelongToOrder(this.database, command.orderId, detailIds);
-    const orderName = await readOrderName(this.database, command.orderId);
+    const orderFields = await readOrderFields(this.database, command.orderId);
+    const orderName = readOrderNameFromFields(orderFields);
     const details = filterDetails(
       await readOrderLabelDetails(this.database, command.orderId, template.labelTemplateId, template.customFieldSchema),
       detailIds,
     );
-    const rows = buildLabelRows({ orderName, template, details, useBasisFields });
+    const rows = buildLabelRows({ orderName, orderFields, template, details, useBasisFields });
     const rowHash = hashLabelRows(rows);
     const svgPages = renderSvgPages(template, rows).pages;
     return {
@@ -471,12 +473,13 @@ export class PgLabelsRepository implements LabelsPort {
       const useBasisFields = command.input.useBasisFields ?? true;
       await assertOrderExists(tx, command.orderId);
       await assertDetailsBelongToOrder(tx, command.orderId, detailIds);
-      const orderName = await readOrderName(tx, command.orderId);
+      const orderFields = await readOrderFields(tx, command.orderId);
+      const orderName = readOrderNameFromFields(orderFields);
       const details = filterDetails(
         await readOrderLabelDetails(tx, command.orderId, template.labelTemplateId, template.customFieldSchema),
         detailIds,
       );
-      const rows = buildLabelRows({ orderName, template, details, useBasisFields });
+      const rows = buildLabelRows({ orderName, orderFields, template, details, useBasisFields });
       const rowHash = hashLabelRows(rows);
       const token = decodePreviewToken(command.input.previewToken);
       if (
@@ -679,9 +682,19 @@ function assertTemplateVersion(current: number, expected: number): void {
   }
 }
 
-async function readOrderName(client: DatabaseClient, orderId: number): Promise<string | null> {
-  const result = await client.query<OrderNameRow>('SELECT order_name FROM orders WHERE order_id=$1 AND delete_flag=false', [orderId]);
-  return result.rows[0]?.order_name ?? null;
+async function readOrderFields(client: DatabaseClient, orderId: number): Promise<Record<string, unknown>> {
+  const result = await client.query<OrderFieldsRow>(
+    `SELECT row_to_json(o)::jsonb AS order_fields
+     FROM orders_view o
+     WHERE o.order_id=$1`,
+    [orderId],
+  );
+  return result.rows[0]?.order_fields ?? {};
+}
+
+function readOrderNameFromFields(orderFields: Record<string, unknown>): string | null {
+  const value = orderFields.order_name;
+  return value == null ? null : String(value);
 }
 
 function filterDetails(details: OrderLabelDataDetailDto[], detailIds: number[]): OrderLabelDataDetailDto[] {
@@ -866,6 +879,7 @@ async function readOrderLabelDetails(
   const result = await client.query<OrderLabelDetailRow>(
     `SELECT od.detail_id, od.order_id, od.detail_number, od.detail_name, od.height, od.width, od.quantity,
             od.material_name, od.note, od.basis_project, od.basis_data,
+            row_to_json(od)::jsonb AS detail_fields,
             ld.bazis_fields, ld.custom_fields, ld.custom_field_schema_snapshot, ld.version
      FROM order_details_view od
      LEFT JOIN order_label_detail_data ld
@@ -897,6 +911,8 @@ function mapOrderLabelDetail(
     note: row.note,
     basisProject: row.basis_project,
     basisData: row.basis_data,
+    detailFields: row.detail_fields ?? {},
+    orderFields: {},
     bazisFields: row.bazis_fields ?? {},
     customFields: row.custom_fields ?? {},
     customFieldSchemaSnapshot: snapshot,

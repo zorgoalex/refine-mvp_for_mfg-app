@@ -3,7 +3,7 @@ export type LabelElementKind = 'text' | 'line' | 'rect';
 
 export interface LabelFieldCatalogItem {
   id: string;
-  source: 'bazis' | 'dynamic';
+  source: 'bazis' | 'dynamic' | 'detail' | 'order';
   sourceColumn: string | null;
   label: string;
   type: 'string' | 'number' | 'boolean' | 'date';
@@ -71,6 +71,8 @@ export interface OrderLabelData {
     note: string | null;
     basisProject: string | null;
     basisData: string | null;
+    detailFields: Record<string, unknown>;
+    orderFields: Record<string, unknown>;
     bazisFields: Record<string, unknown>;
     customFields: Record<string, unknown>;
     version: number | null;

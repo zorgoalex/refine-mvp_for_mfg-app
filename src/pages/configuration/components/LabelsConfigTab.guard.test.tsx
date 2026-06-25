@@ -34,6 +34,9 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/addElement\('line'\)/);
     expect(tabSrc).toMatch(/addElement\('rect'\)/);
     expect(tabSrc).toMatch(/customFieldSchema/);
+    expect(tabSrc).toMatch(/Кастомные поля/);
+    expect(tabSrc).toMatch(/sourceField/);
+    expect(tabSrc).toMatch(/detail\.detail_name/);
     expect(tabSrc).toMatch(/elements,/);
   });
 

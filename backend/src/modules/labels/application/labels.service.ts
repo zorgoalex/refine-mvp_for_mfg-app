@@ -2,7 +2,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
-import { isSupportedFieldBinding } from './bazis-field-catalog';
+import { isBuiltInLabelFieldId, isSupportedFieldBinding } from './bazis-field-catalog';
 import { LABEL_FIELD_CATALOG, type LabelFieldCatalogItem } from './bazis-field-catalog';
 import type {
   CreateLabelTemplateCommand,
@@ -133,8 +133,20 @@ export class LabelsService {
 
 export function validateTemplateInput(input: LabelTemplateInput): void {
   const customFieldSchema = input.customFieldSchema;
+  validateCustomFieldMappings(customFieldSchema);
   for (const [index, element] of input.elements.entries()) {
     validateElementFieldBinding(element, customFieldSchema, index);
+  }
+}
+
+function validateCustomFieldMappings(customFieldSchema: Record<string, unknown>): void {
+  for (const schema of Object.values(customFieldSchema)) {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) continue;
+    const sourceField = (schema as Record<string, unknown>).sourceField;
+    if (sourceField == null || sourceField === '') continue;
+    if (typeof sourceField !== 'string' || !isBuiltInLabelFieldId(sourceField)) {
+      throw new LabelFieldBindingError(String(sourceField));
+    }
   }
 }
 

@@ -74,6 +74,52 @@ describe('label row builder', () => {
       'custom.operator_note': 'ok',
     });
   });
+
+  it('exposes generic detail and order fields for template bindings', () => {
+    const [row] = buildLabelRows({
+      orderName: 'ERP-548',
+      orderFields: { order_name: 'ERP-548', client_name: 'Client A', final_amount: 12345 },
+      today: '2026-06-24',
+      template: { customFieldSchema: {} },
+      details: [
+        detail({
+          detailFields: { detail_name: 'ERP фасад', priority: 8, material_name: 'ЛДСП' },
+        }),
+      ],
+    });
+
+    expect(row.values).toMatchObject({
+      'detail.detail_name': 'ERP фасад',
+      'detail.priority': 8,
+      'detail.material_name': 'ЛДСП',
+      'order.order_name': 'ERP-548',
+      'order.client_name': 'Client A',
+      'order.final_amount': 12345,
+    });
+  });
+
+  it('maps custom fields from detail/order source fields unless manually overridden', () => {
+    const [row] = buildLabelRows({
+      orderName: 'ERP-548',
+      orderFields: { client_name: 'Client A' },
+      today: '2026-06-24',
+      template: {
+        customFieldSchema: {
+          'custom.client': { type: 'string', sourceField: 'order.client_name' },
+          'custom.detail_priority': { type: 'number', sourceField: 'detail.priority' },
+        },
+      },
+      details: [
+        detail({
+          detailFields: { priority: 8 },
+          customFields: { 'custom.client': 'Manual client' },
+        }),
+      ],
+    });
+
+    expect(row.values['custom.client']).toBe('Manual client');
+    expect(row.values['custom.detail_priority']).toBe(8);
+  });
 });
 
 function detail(overrides: Partial<OrderLabelDataDetailDto> = {}): OrderLabelDataDetailDto {
@@ -89,6 +135,8 @@ function detail(overrides: Partial<OrderLabelDataDetailDto> = {}): OrderLabelDat
     note: 'note',
     basisProject: null,
     basisData: null,
+    detailFields: {},
+    orderFields: {},
     bazisFields: {},
     customFields: {},
     customFieldSchemaSnapshot: {},
