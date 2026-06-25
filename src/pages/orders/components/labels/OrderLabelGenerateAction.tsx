@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Modal, Select, Space, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Modal, Select, Space, Typography, message } from 'antd';
 import { DownloadOutlined, TagsOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../../api/labelsApi';
 import type { LabelTemplate, OrderLabelsPreview } from '../../../../api/types/labelsApi.types';
@@ -35,6 +35,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [previewDetailId, setPreviewDetailId] = useState<number | null>(initialDetailId);
+  const [useBasisFields, setUseBasisFields] = useState(true);
   const [preview, setPreview] = useState<OrderLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -66,6 +67,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         templateId: selectedTemplate.labelTemplateId,
         templateVersion: selectedTemplate.version,
         detailFilters,
+        useBasisFields,
       }));
     } catch {
       message.error('Не удалось построить предпросмотр бирок');
@@ -84,6 +86,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         previewToken: preview.previewToken,
         exportFormats: selectedTemplate.defaultExportFormats,
         detailFilters,
+        useBasisFields,
         idempotencyKey: `order-labels-generate-${orderId}-${Date.now()}`,
       });
       const downloaded = await labelsApi.downloadGeneration(orderId, generation.generationId);
@@ -164,6 +167,15 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
               placeholder="Позиция для предпросмотра"
             />
           )}
+          <Checkbox
+            checked={useBasisFields}
+            onChange={(event) => {
+              setUseBasisFields(event.target.checked);
+              setPreview(null);
+            }}
+          >
+            Использовать поля базис проекта
+          </Checkbox>
           {preview && (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary">Бирок: {preview.labelCount}. Показана первая.</Text>

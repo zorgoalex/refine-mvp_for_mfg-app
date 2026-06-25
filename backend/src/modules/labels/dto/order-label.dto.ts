@@ -33,6 +33,7 @@ export const previewOrderLabelsSchema = z
     templateId: z.number().int().positive(),
     templateVersion: z.number().int().min(1),
     detailFilters: detailFiltersSchema.optional(),
+    useBasisFields: z.boolean().optional().default(true),
   })
   .strict();
 

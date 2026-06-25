@@ -68,4 +68,12 @@ describe('order labels UI wiring', () => {
     expect(generateSrc).toMatch(/order-label-preview-fit/);
     expect(generateSrc).not.toMatch(/maxHeight: 220, overflow: 'auto'/);
   });
+
+  it('lets order label generation choose whether Basis project/data columns feed the preview', () => {
+    expect(generateSrc).toMatch(/Использовать поля базис проекта/);
+    expect(generateSrc).toMatch(/useBasisFields/);
+    expect(generateSrc).toMatch(/setUseBasisFields\(event\.target\.checked\)/);
+    expect(generateSrc).toMatch(/labelsApi\.previewOrderLabels[\s\S]*useBasisFields/);
+    expect(generateSrc).toMatch(/labelsApi\.generateOrderLabels[\s\S]*useBasisFields/);
+  });
 });

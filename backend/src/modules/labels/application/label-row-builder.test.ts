@@ -37,7 +37,7 @@ describe('label row builder', () => {
     });
 
     expect(row.values).toMatchObject({
-      'bazis.order_number': '548',
+      'bazis.order_number': 'Project A',
       'bazis.position': '7',
       'bazis.designation': 'D-01',
       'bazis.name': 'ERP name',
@@ -46,6 +46,33 @@ describe('label row builder', () => {
       'custom.operator_note': 'ok',
     });
     expect(hashLabelRows([row])).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('can ignore Basis project/data columns and use ordinary order detail fields', () => {
+    const [row] = buildLabelRows({
+      orderName: 'ERP-548',
+      today: '2026-06-24',
+      template: { customFieldSchema: {} },
+      useBasisFields: false,
+      details: [
+        detail({
+          detailNumber: 'ERP-7',
+          detailName: 'ERP фасад',
+          basisProject: 'BASIS-548',
+          basisData: '9 B-01 - Basis фасад',
+          customFields: { 'custom.operator_note': 'ok' },
+        }),
+      ],
+    });
+
+    expect(row.values).toMatchObject({
+      'bazis.order_number': 'ERP-548',
+      'bazis.position': 'ERP-7',
+      'bazis.designation': '',
+      'bazis.name': 'ERP фасад',
+      'bazis.project': '',
+      'custom.operator_note': 'ok',
+    });
   });
 });
 

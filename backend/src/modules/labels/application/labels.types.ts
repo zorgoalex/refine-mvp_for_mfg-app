@@ -109,6 +109,7 @@ export interface PreviewOrderLabelsInput {
   templateId: number;
   templateVersion: number;
   detailFilters?: LabelDetailFilterInput;
+  useBasisFields?: boolean;
 }
 
 export interface GenerateOrderLabelsInput extends PreviewOrderLabelsInput {

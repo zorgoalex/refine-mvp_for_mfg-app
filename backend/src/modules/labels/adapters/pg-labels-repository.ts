@@ -435,13 +435,14 @@ export class PgLabelsRepository implements LabelsPort {
     assertTemplateVersion(template.version, command.input.templateVersion);
     await assertOrderExists(this.database, command.orderId);
     const detailIds = command.input.detailFilters?.detailIds ?? [];
+    const useBasisFields = command.input.useBasisFields ?? true;
     await assertDetailsBelongToOrder(this.database, command.orderId, detailIds);
     const orderName = await readOrderName(this.database, command.orderId);
     const details = filterDetails(
       await readOrderLabelDetails(this.database, command.orderId, template.labelTemplateId, template.customFieldSchema),
       detailIds,
     );
-    const rows = buildLabelRows({ orderName, template, details });
+    const rows = buildLabelRows({ orderName, template, details, useBasisFields });
     const rowHash = hashLabelRows(rows);
     const svgPages = renderSvgPages(template, rows).pages;
     return {
@@ -456,6 +457,7 @@ export class PgLabelsRepository implements LabelsPort {
         templateId: template.labelTemplateId,
         templateVersion: template.version,
         detailIds,
+        useBasisFields,
         rowHash,
       }),
     };
@@ -466,6 +468,7 @@ export class PgLabelsRepository implements LabelsPort {
       const template = await this.readTemplate(tx, command.input.templateId, true, true);
       assertTemplateVersion(template.version, command.input.templateVersion);
       const detailIds = command.input.detailFilters?.detailIds ?? [];
+      const useBasisFields = command.input.useBasisFields ?? true;
       await assertOrderExists(tx, command.orderId);
       await assertDetailsBelongToOrder(tx, command.orderId, detailIds);
       const orderName = await readOrderName(tx, command.orderId);
@@ -473,7 +476,7 @@ export class PgLabelsRepository implements LabelsPort {
         await readOrderLabelDetails(tx, command.orderId, template.labelTemplateId, template.customFieldSchema),
         detailIds,
       );
-      const rows = buildLabelRows({ orderName, template, details });
+      const rows = buildLabelRows({ orderName, template, details, useBasisFields });
       const rowHash = hashLabelRows(rows);
       const token = decodePreviewToken(command.input.previewToken);
       if (
@@ -481,7 +484,8 @@ export class PgLabelsRepository implements LabelsPort {
         token.templateId !== template.labelTemplateId ||
         token.templateVersion !== template.version ||
         token.rowHash !== rowHash ||
-        JSON.stringify(token.detailIds ?? []) !== JSON.stringify(detailIds)
+        JSON.stringify(token.detailIds ?? []) !== JSON.stringify(detailIds) ||
+        (token.useBasisFields ?? true) !== useBasisFields
       ) {
         throw new ApiError(409, 'LABEL_PREVIEW_TOKEN_STALE', 'Label preview token is stale');
       }
@@ -491,6 +495,7 @@ export class PgLabelsRepository implements LabelsPort {
           templateId: template.labelTemplateId,
           templateVersion: template.version,
           detailIds,
+          useBasisFields,
           rowHash,
           exportFormats: command.input.exportFormats,
         });
@@ -522,7 +527,7 @@ export class PgLabelsRepository implements LabelsPort {
           command.input.idempotencyKey,
           requestHash,
           sha256(command.input.previewToken),
-          JSON.stringify({ detailIds }),
+          JSON.stringify({ detailIds, useBasisFields }),
           JSON.stringify(template),
           JSON.stringify(rows),
           rows.length,
@@ -664,6 +669,7 @@ interface PreviewTokenPayload {
   templateId: number;
   templateVersion: number;
   detailIds: number[];
+  useBasisFields?: boolean;
   rowHash: string;
 }
 

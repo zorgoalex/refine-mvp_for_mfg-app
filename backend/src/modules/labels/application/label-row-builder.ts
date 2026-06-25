@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { LabelTemplateDto, OrderLabelDataDetailDto } from './labels.types';
-import { parseBasisData } from './parse-basis-data';
+import { parseBasisData, type ParsedBasisData } from './parse-basis-data';
 
 export interface LabelRow {
   rowIndex: number;
@@ -15,6 +15,7 @@ export function buildLabelRows(input: {
   orderName: string | null;
   template: Pick<LabelTemplateDto, 'customFieldSchema'>;
   details: OrderLabelDataDetailDto[];
+  useBasisFields?: boolean;
   today?: string;
 }): LabelRow[] {
   const expanded: LabelRow[] = [];
@@ -27,7 +28,7 @@ export function buildLabelRows(input: {
         orderId: detail.orderId,
         copyIndex,
         copyCount,
-        values: buildBaseValues(input.orderName, detail),
+        values: buildBaseValues(input.orderName, detail, input.useBasisFields ?? true),
       });
     }
   }
@@ -50,18 +51,25 @@ export function hashLabelRows(rows: LabelRow[]): string {
 function buildBaseValues(
   orderName: string | null,
   detail: OrderLabelDataDetailDto,
+  useBasisFields: boolean,
 ): Record<string, string | number | boolean | null> {
-  const parsed = parseBasisData(detail.basisData);
+  const parsed: ParsedBasisData = useBasisFields ? parseBasisData(detail.basisData) : { raw: '' };
+  const position = useBasisFields
+    ? parsed.position ?? detail.detailNumber ?? ''
+    : detail.detailNumber ?? '';
+  const detailName = useBasisFields
+    ? detail.detailName ?? parsed.name ?? ''
+    : detail.detailName ?? '';
   const values: Record<string, string | number | boolean | null> = {
-    'bazis.order_number': orderName ?? '',
+    'bazis.order_number': useBasisFields ? detail.basisProject ?? orderName ?? '' : orderName ?? '',
     'bazis.detail_id': detail.detailId,
     'bazis.material': detail.materialName ?? '',
-    'bazis.position': parsed.position ?? detail.detailNumber ?? '',
-    'bazis.position_number': parsed.position ?? detail.detailNumber ?? '',
-    'bazis.position_in_product': parsed.position ?? detail.detailNumber ?? '',
-    'bazis.designation': parsed.designation ?? '',
-    'bazis.designation_in_product': parsed.designation ?? '',
-    'bazis.name': detail.detailName ?? parsed.name ?? '',
+    'bazis.position': position,
+    'bazis.position_number': position,
+    'bazis.position_in_product': position,
+    'bazis.designation': useBasisFields ? parsed.designation ?? '' : '',
+    'bazis.designation_in_product': useBasisFields ? parsed.designation ?? '' : '',
+    'bazis.name': detailName,
     'bazis.quantity': detail.quantity,
     'bazis.detail_length': detail.height,
     'bazis.detail_width': detail.width,
@@ -69,7 +77,7 @@ function buildBaseValues(
     'bazis.cut_width': detail.width,
     'bazis.comment': detail.note ?? '',
     'bazis.note': detail.note ?? '',
-    'bazis.project': detail.basisProject ?? '',
+    'bazis.project': useBasisFields ? detail.basisProject ?? '' : '',
   };
 
   for (const [key, value] of Object.entries(detail.bazisFields)) {
