@@ -11,6 +11,7 @@ SKIP_PRE_BACKUP=0
 STOP_HASURA=1
 START_HASURA=1
 RESTORE_GLOBALS=0
+RESET_SEQUENCES=1
 ENV_FILE_ARG_SET=0
 COMPOSE_FILE_ARG_SET=0
 
@@ -31,6 +32,7 @@ Options:
   --skip-pre-backup        Do not create a pre-restore dump of the current DB
   --no-stop-hasura         Keep Hasura running during restore
   --no-start-hasura        Do not start Hasura after restore
+  --no-reset-sequences     Skip the post-restore identity-sequence realignment
 EOF
 }
 
@@ -55,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --skip-pre-backup) SKIP_PRE_BACKUP=1; shift ;;
     --no-stop-hasura) STOP_HASURA=0; shift ;;
     --no-start-hasura) START_HASURA=0; shift ;;
+    --no-reset-sequences) RESET_SEQUENCES=0; shift ;;
     --help|-h) usage; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
   esac
@@ -132,6 +135,32 @@ log "Restoring main dump"
 log "Running basic DB check"
 "${compose[@]}" exec -T -e PGPASSWORD="$PG_PASSWORD" postgresdb \
   psql -U "$PG_USER" -d "$PG_DB" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';"
+
+if [[ "$RESET_SEQUENCES" == "1" ]]; then
+  # A pg_restore'd dump leaves identity/serial sequences behind the column max,
+  # so the first INSERT after restore collides on the PK (HTTP 500). Realign every
+  # public sequence to MAX(col) so new inserts continue cleanly. Idempotent.
+  log "Realigning identity sequences to column max (post-restore drift guard)"
+  "${compose[@]}" exec -T -e PGPASSWORD="$PG_PASSWORD" postgresdb \
+    psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT n.nspname AS sch, c.relname AS tbl, a.attname AS col,
+           pg_get_serial_sequence(format('%I.%I', n.nspname, c.relname), a.attname) AS seq
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0
+    WHERE n.nspname = 'public' AND c.relkind = 'r'
+      AND pg_get_serial_sequence(format('%I.%I', n.nspname, c.relname), a.attname) IS NOT NULL
+  LOOP
+    EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(%I) FROM %I.%I), 1))',
+                   r.seq, r.col, r.sch, r.tbl);
+  END LOOP;
+END $$;
+SQL
+fi
 
 if [[ "$START_HASURA" == "1" ]]; then
   log "Starting Hasura"
