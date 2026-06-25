@@ -725,12 +725,13 @@ function LabelTemplatePreview({
     const maxY = Math.max(0, safeHeight - Number(element.heightMm ?? 0));
     onMoveElement(drag.elementKey, clamp(point.x - drag.offsetX, 0, maxX), clamp(point.y - drag.offsetY, 0, maxY));
   };
-  const handleDrop = (event: React.DragEvent<SVGSVGElement>) => {
+  const handleDrop = (event: React.DragEvent<Element>) => {
     if (!canDrag || !onDropField) return;
     const fieldId = event.dataTransfer.getData('application/x-label-field') || event.dataTransfer.getData('text/plain');
     const field = fields.find((item) => item.id === fieldId);
     if (!field) return;
     event.preventDefault();
+    event.stopPropagation();
     const point = pointFromEvent(event);
     onDropField(field, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
   };
@@ -746,6 +747,10 @@ function LabelTemplatePreview({
         overflow: 'hidden',
         touchAction: 'none',
       }}
+      onDragOver={(event) => {
+        if (canDrag) event.preventDefault();
+      }}
+      onDrop={handleDrop}
     >
       <svg
         ref={svgRef}
@@ -756,10 +761,6 @@ function LabelTemplatePreview({
         onMouseMove={handleMove}
         onMouseUp={() => setDrag(null)}
         onMouseLeave={() => setDrag(null)}
-        onDragOver={(event) => {
-          if (canDrag) event.preventDefault();
-        }}
-        onDrop={handleDrop}
       >
         <rect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" />
         {sorted.map((element) =>
