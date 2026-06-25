@@ -40,6 +40,16 @@ describe('order labels UI wiring', () => {
     expect(generateSrc).not.toMatch(/downloadLatest/);
   });
 
+  it('generates the whole order even when modal preview is focused on one detail', () => {
+    const generateStart = generateSrc.indexOf('const generation = await labelsApi.generateOrderLabels');
+    const generateEnd = generateSrc.indexOf('const blob = await labelsApi.downloadGeneration', generateStart);
+    const generateBlock = generateSrc.slice(generateStart, generateEnd);
+
+    expect(generateBlock).toMatch(/previewToken: generationPreview\.previewToken/);
+    expect(generateBlock).not.toMatch(/detailFilters/);
+    expect(generateSrc).toMatch(/const generationPreview = await labelsApi\.previewOrderLabels\(orderId,\s*\{/);
+  });
+
   it('latest block uses latest export only for show-page latest download', () => {
     expect(latestSrc).toMatch(/labelsApi\.downloadLatest\(orderId\)/);
     expect(latestSrc).toMatch(/onGenerated=\{loadLatest\}/);

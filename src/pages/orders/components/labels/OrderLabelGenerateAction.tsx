@@ -97,12 +97,16 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     if (!selectedTemplate || !preview || isOrderDirty) return;
     setGenerating(true);
     try {
+      const generationPreview = await labelsApi.previewOrderLabels(orderId, {
+        templateId: selectedTemplate.labelTemplateId,
+        templateVersion: selectedTemplate.version,
+        useBasisFields,
+      });
       const generation = await labelsApi.generateOrderLabels(orderId, {
         templateId: selectedTemplate.labelTemplateId,
         templateVersion: selectedTemplate.version,
-        previewToken: preview.previewToken,
+        previewToken: generationPreview.previewToken,
         exportFormats: selectedTemplate.defaultExportFormats,
-        detailFilters,
         useBasisFields,
         idempotencyKey: `order-labels-generate-${orderId}-${Date.now()}`,
       });

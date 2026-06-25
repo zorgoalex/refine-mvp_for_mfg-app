@@ -10,6 +10,7 @@ describe('label renderer', () => {
     const svg = renderSvgPages(template(), [row({ 'bazis.name': '<Side & back>' })]).pages[0];
 
     expect(svg).toContain('&lt;Side &amp; back&gt;');
+    expect(svg).toContain('fill="white"');
     expect(svg).toContain('<line ');
     expect(svg).toContain('<rect ');
   });
@@ -34,6 +35,7 @@ describe('label renderer', () => {
     expect(png).toBeTruthy();
     const image = PNG.sync.read(png!);
     expect(countBlackPixels(image.data)).toBeGreaterThan(0);
+    expect(countWhitePixels(image.data)).toBeGreaterThan(countBlackPixels(image.data));
   });
 });
 
@@ -41,6 +43,14 @@ function countBlackPixels(rgba: Uint8Array): number {
   let count = 0;
   for (let i = 0; i < rgba.length; i += 4) {
     if (rgba[i] === 0 && rgba[i + 1] === 0 && rgba[i + 2] === 0) count += 1;
+  }
+  return count;
+}
+
+function countWhitePixels(rgba: Uint8Array): number {
+  let count = 0;
+  for (let i = 0; i < rgba.length; i += 4) {
+    if (rgba[i] === 255 && rgba[i + 1] === 255 && rgba[i + 2] === 255) count += 1;
   }
   return count;
 }

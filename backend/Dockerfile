@@ -16,7 +16,7 @@ FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates wget \
+  && apt-get install -y --no-install-recommends ca-certificates fonts-dejavu-core wget \
   && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
