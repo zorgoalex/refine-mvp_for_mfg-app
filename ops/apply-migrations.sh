@@ -86,7 +86,7 @@ _exec() { docker exec -i -e MIG_USER="$USER_OVERRIDE" -e MIG_DB="$DB_OVERRIDE" "
 
 # Run a single SQL string, return rows unaligned/tuples-only.
 pg_query() {
-  _exec sh -c 'psql -U "${MIG_USER:-$POSTGRES_USER}" -d "${MIG_DB:-$POSTGRES_DB}" -v ON_ERROR_STOP=1 -qtA -c "$1"' _ "$1"
+  _exec sh -c 'psql -U "${MIG_USER:-$POSTGRES_USER}" -d "${MIG_DB:-$POSTGRES_DB}" -v ON_ERROR_STOP=1 -qtAF "|" -c "$1"' _ "$1"
 }
 # Pipe a .sql file on stdin.
 pg_apply_file() {
@@ -113,10 +113,10 @@ mapfile -t FILES < <(
 
 checksum_of() { sha256sum "$MIG_DIR/$1" | awk '{print $1}'; }
 
-# Applied set (filename<TAB>checksum), empty if no ledger.
+# Applied set (psql -A emits "filename|checksum"), empty if no ledger.
 declare -A APPLIED_SUM=()
 if ledger_exists; then
-  while IFS=$'\t' read -r fn sum; do
+  while IFS='|' read -r fn sum; do
     [ -n "$fn" ] && APPLIED_SUM["$fn"]="$sum"
   done < <(pg_query "SELECT filename, checksum FROM schema_migrations;")
 fi
@@ -173,7 +173,7 @@ case "$MODE" in
     ensure_ledger
     # Recompute applied set now the ledger surely exists.
     APPLIED_SUM=()
-    while IFS=$'\t' read -r fn sum; do [ -n "$fn" ] && APPLIED_SUM["$fn"]="$sum"; done \
+    while IFS='|' read -r fn sum; do [ -n "$fn" ] && APPLIED_SUM["$fn"]="$sum"; done \
       < <(pg_query "SELECT filename, checksum FROM schema_migrations;")
     print_plan
     if [ "${PENDING_COUNT:-0}" -eq 0 ]; then echo; echo "Nothing to apply."; exit 0; fi
