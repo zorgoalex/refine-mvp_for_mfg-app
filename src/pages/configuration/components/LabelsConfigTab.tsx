@@ -70,6 +70,7 @@ export const LabelsConfigTab: React.FC = () => {
   const [saveAsName, setSaveAsName] = useState('');
   const [selectedElementKey, setSelectedElementKey] = useState<string | null>(null);
   const [fieldSearch, setFieldSearch] = useState('');
+  const [draggingField, setDraggingField] = useState<LabelFieldCatalogItem | null>(null);
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
 
@@ -107,6 +108,13 @@ export const LabelsConfigTab: React.FC = () => {
       setCustomSchemaText(JSON.stringify(selectedTemplate.customFieldSchema ?? {}, null, 2));
     }
   }, [form, selectedTemplate]);
+
+  useEffect(() => {
+    if (!draggingField) return;
+    const clear = () => setDraggingField(null);
+    window.addEventListener('mouseup', clear);
+    return () => window.removeEventListener('mouseup', clear);
+  }, [draggingField]);
 
   const fieldCategories = useMemo(() => new Set(fields.map((field) => field.category)).size, [fields]);
   const customSchemaRows = useMemo(() => parseCustomSchemaRows(customSchemaText), [customSchemaText]);
@@ -555,6 +563,7 @@ export const LabelsConfigTab: React.FC = () => {
               disabled={!canManage}
               search={fieldSearch}
               onSearch={setFieldSearch}
+              onBeginDrag={setDraggingField}
             />
           </Card>
           <Table
@@ -648,6 +657,11 @@ export const LabelsConfigTab: React.FC = () => {
               onSelectElement={setSelectedElementKey}
               onMoveElement={moveElement}
               onDropField={addFieldElement}
+              draggingField={draggingField}
+              onDropDraggingField={(field, xMm, yMm) => {
+                addFieldElement(field, xMm, yMm);
+                setDraggingField(null);
+              }}
             />
           </Card>
         </Col>
@@ -688,6 +702,8 @@ function LabelTemplatePreview({
   onSelectElement,
   onMoveElement,
   onDropField,
+  draggingField,
+  onDropDraggingField,
 }: {
   widthMm: number;
   heightMm: number;
@@ -698,6 +714,8 @@ function LabelTemplatePreview({
   onSelectElement?: (elementKey: string) => void;
   onMoveElement?: (elementKey: string, xMm: number, yMm: number) => void;
   onDropField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
+  draggingField?: LabelFieldCatalogItem | null;
+  onDropDraggingField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<{ elementKey: string; offsetX: number; offsetY: number } | null>(null);
@@ -735,6 +753,13 @@ function LabelTemplatePreview({
     const point = pointFromEvent(event);
     onDropField(field, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
   };
+  const handleWrapperMouseUp = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!draggingField || !onDropDraggingField) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = pointFromEvent(event);
+    onDropDraggingField(draggingField, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
+  };
 
   return (
     <div
@@ -751,6 +776,7 @@ function LabelTemplatePreview({
         if (canDrag) event.preventDefault();
       }}
       onDrop={handleDrop}
+      onMouseUp={handleWrapperMouseUp}
     >
       <svg
         ref={svgRef}
@@ -793,11 +819,13 @@ function FieldPalette({
   disabled,
   search,
   onSearch,
+  onBeginDrag,
 }: {
   fields: LabelFieldCatalogItem[];
   disabled?: boolean;
   search: string;
   onSearch: (value: string) => void;
+  onBeginDrag?: (field: LabelFieldCatalogItem) => void;
 }) {
   const normalizedSearch = search.trim().toLowerCase();
   const visibleFields = fields.filter((field) => {
@@ -822,6 +850,9 @@ function FieldPalette({
                       event.dataTransfer.setData('application/x-label-field', field.id);
                       event.dataTransfer.setData('text/plain', field.id);
                       event.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    onMouseDown={() => {
+                      if (!disabled) onBeginDrag?.(field);
                     }}
                     style={{ cursor: disabled ? 'default' : 'grab', userSelect: 'none' }}
                   >
