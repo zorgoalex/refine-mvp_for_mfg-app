@@ -959,22 +959,23 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer> {
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId);
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90);
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, query.sheetIndex);
     }
     const targetPx = await this.config.getRenderPresetPx(query.preset);
+    // When rotated, the SVG viewBox is h×w — the rasterizer's fit dims must match.
     return renderSheetPng({
       svg: sheet.svg,
       targetPx,
-      sheetWidthMm: sheet.placements.sheet_width_mm,
-      sheetHeightMm: sheet.placements.sheet_height_mm,
+      sheetWidthMm: query.rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
+      sheetHeightMm: query.rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
     });
   }
 
   async renderSheetSvg(query: RenderSheetSvgQuery): Promise<string> {
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId);
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90);
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, query.sheetIndex);
@@ -983,12 +984,16 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer> {
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId);
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90);
     if (sheets.length === 0) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, 0);
     }
     return buildSheetsPdf(
-      sheets.map((s) => ({ svg: s.svg, sheetWidthMm: s.placements.sheet_width_mm, sheetHeightMm: s.placements.sheet_height_mm })),
+      sheets.map((s) => ({
+        svg: s.svg,
+        sheetWidthMm: query.rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
+        sheetHeightMm: query.rotate90 ? s.placements.sheet_width_mm : s.placements.sheet_height_mm,
+      })),
     );
   }
 
@@ -999,9 +1004,13 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const pdfSheets: Array<{ svg: string; sheetWidthMm: number; sheetHeightMm: number }> = [];
     for (const groupRow of groups.rows) {
-      const { sheets } = await this.loadGroupRenderContext(toNum(groupRow.cut_group_id));
+      const { sheets } = await this.loadGroupRenderContext(toNum(groupRow.cut_group_id), query.rotate90);
       for (const sheet of sheets) {
-        pdfSheets.push({ svg: sheet.svg, sheetWidthMm: sheet.placements.sheet_width_mm, sheetHeightMm: sheet.placements.sheet_height_mm });
+        pdfSheets.push({
+          svg: sheet.svg,
+          sheetWidthMm: query.rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
+          sheetHeightMm: query.rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
+        });
       }
     }
     if (pdfSheets.length === 0) {
@@ -1060,6 +1069,7 @@ export class PgCutRepository implements CutRepositoryPort {
    */
   private async loadGroupRenderContext(
     cutGroupId: number,
+    rotate90 = false,
   ): Promise<{ sheets: Array<{ sheetIndex: number; placements: SheetPlacementsJson; svg: string }> }> {
     const allSheets = await this.database.query<{ sheet_index: number; placements: SheetPlacementsJson }>(
       `SELECT cgs.sheet_index, cgs.placements FROM cut_group_sheet cgs WHERE cgs.cut_group_id = $1 ORDER BY cgs.sheet_index`,
@@ -1097,7 +1107,7 @@ export class PgCutRepository implements CutRepositoryPort {
       sheets: allSheets.rows.map((row) => ({
         sheetIndex: toNum(row.sheet_index),
         placements: row.placements,
-        svg: buildSheetSvg({ sheet: row.placements, labelFor }),
+        svg: buildSheetSvg({ sheet: row.placements, labelFor, rotate90 }),
       })),
     };
   }

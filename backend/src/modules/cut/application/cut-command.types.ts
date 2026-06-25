@@ -70,6 +70,8 @@ export interface RenderSheetPngQuery {
   sheetIndex: number;
   /** render preset NAME; px resolved from cut_render_presets config at render time */
   preset: string;
+  /** landscape orientation: rotate the layout 90° (long side horizontal). */
+  rotate90?: boolean;
   requestId?: string;
 }
 
@@ -77,18 +79,24 @@ export interface RenderSheetSvgQuery {
   currentUser: CurrentUser;
   cutGroupId: number;
   sheetIndex: number;
+  /** landscape orientation: rotate the layout 90° (long side horizontal). */
+  rotate90?: boolean;
   requestId?: string;
 }
 
 export interface RenderGroupPdfQuery {
   currentUser: CurrentUser;
   cutGroupId: number;
+  /** landscape orientation: rotate the layout 90° (long side horizontal). */
+  rotate90?: boolean;
   requestId?: string;
 }
 
 export interface RenderJobPdfQuery {
   currentUser: CurrentUser;
   cutJobId: number;
+  /** landscape orientation: rotate the layout 90° (long side horizontal). */
+  rotate90?: boolean;
   requestId?: string;
 }
 

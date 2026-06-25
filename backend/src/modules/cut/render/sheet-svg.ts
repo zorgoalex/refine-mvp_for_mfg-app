@@ -66,6 +66,12 @@ export interface BuildSheetSvgInput {
   labelFor: (piece: FreecutPlacement) => string | string[];
   /** font-size in mm for piece labels (scaled with the mm viewBox). */
   labelFontMm?: number;
+  /**
+   * Rotate the layout 90° clockwise (sheet's long side horizontal / landscape).
+   * The GEOMETRY is transposed — not the bitmap — so piece labels stay upright
+   * (horizontal) on screen and in print, regardless of orientation.
+   */
+  rotate90?: boolean;
 }
 
 function escapeXml(value: string): string {
@@ -82,17 +88,31 @@ function num(value: number): string {
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
-  const { sheet, labelFor } = input;
+  const { sheet, labelFor, rotate90 = false } = input;
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 40));
+
+  // 90° CW transpose into the swapped h×w viewBox. A point (px,py) maps to
+  // (h - py, px); a rect's top-left (x,y) maps to (h - (y + ph), x) with sides
+  // swapped. Labels are placed at the transposed CENTRE without any rotate()
+  // transform, so the text stays horizontal.
+  const vbW = rotate90 ? h : w;
+  const vbH = rotate90 ? w : h;
 
   const pieces = sheet.pieces
     .map((piece) => {
       const x = sheet.trim_mm.left + piece.x_mm;
       const y = sheet.trim_mm.top + piece.y_mm;
-      const cx = x + piece.width_mm / 2;
-      const cy = y + piece.height_mm / 2;
+      const pw = piece.width_mm;
+      const ph = piece.height_mm;
+      const rect = rotate90
+        ? { x: h - (y + ph), y: x, w: ph, h: pw }
+        : { x, y, w: pw, h: ph };
+      const cx0 = x + pw / 2;
+      const cy0 = y + ph / 2;
+      const cx = rotate90 ? h - cy0 : cx0;
+      const cy = rotate90 ? cx0 : cy0;
       const resolved = labelFor(piece);
       const lines = Array.isArray(resolved) ? resolved : [resolved];
       // Vertically centre N lines around cy: the first tspan lifts by
@@ -105,8 +125,8 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
         })
         .join('');
       return [
-        `<rect x="${num(x)}" y="${num(y)}" width="${num(piece.width_mm)}" height="${num(
-          piece.height_mm,
+        `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
+          rect.h,
         )}" fill="#eef3f8" stroke="#1f2d3d" stroke-width="2"/>`,
         `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
           fontMm,
@@ -118,8 +138,8 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
     // via resvg fitTo; explicit width/height would make resvg ignore fitTo.
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(w)} ${num(h)}">`,
-    `<rect x="0" y="0" width="${num(w)}" height="${num(h)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(vbW)} ${num(vbH)}">`,
+    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
     pieces,
     `</svg>`,
   ].join('');
