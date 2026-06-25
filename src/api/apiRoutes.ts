@@ -74,6 +74,7 @@ export const apiRoutes = {
       backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/export.pdf`),
     jobPdf: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/export.pdf`),
     profile: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/profile`),
+    sheetMaterial: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/sheet-material`),
   },
   cutConfig: {
     root: backendApiPath('/cut-config'),

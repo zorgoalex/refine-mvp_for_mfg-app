@@ -10,6 +10,7 @@ import {
   parseCutJobId,
   parseEligibleCriteria,
   parseSetProfileBody,
+  parseSetSheetMaterialBody,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -262,6 +263,35 @@ it('PATCH setProfile delegates parsed args to CutService.setProfile', async () =
   const dto = await controller.setProfile(request, '42', { paramProfileId: 5, version: 2 });
   expect(service.setProfile).toHaveBeenCalledWith(expect.objectContaining({
     cutJobId: 42, paramProfileId: 5, version: 2, requestId: 'req-xyz',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+describe('parseSetSheetMaterialBody', () => {
+  it('accepts a numeric sheet id + version', () => {
+    expect(parseSetSheetMaterialBody({ sheetMaterialTypeId: 7, version: 2 })).toEqual({ sheetMaterialTypeId: 7, version: 2 });
+  });
+  it('accepts null (clear override)', () => {
+    expect(parseSetSheetMaterialBody({ sheetMaterialTypeId: null, version: 0 })).toEqual({ sheetMaterialTypeId: null, version: 0 });
+  });
+  it('rejects a negative version', () => {
+    expect(() => parseSetSheetMaterialBody({ sheetMaterialTypeId: 7, version: -1 })).toThrow();
+  });
+  it('rejects a non-integer sheet id', () => {
+    expect(() => parseSetSheetMaterialBody({ sheetMaterialTypeId: 1.5, version: 0 })).toThrow();
+  });
+});
+
+it('PATCH setSheetMaterial delegates parsed args to CutService.setSheetMaterial', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setSheetMaterial: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-sheet' } as never;
+  const dto = await controller.setSheetMaterial(request, '42', { sheetMaterialTypeId: 7, version: 3 });
+  expect(service.setSheetMaterial).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, sheetMaterialTypeId: 7, version: 3, requestId: 'req-sheet',
   }));
   expect(dto).toBe(serviceReturn);
 });

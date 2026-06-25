@@ -55,6 +55,12 @@ const setProfileBodySchema = z
   })
   .strict();
 
+const setSheetMaterialBodySchema = z
+  .object({
+    sheetMaterialTypeId: z.number().int().positive().nullable(),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
 
 @ApiTags('CutJobs')
 @ApiBearerAuth()
@@ -247,6 +253,24 @@ export class CutController {
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
       paramProfileId,
+      version,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'setCutJobSheetMaterial', summary: 'Set the sheet variant for a job' })
+  @Patch(':cutJobId/sheet-material')
+  async setSheetMaterial(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { sheetMaterialTypeId, version } = parseSetSheetMaterialBody(body);
+    return this.cut.setSheetMaterial({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      sheetMaterialTypeId,
       version,
       requestId: request.requestId,
     });
@@ -446,6 +470,10 @@ export function parseVersionBody(body: unknown): number {
 
 export function parseSetProfileBody(body: unknown): { paramProfileId: number | null; version: number } {
   return parse(setProfileBodySchema, body);
+}
+
+export function parseSetSheetMaterialBody(body: unknown): { sheetMaterialTypeId: number | null; version: number } {
+  return parse(setSheetMaterialBodySchema, body);
 }
 
 /** Query CSV (`orderIds=9,10`) → number arrays. */

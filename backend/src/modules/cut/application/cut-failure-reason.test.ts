@@ -89,6 +89,10 @@ describe('shouldMarkCutFailed', () => {
     expect(shouldMarkCutFailed(new ApiError(422, 'CUT_PARAM_PROFILE_NOT_FOUND', 'chosen profile is inactive'))).toBe(false);
   });
 
+  it('returns false for CUT_SHEET_MATERIAL_NOT_CUTTABLE (precondition: chosen sheet deactivated after selection)', () => {
+    expect(shouldMarkCutFailed(new ApiError(422, 'CUT_SHEET_MATERIAL_NOT_CUTTABLE', 'chosen sheet is inactive'))).toBe(false);
+  });
+
   it('returns true for genuine calculation failures (freecut + cut validation)', () => {
     expect(shouldMarkCutFailed(new ApiError(504, 'FREECUT_TIMEOUT', 'x'))).toBe(true);
     expect(shouldMarkCutFailed(new ApiError(422, 'CUT_NO_ITEMS', 'x'))).toBe(true);

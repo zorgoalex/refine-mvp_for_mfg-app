@@ -104,6 +104,8 @@ export interface CutJobDto {
   /** Operator-facing Russian explanation when status === 'failed' (else null). */
   failureReason: string | null;
   paramProfileId: number | null;
+  /** null = no per-job override (per-detail sheet). Non-null = chosen sheet. */
+  sheetMaterialTypeId: number | null;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];

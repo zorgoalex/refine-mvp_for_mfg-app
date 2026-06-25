@@ -22,6 +22,7 @@ export const CUT_AUDIT_EVENTS = {
   calculateFailed: 'cut_job.calculate_failed',
   permissionDenied: 'cut_job.permission_denied',
   profileChanged: 'cut_job.profile_changed',
+  sheetMaterialChanged: 'cut_job.sheet_material_changed',
 } as const;
 
 export type CutAuditEventName = (typeof CUT_AUDIT_EVENTS)[keyof typeof CUT_AUDIT_EVENTS];

@@ -89,3 +89,11 @@ export class CutParamProfileNotFoundError extends ApiError {
     super(422, 'CUT_PARAM_PROFILE_NOT_FOUND', 'Выбранный профиль раскроя не найден или неактивен', { profileId });
   }
 }
+
+export class CutSheetMaterialNotCuttableError extends ApiError {
+  constructor(sheetMaterialTypeId: number) {
+    super(422, 'CUT_SHEET_MATERIAL_NOT_CUTTABLE', 'Выбранный лист не найден, неактивен или не пригоден для раскроя', {
+      sheetMaterialTypeId,
+    });
+  }
+}

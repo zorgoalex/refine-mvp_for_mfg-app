@@ -47,6 +47,7 @@ import type {
   RenderSheetPngQuery,
   RenderSheetSvgQuery,
   SetCutJobProfileCommand,
+  SetCutJobSheetMaterialCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
@@ -74,6 +75,7 @@ import {
   CutNoSheetSpecError,
   CutOrderDetailNotFoundError,
   CutParamProfileNotFoundError,
+  CutSheetMaterialNotCuttableError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
 
@@ -121,6 +123,7 @@ interface CutJobLockRow extends QueryResultRow {
   pdf_prewarm_state: string;
   params: Record<string, unknown> | null;
   param_profile_id: string | number | null;
+  sheet_material_type_id: string | number | null;
 }
 
 interface CalcItemRow extends QueryResultRow {
@@ -143,6 +146,12 @@ interface CalcItemRow extends QueryResultRow {
  *  two events; falls back to the version when no requestId is supplied. */
 export function profileChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
   return `${CUT_AUDIT_EVENTS.profileChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
+/** Idempotency key for the sheet-material-changed outbox event. Same stability
+ *  rule as profileChangedOutboxKey: stable per (job, request), version fallback. */
+export function sheetMaterialChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.sheetMaterialChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 export class PgCutRepository implements CutRepositoryPort {
@@ -324,9 +333,29 @@ export class PgCutRepository implements CutRepositoryPort {
       assertVersion(job, command.version);
       assertMutable(job);
 
-      const items = await loadCalcItems(tx, command.cutJobId);
+      let items = await loadCalcItems(tx, command.cutJobId);
       if (items.length === 0) {
         throw new CutNoItemsError(command.cutJobId);
+      }
+
+      // Per-job sheet override (migration 040): when set, cut EVERY detail on the
+      // chosen sheet. Validate it is still active + cuttable (it may have been
+      // deactivated after selection) — reject with 422, precondition passthrough
+      // (job is NOT marked failed), mirroring the chosen-but-inactive profile path.
+      if (job.sheetMaterialTypeId !== null) {
+        const sheetRes = await tx.query<{ width_mm: string | number; height_mm: string | number }>(
+          `SELECT width_mm, height_mm FROM sheet_material_types
+           WHERE sheet_material_type_id = $1 AND is_active = true AND is_cuttable = true`,
+          [job.sheetMaterialTypeId],
+        );
+        if (sheetRes.rows.length === 0) {
+          throw new CutSheetMaterialNotCuttableError(job.sheetMaterialTypeId);
+        }
+        items = applySheetOverride(items, {
+          sheetMaterialTypeId: job.sheetMaterialTypeId,
+          widthMm: toNum(sheetRes.rows[0].width_mm),
+          heightMm: toNum(sheetRes.rows[0].height_mm),
+        });
       }
 
       // Recalculation: drop the PREVIOUS result set under the lock so a re-cut
@@ -1003,11 +1032,13 @@ export class PgCutRepository implements CutRepositoryPort {
     const result = await this.database.query<{
       sheet_material_type_id: string | number;
       name: string;
+      material_type_id: string | number;
+      thickness_mm: string | number;
       width_mm: string | number;
       height_mm: string | number;
       is_cuttable: boolean | null;
     }>(
-      `SELECT sheet_material_type_id, name, width_mm, height_mm, is_cuttable
+      `SELECT sheet_material_type_id, name, material_type_id, thickness_mm, width_mm, height_mm, is_cuttable
        FROM sheet_material_types
        WHERE is_active = true AND is_cuttable = true
        ORDER BY name`,
@@ -1015,6 +1046,8 @@ export class PgCutRepository implements CutRepositoryPort {
     return result.rows.map((row) => ({
       sheetMaterialTypeId: toNum(row.sheet_material_type_id),
       name: row.name,
+      materialTypeId: toNum(row.material_type_id),
+      thicknessMm: toNum(row.thickness_mm),
       widthMm: toNum(row.width_mm),
       heightMm: toNum(row.height_mm),
       isCuttable: row.is_cuttable == null ? true : Boolean(row.is_cuttable),
@@ -1252,6 +1285,74 @@ export class PgCutRepository implements CutRepositoryPort {
       return loadJob(tx, command.cutJobId);
     });
   }
+
+  setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; sheet_material_type_id: string | number | null }>(
+        `SELECT status, version, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      if (command.sheetMaterialTypeId !== null) {
+        const exists = await tx.query(
+          `SELECT 1 FROM sheet_material_types WHERE sheet_material_type_id = $1 AND is_active = true AND is_cuttable = true LIMIT 1`,
+          [command.sheetMaterialTypeId],
+        );
+        if (exists.rows.length === 0) throw new CutSheetMaterialNotCuttableError(command.sheetMaterialTypeId);
+      }
+      const beforeId = row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id);
+
+      // No-op short-circuit: an unchanged selection must NOT bump version,
+      // write audit, or emit an outbox event.
+      if (beforeId === command.sheetMaterialTypeId) {
+        return loadJob(tx, command.cutJobId);
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET sheet_material_type_id = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, command.sheetMaterialTypeId],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.sheetMaterialChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        related: { sheetMaterialTypeIds: [beforeId, command.sheetMaterialTypeId] },
+        before: { sheetMaterialTypeId: beforeId },
+        after: { sheetMaterialTypeId: command.sheetMaterialTypeId },
+        metadata: { beforeSheetMaterialTypeId: beforeId, afterSheetMaterialTypeId: command.sheetMaterialTypeId },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.sheetMaterialChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeSheetMaterialTypeId: beforeId,
+            afterSheetMaterialTypeId: command.sheetMaterialTypeId,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          sheetMaterialChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+
+      return loadJob(tx, command.cutJobId);
+    });
+  }
 }
 
 interface EligibleRow extends QueryResultRow {
@@ -1275,6 +1376,22 @@ interface CuttableGroup {
   smtHeightMm: number | null;
   orderIds: number[];
   items: Array<{ orderDetailId: number; orderId: number; qty: number; widthMm: number; heightMm: number; filmTexture: boolean | null }>;
+}
+
+/** Per-job sheet override (migration 040). When a job has a chosen sheet, every
+ *  item is cut on it: rewrite sheet id + stock dims on each row, leaving film_id
+ *  per-detail so grain fan-out is preserved. no_sheet_spec rows inherit the
+ *  chosen sheet and become cuttable. */
+export function applySheetOverride(
+  rows: CalcItemRow[],
+  override: { sheetMaterialTypeId: number; widthMm: number; heightMm: number },
+): CalcItemRow[] {
+  return rows.map((row) => ({
+    ...row,
+    sheet_material_type_id: override.sheetMaterialTypeId,
+    smt_width_mm: override.widthMm,
+    smt_height_mm: override.heightMm,
+  }));
 }
 
 function groupByCuttableKey(rows: CalcItemRow[]): Map<string, CuttableGroup> {
@@ -1337,9 +1454,10 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   version: number;
   params: Record<string, unknown> | null;
   paramProfileId: number | null;
+  sheetMaterialTypeId: number | null;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -1354,6 +1472,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     version: toNum(row.version),
     params: row.params,
     paramProfileId: row.param_profile_id === null || row.param_profile_id === undefined ? null : toNum(row.param_profile_id),
+    sheetMaterialTypeId: row.sheet_material_type_id === null || row.sheet_material_type_id === undefined ? null : toNum(row.sheet_material_type_id),
   };
 }
 
@@ -1386,6 +1505,7 @@ interface JobRow extends QueryResultRow {
   failure_code: string | null;
   failure_reason: string | null;
   param_profile_id: string | number | null;
+  sheet_material_type_id: string | number | null;
 }
 
 interface ItemRow extends QueryResultRow {
@@ -1538,7 +1658,7 @@ async function loadJob(
   totals?: CutJobTotals,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
@@ -1594,6 +1714,7 @@ async function loadJob(
     failureCode: jobRow.failure_code,
     failureReason: jobRow.failure_reason,
     paramProfileId: jobRow.param_profile_id === null || jobRow.param_profile_id === undefined ? null : toNum(jobRow.param_profile_id),
+    sheetMaterialTypeId: jobRow.sheet_material_type_id === null || jobRow.sheet_material_type_id === undefined ? null : toNum(jobRow.sheet_material_type_id),
     totals: resolvedTotals,
     items: itemsResult.rows.map((row) => ({
       cutJobItemId: toNum(row.cut_job_item_id),
