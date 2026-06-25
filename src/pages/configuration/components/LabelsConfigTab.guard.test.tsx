@@ -67,6 +67,15 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/clamp\(point\.x - drag\.offsetX/);
   });
 
+  it('exposes a draggable field palette that can drop fields onto the label visual', () => {
+    expect(tabSrc).toMatch(/Поля бирки/);
+    expect(tabSrc).toMatch(/FieldPalette/);
+    expect(tabSrc).toMatch(/draggable=\{!disabled\}/);
+    expect(tabSrc).toMatch(/application\/x-label-field/);
+    expect(tabSrc).toMatch(/onDropField/);
+    expect(tabSrc).toMatch(/addFieldElement/);
+  });
+
   it('strips read-only element ids before create or update payloads', () => {
     expect(tabSrc).toMatch(/toTemplateElementInput\(elements\)/);
     expect(tabSrc).toMatch(/labelTemplateElementId: _labelTemplateElementId/);

@@ -69,6 +69,7 @@ export const LabelsConfigTab: React.FC = () => {
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveAsName, setSaveAsName] = useState('');
   const [selectedElementKey, setSelectedElementKey] = useState<string | null>(null);
+  const [fieldSearch, setFieldSearch] = useState('');
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
 
@@ -277,6 +278,27 @@ export const LabelsConfigTab: React.FC = () => {
           : element,
       ),
     );
+  };
+
+  const addFieldElement = (field: LabelFieldCatalogItem, xMm: number, yMm: number) => {
+    if (!canManage) return;
+    const elementKey = `field-${field.id.replace(/[^a-zA-Z0-9_-]/g, '-')}-${Date.now()}`;
+    const element: LabelTemplateElement = {
+      elementKey,
+      kind: 'text',
+      sourceField: field.id,
+      staticText: null,
+      xMm: roundMm(xMm),
+      yMm: roundMm(yMm),
+      widthMm: 40,
+      heightMm: 6,
+      rotationDeg: 0,
+      zIndex: elements.length,
+      style: { fontSize: 12 },
+      condition: {},
+    };
+    setElements((current) => [...current, element]);
+    setSelectedElementKey(elementKey);
   };
 
   const handleBazisImportFile = async (file: File | null) => {
@@ -527,6 +549,14 @@ export const LabelsConfigTab: React.FC = () => {
               </Space>
             </Form>
           </Card>
+          <Card size="small" title="Поля бирки" style={{ marginBottom: 16 }}>
+            <FieldPalette
+              fields={sourceFields}
+              disabled={!canManage}
+              search={fieldSearch}
+              onSearch={setFieldSearch}
+            />
+          </Card>
           <Table
             rowKey="elementKey"
             title={() => (
@@ -617,6 +647,7 @@ export const LabelsConfigTab: React.FC = () => {
               canDrag={canManage}
               onSelectElement={setSelectedElementKey}
               onMoveElement={moveElement}
+              onDropField={addFieldElement}
             />
           </Card>
         </Col>
@@ -656,6 +687,7 @@ function LabelTemplatePreview({
   canDrag,
   onSelectElement,
   onMoveElement,
+  onDropField,
 }: {
   widthMm: number;
   heightMm: number;
@@ -665,6 +697,7 @@ function LabelTemplatePreview({
   canDrag?: boolean;
   onSelectElement?: (elementKey: string) => void;
   onMoveElement?: (elementKey: string, xMm: number, yMm: number) => void;
+  onDropField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<{ elementKey: string; offsetX: number; offsetY: number } | null>(null);
@@ -673,7 +706,7 @@ function LabelTemplatePreview({
   const fieldLabels = new Map(fields.map((field) => [field.id, field.label]));
   const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
   const previewWidth = Math.min(680, Math.max(360, safeWidth * 6));
-  const pointFromEvent = (event: React.MouseEvent<Element>) => {
+  const pointFromEvent = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
@@ -691,6 +724,15 @@ function LabelTemplatePreview({
     const maxX = Math.max(0, safeWidth - Number(element.widthMm ?? 0));
     const maxY = Math.max(0, safeHeight - Number(element.heightMm ?? 0));
     onMoveElement(drag.elementKey, clamp(point.x - drag.offsetX, 0, maxX), clamp(point.y - drag.offsetY, 0, maxY));
+  };
+  const handleDrop = (event: React.DragEvent<SVGSVGElement>) => {
+    if (!canDrag || !onDropField) return;
+    const fieldId = event.dataTransfer.getData('application/x-label-field') || event.dataTransfer.getData('text/plain');
+    const field = fields.find((item) => item.id === fieldId);
+    if (!field) return;
+    event.preventDefault();
+    const point = pointFromEvent(event);
+    onDropField(field, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
   };
 
   return (
@@ -714,6 +756,10 @@ function LabelTemplatePreview({
         onMouseMove={handleMove}
         onMouseUp={() => setDrag(null)}
         onMouseLeave={() => setDrag(null)}
+        onDragOver={(event) => {
+          if (canDrag) event.preventDefault();
+        }}
+        onDrop={handleDrop}
       >
         <rect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" />
         {sorted.map((element) =>
@@ -739,6 +785,69 @@ function LabelTemplatePreview({
       </svg>
     </div>
   );
+}
+
+function FieldPalette({
+  fields,
+  disabled,
+  search,
+  onSearch,
+}: {
+  fields: LabelFieldCatalogItem[];
+  disabled?: boolean;
+  search: string;
+  onSearch: (value: string) => void;
+}) {
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleFields = fields.filter((field) => {
+    if (!normalizedSearch) return true;
+    return `${field.category} ${field.label} ${field.id}`.toLowerCase().includes(normalizedSearch);
+  });
+  const grouped = groupFieldsByCategory(visibleFields);
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Input.Search value={search} onChange={(event) => onSearch(event.target.value)} allowClear />
+      <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          {grouped.map(([category, categoryFields]) => (
+            <div key={category}>
+              <Text type="secondary">{category}</Text>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                {categoryFields.map((field) => (
+                  <Tag
+                    key={field.id}
+                    draggable={!disabled}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('application/x-label-field', field.id);
+                      event.dataTransfer.setData('text/plain', field.id);
+                      event.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    style={{ cursor: disabled ? 'default' : 'grab', userSelect: 'none' }}
+                  >
+                    {field.label}
+                  </Tag>
+                ))}
+              </div>
+            </div>
+          ))}
+        </Space>
+      </div>
+    </Space>
+  );
+}
+
+function groupFieldsByCategory(fields: LabelFieldCatalogItem[]): Array<[string, LabelFieldCatalogItem[]]> {
+  const grouped = new Map<string, LabelFieldCatalogItem[]>();
+  for (const field of fields) {
+    grouped.set(field.category, [...(grouped.get(field.category) ?? []), field]);
+  }
+  return Array.from(grouped.entries()).sort(([a], [b]) => {
+    const order = ['Кастомные', 'Деталь', 'Заказ', 'Динамические'];
+    const ai = order.indexOf(a);
+    const bi = order.indexOf(b);
+    if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    return a.localeCompare(b, 'ru');
+  });
 }
 
 function renderPreviewElement({
