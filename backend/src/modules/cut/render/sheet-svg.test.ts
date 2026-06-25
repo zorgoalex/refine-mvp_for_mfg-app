@@ -58,6 +58,34 @@ describe('buildSheetSvg multi-line labels', () => {
   });
 });
 
+describe('buildSheetSvg rotate90 (landscape, upright labels)', () => {
+  it('swaps the viewBox and sheet rect to h×w', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true });
+    expect(svg).toContain('viewBox="0 0 2070 2800"');
+    expect(svg).toMatch(/<rect x="0" y="0" width="2070" height="2800"/);
+  });
+
+  it('transposes each piece rect 90° (x,y,w,h) -> (h-(y+ph), x, ph, pw)', () => {
+    // piece 1 drawn at x=10,y=15,w=600,h=400 -> (2070-415, 10, 400, 600)
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true });
+    expect(svg).toMatch(/<rect x="1655" y="10" width="400" height="600"/);
+  });
+
+  it('keeps labels upright: tspan x = transposed centre (h-cy), text y = cx', () => {
+    // piece 1 centre (310,215) -> (2070-215, 310) = (1855, 310); text NOT rotated
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true });
+    expect(svg).toMatch(/<tspan x="1855"[^>]*>X<\/tspan>/);
+    expect(svg).toMatch(/<text x="1855" y="310"[^>]*>/);
+    expect(svg).not.toMatch(/rotate\(/); // no rotation transform → text stays horizontal
+  });
+
+  it('renders unrotated identically when rotate90 is false/absent', () => {
+    expect(buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: false })).toBe(
+      buildSheetSvg({ sheet, labelFor: () => 'X' }),
+    );
+  });
+});
+
 describe('computeGroupItemQuantities', () => {
   it('counts total placed instances per item across all sheets (qty=3 over 2 sheets)', () => {
     const sheets: BackMappedSheet[] = [

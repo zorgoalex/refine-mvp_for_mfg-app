@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Form,
   Input,
   Select,
@@ -21,8 +22,9 @@ import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
-import { resolveJobProfileParams, isVacuumLayout, shouldRotateLandscape } from './cutPreviewHelpers';
+import { loadSheetOrientationPortrait, saveSheetOrientationPortrait } from './cutPreviewHelpers';
 import { SheetPreview } from './SheetPreview';
+import { authSession } from '../../api/authSession';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -95,6 +97,9 @@ export const CutPage: React.FC = () => {
   const { show } = useNavigation();
   const [form] = Form.useForm<{ name: string; orderIds?: string; sheetMaterialTypeIds?: number[]; filmIds?: string }>();
   const [job, setJob] = useState<CutJobDto | null>(null);
+  // Per-user, per-job sheet preview orientation (portrait by default), persisted
+  // in localStorage. Landscape rotates the render server-side (labels stay upright).
+  const [sheetPortrait, setSheetPortrait] = useState(true);
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
@@ -142,6 +147,27 @@ export const CutPage: React.FC = () => {
       return next;
     });
   }, []);
+
+  // Load this user's saved orientation for the opened job (default portrait).
+  useEffect(() => {
+    if (!job) return;
+    const uid = authSession.getUser()?.id ?? 'anon';
+    setSheetPortrait(loadSheetOrientationPortrait(uid, job.cutJobId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.cutJobId]);
+
+  // Toggle + persist orientation; drop cached previews so they re-fetch oriented.
+  const toggleSheetPortrait = useCallback(
+    (portrait: boolean) => {
+      setSheetPortrait(portrait);
+      if (job) {
+        const uid = authSession.getUser()?.id ?? 'anon';
+        saveSheetOrientationPortrait(uid, job.cutJobId, portrait);
+      }
+      resetSheetViews();
+    },
+    [job, resetSheetViews],
+  );
 
   useEffect(() => {
     blobsRef.current = { images: sheetImages, thumbs: sheetThumbs };
@@ -442,7 +468,7 @@ export const CutPage: React.FC = () => {
       const key = `${group.cutGroupId}:${sheetIndex}`;
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset);
+        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, !sheetPortrait);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetImages((prev) => {
@@ -453,7 +479,7 @@ export const CutPage: React.FC = () => {
         handleError(error, 'Не удалось загрузить лист раскроя');
       }
     },
-    [job, preset, handleError],
+    [job, preset, sheetPortrait, handleError],
   );
 
   // Small layout preview for a ready job's sheet, fetched once with the light
@@ -466,7 +492,7 @@ export const CutPage: React.FC = () => {
       thumbReqRef.current.add(reqKey);
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb');
+        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', !sheetPortrait);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetThumbs((prev) => {
@@ -478,7 +504,7 @@ export const CutPage: React.FC = () => {
         thumbReqRef.current.delete(reqKey);
       }
     },
-    [],
+    [sheetPortrait],
   );
 
   // Auto-load per-sheet previews when a ready job's layout is present, so an
@@ -496,13 +522,13 @@ export const CutPage: React.FC = () => {
     async (group: CutGroupDto, sheetIndex: number) => {
       if (!job) return;
       try {
-        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex);
+        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, !sheetPortrait);
         triggerBlobDownload(blob, `cut-${job.cutJobId}-g${group.cutGroupId}-s${sheetIndex + 1}.svg`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить SVG');
       }
     },
-    [job, handleError],
+    [job, sheetPortrait, handleError],
   );
 
   const downloadGroupPdf = useCallback(
@@ -510,7 +536,7 @@ export const CutPage: React.FC = () => {
       if (!job) return;
       setBusy(true);
       try {
-        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId));
+        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, !sheetPortrait));
         triggerBlobDownload(result.blob, result.fileName ?? `cut-group-${group.cutGroupId}.pdf`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить PDF группы');
@@ -518,21 +544,21 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, handleError],
+    [job, sheetPortrait, handleError],
   );
 
   const downloadJobPdf = useCallback(async () => {
     if (!job) return;
     setBusy(true);
     try {
-      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId));
+      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, !sheetPortrait));
       triggerBlobDownload(result.blob, result.fileName ?? `cut-job-${job.cutJobId}.pdf`);
     } catch (error) {
       handleError(error, 'Не удалось выгрузить PDF раскроя');
     } finally {
       setBusy(false);
     }
-  }, [job, handleError]);
+  }, [job, sheetPortrait, handleError]);
 
   const filteredJobs = useMemo(() => filterJobsByStatus(jobs, statusFilter), [jobs, statusFilter]);
 
@@ -870,7 +896,7 @@ export const CutPage: React.FC = () => {
                       options={profileOptions}
                     />
                     {job.status === 'ready' && (
-                      <div style={{ marginTop: 4, color: '#ad8b00', maxWidth: 320 }}>
+                      <div style={{ marginTop: 4, color: '#ad8b00', whiteSpace: 'nowrap' }}>
                         изменение профиля применится после команды «Повторить расчёт»
                       </div>
                     )}
@@ -966,67 +992,75 @@ export const CutPage: React.FC = () => {
         />
       )}
 
-      {job?.groups.map((group) => (
-        <Card
-          key={group.cutGroupId}
-          size="small"
-          title={`Группа #${group.cutGroupId}`}
-          extra={
-            <Button size="small" onClick={() => downloadGroupPdf(group)} loading={busy}>
-              Скачать PDF
-            </Button>
-          }
-        >
-          <Text type="secondary">{formatGroupSummary(group.summary)}</Text>
-          {/* Previews flow in wrapping rows (not a single column). */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
-            {group.sheets.map((sheet) => {
-              const key = `${group.cutGroupId}:${sheet.sheetIndex}`;
-              const widthMm = sheet.placements.sheet_width_mm;
-              const heightMm = sheet.placements.sheet_height_mm;
-              // Vacuum-table jobs show the sheet lying on its long side (landscape).
-              const jobVacuum = isVacuumLayout(
-                resolveJobProfileParams(job?.paramProfileId ?? null, profiles, cutSettings),
-              );
-              const rotate = shouldRotateLandscape(widthMm, heightMm, jobVacuum);
-              return (
-                <div key={key}>
-                  <Space>
-                    <Button size="small" onClick={() => loadSheet(group, sheet.sheetIndex)}>
-                      Лист {sheet.sheetIndex + 1}
-                    </Button>
-                    <Button size="small" onClick={() => downloadSheetSvg(group, sheet.sheetIndex)}>
-                      SVG
-                    </Button>
-                  </Space>
-                  {sheetThumbs[key] && !sheetImages[key] && (
-                    <SheetPreview
-                      src={sheetThumbs[key]}
-                      alt={`Превью листа ${sheet.sheetIndex + 1}`}
-                      widthMm={widthMm}
-                      heightMm={heightMm}
-                      rotate={rotate}
-                      full={false}
-                      onOpen={() => loadSheet(group, sheet.sheetIndex)}
-                    />
-                  )}
-                  {sheetImages[key] && (
-                    <SheetPreview
-                      src={sheetImages[key]}
-                      alt={`Лист ${sheet.sheetIndex + 1}`}
-                      widthMm={widthMm}
-                      heightMm={heightMm}
-                      rotate={rotate}
-                      full
-                      onCollapse={() => collapseSheet(key)}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      ))}
+      {job && job.groups.length > 0 && (
+        <Checkbox checked={sheetPortrait} onChange={(e) => toggleSheetPortrait(e.target.checked)}>
+          Книжная ориентация листа (вертикально) — снимите для альбомной
+        </Checkbox>
+      )}
+
+      {job?.groups.map((group) => {
+        // Readable group title: «Раскрой: <материал> · N листов» (fallback to id).
+        const matName = sheetOptions.find((o) => o.sheetMaterialTypeId === group.sheetMaterialTypeId)?.name;
+        const title = matName
+          ? `Раскрой: ${matName} · ${group.sheets.length} л.`
+          : `Группа #${group.cutGroupId}`;
+        return (
+          <Card
+            key={group.cutGroupId}
+            size="small"
+            title={title}
+            extra={
+              <Button size="small" onClick={() => downloadGroupPdf(group)} loading={busy}>
+                Скачать PDF
+              </Button>
+            }
+          >
+            <Text type="secondary">{formatGroupSummary(group.summary)}</Text>
+            {/* Previews flow in wrapping rows (not a single column). */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
+              {group.sheets.map((sheet) => {
+                const key = `${group.cutGroupId}:${sheet.sheetIndex}`;
+                const widthMm = sheet.placements.sheet_width_mm;
+                const heightMm = sheet.placements.sheet_height_mm;
+                return (
+                  <div key={key}>
+                    <Space>
+                      <Button size="small" onClick={() => loadSheet(group, sheet.sheetIndex)}>
+                        Лист {sheet.sheetIndex + 1}
+                      </Button>
+                      <Button size="small" onClick={() => downloadSheetSvg(group, sheet.sheetIndex)}>
+                        SVG
+                      </Button>
+                    </Space>
+                    {sheetThumbs[key] && !sheetImages[key] && (
+                      <SheetPreview
+                        src={sheetThumbs[key]}
+                        alt={`Превью листа ${sheet.sheetIndex + 1}`}
+                        widthMm={widthMm}
+                        heightMm={heightMm}
+                        landscape={!sheetPortrait}
+                        full={false}
+                        onOpen={() => loadSheet(group, sheet.sheetIndex)}
+                      />
+                    )}
+                    {sheetImages[key] && (
+                      <SheetPreview
+                        src={sheetImages[key]}
+                        alt={`Лист ${sheet.sheetIndex + 1}`}
+                        widthMm={widthMm}
+                        heightMm={heightMm}
+                        landscape={!sheetPortrait}
+                        full
+                        onCollapse={() => collapseSheet(key)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        );
+      })}
     </Space>
   );
 };

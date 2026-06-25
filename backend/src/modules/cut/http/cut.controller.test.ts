@@ -130,7 +130,7 @@ describe('CutController', () => {
   it('renders a sheet SVG with the svg content type', async () => {
     const controller = createController({ service: { renderSheetSvg: vi.fn(async () => '<svg/>') } });
     const { res, headers, state } = fakeResponse();
-    await controller.renderSvg({ user: currentUser() } as never, '42', '100', '0', res as never);
+    await controller.renderSvg({ user: currentUser() } as never, '42', '100', '0', {}, res as never);
     expect(headers['Content-Type']).toBe('image/svg+xml');
     expect(state.sent).toBe('<svg/>');
   });
@@ -142,14 +142,14 @@ describe('CutController', () => {
     const controller = createController({ service: { renderGroupPdf }, pdfCache });
 
     const cold = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', cold.res as never);
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, cold.res as never);
     expect(cold.state.status).toBe(202);
     expect(cold.headers['Retry-After']).toBe('2');
 
     await pdfCache.whenIdle();
 
     const warm = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', warm.res as never);
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, warm.res as never);
     expect(warm.headers['Content-Type']).toBe('application/pdf');
     expect(warm.state.sent).toBe(pdf);
     expect(renderGroupPdf).toHaveBeenCalledTimes(1);
@@ -162,14 +162,14 @@ describe('CutController', () => {
 
     // First call kicks the render and returns 202.
     const cold = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', cold.res as never);
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, cold.res as never);
     expect(cold.state.status).toBe(202);
     await pdfCache.whenIdle();
 
     // Retry surfaces the ApiError instead of looping 202 forever.
     const warm = fakeResponse();
     await expect(
-      controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', warm.res as never),
+      controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, warm.res as never),
     ).rejects.toMatchObject({ statusCode: 404, code: 'CUT_GROUP_SHEET_NOT_FOUND' });
   });
 
@@ -182,13 +182,13 @@ describe('CutController', () => {
     const controller = createController({ service: { renderJobPdf, getJob, setPdfPrewarmState }, pdfCache });
 
     const cold = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', cold.res as never);
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', {}, cold.res as never);
     expect(cold.state.status).toBe(202);
 
     await pdfCache.whenIdle();
 
     const warm = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', warm.res as never);
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', {}, warm.res as never);
     expect(warm.headers['Content-Type']).toBe('application/pdf');
     expect(warm.state.sent).toBe(pdf);
     expect(renderJobPdf).toHaveBeenCalledTimes(1);

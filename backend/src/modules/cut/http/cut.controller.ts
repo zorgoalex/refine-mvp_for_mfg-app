@@ -293,6 +293,7 @@ export class CutController {
       cutGroupId: parseCutJobId(groupId),
       sheetIndex: parseSheetIndex(sheetIndex),
       preset: parsePreset(query.preset),
+      rotate90: parseOrientation(query.orientation),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/png');
@@ -307,6 +308,7 @@ export class CutController {
     @Param('cutJobId') cutJobId: string,
     @Param('groupId') groupId: string,
     @Param('sheetIndex') sheetIndex: string,
+    @Query() query: Record<string, string>,
     @Res() response: Response,
   ): Promise<void> {
     const currentUser = this.requireRead(request);
@@ -315,6 +317,7 @@ export class CutController {
       currentUser,
       cutGroupId: parseCutJobId(groupId),
       sheetIndex: parseSheetIndex(sheetIndex),
+      rotate90: parseOrientation(query.orientation),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');
@@ -328,13 +331,16 @@ export class CutController {
     @Req() request: RequestWithCurrentUser,
     @Param('cutJobId') cutJobId: string,
     @Param('groupId') groupId: string,
+    @Query() query: Record<string, string>,
     @Res() response: Response,
   ): Promise<void> {
     const currentUser = this.requireRead(request);
     parseCutJobId(cutJobId);
     const cutGroupId = parseCutJobId(groupId);
-    const result = this.pdfCache.ensure(`group:${cutGroupId}`, () =>
-      this.cut.renderGroupPdf({ currentUser, cutGroupId, requestId: request.requestId }),
+    const rotate90 = parseOrientation(query.orientation);
+    // Orientation is part of the cache key so portrait and landscape PDFs don't collide.
+    const result = this.pdfCache.ensure(`group:${cutGroupId}:${rotate90 ? 'L' : 'P'}`, () =>
+      this.cut.renderGroupPdf({ currentUser, cutGroupId, rotate90, requestId: request.requestId }),
     );
     this.sendPdf(response, result, `cut-group-${cutGroupId}.pdf`);
   }
@@ -344,13 +350,15 @@ export class CutController {
   async exportJobPdf(
     @Req() request: RequestWithCurrentUser,
     @Param('cutJobId') cutJobId: string,
+    @Query() query: Record<string, string>,
     @Res() response: Response,
   ): Promise<void> {
     const currentUser = this.requireRead(request);
     const id = parseCutJobId(cutJobId);
+    const rotate90 = parseOrientation(query.orientation);
     // getJob gives the current version (cache discriminator) + enforces cut.view.
     const job = await this.cut.getJob({ currentUser, cutJobId: id, requestId: request.requestId });
-    const result = this.ensureJobPdf(currentUser, id, job.version, request.requestId);
+    const result = this.ensureJobPdf(currentUser, id, job.version, request.requestId, rotate90);
     this.sendPdf(response, result, `cut-job-${id}.pdf`);
   }
 
@@ -359,11 +367,16 @@ export class CutController {
     cutJobId: number,
     version: number,
     requestId: string | undefined,
+    rotate90 = false,
   ) {
+    // Orientation discriminates the cache. pdf_prewarm_state tracks only the
+    // default (portrait) job PDF surfaced in the UI — the landscape variant is
+    // on-demand and must not write the prewarm state.
     return this.pdfCache.ensure(
-      `job:${cutJobId}:v${version}`,
-      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, requestId }),
+      `job:${cutJobId}:v${version}:${rotate90 ? 'L' : 'P'}`,
+      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, requestId }),
       (state, reason) => {
+        if (rotate90) return;
         void this.cut.setPdfPrewarmState({ cutJobId, version, state, reason }).catch(() => undefined);
       },
     );
@@ -454,6 +467,12 @@ export function parsePreset(value: string | undefined): string {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid preset', { field: 'preset' });
   }
   return name;
+}
+
+/** Landscape orientation flag for sheet renders: `?orientation=landscape` rotates
+ *  the layout 90° (long side horizontal). Default (absent / 'portrait') → false. */
+export function parseOrientation(value: string | undefined): boolean {
+  return (value ?? '').trim().toLowerCase() === 'landscape';
 }
 
 export function parseCreateCutJobRequest(body: unknown) {

@@ -98,36 +98,38 @@ export const cutApi = {
     groupId: number,
     sheetIndex: number,
     preset: string = 'screen',
+    landscape = false,
   ): Promise<Blob> {
     const path = apiRoutes.cutJobs.sheetPng(
       validateCutJobId(cutJobId),
       validateCutJobId(groupId),
       sheetIndex,
     );
-    const { blob } = await httpClient.download(`${path}?preset=${encodeURIComponent(preset)}`);
+    const orient = landscape ? '&orientation=landscape' : '';
+    const { blob } = await httpClient.download(`${path}?preset=${encodeURIComponent(preset)}${orient}`);
     return blob;
   },
 
-  async fetchSheetSvg(cutJobId: number, groupId: number, sheetIndex: number): Promise<Blob> {
+  async fetchSheetSvg(cutJobId: number, groupId: number, sheetIndex: number, landscape = false): Promise<Blob> {
     const path = apiRoutes.cutJobs.sheetSvg(
       validateCutJobId(cutJobId),
       validateCutJobId(groupId),
       sheetIndex,
     );
-    const { blob } = await httpClient.download(path);
+    const { blob } = await httpClient.download(landscape ? `${path}?orientation=landscape` : path);
     return blob;
   },
 
   /** Group PDF. 202 (cold cache) -> `{ pending: true }`; caller retries. */
-  fetchGroupPdf(cutJobId: number, groupId: number): Promise<CutPdfResult> {
-    return downloadPdf(
-      apiRoutes.cutJobs.groupPdf(validateCutJobId(cutJobId), validateCutJobId(groupId)),
-    );
+  fetchGroupPdf(cutJobId: number, groupId: number, landscape = false): Promise<CutPdfResult> {
+    const path = apiRoutes.cutJobs.groupPdf(validateCutJobId(cutJobId), validateCutJobId(groupId));
+    return downloadPdf(landscape ? `${path}?orientation=landscape` : path);
   },
 
   /** Whole-job PDF. 202 (cold cache) -> `{ pending: true }`; caller retries. */
-  fetchJobPdf(cutJobId: number): Promise<CutPdfResult> {
-    return downloadPdf(apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId)));
+  fetchJobPdf(cutJobId: number, landscape = false): Promise<CutPdfResult> {
+    const path = apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId));
+    return downloadPdf(landscape ? `${path}?orientation=landscape` : path);
   },
 
   async setProfile(cutJobId: number, paramProfileId: number | null, version: number): Promise<CutJobDto> {
