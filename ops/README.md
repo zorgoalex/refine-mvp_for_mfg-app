@@ -138,17 +138,24 @@ enters the host shell.
 ```bash
 cd ~/projects/erp_dev/repo_erp
 
-ops/apply-migrations.sh                 # dry-run (default): what is pending? read-only
-ops/apply-migrations.sh status          # applied vs pending + checksum drift, read-only
-ops/apply-migrations.sh apply --yes     # apply pending in order, record in ledger
-ops/apply-migrations.sh baseline --yes  # adopt the ledger on an ALREADY-migrated DB
-                                        # (record history as applied WITHOUT running it)
+ops/apply-migrations.sh                      # dry-run (default): what is pending? read-only
+ops/apply-migrations.sh status               # applied vs pending + checksum drift, read-only
+ops/apply-migrations.sh apply --yes          # apply pending in order, record in ledger
+ops/apply-migrations.sh apply --to 032 --yes # apply pending only up to v032, then stop
+ops/apply-migrations.sh baseline --yes       # adopt the ledger on an ALREADY-migrated DB
+ops/apply-migrations.sh mark-applied --upto 005 --yes  # restored dump already at v005
+ops/apply-migrations.sh mark-applied 003 --yes         # skip a single migration (003)
 ```
 
-Run `baseline` once on a DB that was migrated before this ledger existed (e.g.
-the live `erp_test` / a restored dump) so `apply` does not try to replay history.
-Selection excludes the manual Variant-B side files (`*_preflight/_verify/_rollback.sql`)
-and `*.test.ts`. Override the target with `--container`, `--user`, `--db`, `--dir`.
+Run `baseline` once on a DB migrated as a whole before this ledger existed.
+For a restored dump that is only PARTIALLY ahead (real/legacy prod baseline),
+`mark-applied --upto NNN` records 001..NNN as applied with REAL checksums (no
+false drift), and `mark-applied <version|filename>` marks/skips a single one
+(e.g. `003` when prod's `orders_view` is newer). `apply --to NNN` stops after
+version NNN — use it to halt before the destructive Variant-B 033/034 while you
+extend the conversion map. Selection excludes the manual Variant-B side files
+(`*_preflight/_verify/_rollback.sql`) and `*.test.ts`. Override the target with
+`--container`, `--user`, `--db`, `--dir`.
 
 ## One Script Flow
 
