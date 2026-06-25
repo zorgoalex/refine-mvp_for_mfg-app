@@ -21,6 +21,8 @@ import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
+import { resolveJobProfileParams, isVacuumLayout, shouldRotateLandscape } from './cutPreviewHelpers';
+import { SheetPreview } from './SheetPreview';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -127,6 +129,18 @@ export const CutPage: React.FC = () => {
     // Invalidate in-flight sheet/thumb fetches so a late completion can't
     // repopulate the just-cleared maps with a stale-job blob.
     viewEpochRef.current += 1;
+  }, []);
+
+  // Collapse a single full-size sheet back to its thumbnail: revoke the full
+  // image blob and drop it from the map (the thumb stays; clicking reopens).
+  const collapseSheet = useCallback((key: string) => {
+    setSheetImages((prev) => {
+      if (!prev[key]) return prev;
+      URL.revokeObjectURL(prev[key]);
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -843,54 +857,56 @@ export const CutPage: React.FC = () => {
                   <span>Площадь, итого: <b>{formatArea(job.totals.area)}</b></span>
                   {job.status === 'ready' && <span>Листов раскроя: <b>{job.totals.sheets}</b></span>}
                 </Space>
-                <div style={{ marginBottom: 12 }}>
-                  <span style={{ marginRight: 8 }}>Профиль раскроя:</span>
-                  <Select<number | null>
-                    value={job.paramProfileId}
-                    onChange={(v) => void setJobProfile(v ?? null)}
-                    disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
-                    style={{ minWidth: 240 }}
-                    placeholder={resolveProfileLabel(null, profiles, cutSettings)}
-                    allowClear
-                    options={profileOptions}
-                  />
-                  {job.status === 'ready' && (
-                    <span style={{ marginLeft: 8, color: '#ad8b00' }}>
-                      изменение профиля применится после команды «Повторить расчёт»
-                    </span>
-                  )}
-                </div>
-                {(() => {
-                  const jobMt = jobMaterialTypeIds(job.items.map((i) => i.detail?.sheetMaterialTypeId ?? null), sheetOptions);
-                  const { preferred, others } = partitionSheetOptions(sheetOptions, jobMt);
-                  const grouped = [
-                    ...(preferred.length ? [{ label: 'Материал деталей', options: preferred.map((o) => ({ value: o.sheetMaterialTypeId, label: formatSheetOptionLabel(o) })) }] : []),
-                    ...(others.length ? [{ label: 'Другие листы', options: others.map((o) => ({ value: o.sheetMaterialTypeId, label: formatSheetOptionLabel(o) })) }] : []),
-                  ];
-                  const mixed = isMixedMaterialSelection(job.sheetMaterialTypeId, sheetOptions, jobMt);
-                  return (
-                    <div style={{ marginBottom: 12 }}>
-                      <span style={{ marginRight: 8 }}>Лист раскроя:</span>
-                      <Select<number | null>
-                        value={job.sheetMaterialTypeId}
-                        onChange={(v) => void setJobSheetMaterial(v ?? null)}
-                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
-                        style={{ minWidth: 280 }}
-                        placeholder="Как у деталей"
-                        allowClear
-                        options={grouped}
-                      />
-                      {mixed && (
-                        <Alert
-                          type="warning"
-                          showIcon
-                          style={{ marginTop: 8 }}
-                          message="Детали разных материалов будут раскроены на одном выбранном листе"
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 12 }}>
+                  <div>
+                    <span style={{ marginRight: 8 }}>Профиль раскроя:</span>
+                    <Select<number | null>
+                      value={job.paramProfileId}
+                      onChange={(v) => void setJobProfile(v ?? null)}
+                      disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                      style={{ minWidth: 240 }}
+                      placeholder={resolveProfileLabel(null, profiles, cutSettings)}
+                      allowClear
+                      options={profileOptions}
+                    />
+                    {job.status === 'ready' && (
+                      <div style={{ marginTop: 4, color: '#ad8b00', maxWidth: 320 }}>
+                        изменение профиля применится после команды «Повторить расчёт»
+                      </div>
+                    )}
+                  </div>
+                  {(() => {
+                    const jobMt = jobMaterialTypeIds(job.items.map((i) => i.detail?.sheetMaterialTypeId ?? null), sheetOptions);
+                    const { preferred, others } = partitionSheetOptions(sheetOptions, jobMt);
+                    const grouped = [
+                      ...(preferred.length ? [{ label: 'Материал деталей', options: preferred.map((o) => ({ value: o.sheetMaterialTypeId, label: formatSheetOptionLabel(o) })) }] : []),
+                      ...(others.length ? [{ label: 'Другие листы', options: others.map((o) => ({ value: o.sheetMaterialTypeId, label: formatSheetOptionLabel(o) })) }] : []),
+                    ];
+                    const mixed = isMixedMaterialSelection(job.sheetMaterialTypeId, sheetOptions, jobMt);
+                    return (
+                      <div>
+                        <span style={{ marginRight: 8 }}>Лист раскроя:</span>
+                        <Select<number | null>
+                          value={job.sheetMaterialTypeId}
+                          onChange={(v) => void setJobSheetMaterial(v ?? null)}
+                          disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                          style={{ minWidth: 280 }}
+                          placeholder="Как у деталей"
+                          allowClear
+                          options={grouped}
                         />
-                      )}
-                    </div>
-                  );
-                })()}
+                        {mixed && (
+                          <Alert
+                            type="warning"
+                            showIcon
+                            style={{ marginTop: 8, maxWidth: 360 }}
+                            message="Детали разных материалов будут раскроены на одном выбранном листе"
+                          />
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
               </>
             );
           })()}
@@ -962,9 +978,17 @@ export const CutPage: React.FC = () => {
           }
         >
           <Text type="secondary">{formatGroupSummary(group.summary)}</Text>
-          <Space direction="vertical" style={{ width: '100%' }}>
+          {/* Previews flow in wrapping rows (not a single column). */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
             {group.sheets.map((sheet) => {
               const key = `${group.cutGroupId}:${sheet.sheetIndex}`;
+              const widthMm = sheet.placements.sheet_width_mm;
+              const heightMm = sheet.placements.sheet_height_mm;
+              // Vacuum-table jobs show the sheet lying on its long side (landscape).
+              const jobVacuum = isVacuumLayout(
+                resolveJobProfileParams(job?.paramProfileId ?? null, profiles, cutSettings),
+              );
+              const rotate = shouldRotateLandscape(widthMm, heightMm, jobVacuum);
               return (
                 <div key={key}>
                   <Space>
@@ -975,28 +999,32 @@ export const CutPage: React.FC = () => {
                       SVG
                     </Button>
                   </Space>
-                  {/* Inline auto-preview (~5 detail rows tall); click to open full size. */}
                   {sheetThumbs[key] && !sheetImages[key] && (
-                    <div style={{ marginTop: 4 }}>
-                      <Tooltip title="Открыть лист в полном размере">
-                        <img
-                          src={sheetThumbs[key]}
-                          alt={`Превью листа ${sheet.sheetIndex + 1}`}
-                          onClick={() => loadSheet(group, sheet.sheetIndex)}
-                          style={{ height: 170, width: 'auto', maxWidth: '100%', cursor: 'pointer', border: '1px solid #f0f0f0' }}
-                        />
-                      </Tooltip>
-                    </div>
+                    <SheetPreview
+                      src={sheetThumbs[key]}
+                      alt={`Превью листа ${sheet.sheetIndex + 1}`}
+                      widthMm={widthMm}
+                      heightMm={heightMm}
+                      rotate={rotate}
+                      full={false}
+                      onOpen={() => loadSheet(group, sheet.sheetIndex)}
+                    />
                   )}
                   {sheetImages[key] && (
-                    <div>
-                      <img src={sheetImages[key]} alt={`Лист ${sheet.sheetIndex + 1}`} style={{ maxWidth: '100%' }} />
-                    </div>
+                    <SheetPreview
+                      src={sheetImages[key]}
+                      alt={`Лист ${sheet.sheetIndex + 1}`}
+                      widthMm={widthMm}
+                      heightMm={heightMm}
+                      rotate={rotate}
+                      full
+                      onCollapse={() => collapseSheet(key)}
+                    />
                   )}
                 </div>
               );
             })}
-          </Space>
+          </div>
         </Card>
       ))}
     </Space>
