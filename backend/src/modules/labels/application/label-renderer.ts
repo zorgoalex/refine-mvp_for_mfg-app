@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { PNG } from 'pngjs';
 import { Resvg } from '@resvg/resvg-js';
+import { existsSync } from 'node:fs';
 import { writeBmp } from './bmp-writer';
 import type { LabelRow } from './label-row-builder';
 import type { LabelExportFormat, LabelTemplateDto } from './labels.types';
@@ -91,10 +92,12 @@ function renderSvgPage(template: LabelTemplateDto, row: LabelRow): string {
 }
 
 function renderSvgToPng(svg: string): Buffer {
+  const fontFiles = ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'].filter((file) => existsSync(file));
   return new Resvg(svg, {
     fitTo: { mode: 'original' },
     font: {
       defaultFontFamily: 'DejaVu Sans',
+      fontFiles,
       loadSystemFonts: true,
     },
   }).render().asPng();
