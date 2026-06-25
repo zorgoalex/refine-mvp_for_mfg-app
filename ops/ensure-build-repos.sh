@@ -27,4 +27,7 @@ ensure() { # $1 dir-name  $2 url
 
 ensure repo_freecut "$FREECUT_REPO_URL"
 ensure repo_svgdxf  "$SVGDXF_REPO_URL"
-[ "$DRY" -eq 1 ] && echo "ensure-build-repos: dry-run complete"
+# Use an if, NOT `[ ] && echo`: the && form returns 1 when DRY=0, which under
+# `set -e` makes this script exit non-zero and silently aborts callers (provision
+# stops right after this step with no error). The if form returns 0.
+if [ "$DRY" -eq 1 ]; then echo "ensure-build-repos: dry-run complete"; fi

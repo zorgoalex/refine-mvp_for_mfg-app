@@ -40,4 +40,20 @@ describe('ensure-build-repos.sh', () => {
       }),
     ).toThrow();
   });
+
+  // Regression: the normal (non-dry-run) path with both repos already present
+  // MUST exit 0. A trailing `[ "$DRY" -eq 1 ] && echo` returned 1 here, which
+  // under `set -e` silently aborted callers (provision) right after this step.
+  it('exits 0 on the normal path when both repos are already present', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ebr-'));
+    mkdirSync(join(root, 'repo_freecut', '.git'), { recursive: true });
+    mkdirSync(join(root, 'repo_svgdxf', '.git'), { recursive: true });
+    const out = execFileSync('bash', [script], {
+      encoding: 'utf8',
+      env: { ...process.env, ENSURE_BUILD_REPOS_ROOT: root },
+    });
+    expect(out).toMatch(/repo_freecut present/);
+    expect(out).toMatch(/repo_svgdxf present/);
+    // execFileSync throws on non-zero exit, so reaching here proves exit 0.
+  });
 });
