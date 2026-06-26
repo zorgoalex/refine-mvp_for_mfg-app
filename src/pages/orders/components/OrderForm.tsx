@@ -100,7 +100,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   // Enrich the tab label once the order name is known.
   useEffect(() => {
     if (mode === 'edit' && orderId && header?.order_name) {
-      setTabTitle(tabKey, `Заказ #${orderId} · ${header.order_name}`);
+      setTabTitle(tabKey, `Заказ #${orderId} · ${header.order_name} · Редактирование`);
     }
   }, [mode, orderId, header?.order_name, tabKey, setTabTitle]);
   const { exportToDrive, isUploading } = useOrderExport();

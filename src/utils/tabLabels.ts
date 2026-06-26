@@ -68,8 +68,11 @@ export const resourceFromPath = (pathname: string): string | undefined => {
 
 export const resolveTabLabel = (pathname: string): string => {
   const segs = pathname.split('/').filter(Boolean);
-  const orderId = pathname.match(/^\/orders\/(?:edit|show)\/(\d+)/)?.[1];
-  if (orderId) return `Заказ #${orderId}`;
+  const orderMatch = pathname.match(/^\/orders\/(edit|show)\/(\d+)/);
+  if (orderMatch) {
+    const [, action, orderId] = orderMatch;
+    return action === 'edit' ? `Заказ #${orderId} · Редактирование` : `Заказ #${orderId}`;
+  }
   const resource = resourceFromPath(pathname);
   const resourceLabel = resource ? RESOURCE_LABELS[resource] : undefined;
   if (resourceLabel) {

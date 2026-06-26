@@ -6,10 +6,10 @@ describe('resolveTabLabel', () => {
     expect(resolveTabLabel('/orders')).toBe('Заказы');
     expect(resolveTabLabel('/calendar')).toBe('Календарь');
   });
-  it('labels an order edit route with the id', () => {
-    expect(resolveTabLabel('/orders/edit/11195')).toBe('Заказ #11195');
+  it('labels an order edit route with the id and edit suffix', () => {
+    expect(resolveTabLabel('/orders/edit/11195')).toBe('Заказ #11195 · Редактирование');
   });
-  it('labels an order show route with the id', () => {
+  it('labels an order show route with the id only', () => {
     expect(resolveTabLabel('/orders/show/11195')).toBe('Заказ #11195');
   });
   it('distinguishes list, show, create and edit tabs for reference resources', () => {
