@@ -28,13 +28,13 @@ SELECT
     od.production_status_id,
     od.joint_order_id,
     od.note,
-    od.basis_project,
-    od.basis_data,
     od.link_cutting_file,
     od.link_cutting_image_file,
     od.link_cad_file,
     od.link_pdf_file,
-    od.ref_key_1c
+    od.ref_key_1c,
+    od.basis_project,
+    od.basis_data
 FROM order_details od
 JOIN orders ord
   ON ord.order_id = od.order_id AND ord.delete_flag = false

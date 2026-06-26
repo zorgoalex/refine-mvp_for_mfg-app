@@ -22,7 +22,7 @@ import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
-import { loadSheetOrientationPortrait, saveSheetOrientationPortrait } from './cutPreviewHelpers';
+import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait } from './cutPreviewHelpers';
 import { SheetPreview } from './SheetPreview';
 import { authSession } from '../../api/authSession';
 import type {
@@ -1022,6 +1022,7 @@ export const CutPage: React.FC = () => {
                 const key = `${group.cutGroupId}:${sheet.sheetIndex}`;
                 const widthMm = sheet.placements.sheet_width_mm;
                 const heightMm = sheet.placements.sheet_height_mm;
+                const overlays = buildSheetPieceOverlays(sheet.placements, job.items, !sheetPortrait);
                 return (
                   <div key={key}>
                     <Space>
@@ -1040,6 +1041,7 @@ export const CutPage: React.FC = () => {
                         heightMm={heightMm}
                         landscape={!sheetPortrait}
                         full={false}
+                        overlays={overlays}
                         onOpen={() => loadSheet(group, sheet.sheetIndex)}
                       />
                     )}
@@ -1051,6 +1053,7 @@ export const CutPage: React.FC = () => {
                         heightMm={heightMm}
                         landscape={!sheetPortrait}
                         full
+                        overlays={overlays}
                         onCollapse={() => collapseSheet(key)}
                       />
                     )}

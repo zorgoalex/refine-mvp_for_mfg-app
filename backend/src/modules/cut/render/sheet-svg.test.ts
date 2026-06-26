@@ -4,6 +4,7 @@ import {
   composePieceLabelLines,
   computeGroupItemQuantities,
   formatPieceLabel,
+  orderFillColor,
 } from './sheet-svg';
 import type { BackMappedSheet, SheetPlacementsJson } from '../application/cut-freecut-mapping';
 
@@ -55,6 +56,24 @@ describe('buildSheetSvg multi-line labels', () => {
   it('still accepts a plain string label (single line)', () => {
     const svg = buildSheetSvg({ sheet, labelFor: () => 'X' });
     expect(svg).toContain('>X</tspan>');
+  });
+
+  it('uses deterministic per-order fills when provided', () => {
+    const svg = buildSheetSvg({
+      sheet,
+      labelFor: () => 'X',
+      fillFor: (piece) => (piece.instance === 1 ? orderFillColor(12) : orderFillColor(13)),
+    });
+
+    expect(svg).toContain(`fill="${orderFillColor(12)}"`);
+    expect(svg).toContain(`fill="${orderFillColor(13)}"`);
+    expect(orderFillColor(12)).not.toBe(orderFillColor(13));
+    expect(orderFillColor(12)).toBe(orderFillColor(12));
+  });
+
+  it('keeps the legacy piece fill when no order color is resolved', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X', fillFor: () => null });
+    expect(svg).toContain('fill="#eef3f8"');
   });
 });
 

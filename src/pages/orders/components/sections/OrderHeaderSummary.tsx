@@ -17,6 +17,7 @@ import { buildProductionStagesDisplayConfig } from '../../../../utils/production
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
 import { RowSeparator } from './RowSeparator';
+import { collectOrderBasisProjects } from './orderBasisProjects';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -262,6 +263,7 @@ export const OrderHeaderSummary: React.FC = () => {
   const materialsSummary = resolvedMaterialNames.length > 0
     ? resolvedMaterialNames.join(', ')
     : '—';
+  const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);
 
   // Load milling types, edge types, films для lookup
   const { data: millingTypesData } = useList({
@@ -650,6 +652,14 @@ export const OrderHeaderSummary: React.FC = () => {
                 </React.Fragment>
               );
             })
+          )}
+          {basisProjects.length > 0 && (
+            <span style={{ marginLeft: 12 }}>
+              <Text style={{ fontSize: 12, color: '#6B7280' }}>Базис-проект: </Text>
+              <Text strong style={{ fontSize: 12, color: '#111827' }}>
+                {basisProjects.join(', ')}
+              </Text>
+            </span>
           )}
         </div>
 

@@ -62,7 +62,7 @@ import type {
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
 import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, type TotalsRow } from './cut-totals';
-import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities } from '../render/sheet-svg';
+import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, orderFillColor } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import { buildSheetsPdf } from '../render/sheet-pdf';
 import {
@@ -1102,12 +1102,17 @@ export class PgCutRepository implements CutRepositoryPort {
         qty: quantities.get(piece.item_id) ?? 1,
       });
     };
+    const fillFor = (piece: FreecutPlacement): string => {
+      const detailId = parseFreecutItemId(piece.item_id);
+      const orderId = detailId === null ? null : orderByDetail.get(detailId) ?? null;
+      return orderFillColor(orderId);
+    };
 
     return {
       sheets: allSheets.rows.map((row) => ({
         sheetIndex: toNum(row.sheet_index),
         placements: row.placements,
-        svg: buildSheetSvg({ sheet: row.placements, labelFor, rotate90 }),
+        svg: buildSheetSvg({ sheet: row.placements, labelFor, fillFor, rotate90 }),
       })),
     };
   }
@@ -1529,6 +1534,7 @@ interface ItemRow extends QueryResultRow {
   // joined_detail_id is the existence sentinel: NULL iff the LEFT JOIN found no
   // live (non-deleted) detail. Never key existence off user data (detail_number).
   joined_detail_id?: string | number | null;
+  detail_fields?: Record<string, unknown> | null;
   detail_number?: string | number | null;
   detail_name?: string | null;
   height?: string | number | null;
@@ -1563,6 +1569,7 @@ interface ItemRow extends QueryResultRow {
 const ENRICHED_ITEMS_QUERY = `
   SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
          od.detail_id AS joined_detail_id,
+         to_jsonb(od) AS detail_fields,
          od.detail_number, od.detail_name, od.height, od.width,
          od.quantity AS detail_quantity, od.area,
          od.material_id, od.sheet_material_type_id,
@@ -1597,6 +1604,7 @@ function mapItemDetail(row: ItemRow): CutDetailInfoDto | null {
     return null;
   }
   return {
+    detailFields: row.detail_fields ?? null,
     detailNumber: numOrNull(row.detail_number),
     detailName: row.detail_name ?? null,
     height: numOrNull(row.height),

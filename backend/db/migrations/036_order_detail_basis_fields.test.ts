@@ -14,6 +14,7 @@ describe('036_order_detail_basis_fields migration', () => {
     expect(sql).toMatch(/CREATE OR REPLACE VIEW order_details_view/i);
     expect(sql).toMatch(/od\.basis_project/i);
     expect(sql).toMatch(/od\.basis_data/i);
+    expect(sql).toMatch(/od\.ref_key_1c,\s+od\.basis_project,\s+od\.basis_data/i);
     expect(sql).toMatch(/JOIN orders ord\s+ON ord\.order_id = od\.order_id AND ord\.delete_flag = false/i);
     expect(sql).toMatch(/WHERE od\.delete_flag = false/i);
   });

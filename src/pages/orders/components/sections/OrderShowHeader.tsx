@@ -16,6 +16,7 @@ import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { RowSeparator } from './RowSeparator';
+import { collectOrderBasisProjects } from './orderBasisProjects';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -164,6 +165,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   const materialsSummary = resolvedMaterialNames.length > 0
     ? resolvedMaterialNames.join(', ')
     : '—';
+  const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);
 
   // Load production status events for this order (all recorded statuses)
   const { data: productionEventsData } = useList({
@@ -555,6 +557,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
                 </React.Fragment>
               );
             })
+          )}
+          {basisProjects.length > 0 && (
+            <span style={{ marginLeft: 12 }}>
+              <Text style={{ fontSize: 12, color: '#6B7280' }}>Базис-проект: </Text>
+              <Text strong style={{ fontSize: 12, color: '#111827' }}>
+                {basisProjects.join(', ')}
+              </Text>
+            </span>
           )}
         </div>
 

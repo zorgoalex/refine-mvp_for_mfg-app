@@ -24,6 +24,8 @@ export interface AddCutItemsRequest {
  * is production-facing. Fields are null when the source detail no longer exists.
  */
 export interface CutDetailInfoDto {
+  /** Raw order_details row values, keyed by DB column name, for operator tooltip. */
+  detailFields?: Record<string, unknown> | null;
   detailNumber: number | null;
   detailName: string | null;
   height: number | null;

@@ -56,6 +56,30 @@ export function computeGroupItemQuantities(sheets: readonly BackMappedSheet[]): 
   return counts;
 }
 
+const DEFAULT_PIECE_FILL = '#eef3f8';
+const ORDER_FILL_PALETTE = [
+  '#d7e9ff',
+  '#dff3d7',
+  '#ffe6b8',
+  '#f7d5e8',
+  '#d9f0ef',
+  '#eadcff',
+  '#ffe0d2',
+  '#e8edc9',
+  '#d5e5f2',
+  '#f2ddd5',
+] as const;
+
+/** Deterministic, light fill color for a source order. Unknown order keeps the
+ * legacy neutral fill so old/partial data remains readable. */
+export function orderFillColor(orderId: number | null | undefined): string {
+  if (typeof orderId !== 'number' || !Number.isFinite(orderId)) {
+    return DEFAULT_PIECE_FILL;
+  }
+  const index = Math.abs(Math.trunc(orderId)) % ORDER_FILL_PALETTE.length;
+  return ORDER_FILL_PALETTE[index];
+}
+
 export interface BuildSheetSvgInput {
   sheet: SheetPlacementsJson;
   /**
@@ -64,6 +88,8 @@ export interface BuildSheetSvgInput {
    * detail on line 2).
    */
   labelFor: (piece: FreecutPlacement) => string | string[];
+  /** Optional per-piece fill, used to group details by source order. */
+  fillFor?: (piece: FreecutPlacement) => string | null | undefined;
   /** font-size in mm for piece labels (scaled with the mm viewBox). */
   labelFontMm?: number;
   /**
@@ -88,7 +114,7 @@ function num(value: number): string {
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
-  const { sheet, labelFor, rotate90 = false } = input;
+  const { sheet, labelFor, fillFor, rotate90 = false } = input;
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 40));
@@ -114,6 +140,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const cx = rotate90 ? h - cy0 : cx0;
       const cy = rotate90 ? cx0 : cy0;
       const resolved = labelFor(piece);
+      const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;
       const lines = Array.isArray(resolved) ? resolved : [resolved];
       // Vertically centre N lines around cy: the first tspan lifts by
       // (N-1)/2 line-heights, each subsequent line drops one line-height. em
@@ -127,7 +154,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       return [
         `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
           rect.h,
-        )}" fill="#eef3f8" stroke="#1f2d3d" stroke-width="2"/>`,
+        )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`,
         `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
           fontMm,
         )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,

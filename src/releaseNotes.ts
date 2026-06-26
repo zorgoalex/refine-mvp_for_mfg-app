@@ -30,6 +30,27 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-06-26",
+    title: "Раскрой: цветные листы и подсказки по деталям",
+    services: ["Cutting", "ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В превью листов раскроя детали из разных заказов выделяются разными цветами.",
+      "При наведении на деталь в превью показываются номер заказа, деталь и значения полей исходной строки детали.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-06-25",
+    title: "Карточка заказа: Базис-проект в шапке",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В третьей строке шапки заказа после материала показываются уникальные значения «Базис-проект» из всех деталей заказа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-06-24",
     title: "Выбор листа в задании на раскрой",
     services: ["Cutting", "ERP"],
