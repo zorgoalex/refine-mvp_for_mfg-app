@@ -62,7 +62,7 @@ import type {
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
 import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, type TotalsRow } from './cut-totals';
-import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, orderFillColor } from '../render/sheet-svg';
+import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, createOrderFillResolver } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import { buildSheetsPdf } from '../render/sheet-pdf';
 import {
@@ -1081,13 +1081,14 @@ export class PgCutRepository implements CutRepositoryPort {
 
     // Map freecut item_id -> detail/order label.
     const items = await this.database.query<{ order_detail_id: string | number; order_id: string | number }>(
-      `SELECT cji.order_detail_id, cji.order_id FROM cut_job_item cji WHERE cji.cut_group_id = $1`,
+      `SELECT cji.order_detail_id, cji.order_id FROM cut_job_item cji WHERE cji.cut_group_id = $1 ORDER BY cji.cut_job_item_id`,
       [cutGroupId],
     );
     const orderByDetail = new Map<number, number>();
     for (const row of items.rows) {
       orderByDetail.set(toNum(row.order_detail_id), toNum(row.order_id));
     }
+    const fillByOrder = createOrderFillResolver(items.rows.map((row) => toNum(row.order_id)));
 
     const labelFor = (piece: FreecutPlacement): string[] => {
       const detailId = parseFreecutItemId(piece.item_id);
@@ -1105,7 +1106,7 @@ export class PgCutRepository implements CutRepositoryPort {
     const fillFor = (piece: FreecutPlacement): string => {
       const detailId = parseFreecutItemId(piece.item_id);
       const orderId = detailId === null ? null : orderByDetail.get(detailId) ?? null;
-      return orderFillColor(orderId);
+      return fillByOrder(orderId);
     };
 
     return {

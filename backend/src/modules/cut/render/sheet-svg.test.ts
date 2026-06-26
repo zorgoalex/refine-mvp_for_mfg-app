@@ -3,6 +3,7 @@ import {
   buildSheetSvg,
   composePieceLabelLines,
   computeGroupItemQuantities,
+  createOrderFillResolver,
   formatPieceLabel,
   orderFillColor,
 } from './sheet-svg';
@@ -69,6 +70,13 @@ describe('buildSheetSvg multi-line labels', () => {
     expect(svg).toContain(`fill="${orderFillColor(13)}"`);
     expect(orderFillColor(12)).not.toBe(orderFillColor(13));
     expect(orderFillColor(12)).toBe(orderFillColor(12));
+  });
+
+  it('assigns different colors to different orders even when ids share a modulo palette slot', () => {
+    const fill = createOrderFillResolver([11372, 11292]);
+
+    expect(fill(11372)).not.toBe(fill(11292));
+    expect(fill(11372)).toBe(fill(11372));
   });
 
   it('keeps the legacy piece fill when no order color is resolved', () => {

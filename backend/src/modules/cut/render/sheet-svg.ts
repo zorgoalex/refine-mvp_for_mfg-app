@@ -80,6 +80,24 @@ export function orderFillColor(orderId: number | null | undefined): string {
   return ORDER_FILL_PALETTE[index];
 }
 
+/** Build a per-render color resolver from the orders present in one cut group.
+ * Different source orders get different palette slots by first appearance, so
+ * IDs like 11372 and 11292 do not collapse to the same `orderId % palette` color. */
+export function createOrderFillResolver(orderIds: readonly number[]): (orderId: number | null | undefined) => string {
+  const indexByOrder = new Map<number, number>();
+  for (const orderId of orderIds) {
+    if (!Number.isFinite(orderId) || indexByOrder.has(orderId)) continue;
+    indexByOrder.set(orderId, indexByOrder.size);
+  }
+  return (orderId) => {
+    if (typeof orderId !== 'number' || !Number.isFinite(orderId)) {
+      return DEFAULT_PIECE_FILL;
+    }
+    const index = indexByOrder.get(orderId);
+    return index === undefined ? DEFAULT_PIECE_FILL : ORDER_FILL_PALETTE[index % ORDER_FILL_PALETTE.length];
+  };
+}
+
 export interface BuildSheetSvgInput {
   sheet: SheetPlacementsJson;
   /**

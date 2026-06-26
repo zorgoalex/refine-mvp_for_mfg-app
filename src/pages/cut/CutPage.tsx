@@ -234,6 +234,20 @@ export const CutPage: React.FC = () => {
     }
   }, [handleError]);
 
+  const cutTabPath = useTabStore((s) => s.tabs.find((t) => t.key === '/cut')?.path);
+  const lastListRefreshPathRef = useRef<string | undefined>(undefined);
+
+  // /cut is kept mounted by the workspace. Jobs may be created from an order
+  // while this page is hidden, so refresh the list when the /cut tab is opened
+  // or its path changes via useTabSync/deep-link.
+  useEffect(() => {
+    if (!can('cut.view')) return;
+    if (!cutTabPath) return;
+    if (cutTabPath === lastListRefreshPathRef.current) return;
+    lastListRefreshPathRef.current = cutTabPath;
+    void loadJobs();
+  }, [cutTabPath, loadJobs]);
+
   const setJobProfile = useCallback(
     async (paramProfileId: number | null) => {
       if (!job) return;
@@ -302,6 +316,7 @@ export const CutPage: React.FC = () => {
         setEligible(null);
         setSelected([]);
         resetSheetViews();
+        void loadJobs();
       } catch (error) {
         if (openSeqRef.current !== seq) return; // superseded; swallow the stale error
         handleError(error, 'Не удалось открыть раскрой');
@@ -309,7 +324,7 @@ export const CutPage: React.FC = () => {
         if (openSeqRef.current === seq) setBusy(false);
       }
     },
-    [form, handleError, resetSheetViews],
+    [form, handleError, loadJobs, resetSheetViews],
   );
 
   // Deep-link: /cut?job=<id> opens that job (e.g. from the order show page
@@ -323,7 +338,6 @@ export const CutPage: React.FC = () => {
   // only links ready jobs, so the normal flow never deep-links archived — only a
   // stale/hand-edited URL can, and mutate controls are disabled for archived jobs
   // (isArchivedJob guard) so that is truly read-only.
-  const cutTabPath = useTabStore((s) => s.tabs.find((t) => t.key === '/cut')?.path);
   const storeDeepLinkJobId = parseJobQueryParam(
     cutTabPath && cutTabPath.includes('?') ? cutTabPath.slice(cutTabPath.indexOf('?')) : '',
   );

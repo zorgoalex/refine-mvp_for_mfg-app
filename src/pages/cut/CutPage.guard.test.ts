@@ -83,6 +83,20 @@ describe('CutPage source guards', () => {
     expect(source).toContain('form.setFieldsValue');
   });
 
+  it('refreshes the job list when the kept-alive /cut tab path changes or deep-link opens a job', () => {
+    // A cut job can be created from an order while /cut is mounted but hidden.
+    // When the user opens /cut later, the list must refetch; otherwise the new
+    // job is visible only after browser refresh.
+    expect(source).toContain('lastListRefreshPathRef');
+    expect(source).toMatch(/if \(cutTabPath === lastListRefreshPathRef\.current\) return/);
+    expect(source).toMatch(/lastListRefreshPathRef\.current = cutTabPath/);
+    expect(source).toMatch(/void loadJobs\(\)/);
+
+    const openJob = source.slice(source.indexOf('const openJob = useCallback'));
+    const openJobBody = openJob.slice(0, openJob.indexOf('}, [form'));
+    expect(openJobBody).toContain('void loadJobs()');
+  });
+
   it('auto-loads small per-sheet layout previews for a ready job', () => {
     // Ready jobs show an inline thumbnail per sheet (light 'thumb' preset),
     // fetched automatically, click-to-enlarge.
