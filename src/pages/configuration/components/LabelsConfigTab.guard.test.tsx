@@ -70,6 +70,20 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/clamp\(event\.target\.x\(\)/);
   });
 
+  it('supports advanced Konva editing controls for transform, grid, zoom and keyboard', () => {
+    expect(tabSrc).toMatch(/Transformer/);
+    expect(tabSrc).toMatch(/renderGrid/);
+    expect(tabSrc).toMatch(/Сетка/);
+    expect(tabSrc).toMatch(/Snap/);
+    expect(tabSrc).toMatch(/setZoom/);
+    expect(tabSrc).toMatch(/onWheel/);
+    expect(tabSrc).toMatch(/onKeyDown=\{handleKeyDown\}/);
+    expect(tabSrc).toMatch(/Delete' \|\| event\.key === 'Backspace/);
+    expect(tabSrc).toMatch(/ArrowLeft/);
+    expect(tabSrc).toMatch(/onTransformEnd/);
+    expect(tabSrc).toMatch(/boundBoxFunc/);
+  });
+
   it('exposes a draggable field palette that can drop fields onto the label visual', () => {
     expect(tabSrc).toMatch(/Поля бирки/);
     expect(tabSrc).toMatch(/FieldPalette/);

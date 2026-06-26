@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
 import { CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import type Konva from 'konva';
-import { Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText } from 'react-konva';
+import { Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import { labelsApi } from '../../../api/labelsApi';
 import type {
   LabelElementKind,
@@ -281,6 +281,21 @@ export const LabelsConfigTab: React.FC = () => {
           : element,
       ),
     );
+  };
+
+  const patchElementByKey = (elementKey: string, patch: Partial<LabelTemplateElement>) => {
+    setElements((current) =>
+      current.map((element) =>
+        element.elementKey === elementKey
+          ? { ...element, ...patch }
+          : element,
+      ),
+    );
+  };
+
+  const deleteElementByKey = (elementKey: string) => {
+    setElements((current) => current.filter((element) => element.elementKey !== elementKey));
+    setSelectedElementKey((current) => (current === elementKey ? null : current));
   };
 
   const addFieldElement = (field: LabelFieldCatalogItem, xMm: number, yMm: number) => {
@@ -651,6 +666,8 @@ export const LabelsConfigTab: React.FC = () => {
               canDrag={canManage}
               onSelectElement={setSelectedElementKey}
               onMoveElement={moveElement}
+              onChangeElement={patchElementByKey}
+              onDeleteElement={deleteElementByKey}
               onDropField={addFieldElement}
               draggingField={draggingField}
               onDropDraggingField={(field, xMm, yMm) => {
@@ -696,6 +713,8 @@ function LabelTemplatePreview({
   canDrag,
   onSelectElement,
   onMoveElement,
+  onChangeElement,
+  onDeleteElement,
   onDropField,
   draggingField,
   onDropDraggingField,
@@ -708,17 +727,25 @@ function LabelTemplatePreview({
   canDrag?: boolean;
   onSelectElement?: (elementKey: string) => void;
   onMoveElement?: (elementKey: string, xMm: number, yMm: number) => void;
+  onChangeElement?: (elementKey: string, patch: Partial<LabelTemplateElement>) => void;
+  onDeleteElement?: (elementKey: string) => void;
   onDropField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
   draggingField?: LabelFieldCatalogItem | null;
   onDropDraggingField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
 }) {
   const stageRef = useRef<Konva.Stage | null>(null);
+  const transformerRef = useRef<Konva.Transformer | null>(null);
+  const nodeRefs = useRef(new Map<string, Konva.Node>());
+  const [zoom, setZoom] = useState(1);
+  const [showGrid, setShowGrid] = useState(false);
+  const [snapToGrid, setSnapToGrid] = useState(true);
   const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 85;
   const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 88;
   const fieldLabels = new Map(fields.map((field) => [field.id, field.label]));
   const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
-  const previewWidth = Math.min(760, Math.max(360, safeWidth * 7));
+  const previewWidth = Math.round(Math.min(760, Math.max(360, safeWidth * 7)) * zoom);
   const previewHeight = previewWidth * (safeHeight / safeWidth);
+  const selectedElement = elements.find((element) => element.elementKey === selectedElementKey);
   const pointFromEvent = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
     const container = stageRef.current?.container();
     if (!container) return { x: 0, y: 0 };
@@ -728,6 +755,17 @@ function LabelTemplatePreview({
       y: ((event.clientY - rect.top) / rect.height) * safeHeight,
     };
   };
+
+  useEffect(() => {
+    if (!canDrag || !selectedElementKey) {
+      transformerRef.current?.nodes([]);
+      transformerRef.current?.getLayer()?.batchDraw();
+      return;
+    }
+    const node = nodeRefs.current.get(selectedElementKey);
+    transformerRef.current?.nodes(node ? [node] : []);
+    transformerRef.current?.getLayer()?.batchDraw();
+  }, [canDrag, elements, selectedElementKey]);
 
   useEffect(() => {
     if (!draggingField || !onDropDraggingField) return;
@@ -758,6 +796,83 @@ function LabelTemplatePreview({
     };
   }, [draggingField, onDropDraggingField, previewHeight, previewWidth, safeHeight, safeWidth]);
 
+  const applySnap = (value: number, event?: { altKey?: boolean }) => (
+    snapToGrid && !event?.altKey ? Math.round(value) : value
+  );
+
+  const patchGeometry = (
+    elementKey: string,
+    patch: Partial<LabelTemplateElement>,
+    event?: { altKey?: boolean },
+  ) => {
+    const next: Partial<LabelTemplateElement> = {};
+    if (patch.xMm !== undefined) next.xMm = roundMm(applySnap(Number(patch.xMm), event));
+    if (patch.yMm !== undefined) next.yMm = roundMm(applySnap(Number(patch.yMm), event));
+    if (patch.widthMm !== undefined) next.widthMm = roundMm(Math.max(0.1, applySnap(Number(patch.widthMm), event)));
+    if (patch.heightMm !== undefined) next.heightMm = roundMm(Math.max(0, applySnap(Number(patch.heightMm), event)));
+    if (patch.rotationDeg !== undefined) next.rotationDeg = roundMm(Number(patch.rotationDeg));
+    onChangeElement?.(elementKey, next);
+  };
+
+  const handleMoveElement = (elementKey: string, xMm: number, yMm: number, event?: { altKey?: boolean }) => {
+    const element = elements.find((item) => item.elementKey === elementKey);
+    if (!element) return;
+    const maxX = Math.max(0, safeWidth - Number(element.widthMm ?? 0));
+    const maxY = Math.max(0, safeHeight - Number(element.heightMm ?? 0));
+    const nextX = clamp(applySnap(xMm, event), 0, maxX);
+    const nextY = clamp(applySnap(yMm, event), 0, maxY);
+    onMoveElement?.(elementKey, nextX, nextY);
+  };
+
+  const handleTransformEnd = (
+    element: LabelTemplateElement,
+    node: Konva.Node,
+    event: Konva.KonvaEventObject<Event>,
+  ) => {
+    const scaleX = node.scaleX();
+    const scaleY = node.scaleY();
+    const rotationStep = (event.evt as MouseEvent | KeyboardEvent | PointerEvent | undefined)?.shiftKey ? 15 : 1;
+    node.scaleX(1);
+    node.scaleY(1);
+    const nextRotation = Math.round(Number(node.rotation() ?? 0) / rotationStep) * rotationStep;
+    patchGeometry(
+      element.elementKey,
+      {
+        xMm: clamp(node.x(), 0, safeWidth),
+        yMm: clamp(node.y(), 0, safeHeight),
+        widthMm: Number(element.widthMm ?? 0) * scaleX,
+        heightMm: Number(element.heightMm ?? 0) * scaleY,
+        rotationDeg: nextRotation,
+      },
+      event.evt as MouseEvent | PointerEvent,
+    );
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!canDrag || !selectedElement) return;
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault();
+      onDeleteElement?.(selectedElement.elementKey);
+      return;
+    }
+    const delta = event.shiftKey ? 5 : 1;
+    const moveBy: Record<string, [number, number]> = {
+      ArrowLeft: [-delta, 0],
+      ArrowRight: [delta, 0],
+      ArrowUp: [0, -delta],
+      ArrowDown: [0, delta],
+    };
+    const offset = moveBy[event.key];
+    if (!offset) return;
+    event.preventDefault();
+    handleMoveElement(
+      selectedElement.elementKey,
+      Number(selectedElement.xMm ?? 0) + offset[0],
+      Number(selectedElement.yMm ?? 0) + offset[1],
+      event,
+    );
+  };
+
   const handleDrop = (event: React.DragEvent<Element>) => {
     if (!canDrag || !onDropField) return;
     const fieldId = event.dataTransfer.getData('application/x-label-field') || event.dataTransfer.getData('text/plain');
@@ -776,47 +891,86 @@ function LabelTemplatePreview({
     onDropDraggingField(draggingField, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
   };
   return (
-    <div
-      data-label-dragging-field={draggingField?.id}
-      style={{
-        width: '100%',
-        maxWidth: previewWidth,
-        aspectRatio: `${safeWidth} / ${safeHeight}`,
-        border: '1px solid #d9d9d9',
-        background: '#fff',
-        overflow: 'hidden',
-        touchAction: 'none',
-      }}
-      onDragOver={(event) => {
-        if (canDrag) event.preventDefault();
-      }}
-      onDrop={handleDrop}
-      onMouseUp={handleWrapperMouseUp}
-    >
-      <Stage
-        ref={stageRef}
-        width={previewWidth}
-        height={previewHeight}
-        scaleX={previewWidth / safeWidth}
-        scaleY={previewHeight / safeHeight}
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      {canDrag && (
+        <Space wrap size={8}>
+          <Text type="secondary">Сетка</Text>
+          <Switch size="small" checked={showGrid} onChange={setShowGrid} />
+          <Text type="secondary">Snap</Text>
+          <Switch size="small" checked={snapToGrid} onChange={setSnapToGrid} />
+          <Button size="small" onClick={() => setZoom((value) => clamp(Math.round((value - 0.1) * 10) / 10, 0.4, 2.5))}>-</Button>
+          <Text>{Math.round(zoom * 100)}%</Text>
+          <Button size="small" onClick={() => setZoom((value) => clamp(Math.round((value + 0.1) * 10) / 10, 0.4, 2.5))}>+</Button>
+          <Button size="small" onClick={() => setZoom(1)}>Fit</Button>
+        </Space>
+      )}
+      <div
+        data-label-dragging-field={draggingField?.id}
+        tabIndex={canDrag ? 0 : undefined}
+        style={{
+          width: '100%',
+          maxWidth: previewWidth,
+          aspectRatio: `${safeWidth} / ${safeHeight}`,
+          border: '1px solid #d9d9d9',
+          background: '#fff',
+          overflow: 'hidden',
+          touchAction: 'none',
+          outline: 'none',
+        }}
+        onDragOver={(event) => {
+          if (canDrag) event.preventDefault();
+        }}
+        onDrop={handleDrop}
+        onMouseUp={handleWrapperMouseUp}
+        onKeyDown={handleKeyDown}
       >
-        <Layer>
-          <KonvaRect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" />
-        {sorted.map((element) =>
-          renderKonvaPreviewElement({
-            element,
-            fieldLabels,
-            selected: selectedElementKey === element.elementKey,
-            draggable: Boolean(canDrag),
-            safeWidth,
-            safeHeight,
-            onSelectElement,
-            onMoveElement,
-          }),
-        )}
-        </Layer>
-      </Stage>
-    </div>
+        <Stage
+          ref={stageRef}
+          width={previewWidth}
+          height={previewHeight}
+          scaleX={previewWidth / safeWidth}
+          scaleY={previewHeight / safeHeight}
+          onWheel={(event) => {
+            if (!canDrag || !event.evt.ctrlKey) return;
+            event.evt.preventDefault();
+            const direction = event.evt.deltaY > 0 ? -0.1 : 0.1;
+            setZoom((value) => clamp(Math.round((value + direction) * 10) / 10, 0.4, 2.5));
+          }}
+        >
+          <Layer>
+            <KonvaRect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" />
+            {showGrid && renderGrid(safeWidth, safeHeight)}
+            {sorted.map((element) =>
+              renderKonvaPreviewElement({
+                element,
+                fieldLabels,
+                selected: selectedElementKey === element.elementKey,
+                draggable: Boolean(canDrag),
+                safeWidth,
+                safeHeight,
+                onSelectElement,
+                onMoveElement: handleMoveElement,
+                nodeRef: (node) => {
+                  if (node) nodeRefs.current.set(element.elementKey, node);
+                  else nodeRefs.current.delete(element.elementKey);
+                },
+                onTransformEnd: (node, event) => handleTransformEnd(element, node, event),
+              }),
+            )}
+            {canDrag && (
+              <Transformer
+                ref={transformerRef}
+                rotateEnabled
+                enabledAnchors={selectedElement?.kind === 'line' ? ['middle-left', 'middle-right'] : undefined}
+                boundBoxFunc={(oldBox, newBox) => (
+                  newBox.width < 2 || newBox.height < 2 ? oldBox : newBox
+                )}
+              />
+            )}
+          </Layer>
+        </Stage>
+      </div>
+    </Space>
   );
 }
 
@@ -929,6 +1083,8 @@ function renderKonvaPreviewElement({
   safeHeight,
   onSelectElement,
   onMoveElement,
+  nodeRef,
+  onTransformEnd,
 }: {
   element: LabelTemplateElement;
   fieldLabels: Map<string, string>;
@@ -937,7 +1093,9 @@ function renderKonvaPreviewElement({
   safeWidth: number;
   safeHeight: number;
   onSelectElement?: (elementKey: string) => void;
-  onMoveElement?: (elementKey: string, xMm: number, yMm: number) => void;
+  onMoveElement?: (elementKey: string, xMm: number, yMm: number, event?: { altKey?: boolean }) => void;
+  nodeRef?: (node: Konva.Node | null) => void;
+  onTransformEnd?: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
 }) {
   const x = Number(element.xMm ?? 0);
   const y = Number(element.yMm ?? 0);
@@ -950,9 +1108,10 @@ function renderKonvaPreviewElement({
   const select = () => onSelectElement?.(key);
   const dragEnd = (event: Konva.KonvaEventObject<DragEvent>) => {
     if (!onMoveElement) return;
-    onMoveElement(key, clamp(event.target.x(), 0, maxX), clamp(event.target.y(), 0, maxY));
+    onMoveElement(key, clamp(event.target.x(), 0, maxX), clamp(event.target.y(), 0, maxY), event.evt);
   };
   const common = {
+    ref: nodeRef,
     x,
     y,
     rotation,
@@ -961,6 +1120,7 @@ function renderKonvaPreviewElement({
     onTap: select,
     onDragStart: select,
     onDragEnd: dragEnd,
+    onTransformEnd: (event: Konva.KonvaEventObject<Event>) => onTransformEnd?.(event.target, event),
   };
   const selectionBox = selected ? (
     <KonvaRect
@@ -1027,6 +1187,35 @@ function renderKonvaPreviewElement({
       {selectionBox}
     </React.Fragment>
   );
+}
+
+function renderGrid(widthMm: number, heightMm: number) {
+  const lines = [];
+  for (let x = 1; x < widthMm; x += 1) {
+    const major = x % 5 === 0;
+    lines.push(
+      <KonvaLine
+        key={`grid-x-${x}`}
+        points={[x, 0, x, heightMm]}
+        stroke={major ? '#d9d9d9' : '#f0f0f0'}
+        strokeWidth={major ? 0.12 : 0.06}
+        listening={false}
+      />,
+    );
+  }
+  for (let y = 1; y < heightMm; y += 1) {
+    const major = y % 5 === 0;
+    lines.push(
+      <KonvaLine
+        key={`grid-y-${y}`}
+        points={[0, y, widthMm, y]}
+        stroke={major ? '#d9d9d9' : '#f0f0f0'}
+        strokeWidth={major ? 0.12 : 0.06}
+        listening={false}
+      />,
+    );
+  }
+  return lines;
 }
 
 function clamp(value: number, min: number, max: number): number {
