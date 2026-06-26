@@ -48,12 +48,13 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/buildStandardBazisElements/);
   });
 
-  it('shows an active SVG label preview for the selected or edited template', () => {
+  it('shows an active Konva label preview for the selected or edited template', () => {
     expect(tabSrc).toMatch(/Визуал бирки/);
     expect(tabSrc).toMatch(/LabelTemplatePreview/);
     expect(tabSrc).toMatch(/Form\.useWatch\('canvasWidthMm'/);
     expect(tabSrc).toMatch(/rowClassName=.*ant-table-row-selected/);
-    expect(tabSrc).toMatch(/renderPreviewElement/);
+    expect(tabSrc).toMatch(/renderKonvaPreviewElement/);
+    expect(tabSrc).toMatch(/react-konva/);
     expect(tabSrc).toMatch(/PREVIEW_FIELD_VALUES/);
   });
 
@@ -62,9 +63,11 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/scroll=\{\{ y: 430 \}\}/);
     expect(tabSrc).toMatch(/title="Просмотр текущего шаблона"/);
     expect(tabSrc).toMatch(/onMoveElement/);
-    expect(tabSrc).toMatch(/onMouseDown/);
-    expect(tabSrc).toMatch(/setDrag/);
-    expect(tabSrc).toMatch(/clamp\(point\.x - drag\.offsetX/);
+    expect(tabSrc).toMatch(/<Stage/);
+    expect(tabSrc).toMatch(/<Layer/);
+    expect(tabSrc).toMatch(/KonvaText/);
+    expect(tabSrc).toMatch(/onDragEnd/);
+    expect(tabSrc).toMatch(/clamp\(event\.target\.x\(\)/);
   });
 
   it('exposes a draggable field palette that can drop fields onto the label visual', () => {

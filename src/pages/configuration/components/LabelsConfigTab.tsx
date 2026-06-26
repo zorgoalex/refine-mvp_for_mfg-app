@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import type Konva from 'konva';
+import { Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText } from 'react-konva';
 import { labelsApi } from '../../../api/labelsApi';
 import type {
   LabelElementKind,
@@ -108,13 +110,6 @@ export const LabelsConfigTab: React.FC = () => {
       setCustomSchemaText(JSON.stringify(selectedTemplate.customFieldSchema ?? {}, null, 2));
     }
   }, [form, selectedTemplate]);
-
-  useEffect(() => {
-    if (!draggingField) return;
-    const clear = () => setDraggingField(null);
-    window.addEventListener('mouseup', clear);
-    return () => window.removeEventListener('mouseup', clear);
-  }, [draggingField]);
 
   const fieldCategories = useMemo(() => new Set(fields.map((field) => field.category)).size, [fields]);
   const customSchemaRows = useMemo(() => parseCustomSchemaRows(customSchemaText), [customSchemaText]);
@@ -717,32 +712,52 @@ function LabelTemplatePreview({
   draggingField?: LabelFieldCatalogItem | null;
   onDropDraggingField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
 }) {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const [drag, setDrag] = useState<{ elementKey: string; offsetX: number; offsetY: number } | null>(null);
+  const stageRef = useRef<Konva.Stage | null>(null);
   const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 85;
   const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 88;
   const fieldLabels = new Map(fields.map((field) => [field.id, field.label]));
   const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
-  const previewWidth = Math.min(680, Math.max(360, safeWidth * 6));
+  const previewWidth = Math.min(760, Math.max(360, safeWidth * 7));
+  const previewHeight = previewWidth * (safeHeight / safeWidth);
   const pointFromEvent = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
-    const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
-    const rect = svg.getBoundingClientRect();
+    const container = stageRef.current?.container();
+    if (!container) return { x: 0, y: 0 };
+    const rect = container.getBoundingClientRect();
     return {
       x: ((event.clientX - rect.left) / rect.width) * safeWidth,
       y: ((event.clientY - rect.top) / rect.height) * safeHeight,
     };
   };
 
-  const handleMove = (event: React.MouseEvent<SVGSVGElement>) => {
-    if (!drag || !onMoveElement) return;
-    const point = pointFromEvent(event);
-    const element = elements.find((item) => item.elementKey === drag.elementKey);
-    if (!element) return;
-    const maxX = Math.max(0, safeWidth - Number(element.widthMm ?? 0));
-    const maxY = Math.max(0, safeHeight - Number(element.heightMm ?? 0));
-    onMoveElement(drag.elementKey, clamp(point.x - drag.offsetX, 0, maxX), clamp(point.y - drag.offsetY, 0, maxY));
-  };
+  useEffect(() => {
+    if (!draggingField || !onDropDraggingField) return;
+    let dropped = false;
+    const handleGlobalDrop = (event: MouseEvent | PointerEvent) => {
+      if (dropped) return;
+      const container = stageRef.current?.container();
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const inside =
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom;
+      if (!inside) return;
+      dropped = true;
+      onDropDraggingField(
+        draggingField,
+        clamp(((event.clientX - rect.left) / rect.width) * safeWidth, 0, safeWidth - 1),
+        clamp(((event.clientY - rect.top) / rect.height) * safeHeight, 0, safeHeight - 1),
+      );
+    };
+    window.addEventListener('pointerup', handleGlobalDrop);
+    window.addEventListener('mouseup', handleGlobalDrop);
+    return () => {
+      window.removeEventListener('pointerup', handleGlobalDrop);
+      window.removeEventListener('mouseup', handleGlobalDrop);
+    };
+  }, [draggingField, onDropDraggingField, previewHeight, previewWidth, safeHeight, safeWidth]);
+
   const handleDrop = (event: React.DragEvent<Element>) => {
     if (!canDrag || !onDropField) return;
     const fieldId = event.dataTransfer.getData('application/x-label-field') || event.dataTransfer.getData('text/plain');
@@ -760,9 +775,9 @@ function LabelTemplatePreview({
     const point = pointFromEvent(event);
     onDropDraggingField(draggingField, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
   };
-
   return (
     <div
+      data-label-dragging-field={draggingField?.id}
       style={{
         width: '100%',
         maxWidth: previewWidth,
@@ -778,38 +793,29 @@ function LabelTemplatePreview({
       onDrop={handleDrop}
       onMouseUp={handleWrapperMouseUp}
     >
-      <svg
-        ref={svgRef}
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox={`0 0 ${safeWidth} ${safeHeight}`}
-        width="100%"
-        height="100%"
-        onMouseMove={handleMove}
-        onMouseUp={() => setDrag(null)}
-        onMouseLeave={() => setDrag(null)}
+      <Stage
+        ref={stageRef}
+        width={previewWidth}
+        height={previewHeight}
+        scaleX={previewWidth / safeWidth}
+        scaleY={previewHeight / safeHeight}
       >
-        <rect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" />
+        <Layer>
+          <KonvaRect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" />
         {sorted.map((element) =>
-          renderPreviewElement({
+          renderKonvaPreviewElement({
             element,
             fieldLabels,
             selected: selectedElementKey === element.elementKey,
             draggable: Boolean(canDrag),
-            onMouseDown: (event) => {
-              if (!canDrag) return;
-              event.preventDefault();
-              event.stopPropagation();
-              const point = pointFromEvent(event);
-              onSelectElement?.(element.elementKey);
-              setDrag({
-                elementKey: element.elementKey,
-                offsetX: point.x - Number(element.xMm ?? 0),
-                offsetY: point.y - Number(element.yMm ?? 0),
-              });
-            },
+            safeWidth,
+            safeHeight,
+            onSelectElement,
+            onMoveElement,
           }),
         )}
-      </svg>
+        </Layer>
+      </Stage>
     </div>
   );
 }
@@ -847,16 +853,48 @@ function FieldPalette({
                     key={field.id}
                     draggable={!disabled}
                     onDragStart={(event) => {
+                      if (!disabled) onBeginDrag?.(field);
                       event.dataTransfer.setData('application/x-label-field', field.id);
                       event.dataTransfer.setData('text/plain', field.id);
                       event.dataTransfer.effectAllowed = 'copy';
                     }}
-                    onMouseDown={() => {
-                      if (!disabled) onBeginDrag?.(field);
+                    onMouseDown={(event) => {
+                      if (disabled) return;
+                      event.preventDefault();
+                      onBeginDrag?.(field);
+                    }}
+                    onMouseDownCapture={(event) => {
+                      if (disabled) return;
+                      event.preventDefault();
+                      onBeginDrag?.(field);
+                    }}
+                    onPointerDown={(event) => {
+                      if (disabled) return;
+                      event.preventDefault();
+                      onBeginDrag?.(field);
+                    }}
+                    onPointerDownCapture={(event) => {
+                      if (disabled) return;
+                      event.preventDefault();
+                      onBeginDrag?.(field);
                     }}
                     style={{ cursor: disabled ? 'default' : 'grab', userSelect: 'none' }}
                   >
-                    {field.label}
+                    <span
+                      onMouseDown={(event) => {
+                        if (disabled) return;
+                        event.preventDefault();
+                        onBeginDrag?.(field);
+                      }}
+                      onPointerDown={(event) => {
+                        if (disabled) return;
+                        event.preventDefault();
+                        onBeginDrag?.(field);
+                      }}
+                      style={{ display: 'inline-block' }}
+                    >
+                      {field.label}
+                    </span>
                   </Tag>
                 ))}
               </div>
@@ -882,51 +920,89 @@ function groupFieldsByCategory(fields: LabelFieldCatalogItem[]): Array<[string, 
   });
 }
 
-function renderPreviewElement({
+function renderKonvaPreviewElement({
   element,
   fieldLabels,
   selected,
   draggable,
-  onMouseDown,
+  safeWidth,
+  safeHeight,
+  onSelectElement,
+  onMoveElement,
 }: {
   element: LabelTemplateElement;
   fieldLabels: Map<string, string>;
   selected: boolean;
   draggable: boolean;
-  onMouseDown: (event: React.MouseEvent<SVGGElement>) => void;
+  safeWidth: number;
+  safeHeight: number;
+  onSelectElement?: (elementKey: string) => void;
+  onMoveElement?: (elementKey: string, xMm: number, yMm: number) => void;
 }) {
   const x = Number(element.xMm ?? 0);
   const y = Number(element.yMm ?? 0);
   const w = Number(element.widthMm ?? 0);
   const h = Number(element.heightMm ?? 0);
   const key = element.elementKey;
-  const transform = Number(element.rotationDeg ?? 0)
-    ? `rotate(${Number(element.rotationDeg ?? 0)} ${x} ${y})`
-    : undefined;
-
-  const clipId = `label-preview-clip-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-  const selectionBox = selected ? (
-    <rect x={x} y={y} width={Math.max(w, 2)} height={Math.max(h, 2)} fill="none" stroke="#1677ff" strokeWidth={0.45} strokeDasharray="1 1" />
-  ) : null;
-  const common = {
-    transform,
-    onMouseDown,
-    style: { cursor: draggable ? 'move' : 'default' },
+  const rotation = Number(element.rotationDeg ?? 0);
+  const maxX = Math.max(0, safeWidth - Math.max(w, 1));
+  const maxY = Math.max(0, safeHeight - Math.max(h, 1));
+  const select = () => onSelectElement?.(key);
+  const dragEnd = (event: Konva.KonvaEventObject<DragEvent>) => {
+    if (!onMoveElement) return;
+    onMoveElement(key, clamp(event.target.x(), 0, maxX), clamp(event.target.y(), 0, maxY));
   };
+  const common = {
+    x,
+    y,
+    rotation,
+    draggable,
+    onClick: select,
+    onTap: select,
+    onDragStart: select,
+    onDragEnd: dragEnd,
+  };
+  const selectionBox = selected ? (
+    <KonvaRect
+      key={`${key}-selected`}
+      x={x}
+      y={y}
+      width={Math.max(w, 2)}
+      height={Math.max(h, 2)}
+      stroke="#1677ff"
+      strokeWidth={0.35}
+      dash={[1, 1]}
+      listening={false}
+    />
+  ) : null;
+
   if (element.kind === 'line') {
     return (
-      <g key={key} {...common}>
-        <line x1={x} y1={y} x2={x + w} y2={y + h} stroke="black" strokeWidth={0.45} />
+      <React.Fragment key={key}>
+        <KonvaLine
+          {...common}
+          points={[0, 0, w, h]}
+          stroke="black"
+          strokeWidth={0.45}
+          hitStrokeWidth={4}
+        />
         {selectionBox}
-      </g>
+      </React.Fragment>
     );
   }
   if (element.kind === 'rect') {
     return (
-      <g key={key} {...common}>
-        <rect x={x} y={y} width={w} height={h} fill="none" stroke="black" strokeWidth={Number(element.style?.strokeWidth ?? 0.45)} />
+      <React.Fragment key={key}>
+        <KonvaRect
+          {...common}
+          width={Math.max(w, 0.1)}
+          height={Math.max(h, 0.1)}
+          fill="transparent"
+          stroke="black"
+          strokeWidth={Number(element.style?.strokeWidth ?? 0.45)}
+        />
         {selectionBox}
-      </g>
+      </React.Fragment>
     );
   }
 
@@ -935,25 +1011,21 @@ function renderPreviewElement({
     ? PREVIEW_FIELD_VALUES[element.sourceField] ?? fieldLabels.get(element.sourceField) ?? element.sourceField
     : element.staticText ?? '';
   return (
-    <g key={key} {...common}>
-      <defs>
-        <clipPath id={clipId}>
-          <rect x={x} y={y} width={Math.max(w, 1)} height={Math.max(h, fontSize + 1)} />
-        </clipPath>
-      </defs>
-      <text
-        x={x}
-        y={y + fontSize}
-        fontFamily="Arial, sans-serif"
+    <React.Fragment key={key}>
+      <KonvaText
+        {...common}
+        width={Math.max(w, 1)}
+        height={Math.max(h, fontSize + 1)}
+        text={text}
+        fontFamily="Arial"
         fontSize={fontSize}
-        fontWeight={String(element.style?.fontWeight ?? 'normal')}
+        fontStyle={String(element.style?.fontWeight ?? 'normal') === 'bold' ? 'bold' : 'normal'}
         fill="black"
-        clipPath={`url(#${clipId})`}
-      >
-        {text}
-      </text>
+        wrap="none"
+        ellipsis={false}
+      />
       {selectionBox}
-    </g>
+    </React.Fragment>
   );
 }
 
