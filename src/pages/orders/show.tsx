@@ -27,7 +27,7 @@ import { ProjectLinksEditor } from "./components/projects/ProjectLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
-import type { CutDetailLastReadyRef } from "../../api/types/cutApi.types";
+import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.types";
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
@@ -317,6 +317,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     // depend on it instead of the array to avoid redundant fetches.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cutColumnEnabled, cutDetailIdsKey]);
+
+  // All distinct active cut jobs that contain details from THIS order (a detail
+  // may be placed in several jobs — list them all). Same cut.view gate as the
+  // column; powers the «Раскрой» sub-block in the additional-info panel.
+  const [cutOrderJobs, setCutOrderJobs] = useState<CutJobRef[]>([]);
+  useEffect(() => {
+    if (!cutColumnEnabled || !record?.order_id) {
+      setCutOrderJobs([]);
+      return;
+    }
+    let cancelled = false;
+    cutApi
+      .listPlacements({ orderIds: [record.order_id] })
+      .then((res) => {
+        if (!cancelled) setCutOrderJobs(res.jobs);
+      })
+      .catch(() => {
+        if (!cancelled) setCutOrderJobs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cutColumnEnabled, record?.order_id]);
 
   // Hook for updating order
   const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
@@ -802,6 +825,30 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
                       <OrderFilesBlock record={record} compact />
                     </div>
+
+                    {/* Раскрой */}
+                    {cutColumnEnabled && (
+                      <div style={{ marginBottom: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
+                          Раскрой
+                        </div>
+                        {cutOrderJobs.length === 0 ? (
+                          <span style={{ fontSize: 12, color: '#8c8c8c' }}>—</span>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            {cutOrderJobs.map((j) => (
+                              <Link
+                                key={j.cutJobId}
+                                to={cutJobDeepLink(j.cutJobId)}
+                                style={{ fontSize: 12 }}
+                              >
+                                {j.name}
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {labelsEnabled && record?.order_id && (
                       <OrderLatestLabelsPreview orderId={record.order_id} />
