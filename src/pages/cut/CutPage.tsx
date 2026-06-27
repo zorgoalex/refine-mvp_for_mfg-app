@@ -76,6 +76,20 @@ const STATUS_TAG_COLORS: Record<string, string> = {
   archived: 'default',
 };
 
+const sheetPreviewListStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'row',
+  flexWrap: 'wrap',
+  alignItems: 'flex-start',
+  gap: 16,
+  marginTop: 8,
+};
+
+const sheetPreviewItemStyle: React.CSSProperties = {
+  flex: '0 1 420px',
+  maxWidth: '100%',
+};
+
 /** Revoke every blob object URL in a key->url map (leak guard on reset/unmount). */
 const revokeObjectUrls = (map: Record<string, string>): void => {
   Object.values(map).forEach((url) => URL.revokeObjectURL(url));
@@ -1031,14 +1045,14 @@ export const CutPage: React.FC = () => {
           >
             <Text type="secondary">{formatGroupSummary(group.summary)}</Text>
             {/* Previews flow in wrapping rows (not a single column). */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
+            <div style={sheetPreviewListStyle}>
               {group.sheets.map((sheet) => {
                 const key = `${group.cutGroupId}:${sheet.sheetIndex}`;
                 const widthMm = sheet.placements.sheet_width_mm;
                 const heightMm = sheet.placements.sheet_height_mm;
                 const overlays = buildSheetPieceOverlays(sheet.placements, job.items, !sheetPortrait);
                 return (
-                  <div key={key}>
+                  <div key={key} style={sheetPreviewItemStyle}>
                     <Space>
                       <Button size="small" onClick={() => loadSheet(group, sheet.sheetIndex)}>
                         Лист {sheet.sheetIndex + 1}
