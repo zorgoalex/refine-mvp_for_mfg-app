@@ -62,83 +62,33 @@ export interface CutPieceOverlay {
   tooltipRows: CutPieceTooltipRow[];
 }
 
-const DETAIL_FIELD_LABELS: Record<string, string> = {
-  detail_id: 'ID детали',
-  detailId: 'ID детали',
-  order_id: 'Заказ',
-  orderId: 'Заказ',
-  detail_number: 'Позиция',
-  detailNumber: 'Позиция',
-  detail_name: 'Наименование',
-  detailName: 'Наименование',
-  height: 'Высота',
-  width: 'Ширина',
-  quantity: 'Количество',
-  area: 'Площадь',
-  material_id: 'ID материала',
-  materialId: 'ID материала',
-  sheet_material_type_id: 'ID листового материала',
-  sheetMaterialTypeId: 'ID листового материала',
-  materialName: 'Материал',
-  milling_type_id: 'ID фрезеровки',
-  millingTypeId: 'ID фрезеровки',
-  millingTypeName: 'Фрезеровка',
-  edge_type_id: 'ID кромки',
-  edgeTypeId: 'ID кромки',
-  edgeTypeName: 'Кромка',
-  film_id: 'ID плёнки',
-  filmId: 'ID плёнки',
-  filmName: 'Плёнка',
-  priority: 'Приоритет',
-  production_status_id: 'ID статуса производства',
-  productionStatusId: 'ID статуса производства',
-  productionStatusName: 'Статус производства',
-  joint_order_id: 'Соединённый заказ',
-  jointOrderId: 'Соединённый заказ',
-  note: 'Примечание',
-  link_cutting_file: 'Файл раскроя',
-  linkCuttingFile: 'Файл раскроя',
-  link_cutting_image_file: 'Изображение раскроя',
-  linkCuttingImageFile: 'Изображение раскроя',
-  link_cad_file: 'CAD-файл',
-  linkCadFile: 'CAD-файл',
-  link_pdf_file: 'PDF-файл',
-  linkPdfFile: 'PDF-файл',
-  delete_flag: 'Удалена',
-  version: 'Версия',
-  ref_key_1c: 'Ключ 1С',
-  created_by: 'Кем создано',
-  edited_by: 'Кем изменено',
-  created_at: 'Создано',
-  updated_at: 'Изменено',
-  basis_project: 'Базис-проект',
-  basis_data: 'Данные Базис',
-};
-
 export function parseCutPieceDetailId(itemId: string): number | null {
   const match = /^det-(\d+)$/.exec(itemId);
   return match ? Number(match[1]) : null;
 }
 
 export function buildCutPieceTooltipRows(item: CutJobItemDto, piece: SheetPlacementPiece): CutPieceTooltipRow[] {
+  const detail = item.detail;
   const rows: CutPieceTooltipRow[] = [
     { label: 'Заказ', value: formatTooltipValue(item.orderId) },
-    { label: 'Позиция', value: formatTooltipValue(item.detail?.detailNumber) },
-    { label: 'ID детали', value: formatTooltipValue(item.orderDetailId) },
+    { label: 'Позиция', value: formatTooltipValue(detail?.detailNumber) },
     { label: 'Экземпляр', value: formatTooltipValue(piece.instance) },
     { label: 'Кол-во в задании', value: formatTooltipValue(item.qty) },
   ];
 
-  const detailFields = item.detail?.detailFields;
-  if (detailFields && typeof detailFields === 'object') {
-    for (const [label, value] of Object.entries(detailFields)) {
-      rows.push({ label: russianDetailFieldLabel(label), value: formatTooltipValue(value) });
-    }
-  } else if (item.detail) {
-    for (const [label, value] of Object.entries(item.detail)) {
-      if (label === 'detailFields') continue;
-      rows.push({ label: russianDetailFieldLabel(label), value: formatTooltipValue(value) });
-    }
+  if (detail) {
+    rows.push(
+      { label: 'Высота', value: formatTooltipValue(detail.height) },
+      { label: 'Ширина', value: formatTooltipValue(detail.width) },
+      { label: 'Количество', value: formatTooltipValue(detail.quantity) },
+      { label: 'Площадь', value: formatTooltipArea(detail.area) },
+      { label: 'Фрезеровка', value: formatTooltipValue(detail.millingTypeName) },
+      { label: 'Обкат', value: formatTooltipValue(detail.edgeTypeName) },
+      { label: 'Материал', value: formatTooltipValue(detail.materialName) },
+      { label: 'Статус', value: formatTooltipValue(detail.productionStatusName) },
+      { label: 'Примечание', value: formatTooltipValue(detail.note) },
+      { label: 'Плёнка', value: formatTooltipValue(detail.filmName) },
+    );
   }
 
   return rows;
@@ -182,10 +132,6 @@ export function buildSheetPieceOverlays(
     .filter((overlay): overlay is CutPieceOverlay => overlay !== null);
 }
 
-function russianDetailFieldLabel(field: string): string {
-  return DETAIL_FIELD_LABELS[field] ?? 'Дополнительное поле';
-}
-
 function formatTooltipValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'string') return value;
@@ -195,4 +141,9 @@ function formatTooltipValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function formatTooltipArea(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return value.toFixed(2);
 }

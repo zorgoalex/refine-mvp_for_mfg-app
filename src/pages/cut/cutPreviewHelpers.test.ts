@@ -71,11 +71,11 @@ describe('cutPreviewHelpers', () => {
         sheetMaterialTypeId: 9,
         materialName: 'МДФ 16',
         millingTypeId: null,
-        millingTypeName: null,
+        millingTypeName: 'Паз',
         edgeTypeId: null,
-        edgeTypeName: null,
+        edgeTypeName: 'ПВХ',
         filmId: null,
-        filmName: null,
+        filmName: 'Белая матовая',
         priority: null,
         productionStatusId: 1,
         productionStatusName: 'Готово',
@@ -116,14 +116,22 @@ describe('cutPreviewHelpers', () => {
       expect(overlay.heightPct).toBe((600 / 2800) * 100);
     });
 
-    it('builds tooltip rows with Russian labels and raw order detail values', () => {
+    it('builds tooltip rows like the order detail table with resolved names, not bare ids', () => {
       const rows = buildCutPieceTooltipRows(item, placements.pieces[0]);
       expect(rows).toContainEqual({ label: 'Заказ', value: '777' });
       expect(rows).toContainEqual({ label: 'Позиция', value: '3' });
-      expect(rows).toContainEqual({ label: 'ID детали', value: '42' });
-      expect(rows).toContainEqual({ label: 'Наименование', value: 'Боковина' });
+      expect(rows).toContainEqual({ label: 'Высота', value: '400' });
+      expect(rows).toContainEqual({ label: 'Ширина', value: '600' });
+      expect(rows).toContainEqual({ label: 'Количество', value: '2' });
+      expect(rows).toContainEqual({ label: 'Площадь', value: '0.24' });
+      expect(rows).toContainEqual({ label: 'Фрезеровка', value: 'Паз' });
+      expect(rows).toContainEqual({ label: 'Обкат', value: 'ПВХ' });
+      expect(rows).toContainEqual({ label: 'Материал', value: 'МДФ 16' });
+      expect(rows).toContainEqual({ label: 'Статус', value: 'Готово' });
       expect(rows).toContainEqual({ label: 'Примечание', value: '—' });
-      expect(rows.some((row) => row.label === 'detail_name' || row.label === 'note')).toBe(false);
+      expect(rows).toContainEqual({ label: 'Плёнка', value: 'Белая матовая' });
+      expect(rows.some((row) => row.label.endsWith('ID') || row.label.includes('ID '))).toBe(false);
+      expect(rows.some((row) => row.label === 'detail_name' || row.label === 'note' || row.label === 'film_id')).toBe(false);
     });
   });
 });
