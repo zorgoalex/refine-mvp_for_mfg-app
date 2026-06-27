@@ -657,10 +657,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     recalcSum('milling_cost_per_sqm', value);
   }, [recalcSum]);
 
-  // Number of data columns (excl. AntD-injected selection column).
-  // Used to set colSpan on separator rows so they span the full width.
-  const DATA_COLUMN_COUNT = 18;
-
   const columns: ColumnsType<any> = [
     {
       title: <div style={{ textAlign: 'center', fontSize: '70%' }}>№</div>,
@@ -1227,17 +1223,20 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     },
   ];
 
-  const renderedColumns = useMemo(
-    () =>
-      groupingActive
-        ? columns.map((col) => {
-            const { sorter, defaultSortOrder, sortOrder, ...rest } = col as any;
-            return rest;
-          })
-        : columns,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [groupingActive],
-  );
+  // Number of data columns (excl. AntD-injected selection column).
+  // Used to set colSpan on separator rows so they span the full width.
+  // Derived from columns.length to stay in sync automatically.
+  const DATA_COLUMN_COUNT = columns.length;
+
+  // Plain conditional — no memo — so render closures (isEditing, lookup maps,
+  // Form watches) are always fresh. A stale memo on [groupingActive] would
+  // freeze the closures captured at activation, breaking inline editing.
+  const renderedColumns = groupingActive
+    ? columns.map((col: any) => {
+        const { sorter, defaultSortOrder, sortOrder, ...rest } = col;
+        return rest;
+      })
+    : columns;
 
   const rowSelection = onSelectChange
     ? {
