@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Collapse,
   Form,
   Input,
   Select,
@@ -23,6 +24,7 @@ import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait } from './cutPreviewHelpers';
+import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
 import { authSession } from '../../api/authSession';
 import type {
@@ -52,6 +54,8 @@ import {
   selectableDetailIds,
   triggerBlobDownload,
 } from './cutPageHelpers';
+
+const { Panel } = Collapse;
 
 // Built-in fallback preset names (used until the backend config list loads).
 const DEFAULT_PRESET_OPTIONS = [
@@ -1100,17 +1104,21 @@ export const CutPage: React.FC = () => {
       )}
 
       {job && (
-        <Card size="small" title={`Детали задания (${job.items.length})`}>
-          <Table<CutJobItemDto>
-            size="small"
-            rowKey="cutJobItemId"
-            columns={jobItemColumns}
-            dataSource={job.items}
-            pagination={false}
-            scroll={{ x: 1900 }}
-            locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
-          />
-        </Card>
+        <Collapse size="small" defaultActiveKey={[]}>
+          <Panel header={`Детали задания (${job.items.length})`} key="cut-job-details">
+            <TableTopScroll>
+              <Table<CutJobItemDto>
+                size="small"
+                rowKey="cutJobItemId"
+                columns={jobItemColumns}
+                dataSource={job.items}
+                pagination={false}
+                scroll={{ x: 1900 }}
+                locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
+              />
+            </TableTopScroll>
+          </Panel>
+        </Collapse>
       )}
 
       {noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
