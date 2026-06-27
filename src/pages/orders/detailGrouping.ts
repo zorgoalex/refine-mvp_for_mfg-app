@@ -1,0 +1,76 @@
+// src/pages/orders/detailGrouping.ts
+import type { OrderDetail } from '../../types/orders';
+
+export type GroupField = 'milling' | 'material' | 'film' | 'edge' | 'price' | 'note';
+
+export interface GroupFieldDef {
+  field: GroupField;
+  label: string;
+}
+
+export const GROUP_FIELDS: GroupFieldDef[] = [
+  { field: 'milling', label: 'по фрезеровке' },
+  { field: 'material', label: 'по материалам' },
+  { field: 'film', label: 'по пленкам' },
+  { field: 'edge', label: 'по обкату' },
+  { field: 'price', label: 'по ценам' },
+  { field: 'note', label: 'по примечанию' },
+];
+
+export const EMPTY_GROUP_KEY = '__EMPTY__';
+
+const idValue = (raw: unknown): string => {
+  if (raw === null || raw === undefined) return EMPTY_GROUP_KEY;
+  const num = Number(raw);
+  return Number.isFinite(num) && num > 0 ? String(num) : EMPTY_GROUP_KEY;
+};
+
+export function extractGroupValue(detail: OrderDetail, field: GroupField): string {
+  switch (field) {
+    case 'milling': return idValue(detail.milling_type_id);
+    case 'material': return idValue(detail.sheet_material_type_id);
+    case 'film': return idValue(detail.film_id);
+    case 'edge': return idValue(detail.edge_type_id);
+    case 'price': {
+      const raw = detail.milling_cost_per_sqm;
+      if (raw === null || raw === undefined) return EMPTY_GROUP_KEY;
+      const num = Number(raw);
+      return Number.isFinite(num) ? String(num) : EMPTY_GROUP_KEY;
+    }
+    case 'note': {
+      const trimmed = (detail.note || '').trim();
+      return trimmed === '' ? EMPTY_GROUP_KEY : trimmed;
+    }
+    default: return EMPTY_GROUP_KEY;
+  }
+}
+
+export type GroupedRow =
+  | { kind: 'detail'; detail: OrderDetail; groupIndex: number }
+  | { kind: 'separator'; groupIndex: number; key: string };
+
+export function buildGroupedRows(details: OrderDetail[], field: GroupField): GroupedRow[] {
+  // First-seen order of group keys, with the empty group forced last.
+  const order: string[] = [];
+  const buckets = new Map<string, OrderDetail[]>();
+  for (const detail of details) {
+    const key = extractGroupValue(detail, field);
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+      if (key !== EMPTY_GROUP_KEY) order.push(key);
+    }
+    buckets.get(key)!.push(detail);
+  }
+  if (buckets.has(EMPTY_GROUP_KEY)) order.push(EMPTY_GROUP_KEY);
+
+  const rows: GroupedRow[] = [];
+  order.forEach((key, groupIndex) => {
+    if (groupIndex > 0) {
+      rows.push({ kind: 'separator', groupIndex, key: `__sep__:${field}:${key}:${groupIndex}` });
+    }
+    for (const detail of buckets.get(key)!) {
+      rows.push({ kind: 'detail', detail, groupIndex });
+    }
+  });
+  return rows;
+}
