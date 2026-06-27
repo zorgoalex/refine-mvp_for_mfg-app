@@ -34,6 +34,7 @@ import type {
 import { can } from '../../utils/permissions';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import { useTabStore } from '../../stores/tabStore';
+import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
   CUT_JOB_STATUS_FILTER_OPTIONS,
@@ -201,21 +202,37 @@ export const CutPage: React.FC = () => {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
 
-  // Render presets are config-driven (/configuration "Раскрой"): load the active
-  // names from the backend, falling back to the built-ins.
-  useEffect(() => {
-    cutConfigApi
-      .get()
-      .then((cfg) => {
-        const options = cfg.renderPresets
-          .filter((p) => p.isActive)
-          .map((p) => ({ value: p.name, label: p.name }));
-        if (options.length > 0) setPresetOptions(options);
-        setProfiles(cfg.paramProfiles); // FULL list (active + inactive)
-        setCutSettings(cfg.settings);
-      })
-      .catch(() => undefined);
+  // Render presets and cut profiles are config-driven (/configuration "Раскрой").
+  // Load active names from the backend, falling back to the built-ins.
+  const loadCutConfig = useCallback(async () => {
+    try {
+      const cfg = await cutConfigApi.get();
+      const options = cfg.renderPresets
+        .filter((p) => p.isActive)
+        .map((p) => ({ value: p.name, label: p.name }));
+      if (options.length > 0) setPresetOptions(options);
+      setProfiles(cfg.paramProfiles); // FULL list (active + inactive)
+      setCutSettings(cfg.settings);
+    } catch {
+      // keep the current/built-in options on failure
+    }
   }, []);
+
+  useEffect(() => {
+    void loadCutConfig();
+  }, [loadCutConfig]);
+
+  // The /cut tab is kept alive (not remounted) when switching tabs, so profiles
+  // created elsewhere (e.g. /configuration "Раскрой") would otherwise stay stale.
+  // Refetch the config whenever this tab is re-activated.
+  const { isActive } = useKeepAlive();
+  const wasActiveRef = useRef(isActive);
+  useEffect(() => {
+    if (isActive && !wasActiveRef.current) {
+      void loadCutConfig();
+    }
+    wasActiveRef.current = isActive;
+  }, [isActive, loadCutConfig]);
 
   const criteriaFromForm = useCallback(() => {
     const values = form.getFieldsValue();

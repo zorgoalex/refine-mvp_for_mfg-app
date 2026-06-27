@@ -1069,6 +1069,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             dataIndex="order_id"
             title={<span style={{ fontSize: '42%' }}>id</span>}
             sorter
+            fixed="left"
             width={39}
             className="col-order-id"
             onHeaderCell={() => ({ className: "col-order-id" })}
@@ -1078,6 +1079,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             dataIndex="order_name"
             title="Заказ"
             sorter
+            fixed="left"
             width={80}
             className="orders-col orders-col--order-name"
             render={(value) => (
