@@ -85,6 +85,29 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/boundBoxFunc/);
   });
 
+  it('defaults the edit visual to compact mode and can expand it', () => {
+    expect(tabSrc).toMatch(/visualExpanded/);
+    expect(tabSrc).toMatch(/initialZoom=\{visualExpanded \? 1\.3 : 0\.7\}/);
+    expect(tabSrc).toMatch(/Увеличить визуал/);
+    expect(tabSrc).toMatch(/leftColumnSpan = visualExpanded \? 10 : 14/);
+    expect(tabSrc).toMatch(/rightColumnSpan = visualExpanded \? 14 : 10/);
+  });
+
+  it('places field palette and template settings in the requested editor layout', () => {
+    expect(tabSrc).toMatch(/<Text strong>Поля бирки<\/Text>/);
+    expect(tabSrc).toMatch(/title="Параметры шаблона"/);
+    expect(tabSrc).toMatch(/title="Визуал бирки"/);
+    expect(tabSrc).toMatch(/title="Пользовательские поля"/);
+  });
+
+  it('shows a hover tooltip that identifies the label element field', () => {
+    expect(tabSrc).toMatch(/hoveredElement/);
+    expect(tabSrc).toMatch(/describeLabelElement/);
+    expect(tabSrc).toMatch(/В списке полей/);
+    expect(tabSrc).toMatch(/onHoverElement/);
+    expect(tabSrc).toMatch(/onMouseEnter/);
+  });
+
   it('exposes a draggable field palette that can drop fields onto the label visual', () => {
     expect(tabSrc).toMatch(/Поля бирки/);
     expect(tabSrc).toMatch(/FieldPalette/);

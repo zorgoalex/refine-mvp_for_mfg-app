@@ -78,6 +78,7 @@ export const LabelsConfigTab: React.FC = () => {
   const [selectedElementKey, setSelectedElementKey] = useState<string | null>(null);
   const [fieldSearch, setFieldSearch] = useState('');
   const [draggingField, setDraggingField] = useState<LabelFieldCatalogItem | null>(null);
+  const [visualExpanded, setVisualExpanded] = useState(false);
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
 
@@ -355,6 +356,9 @@ export const LabelsConfigTab: React.FC = () => {
     });
   };
 
+  const leftColumnSpan = visualExpanded ? 10 : 14;
+  const rightColumnSpan = visualExpanded ? 14 : 10;
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Space wrap>
@@ -465,103 +469,25 @@ export const LabelsConfigTab: React.FC = () => {
         />
       </Card>
 
-      <Row gutter={16} align="top">
-        <Col xs={24} lg={9}>
-          <Card size="small" title={selectedTemplate ? 'Редактирование шаблона' : 'Новый шаблон'} style={{ marginBottom: 16 }}>
-            <Form form={form} layout="vertical" onFinish={saveTemplate} disabled={!canManage || saving}>
+      <Form form={form} layout="vertical" onFinish={saveTemplate} disabled={!canManage || saving}>
+        <Row gutter={16} align="top">
+          <Col xs={24} lg={leftColumnSpan}>
+            <Card size="small" title={selectedTemplate ? 'Редактирование шаблона' : 'Новый шаблон'} style={{ marginBottom: 16 }}>
               <Form.Item name="name" label="Название" rules={[{ required: true, whitespace: true }]}>
                 <Input />
               </Form.Item>
-              <Form.Item name="description" label="Описание">
-                <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} />
-              </Form.Item>
-              <Row gutter={8}>
-                <Col span={8}>
-                  <Form.Item name="canvasWidthMm" label="Ширина" rules={[{ required: true }]}>
-                    <InputNumber min={1} style={{ width: '100%' }} />
-                  </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <Form.Item name="canvasHeightMm" label="Высота" rules={[{ required: true }]}>
-                    <InputNumber min={1} style={{ width: '100%' }} />
-                  </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <Form.Item name="dpi" label="Разрешение" tooltip="Разрешение печати в точках на дюйм. Влияет на размер растровых файлов при генерации бирок." rules={[{ required: true }]}>
-                    <InputNumber min={1} style={{ width: '100%' }} />
-                  </Form.Item>
-                </Col>
-              </Row>
-              <Form.Item name="defaultExportFormats" label="Форматы" rules={[{ required: true }]}>
-                <Checkbox.Group options={EXPORT_FORMATS.map((format) => ({ label: format, value: format }))} />
-              </Form.Item>
-              <Form.Item label="Пользовательские поля JSON">
-                <Input.TextArea value={customSchemaText} onChange={(event) => setCustomSchemaText(event.target.value)} autoSize={{ minRows: 3, maxRows: 6 }} />
-              </Form.Item>
-              <Table
-                rowKey="fieldId"
-                size="small"
-                pagination={false}
-                dataSource={customSchemaRows.rows}
-                title={() => (
-                  <Space wrap>
-                    <Text strong>Кастомные поля</Text>
-                    <Button size="small" icon={<PlusOutlined />} disabled={!canManage || !customSchemaRows.valid} onClick={addCustomField}>
-                      Поле
-                    </Button>
-                    {!customSchemaRows.valid && <Text type="danger">JSON некорректен</Text>}
-                  </Space>
-                )}
-                columns={[
-                  { title: 'Ключ', dataIndex: 'fieldId', width: 170 },
-                  {
-                    title: 'Название',
-                    width: 170,
-                    render: (_, row) => (
-                      <Input
-                        value={row.label}
-                        disabled={!canManage}
-                        onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })}
-                      />
-                    ),
-                  },
-                  {
-                    title: 'Тип',
-                    width: 110,
-                    render: (_, row) => (
-                      <Select
-                        value={row.type}
-                        disabled={!canManage}
-                        style={{ width: '100%' }}
-                        options={CUSTOM_FIELD_TYPE_OPTIONS}
-                        onChange={(type) => patchCustomField(row.fieldId, { type })}
-                      />
-                    ),
-                  },
-                  {
-                    title: 'Источник',
-                    width: 220,
-                    render: (_, row) => (
-                      <Select
-                        showSearch
-                        allowClear
-                        value={row.sourceField ?? undefined}
-                        disabled={!canManage}
-                        style={{ width: '100%' }}
-                        options={fields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
-                        onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField: sourceField ?? null })}
-                      />
-                    ),
-                  },
-                  {
-                    title: '',
-                    width: 48,
-                    render: (_, row) => (
-                      <Button danger size="small" icon={<DeleteOutlined />} disabled={!canManage} onClick={() => deleteCustomField(row.fieldId)} />
-                    ),
-                  },
-                ]}
-              />
+              <div style={{ marginBottom: 16 }}>
+                <Text strong>Поля бирки</Text>
+                <div style={{ marginTop: 8 }}>
+                <FieldPalette
+                  fields={sourceFields}
+                  disabled={!canManage}
+                  search={fieldSearch}
+                  onSearch={setFieldSearch}
+                  onBeginDrag={setDraggingField}
+                />
+                </div>
+              </div>
               <Space wrap>
                 <Button htmlType="submit" type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage}>
                   Сохранить шаблон
@@ -570,18 +496,8 @@ export const LabelsConfigTab: React.FC = () => {
                   Сохранить как
                 </Button>
               </Space>
-            </Form>
-          </Card>
-          <Card size="small" title="Поля бирки" style={{ marginBottom: 16 }}>
-            <FieldPalette
-              fields={sourceFields}
-              disabled={!canManage}
-              search={fieldSearch}
-              onSearch={setFieldSearch}
-              onBeginDrag={setDraggingField}
-            />
-          </Card>
-          <Table
+            </Card>
+            <Table
             rowKey="elementKey"
             title={() => (
               <Space wrap>
@@ -665,30 +581,131 @@ export const LabelsConfigTab: React.FC = () => {
               })),
             ]}
           />
-        </Col>
-        <Col xs={24} lg={15}>
-          <Card size="small" title="Визуал бирки">
-            <LabelTemplatePreview
-              widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
-              heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
-              elements={elements}
-              fields={sourceFields}
-              selectedElementKey={selectedElementKey}
-              canDrag={canManage}
-              onSelectElement={setSelectedElementKey}
-              onMoveElement={moveElement}
-              onChangeElement={patchElementByKey}
-              onDeleteElement={deleteElementByKey}
-              onDropField={addFieldElement}
-              draggingField={draggingField}
-              onDropDraggingField={(field, xMm, yMm) => {
-                addFieldElement(field, xMm, yMm);
-                setDraggingField(null);
-              }}
-            />
-          </Card>
-        </Col>
-      </Row>
+          </Col>
+          <Col xs={24} lg={rightColumnSpan}>
+            <Card size="small" title="Параметры шаблона" style={{ marginBottom: 16 }}>
+              <Form.Item name="description" label="Описание">
+                <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} />
+              </Form.Item>
+              <Row gutter={8}>
+                <Col span={8}>
+                  <Form.Item name="canvasWidthMm" label="Ширина" rules={[{ required: true }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="canvasHeightMm" label="Высота" rules={[{ required: true }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="dpi" label="Разрешение" tooltip="Разрешение печати в точках на дюйм. Влияет на размер растровых файлов при генерации бирок." rules={[{ required: true }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item name="defaultExportFormats" label="Форматы" rules={[{ required: true }]}>
+                <Checkbox.Group options={EXPORT_FORMATS.map((format) => ({ label: format, value: format }))} />
+              </Form.Item>
+            </Card>
+            <Card
+              size="small"
+              title="Визуал бирки"
+              extra={<Checkbox checked={visualExpanded} onChange={(event) => setVisualExpanded(event.target.checked)}>Увеличить визуал</Checkbox>}
+              style={{ marginBottom: 16 }}
+            >
+              <LabelTemplatePreview
+                widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
+                heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
+                elements={elements}
+                fields={sourceFields}
+                selectedElementKey={selectedElementKey}
+                canDrag={canManage}
+                initialZoom={visualExpanded ? 1.3 : 0.7}
+                onSelectElement={setSelectedElementKey}
+                onMoveElement={moveElement}
+                onChangeElement={patchElementByKey}
+                onDeleteElement={deleteElementByKey}
+                onDropField={addFieldElement}
+                draggingField={draggingField}
+                onDropDraggingField={(field, xMm, yMm) => {
+                  addFieldElement(field, xMm, yMm);
+                  setDraggingField(null);
+                }}
+              />
+            </Card>
+            <Card size="small" title="Пользовательские поля">
+              <Form.Item label="Пользовательские поля JSON">
+                <Input.TextArea value={customSchemaText} onChange={(event) => setCustomSchemaText(event.target.value)} autoSize={{ minRows: 3, maxRows: 6 }} />
+              </Form.Item>
+              <Table
+                rowKey="fieldId"
+                size="small"
+                pagination={false}
+                dataSource={customSchemaRows.rows}
+                title={() => (
+                  <Space wrap>
+                    <Text strong>Кастомные поля</Text>
+                    <Button size="small" icon={<PlusOutlined />} disabled={!canManage || !customSchemaRows.valid} onClick={addCustomField}>
+                      Поле
+                    </Button>
+                    {!customSchemaRows.valid && <Text type="danger">JSON некорректен</Text>}
+                  </Space>
+                )}
+                columns={[
+                  { title: 'Ключ', dataIndex: 'fieldId', width: 170 },
+                  {
+                    title: 'Название',
+                    width: 170,
+                    render: (_, row) => (
+                      <Input
+                        value={row.label}
+                        disabled={!canManage}
+                        onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })}
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Тип',
+                    width: 110,
+                    render: (_, row) => (
+                      <Select
+                        value={row.type}
+                        disabled={!canManage}
+                        style={{ width: '100%' }}
+                        options={CUSTOM_FIELD_TYPE_OPTIONS}
+                        onChange={(type) => patchCustomField(row.fieldId, { type })}
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Источник',
+                    width: 220,
+                    render: (_, row) => (
+                      <Select
+                        showSearch
+                        allowClear
+                        value={row.sourceField ?? undefined}
+                        disabled={!canManage}
+                        style={{ width: '100%' }}
+                        options={fields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+                        onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField: sourceField ?? null })}
+                      />
+                    ),
+                  },
+                  {
+                    title: '',
+                    width: 48,
+                    render: (_, row) => (
+                      <Button danger size="small" icon={<DeleteOutlined />} disabled={!canManage} onClick={() => deleteCustomField(row.fieldId)} />
+                    ),
+                  },
+                ]}
+              />
+            </Card>
+          </Col>
+        </Row>
+      </Form>
 
       <div>
         <Text type="secondary">Доступно полей: {fields.length}; категорий: {fieldCategories}</Text>
@@ -729,6 +746,7 @@ function LabelTemplatePreview({
   onDropField,
   draggingField,
   onDropDraggingField,
+  initialZoom = 1,
 }: {
   widthMm: number;
   heightMm: number;
@@ -743,16 +761,19 @@ function LabelTemplatePreview({
   onDropField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
   draggingField?: LabelFieldCatalogItem | null;
   onDropDraggingField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
+  initialZoom?: number;
 }) {
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodeRefs = useRef(new Map<string, Konva.Node>());
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(initialZoom);
   const [showGrid, setShowGrid] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
+  const [hoveredElement, setHoveredElement] = useState<{ element: LabelTemplateElement; x: number; y: number } | null>(null);
   const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 85;
   const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 88;
-  const fieldLabels = new Map(fields.map((field) => [field.id, field.label]));
+  const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
+  const fieldInfo = useMemo(() => new Map(fields.map((field) => [field.id, field])), [fields]);
   const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
   const previewWidth = Math.round(Math.min(760, Math.max(360, safeWidth * 7)) * zoom);
   const previewHeight = previewWidth * (safeHeight / safeWidth);
@@ -766,6 +787,10 @@ function LabelTemplatePreview({
       y: ((event.clientY - rect.top) / rect.height) * safeHeight,
     };
   };
+
+  useEffect(() => {
+    setZoom(initialZoom);
+  }, [initialZoom]);
 
   useEffect(() => {
     if (!canDrag || !selectedElementKey) {
@@ -945,6 +970,7 @@ function LabelTemplatePreview({
           border: '1px solid #d9d9d9',
           background: '#fff',
           overflow: 'hidden',
+          position: 'relative',
           touchAction: 'none',
           outline: 'none',
         }}
@@ -986,6 +1012,15 @@ function LabelTemplatePreview({
                   else nodeRefs.current.delete(element.elementKey);
                 },
                 onTransformEnd: (node, event) => handleTransformEnd(element, node, event),
+                onHoverElement: (hovered, event) => {
+                  const pointer = event.target.getStage()?.getPointerPosition();
+                  setHoveredElement({
+                    element: hovered,
+                    x: pointer?.x ?? 0,
+                    y: pointer?.y ?? 0,
+                  });
+                },
+                onLeaveElement: () => setHoveredElement(null),
               }),
             )}
             {canDrag && (
@@ -1000,6 +1035,26 @@ function LabelTemplatePreview({
             )}
           </Layer>
         </Stage>
+        {hoveredElement && (
+          <div
+            style={{
+              position: 'absolute',
+              left: Math.min(hoveredElement.x + 10, Math.max(8, previewWidth - 230)),
+              top: Math.min(hoveredElement.y + 10, Math.max(8, previewHeight - 74)),
+              maxWidth: 220,
+              padding: '6px 8px',
+              color: '#fff',
+              background: 'rgba(0, 0, 0, 0.78)',
+              borderRadius: 4,
+              fontSize: 12,
+              lineHeight: 1.35,
+              pointerEvents: 'none',
+              zIndex: 2,
+            }}
+          >
+            {describeLabelElement(hoveredElement.element, fieldInfo)}
+          </div>
+        )}
       </div>
     </Space>
   );
@@ -1116,6 +1171,8 @@ function renderKonvaPreviewElement({
   onMoveElement,
   nodeRef,
   onTransformEnd,
+  onHoverElement,
+  onLeaveElement,
 }: {
   element: LabelTemplateElement;
   fieldLabels: Map<string, string>;
@@ -1127,6 +1184,8 @@ function renderKonvaPreviewElement({
   onMoveElement?: (elementKey: string, xMm: number, yMm: number, event?: { altKey?: boolean }) => void;
   nodeRef?: (node: Konva.Node | null) => void;
   onTransformEnd?: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
+  onHoverElement?: (element: LabelTemplateElement, event: Konva.KonvaEventObject<MouseEvent>) => void;
+  onLeaveElement?: () => void;
 }) {
   const x = Number(element.xMm ?? 0);
   const y = Number(element.yMm ?? 0);
@@ -1152,6 +1211,15 @@ function renderKonvaPreviewElement({
     onDragStart: select,
     onDragEnd: dragEnd,
     onTransformEnd: (event: Konva.KonvaEventObject<Event>) => onTransformEnd?.(event.target, event),
+    onMouseEnter: (event: Konva.KonvaEventObject<MouseEvent>) => {
+      event.target.getStage()?.container().style.setProperty('cursor', draggable ? 'move' : 'default');
+      onHoverElement?.(element, event);
+    },
+    onMouseMove: (event: Konva.KonvaEventObject<MouseEvent>) => onHoverElement?.(element, event),
+    onMouseLeave: (event: Konva.KonvaEventObject<MouseEvent>) => {
+      event.target.getStage()?.container().style.setProperty('cursor', 'default');
+      onLeaveElement?.();
+    },
   };
   const selectionBox = selected ? (
     <KonvaRect
@@ -1218,6 +1286,33 @@ function renderKonvaPreviewElement({
       {selectionBox}
     </React.Fragment>
   );
+}
+
+function describeLabelElement(
+  element: LabelTemplateElement,
+  fieldInfo: Map<string, LabelFieldCatalogItem>,
+): React.ReactNode {
+  if (element.kind === 'rect') return 'Прямоугольник';
+  if (element.kind === 'line') return 'Линия';
+  if (element.sourceField) {
+    const field = fieldInfo.get(element.sourceField);
+    if (field) {
+      return (
+        <>
+          <div>{field.label}</div>
+          <div>В списке полей: {field.category}: {field.label}</div>
+          <div>{field.id}</div>
+        </>
+      );
+    }
+    return (
+      <>
+        <div>{element.sourceField}</div>
+        <div>В списке полей: поле не найдено</div>
+      </>
+    );
+  }
+  return `Статический текст: ${element.staticText || 'пусто'}`;
 }
 
 function renderGrid(widthMm: number, heightMm: number) {
