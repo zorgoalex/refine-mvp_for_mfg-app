@@ -14,6 +14,8 @@ export interface TotalsRow {
   details?: string | number | null;
   area?: string | number | null;
   sheets?: string | number | null;
+  materials_count?: string | number | null;
+  films_count?: string | number | null;
 }
 
 export function mapTotalsRow(row: TotalsRow): CutJobTotals {
@@ -22,17 +24,23 @@ export function mapTotalsRow(row: TotalsRow): CutJobTotals {
     details: num(row.details),
     area: roundTo2(num(row.area)),
     sheets: num(row.sheets),
+    materialsCount: num(row.materials_count),
+    filmsCount: num(row.films_count),
   };
 }
 
 /** positions counts only live-detail rows (COUNT(od.detail_id)); details/area
- *  use od.quantity/od.area (NULL od -> 0 via SUM). Grouped by cut_job_id so one
- *  query serves a whole list. */
+ *  use od.quantity/od.area (NULL od -> 0 via SUM). materials_count/films_count
+ *  count the DISTINCT non-null sheet materials / films among the job's details
+ *  (no_sheet_spec / film-less rows are NULL → excluded by COUNT(DISTINCT)).
+ *  Grouped by cut_job_id so one query serves a whole list. */
 export const TOTALS_BY_JOB_SQL = `
   SELECT i.cut_job_id,
-         COUNT(od.detail_id)                       AS positions,
-         COALESCE(SUM(od.quantity), 0)             AS details,
-         COALESCE(SUM(od.area * od.quantity), 0)   AS area
+         COUNT(od.detail_id)                          AS positions,
+         COALESCE(SUM(od.quantity), 0)                AS details,
+         COALESCE(SUM(od.area * od.quantity), 0)      AS area,
+         COUNT(DISTINCT od.sheet_material_type_id)    AS materials_count,
+         COUNT(DISTINCT od.film_id)                   AS films_count
   FROM cut_job_item i
   LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND od.delete_flag = false
   WHERE i.cut_job_id = ANY($1::bigint[]) AND i.is_active = true

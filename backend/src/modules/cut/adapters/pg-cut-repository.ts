@@ -1651,7 +1651,7 @@ interface SheetRow extends QueryResultRow {
 
 async function computeTotals(client: DatabaseClient, cutJobIds: number[]): Promise<Map<number, CutJobTotals>> {
   const out = new Map<number, CutJobTotals>();
-  for (const id of cutJobIds) out.set(id, { positions: 0, details: 0, area: 0, sheets: 0 });
+  for (const id of cutJobIds) out.set(id, { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 });
   if (cutJobIds.length === 0) return out;
   // SEQUENTIAL, not Promise.all: loadJob/computeTotals run inside command
   // transactions on a single pg client/connection. Two concurrent queries on one
@@ -1664,7 +1664,7 @@ async function computeTotals(client: DatabaseClient, cutJobIds: number[]): Promi
   }
   for (const row of sheets.rows) {
     const id = toNum(row.cut_job_id);
-    const cur = out.get(id) ?? { positions: 0, details: 0, area: 0, sheets: 0 };
+    const cur = out.get(id) ?? { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 };
     out.set(id, { ...cur, sheets: toNum(row.sheets) });
   }
   return out;
