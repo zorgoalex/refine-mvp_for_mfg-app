@@ -33,21 +33,22 @@ export function mapTotalsRow(row: TotalsRow): CutJobTotals {
  *  use od.quantity/od.area (NULL od -> 0 via SUM). films_count counts the
  *  DISTINCT non-null films among the job's details (film-less rows are NULL →
  *  excluded by COUNT(DISTINCT)). materials_count reflects the RESOLVED cut
- *  material, matching what calculate groups by: the job collapses to ONE material
- *  only when it is NOT split by material AND a sheet override is set
- *  (split_by_material = false AND cut_job.sheet_material_type_id IS NOT NULL —
- *  every detail cut on that one sheet → count = 1). Otherwise (split by material,
- *  the default) it is the DISTINCT non-null per-detail sheet materials — the
- *  override no longer collapses different materials.
+ *  material, matching the EFFECTIVE grouping calculate produces:
+ *   - split_by_material = false: every detail goes into ONE group → count = 1.
+ *   - split_by_material = true (default): the DISTINCT effective sheet per detail,
+ *     i.e. COALESCE(od.sheet_material_type_id, cut_job.sheet_material_type_id) —
+ *     a no_sheet_spec detail resolves to the override sheet (calculate fills it),
+ *     a materialed detail keeps its own sheet. NULL (no sheet, no override) is
+ *     excluded by COUNT(DISTINCT) — that detail cannot be cut.
  *  Grouped by cut_job_id so one query serves a whole list. */
 export const TOTALS_BY_JOB_SQL = `
   SELECT i.cut_job_id,
          COUNT(od.detail_id)                          AS positions,
          COALESCE(SUM(od.quantity), 0)                AS details,
          COALESCE(SUM(od.area * od.quantity), 0)      AS area,
-         CASE WHEN cj.sheet_material_type_id IS NOT NULL AND NOT cj.split_by_material
+         CASE WHEN NOT cj.split_by_material
               THEN 1
-              ELSE COUNT(DISTINCT od.sheet_material_type_id) END AS materials_count,
+              ELSE COUNT(DISTINCT COALESCE(od.sheet_material_type_id, cj.sheet_material_type_id)) END AS materials_count,
          COUNT(DISTINCT od.film_id)                   AS films_count
   FROM cut_job_item i
   JOIN cut_job cj ON cj.cut_job_id = i.cut_job_id

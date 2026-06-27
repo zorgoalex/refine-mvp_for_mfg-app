@@ -850,6 +850,8 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     expect(groups.rows).toHaveLength(3);
     expect(groups.rows.every((r) => r.sheet_material_type_id !== null)).toBe(true);
     expect([...new Set(groups.rows.map((r) => Number(r.sheet_material_type_id)))].sort()).toEqual([1, 2]);
+    // header «Материалов» reflects the effective grouping: materials {1, 2} → 2.
+    expect(ready.totals.materialsCount).toBe(2);
   });
 
   it('Split 2: split_by_material=false puts ALL details (materials 1,1,2) into ONE group together', async () => {
@@ -865,6 +867,8 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     expect(groups.rows[0].film_id).toBeNull();
     const items = await pool.query(`SELECT count(*)::int AS n FROM cut_job_item WHERE cut_job_id = $1 AND cut_group_id = $2`, [job.cutJobId, groups.rows[0].cut_group_id]);
     expect(items.rows[0].n).toBe(3); // all three details in the one group
+    // header «Материалов» reflects ONE all-in-one group when not split → 1.
+    expect(ready.totals.materialsCount).toBe(1);
   });
 
   it('Split 3: split_by_material=true + sheet override fills ONLY the no-sheet detail; materialed detail keeps its own material (no merge)', async () => {
@@ -881,6 +885,8 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     // Material 1 (detail 100, kept its own sheet) + material 2 (detail 3, filled by override) → 2 groups, NOT merged.
     expect(groups.rows).toHaveLength(2);
     expect(groups.rows.map((r) => Number(r.sheet_material_type_id))).toEqual([1, 2]);
+    // header «Материалов» resolves the no-sheet detail to the override → {1, 2} → 2.
+    expect(ready.totals.materialsCount).toBe(2);
   });
 
   it('Split 4: setSplitByMaterial true→false persists + audits + outbox; stale 409, same-requestId duplicate hits ON CONFLICT; unchanged is a no-op', async () => {
