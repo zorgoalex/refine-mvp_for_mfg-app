@@ -100,6 +100,7 @@ describe('cutPreviewHelpers', () => {
         key: 'det-42:1',
         orderId: 777,
         orderDetailId: 42,
+        detailNumber: 3,
         leftPct: (10 / 2800) * 100,
         topPct: (15 / 2070) * 100,
         widthPct: (600 / 2800) * 100,
@@ -115,12 +116,14 @@ describe('cutPreviewHelpers', () => {
       expect(overlay.heightPct).toBe((600 / 2800) * 100);
     });
 
-    it('builds tooltip rows with source ids and raw order_details fields', () => {
+    it('builds tooltip rows with Russian labels and raw order detail values', () => {
       const rows = buildCutPieceTooltipRows(item, placements.pieces[0]);
       expect(rows).toContainEqual({ label: 'Заказ', value: '777' });
-      expect(rows).toContainEqual({ label: 'Деталь', value: '42' });
-      expect(rows).toContainEqual({ label: 'detail_name', value: 'Боковина' });
-      expect(rows).toContainEqual({ label: 'note', value: '—' });
+      expect(rows).toContainEqual({ label: 'Позиция', value: '3' });
+      expect(rows).toContainEqual({ label: 'ID детали', value: '42' });
+      expect(rows).toContainEqual({ label: 'Наименование', value: 'Боковина' });
+      expect(rows).toContainEqual({ label: 'Примечание', value: '—' });
+      expect(rows.some((row) => row.label === 'detail_name' || row.label === 'note')).toBe(false);
     });
   });
 });

@@ -32,7 +32,7 @@ function renderOverlayTooltip(overlay: CutPieceOverlay): React.ReactNode {
   return (
     <div style={{ maxWidth: 520, maxHeight: 420, overflow: 'auto' }}>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>
-        Заказ {overlay.orderId ?? '—'} · деталь {overlay.orderDetailId ?? '—'}
+        Заказ {overlay.orderId ?? '—'} · позиция {overlay.detailNumber ?? '—'}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(120px, 1fr)', columnGap: 10, rowGap: 3 }}>
         {overlay.tooltipRows.map((row, index) => (
@@ -61,7 +61,7 @@ function OverlayLayer({
       {overlays.map((overlay) => (
         <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)} mouseEnterDelay={0.15}>
           <span
-            aria-label={`Заказ ${overlay.orderId ?? '—'}, деталь ${overlay.orderDetailId ?? '—'}`}
+            aria-label={`Заказ ${overlay.orderId ?? '—'}, позиция ${overlay.detailNumber ?? '—'}`}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
             style={{
