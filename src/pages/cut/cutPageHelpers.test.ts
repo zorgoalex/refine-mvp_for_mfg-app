@@ -54,7 +54,7 @@ describe('cutPageHelpers', () => {
   });
 
   it('formats a freecut group summary compactly', () => {
-    expect(formatGroupSummary({ used_stock_count: 2, waste_percent: 12.5 })).toBe('листов: 2, отход: 13%');
+    expect(formatGroupSummary({ used_stock_count: 2, waste_percent: 12.5 })).toBe('листов: 2, остаток: 13%');
     expect(formatGroupSummary(null)).toBe('');
   });
 

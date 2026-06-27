@@ -230,7 +230,7 @@ export function formatGroupSummary(summary: Record<string, unknown> | null): str
   if (sheets !== undefined && sheets !== null) parts.push(`листов: ${sheets}`);
   if (waste !== undefined && waste !== null) {
     const roundedWaste = Math.round(Number(waste));
-    parts.push(`отход: ${Number.isFinite(roundedWaste) ? roundedWaste : waste}%`);
+    parts.push(`остаток: ${Number.isFinite(roundedWaste) ? roundedWaste : waste}%`);
   }
   return parts.join(', ');
 }
