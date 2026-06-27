@@ -116,16 +116,20 @@ test.describe('Order UI full form coverage', () => {
         await detailsCard.getByRole('button', { name: /Пересчитать суммы/ }).click();
         await screenshot(page, testInfo, 'create-details');
 
-        // Grouping fixture: add detail 2 (same material A = МДФ 16мм) and detail 3
-        // (different material B = МДФ 19мм) so the A, A, B pattern guarantees ≥1
-        // multi-row group in the tint-parity walk (all-singleton A,B,C is insufficient).
+        // Grouping fixture: add detail 2 (material B = МДФ 19мм) and detail 3
+        // (material A = МДФ 16мм) so the creation order is A, B, A (interleaved).
+        // Clustered display order is A={d1,d3}, B={d2} → readNums=[1,3,2] ≠ baseline [1,2,3].
+        // After uncheck, correct implementation restores [1,2,3]==baseline; a regression that
+        // keeps clustering yields [1,3,2]≠baseline, so the assertion is now non-vacuous.
+        // The A group still has 2 rows (d1, d3 both МДФ 16мм), satisfying the tint-parity
+        // walk's groups.some(g => g.length >= 2) check.
         await refreshedDetailsCard.getByRole('button', { name: 'plus' }).click();
         const detailDialog2 = page.getByRole('dialog', { name: 'Добавить деталь' });
         await expect(detailDialog2).toBeVisible();
         await detailDialog2.locator('#height').fill('500');
         await detailDialog2.locator('#width').fill('300');
         await detailDialog2.locator('#quantity').fill('1');
-        await selectAntdOption(page, formItem(detailDialog2, 'Материал'), 'МДФ 16мм');
+        await selectAntdOption(page, formItem(detailDialog2, 'Материал'), 'МДФ 19мм');
         await detailDialog2.getByRole('button', { name: 'Сохранить' }).click();
         await expect(detailsCard.getByText('Всего позиций: 2')).toBeVisible();
 
@@ -135,7 +139,7 @@ test.describe('Order UI full form coverage', () => {
         await detailDialog3.locator('#height').fill('400');
         await detailDialog3.locator('#width').fill('200');
         await detailDialog3.locator('#quantity').fill('1');
-        await selectAntdOption(page, formItem(detailDialog3, 'Материал'), 'МДФ 19мм');
+        await selectAntdOption(page, formItem(detailDialog3, 'Материал'), 'МДФ 16мм');
         await detailDialog3.getByRole('button', { name: 'Сохранить' }).click();
         await expect(detailsCard.getByText('Всего позиций: 3')).toBeVisible();
 
@@ -440,9 +444,9 @@ async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string,
     expect(baselineNums.length).toBeGreaterThanOrEqual(2); // fixture sanity (non-vacuous)
 
     // Group by material → separators + tinted groups appear.
-    await page.getByRole('button', { name: /Группировать по/ }).click();
+    await form.getByRole('button', { name: /Группировать по/ }).click();
     await page.getByRole('menuitem', { name: 'по материалам' }).click();
-    const sepCheckbox = page.getByLabel('Разделение на группы');
+    const sepCheckbox = form.getByLabel('Разделение на группы');
     await expect(sepCheckbox).toBeVisible();
     await expect(detailsTable.locator('tr.detail-group-separator')).not.toHaveCount(0);
 
