@@ -334,6 +334,23 @@ export const CutPage: React.FC = () => {
     [job, handleError, loadJobs],
   );
 
+  const setJobCombineFilms = useCallback(
+    async (combineFilms: boolean) => {
+      if (!job) return;
+      setBusy(true);
+      try {
+        const updated = await cutApi.setCombineFilms(job.cutJobId, combineFilms, job.version);
+        setJob(updated);
+        void loadJobs();
+      } catch (error) {
+        handleError(error, 'Не удалось изменить объединение плёнок');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [job, handleError, loadJobs],
+  );
+
   // Load the existing (non-archived) jobs on mount so an operator can reopen a
   // job created earlier — including jobs staged from the Orders "Добавить в
   // раскрой" action, which previously had no surface to be reopened on.
@@ -1012,6 +1029,18 @@ export const CutPage: React.FC = () => {
                       </div>
                     );
                   })()}
+                  <div>
+                    <Checkbox
+                      checked={job.combineFilms}
+                      onChange={(e) => void setJobCombineFilms(e.target.checked)}
+                      disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                    >
+                      Объединить разные плёнки
+                    </Checkbox>
+                    <div style={{ marginTop: 4, color: '#8c8c8c', maxWidth: 260, fontSize: 12 }}>
+                      детали одного материала с разными плёнками кроятся вместе; применится после команды «Повторить расчёт»
+                    </div>
+                  </div>
                 </div>
               </>
             );

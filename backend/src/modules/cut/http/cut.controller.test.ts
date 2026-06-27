@@ -11,6 +11,7 @@ import {
   parseEligibleCriteria,
   parseSetProfileBody,
   parseSetSheetMaterialBody,
+  parseSetCombineFilmsBody,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -30,6 +31,8 @@ function jobDto(): CutJobDto {
     failureCode: null,
     failureReason: null,
     paramProfileId: null,
+    sheetMaterialTypeId: null,
+    combineFilms: false,
     totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },
     items: [],
     groups: [],
@@ -292,6 +295,35 @@ it('PATCH setSheetMaterial delegates parsed args to CutService.setSheetMaterial'
   const dto = await controller.setSheetMaterial(request, '42', { sheetMaterialTypeId: 7, version: 3 });
   expect(service.setSheetMaterial).toHaveBeenCalledWith(expect.objectContaining({
     cutJobId: 42, sheetMaterialTypeId: 7, version: 3, requestId: 'req-sheet',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+describe('parseSetCombineFilmsBody', () => {
+  it('accepts a boolean + version', () => {
+    expect(parseSetCombineFilmsBody({ combineFilms: true, version: 2 })).toEqual({ combineFilms: true, version: 2 });
+  });
+  it('rejects a non-boolean combineFilms', () => {
+    expect(() => parseSetCombineFilmsBody({ combineFilms: 'yes', version: 0 })).toThrow();
+  });
+  it('rejects a negative version', () => {
+    expect(() => parseSetCombineFilmsBody({ combineFilms: true, version: -1 })).toThrow();
+  });
+  it('rejects unknown keys (strict)', () => {
+    expect(() => parseSetCombineFilmsBody({ combineFilms: true, version: 0, extra: 1 })).toThrow();
+  });
+});
+
+it('PATCH setCombineFilms delegates parsed args to CutService.setCombineFilms', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setCombineFilms: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-combine' } as never;
+  const dto = await controller.setCombineFilms(request, '42', { combineFilms: true, version: 3 });
+  expect(service.setCombineFilms).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, combineFilms: true, version: 3, requestId: 'req-combine',
   }));
   expect(dto).toBe(serviceReturn);
 });

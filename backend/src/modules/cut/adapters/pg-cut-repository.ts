@@ -48,6 +48,7 @@ import type {
   RenderSheetSvgQuery,
   SetCutJobProfileCommand,
   SetCutJobSheetMaterialCommand,
+  SetCutJobCombineFilmsCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
@@ -124,6 +125,7 @@ interface CutJobLockRow extends QueryResultRow {
   params: Record<string, unknown> | null;
   param_profile_id: string | number | null;
   sheet_material_type_id: string | number | null;
+  combine_films: boolean | null;
 }
 
 interface CalcItemRow extends QueryResultRow {
@@ -152,6 +154,12 @@ export function profileChangedOutboxKey(cutJobId: number, requestId: string | un
  *  rule as profileChangedOutboxKey: stable per (job, request), version fallback. */
 export function sheetMaterialChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
   return `${CUT_AUDIT_EVENTS.sheetMaterialChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
+/** Idempotency key for the combine-films-changed outbox event. Same stability
+ *  rule as sheetMaterialChangedOutboxKey: stable per (job, request), version fallback. */
+export function combineFilmsChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.combineFilmsChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 export class PgCutRepository implements CutRepositoryPort {
@@ -369,7 +377,7 @@ export class PgCutRepository implements CutRepositoryPort {
       // Multi-material fan-out (plan §6): one cut_group + one freecut call per
       // cuttable key (sheet_material_type_id, film_id). Slice-2 removes the
       // single-group 422 — a mixed-material job fans out to N groups.
-      const groups = [...groupByCuttableKey(items).values()];
+      const groups = [...groupByCuttableKey(items, job.combineFilms).values()];
       phase1Related = {
         orderIds: groups.flatMap((g) => g.orderIds),
         sheetMaterialTypeIds: groups
@@ -537,7 +545,10 @@ export class PgCutRepository implements CutRepositoryPort {
       );
       const requestHash = computeRequestHash({
         items: allHashItems,
-        params: prep.params as unknown as Record<string, unknown>,
+        // Fold the job-level combine-films flag into the hashed params so toggling
+        // it re-cuts (emits a fresh outbox row) even when the resolved groups would
+        // otherwise hash identically (e.g. one film per material).
+        params: { ...(prep.params as unknown as Record<string, unknown>), combineFilms: job.combineFilms },
       });
       await tx.query(
         `
@@ -1369,6 +1380,66 @@ export class PgCutRepository implements CutRepositoryPort {
       return loadJob(tx, command.cutJobId);
     });
   }
+
+  setCombineFilms(command: SetCutJobCombineFilmsCommand): Promise<CutJobDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; combine_films: boolean | null }>(
+        `SELECT status, version, combine_films FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      const before = row.combine_films === true;
+
+      // No-op short-circuit: an unchanged value must NOT bump version, write
+      // audit, or emit an outbox event.
+      if (before === command.combineFilms) {
+        return loadJob(tx, command.cutJobId);
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET combine_films = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, command.combineFilms],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.combineFilmsChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { combineFilms: before },
+        after: { combineFilms: command.combineFilms },
+        metadata: { beforeCombineFilms: before, afterCombineFilms: command.combineFilms },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.combineFilmsChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeCombineFilms: before,
+            afterCombineFilms: command.combineFilms,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          combineFilmsChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+
+      return loadJob(tx, command.cutJobId);
+    });
+  }
 }
 
 interface EligibleRow extends QueryResultRow {
@@ -1410,12 +1481,23 @@ export function applySheetOverride(
   }));
 }
 
-function groupByCuttableKey(rows: CalcItemRow[]): Map<string, CuttableGroup> {
+/** Fan-out the resolved items into one group per cuttable key.
+ *  Default key = (sheet_material_type_id, film_id): a job with mixed films cuts
+ *  each film on its own sheets. When combineFilms is true the key drops film_id,
+ *  so films of the SAME material nest on shared sheets (the merged group's
+ *  filmId is null — mixed); each item keeps its own filmTexture so freecut still
+ *  applies grain per detail. Different materials are NEVER combined. */
+export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false): Map<string, CuttableGroup> {
   const groups = new Map<string, CuttableGroup>();
   for (const row of rows) {
     const sheetMaterialTypeId = row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id);
-    const filmId = row.film_id === null ? null : toNum(row.film_id);
-    const key = `${sheetMaterialTypeId ?? 'null'}:${filmId ?? 'null'}`;
+    const rowFilmId = row.film_id === null ? null : toNum(row.film_id);
+    // When combining, the group represents a material (films mixed): null filmId
+    // and a material-only key so different films merge into one group.
+    const filmId = combineFilms ? null : rowFilmId;
+    const key = combineFilms
+      ? `${sheetMaterialTypeId ?? 'null'}:all`
+      : `${sheetMaterialTypeId ?? 'null'}:${rowFilmId ?? 'null'}`;
     let group = groups.get(key);
     if (!group) {
       group = {
@@ -1471,9 +1553,10 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   params: Record<string, unknown> | null;
   paramProfileId: number | null;
   sheetMaterialTypeId: number | null;
+  combineFilms: boolean;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -1489,6 +1572,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     params: row.params,
     paramProfileId: row.param_profile_id === null || row.param_profile_id === undefined ? null : toNum(row.param_profile_id),
     sheetMaterialTypeId: row.sheet_material_type_id === null || row.sheet_material_type_id === undefined ? null : toNum(row.sheet_material_type_id),
+    combineFilms: row.combine_films === true,
   };
 }
 
@@ -1522,6 +1606,7 @@ interface JobRow extends QueryResultRow {
   failure_reason: string | null;
   param_profile_id: string | number | null;
   sheet_material_type_id: string | number | null;
+  combine_films: boolean | null;
 }
 
 interface ItemRow extends QueryResultRow {
@@ -1677,7 +1762,7 @@ async function loadJob(
   totals?: CutJobTotals,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, combine_films FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
@@ -1734,6 +1819,7 @@ async function loadJob(
     failureReason: jobRow.failure_reason,
     paramProfileId: jobRow.param_profile_id === null || jobRow.param_profile_id === undefined ? null : toNum(jobRow.param_profile_id),
     sheetMaterialTypeId: jobRow.sheet_material_type_id === null || jobRow.sheet_material_type_id === undefined ? null : toNum(jobRow.sheet_material_type_id),
+    combineFilms: jobRow.combine_films === true,
     totals: resolvedTotals,
     items: itemsResult.rows.map((row) => ({
       cutJobItemId: toNum(row.cut_job_item_id),

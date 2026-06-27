@@ -100,7 +100,8 @@ export interface CutJobTotals {
   details: number;
   area: number;
   sheets: number;
-  /** distinct non-null sheet materials among the job's details */
+  /** resolved sheet materials (override-aware): a per-job sheet override → 1,
+   *  else distinct non-null per-detail sheet materials */
   materialsCount: number;
   /** distinct non-null films among the job's details */
   filmsCount: number;
@@ -119,6 +120,9 @@ export interface CutJobDto {
   failureReason?: string | null;
   paramProfileId: number | null;
   sheetMaterialTypeId: number | null;
+  /** true = group details by sheet material only (films of the same material
+   *  share sheets); false (default) = group by (material, film). */
+  combineFilms: boolean;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];

@@ -92,7 +92,9 @@ export interface CutJobTotals {
   area: number;
   /** count of cut_group_sheet rows across the job's groups (0 unless ready) */
   sheets: number;
-  /** count of DISTINCT non-null sheet materials among the job's details */
+  /** count of RESOLVED sheet materials (override-aware): a per-job sheet override
+   *  cuts every detail on one sheet → 1; otherwise DISTINCT non-null per-detail
+   *  sheet materials. Matches what calculate groups by. */
   materialsCount: number;
   /** count of DISTINCT non-null films among the job's details */
   filmsCount: number;
@@ -112,6 +114,9 @@ export interface CutJobDto {
   paramProfileId: number | null;
   /** null = no per-job override (per-detail sheet). Non-null = chosen sheet. */
   sheetMaterialTypeId: number | null;
+  /** true = calculate groups details by sheet material only (films of the same
+   *  material share sheets). false (default) = group by (material, film). */
+  combineFilms: boolean;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];

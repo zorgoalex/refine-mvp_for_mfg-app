@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { roundTo2, mapTotalsRow } from './cut-totals';
+import { roundTo2, mapTotalsRow, TOTALS_BY_JOB_SQL } from './cut-totals';
 
 describe('roundTo2', () => {
   it('rounds to 2 decimals (avoid .x5 float boundaries)', () => {
@@ -20,5 +20,15 @@ describe('mapTotalsRow', () => {
   });
   it('defaults missing/null columns to 0', () => {
     expect(mapTotalsRow({})).toEqual({ positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 });
+  });
+});
+
+describe('TOTALS_BY_JOB_SQL materials_count resolution', () => {
+  it('joins cut_job and counts the override as one resolved material', () => {
+    const sql = TOTALS_BY_JOB_SQL.replace(/\s+/g, ' ');
+    // Override-aware: a job with a chosen sheet cuts all details on it -> count 1.
+    expect(sql).toContain('JOIN cut_job cj ON cj.cut_job_id = i.cut_job_id');
+    expect(sql).toContain('CASE WHEN cj.sheet_material_type_id IS NOT NULL THEN 1 ELSE COUNT(DISTINCT od.sheet_material_type_id) END AS materials_count');
+    expect(sql).toContain('GROUP BY i.cut_job_id, cj.sheet_material_type_id');
   });
 });
