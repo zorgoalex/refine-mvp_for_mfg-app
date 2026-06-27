@@ -14,6 +14,11 @@ describe('CutPage split-by-material toggle wiring', () => {
   it('disables the toggle for read-only / busy / calculating / archived jobs', () => {
     expect(cutPage).toMatch(/!canManage \|\| busy \|\| job\.status === 'calculating' \|\| isArchivedJob/);
   });
+  it('shows the cross-material override warning ONLY when split-by-material is OFF', () => {
+    // Under default split=true the override only fills no-sheet details, so the
+    // "all on one sheet" warning must be gated on !job.splitByMaterial.
+    expect(cutPage).toMatch(/\{mixed && !job\.splitByMaterial && \(/);
+  });
 });
 
 describe('Enlarged sheet preview is ~2× larger', () => {

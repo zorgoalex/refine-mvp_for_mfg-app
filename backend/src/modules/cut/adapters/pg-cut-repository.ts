@@ -1602,6 +1602,13 @@ export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false, sp
         items: [],
       };
       groups.set(key, group);
+    } else if (!splitByMaterial && group.sheetMaterialTypeId === null && sheetMaterialTypeId !== null) {
+      // The single "all" group cuts every detail together: if its sheet is still
+      // unknown (the first row was no_sheet_spec), adopt the first materialed row's
+      // sheet/dims instead of failing the whole group with CUT_NO_SHEET_SPEC.
+      group.sheetMaterialTypeId = sheetMaterialTypeId;
+      group.smtWidthMm = row.smt_width_mm === null ? null : toNum(row.smt_width_mm);
+      group.smtHeightMm = row.smt_height_mm === null ? null : toNum(row.smt_height_mm);
     }
     const orderId = toNum(row.order_id);
     group.orderIds.push(orderId);

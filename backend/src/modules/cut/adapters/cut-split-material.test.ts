@@ -49,6 +49,19 @@ describe('groupByCuttableKey splitByMaterial', () => {
     expect(groups[0].items).toHaveLength(3);
   });
 
+  it('split=false: when the FIRST row is no_sheet_spec, the all-group adopts the first materialed sheet (not null → no CUT_NO_SHEET_SPEC)', () => {
+    const rows = [
+      row({ order_detail_id: 10, sheet_material_type_id: null, smt_width_mm: null, smt_height_mm: null }),
+      row({ order_detail_id: 11, sheet_material_type_id: 5, smt_width_mm: 2440, smt_height_mm: 1830 }),
+    ];
+    const groups = [...groupByCuttableKey(rows as any, false, false).values()];
+    expect(groups).toHaveLength(1);
+    expect(groups[0].sheetMaterialTypeId).toBe(5);
+    expect(groups[0].smtWidthMm).toBe(2440);
+    expect(groups[0].smtHeightMm).toBe(1830);
+    expect(groups[0].items).toHaveLength(2);
+  });
+
   it('split=true + combineFilms: per material, films merged within each material', () => {
     const rows = [
       row({ sheet_material_type_id: 2, film_id: 3 }),

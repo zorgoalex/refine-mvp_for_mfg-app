@@ -915,4 +915,27 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     const noop = await repo.setSplitByMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, splitByMaterial: true, version: replay.version, requestId: 's4m-noop' });
     expect(noop.version).toBe(replay.version);
   });
+
+  it('Split 5: split_by_material=false with a no_sheet_spec FIRST item + a materialed item → ONE group on the materialed sheet (no CUT_NO_SHEET_SPEC), all placed', async () => {
+    const repo = new PgCutRepository(database, makeEchoFreecut());
+    // Create an eligible job, then replace its items so the no_sheet_spec detail (3)
+    // is the FIRST active item (lowest cut_job_item_id, which loadCalcItems orders
+    // by) and the materialed detail (100, material 1) is second. No override.
+    const job = await makeJobWithDetails(repo, [100], 'Тест split off no-spec first', 's5m-create');
+    await pool.query(`DELETE FROM cut_job_item WHERE cut_job_id = $1`, [job.cutJobId]);
+    await pool.query(`INSERT INTO cut_job_item (cut_job_id, order_detail_id, order_id, qty, is_active) VALUES ($1, 3, 10, 1, true)`, [job.cutJobId]);
+    await pool.query(`INSERT INTO cut_job_item (cut_job_id, order_detail_id, order_id, qty, is_active) VALUES ($1, 100, 50, 1, true)`, [job.cutJobId]);
+    const set = await repo.setSplitByMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, splitByMaterial: false, version: job.version, requestId: 's5m-set' });
+
+    const ready = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: set.version, requestId: 's5m-calc' });
+    expect(ready.status).toBe('ready');
+
+    const groups = await pool.query(`SELECT cut_group_id, sheet_material_type_id FROM cut_group WHERE cut_job_id = $1`, [job.cutJobId]);
+    expect(groups.rows).toHaveLength(1);
+    // The all-group adopted detail 100's material (1) rather than failing on the
+    // no_sheet_spec first item.
+    expect(Number(groups.rows[0].sheet_material_type_id)).toBe(1);
+    const items = await pool.query(`SELECT count(*)::int AS n FROM cut_job_item WHERE cut_job_id = $1 AND cut_group_id = $2`, [job.cutJobId, groups.rows[0].cut_group_id]);
+    expect(items.rows[0].n).toBe(2);
+  });
 });

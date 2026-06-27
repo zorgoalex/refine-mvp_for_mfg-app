@@ -1035,12 +1035,12 @@ export const CutPage: React.FC = () => {
                           allowClear
                           options={grouped}
                         />
-                        {mixed && (
+                        {mixed && !job.splitByMaterial && (
                           <Alert
                             type="warning"
                             showIcon
                             style={{ marginTop: 8, maxWidth: 360 }}
-                            message="Детали разных материалов будут раскроены на одном выбранном листе"
+                            message="«Разделять по материалу» выключено: все детали разных материалов будут раскроены на одном выбранном листе"
                           />
                         )}
                       </div>
