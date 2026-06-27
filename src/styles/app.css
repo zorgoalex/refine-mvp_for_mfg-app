@@ -294,6 +294,10 @@
   z-index: 20;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
+  /* Visually separate the pinned tab strip from the content below it: a gap
+     of roughly half the strip height. The border-bottom stays on the bar; the
+     margin shows the page background as breathing room before the content. */
+  margin-bottom: 20px;
 }
 .workspace-tabs .ant-tabs-nav {
   margin: 0;

@@ -854,13 +854,23 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       <OrderLatestLabelsPreview orderId={record.order_id} />
                     )}
 
-                    {/* Служебная информация */}
-                    <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#8c8c8c', marginBottom: 3 }}>
+                    {/* Служебная информация — спойлер, по умолчанию свёрнут */}
+                    <details style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                      <summary
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: '#8c8c8c',
+                          marginBottom: 3,
+                          cursor: 'pointer',
+                        }}
+                      >
                         Служебная информация
+                      </summary>
+                      <div style={{ marginTop: 3 }}>
+                        <OrderMetaBlock record={record} compact />
                       </div>
-                      <OrderMetaBlock record={record} compact />
-                    </div>
+                    </details>
                   </>
                 )}
               </div>

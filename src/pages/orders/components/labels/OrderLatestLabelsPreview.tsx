@@ -17,6 +17,9 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
   const canGenerate = can('labels.generate');
   const [latest, setLatest] = useState<LatestOrderLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
+  // Preview is rendered at 25% by default (fits without scroll); a click zooms
+  // it back to 100% (×4) and the block grows so the label shows in full.
+  const [zoomed, setZoomed] = useState(false);
 
   const loadLatest = useCallback(() => {
     setLoading(true);
@@ -51,9 +54,21 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
             {latest.svgPages.slice(0, 1).map((svg, index) => (
               <div
                 key={index}
-                style={{ border: '1px solid #d9d9d9', maxHeight: 160, overflow: 'auto' }}
-                dangerouslySetInnerHTML={{ __html: svg }}
-              />
+                onClick={() => setZoomed((z) => !z)}
+                title={zoomed ? 'Свернуть бирку' : 'Увеличить бирку'}
+                style={{
+                  border: '1px solid #d9d9d9',
+                  overflow: 'hidden',
+                  cursor: 'pointer',
+                  display: 'inline-block',
+                  lineHeight: 0,
+                }}
+              >
+                <div
+                  style={{ zoom: zoomed ? 1 : 0.25 }}
+                  dangerouslySetInnerHTML={{ __html: svg }}
+                />
+              </div>
             ))}
             <Space wrap>
               {canGenerate && (
