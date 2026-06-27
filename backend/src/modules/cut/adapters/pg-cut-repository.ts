@@ -1108,24 +1108,49 @@ export class PgCutRepository implements CutRepositoryPort {
     );
 
     // Map freecut item_id -> detail/order label.
-    const items = await this.database.query<{ order_detail_id: string | number; order_id: string | number }>(
-      `SELECT cji.order_detail_id, cji.order_id FROM cut_job_item cji WHERE cji.cut_group_id = $1 ORDER BY cji.cut_job_item_id`,
+    const items = await this.database.query<{
+      order_detail_id: string | number;
+      order_id: string | number;
+      detail_number: string | number | null;
+      width: string | number | null;
+      height: string | number | null;
+    }>(
+      `SELECT cji.order_detail_id, cji.order_id,
+              od.detail_number, od.width, od.height
+       FROM cut_job_item cji
+       LEFT JOIN order_details od ON od.detail_id = cji.order_detail_id AND od.delete_flag = false
+       WHERE cji.cut_group_id = $1
+       ORDER BY cji.cut_job_item_id`,
       [cutGroupId],
     );
-    const orderByDetail = new Map<number, number>();
+    const detailById = new Map<number, {
+      orderId: number;
+      detailNumber: number | null;
+      widthMm: number | null;
+      heightMm: number | null;
+    }>();
     for (const row of items.rows) {
-      orderByDetail.set(toNum(row.order_detail_id), toNum(row.order_id));
+      detailById.set(toNum(row.order_detail_id), {
+        orderId: toNum(row.order_id),
+        detailNumber: numOrNull(row.detail_number),
+        widthMm: numOrNull(row.width),
+        heightMm: numOrNull(row.height),
+      });
     }
     const fillByOrder = createOrderFillResolver(items.rows.map((row) => toNum(row.order_id)));
 
     const labelFor = (piece: FreecutPlacement): string[] => {
       const detailId = parseFreecutItemId(piece.item_id);
-      const orderId = detailId === null ? null : orderByDetail.get(detailId) ?? null;
+      const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+      const orderId = detail?.orderId ?? null;
       // Order on line 1, detail (+ instance N/qty) on line 2 — rendered as
       // separate <tspan> lines by buildSheetSvg.
       return composePieceLabelLines({
         orderId,
         detailId,
+        detailNumber: detail?.detailNumber ?? null,
+        widthMm: detail?.widthMm ?? null,
+        heightMm: detail?.heightMm ?? null,
         itemId: piece.item_id,
         instance: piece.instance,
         qty: quantities.get(piece.item_id) ?? 1,
@@ -1133,7 +1158,7 @@ export class PgCutRepository implements CutRepositoryPort {
     };
     const fillFor = (piece: FreecutPlacement): string => {
       const detailId = parseFreecutItemId(piece.item_id);
-      const orderId = detailId === null ? null : orderByDetail.get(detailId) ?? null;
+      const orderId = detailId === null ? null : detailById.get(detailId)?.orderId ?? null;
       return fillByOrder(orderId);
     };
 

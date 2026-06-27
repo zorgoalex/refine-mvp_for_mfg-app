@@ -26,17 +26,35 @@ describe('formatPieceLabel (§3 instance labels)', () => {
   });
 });
 
-describe('composePieceLabelLines (two-line order/detail label)', () => {
-  it('puts the order on line 1 and the detail on line 2', () => {
+describe('composePieceLabelLines (cut preview piece label)', () => {
+  it('puts order, position, and size on the first three lines', () => {
     expect(
-      composePieceLabelLines({ orderId: 12, detailId: 45, itemId: 'det-45', instance: 1, qty: 1 }),
-    ).toEqual(['№12', '45']);
+      composePieceLabelLines({
+        orderId: 12,
+        detailId: 45,
+        detailNumber: 7,
+        widthMm: 600,
+        heightMm: 400,
+        itemId: 'det-45',
+        instance: 1,
+        qty: 1,
+      }),
+    ).toEqual(['12', 'поз. 7', '600X400']);
   });
 
-  it('appends instance N/qty to the detail line only', () => {
+  it('adds instance count as its own line when qty > 1', () => {
     expect(
-      composePieceLabelLines({ orderId: 12, detailId: 45, itemId: 'det-45', instance: 2, qty: 3 }),
-    ).toEqual(['№12', '45 2/3']);
+      composePieceLabelLines({
+        orderId: 12,
+        detailId: 45,
+        detailNumber: 7,
+        widthMm: 600,
+        heightMm: 400,
+        itemId: 'det-45',
+        instance: 2,
+        qty: 3,
+      }),
+    ).toEqual(['12', 'поз. 7 - 2/3', '600X400']);
   });
 
   it('falls back to a single line when the order is unknown', () => {
@@ -48,10 +66,11 @@ describe('composePieceLabelLines (two-line order/detail label)', () => {
 
 describe('buildSheetSvg multi-line labels', () => {
   it('renders each label line as its own <tspan> sharing the piece centre x', () => {
-    const svg = buildSheetSvg({ sheet, labelFor: () => ['№5', '999'] });
+    const svg = buildSheetSvg({ sheet, labelFor: () => ['5', 'поз. 9', '600X400'] });
     // first piece centre: x=10+600/2=310, y=15+400/2=215
-    expect(svg).toMatch(/<tspan x="310"[^>]*>№5<\/tspan>/);
-    expect(svg).toMatch(/<tspan x="310"[^>]*>999<\/tspan>/);
+    expect(svg).toMatch(/<tspan x="310"[^>]*>5<\/tspan>/);
+    expect(svg).toMatch(/<tspan x="310"[^>]*>поз\. 9<\/tspan>/);
+    expect(svg).toMatch(/<tspan x="310"[^>]*>600X400<\/tspan>/);
   });
 
   it('still accepts a plain string label (single line)', () => {

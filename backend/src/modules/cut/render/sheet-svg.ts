@@ -25,6 +25,11 @@ export interface PieceLabelInput {
   orderId: number | null;
   /** order_detail_id parsed from the freecut item id, or null when unparseable. */
   detailId: number | null;
+  /** detail_number from the source order, or null when unknown. */
+  detailNumber?: number | null;
+  /** resolved source detail dimensions, shown as width x height. */
+  widthMm?: number | null;
+  heightMm?: number | null;
   /** raw freecut item id (fallback label when order/detail are unknown). */
   itemId: string;
   instance: number;
@@ -32,17 +37,37 @@ export interface PieceLabelInput {
 }
 
 /**
- * Two-line piece label: order on line 1 (`№<orderId>`), detail on line 2
- * (`<detailId>` plus the `N/qty` instance suffix when qty > 1). When the order
- * can't be resolved we fall back to a single line with the raw item id so the
- * label is never empty.
+ * Piece label lines shown inside every placed detail:
+ * 1) order id (without the № prefix), 2) order detail position + instance
+ * count, 3) size (width x height). When the
+ * order can't be resolved we fall back to a single line with the raw item id so
+ * the label is never empty.
  */
 export function composePieceLabelLines(input: PieceLabelInput): string[] {
-  const { orderId, detailId, itemId, instance, qty } = input;
+  const { orderId, detailId, detailNumber, widthMm, heightMm, itemId, instance, qty } = input;
   if (orderId === null || detailId === null) {
     return [formatPieceLabel(itemId, instance, qty)];
   }
-  return [`№${orderId}`, formatPieceLabel(String(detailId), instance, qty)];
+  return [
+    String(orderId),
+    formatPositionLine(detailNumber ?? detailId, instance, qty),
+    formatPieceSize(widthMm, heightMm),
+  ];
+}
+
+function formatPositionLine(position: number, instance: number, qty: number): string {
+  return qty > 1 ? `поз. ${position} - ${instance}/${qty}` : `поз. ${position}`;
+}
+
+function formatPieceSize(widthMm: number | null | undefined, heightMm: number | null | undefined): string {
+  if (widthMm === null || widthMm === undefined || heightMm === null || heightMm === undefined) {
+    return 'размер —';
+  }
+  return `${formatDimension(widthMm)}X${formatDimension(heightMm)}`;
+}
+
+function formatDimension(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1)));
 }
 
 /** Total placed instances per freecut item id across all sheets of a group. */
