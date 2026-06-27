@@ -31,6 +31,10 @@ import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.ty
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
+import { buildGroupedRows } from './detailGrouping';
+import { useDetailGrouping } from './useDetailGrouping';
+import { DetailGroupingControls } from './components/DetailGroupingControls';
+import { authSession } from '../../api/authSession';
 
 type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'additional';
 
@@ -341,6 +345,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     };
   }, [cutColumnEnabled, record?.order_id]);
 
+  // Detail grouping state (persisted per user+order; suppressed during cut selection).
+  const groupingUserId = authSession.getUser()?.id ?? 'anon';
+  const grouping = useDetailGrouping(groupingUserId, record?.order_id ?? 'new');
+
+  // Active only when a field is chosen, separation is on, and NOT cut-selecting.
+  const groupingActive = !!grouping.state.field && grouping.state.showSeparation && !cutSelectMode;
+
+  // Grouped (clustered + separators) only when active; otherwise RAW order.
+  // No explicit annotation: show.tsx does NOT import OrderDetail; let TS infer.
+  const groupedDataSource = useMemo(
+    () => (groupingActive ? buildGroupedRows(details, grouping.state.field!) : details),
+    [groupingActive, details, grouping.state.field],
+  );
+
   // Hook for updating order
   const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
 
@@ -539,6 +557,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       setIsSnapshotExporting(false);
     }
   };
+
+  // Unwrap a GroupedRow to the underlying detail, or null for separator rows.
+  // Declared at component scope (NOT inside JSX) — statements inside JSX are invalid TSX.
+  const asDetail = (row: any) => (row?.kind === 'detail' ? row.detail : row?.kind === 'separator' ? null : row);
+  const COLUMN_COUNT = 12 + (cutColumnEnabled ? 1 : 0);
 
   return (
     <Show
@@ -928,10 +951,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 </Space>
               )}
             </div>
+            <div style={{ marginTop: 4 }}>
+              <DetailGroupingControls
+                state={grouping.state}
+                onFieldChange={grouping.setField}
+                onToggleSeparation={grouping.setShowSeparation}
+              />
+            </div>
             <TableTopScroll>
             <Table
-              dataSource={details}
-              rowKey="detail_id"
+              className={groupingActive ? 'details-grouped' : undefined}
+              dataSource={groupedDataSource as any}
+              rowKey={(row: any) => (row?.kind === 'separator' ? row.key : (row?.kind === 'detail' ? row.detail : row).detail_id)}
               scroll={{ x: 'max-content' }}
               rowSelection={
                 cutSelectMode
@@ -946,14 +977,19 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               bordered
               tableLayout="fixed"
               style={{ fontSize: 12 }}
-              rowClassName={(_, index) => index % 2 === 0 ? 'table-row-light' : 'table-row-dark'}
-              onRow={() => ({
+              rowClassName={(row: any, index) => {
+                if (row?.kind === 'separator') return 'detail-group-separator';
+                if (!groupingActive) return index % 2 === 0 ? 'table-row-light' : 'table-row-dark';
+                const groupIndex = row?.kind === 'detail' ? row.groupIndex : index;
+                return `detail-group-tint-${groupIndex % 2}`;
+              }}
+              onRow={(row: any) => ({
                 onDoubleClick: () => {
-                  if (record?.order_id) {
-                    navigate(`/orders/edit/${record.order_id}`);
-                  }
+                  if (row?.kind === 'separator') return;
+                  const d = row?.kind === 'detail' ? row.detail : row;
+                  if (d?.order_id) navigate(`/orders/edit/${d.order_id}`);
                 },
-                style: { cursor: 'pointer' },
+                style: { cursor: row?.kind === 'separator' ? 'default' : 'pointer' },
               })}
               components={{
                 header: {
@@ -966,52 +1002,84 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               columns={[
                 {
                   title: '№',
-                  dataIndex: 'detail_number',
                   key: 'detail_number',
                   width: 43,
                   align: 'center',
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: COLUMN_COUNT } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    return d.detail_number;
+                  },
                 },
                 {
                   title: 'Высота',
-                  dataIndex: 'height',
                   key: 'height',
                   width: 72,
                   align: 'center',
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    return d.height;
+                  },
                 },
                 {
                   title: 'Ширина',
-                  dataIndex: 'width',
                   key: 'width',
                   width: 72,
                   align: 'center',
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    return d.width;
+                  },
                 },
                 {
                   title: 'Кол-во',
-                  dataIndex: 'quantity',
                   key: 'quantity',
                   width: 63,
                   align: 'center',
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    return d.quantity;
+                  },
                 },
                 {
                   title: 'м²',
-                  dataIndex: 'area',
                   key: 'area',
                   width: 72,
                   align: 'center',
-                  render: (value) => value ? value.toFixed(2) : '0.00',
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    return d.area ? d.area.toFixed(2) : '0.00';
+                  },
                 },
                 {
                   title: 'Фрезеровка',
                   key: 'milling_type',
                   width: 128,
-                  render: (_, record) => millingTypesMap.get(record.milling_type_id) || '—',
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    return millingTypesMap.get(d.milling_type_id) || '—';
+                  },
                 },
                 {
                   title: 'Обкат',
                   key: 'edge_type',
                   width: 51,
-                  render: (_, record) => {
-                    const edgeTypeName = edgeTypesMap.get(record.edge_type_id) || '—';
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    const edgeTypeName = edgeTypesMap.get(d.edge_type_id) || '—';
                     return <span style={{ fontSize: '0.86em' }}>{edgeTypeName}</span>;
                   },
                 },
@@ -1019,46 +1087,68 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   title: 'Материал',
                   key: 'material',
                   width: 77,
-                  render: (_, record) => {
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
                     const materialName =
-                      resolveDetailMaterialName(record, resolvedNameByDetailId, materialsMap) || '—';
+                      resolveDetailMaterialName(d, resolvedNameByDetailId, materialsMap) || '—';
                     return <span style={{ fontSize: '0.86em' }}>{materialName}</span>;
                   },
                 },
                 {
                   title: 'Пр-е',
-                  dataIndex: 'note',
                   key: 'note',
                   // Без фиксированной ширины - занимает оставшееся пространство
-                  render: (value) => (
-                    <span style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
-                      {value || ''}
-                    </span>
-                  ),
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    return (
+                      <span style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                        {d.note || ''}
+                      </span>
+                    );
+                  },
                 },
                 {
                   title: 'Цена за кв.м.',
-                  dataIndex: 'milling_cost_per_sqm',
                   key: 'milling_cost_per_sqm',
                   width: 70,
                   align: 'right',
-                  render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    return (d.milling_cost_per_sqm !== null && d.milling_cost_per_sqm !== undefined)
+                      ? d.milling_cost_per_sqm.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                      : '—';
+                  },
                 },
                 {
                   title: 'Сумма',
-                  dataIndex: 'detail_cost',
                   key: 'detail_cost',
                   width: 65,
                   align: 'right',
-                  render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    return (d.detail_cost !== null && d.detail_cost !== undefined)
+                      ? d.detail_cost.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                      : '—';
+                  },
                 },
                 {
                   title: 'Пленка',
                   key: 'film',
                   width: 104,
-                  render: (_, record) => {
-                    if (!record.film_id) return '';
-                    const filmName = filmsMap.get(record.film_id);
+                  onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                  render: (_: any, row: any) => {
+                    const d = asDetail(row);
+                    if (!d) return null;
+                    if (!d.film_id) return '';
+                    const filmName = filmsMap.get(d.film_id);
                     return (
                       <span
                         style={{ fontSize: '0.86em', wordBreak: 'break-word', whiteSpace: 'normal' }}
@@ -1075,8 +1165,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         title: 'Раскрой',
                         key: 'cut_job',
                         width: 150,
-                        render: (_: unknown, record: any) => {
-                          const ref = cutJobByDetailId.get(record.detail_id);
+                        onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+                        render: (_: any, row: any) => {
+                          const d = asDetail(row);
+                          if (!d) return null;
+                          const ref = cutJobByDetailId.get(d.detail_id);
                           if (!ref) return '—';
                           return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
                         },
