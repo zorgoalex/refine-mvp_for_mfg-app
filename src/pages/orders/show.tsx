@@ -739,138 +739,151 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
                 {activeInfoPanel === 'additional' && (
                   <>
-                    {/* Даты */}
-                    <div style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#52c41a', marginBottom: 3 }}>
-                        Даты
-                      </div>
-                      <OrderDatesBlock record={record} compact />
-                    </div>
-                    
-                    {/* Производство */}
-                    <div style={{ marginBottom: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#fa8c16', marginBottom: 3 }}>
-                        Производство
-                      </div>
-                      <OrderProductionBlock
-                        record={record}
-                        details={details}
-                        millingTypesMap={millingTypesMap}
-                        edgeTypesMap={edgeTypesMap}
-                        filmsMap={filmsMap}
-                        compact
-                      />
-                    </div>
-
-                    {/* Присадки */}
-                    <div style={{ marginBottom: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#13c2c2', marginBottom: 3 }}>
-                        Присадки
-                      </div>
-                      {dowelingLinks.length > 0 ? (
-                        <Table
-                          dataSource={dowelingLinks}
-                          rowKey="order_doweling_link_id"
-                          size="small"
-                          pagination={false}
-                          bordered
-                          style={{ fontSize: 12 }}
-                          components={{
-                            header: {
-                              cell: (props: any) => <th {...props} style={{ ...props.style, padding: '2px 6px', fontSize: 11 }} />,
-                            },
-                            body: {
-                              cell: (props: any) => <td {...props} style={{ ...props.style, padding: '2px 6px', fontSize: 12 }} />,
-                            },
-                          }}
-                          columns={[
-                            {
-                              title: 'Номер присадки',
-                              key: 'name',
-                              render: (_, link: any) => {
-                                const dowelingOrderId =
-                                  link.doweling_order?.doweling_order_id ?? link.doweling_order_id;
-                                const dowelingOrderName =
-                                  link.doweling_order?.doweling_order_name ||
-                                  link.doweling_order_name ||
-                                  (dowelingOrderId ? String(dowelingOrderId) : '—');
-                                const showPath = getDowelingOrderShowPath(dowelingOrderId);
-
-                                return showPath ? (
-                                  <Link to={showPath}>{dowelingOrderName}</Link>
-                                ) : (
-                                  dowelingOrderName
-                                );
-                              },
-                            },
-                            {
-                              title: 'Конструктор',
-                              key: 'engineer',
-                              render: (_, link: any) => {
-                                const engineerId = link.doweling_order?.design_engineer_id;
-                                return engineerId ? employeesMap.get(engineerId) || '—' : '—';
-                              },
-                            },
-                          ]}
-                        />
-                      ) : (
-                        <span style={{ color: '#8c8c8c', fontStyle: 'italic' }}>Нет связанных присадок</span>
-                      )}
-                    </div>
-
-                    {/* Файлы */}
-                    <div style={{ marginBottom: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#722ed1', marginBottom: 3 }}>
-                        Файлы
-                      </div>
-                      <OrderFilesBlock record={record} compact />
-                    </div>
-
-                    {/* Раскрой */}
-                    {cutColumnEnabled && (
-                      <div style={{ marginBottom: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
-                          Раскрой
+                    {/* Три колонки: Даты | Производство | Присадки + Раскрой */}
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                        gap: 12,
+                        alignItems: 'start',
+                      }}
+                    >
+                      {/* Колонка 1 — Даты */}
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#52c41a', marginBottom: 3 }}>
+                          Даты
                         </div>
-                        {cutOrderJobs.length === 0 ? (
-                          <span style={{ fontSize: 12, color: '#8c8c8c' }}>—</span>
+                        <OrderDatesBlock record={record} compact />
+                      </div>
+
+                      {/* Колонка 2 — Производство */}
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#fa8c16', marginBottom: 3 }}>
+                          Производство
+                        </div>
+                        <OrderProductionBlock
+                          record={record}
+                          details={details}
+                          millingTypesMap={millingTypesMap}
+                          edgeTypesMap={edgeTypesMap}
+                          filmsMap={filmsMap}
+                          compact
+                        />
+                      </div>
+
+                      {/* Колонка 3 — Присадки + Раскрой (вертикально, разделены горизонтально) */}
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#13c2c2', marginBottom: 3 }}>
+                          Присадки
+                        </div>
+                        {dowelingLinks.length > 0 ? (
+                          <Table
+                            dataSource={dowelingLinks}
+                            rowKey="order_doweling_link_id"
+                            size="small"
+                            pagination={false}
+                            bordered
+                            style={{ fontSize: 12 }}
+                            components={{
+                              header: {
+                                cell: (props: any) => <th {...props} style={{ ...props.style, padding: '2px 6px', fontSize: 11 }} />,
+                              },
+                              body: {
+                                cell: (props: any) => <td {...props} style={{ ...props.style, padding: '2px 6px', fontSize: 12 }} />,
+                              },
+                            }}
+                            columns={[
+                              {
+                                title: 'Номер присадки',
+                                key: 'name',
+                                render: (_, link: any) => {
+                                  const dowelingOrderId =
+                                    link.doweling_order?.doweling_order_id ?? link.doweling_order_id;
+                                  const dowelingOrderName =
+                                    link.doweling_order?.doweling_order_name ||
+                                    link.doweling_order_name ||
+                                    (dowelingOrderId ? String(dowelingOrderId) : '—');
+                                  const showPath = getDowelingOrderShowPath(dowelingOrderId);
+
+                                  return showPath ? (
+                                    <Link to={showPath}>{dowelingOrderName}</Link>
+                                  ) : (
+                                    dowelingOrderName
+                                  );
+                                },
+                              },
+                              {
+                                title: 'Конструктор',
+                                key: 'engineer',
+                                render: (_, link: any) => {
+                                  const engineerId = link.doweling_order?.design_engineer_id;
+                                  return engineerId ? employeesMap.get(engineerId) || '—' : '—';
+                                },
+                              },
+                            ]}
+                          />
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            {cutOrderJobs.map((j) => (
-                              <Link
-                                key={j.cutJobId}
-                                to={cutJobDeepLink(j.cutJobId)}
-                                style={{ fontSize: 12 }}
-                              >
-                                {j.name}
-                              </Link>
-                            ))}
+                          <span style={{ color: '#8c8c8c', fontStyle: 'italic' }}>Нет связанных присадок</span>
+                        )}
+
+                        {/* Раскрой — под присадками, горизонтальный разделитель */}
+                        {cutColumnEnabled && (
+                          <div style={{ marginTop: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
+                              Раскрой
+                            </div>
+                            {cutOrderJobs.length === 0 ? (
+                              <span style={{ fontSize: 12, color: '#8c8c8c' }}>—</span>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                {cutOrderJobs.map((j) => (
+                                  <Link
+                                    key={j.cutJobId}
+                                    to={cutJobDeepLink(j.cutJobId)}
+                                    style={{ fontSize: 12 }}
+                                  >
+                                    {j.name}
+                                  </Link>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
-                    )}
+                    </div>
 
-                    {labelsEnabled && record?.order_id && (
-                      <OrderLatestLabelsPreview orderId={record.order_id} />
-                    )}
-
-                    {/* Служебная информация — спойлер, по умолчанию свёрнут */}
-                    <details style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                      <summary
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: '#8c8c8c',
-                          marginBottom: 3,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Служебная информация
-                      </summary>
-                      <div style={{ marginTop: 3 }}>
-                        <OrderMetaBlock record={record} compact />
+                    {/* Ниже — на всю ширину: Файлы, Бирки, Служебная информация */}
+                    <div style={{ marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                      {/* Файлы */}
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#722ed1', marginBottom: 3 }}>
+                          Файлы
+                        </div>
+                        <OrderFilesBlock record={record} compact />
                       </div>
-                    </details>
+
+                      {labelsEnabled && record?.order_id && (
+                        <OrderLatestLabelsPreview orderId={record.order_id} />
+                      )}
+
+                      {/* Служебная информация — спойлер, по умолчанию свёрнут */}
+                      <details style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                        <summary
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: '#8c8c8c',
+                            marginBottom: 3,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Служебная информация
+                        </summary>
+                        <div style={{ marginTop: 3 }}>
+                          <OrderMetaBlock record={record} compact />
+                        </div>
+                      </details>
+                    </div>
                   </>
                 )}
               </div>
