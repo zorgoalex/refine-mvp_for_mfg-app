@@ -24,11 +24,10 @@ describe('mapTotalsRow', () => {
 });
 
 describe('TOTALS_BY_JOB_SQL materials_count resolution', () => {
-  it('joins cut_job and counts the override as one resolved material', () => {
+  it('mirrors the effective grouping: 1 when not split; else distinct COALESCE(detail sheet, override)', () => {
     const sql = TOTALS_BY_JOB_SQL.replace(/\s+/g, ' ');
-    // Override-aware: a job with a chosen sheet cuts all details on it -> count 1.
     expect(sql).toContain('JOIN cut_job cj ON cj.cut_job_id = i.cut_job_id');
-    expect(sql).toContain('CASE WHEN cj.sheet_material_type_id IS NOT NULL THEN 1 ELSE COUNT(DISTINCT od.sheet_material_type_id) END AS materials_count');
-    expect(sql).toContain('GROUP BY i.cut_job_id, cj.sheet_material_type_id');
+    expect(sql).toContain('CASE WHEN NOT cj.split_by_material THEN 1 ELSE COUNT(DISTINCT COALESCE(od.sheet_material_type_id, cj.sheet_material_type_id)) END AS materials_count');
+    expect(sql).toContain('GROUP BY i.cut_job_id, cj.sheet_material_type_id, cj.split_by_material');
   });
 });

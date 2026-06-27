@@ -147,6 +147,7 @@ async function createSchema(pool: Pool): Promise<void> {
       param_profile_id BIGINT,
       sheet_material_type_id BIGINT REFERENCES sheet_material_types(sheet_material_type_id),
       combine_films BOOLEAN NOT NULL DEFAULT false,
+      split_by_material BOOLEAN NOT NULL DEFAULT true,
       created_by BIGINT,
       version INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT now(),

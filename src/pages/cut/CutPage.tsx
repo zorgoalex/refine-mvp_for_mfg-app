@@ -351,6 +351,23 @@ export const CutPage: React.FC = () => {
     [job, handleError, loadJobs],
   );
 
+  const setJobSplitByMaterial = useCallback(
+    async (splitByMaterial: boolean) => {
+      if (!job) return;
+      setBusy(true);
+      try {
+        const updated = await cutApi.setSplitByMaterial(job.cutJobId, splitByMaterial, job.version);
+        setJob(updated);
+        void loadJobs();
+      } catch (error) {
+        handleError(error, 'Не удалось изменить разделение по материалу');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [job, handleError, loadJobs],
+  );
+
   // Load the existing (non-archived) jobs on mount so an operator can reopen a
   // job created earlier — including jobs staged from the Orders "Добавить в
   // раскрой" action, which previously had no surface to be reopened on.
@@ -1018,17 +1035,29 @@ export const CutPage: React.FC = () => {
                           allowClear
                           options={grouped}
                         />
-                        {mixed && (
+                        {mixed && !job.splitByMaterial && (
                           <Alert
                             type="warning"
                             showIcon
                             style={{ marginTop: 8, maxWidth: 360 }}
-                            message="Детали разных материалов будут раскроены на одном выбранном листе"
+                            message="«Разделять по материалу» выключено: все детали разных материалов будут раскроены на одном выбранном листе"
                           />
                         )}
                       </div>
                     );
                   })()}
+                  <div>
+                    <Checkbox
+                      checked={job.splitByMaterial}
+                      onChange={(e) => void setJobSplitByMaterial(e.target.checked)}
+                      disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                    >
+                      Разделять по материалу
+                    </Checkbox>
+                    <div style={{ marginTop: 4, color: '#8c8c8c', maxWidth: 260, fontSize: 12 }}>
+                      разные материалы кроятся отдельными группами; выключите, чтобы раскроить все детали вместе в одной группе; применится после команды «Повторить расчёт»
+                    </div>
+                  </div>
                   <div>
                     <Checkbox
                       checked={job.combineFilms}
@@ -1145,7 +1174,17 @@ export const CutPage: React.FC = () => {
                 const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
                 const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90);
                 return (
-                  <div key={key} style={sheetPreviewItemStyle(widthMm, heightMm, rotate90)}>
+                  <div
+                    key={key}
+                    style={
+                      // Open (enlarged) sheet spans the full previews row so the
+                      // image can grow ~2× instead of being capped by the thumbnail
+                      // column width.
+                      sheetImages[key]
+                        ? { flex: '1 1 100%', maxWidth: '100%' }
+                        : sheetPreviewItemStyle(widthMm, heightMm, rotate90)
+                    }
+                  >
                     <Space>
                       <Button size="small" onClick={() => loadSheet(group, sheet.sheetIndex)}>
                         Лист {sheet.sheetIndex + 1}

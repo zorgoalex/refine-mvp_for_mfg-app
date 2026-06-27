@@ -119,7 +119,10 @@ export function SheetPreview({
       <Tooltip title="Двойной клик — свернуть до превью">
         {/* padding leaves room for the side-dimension labels */}
         <div style={{ position: 'relative', display: 'inline-block', padding: '22px 56px', cursor: 'zoom-out' }}>
-          <span style={{ position: 'relative', display: 'inline-block', maxWidth: 900, width: '100%' }}>
+          {/* Enlarged view ~2× the previous size: cap doubled (900 → 1800); the
+              open sheet's wrapper in CutPage spans the full previews row so the
+              image can actually grow to this width. */}
+          <span style={{ position: 'relative', display: 'inline-block', maxWidth: 1800, width: '100%' }}>
             <img
               src={src}
               alt={alt}

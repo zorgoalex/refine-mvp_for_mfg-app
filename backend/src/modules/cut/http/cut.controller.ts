@@ -69,6 +69,13 @@ const setCombineFilmsBodySchema = z
   })
   .strict();
 
+const setSplitByMaterialBodySchema = z
+  .object({
+    splitByMaterial: z.boolean(),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
+
 @ApiTags('CutJobs')
 @ApiBearerAuth()
 @Controller('cut-jobs')
@@ -301,6 +308,24 @@ export class CutController {
     });
   }
 
+  @ApiOperation({ operationId: 'setCutJobSplitByMaterial', summary: 'Toggle split-by-material for a job' })
+  @Patch(':cutJobId/split-by-material')
+  async setSplitByMaterial(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { splitByMaterial, version } = parseSetSplitByMaterialBody(body);
+    return this.cut.setSplitByMaterial({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      splitByMaterial,
+      version,
+      requestId: request.requestId,
+    });
+  }
+
   @ApiOperation({ operationId: 'renderCutSheetPng', summary: 'Render a per-sheet PNG' })
   @Get(':cutJobId/groups/:groupId/sheets/:sheetIndex.png')
   async renderPng(
@@ -522,6 +547,10 @@ export function parseSetSheetMaterialBody(body: unknown): { sheetMaterialTypeId:
 
 export function parseSetCombineFilmsBody(body: unknown): { combineFilms: boolean; version: number } {
   return parse(setCombineFilmsBodySchema, body);
+}
+
+export function parseSetSplitByMaterialBody(body: unknown): { splitByMaterial: boolean; version: number } {
+  return parse(setSplitByMaterialBodySchema, body);
 }
 
 /** Query CSV (`orderIds=9,10`) → number arrays. */

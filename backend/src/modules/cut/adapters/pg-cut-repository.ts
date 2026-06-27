@@ -49,6 +49,7 @@ import type {
   SetCutJobProfileCommand,
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
+  SetCutJobSplitByMaterialCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
@@ -126,6 +127,7 @@ interface CutJobLockRow extends QueryResultRow {
   param_profile_id: string | number | null;
   sheet_material_type_id: string | number | null;
   combine_films: boolean | null;
+  split_by_material: boolean | null;
 }
 
 interface CalcItemRow extends QueryResultRow {
@@ -160,6 +162,12 @@ export function sheetMaterialChangedOutboxKey(cutJobId: number, requestId: strin
  *  rule as sheetMaterialChangedOutboxKey: stable per (job, request), version fallback. */
 export function combineFilmsChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
   return `${CUT_AUDIT_EVENTS.combineFilmsChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
+/** Idempotency key for the split-by-material-changed outbox event. Same stability
+ *  rule: stable per (job, request), version fallback. */
+export function splitByMaterialChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.splitByMaterialChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 export class PgCutRepository implements CutRepositoryPort {
@@ -346,10 +354,15 @@ export class PgCutRepository implements CutRepositoryPort {
         throw new CutNoItemsError(command.cutJobId);
       }
 
-      // Per-job sheet override (migration 040): when set, cut EVERY detail on the
-      // chosen sheet. Validate it is still active + cuttable (it may have been
-      // deactivated after selection) — reject with 422, precondition passthrough
-      // (job is NOT marked failed), mirroring the chosen-but-inactive profile path.
+      // Per-job sheet override (migration 040). Validate it is still active +
+      // cuttable (it may have been deactivated after selection) — reject with 422,
+      // precondition passthrough (job is NOT marked failed). How it is applied
+      // depends on split_by_material (migration 043):
+      //   - split_by_material = false: cut EVERY detail on the chosen sheet (the
+      //     deliberate "all in one group" case).
+      //   - split_by_material = true (default): different materials must NOT be
+      //     merged, so the override only FILLS details that have no sheet
+      //     (no_sheet_spec); materialed details keep their own sheet and split.
       if (job.sheetMaterialTypeId !== null) {
         const sheetRes = await tx.query<{ width_mm: string | number; height_mm: string | number }>(
           `SELECT width_mm, height_mm FROM sheet_material_types
@@ -359,11 +372,15 @@ export class PgCutRepository implements CutRepositoryPort {
         if (sheetRes.rows.length === 0) {
           throw new CutSheetMaterialNotCuttableError(job.sheetMaterialTypeId);
         }
-        items = applySheetOverride(items, {
-          sheetMaterialTypeId: job.sheetMaterialTypeId,
-          widthMm: toNum(sheetRes.rows[0].width_mm),
-          heightMm: toNum(sheetRes.rows[0].height_mm),
-        });
+        items = applySheetOverride(
+          items,
+          {
+            sheetMaterialTypeId: job.sheetMaterialTypeId,
+            widthMm: toNum(sheetRes.rows[0].width_mm),
+            heightMm: toNum(sheetRes.rows[0].height_mm),
+          },
+          { onlyNoSheetSpec: job.splitByMaterial },
+        );
       }
 
       // Recalculation: drop the PREVIOUS result set under the lock so a re-cut
@@ -377,7 +394,7 @@ export class PgCutRepository implements CutRepositoryPort {
       // Multi-material fan-out (plan §6): one cut_group + one freecut call per
       // cuttable key (sheet_material_type_id, film_id). Slice-2 removes the
       // single-group 422 — a mixed-material job fans out to N groups.
-      const groups = [...groupByCuttableKey(items, job.combineFilms).values()];
+      const groups = [...groupByCuttableKey(items, job.combineFilms, job.splitByMaterial).values()];
       phase1Related = {
         orderIds: groups.flatMap((g) => g.orderIds),
         sheetMaterialTypeIds: groups
@@ -548,7 +565,7 @@ export class PgCutRepository implements CutRepositoryPort {
         // Fold the job-level combine-films flag into the hashed params so toggling
         // it re-cuts (emits a fresh outbox row) even when the resolved groups would
         // otherwise hash identically (e.g. one film per material).
-        params: { ...(prep.params as unknown as Record<string, unknown>), combineFilms: job.combineFilms },
+        params: { ...(prep.params as unknown as Record<string, unknown>), combineFilms: job.combineFilms, splitByMaterial: job.splitByMaterial },
       });
       await tx.query(
         `
@@ -1440,6 +1457,66 @@ export class PgCutRepository implements CutRepositoryPort {
       return loadJob(tx, command.cutJobId);
     });
   }
+
+  setSplitByMaterial(command: SetCutJobSplitByMaterialCommand): Promise<CutJobDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; split_by_material: boolean | null }>(
+        `SELECT status, version, split_by_material FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      const before = row.split_by_material !== false;
+
+      // No-op short-circuit: an unchanged value must NOT bump version, write audit,
+      // or emit an outbox event.
+      if (before === command.splitByMaterial) {
+        return loadJob(tx, command.cutJobId);
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET split_by_material = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, command.splitByMaterial],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.splitByMaterialChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { splitByMaterial: before },
+        after: { splitByMaterial: command.splitByMaterial },
+        metadata: { beforeSplitByMaterial: before, afterSplitByMaterial: command.splitByMaterial },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.splitByMaterialChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeSplitByMaterial: before,
+            afterSplitByMaterial: command.splitByMaterial,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          splitByMaterialChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+
+      return loadJob(tx, command.cutJobId);
+    });
+  }
 }
 
 interface EligibleRow extends QueryResultRow {
@@ -1472,32 +1549,47 @@ interface CuttableGroup {
 export function applySheetOverride(
   rows: CalcItemRow[],
   override: { sheetMaterialTypeId: number; widthMm: number; heightMm: number },
+  options: { onlyNoSheetSpec?: boolean } = {},
 ): CalcItemRow[] {
-  return rows.map((row) => ({
-    ...row,
-    sheet_material_type_id: override.sheetMaterialTypeId,
-    smt_width_mm: override.widthMm,
-    smt_height_mm: override.heightMm,
-  }));
+  return rows.map((row) => {
+    // onlyNoSheetSpec (split_by_material=true): leave materialed details on their
+    // own sheet so different materials split; the override only fills details that
+    // have no sheet (no_sheet_spec), giving them a cuttable sheet.
+    if (options.onlyNoSheetSpec && row.sheet_material_type_id !== null) {
+      return row;
+    }
+    return {
+      ...row,
+      sheet_material_type_id: override.sheetMaterialTypeId,
+      smt_width_mm: override.widthMm,
+      smt_height_mm: override.heightMm,
+    };
+  });
 }
 
 /** Fan-out the resolved items into one group per cuttable key.
- *  Default key = (sheet_material_type_id, film_id): a job with mixed films cuts
- *  each film on its own sheets. When combineFilms is true the key drops film_id,
- *  so films of the SAME material nest on shared sheets (the merged group's
- *  filmId is null — mixed); each item keeps its own filmTexture so freecut still
- *  applies grain per detail. Different materials are NEVER combined. */
-export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false): Map<string, CuttableGroup> {
+ *  - splitByMaterial=true (default): one group per material. Default key =
+ *    (sheet_material_type_id, film_id) so mixed films cut on their own sheets;
+ *    when combineFilms is true the key drops film_id so films of the SAME material
+ *    nest on shared sheets (merged group filmId null). Different materials NEVER
+ *    merge.
+ *  - splitByMaterial=false: ALL details land in ONE group (key constant), cut
+ *    together; the group's sheet/dims come from the first item (typically the
+ *    per-job override sheet). filmId is null (mixed).
+ *  Each item always keeps its own filmTexture so freecut applies grain per detail. */
+export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false, splitByMaterial = true): Map<string, CuttableGroup> {
   const groups = new Map<string, CuttableGroup>();
   for (const row of rows) {
     const sheetMaterialTypeId = row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id);
     const rowFilmId = row.film_id === null ? null : toNum(row.film_id);
-    // When combining, the group represents a material (films mixed): null filmId
-    // and a material-only key so different films merge into one group.
-    const filmId = combineFilms ? null : rowFilmId;
-    const key = combineFilms
-      ? `${sheetMaterialTypeId ?? 'null'}:all`
-      : `${sheetMaterialTypeId ?? 'null'}:${rowFilmId ?? 'null'}`;
+    // The group's film: null when films are mixed into one group (combine, or the
+    // single all-materials group); otherwise the row's own film.
+    const filmId = !splitByMaterial || combineFilms ? null : rowFilmId;
+    const key = !splitByMaterial
+      ? 'all'
+      : combineFilms
+        ? `${sheetMaterialTypeId ?? 'null'}:all`
+        : `${sheetMaterialTypeId ?? 'null'}:${rowFilmId ?? 'null'}`;
     let group = groups.get(key);
     if (!group) {
       group = {
@@ -1510,6 +1602,13 @@ export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false): M
         items: [],
       };
       groups.set(key, group);
+    } else if (!splitByMaterial && group.sheetMaterialTypeId === null && sheetMaterialTypeId !== null) {
+      // The single "all" group cuts every detail together: if its sheet is still
+      // unknown (the first row was no_sheet_spec), adopt the first materialed row's
+      // sheet/dims instead of failing the whole group with CUT_NO_SHEET_SPEC.
+      group.sheetMaterialTypeId = sheetMaterialTypeId;
+      group.smtWidthMm = row.smt_width_mm === null ? null : toNum(row.smt_width_mm);
+      group.smtHeightMm = row.smt_height_mm === null ? null : toNum(row.smt_height_mm);
     }
     const orderId = toNum(row.order_id);
     group.orderIds.push(orderId);
@@ -1554,9 +1653,10 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   paramProfileId: number | null;
   sheetMaterialTypeId: number | null;
   combineFilms: boolean;
+  splitByMaterial: boolean;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -1573,6 +1673,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     paramProfileId: row.param_profile_id === null || row.param_profile_id === undefined ? null : toNum(row.param_profile_id),
     sheetMaterialTypeId: row.sheet_material_type_id === null || row.sheet_material_type_id === undefined ? null : toNum(row.sheet_material_type_id),
     combineFilms: row.combine_films === true,
+    splitByMaterial: row.split_by_material !== false,
   };
 }
 
@@ -1607,6 +1708,7 @@ interface JobRow extends QueryResultRow {
   param_profile_id: string | number | null;
   sheet_material_type_id: string | number | null;
   combine_films: boolean | null;
+  split_by_material: boolean | null;
 }
 
 interface ItemRow extends QueryResultRow {
@@ -1762,7 +1864,7 @@ async function loadJob(
   totals?: CutJobTotals,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, combine_films FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
@@ -1820,6 +1922,7 @@ async function loadJob(
     paramProfileId: jobRow.param_profile_id === null || jobRow.param_profile_id === undefined ? null : toNum(jobRow.param_profile_id),
     sheetMaterialTypeId: jobRow.sheet_material_type_id === null || jobRow.sheet_material_type_id === undefined ? null : toNum(jobRow.sheet_material_type_id),
     combineFilms: jobRow.combine_films === true,
+    splitByMaterial: jobRow.split_by_material !== false,
     totals: resolvedTotals,
     items: itemsResult.rows.map((row) => ({
       cutJobItemId: toNum(row.cut_job_item_id),

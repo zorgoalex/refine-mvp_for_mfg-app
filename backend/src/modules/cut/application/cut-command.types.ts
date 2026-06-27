@@ -179,6 +179,17 @@ export interface SetCutJobCombineFilmsCommand {
   requestId?: string;
 }
 
+export interface SetCutJobSplitByMaterialCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  /** true (default) = split the job by material type (different materials cut in
+   *  separate groups/sheets; the per-job sheet override then only fills no-sheet
+   *  details). false = put ALL details into ONE group (cut together). */
+  splitByMaterial: boolean;
+  version: number;
+  requestId?: string;
+}
+
 export interface CutRepositoryPort {
   createJob(command: CreateCutJobCommand): Promise<CutJobDto>;
   recordPermissionDenied(input: CutPermissionDeniedInput): Promise<void>;
@@ -189,6 +200,7 @@ export interface CutRepositoryPort {
   setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto>;
   setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto>;
   setCombineFilms(command: SetCutJobCombineFilmsCommand): Promise<CutJobDto>;
+  setSplitByMaterial(command: SetCutJobSplitByMaterialCommand): Promise<CutJobDto>;
   getJob(query: GetCutJobQuery): Promise<CutJobDto>;
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;

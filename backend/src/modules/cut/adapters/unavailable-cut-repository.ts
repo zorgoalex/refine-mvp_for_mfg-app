@@ -83,6 +83,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
   setCombineFilms() {
     return Promise.reject(unavailable());
   }
+
+  setSplitByMaterial() {
+    return Promise.reject(unavailable());
+  }
 }
 
 function unavailable(): ApiError {

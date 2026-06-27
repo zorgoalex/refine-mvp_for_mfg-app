@@ -177,6 +177,7 @@ async function createSchema(pool: Pool): Promise<void> {
       param_profile_id BIGINT,
       sheet_material_type_id BIGINT REFERENCES sheet_material_types(sheet_material_type_id),
       combine_films BOOLEAN NOT NULL DEFAULT false,
+      split_by_material BOOLEAN NOT NULL DEFAULT true,
       created_by BIGINT,
       version INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT now(),
@@ -574,11 +575,23 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     });
     expect(afterSet.sheetMaterialTypeId).toBe(1);
 
+    // Cram-all is now opt-in: under split_by_material=true (default, migration 043)
+    // the override only fills no-sheet details. To force EVERY detail onto the one
+    // chosen sheet (this scenario's intent) turn split_by_material OFF.
+    const afterSplit = await repo.setSplitByMaterial({
+      currentUser: currentUser(),
+      cutJobId: job.cutJobId,
+      splitByMaterial: false,
+      version: afterSet.version,
+      requestId: 's3-split',
+    });
+    expect(afterSplit.splitByMaterial).toBe(false);
+
     // Calculate: all items (detail 1, 2, 3) must be cut on SMT 1 → one group.
     const calculated = await repo.calculate({
       currentUser: currentUser(),
       cutJobId: job.cutJobId,
-      version: afterSet.version,
+      version: afterSplit.version,
       requestId: 's3-calc',
     });
 
@@ -821,5 +834,114 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     expect(groups.rows).toHaveLength(2);
     expect(groups.rows.map((r) => Number(r.sheet_material_type_id))).toEqual([1, 2]);
     expect(groups.rows[0].film_id).toBeNull();
+  });
+
+  // ── Split-by-material scenarios (migration 043) ─────────────────────────────
+
+  it('Split 1: split_by_material=true (default) never merges materials — details 100/101/102 (materials 1,1,2) split into per-(material,film) groups', async () => {
+    const repo = new PgCutRepository(database, makeEchoFreecut());
+    const job = await makeJobWithDetails(repo, [100, 101, 102], 'Тест split default', 's1m-create');
+    expect(job.splitByMaterial).toBe(true);
+    const ready = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 's1m-calc' });
+    expect(ready.status).toBe('ready');
+
+    const groups = await pool.query(`SELECT sheet_material_type_id FROM cut_group WHERE cut_job_id = $1 ORDER BY sheet_material_type_id, film_id`, [job.cutJobId]);
+    // (1,10),(1,11),(2,11) → 3 groups; every group is a SINGLE material; both 1 and 2 present.
+    expect(groups.rows).toHaveLength(3);
+    expect(groups.rows.every((r) => r.sheet_material_type_id !== null)).toBe(true);
+    expect([...new Set(groups.rows.map((r) => Number(r.sheet_material_type_id)))].sort()).toEqual([1, 2]);
+    // header «Материалов» reflects the effective grouping: materials {1, 2} → 2.
+    expect(ready.totals.materialsCount).toBe(2);
+  });
+
+  it('Split 2: split_by_material=false puts ALL details (materials 1,1,2) into ONE group together', async () => {
+    const repo = new PgCutRepository(database, makeEchoFreecut());
+    const job = await makeJobWithDetails(repo, [100, 101, 102], 'Тест split off', 's2m-create');
+    const set = await repo.setSplitByMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, splitByMaterial: false, version: job.version, requestId: 's2m-set' });
+    expect(set.splitByMaterial).toBe(false);
+    const ready = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: set.version, requestId: 's2m-calc' });
+    expect(ready.status).toBe('ready');
+
+    const groups = await pool.query(`SELECT cut_group_id, film_id FROM cut_group WHERE cut_job_id = $1`, [job.cutJobId]);
+    expect(groups.rows).toHaveLength(1);
+    expect(groups.rows[0].film_id).toBeNull();
+    const items = await pool.query(`SELECT count(*)::int AS n FROM cut_job_item WHERE cut_job_id = $1 AND cut_group_id = $2`, [job.cutJobId, groups.rows[0].cut_group_id]);
+    expect(items.rows[0].n).toBe(3); // all three details in the one group
+    // header «Материалов» reflects ONE all-in-one group when not split → 1.
+    expect(ready.totals.materialsCount).toBe(1);
+  });
+
+  it('Split 3: split_by_material=true + sheet override fills ONLY the no-sheet detail; materialed detail keeps its own material (no merge)', async () => {
+    const repo = new PgCutRepository(database, makeEchoFreecut());
+    // Detail 100 = material 1; detail 3 = no_sheet_spec (sheet null).
+    const job = await makeJobWithDetails(repo, [100], 'Тест split override fill', 's3m-create');
+    await pool.query(`INSERT INTO cut_job_item (cut_job_id, order_detail_id, order_id, qty, is_active) VALUES ($1, 3, 10, 1, true)`, [job.cutJobId]);
+    // Set the override sheet to material 2 (cuttable). split stays true (default).
+    const set = await repo.setSheetMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, sheetMaterialTypeId: 2, version: job.version, requestId: 's3m-sheet' });
+    const ready = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: set.version, requestId: 's3m-calc' });
+    expect(ready.status).toBe('ready');
+
+    const groups = await pool.query(`SELECT sheet_material_type_id FROM cut_group WHERE cut_job_id = $1 ORDER BY sheet_material_type_id`, [job.cutJobId]);
+    // Material 1 (detail 100, kept its own sheet) + material 2 (detail 3, filled by override) → 2 groups, NOT merged.
+    expect(groups.rows).toHaveLength(2);
+    expect(groups.rows.map((r) => Number(r.sheet_material_type_id))).toEqual([1, 2]);
+    // header «Материалов» resolves the no-sheet detail to the override → {1, 2} → 2.
+    expect(ready.totals.materialsCount).toBe(2);
+  });
+
+  it('Split 4: setSplitByMaterial true→false persists + audits + outbox; stale 409, same-requestId duplicate hits ON CONFLICT; unchanged is a no-op', async () => {
+    const repo = new PgCutRepository(database, makeEchoFreecut());
+    const job = await makeJobWithDetails(repo, [100], 'Тест split set', 's4m-create');
+    expect(job.splitByMaterial).toBe(true);
+    const beforeVersion = job.version;
+
+    const updated = await repo.setSplitByMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, splitByMaterial: false, version: beforeVersion, requestId: 's4m-set' });
+    expect(updated.splitByMaterial).toBe(false);
+    expect(updated.version).toBe(beforeVersion + 1);
+
+    const expectedKey = `${CUT_AUDIT_EVENTS.splitByMaterialChanged}:${job.cutJobId}:s4m-set`;
+    const audit = await pool.query(`SELECT count(*)::int AS n FROM audit_log WHERE event = $1`, [CUT_AUDIT_EVENTS.splitByMaterialChanged]);
+    expect(audit.rows[0].n).toBe(1);
+    const outbox = await pool.query(`SELECT idempotency_key FROM outbox_events WHERE event_type = $1`, [CUT_AUDIT_EVENTS.splitByMaterialChanged]);
+    expect(outbox.rows).toHaveLength(1);
+    expect(String(outbox.rows[0].idempotency_key)).toBe(expectedKey);
+
+    // stale replay → 409
+    await expect(
+      repo.setSplitByMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, splitByMaterial: false, version: beforeVersion, requestId: 's4m-set' }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_STALE_VERSION' });
+
+    // genuine change reusing the same requestId → outbox ON CONFLICT, no second row
+    const replay = await repo.setSplitByMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, splitByMaterial: true, version: updated.version, requestId: 's4m-set' });
+    expect(replay.splitByMaterial).toBe(true);
+    const outboxAfter = await pool.query(`SELECT count(*)::int AS n FROM outbox_events WHERE idempotency_key = $1`, [expectedKey]);
+    expect(outboxAfter.rows[0].n).toBe(1);
+
+    // no-op: setting the current value bumps nothing
+    const noop = await repo.setSplitByMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, splitByMaterial: true, version: replay.version, requestId: 's4m-noop' });
+    expect(noop.version).toBe(replay.version);
+  });
+
+  it('Split 5: split_by_material=false with a no_sheet_spec FIRST item + a materialed item → ONE group on the materialed sheet (no CUT_NO_SHEET_SPEC), all placed', async () => {
+    const repo = new PgCutRepository(database, makeEchoFreecut());
+    // Create an eligible job, then replace its items so the no_sheet_spec detail (3)
+    // is the FIRST active item (lowest cut_job_item_id, which loadCalcItems orders
+    // by) and the materialed detail (100, material 1) is second. No override.
+    const job = await makeJobWithDetails(repo, [100], 'Тест split off no-spec first', 's5m-create');
+    await pool.query(`DELETE FROM cut_job_item WHERE cut_job_id = $1`, [job.cutJobId]);
+    await pool.query(`INSERT INTO cut_job_item (cut_job_id, order_detail_id, order_id, qty, is_active) VALUES ($1, 3, 10, 1, true)`, [job.cutJobId]);
+    await pool.query(`INSERT INTO cut_job_item (cut_job_id, order_detail_id, order_id, qty, is_active) VALUES ($1, 100, 50, 1, true)`, [job.cutJobId]);
+    const set = await repo.setSplitByMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, splitByMaterial: false, version: job.version, requestId: 's5m-set' });
+
+    const ready = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: set.version, requestId: 's5m-calc' });
+    expect(ready.status).toBe('ready');
+
+    const groups = await pool.query(`SELECT cut_group_id, sheet_material_type_id FROM cut_group WHERE cut_job_id = $1`, [job.cutJobId]);
+    expect(groups.rows).toHaveLength(1);
+    // The all-group adopted detail 100's material (1) rather than failing on the
+    // no_sheet_spec first item.
+    expect(Number(groups.rows[0].sheet_material_type_id)).toBe(1);
+    const items = await pool.query(`SELECT count(*)::int AS n FROM cut_job_item WHERE cut_job_id = $1 AND cut_group_id = $2`, [job.cutJobId, groups.rows[0].cut_group_id]);
+    expect(items.rows[0].n).toBe(2);
   });
 });
