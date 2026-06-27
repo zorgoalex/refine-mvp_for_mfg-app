@@ -61,7 +61,9 @@ describe('LabelsConfigTab wiring', () => {
   it('keeps the template list full-width with scroll and supports visual drag editing', () => {
     expect(tabSrc).toMatch(/title="Шаблоны"/);
     expect(tabSrc).toMatch(/scroll=\{\{ y: 430 \}\}/);
-    expect(tabSrc).toMatch(/title="Просмотр текущего шаблона"/);
+    expect(tabSrc).toMatch(/label: 'Просмотр текущего шаблона'/);
+    expect(tabSrc).toMatch(/defaultActiveKey=\{\['current-template-preview'\]\}/);
+    expect(tabSrc).toMatch(/Collapse/);
     expect(tabSrc).toMatch(/onMoveElement/);
     expect(tabSrc).toMatch(/<Stage/);
     expect(tabSrc).toMatch(/<Layer/);
@@ -85,6 +87,13 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/boundBoxFunc/);
   });
 
+  it('keeps text and rectangle content stable while resizing transform handles', () => {
+    expect(tabSrc).toMatch(/onTransform: \(node, event\) => handleTransform/);
+    expect(tabSrc).toMatch(/normalizeTransformedNode/);
+    expect(tabSrc).toMatch(/sizedNode\.scaleX\(1\)/);
+    expect(tabSrc).toMatch(/sizedNode\.width\(widthMm\)/);
+  });
+
   it('defaults the edit visual to compact mode and can expand it', () => {
     expect(tabSrc).toMatch(/visualExpanded/);
     expect(tabSrc).toMatch(/initialZoom=\{visualExpanded \? 1\.3 : 0\.7\}/);
@@ -97,7 +106,12 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/<Text strong>Поля бирки<\/Text>/);
     expect(tabSrc).toMatch(/title="Параметры шаблона"/);
     expect(tabSrc).toMatch(/title="Визуал бирки"/);
-    expect(tabSrc).toMatch(/title="Пользовательские поля"/);
+    expect(tabSrc).toMatch(/<Text strong>Пользовательские поля<\/Text>/);
+  });
+
+  it('keeps template dimensions, resolution and formats on one settings row', () => {
+    expect(tabSrc).toMatch(/<Row gutter=\{8\} align="top" wrap=\{false\}>/);
+    expect(tabSrc).toMatch(/name="canvasWidthMm" label="Ширина"[\s\S]*name="canvasHeightMm" label="Высота"[\s\S]*name="dpi" label="Разрешение"[\s\S]*name="defaultExportFormats" label="Форматы"/);
   });
 
   it('shows a hover tooltip that identifies the label element field', () => {

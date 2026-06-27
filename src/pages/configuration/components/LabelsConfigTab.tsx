@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import type Konva from 'konva';
 import { Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
@@ -458,16 +458,25 @@ export const LabelsConfigTab: React.FC = () => {
         />
       </Card>
 
-      <Card size="small" title="Просмотр текущего шаблона">
-        <LabelTemplatePreview
-          widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
-          heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
-          elements={elements}
-          fields={sourceFields}
-          selectedElementKey={selectedElementKey}
-          canDrag={false}
-        />
-      </Card>
+      <Collapse
+        defaultActiveKey={['current-template-preview']}
+        items={[
+          {
+            key: 'current-template-preview',
+            label: 'Просмотр текущего шаблона',
+            children: (
+              <LabelTemplatePreview
+                widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
+                heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
+                elements={elements}
+                fields={sourceFields}
+                selectedElementKey={selectedElementKey}
+                canDrag={false}
+              />
+            ),
+          },
+        ]}
+      />
 
       <Form form={form} layout="vertical" onFinish={saveTemplate} disabled={!canManage || saving}>
         <Row gutter={16} align="top">
@@ -479,13 +488,85 @@ export const LabelsConfigTab: React.FC = () => {
               <div style={{ marginBottom: 16 }}>
                 <Text strong>Поля бирки</Text>
                 <div style={{ marginTop: 8 }}>
-                <FieldPalette
-                  fields={sourceFields}
-                  disabled={!canManage}
-                  search={fieldSearch}
-                  onSearch={setFieldSearch}
-                  onBeginDrag={setDraggingField}
-                />
+                  <FieldPalette
+                    fields={sourceFields}
+                    disabled={!canManage}
+                    search={fieldSearch}
+                    onSearch={setFieldSearch}
+                    onBeginDrag={setDraggingField}
+                  />
+                </div>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <Text strong>Пользовательские поля</Text>
+                <div style={{ marginTop: 8 }}>
+                  <Form.Item label="Пользовательские поля JSON">
+                    <Input.TextArea value={customSchemaText} onChange={(event) => setCustomSchemaText(event.target.value)} autoSize={{ minRows: 3, maxRows: 6 }} />
+                  </Form.Item>
+                  <Table
+                    rowKey="fieldId"
+                    size="small"
+                    pagination={false}
+                    dataSource={customSchemaRows.rows}
+                    title={() => (
+                      <Space wrap>
+                        <Text strong>Кастомные поля</Text>
+                        <Button size="small" icon={<PlusOutlined />} disabled={!canManage || !customSchemaRows.valid} onClick={addCustomField}>
+                          Поле
+                        </Button>
+                        {!customSchemaRows.valid && <Text type="danger">JSON некорректен</Text>}
+                      </Space>
+                    )}
+                    columns={[
+                      { title: 'Ключ', dataIndex: 'fieldId', width: 170 },
+                      {
+                        title: 'Название',
+                        width: 170,
+                        render: (_, row) => (
+                          <Input
+                            value={row.label}
+                            disabled={!canManage}
+                            onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })}
+                          />
+                        ),
+                      },
+                      {
+                        title: 'Тип',
+                        width: 110,
+                        render: (_, row) => (
+                          <Select
+                            value={row.type}
+                            disabled={!canManage}
+                            style={{ width: '100%' }}
+                            options={CUSTOM_FIELD_TYPE_OPTIONS}
+                            onChange={(type) => patchCustomField(row.fieldId, { type })}
+                          />
+                        ),
+                      },
+                      {
+                        title: 'Источник',
+                        width: 220,
+                        render: (_, row) => (
+                          <Select
+                            showSearch
+                            allowClear
+                            value={row.sourceField ?? undefined}
+                            disabled={!canManage}
+                            style={{ width: '100%' }}
+                            options={fields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+                            onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField: sourceField ?? null })}
+                          />
+                        ),
+                      },
+                      {
+                        title: '',
+                        width: 48,
+                        render: (_, row) => (
+                          <Button danger size="small" icon={<DeleteOutlined />} disabled={!canManage} onClick={() => deleteCustomField(row.fieldId)} />
+                        ),
+                      },
+                    ]}
+                  />
                 </div>
               </div>
               <Space wrap>
@@ -587,26 +668,28 @@ export const LabelsConfigTab: React.FC = () => {
               <Form.Item name="description" label="Описание">
                 <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} />
               </Form.Item>
-              <Row gutter={8}>
-                <Col span={8}>
-                  <Form.Item name="canvasWidthMm" label="Ширина" rules={[{ required: true }]}>
+              <Row gutter={8} align="top" wrap={false}>
+                <Col flex="78px">
+                  <Form.Item name="canvasWidthMm" label="Ширина" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
-                <Col span={8}>
-                  <Form.Item name="canvasHeightMm" label="Высота" rules={[{ required: true }]}>
+                <Col flex="78px">
+                  <Form.Item name="canvasHeightMm" label="Высота" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
-                <Col span={8}>
-                  <Form.Item name="dpi" label="Разрешение" tooltip="Разрешение печати в точках на дюйм. Влияет на размер растровых файлов при генерации бирок." rules={[{ required: true }]}>
+                <Col flex="112px">
+                  <Form.Item name="dpi" label="Разрешение" tooltip="Разрешение печати в точках на дюйм. Влияет на размер растровых файлов при генерации бирок." rules={[{ required: true }]} style={{ marginBottom: 0 }}>
                     <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col flex="auto">
+                  <Form.Item name="defaultExportFormats" label="Форматы" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                    <Checkbox.Group options={EXPORT_FORMATS.map((format) => ({ label: format, value: format }))} />
                   </Form.Item>
                 </Col>
               </Row>
-              <Form.Item name="defaultExportFormats" label="Форматы" rules={[{ required: true }]}>
-                <Checkbox.Group options={EXPORT_FORMATS.map((format) => ({ label: format, value: format }))} />
-              </Form.Item>
             </Card>
             <Card
               size="small"
@@ -632,75 +715,6 @@ export const LabelsConfigTab: React.FC = () => {
                   addFieldElement(field, xMm, yMm);
                   setDraggingField(null);
                 }}
-              />
-            </Card>
-            <Card size="small" title="Пользовательские поля">
-              <Form.Item label="Пользовательские поля JSON">
-                <Input.TextArea value={customSchemaText} onChange={(event) => setCustomSchemaText(event.target.value)} autoSize={{ minRows: 3, maxRows: 6 }} />
-              </Form.Item>
-              <Table
-                rowKey="fieldId"
-                size="small"
-                pagination={false}
-                dataSource={customSchemaRows.rows}
-                title={() => (
-                  <Space wrap>
-                    <Text strong>Кастомные поля</Text>
-                    <Button size="small" icon={<PlusOutlined />} disabled={!canManage || !customSchemaRows.valid} onClick={addCustomField}>
-                      Поле
-                    </Button>
-                    {!customSchemaRows.valid && <Text type="danger">JSON некорректен</Text>}
-                  </Space>
-                )}
-                columns={[
-                  { title: 'Ключ', dataIndex: 'fieldId', width: 170 },
-                  {
-                    title: 'Название',
-                    width: 170,
-                    render: (_, row) => (
-                      <Input
-                        value={row.label}
-                        disabled={!canManage}
-                        onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })}
-                      />
-                    ),
-                  },
-                  {
-                    title: 'Тип',
-                    width: 110,
-                    render: (_, row) => (
-                      <Select
-                        value={row.type}
-                        disabled={!canManage}
-                        style={{ width: '100%' }}
-                        options={CUSTOM_FIELD_TYPE_OPTIONS}
-                        onChange={(type) => patchCustomField(row.fieldId, { type })}
-                      />
-                    ),
-                  },
-                  {
-                    title: 'Источник',
-                    width: 220,
-                    render: (_, row) => (
-                      <Select
-                        showSearch
-                        allowClear
-                        value={row.sourceField ?? undefined}
-                        disabled={!canManage}
-                        style={{ width: '100%' }}
-                        options={fields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
-                        onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField: sourceField ?? null })}
-                      />
-                    ),
-                  },
-                  {
-                    title: '',
-                    width: 48,
-                    render: (_, row) => (
-                      <Button danger size="small" icon={<DeleteOutlined />} disabled={!canManage} onClick={() => deleteCustomField(row.fieldId)} />
-                    ),
-                  },
-                ]}
               />
             </Card>
           </Col>
@@ -865,20 +879,37 @@ function LabelTemplatePreview({
     node: Konva.Node,
     event: Konva.KonvaEventObject<Event>,
   ) => {
-    const scaleX = node.scaleX();
-    const scaleY = node.scaleY();
     const rotationStep = (event.evt as MouseEvent | KeyboardEvent | PointerEvent | undefined)?.shiftKey ? 15 : 1;
-    node.scaleX(1);
-    node.scaleY(1);
     const nextRotation = Math.round(Number(node.rotation() ?? 0) / rotationStep) * rotationStep;
+    const nextSize = normalizeTransformedNode(element, node);
     patchGeometry(
       element.elementKey,
       {
         xMm: clamp(node.x(), 0, safeWidth),
         yMm: clamp(node.y(), 0, safeHeight),
-        widthMm: Number(element.widthMm ?? 0) * scaleX,
-        heightMm: Number(element.heightMm ?? 0) * scaleY,
+        widthMm: nextSize.widthMm,
+        heightMm: nextSize.heightMm,
         rotationDeg: nextRotation,
+      },
+      event.evt as MouseEvent | PointerEvent,
+    );
+  };
+
+  const handleTransform = (
+    element: LabelTemplateElement,
+    node: Konva.Node,
+    event: Konva.KonvaEventObject<Event>,
+  ) => {
+    if (element.kind === 'line') return;
+    const nextSize = normalizeTransformedNode(element, node);
+    patchGeometry(
+      element.elementKey,
+      {
+        xMm: clamp(node.x(), 0, safeWidth),
+        yMm: clamp(node.y(), 0, safeHeight),
+        widthMm: nextSize.widthMm,
+        heightMm: nextSize.heightMm,
+        rotationDeg: Number(node.rotation() ?? 0),
       },
       event.evt as MouseEvent | PointerEvent,
     );
@@ -1011,6 +1042,7 @@ function LabelTemplatePreview({
                   if (node) nodeRefs.current.set(element.elementKey, node);
                   else nodeRefs.current.delete(element.elementKey);
                 },
+                onTransform: (node, event) => handleTransform(element, node, event),
                 onTransformEnd: (node, event) => handleTransformEnd(element, node, event),
                 onHoverElement: (hovered, event) => {
                   const pointer = event.target.getStage()?.getPointerPosition();
@@ -1170,6 +1202,7 @@ function renderKonvaPreviewElement({
   onSelectElement,
   onMoveElement,
   nodeRef,
+  onTransform,
   onTransformEnd,
   onHoverElement,
   onLeaveElement,
@@ -1183,6 +1216,7 @@ function renderKonvaPreviewElement({
   onSelectElement?: (elementKey: string) => void;
   onMoveElement?: (elementKey: string, xMm: number, yMm: number, event?: { altKey?: boolean }) => void;
   nodeRef?: (node: Konva.Node | null) => void;
+  onTransform?: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
   onTransformEnd?: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
   onHoverElement?: (element: LabelTemplateElement, event: Konva.KonvaEventObject<MouseEvent>) => void;
   onLeaveElement?: () => void;
@@ -1210,6 +1244,7 @@ function renderKonvaPreviewElement({
     onTap: select,
     onDragStart: select,
     onDragEnd: dragEnd,
+    onTransform: (event: Konva.KonvaEventObject<Event>) => onTransform?.(event.target, event),
     onTransformEnd: (event: Konva.KonvaEventObject<Event>) => onTransformEnd?.(event.target, event),
     onMouseEnter: (event: Konva.KonvaEventObject<MouseEvent>) => {
       event.target.getStage()?.container().style.setProperty('cursor', draggable ? 'move' : 'default');
@@ -1313,6 +1348,34 @@ function describeLabelElement(
     );
   }
   return `Статический текст: ${element.staticText || 'пусто'}`;
+}
+
+function normalizeTransformedNode(
+  element: LabelTemplateElement,
+  node: Konva.Node,
+): { widthMm: number; heightMm: number } {
+  const scaleX = node.scaleX();
+  const scaleY = node.scaleY();
+  if (element.kind === 'line') {
+    node.scaleX(1);
+    node.scaleY(1);
+    return {
+      widthMm: Number(element.widthMm ?? 0) * scaleX,
+      heightMm: Number(element.heightMm ?? 0) * scaleY,
+    };
+  }
+
+  const sizedNode = node as Konva.Node & {
+    width: (value?: number) => number;
+    height: (value?: number) => number;
+  };
+  const widthMm = Math.max(0.1, Number(sizedNode.width()) * scaleX);
+  const heightMm = Math.max(0.1, Number(sizedNode.height()) * scaleY);
+  sizedNode.scaleX(1);
+  sizedNode.scaleY(1);
+  sizedNode.width(widthMm);
+  sizedNode.height(heightMm);
+  return { widthMm, heightMm };
 }
 
 function renderGrid(widthMm: number, heightMm: number) {
