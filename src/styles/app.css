@@ -297,7 +297,7 @@
   /* Visually separate the pinned tab strip from the content below it: a gap
      of roughly half the strip height. The border-bottom stays on the bar; the
      margin shows the page background as breathing room before the content. */
-  margin-bottom: 20px;
+  margin-bottom: 40px;
 }
 .workspace-tabs .ant-tabs-nav {
   margin: 0;
