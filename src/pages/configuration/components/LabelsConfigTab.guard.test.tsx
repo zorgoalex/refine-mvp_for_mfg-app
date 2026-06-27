@@ -139,6 +139,8 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/data-label-global-drag-preview/);
     expect(tabSrc).toMatch(/updateDragPreview/);
     expect(tabSrc).toMatch(/text=\{dragPreview\.field\.label\}/);
+    expect(tabSrc).toMatch(/interactive: Boolean\(canDrag && !draggingField\)/);
+    expect(tabSrc).toMatch(/window\.addEventListener\('pointerup', handleGlobalDrop, true\)/);
   });
 
   it('highlights fields already placed on the label and supports element context actions', () => {

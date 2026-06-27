@@ -886,7 +886,7 @@ function LabelTemplatePreview({
   }, [initialZoom]);
 
   useEffect(() => {
-    if (!canDrag || !selectedElementKey || selectedElementLocked) {
+    if (!canDrag || !selectedElementKey || selectedElementLocked || draggingField) {
       transformerRef.current?.nodes([]);
       transformerRef.current?.getLayer()?.batchDraw();
       return;
@@ -894,7 +894,7 @@ function LabelTemplatePreview({
     const node = nodeRefs.current.get(selectedElementKey);
     transformerRef.current?.nodes(node ? [node] : []);
     transformerRef.current?.getLayer()?.batchDraw();
-  }, [canDrag, elements, selectedElementKey, selectedElementLocked]);
+  }, [canDrag, draggingField, elements, selectedElementKey, selectedElementLocked]);
 
   useEffect(() => {
     if (!draggingField || !onDropDraggingField) return;
@@ -921,11 +921,11 @@ function LabelTemplatePreview({
         clamp(((event.clientY - rect.top) / rect.height) * safeHeight, 0, safeHeight - 1),
       );
     };
-    window.addEventListener('pointerup', handleGlobalDrop);
-    window.addEventListener('mouseup', handleGlobalDrop);
+    window.addEventListener('pointerup', handleGlobalDrop, true);
+    window.addEventListener('mouseup', handleGlobalDrop, true);
     return () => {
-      window.removeEventListener('pointerup', handleGlobalDrop);
-      window.removeEventListener('mouseup', handleGlobalDrop);
+      window.removeEventListener('pointerup', handleGlobalDrop, true);
+      window.removeEventListener('mouseup', handleGlobalDrop, true);
     };
   }, [draggingField, onDropDraggingField, previewHeight, previewWidth, safeHeight, safeWidth]);
 
@@ -1179,17 +1179,18 @@ function LabelTemplatePreview({
           }}
         >
           <Layer>
-            <KonvaRect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" />
+            <KonvaRect x={0} y={0} width={safeWidth} height={safeHeight} fill="#fff" listening={false} />
             {showGrid && renderGrid(safeWidth, safeHeight)}
             {sorted.map((element) =>
               renderKonvaPreviewElement({
                 element,
                 fieldLabels,
-                selected: selectedElementKey === element.elementKey,
-                draggable: Boolean(canDrag && !isLabelElementLocked(element)),
+                selected: !draggingField && selectedElementKey === element.elementKey,
+                interactive: Boolean(canDrag && !draggingField),
+                draggable: Boolean(canDrag && !draggingField && !isLabelElementLocked(element)),
                 safeWidth,
                 safeHeight,
-                onSelectElement,
+                onSelectElement: draggingField ? undefined : onSelectElement,
                 onMoveElement: handleMoveElement,
                 nodeRef: (node) => {
                   if (node) nodeRefs.current.set(element.elementKey, node);
@@ -1206,7 +1207,7 @@ function LabelTemplatePreview({
                   });
                 },
                 onLeaveElement: () => setHoveredElement(null),
-                onContextMenu: (menuElement, event) => {
+                onContextMenu: draggingField ? undefined : (menuElement, event) => {
                   if (!canDrag) return;
                   event.evt.preventDefault();
                   const pointer = event.target.getStage()?.getPointerPosition();
@@ -1246,7 +1247,7 @@ function LabelTemplatePreview({
                 />
               </>
             )}
-            {canDrag && (
+            {canDrag && !draggingField && (
               <Transformer
                 ref={transformerRef}
                 rotateEnabled
@@ -1447,6 +1448,7 @@ function renderKonvaPreviewElement({
   element,
   fieldLabels,
   selected,
+  interactive,
   draggable,
   safeWidth,
   safeHeight,
@@ -1462,6 +1464,7 @@ function renderKonvaPreviewElement({
   element: LabelTemplateElement;
   fieldLabels: Map<string, string>;
   selected: boolean;
+  interactive: boolean;
   draggable: boolean;
   safeWidth: number;
   safeHeight: number;
@@ -1492,6 +1495,7 @@ function renderKonvaPreviewElement({
     x,
     y,
     rotation,
+    listening: interactive,
     draggable,
     onClick: select,
     onTap: select,
