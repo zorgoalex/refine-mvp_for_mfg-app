@@ -23,6 +23,7 @@ export const CUT_AUDIT_EVENTS = {
   permissionDenied: 'cut_job.permission_denied',
   profileChanged: 'cut_job.profile_changed',
   sheetMaterialChanged: 'cut_job.sheet_material_changed',
+  combineFilmsChanged: 'cut_job.combine_films_changed',
 } as const;
 
 export type CutAuditEventName = (typeof CUT_AUDIT_EVENTS)[keyof typeof CUT_AUDIT_EVENTS];

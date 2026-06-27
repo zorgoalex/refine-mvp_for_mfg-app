@@ -62,6 +62,13 @@ const setSheetMaterialBodySchema = z
   })
   .strict();
 
+const setCombineFilmsBodySchema = z
+  .object({
+    combineFilms: z.boolean(),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
+
 @ApiTags('CutJobs')
 @ApiBearerAuth()
 @Controller('cut-jobs')
@@ -271,6 +278,24 @@ export class CutController {
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
       sheetMaterialTypeId,
+      version,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'setCutJobCombineFilms', summary: 'Toggle combine-different-films for a job' })
+  @Patch(':cutJobId/combine-films')
+  async setCombineFilms(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { combineFilms, version } = parseSetCombineFilmsBody(body);
+    return this.cut.setCombineFilms({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      combineFilms,
       version,
       requestId: request.requestId,
     });
@@ -493,6 +518,10 @@ export function parseSetProfileBody(body: unknown): { paramProfileId: number | n
 
 export function parseSetSheetMaterialBody(body: unknown): { sheetMaterialTypeId: number | null; version: number } {
   return parse(setSheetMaterialBodySchema, body);
+}
+
+export function parseSetCombineFilmsBody(body: unknown): { combineFilms: boolean; version: number } {
+  return parse(setCombineFilmsBodySchema, body);
 }
 
 /** Query CSV (`orderIds=9,10`) → number arrays. */

@@ -102,6 +102,15 @@ describe('cutApi', () => {
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ sheetMaterialTypeId: null, version: 6 });
   });
+
+  it('setCombineFilms PATCHes the combine-films route with body', async () => {
+    const job = jobDto({ combineFilms: true });
+    const fetchMock = mockFetch(job);
+    await cutApi.setCombineFilms(3, true, 5);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/3/combine-films');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ combineFilms: true, version: 5 });
+  });
 });
 
 function mockFetch(...bodies: unknown[]) {
@@ -125,6 +134,7 @@ function jobDto(overrides: Partial<CutJobDto> = {}): CutJobDto {
     pdfPrewarmState: 'pending',
     paramProfileId: null,
     sheetMaterialTypeId: null,
+    combineFilms: false,
     totals: { positions: 0, details: 0, area: 0, sheets: 0 },
     items: [],
     groups: [],

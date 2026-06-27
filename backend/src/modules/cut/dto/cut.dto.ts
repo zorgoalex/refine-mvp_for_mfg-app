@@ -112,6 +112,9 @@ export interface CutJobDto {
   paramProfileId: number | null;
   /** null = no per-job override (per-detail sheet). Non-null = chosen sheet. */
   sheetMaterialTypeId: number | null;
+  /** true = calculate groups details by sheet material only (films of the same
+   *  material share sheets). false (default) = group by (material, film). */
+  combineFilms: boolean;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];

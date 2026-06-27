@@ -119,6 +119,9 @@ export interface CutJobDto {
   failureReason?: string | null;
   paramProfileId: number | null;
   sheetMaterialTypeId: number | null;
+  /** true = group details by sheet material only (films of the same material
+   *  share sheets); false (default) = group by (material, film). */
+  combineFilms: boolean;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];

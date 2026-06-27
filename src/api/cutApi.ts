@@ -145,6 +145,13 @@ export const cutApi = {
       version,
     });
   },
+
+  async setCombineFilms(cutJobId: number, combineFilms: boolean, version: number): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.combineFilms(validateCutJobId(cutJobId)), {
+      combineFilms,
+      version,
+    });
+  },
 };
 
 export type CutPdfResult = { pending: true } | { pending: false; blob: Blob; fileName: string | null };
