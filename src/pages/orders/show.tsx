@@ -749,7 +749,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       }}
                     >
                       {/* Колонка 1 — Даты */}
-                      <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                      <div style={{ borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#52c41a', marginBottom: 3 }}>
                           Даты
                         </div>
@@ -757,7 +757,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
 
                       {/* Колонка 2 — Производство */}
-                      <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                      <div style={{ borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#fa8c16', marginBottom: 3 }}>
                           Производство
                         </div>
@@ -772,7 +772,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
 
                       {/* Колонка 3 — Присадки + Раскрой (вертикально, разделены горизонтально) */}
-                      <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                      <div style={{ borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#13c2c2', marginBottom: 3 }}>
                           Присадки
                         </div>
@@ -828,7 +828,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
                         {/* Раскрой — под присадками, горизонтальный разделитель */}
                         {cutColumnEnabled && (
-                          <div style={{ marginTop: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                          <div style={{ marginTop: 8, borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
                             <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
                               Раскрой
                             </div>
@@ -853,7 +853,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </div>
 
                     {/* Ниже — на всю ширину: Файлы, Бирки, Служебная информация */}
-                    <div style={{ marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                    <div style={{ marginTop: 12, borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
                       {/* Файлы */}
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#722ed1', marginBottom: 3 }}>
@@ -867,7 +867,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       )}
 
                       {/* Служебная информация — спойлер, по умолчанию свёрнут */}
-                      <details style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                      <details style={{ borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
                         <summary
                           style={{
                             fontSize: 12,

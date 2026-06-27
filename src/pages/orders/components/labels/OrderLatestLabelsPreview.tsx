@@ -43,7 +43,7 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
   };
 
   return (
-    <div style={{ marginBottom: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+    <div style={{ marginBottom: 8, borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
         Бирки
       </div>
