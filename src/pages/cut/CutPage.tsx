@@ -922,9 +922,11 @@ export const CutPage: React.FC = () => {
               : activeOptions;
             return (
               <>
-                <Space size="large" style={{ marginBottom: 12 }}>
+                <Space size="large" style={{ marginBottom: 12 }} wrap>
                   <span>Позиции: <b>{job.totals.positions}</b></span>
                   <span>Деталей: <b>{job.totals.details}</b></span>
+                  <span>Материалов: <b>{job.totals.materialsCount}</b></span>
+                  <span>Плёнок: <b>{job.totals.filmsCount}</b></span>
                   <span>Площадь, итого: <b>{formatArea(job.totals.area)}</b></span>
                   {job.status === 'ready' && <span>Листов раскроя: <b>{job.totals.sheets}</b></span>}
                 </Space>
@@ -1078,6 +1080,8 @@ export const CutPage: React.FC = () => {
                         SVG
                       </Button>
                     </Space>
+                    {/* Material of the details on this sheet. */}
+                    <div style={{ marginTop: 2, color: '#8c8c8c', fontSize: 12 }}>{matName ?? 'материал не задан'}</div>
                     {sheetThumbs[key] && !sheetImages[key] && (
                       <SheetPreview
                         src={sheetThumbs[key]}

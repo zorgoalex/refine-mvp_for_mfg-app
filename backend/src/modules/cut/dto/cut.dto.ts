@@ -92,6 +92,10 @@ export interface CutJobTotals {
   area: number;
   /** count of cut_group_sheet rows across the job's groups (0 unless ready) */
   sheets: number;
+  /** count of DISTINCT non-null sheet materials among the job's details */
+  materialsCount: number;
+  /** count of DISTINCT non-null films among the job's details */
+  filmsCount: number;
 }
 
 export interface CutJobDto {

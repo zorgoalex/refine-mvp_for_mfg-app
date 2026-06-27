@@ -100,6 +100,10 @@ export interface CutJobTotals {
   details: number;
   area: number;
   sheets: number;
+  /** distinct non-null sheet materials among the job's details */
+  materialsCount: number;
+  /** distinct non-null films among the job's details */
+  filmsCount: number;
 }
 
 export interface CutJobDto {

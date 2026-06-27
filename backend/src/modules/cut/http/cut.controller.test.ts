@@ -30,7 +30,7 @@ function jobDto(): CutJobDto {
     failureCode: null,
     failureReason: null,
     paramProfileId: null,
-    totals: { positions: 0, details: 0, area: 0, sheets: 0 },
+    totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },
     items: [],
     groups: [],
   };
