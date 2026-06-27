@@ -25,6 +25,7 @@ import {
   filterCuttableOptions,
 } from '../../../../hooks/useSheetMaterialOptions';
 import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
+import { buildGroupedRows, type GroupField } from '../../detailGrouping';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -37,6 +38,8 @@ interface OrderDetailTableProps {
   highlightedRowKey?: React.Key | null;
   /** Callback when drag selection has pending items to confirm */
   onDragSelectionPending?: (pendingKeys: React.Key[], confirm: () => void, cancel: () => void) => void;
+  groupField?: GroupField | null;
+  showSeparation?: boolean;
 }
 
 // Exposed methods via ref
@@ -159,6 +162,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   onSelectChange,
   highlightedRowKey = null,
   onDragSelectionPending,
+  groupField = null,
+  showSeparation = true,
 }, ref) => {
   const { header, details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
   const orderFormData = useOrderFormData();
@@ -201,6 +206,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     autoScrollZone: 120,
     autoScrollSpeed: 32,
   });
+
+  const groupingActive = !!groupField && showSeparation;
+
+  const tableRows = useMemo(
+    () => (groupingActive ? buildGroupedRows(sortedDetails, groupField!) : sortedDetails),
+    [groupingActive, sortedDetails, groupField],
+  );
+
+  const asDetail = useCallback(
+    (row: any): OrderDetail | null =>
+      row?.kind === 'detail' ? row.detail : row?.kind === 'separator' ? null : row,
+    [],
+  );
 
   // Notify parent when pending selections change
   useEffect(() => {
@@ -639,16 +657,25 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     recalcSum('milling_cost_per_sqm', value);
   }, [recalcSum]);
 
-  const columns: ColumnsType<OrderDetail> = [
+  // Number of data columns (excl. AntD-injected selection column).
+  // Used to set colSpan on separator rows so they span the full width.
+  const DATA_COLUMN_COUNT = 18;
+
+  const columns: ColumnsType<any> = [
     {
       title: <div style={{ textAlign: 'center', fontSize: '70%' }}>№</div>,
       dataIndex: 'detail_number',
       key: 'detail_number',
       width: 27,
       fixed: 'left',
-      defaultSortOrder: 'ascend',
-      sorter: (a, b) => a.detail_number - b.detail_number,
-      render: (value) => <span style={{ color: '#999', fontSize: '67%' }}>{value}</span>,
+      defaultSortOrder: 'ascend' as const,
+      sorter: (a: OrderDetail, b: OrderDetail) => a.detail_number - b.detail_number,
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: DATA_COLUMN_COUNT } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return <span style={{ color: '#999', fontSize: '67%' }}>{d.detail_number}</span>;
+      },
     },
     {
       title: (
@@ -662,10 +689,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'height',
       width: 54,
       align: 'right',
-      sorter: (a, b) => (a.height || 0) - (b.height || 0),
-      render: (value, record) => {
-        if (!isEditing(record)) {
-          const num = Number(value);
+      sorter: (a: OrderDetail, b: OrderDetail) => (a.height || 0) - (b.height || 0),
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        if (!isEditing(d)) {
+          const num = Number(d.height);
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
@@ -695,10 +725,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'width',
       width: 54,
       align: 'right',
-      sorter: (a, b) => (a.width || 0) - (b.width || 0),
-      render: (value, record) => {
-        if (!isEditing(record)) {
-          const num = Number(value);
+      sorter: (a: OrderDetail, b: OrderDetail) => (a.width || 0) - (b.width || 0),
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        if (!isEditing(d)) {
+          const num = Number(d.width);
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
@@ -721,9 +754,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'quantity',
       width: 54,
       align: 'right',
-      sorter: (a, b) => (a.quantity || 0) - (b.quantity || 0),
-      render: (value, record) =>
-        isEditing(record) ? (
+      sorter: (a: OrderDetail, b: OrderDetail) => (a.quantity || 0) - (b.quantity || 0),
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="quantity" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
               controls={false}
@@ -735,8 +771,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          formatNumber(value, 0)
-        ),
+          formatNumber(d.quantity, 0)
+        );
+      },
     },
     {
       title: (
@@ -750,15 +787,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'area',
       width: 63,
       align: 'right',
-      sorter: (a, b) => (a.area || 0) - (b.area || 0),
-      render: (value, record) =>
-        isEditing(record) ? (
+      sorter: (a: OrderDetail, b: OrderDetail) => (a.area || 0) - (b.area || 0),
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="area" style={{ margin: 0, padding: '0 4px' }}>
             <InputNumber style={{ width: '100%', minWidth: '85px' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          formatNumber(value, 2) + ' м²'
-        ),
+          formatNumber(d.area, 2) + ' м²'
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Фрезеровка</div>,
@@ -766,9 +807,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'milling_type_id',
       width: 85,
       align: 'center',
-      sorter: (a, b) => (a.milling_type_id || 0) - (b.milling_type_id || 0),
-      render: (millingTypeId, record) =>
-        isEditing(record) ? (
+      sorter: (a: OrderDetail, b: OrderDetail) => (a.milling_type_id || 0) - (b.milling_type_id || 0),
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="milling_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               {...resolvedMillingTypeSelectProps}
@@ -781,11 +825,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <MillingTypeCell
-            millingTypeId={millingTypeId}
+            millingTypeId={d.milling_type_id}
             namesById={millingNameById}
             loading={referencesLoading}
           />
-        ),
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Обкат</span></div>,
@@ -793,8 +838,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'edge_type_id',
       width: 52,
       align: 'center',
-      render: (edgeTypeId, record) =>
-        isEditing(record) ? (
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="edge_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               {...resolvedEdgeTypeSelectProps}
@@ -807,11 +855,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <EdgeTypeCell
-            edgeTypeId={edgeTypeId}
+            edgeTypeId={d.edge_type_id}
             namesById={edgeNameById}
             loading={referencesLoading}
           />
-        ),
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Материал</div>,
@@ -824,16 +873,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const nameB = sheetMaterials.byId.get(b.sheet_material_type_id ?? 0)?.label ?? '';
         return nameA.localeCompare(nameB, 'ru');
       },
-      render: (sheetId: number | null | undefined, record: OrderDetail) =>
-        isEditing(record) ? (
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="sheet_material_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               options={toSheetSelectOptions(filterCuttableOptions(sheetMaterials.options).filter(o => o.isActive !== false || o.value === watchedSheetId), watchedSheetId)}
               loading={sheetMaterials.isLoading}
               placeholder="Материал"
               allowClear={
-                !(typeof record.sheet_material_type_id === 'number' &&
-                  record.sheet_material_type_id > 0)
+                !(typeof d.sheet_material_type_id === 'number' &&
+                  d.sheet_material_type_id > 0)
               }
               showSearch
               optionFilterProp="label"
@@ -843,23 +895,28 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span style={{ fontSize: '90%' }}>
-            {sheetId ? (sheetMaterials.byId.get(sheetId)?.label ?? '') : ''}
+            {d.sheet_material_type_id ? (sheetMaterials.byId.get(d.sheet_material_type_id)?.label ?? '') : ''}
           </span>
-        ),
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Примечание</div>,
       dataIndex: 'note',
       key: 'note',
       width: 100,
-      render: (text, record) =>
-        isEditing(record) ? (
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="note" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Примечание" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{text || ''}</span>
-        ),
+          <span style={{ fontSize: '90%' }}>{d.note || ''}</span>
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Цена за кв.м.</div>,
@@ -867,8 +924,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'milling_cost_per_sqm',
       width: 70,
       align: 'right',
-      render: (value, record) =>
-        isEditing(record) ? (
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="milling_cost_per_sqm" style={{ margin: 0, padding: '0 4px' }}>
             <InputNumber
               controls={false}
@@ -883,9 +943,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span>
-            {value !== null && value !== undefined ? formatNumber(value, 2) : '—'}
+            {d.milling_cost_per_sqm !== null && d.milling_cost_per_sqm !== undefined ? formatNumber(d.milling_cost_per_sqm, 2) : '—'}
           </span>
-        ),
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Сумма</div>,
@@ -893,63 +954,70 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'detail_cost',
       width: 70,
       align: 'right',
-      sorter: (a, b) => (a.detail_cost || 0) - (b.detail_cost || 0),
-      render: (value, record) =>
-        isEditing(record) ? (
-          <Form.Item
-            name="detail_cost"
-            style={{ margin: 0, padding: '0 4px' }}
-          >
-            <InputNumber
-              controls={false}
-              style={{ width: '100%', minWidth: '90px' }}
-              precision={2}
-              min={0}
-              formatter={currencySmartFormatter}
-              parser={numberParser}
-              disabled={!isSumEditable}
-              onContextMenu={(e) => {
-                if (!isSumEditable) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setSumContextMenu({ x: e.clientX, y: e.clientY });
-                }
-              }}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
-            />
-          </Form.Item>
-        ) : (
-          (() => {
-            const hasValue = value !== null && value !== undefined;
-            const manualOverride = isCostManuallyEdited(record);
-            const color = !hasValue
-              ? '#d32029'
-              : manualOverride
-              ? '#ad4e00'
-              : undefined;
-            const fontWeight = manualOverride || !hasValue ? 600 : undefined;
-            const title = !hasValue
-              ? 'Сумма не рассчитана'
-              : manualOverride
-              ? 'Значение отличается от авторасчета'
-              : undefined;
+      sorter: (a: OrderDetail, b: OrderDetail) => (a.detail_cost || 0) - (b.detail_cost || 0),
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        if (isEditing(d)) {
+          return (
+            <Form.Item
+              name="detail_cost"
+              style={{ margin: 0, padding: '0 4px' }}
+            >
+              <InputNumber
+                controls={false}
+                style={{ width: '100%', minWidth: '90px' }}
+                precision={2}
+                min={0}
+                formatter={currencySmartFormatter}
+                parser={numberParser}
+                disabled={!isSumEditable}
+                onContextMenu={(e) => {
+                  if (!isSumEditable) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSumContextMenu({ x: e.clientX, y: e.clientY });
+                  }
+                }}
+                onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              />
+            </Form.Item>
+          );
+        }
+        const value = d.detail_cost;
+        const hasValue = value !== null && value !== undefined;
+        const manualOverride = isCostManuallyEdited(d);
+        const color = !hasValue
+          ? '#d32029'
+          : manualOverride
+          ? '#ad4e00'
+          : undefined;
+        const fontWeight = manualOverride || !hasValue ? 600 : undefined;
+        const title = !hasValue
+          ? 'Сумма не рассчитана'
+          : manualOverride
+          ? 'Значение отличается от авторасчета'
+          : undefined;
 
-            return (
-              <span style={{ color, fontWeight }} title={title}>
-                {hasValue ? formatNumber(value, 2) : '—'}
-              </span>
-            );
-          })()
-        ),
+        return (
+          <span style={{ color, fontWeight }} title={title}>
+            {hasValue ? formatNumber(value, 2) : '—'}
+          </span>
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Пленка</div>,
       dataIndex: 'film_id',
       key: 'film_id',
       width: 120,
-      sorter: (a, b) => (a.film_id || 0) - (b.film_id || 0),
-      render: (filmId, record) =>
-        isEditing(record) ? (
+      sorter: (a: OrderDetail, b: OrderDetail) => (a.film_id || 0) - (b.film_id || 0),
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="film_id" style={{ margin: 0, padding: '0 4px' }}>
             <Select
               {...resolvedFilmSelectProps}
@@ -961,7 +1029,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               style={{ minWidth: 200, textAlign: 'left' }}
               onKeyDown={(e) => {
                 if (e.key === 'Tab' && !e.shiftKey) {
-                  handleTabOnLastField(e, record);
+                  handleTabOnLastField(e, d);
                 }
               }}
               dropdownRender={(menu) => (
@@ -985,15 +1053,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span style={{ fontSize: '11px' }}>
-            {filmId ? (
+            {d.film_id ? (
               <FilmCell
-                filmId={filmId}
+                filmId={d.film_id}
                 namesById={filmNameById}
                 loading={referencesLoading}
               />
             ) : '—'}
           </span>
-        ),
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Пр-т</div>,
@@ -1001,8 +1070,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'priority',
       width: 35,
       align: 'center',
-      render: (value, record) =>
-        isEditing(record) ? (
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="priority" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
               controls={false}
@@ -1014,16 +1086,20 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          formatNumber(value, 0)
-        ),
+          formatNumber(d.priority, 0)
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Статус</div>,
       dataIndex: 'production_status_id',
       key: 'production_status_id',
       width: 120,
-      render: (statusId, record) =>
-        isEditing(record) ? (
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="production_status_id" style={{ margin: 0, padding: '0 4px' }}>
             <Select
               {...resolvedProductionStatusSelectProps}
@@ -1037,42 +1113,51 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          statusId ? (
+          d.production_status_id ? (
             <ProductionStatusCell
-              statusId={statusId}
+              statusId={d.production_status_id}
               namesById={productionStatusNameById}
               loading={referencesLoading}
             />
           ) : <Tag>Не назначен</Tag>
-        ),
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис проект</div>,
       dataIndex: 'basis_project',
       key: 'basis_project',
       width: 120,
-      render: (text, record) =>
-        isEditing(record) ? (
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="basis_project" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{text || ''}</span>
-        ),
+          <span style={{ fontSize: '90%' }}>{d.basis_project || ''}</span>
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис данные</div>,
       dataIndex: 'basis_data',
       key: 'basis_data',
       width: 160,
-      render: (text, record) =>
-        isEditing(record) ? (
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="basis_data" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Номер/Обозначение/Наименование" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{text || ''}</span>
-        ),
+          <span style={{ fontSize: '90%' }}>{d.basis_data || ''}</span>
+        );
+      },
     },
     {
       title: (
@@ -1083,8 +1168,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       dataIndex: 'detail_name',
       key: 'detail_name',
       width: 100,
-      render: (text, record) =>
-        isEditing(record) ? (
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
           <Form.Item name="detail_name" style={{ margin: 0, padding: '0 4px' }}>
             <Input
               placeholder="Название детали"
@@ -1093,51 +1181,74 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          text || '—'
-        ),
+          d.detail_name || '—'
+        );
+      },
     },
     {
       title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Действия</span></div>,
       key: 'actions',
       width: 40,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size={2}>
-          {isEditing(record) ? (
-            <>
-              {dimensionValidationError && (
-                <Tooltip title={dimensionValidationError}>
-                  <ExclamationCircleOutlined style={{ fontSize: '14px', color: '#ff4d4f', marginRight: '4px' }} />
-                </Tooltip>
-              )}
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return (
+          <Space size={2}>
+            {isEditing(d) ? (
+              <>
+                {dimensionValidationError && (
+                  <Tooltip title={dimensionValidationError}>
+                    <ExclamationCircleOutlined style={{ fontSize: '14px', color: '#ff4d4f', marginRight: '4px' }} />
+                  </Tooltip>
+                )}
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CheckOutlined style={{ fontSize: '16px', color: dimensionValidationError ? 'var(--app-border)' : '#52c41a' }} />}
+                  onClick={() => saveEdit(d)}
+                  style={{ padding: '0 4px' }}
+                  disabled={!!dimensionValidationError}
+                />
+              </>
+            ) : (
               <Button
                 type="text"
                 size="small"
-                icon={<CheckOutlined style={{ fontSize: '16px', color: dimensionValidationError ? 'var(--app-border)' : '#52c41a' }} />}
-                onClick={() => saveEdit(record)}
+                icon={<EditOutlined style={{ fontSize: '12px' }} />}
+                onClick={() => startEdit(d)}
                 style={{ padding: '0 4px' }}
-                disabled={!!dimensionValidationError}
               />
-            </>
-          ) : (
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined style={{ fontSize: '12px' }} />}
-              onClick={() => startEdit(record)}
-              style={{ padding: '0 4px' }}
-            />
-          )}
-        </Space>
-      ),
+            )}
+          </Space>
+        );
+      },
     },
   ];
+
+  const renderedColumns = useMemo(
+    () =>
+      groupingActive
+        ? columns.map((col) => {
+            const { sorter, defaultSortOrder, sortOrder, ...rest } = col as any;
+            return rest;
+          })
+        : columns,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groupingActive],
+  );
 
   const rowSelection = onSelectChange
     ? {
         selectedRowKeys,
-        onChange: onSelectChange,
+        onChange: (keys: React.Key[]) =>
+          onSelectChange(keys.filter((k) => typeof k !== 'string' || !k.startsWith('__sep__'))),
         columnWidth: 24,
+        getCheckboxProps: (row: any) =>
+          row?.kind === 'separator' ? { disabled: true, style: { display: 'none' } } : {},
+        renderCell: (checked: boolean, row: any, index: number, node: React.ReactNode) =>
+          row?.kind === 'separator' ? null : node,
       }
     : undefined;
 
@@ -1602,11 +1713,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         className={dragSelection.isDragging ? 'drag-selection-active' : ''}
         style={{ position: 'relative' }}
       >
-      <Table<OrderDetail>
-        className="order-details-table"
-        dataSource={sortedDetails}
-        columns={columns}
-        rowKey={(record) => record.temp_id || record.detail_id || 0}
+      <Table<any>
+        className={`order-details-table${groupingActive ? ' details-grouped' : ''}`}
+        dataSource={tableRows as any}
+        columns={renderedColumns}
+        rowKey={(row: any) => {
+          if (row?.kind === 'separator') return row.key;
+          const d = row?.kind === 'detail' ? row.detail : row;
+          return d.temp_id ?? d.detail_id ?? 0;
+        }}
         rowSelection={rowSelection}
         showSorterTooltip={false}
         pagination={{
@@ -1619,9 +1734,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         scroll={{ x: 1780, y: 500 }}
         size="small"
         bordered
-        rowClassName={(record) => {
+        rowClassName={(row: any) => {
+          if (row?.kind === 'separator') return 'detail-group-separator';
+          const record = asDetail(row)!;
           const rowKey = record.temp_id || record.detail_id || 0;
-          return dragSelection.isInPendingSelection(rowKey) ? 'drag-selection-pending' : '';
+          if (!groupingActive) {
+            return dragSelection.isInPendingSelection(rowKey) ? 'drag-selection-pending' : '';
+          }
+          const groupIndex = row?.kind === 'detail' ? row.groupIndex : 0;
+          const classes = [`detail-group-tint-${groupIndex % 2}`];
+          if (isEditing(record)) classes.push('dg-editing');
+          else if (dragSelection.isInPendingSelection(rowKey)) classes.push('dg-pending');
+          else if (highlightedRowKey !== null && rowKey === highlightedRowKey) classes.push('dg-highlight');
+          return classes.join(' ');
         }}
         summary={() => (
           <Table.Summary fixed="bottom">
@@ -1677,7 +1802,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             </Table.Summary.Row>
           </Table.Summary>
         )}
-        onRow={(record, index) => {
+        onRow={(row: any, index) => {
+          if (row?.kind === 'separator') {
+            return { style: { cursor: 'default', userSelect: 'none' as const } };
+          }
+          const record = asDetail(row)!;
           const rowKey = record.temp_id || record.detail_id || 0;
           const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
           const isCurrentlyEditing = isEditing(record);

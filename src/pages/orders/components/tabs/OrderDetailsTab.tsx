@@ -12,6 +12,9 @@ import { useOrderFormStore, useOrderDraftStoreApi } from '../../../../stores/ord
 import { OrderDetail } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { useSheetMaterialOptions, filterCuttableOptions } from '../../../../hooks/useSheetMaterialOptions';
+import { useDetailGrouping } from '../../useDetailGrouping';
+import { DetailGroupingControls } from '../DetailGroupingControls';
+import { authSession } from '../../../../api/authSession';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -36,6 +39,9 @@ interface DragSelectionState {
 export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
+
+  const groupingUserId = authSession.getUser()?.id ?? 'anon';
+  const grouping = useDetailGrouping(groupingUserId, header?.order_id ?? 'new');
 
   // Sheet-material quick-add default: first active cuttable type; falls back to
   // undefined so form validation prompts the user if no cuttable types are loaded.
@@ -513,6 +519,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           />
         )}
 
+        {/* Detail grouping controls */}
+        <DetailGroupingControls
+          state={grouping.state}
+          onFieldChange={grouping.setField}
+          onToggleSeparation={grouping.setShowSeparation}
+        />
+
         {/* Table */}
         <OrderDetailTable
           ref={tableRef}
@@ -525,6 +538,8 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           onSelectChange={handleSelectChange}
           highlightedRowKey={highlightedRowKey}
           onDragSelectionPending={handleDragSelectionPending}
+          groupField={grouping.state.field}
+          showSeparation={grouping.state.showSeparation}
         />
 
         {/* Modal */}
