@@ -116,6 +116,29 @@ test.describe('Order UI full form coverage', () => {
         await detailsCard.getByRole('button', { name: /Пересчитать суммы/ }).click();
         await screenshot(page, testInfo, 'create-details');
 
+        // Grouping fixture: add detail 2 (same material A = МДФ 16мм) and detail 3
+        // (different material B = МДФ 19мм) so the A, A, B pattern guarantees ≥1
+        // multi-row group in the tint-parity walk (all-singleton A,B,C is insufficient).
+        await refreshedDetailsCard.getByRole('button', { name: 'plus' }).click();
+        const detailDialog2 = page.getByRole('dialog', { name: 'Добавить деталь' });
+        await expect(detailDialog2).toBeVisible();
+        await detailDialog2.locator('#height').fill('500');
+        await detailDialog2.locator('#width').fill('300');
+        await detailDialog2.locator('#quantity').fill('1');
+        await selectAntdOption(page, formItem(detailDialog2, 'Материал'), 'МДФ 16мм');
+        await detailDialog2.getByRole('button', { name: 'Сохранить' }).click();
+        await expect(detailsCard.getByText('Всего позиций: 2')).toBeVisible();
+
+        await refreshedDetailsCard.getByRole('button', { name: 'plus' }).click();
+        const detailDialog3 = page.getByRole('dialog', { name: 'Добавить деталь' });
+        await expect(detailDialog3).toBeVisible();
+        await detailDialog3.locator('#height').fill('400');
+        await detailDialog3.locator('#width').fill('200');
+        await detailDialog3.locator('#quantity').fill('1');
+        await selectAntdOption(page, formItem(detailDialog3, 'Материал'), 'МДФ 19мм');
+        await detailDialog3.getByRole('button', { name: 'Сохранить' }).click();
+        await expect(detailsCard.getByText('Всего позиций: 3')).toBeVisible();
+
         await clickOrderTab(orderDialog, 'Финансы');
         await expect(orderDialog.getByRole('button', { name: /Удалить выбранные/ })).toBeDisabled();
         await orderDialog.getByRole('button', { name: 'Добавить (форма)' }).click();
@@ -404,6 +427,61 @@ async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string,
     await expect(form.getByText(detailName).first()).toBeVisible();
     await screenshot(page, testInfo, 'edit-details');
 
+    // ── Visual grouping assertions ────────────────────────────────────────────
+    // Details table = the one carrying the «Обкат» column header, scoped to the
+    // order form card so it never collides with the payments table.
+    // Real № column = 2nd cell (cell 1 is the row-selection checkbox), excluding separators.
+    const detailsTable = form.locator('table:has(th:has-text("Обкат"))');
+    const readNums = async () => {
+        const cells = detailsTable.locator('tbody tr:not(.detail-group-separator) td:nth-child(2)');
+        return (await cells.allInnerTexts()).map((t) => t.trim()).filter((t) => t.length > 0);
+    };
+    const baselineNums = await readNums();
+    expect(baselineNums.length).toBeGreaterThanOrEqual(2); // fixture sanity (non-vacuous)
+
+    // Group by material → separators + tinted groups appear.
+    await page.getByRole('button', { name: /Группировать по/ }).click();
+    await page.getByRole('menuitem', { name: 'по материалам' }).click();
+    const sepCheckbox = page.getByLabel('Разделение на группы');
+    await expect(sepCheckbox).toBeVisible();
+    await expect(detailsTable.locator('tr.detail-group-separator')).not.toHaveCount(0);
+
+    // Tint must be GROUP-based, not row-based: walk rows in DOM order; detail rows
+    // between separators must share one tint parity, and parity must flip across each
+    // separator. A row-index zebra would fail this check on the A,A group.
+    const tintSequence = await detailsTable.locator('tbody tr').evaluateAll((rows) =>
+        rows.map((r) => {
+            if (r.classList.contains('detail-group-separator')) return 'SEP';
+            if (r.classList.contains('detail-group-tint-0')) return '0';
+            if (r.classList.contains('detail-group-tint-1')) return '1';
+            return 'OTHER';
+        }),
+    );
+    // Split on SEP, drop empty buckets; each group must be uniform; adjacent groups differ.
+    const groups: string[][] = [];
+    let cur: string[] = [];
+    for (const t of tintSequence) {
+        if (t === 'SEP') { if (cur.length) groups.push(cur); cur = []; }
+        else if (t === '0' || t === '1') cur.push(t);
+    }
+    if (cur.length) groups.push(cur);
+    expect(groups.length).toBeGreaterThanOrEqual(2);
+    // ≥1 multi-row group required — an all-singleton fixture lets a row-index zebra pass vacuously.
+    expect(groups.some((g) => g.length >= 2)).toBe(true);
+    for (const g of groups) expect(new Set(g).size).toBe(1);           // each group uniform (incl. A,A)
+    for (let i = 1; i < groups.length; i++) expect(groups[i][0]).not.toBe(groups[i - 1][0]); // parity flips
+
+    // Uncheck → normal list: no separators AND original row order restored byte-equal.
+    await sepCheckbox.uncheck();
+    await expect(detailsTable.locator('tr.detail-group-separator')).toHaveCount(0);
+    expect(await readNums()).toEqual(baselineNums);
+
+    // Re-check → grouping re-activates (field stays persisted; check forces showSeparation on).
+    await sepCheckbox.check();
+    await expect(detailsTable.locator('tr.detail-group-separator')).not.toHaveCount(0);
+    await screenshot(page, testInfo, 'edit-details-grouped');
+    // ── End visual grouping assertions ───────────────────────────────────────
+
     await clickOrderTab(form, 'Даты');
     await screenshot(page, testInfo, 'edit-dates');
 
@@ -438,6 +516,23 @@ async function verifyShowPage(
     await expect(page.getByText(`${detailNote} detail`).first()).toBeVisible();
     await expect(page.getByRole('row', { name: /610 410 2/ })).toBeVisible();
     await screenshot(page, testInfo, 'show-details');
+
+    // ── Show-page grouping + cut-select guard ────────────────────────────────
+    // grouping state (field=material, showSeparation=true) was re-activated on the
+    // edit page (re-check step above) and persisted to localStorage; the show page
+    // reads the same key and must render separators while the details section is open.
+    await expect(page.locator('tr.detail-group-separator')).not.toHaveCount(0);
+    // Entering cut-select mode must suppress separators so no checkbox lands on one.
+    const cutSelectBtn = page.getByRole('button', { name: 'Выделить детали для раскроя' });
+    if (await cutSelectBtn.count()) {
+        await cutSelectBtn.click();
+        await expect(page.locator('tr.detail-group-separator')).toHaveCount(0);
+        await page.getByRole('button', { name: 'Отменить выбор' }).click();
+        await expect(page.locator('tr.detail-group-separator')).not.toHaveCount(0);
+    } else {
+        console.log('[grouping] cut-select button absent (flag off) — skipping cut-select guard');
+    }
+    // ── End show-page cut-select guard ──────────────────────────────────────
 
     await page.getByText('Финансы', { exact: false }).first().click();
     await expect(page.getByRole('row', { name: /4\s?501/ }).first()).toBeVisible();
