@@ -228,6 +228,9 @@ export function formatGroupSummary(summary: Record<string, unknown> | null): str
   const waste = summary.waste_percent;
   const parts: string[] = [];
   if (sheets !== undefined && sheets !== null) parts.push(`листов: ${sheets}`);
-  if (waste !== undefined && waste !== null) parts.push(`отход: ${waste}%`);
+  if (waste !== undefined && waste !== null) {
+    const roundedWaste = Math.round(Number(waste));
+    parts.push(`отход: ${Number.isFinite(roundedWaste) ? roundedWaste : waste}%`);
+  }
   return parts.join(', ');
 }

@@ -86,10 +86,31 @@ const sheetPreviewListStyle: React.CSSProperties = {
   marginTop: 8,
 };
 
-const sheetPreviewItemStyle: React.CSSProperties = {
-  flex: '0 1 420px',
-  maxWidth: '100%',
-};
+function sheetPreviewRotate90(widthMm: number, heightMm: number, portrait: boolean): boolean {
+  if (widthMm === heightMm) return false;
+  return portrait ? widthMm > heightMm : widthMm < heightMm;
+}
+
+function sheetPreviewItemStyle(widthMm: number, heightMm: number, rotate90: boolean): React.CSSProperties {
+  const horizontalMm = rotate90 ? heightMm : widthMm;
+  const verticalMm = rotate90 ? widthMm : heightMm;
+  const ratio = verticalMm > 0 ? horizontalMm / verticalMm : 1;
+  const basis = Math.min(520, Math.max(240, Math.round(ratio * 260 + 112)));
+  return {
+    flex: `0 1 ${basis}px`,
+    maxWidth: '100%',
+  };
+}
+
+function groupFilmNames(job: CutJobDto, group: CutGroupDto): string[] {
+  const names = new Set<string>();
+  for (const item of job.items) {
+    if (item.cutGroupId !== group.cutGroupId) continue;
+    const name = item.detail?.filmName?.trim();
+    if (name) names.add(name);
+  }
+  return [...names];
+}
 
 /** Revoke every blob object URL in a key->url map (leak guard on reset/unmount). */
 const revokeObjectUrls = (map: Record<string, string>): void => {
@@ -511,9 +532,13 @@ export const CutPage: React.FC = () => {
     async (group: CutGroupDto, sheetIndex: number) => {
       if (!job) return;
       const key = `${group.cutGroupId}:${sheetIndex}`;
+      const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
+      const rotate90 = sheet
+        ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
+        : sheetPortrait;
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, !sheetPortrait);
+        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetImages((prev) => {
@@ -535,9 +560,13 @@ export const CutPage: React.FC = () => {
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
+      const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
+      const rotate90 = sheet
+        ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
+        : sheetPortrait;
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', !sheetPortrait);
+        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetThumbs((prev) => {
@@ -567,7 +596,11 @@ export const CutPage: React.FC = () => {
     async (group: CutGroupDto, sheetIndex: number) => {
       if (!job) return;
       try {
-        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, !sheetPortrait);
+        const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
+        const rotate90 = sheet
+          ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
+          : sheetPortrait;
+        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90);
         triggerBlobDownload(blob, `cut-${job.cutJobId}-g${group.cutGroupId}-s${sheetIndex + 1}.svg`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить SVG');
@@ -581,7 +614,7 @@ export const CutPage: React.FC = () => {
       if (!job) return;
       setBusy(true);
       try {
-        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, !sheetPortrait));
+        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait));
         triggerBlobDownload(result.blob, result.fileName ?? `cut-group-${group.cutGroupId}.pdf`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить PDF группы');
@@ -596,7 +629,7 @@ export const CutPage: React.FC = () => {
     if (!job) return;
     setBusy(true);
     try {
-      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, !sheetPortrait));
+      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait));
       triggerBlobDownload(result.blob, result.fileName ?? `cut-job-${job.cutJobId}.pdf`);
     } catch (error) {
       handleError(error, 'Не удалось выгрузить PDF раскроя');
@@ -1048,6 +1081,9 @@ export const CutPage: React.FC = () => {
       {job?.groups.map((group) => {
         // Readable group title: «Раскрой: <материал> · N листов» (fallback to id).
         const matName = sheetOptions.find((o) => o.sheetMaterialTypeId === group.sheetMaterialTypeId)?.name;
+        const filmNames = groupFilmNames(job, group);
+        const filmText = filmNames.length > 0 ? filmNames.join(', ') : null;
+        const filmLabel = filmNames.length > 1 ? 'Плёнки' : 'Плёнка';
         const title = matName
           ? `Раскрой: ${matName} · ${group.sheets.length} л.`
           : `Группа #${group.cutGroupId}`;
@@ -1063,15 +1099,24 @@ export const CutPage: React.FC = () => {
             }
           >
             <Text type="secondary">{formatGroupSummary(group.summary)}</Text>
+            <div style={{ marginTop: 4, color: '#595959', fontSize: 13 }}>
+              Материал раскроя: <b>{matName ?? 'не задан'}</b>
+              {filmText && (
+                <>
+                  {' '}· {filmLabel}: <b>{filmText}</b>
+                </>
+              )}
+            </div>
             {/* Previews flow in wrapping rows (not a single column). */}
             <div style={sheetPreviewListStyle}>
               {group.sheets.map((sheet) => {
                 const key = `${group.cutGroupId}:${sheet.sheetIndex}`;
                 const widthMm = sheet.placements.sheet_width_mm;
                 const heightMm = sheet.placements.sheet_height_mm;
-                const overlays = buildSheetPieceOverlays(sheet.placements, job.items, !sheetPortrait);
+                const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
+                const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90);
                 return (
-                  <div key={key} style={sheetPreviewItemStyle}>
+                  <div key={key} style={sheetPreviewItemStyle(widthMm, heightMm, rotate90)}>
                     <Space>
                       <Button size="small" onClick={() => loadSheet(group, sheet.sheetIndex)}>
                         Лист {sheet.sheetIndex + 1}
@@ -1081,14 +1126,17 @@ export const CutPage: React.FC = () => {
                       </Button>
                     </Space>
                     {/* Material of the details on this sheet. */}
-                    <div style={{ marginTop: 2, color: '#8c8c8c', fontSize: 12 }}>{matName ?? 'материал не задан'}</div>
+                    <div style={{ marginTop: 2, color: '#8c8c8c', fontSize: 12 }}>
+                      {matName ?? 'материал не задан'}
+                      {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
+                    </div>
                     {sheetThumbs[key] && !sheetImages[key] && (
                       <SheetPreview
                         src={sheetThumbs[key]}
                         alt={`Превью листа ${sheet.sheetIndex + 1}`}
                         widthMm={widthMm}
                         heightMm={heightMm}
-                        landscape={!sheetPortrait}
+                        landscape={rotate90}
                         full={false}
                         overlays={overlays}
                         onOpen={() => loadSheet(group, sheet.sheetIndex)}
@@ -1100,7 +1148,7 @@ export const CutPage: React.FC = () => {
                         alt={`Лист ${sheet.sheetIndex + 1}`}
                         widthMm={widthMm}
                         heightMm={heightMm}
-                        landscape={!sheetPortrait}
+                        landscape={rotate90}
                         full
                         overlays={overlays}
                         onCollapse={() => collapseSheet(key)}
