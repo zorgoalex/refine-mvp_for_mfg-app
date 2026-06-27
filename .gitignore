@@ -52,6 +52,7 @@ next-env.d.ts
 
 # ai
 .codex/
+.gstack/
 ai_docs/
 /session-handoffs/
 /docs/

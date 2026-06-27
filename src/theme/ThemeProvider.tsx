@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { profileApi } from '../api/profileApi';
+import { authSession } from '../api/authSession';
 import { authStorage } from '../utils/auth';
 import { getStoredThemeMode, setStoredThemeMode } from './themeStorage';
 import type { ThemeMode } from './themeTypes';
@@ -13,6 +14,7 @@ interface AppThemeContextValue {
 const AppThemeContext = createContext<AppThemeContextValue | null>(null);
 
 export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
+  const [authRevision, setAuthRevision] = useState(0);
   const [mode, setModeState] = useState<ThemeMode>(() => {
     const userId = getCurrentUserId();
     return (userId ? getStoredThemeMode(String(userId)) : null) ?? 'light';
@@ -23,7 +25,15 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
   }, [mode]);
 
   useEffect(() => {
+    return authSession.subscribe(() => {
+      setAuthRevision((revision) => revision + 1);
+    });
+  }, []);
+
+  useEffect(() => {
+    const token = authStorage.getAccessToken();
     const userId = getCurrentUserId();
+    if (!token || !userId) return;
 
     const cached = userId ? getStoredThemeMode(String(userId)) : null;
     if (cached) {
@@ -47,14 +57,17 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
     return () => {
       active = false;
     };
-  }, []);
+  }, [authRevision]);
 
   const setMode = useCallback(async (nextMode: ThemeMode) => {
+    const token = authStorage.getAccessToken();
     const userId = getCurrentUserId();
     setModeState(nextMode);
     if (userId) {
       setStoredThemeMode(String(userId), nextMode);
     }
+
+    if (!token || !userId) return;
 
     try {
       const response = await profileApi.updatePreferences({ themeMode: nextMode });

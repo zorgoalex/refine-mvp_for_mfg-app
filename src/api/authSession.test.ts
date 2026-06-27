@@ -1,0 +1,32 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { authSession } from './authSession';
+
+describe('authSession subscriptions', () => {
+  beforeEach(() => {
+    authSession.clear();
+  });
+
+  it('notifies listeners when access token changes', () => {
+    const listener = vi.fn();
+    const unsubscribe = authSession.subscribe(listener);
+
+    authSession.setAccessToken('token-1');
+
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    authSession.setAccessToken('token-2');
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('notifies listeners when user changes or session clears', () => {
+    const listener = vi.fn();
+    authSession.subscribe(listener);
+
+    authSession.setUser({ id: '1', username: 'admin', role: 'admin' });
+    authSession.clear();
+
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+});

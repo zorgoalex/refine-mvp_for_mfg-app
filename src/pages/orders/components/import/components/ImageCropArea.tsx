@@ -64,7 +64,7 @@ export const ImageCropArea: React.FC<ImageCropAreaProps> = ({
       <style>{`
         .image-crop-container {
           display: flex;
-          background: #f5f5f5;
+          background: var(--app-surface-muted);
           border-radius: 8px;
           padding: 16px;
         }
@@ -80,7 +80,7 @@ export const ImageCropArea: React.FC<ImageCropAreaProps> = ({
           width: 12px !important;
           height: 12px !important;
           background-color: #1890ff !important;
-          border: 2px solid #fff !important;
+          border: 2px solid var(--app-surface) !important;
           border-radius: 50% !important;
         }
 

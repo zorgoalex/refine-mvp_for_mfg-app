@@ -807,7 +807,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                     <div style={{ fontWeight: 600, marginBottom: '4px', color: '#ff4d4f' }}>⚠️ Ошибка в деталях:</div>
                     <ul style={{ margin: 0, paddingLeft: '20px' }}>
                       {generalDetailErrors.map((msg, idx) => (
-                        <li key={idx} style={{ color: '#595959' }}>{msg}</li>
+                        <li key={idx} style={{ color: 'var(--app-text-muted)' }}>{msg}</li>
                       ))}
                     </ul>
                   </div>
@@ -818,7 +818,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                     <div style={{ fontWeight: 600, marginBottom: '4px' }}>📋 Основная информация:</div>
                     <ul style={{ margin: 0, paddingLeft: '20px' }}>
                       {headerErrors.map((field, idx) => (
-                        <li key={idx} style={{ color: '#595959' }}>{field}</li>
+                        <li key={idx} style={{ color: 'var(--app-text-muted)' }}>{field}</li>
                       ))}
                     </ul>
                   </div>
@@ -834,7 +834,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                         </div>
                         <ul style={{ margin: 0, paddingLeft: '20px' }}>
                           {fields.map((field, idx) => (
-                            <li key={idx} style={{ color: '#595959' }}>{field}</li>
+                            <li key={idx} style={{ color: 'var(--app-text-muted)' }}>{field}</li>
                           ))}
                         </ul>
                       </div>

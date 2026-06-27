@@ -203,7 +203,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
                   className="order-label-preview-fit"
                   style={{
                     alignItems: 'center',
-                    border: '1px solid #d9d9d9',
+                    border: '1px solid var(--app-border)',
                     display: 'flex',
                     justifyContent: 'center',
                     minHeight: 260,

@@ -419,10 +419,10 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
 
       <style>{`
         .row-error {
-          background-color: #fff2f0 !important;
+          background-color: var(--app-danger-bg) !important;
         }
         .row-warning {
-          background-color: #fffbe6 !important;
+          background-color: var(--app-highlight) !important;
         }
       `}</style>
     </div>

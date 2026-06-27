@@ -43,7 +43,7 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
   };
 
   return (
-    <div style={{ marginBottom: 8, borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
+    <div style={{ marginBottom: 8, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
         Бирки
       </div>
@@ -57,7 +57,7 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
                 onClick={() => setZoomed((z) => !z)}
                 title={zoomed ? 'Свернуть бирку' : 'Увеличить бирку'}
                 style={{
-                  border: '1px solid #d9d9d9',
+                  border: '1px solid var(--app-border)',
                   overflow: 'hidden',
                   cursor: 'pointer',
                   display: 'inline-block',

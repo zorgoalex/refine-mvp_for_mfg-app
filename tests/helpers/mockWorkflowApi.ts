@@ -9,6 +9,7 @@ export interface WorkflowMockApiOptions {
     onGraphqlError?: (message: string, query: string) => void;
     graphqlErrorForQuery?: (query: string) => string | null | undefined;
     runtimeConfig?: false | Record<string, boolean>;
+    themeMode?: 'light' | 'dark';
 }
 
 const AUTH_TOKEN =
@@ -543,6 +544,31 @@ export async function setupWorkflowMockApi(
                         'sheet_materials.manage',
                     ],
                 },
+            }),
+        });
+    });
+
+    await page.route(/\/api\/v1\/me\/preferences$/, async (route) => {
+        const requestedThemeMode = (() => {
+            if (route.request().method() !== 'PATCH') {
+                return null;
+            }
+
+            try {
+                return JSON.parse(route.request().postData() || '{}').themeMode;
+            } catch {
+                return null;
+            }
+        })();
+        const themeMode = requestedThemeMode === 'dark' || requestedThemeMode === 'light'
+            ? requestedThemeMode
+            : options.themeMode ?? 'light';
+
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                preferences: { themeMode },
             }),
         });
     });

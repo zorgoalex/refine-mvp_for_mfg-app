@@ -396,7 +396,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
       key: `production_status_${status.id}`,
       label: status.name,
       icon: isActive ? <CheckOutlined style={{ color: '#52c41a' }} /> : null,
-      style: isActive ? { fontWeight: 600, backgroundColor: '#f6ffed' } : undefined,
+      style: isActive ? { fontWeight: 600, backgroundColor: 'var(--app-success-bg)' } : undefined,
       onClick: () => {
         handleProductionStatusToggle(status.id, status.name);
         onClose();

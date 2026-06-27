@@ -114,16 +114,16 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
 
   // Payment status color
   const getPaymentStatusColor = (statusName: string | null) => {
-    if (!statusName) return '#262626';
+    if (!statusName) return 'var(--app-text)';
     if (statusName === 'Оплачен') return '#52c41a';
     if (statusName === 'Частично оплачен') return '#d4a574';
     if (statusName === 'Не оплачен') return '#ff4d4f';
-    return '#262626';
+    return 'var(--app-text)';
   };
 
   // Стили для ячеек таблицы финансов
   const cellStyle: React.CSSProperties = {
-    border: '1px solid #d9d9d9',
+    border: '1px solid var(--app-border)',
     padding: '4px 8px',
     textAlign: 'center',
     verticalAlign: 'middle',
@@ -131,9 +131,9 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
 
   const headerCellStyle: React.CSSProperties = {
     ...cellStyle,
-    background: '#fafafa',
+    background: 'var(--app-surface-muted)',
     fontSize: 11,
-    color: '#8c8c8c',
+    color: 'var(--app-text-muted)',
     fontWeight: 500,
   };
 
@@ -149,7 +149,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
         marginBottom: 16,
         border: '1px solid #faad14',
         borderRadius: 6,
-        background: '#FFFFFF',
+        background: 'var(--app-surface)',
         padding: '12px 16px',
       }}
     >
@@ -196,7 +196,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
               </td>
             )}
             {surcharge > 0 && (
-              <td style={{ ...valueCellStyle, color: '#111827' }}>
+              <td style={{ ...valueCellStyle, color: 'var(--app-text)' }}>
                 +{formatNumber(surcharge, 2)}
               </td>
             )}
@@ -207,7 +207,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
               {formatNumber(paidAmount, 2)}
             </td>
             {showRemaining && (
-              <td style={{ ...valueCellStyle, color: '#d4380d', background: '#fff2e8' }}>
+              <td style={{ ...valueCellStyle, color: '#d4380d', background: 'var(--app-warning-bg)' }}>
                 {formatNumber(remainingAmount, 2)}
               </td>
             )}
@@ -222,7 +222,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
       {/* Таблица платежей */}
       {payments.length > 0 && (
         <div>
-          <Text style={{ fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 8 }}>
+          <Text style={{ fontSize: 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: 8 }}>
             Платежи по заказу
           </Text>
           <Table

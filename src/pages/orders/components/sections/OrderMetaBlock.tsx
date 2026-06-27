@@ -51,34 +51,34 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record, compact 
       }}
     >
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             ID заказа
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {record?.order_id || '—'}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Ссылка 1C
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {record?.ref_key_1c || '—'}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Версия
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {record?.version || '—'}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Удалён
           </Text>
           <Tag color={record?.delete_flag ? 'red' : 'green'} style={{ marginTop: compact ? 0 : 2 }}>
@@ -87,37 +87,37 @@ export const OrderMetaBlock: React.FC<OrderMetaBlockProps> = ({ record, compact 
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Создан
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {formatDate(record?.created_at)}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Изменён
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {formatDate(record?.updated_at)}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Создал
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {createdByUser?.data?.username || record?.created_by || '—'}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Изменил
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {editedByUser?.data?.username || record?.edited_by || '—'}
           </Text>
         </div>

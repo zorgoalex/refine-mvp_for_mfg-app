@@ -1111,7 +1111,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 return primary ? (
                   <span>{primary.code} · {primary.name}</span>
                 ) : (
-                  <span style={{ color: '#8c8c8c' }}>Проект не указан</span>
+                  <span style={{ color: 'var(--app-text-muted)' }}>Проект не указан</span>
                 );
               }}
             />

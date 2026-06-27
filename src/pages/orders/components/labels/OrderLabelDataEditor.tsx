@@ -191,7 +191,7 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
                 className="order-label-inline-preview-fit"
                 style={{
                   alignItems: 'center',
-                  border: '1px solid #d9d9d9',
+                  border: '1px solid var(--app-border)',
                   display: 'flex',
                   justifyContent: 'center',
                   minHeight: 180,

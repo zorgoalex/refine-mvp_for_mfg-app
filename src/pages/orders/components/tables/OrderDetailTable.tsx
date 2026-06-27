@@ -1113,7 +1113,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               <Button
                 type="text"
                 size="small"
-                icon={<CheckOutlined style={{ fontSize: '16px', color: dimensionValidationError ? '#d9d9d9' : '#52c41a' }} />}
+                icon={<CheckOutlined style={{ fontSize: '16px', color: dimensionValidationError ? 'var(--app-border)' : '#52c41a' }} />}
                 onClick={() => saveEdit(record)}
                 style={{ padding: '0 4px' }}
                 disabled={!!dimensionValidationError}
@@ -1625,7 +1625,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         }}
         summary={() => (
           <Table.Summary fixed="bottom">
-            <Table.Summary.Row style={{ backgroundColor: '#fafafa', fontWeight: 'bold' }}>
+            <Table.Summary.Row style={{ backgroundColor: 'var(--app-surface-muted)', fontWeight: 'bold' }}>
               {/* Checkbox column */}
               <Table.Summary.Cell index={0} />
               {/* № */}
@@ -1687,12 +1687,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             ref: isHighlighted ? highlightedRowRef : undefined,
             style: {
               backgroundColor: isCurrentlyEditing
-                ? '#fffbe6' // Warm yellow for editing row
+                ? 'var(--app-highlight)' // Warm yellow for editing row
                 : isPendingSelection
-                ? '#e6f4ff' // Light blue for pending drag selection
+                ? 'var(--app-selection-bg)' // Light blue for pending drag selection
                 : isHighlighted
-                ? '#e6f7ff' // Light blue for highlighted row
-                : (index! % 2 === 0 ? '#ffffff' : '#f5f5f5'),
+                ? 'var(--app-selection-bg)' // Light blue for highlighted row
+                : (index! % 2 === 0 ? 'var(--app-surface)' : 'var(--app-surface-muted)'),
               boxShadow: isCurrentlyEditing ? '0 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
               transform: isCurrentlyEditing ? 'scale(1.01)' : 'scale(1)',
               position: isCurrentlyEditing ? 'relative' as const : 'relative' as const,

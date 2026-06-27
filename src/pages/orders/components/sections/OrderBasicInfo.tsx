@@ -520,10 +520,10 @@ export const OrderBasicInfo: React.FC = () => {
           <Form.Item>
             <div
               style={{
-                border: '1px solid #d9d9d9',
+                border: '1px solid var(--app-border)',
                 borderRadius: 8,
                 padding: '8px 12px',
-                backgroundColor: '#fff',
+                backgroundColor: 'var(--app-surface)',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
@@ -665,7 +665,7 @@ export const OrderBasicInfo: React.FC = () => {
                 )}
 
                 {dowelingLinks.length === 0 && (
-                  <span style={{ color: '#8c8c8c', fontStyle: 'italic' }}>Нет связанных присадок</span>
+                  <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>Нет связанных присадок</span>
                 )}
 
                 {/* Выбор существующей или создание новой присадки */}
@@ -702,7 +702,7 @@ export const OrderBasicInfo: React.FC = () => {
                   dropdownRender={(menu) => (
                     <>
                       {menu}
-                      <div style={{ borderTop: '1px solid #e8e8e8', padding: '8px' }}>
+                      <div style={{ borderTop: '1px solid var(--app-border-soft)', padding: '8px' }}>
                         <Button
                           type="text"
                           icon={<PlusOutlined />}
@@ -716,7 +716,7 @@ export const OrderBasicInfo: React.FC = () => {
                   )}
                 />
                 {!header.order_id && (
-                  <span style={{ fontSize: 12, color: '#8c8c8c' }}>
+                  <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
                     Сначала сохраните заказ
                   </span>
                 )}
