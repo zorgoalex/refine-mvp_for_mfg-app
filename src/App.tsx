@@ -3,7 +3,7 @@ import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { WorkspaceLayout } from "./components/workspace/WorkspaceLayout";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
-import { ConfigProvider, notification, Spin } from "antd";
+import { ConfigProvider, notification, Spin, theme as antdTheme } from "antd";
 import { useEffect, Suspense, lazy } from "react";
 import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
@@ -15,6 +15,7 @@ import { dataProvider } from "./utils/dataProvider";
 import { authProvider } from "./authProvider";
 import { i18nProvider } from "./utils/i18nProvider";
 import { featureFlags } from "./config/featureFlags";
+import { AppThemeProvider, useAppTheme } from "./theme/ThemeProvider";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -24,6 +25,7 @@ const ProjectsPage = lazy(async () => ({ default: (await import("./pages/project
 const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/doweling_orders/edit")).DowelOrderEdit }));
 const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
 const ConfigurationPage = lazy(async () => ({ default: (await import("./pages/configuration")).ConfigurationPage }));
+const ProfilePage = lazy(async () => ({ default: (await import("./pages/profile")).ProfilePage }));
 
 // Route-level code splitting: every page component is lazy-loaded so the root
 // bundle ships only shell/providers/login. The existing <Suspense> around
@@ -177,7 +179,15 @@ const SheetMaterialShow = lazy(async () => ({ default: (await import('./pages/sh
 
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 
-const App = () => {
+const App = () => (
+  <AppThemeProvider>
+    <ThemedApp />
+  </AppThemeProvider>
+);
+
+const ThemedApp = () => {
+  const { mode } = useAppTheme();
+
   // Configure notifications globally
   useEffect(() => {
     notification.config({
@@ -193,6 +203,13 @@ const App = () => {
         <RefineKbarProvider>
           <ConfigProvider
             locale={ruRU}
+            theme={{
+              algorithm: mode === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+              token: {
+                colorPrimary: "#1677ff",
+                borderRadius: 6,
+              },
+            }}
             tooltip={{ mouseEnterDelay: 1 }}
             table={{ showSorterTooltip: { mouseEnterDelay: 1 } }}
           >
@@ -724,6 +741,7 @@ const App = () => {
                     <Route path="show/:id" element={<UserShow />} />
                   </Route>
                   <Route path="/configuration" element={<ConfigurationPage />} />
+                  <Route path="/profile" element={<ProfilePage />} />
                   <Route path="/audit">
                     <Route index element={<AuditList />} />
                   </Route>

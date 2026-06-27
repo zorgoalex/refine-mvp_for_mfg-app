@@ -13,6 +13,9 @@ export const apiRoutes = {
     logout: backendApiPath('/auth/logout'),
     me: backendApiPath('/me'),
   },
+  profile: {
+    preferences: backendApiPath('/me/preferences'),
+  },
   orders: {
     list: backendApiPath('/orders'),
     formData: backendApiPath('/orders/form-data'),

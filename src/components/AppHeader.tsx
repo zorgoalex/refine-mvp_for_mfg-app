@@ -1,9 +1,19 @@
 import React from "react";
-import { Layout, Space, Avatar, Typography, Dropdown, Button } from "antd";
-import { UserOutlined, LogoutOutlined, DownOutlined, MenuOutlined } from "@ant-design/icons";
+import { Layout, Space, Avatar, Typography, Dropdown, Button, Switch, Tooltip } from "antd";
+import {
+  UserOutlined,
+  LogoutOutlined,
+  DownOutlined,
+  MenuOutlined,
+  MoonOutlined,
+  SunOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
 import { useGetIdentity, useLogout } from "@refinedev/core";
+import { useNavigate } from "react-router-dom";
 import type { UserIdentity } from "../types/auth";
 import { NotificationBell } from "./NotificationBell";
+import { useAppTheme } from "../theme/ThemeProvider";
 // import { NotificationTestButton } from "./NotificationTestButton"; // DEV ONLY - закомментирован
 
 export interface AppHeaderProps {
@@ -13,6 +23,8 @@ export interface AppHeaderProps {
 export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
   const { data: identity } = useGetIdentity<UserIdentity>();
   const { mutate: logout } = useLogout();
+  const navigate = useNavigate();
+  const { mode, setMode } = useAppTheme();
 
   const username = identity?.username || "Пользователь";
   const role = identity?.role || "";
@@ -32,12 +44,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
   return (
     <Layout.Header
       style={{
-        background: "#fff",
+        background: "var(--app-surface)",
         padding: "0 16px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        borderBottom: "1px solid #f0f0f0",
+        borderBottom: "1px solid var(--app-border-soft)",
         gap: 8,
       }}
     >
@@ -79,6 +91,16 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
             {/* Колокольчик уведомлений */}
             <NotificationBell />
 
+            <Tooltip title={mode === "dark" ? "Темная тема" : "Светлая тема"}>
+              <Switch
+                checked={mode === "dark"}
+                checkedChildren={<MoonOutlined />}
+                unCheckedChildren={<SunOutlined />}
+                onChange={(checked) => setMode(checked ? "dark" : "light")}
+                aria-label="Переключить тему"
+              />
+            </Tooltip>
+
             <Avatar
               style={{ backgroundColor: "#1677ff" }}
               icon={<UserOutlined />}
@@ -93,12 +115,21 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
                     label: (
                       <div>
                         <div style={{ fontWeight: 600 }}>{username}</div>
-                        <div style={{ fontSize: 12, color: "#8c8c8c" }}>
+                        <div style={{ fontSize: 12, color: "var(--app-text-muted)" }}>
                           {roleName}
                         </div>
                       </div>
                     ),
                     disabled: true,
+                  },
+                  {
+                    type: "divider",
+                  },
+                  {
+                    key: "profile",
+                    icon: <SettingOutlined />,
+                    label: "Личный кабинет",
+                    onClick: () => navigate("/profile"),
                   },
                   {
                     type: "divider",

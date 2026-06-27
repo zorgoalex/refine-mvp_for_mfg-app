@@ -6,7 +6,7 @@
 
 /* Более тёмные горизонтальные линии между строками */
 .orders-table .ant-table-tbody > tr > td {
-  border-bottom: 1px solid #c0c0c0;
+  border-bottom: 1px solid var(--app-border);
 }
 
 /* Уменьшенный размер шрифта для заголовков */
@@ -77,16 +77,16 @@
 
 /* Подсветка найденной строки */
 .orders-table .highlighted-row > td {
-  background-color: #fffbe6 !important;
+  background-color: var(--app-highlight) !important;
   animation: highlight-pulse 1s ease-in-out 3;
   transition: background-color 0.3s ease;
 }
 
 @keyframes highlight-pulse {
   0%, 100% {
-    background-color: #fffbe6;
+    background-color: var(--app-highlight);
   }
   50% {
-    background-color: #fff1b8;
+    background-color: var(--app-selection-bg);
   }
 }

@@ -89,7 +89,7 @@ export const NotificationPanel: React.FC<{
 
   if (!loading && error) {
     return (
-      <div style={{ width: 315, padding: 12, backgroundColor: '#fff' }}>
+      <div style={{ width: 315, padding: 12, backgroundColor: 'var(--app-surface)' }}>
         <Alert
           type="error"
           showIcon
@@ -120,9 +120,9 @@ export const NotificationPanel: React.FC<{
   }
 
   return (
-    <div style={{ width: 315, backgroundColor: '#fff' }}>
+    <div style={{ width: 315, backgroundColor: 'var(--app-surface)' }}>
       {/* Заголовок с действиями */}
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', backgroundColor: '#fff' }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--app-border-soft)', backgroundColor: 'var(--app-surface)' }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <Space>
             <Checkbox
@@ -162,7 +162,7 @@ export const NotificationPanel: React.FC<{
 
       {/* Список уведомлений */}
       <List
-        style={{ maxHeight: 500, overflow: 'auto', backgroundColor: '#fff' }}
+        style={{ maxHeight: 500, overflow: 'auto', backgroundColor: 'var(--app-surface)' }}
         dataSource={notifications}
         loading={loading}
         renderItem={(item) => {
@@ -175,7 +175,7 @@ export const NotificationPanel: React.FC<{
               style={{
                 padding: '12px 16px',
                 cursor: 'pointer',
-                backgroundColor: item.read ? 'transparent' : '#f0f5ff',
+                backgroundColor: item.read ? 'transparent' : 'var(--app-selection-bg)',
                 borderLeft: item.read ? 'none' : `3px solid ${color}`,
               }}
               onClick={() => handleItemClick(item)}
@@ -231,7 +231,7 @@ export const NotificationPanel: React.FC<{
 
       {/* Футер с информацией */}
       <Divider style={{ margin: 0 }} />
-      <div style={{ padding: '8px 16px', textAlign: 'center', backgroundColor: '#fff' }}>
+      <div style={{ padding: '8px 16px', textAlign: 'center', backgroundColor: 'var(--app-surface)' }}>
         <Text type="secondary" style={{ fontSize: 10 }}>
           Показано {notifications.length} из последних 50 уведомлений
         </Text>

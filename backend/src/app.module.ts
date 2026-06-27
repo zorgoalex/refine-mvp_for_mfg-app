@@ -19,6 +19,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { ProductionActionsModule } from './modules/production-actions/production-actions.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { OrgModule } from './modules/org/org.module';
+import { ProfileModule } from './modules/profile/profile.module';
 import { UsersModule } from './modules/users/users.module';
 import { VlmModule } from './modules/vlm/vlm.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -49,6 +50,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     ProductionActionsModule,
     ProjectsModule,
     OrgModule,
+    ProfileModule,
     UsersModule,
     VlmModule,
     PermissionsModule,

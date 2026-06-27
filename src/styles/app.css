@@ -1,3 +1,45 @@
+:root {
+  --app-bg: #f5f5f5;
+  --app-surface: #ffffff;
+  --app-surface-muted: #fafafa;
+  --app-surface-soft: #fefefe;
+  --app-text: #262626;
+  --app-text-muted: #8c8c8c;
+  --app-border: #d9d9d9;
+  --app-border-soft: #f0f0f0;
+  --app-row-hover: #f8f8f8;
+  --app-highlight: #ffd666;
+  --app-selection-bg: #e6f4ff;
+  --app-selection-border: #1890ff;
+  --app-shadow: rgba(0, 0, 0, 0.05);
+  --app-workspace-gap: #f0f0f0;
+}
+
+:root[data-theme="dark"],
+[data-theme="dark"] {
+  --app-bg: #111318;
+  --app-surface: #1f1f1f;
+  --app-surface-muted: #262626;
+  --app-surface-soft: #1b1d22;
+  --app-text: #f0f0f0;
+  --app-text-muted: #bfbfbf;
+  --app-border: #434343;
+  --app-border-soft: #303030;
+  --app-row-hover: #2a2f3a;
+  --app-highlight: #5c3b00;
+  --app-selection-bg: #102a43;
+  --app-selection-border: #69b1ff;
+  --app-shadow: rgba(0, 0, 0, 0.35);
+  --app-workspace-gap: #141414;
+}
+
+html,
+body,
+#root {
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
 /* Fixed sidebar with independent scrolling for content area */
 
 /* Keep large Ant Design notifications usable on small screens. Validation
@@ -23,6 +65,7 @@
 .ant-layout {
   min-height: 100vh;
   display: flex;
+  background: var(--app-bg);
 }
 
 /* Fixed sidebar */
@@ -35,7 +78,7 @@
   overflow-y: auto !important;
   overflow-x: hidden;
   z-index: 10;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
+  box-shadow: 2px 0 8px var(--app-shadow);
 }
 
 /* Scrollbar styling for sidebar */
@@ -44,16 +87,16 @@
 }
 
 .ant-layout-sider::-webkit-scrollbar-track {
-  background: #f0f0f0;
+  background: var(--app-border-soft);
 }
 
 .ant-layout-sider::-webkit-scrollbar-thumb {
-  background: #bfbfbf;
+  background: var(--app-text-muted);
   border-radius: 3px;
 }
 
 .ant-layout-sider::-webkit-scrollbar-thumb:hover {
-  background: #999;
+  background: var(--app-text);
 }
 
 /* Adjust content area to account for fixed sidebar.
@@ -99,13 +142,13 @@
 /* Highlighted row animation after create/edit */
 .highlighted-row,
 .highlighted-row > td {
-  background-color: #ffd666 !important;
+  background-color: var(--app-highlight) !important;
   animation: fadeHighlight 2s ease-out;
 }
 
 @keyframes fadeHighlight {
   0% {
-    background-color: #ffd666;
+    background-color: var(--app-highlight);
   }
   100% {
     background-color: transparent;
@@ -114,7 +157,7 @@
 
 /* Hover state should still work */
 .highlighted-row:hover td {
-  background-color: #fafafa !important;
+  background-color: var(--app-row-hover) !important;
 }
 
 /* Orders table: allow header titles to wrap within constrained widths */
@@ -139,40 +182,40 @@
 
 /* Zebra striping for details table - alternating row colors */
 .table-row-light {
-  background-color: #ffffff !important;
+  background-color: var(--app-surface) !important;
 }
 
 .table-row-dark {
-  background-color: #fefefe !important;
+  background-color: var(--app-surface-soft) !important;
 }
 
 .table-row-light:hover td,
 .table-row-dark:hover td {
-  background-color: #f8f8f8 !important;
+  background-color: var(--app-row-hover) !important;
 }
 
 /* Darker horizontal borders for details table */
 .table-row-light td,
 .table-row-dark td {
-  border-bottom: 1px solid #d9d9d9 !important;
+  border-bottom: 1px solid var(--app-border) !important;
 }
 
 /* Глобальное чередование цветов строк во всех таблицах для улучшения читаемости */
 .ant-table-tbody > tr:nth-child(even) > td {
-  background-color: #fefefe;
+  background-color: var(--app-surface-soft);
 }
 
 .ant-table-tbody > tr:nth-child(odd) > td {
-  background-color: #ffffff;
+  background-color: var(--app-surface);
 }
 
 /* Сохраняем цвет при наведении */
 .ant-table-tbody > tr:nth-child(even):hover > td {
-  background-color: #f8f8f8 !important;
+  background-color: var(--app-row-hover) !important;
 }
 
 .ant-table-tbody > tr:nth-child(odd):hover > td {
-  background-color: #fafafa !important;
+  background-color: var(--app-surface-muted) !important;
 }
 
 /* Компактные Collapse панели для формы просмотра заказа */
@@ -192,22 +235,22 @@
 
 /* Тёмные границы для таблицы платежей */
 .payments-table-dark-borders.ant-table-wrapper .ant-table {
-  border: 1px solid #b8b8b8 !important;
+  border: 1px solid var(--app-border) !important;
 }
 
 .payments-table-dark-borders .ant-table-thead > tr > th {
-  border-bottom: 1px solid #b8b8b8 !important;
-  border-right: 1px solid #b8b8b8 !important;
+  border-bottom: 1px solid var(--app-border) !important;
+  border-right: 1px solid var(--app-border) !important;
 }
 
 .payments-table-dark-borders .ant-table-tbody > tr > td {
-  border-bottom: 1px solid #b8b8b8 !important;
-  border-right: 1px solid #b8b8b8 !important;
+  border-bottom: 1px solid var(--app-border) !important;
+  border-right: 1px solid var(--app-border) !important;
 }
 
 .payments-table-dark-borders .ant-table-summary > tr > td {
-  border-bottom: 1px solid #b8b8b8 !important;
-  border-right: 1px solid #b8b8b8 !important;
+  border-bottom: 1px solid var(--app-border) !important;
+  border-right: 1px solid var(--app-border) !important;
 }
 
 /* ========================================
@@ -216,26 +259,26 @@
 
 /* Pending selection - dashed border and light background */
 .drag-selection-pending > td {
-  background-color: #e6f4ff !important;
-  border-top: 1px dashed #1890ff !important;
-  border-bottom: 1px dashed #1890ff !important;
+  background-color: var(--app-selection-bg) !important;
+  border-top: 1px dashed var(--app-selection-border) !important;
+  border-bottom: 1px dashed var(--app-selection-border) !important;
 }
 
 .drag-selection-pending:first-of-type > td {
-  border-top: 2px dashed #1890ff !important;
+  border-top: 2px dashed var(--app-selection-border) !important;
 }
 
 .drag-selection-pending:last-of-type > td {
-  border-bottom: 2px dashed #1890ff !important;
+  border-bottom: 2px dashed var(--app-selection-border) !important;
 }
 
 /* Pending selection - left/right indicators */
 .drag-selection-pending > td:first-child {
-  border-left: 2px dashed #1890ff !important;
+  border-left: 2px dashed var(--app-selection-border) !important;
 }
 
 .drag-selection-pending > td:last-child {
-  border-right: 2px dashed #1890ff !important;
+  border-right: 2px dashed var(--app-selection-border) !important;
 }
 
 /* Confirmation toolbar animation */
@@ -292,12 +335,12 @@
   position: sticky;
   top: 0;
   z-index: 20;
-  background: #fff;
+  background: var(--app-surface);
   /* Visually separate the pinned tab strip from the content below it. A thick
      light-grey bottom border (not a transparent margin) paints an opaque,
      sticky gap: scrolled content can't bleed through it, and the grey band
      contrasts with the white strip so the separation is actually visible. */
-  border-bottom: 20px solid #f0f0f0;
+  border-bottom: 20px solid var(--app-workspace-gap);
 }
 .workspace-tabs .ant-tabs-nav {
   margin: 0;

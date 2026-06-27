@@ -63,8 +63,8 @@ export const AppFooter: React.FC = () => {
   return (
     <Layout.Footer
       style={{
-        background: "#fff",
-        borderTop: "1px solid #f0f0f0",
+        background: "var(--app-surface)",
+        borderTop: "1px solid var(--app-border-soft)",
         padding: "8px 16px",
         position: "sticky",
         bottom: 0,
