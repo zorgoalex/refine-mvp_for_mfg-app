@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import type Konva from 'konva';
 import { Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
@@ -16,7 +16,12 @@ import { can } from '../../../utils/permissions';
 
 const { Text } = Typography;
 const EXPORT_FORMATS: LabelExportFormat[] = ['bmp', 'png', 'emf'];
-const CUSTOM_FIELD_TYPE_OPTIONS = ['string', 'number', 'boolean', 'date'].map((type) => ({ value: type, label: type }));
+const CUSTOM_FIELD_TYPE_OPTIONS = [
+  { value: 'string', label: 'Строка' },
+  { value: 'number', label: 'Число' },
+  { value: 'boolean', label: 'Да/нет' },
+  { value: 'date', label: 'Дата' },
+];
 const PREVIEW_FIELD_VALUES: Record<string, string> = {
   'bazis.order_number': '548-16мм МДФ',
   'bazis.detail_id': '2590',
@@ -482,7 +487,7 @@ export const LabelsConfigTab: React.FC = () => {
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item name="dpi" label="DPI" rules={[{ required: true }]}>
+                  <Form.Item name="dpi" label="Разрешение" tooltip="Разрешение печати в точках на дюйм. Влияет на размер растровых файлов при генерации бирок." rules={[{ required: true }]}>
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
@@ -581,9 +586,15 @@ export const LabelsConfigTab: React.FC = () => {
             title={() => (
               <Space wrap>
                 <Text strong>Элементы</Text>
-                <Button disabled={!canManage} onClick={() => addElement('text')}>Текст</Button>
-                <Button disabled={!canManage} onClick={() => addElement('line')}>Линия</Button>
-                <Button disabled={!canManage} onClick={() => addElement('rect')}>Прямоугольник</Button>
+                <Tooltip title="Добавляет текстовый элемент. Можно привязать к полю заказа, детали, Базиса или кастомному полю, затем перетащить на визуале.">
+                  <Button disabled={!canManage} onClick={() => addElement('text')}>Текст</Button>
+                </Tooltip>
+                <Tooltip title="Добавляет линию. Используйте для разделителей, подчеркиваний и простых графических границ внутри бирки.">
+                  <Button disabled={!canManage} onClick={() => addElement('line')}>Линия</Button>
+                </Tooltip>
+                <Tooltip title="Добавляет прямоугольник. Используйте для рамок, блоков и визуального выделения областей бирки.">
+                  <Button disabled={!canManage} onClick={() => addElement('rect')}>Прямоугольник</Button>
+                </Tooltip>
               </Space>
             )}
             size="small"
@@ -894,14 +905,34 @@ function LabelTemplatePreview({
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       {canDrag && (
         <Space wrap size={8}>
-          <Text type="secondary">Сетка</Text>
-          <Switch size="small" checked={showGrid} onChange={setShowGrid} />
-          <Text type="secondary">Snap</Text>
-          <Switch size="small" checked={snapToGrid} onChange={setSnapToGrid} />
-          <Button size="small" onClick={() => setZoom((value) => clamp(Math.round((value - 0.1) * 10) / 10, 0.4, 2.5))}>-</Button>
+          <Tooltip title="Показывает миллиметровую сетку поверх бирки. Толстые линии идут через каждые 5 мм, тонкие — через 1 мм. Помогает ровно выставлять поля и рамки.">
+            <Space size={6}>
+              <Text type="secondary">Сетка</Text>
+              <Switch size="small" checked={showGrid} onChange={setShowGrid} />
+            </Space>
+          </Tooltip>
+          <Tooltip title="Привязывает перемещение и изменение размера к шагу 1 мм. Удерживайте клавишу свободного перемещения во время перетаскивания или изменения размера, чтобы временно отключить привязку.">
+            <Space size={6}>
+              <Text type="secondary">Привязка</Text>
+              <Switch size="small" checked={snapToGrid} onChange={setSnapToGrid} />
+            </Space>
+          </Tooltip>
+          <Tooltip title="Уменьшает масштаб визуального редактора. Размер самой бирки и координаты элементов не меняются.">
+            <Button size="small" onClick={() => setZoom((value) => clamp(Math.round((value - 0.1) * 10) / 10, 0.4, 2.5))}>-</Button>
+          </Tooltip>
           <Text>{Math.round(zoom * 100)}%</Text>
-          <Button size="small" onClick={() => setZoom((value) => clamp(Math.round((value + 0.1) * 10) / 10, 0.4, 2.5))}>+</Button>
-          <Button size="small" onClick={() => setZoom(1)}>Fit</Button>
+          <Tooltip title="Увеличивает масштаб визуального редактора. Удобно для точной настройки мелких текстов и линий.">
+            <Button size="small" onClick={() => setZoom((value) => clamp(Math.round((value + 0.1) * 10) / 10, 0.4, 2.5))}>+</Button>
+          </Tooltip>
+          <Tooltip title="Возвращает масштаб редактора к исходному значению 100%. Это не сбрасывает изменения шаблона.">
+            <Button size="small" onClick={() => setZoom(1)}>По размеру</Button>
+          </Tooltip>
+          <Tooltip title="Выделите элемент на бирке, чтобы появились ручки изменения размера и поворота. Для линии доступны две боковые ручки, для текста и прямоугольника — ручки по углам и сторонам.">
+            <Text type="secondary">Размер/поворот</Text>
+          </Tooltip>
+          <Tooltip title="После выбора элемента стрелки двигают его на 1 мм. Ускоренное перемещение со стрелками двигает на 5 мм. Клавиша удаления убирает выбранный элемент.">
+            <Text type="secondary">Клавиатура</Text>
+          </Tooltip>
         </Space>
       )}
       <div

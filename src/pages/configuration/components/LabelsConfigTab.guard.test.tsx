@@ -74,7 +74,8 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/Transformer/);
     expect(tabSrc).toMatch(/renderGrid/);
     expect(tabSrc).toMatch(/Сетка/);
-    expect(tabSrc).toMatch(/Snap/);
+    expect(tabSrc).toMatch(/Привязка/);
+    expect(tabSrc).toMatch(/Tooltip/);
     expect(tabSrc).toMatch(/setZoom/);
     expect(tabSrc).toMatch(/onWheel/);
     expect(tabSrc).toMatch(/onKeyDown=\{handleKeyDown\}/);
