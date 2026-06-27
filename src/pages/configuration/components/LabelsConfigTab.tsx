@@ -784,6 +784,7 @@ function LabelTemplatePreview({
   const [showGrid, setShowGrid] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [hoveredElement, setHoveredElement] = useState<{ element: LabelTemplateElement; x: number; y: number } | null>(null);
+  const [dragPreview, setDragPreview] = useState<{ field: LabelFieldCatalogItem; xMm: number; yMm: number } | null>(null);
   const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 85;
   const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 88;
   const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
@@ -830,8 +831,12 @@ function LabelTemplatePreview({
         event.clientX <= rect.right &&
         event.clientY >= rect.top &&
         event.clientY <= rect.bottom;
-      if (!inside) return;
+      if (!inside) {
+        setDragPreview(null);
+        return;
+      }
       dropped = true;
+      setDragPreview(null);
       onDropDraggingField(
         draggingField,
         clamp(((event.clientX - rect.left) / rect.width) * safeWidth, 0, safeWidth - 1),
@@ -948,6 +953,7 @@ function LabelTemplatePreview({
     event.preventDefault();
     event.stopPropagation();
     const point = pointFromEvent(event);
+    setDragPreview(null);
     onDropField(field, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
   };
   const handleWrapperMouseUp = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -955,7 +961,17 @@ function LabelTemplatePreview({
     event.preventDefault();
     event.stopPropagation();
     const point = pointFromEvent(event);
+    setDragPreview(null);
     onDropDraggingField(draggingField, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
+  };
+  const updateDragPreview = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
+    if (!draggingField) return;
+    const point = pointFromEvent(event);
+    setDragPreview({
+      field: draggingField,
+      xMm: clamp(point.x, 0, safeWidth - 1),
+      yMm: clamp(point.y, 0, safeHeight - 1),
+    });
   };
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -1006,9 +1022,13 @@ function LabelTemplatePreview({
           outline: 'none',
         }}
         onDragOver={(event) => {
-          if (canDrag) event.preventDefault();
+          if (!canDrag) return;
+          event.preventDefault();
+          updateDragPreview(event);
         }}
+        onDragLeave={() => setDragPreview(null)}
         onDrop={handleDrop}
+        onMouseMove={(event) => updateDragPreview(event)}
         onMouseUp={handleWrapperMouseUp}
         onKeyDown={handleKeyDown}
       >
@@ -1054,6 +1074,33 @@ function LabelTemplatePreview({
                 },
                 onLeaveElement: () => setHoveredElement(null),
               }),
+            )}
+            {dragPreview && (
+              <>
+                <KonvaText
+                  x={dragPreview.xMm}
+                  y={dragPreview.yMm}
+                  width={Math.min(40, Math.max(8, safeWidth - dragPreview.xMm))}
+                  height={7}
+                  text={dragPreview.field.label}
+                  fontFamily="Arial"
+                  fontSize={4.2}
+                  fill="#1677ff"
+                  opacity={0.72}
+                  listening={false}
+                />
+                <KonvaRect
+                  x={dragPreview.xMm}
+                  y={dragPreview.yMm}
+                  width={Math.min(40, Math.max(8, safeWidth - dragPreview.xMm))}
+                  height={7}
+                  stroke="#1677ff"
+                  strokeWidth={0.3}
+                  dash={[1, 1]}
+                  opacity={0.72}
+                  listening={false}
+                />
+              </>
             )}
             {canDrag && (
               <Transformer

@@ -129,6 +129,9 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/application\/x-label-field/);
     expect(tabSrc).toMatch(/onDropField/);
     expect(tabSrc).toMatch(/addFieldElement/);
+    expect(tabSrc).toMatch(/dragPreview/);
+    expect(tabSrc).toMatch(/updateDragPreview/);
+    expect(tabSrc).toMatch(/text=\{dragPreview\.field\.label\}/);
   });
 
   it('strips read-only element ids before create or update payloads', () => {
