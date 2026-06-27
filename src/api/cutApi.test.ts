@@ -111,6 +111,15 @@ describe('cutApi', () => {
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ combineFilms: true, version: 5 });
   });
+
+  it('setSplitByMaterial PATCHes the split-by-material route with body', async () => {
+    const job = jobDto({ splitByMaterial: false });
+    const fetchMock = mockFetch(job);
+    await cutApi.setSplitByMaterial(3, false, 7);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/3/split-by-material');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ splitByMaterial: false, version: 7 });
+  });
 });
 
 function mockFetch(...bodies: unknown[]) {
@@ -135,6 +144,7 @@ function jobDto(overrides: Partial<CutJobDto> = {}): CutJobDto {
     paramProfileId: null,
     sheetMaterialTypeId: null,
     combineFilms: false,
+    splitByMaterial: true,
     failureCode: null,
     failureReason: null,
     totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },

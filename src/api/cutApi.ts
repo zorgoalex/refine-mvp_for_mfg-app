@@ -152,6 +152,13 @@ export const cutApi = {
       version,
     });
   },
+
+  async setSplitByMaterial(cutJobId: number, splitByMaterial: boolean, version: number): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.splitByMaterial(validateCutJobId(cutJobId)), {
+      splitByMaterial,
+      version,
+    });
+  },
 };
 
 export type CutPdfResult = { pending: true } | { pending: false; blob: Blob; fileName: string | null };

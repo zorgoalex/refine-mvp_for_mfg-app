@@ -117,6 +117,10 @@ export interface CutJobDto {
   /** true = calculate groups details by sheet material only (films of the same
    *  material share sheets). false (default) = group by (material, film). */
   combineFilms: boolean;
+  /** true (default) = split by material (different materials → separate groups;
+   *  the sheet override only fills no-sheet details). false = all details in one
+   *  group. */
+  splitByMaterial: boolean;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];

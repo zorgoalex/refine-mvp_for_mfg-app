@@ -23,6 +23,7 @@ import type {
   SetCutJobProfileCommand,
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
+  SetCutJobSplitByMaterialCommand,
   SetPdfPrewarmStateQuery,
 } from './cut-command.types';
 
@@ -141,6 +142,11 @@ export class CutService {
   async setCombineFilms(command: SetCutJobCombineFilmsCommand) {
     this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
     return this.ports.cut.setCombineFilms(command);
+  }
+
+  async setSplitByMaterial(command: SetCutJobSplitByMaterialCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.setSplitByMaterial(command);
   }
 
   private require(

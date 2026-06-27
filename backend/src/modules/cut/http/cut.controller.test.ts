@@ -12,6 +12,7 @@ import {
   parseSetProfileBody,
   parseSetSheetMaterialBody,
   parseSetCombineFilmsBody,
+  parseSetSplitByMaterialBody,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -33,6 +34,7 @@ function jobDto(): CutJobDto {
     paramProfileId: null,
     sheetMaterialTypeId: null,
     combineFilms: false,
+    splitByMaterial: true,
     totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },
     items: [],
     groups: [],
@@ -324,6 +326,32 @@ it('PATCH setCombineFilms delegates parsed args to CutService.setCombineFilms', 
   const dto = await controller.setCombineFilms(request, '42', { combineFilms: true, version: 3 });
   expect(service.setCombineFilms).toHaveBeenCalledWith(expect.objectContaining({
     cutJobId: 42, combineFilms: true, version: 3, requestId: 'req-combine',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+describe('parseSetSplitByMaterialBody', () => {
+  it('accepts a boolean + version', () => {
+    expect(parseSetSplitByMaterialBody({ splitByMaterial: false, version: 2 })).toEqual({ splitByMaterial: false, version: 2 });
+  });
+  it('rejects a non-boolean splitByMaterial', () => {
+    expect(() => parseSetSplitByMaterialBody({ splitByMaterial: 'no', version: 0 })).toThrow();
+  });
+  it('rejects unknown keys (strict)', () => {
+    expect(() => parseSetSplitByMaterialBody({ splitByMaterial: true, version: 0, extra: 1 })).toThrow();
+  });
+});
+
+it('PATCH setSplitByMaterial delegates parsed args to CutService.setSplitByMaterial', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setSplitByMaterial: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-split' } as never;
+  const dto = await controller.setSplitByMaterial(request, '42', { splitByMaterial: false, version: 3 });
+  expect(service.setSplitByMaterial).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, splitByMaterial: false, version: 3, requestId: 'req-split',
   }));
   expect(dto).toBe(serviceReturn);
 });
