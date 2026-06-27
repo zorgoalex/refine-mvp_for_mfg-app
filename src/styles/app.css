@@ -449,3 +449,37 @@ body,
 .configuration-tabs-wrap.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
   margin: 2px 0 4px 0 !important;
 }
+
+/* ----- Order-detail visual grouping (purely visual; non-functional rows) ----- */
+/* Under a grouped table, neutralize the global per-row zebra so group tints win. */
+.details-grouped .ant-table-tbody > tr:nth-child(even) > td,
+.details-grouped .ant-table-tbody > tr:nth-child(odd) > td,
+.details-grouped .ant-table-tbody > tr.table-row-light > td,
+.details-grouped .ant-table-tbody > tr.table-row-dark > td {
+  background-color: transparent;
+}
+/* Opaque per-GROUP backgrounds (theme-var based → dark-theme aware). */
+.details-grouped .ant-table-tbody > tr.detail-group-tint-0 > td {
+  background-color: var(--app-surface);
+}
+.details-grouped .ant-table-tbody > tr.detail-group-tint-1 > td {
+  background-color: var(--app-surface-soft);
+}
+/* Non-functional separator band between groups. */
+.details-grouped .ant-table-tbody > tr.detail-group-separator > td {
+  background-color: var(--app-surface-muted, #e6ebf2);
+  height: 10px;
+  padding: 0 !important;
+  border-top: none;
+  cursor: default;
+  user-select: none;
+}
+/* Row-state highlights must win over group tint (placed AFTER tint rules). */
+.details-grouped .ant-table-tbody > tr.dg-editing > td { background-color: #fffbe6 !important; }
+.details-grouped .ant-table-tbody > tr.dg-pending > td { background-color: #e6f4ff !important; }
+.details-grouped .ant-table-tbody > tr.dg-highlight > td { background-color: #e6f7ff !important; }
+/* Pin group tint + separator on hover (the global hover rules at app.css ~213
+   use !important and would otherwise wash out group boundaries on hover). */
+.details-grouped .ant-table-tbody > tr.detail-group-tint-0:hover > td { background-color: var(--app-surface) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-1:hover > td { background-color: var(--app-surface-soft) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-separator:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
