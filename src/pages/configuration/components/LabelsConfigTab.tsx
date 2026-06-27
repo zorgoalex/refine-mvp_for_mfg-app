@@ -78,6 +78,7 @@ export const LabelsConfigTab: React.FC = () => {
   const [selectedElementKey, setSelectedElementKey] = useState<string | null>(null);
   const [fieldSearch, setFieldSearch] = useState('');
   const [draggingField, setDraggingField] = useState<LabelFieldCatalogItem | null>(null);
+  const [dragCursor, setDragCursor] = useState<{ x: number; y: number } | null>(null);
   const [visualExpanded, setVisualExpanded] = useState(false);
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
@@ -133,6 +134,34 @@ export const LabelsConfigTab: React.FC = () => {
     ],
     [customSchemaRows.rows, fields],
   );
+  const usedFieldIds = useMemo(
+    () => new Set(elements.map((element) => element.sourceField).filter((fieldId): fieldId is string => Boolean(fieldId))),
+    [elements],
+  );
+
+  useEffect(() => {
+    if (!draggingField) {
+      setDragCursor(null);
+      return;
+    }
+    const handleMove = (event: PointerEvent | MouseEvent) => {
+      setDragCursor({ x: event.clientX, y: event.clientY });
+    };
+    const handleEnd = () => {
+      setDraggingField(null);
+      setDragCursor(null);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('pointerup', handleEnd);
+    window.addEventListener('mouseup', handleEnd);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('pointerup', handleEnd);
+      window.removeEventListener('mouseup', handleEnd);
+    };
+  }, [draggingField]);
 
   const startNew = () => {
     setSelectedTemplate(null);
@@ -302,6 +331,25 @@ export const LabelsConfigTab: React.FC = () => {
   const deleteElementByKey = (elementKey: string) => {
     setElements((current) => current.filter((element) => element.elementKey !== elementKey));
     setSelectedElementKey((current) => (current === elementKey ? null : current));
+  };
+
+  const duplicateElementByKey = (elementKey: string) => {
+    setElements((current) => {
+      const source = current.find((element) => element.elementKey === elementKey);
+      if (!source) return current;
+      const nextKey = `${source.elementKey}-copy-${Date.now()}`;
+      const copy: LabelTemplateElement = {
+        ...source,
+        labelTemplateElementId: undefined,
+        elementKey: nextKey,
+        xMm: roundMm(Number(source.xMm ?? 0) + 2),
+        yMm: roundMm(Number(source.yMm ?? 0) + 2),
+        zIndex: Math.max(0, ...current.map((element) => Number(element.zIndex ?? 0))) + 1,
+        style: { ...(source.style ?? {}), locked: false },
+      };
+      setSelectedElementKey(nextKey);
+      return [...current, copy];
+    });
   };
 
   const addFieldElement = (field: LabelFieldCatalogItem, xMm: number, yMm: number) => {
@@ -490,6 +538,7 @@ export const LabelsConfigTab: React.FC = () => {
                 <div style={{ marginTop: 8 }}>
                   <FieldPalette
                     fields={sourceFields}
+                    usedFieldIds={usedFieldIds}
                     disabled={!canManage}
                     search={fieldSearch}
                     onSearch={setFieldSearch}
@@ -669,23 +718,23 @@ export const LabelsConfigTab: React.FC = () => {
                 <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} />
               </Form.Item>
               <Row gutter={8} align="top" wrap={false}>
-                <Col flex="78px">
-                  <Form.Item name="canvasWidthMm" label="Ширина" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                <Col flex="47px">
+                  <Form.Item name="canvasWidthMm" label={<span style={{ fontSize: 11 }}>Ширина</span>} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
-                <Col flex="78px">
-                  <Form.Item name="canvasHeightMm" label="Высота" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                <Col flex="47px">
+                  <Form.Item name="canvasHeightMm" label={<span style={{ fontSize: 11 }}>Высота</span>} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
-                <Col flex="112px">
-                  <Form.Item name="dpi" label="Разрешение" tooltip="Разрешение печати в точках на дюйм. Влияет на размер растровых файлов при генерации бирок." rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                <Col flex="67px">
+                  <Form.Item name="dpi" label={<span style={{ fontSize: 11 }}>Разрешение</span>} tooltip="Разрешение печати в точках на дюйм. Влияет на размер растровых файлов при генерации бирок." rules={[{ required: true }]} style={{ marginBottom: 0 }}>
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
                 <Col flex="auto">
-                  <Form.Item name="defaultExportFormats" label="Форматы" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                  <Form.Item name="defaultExportFormats" label={<span style={{ fontSize: 11 }}>Форматы</span>} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
                     <Checkbox.Group options={EXPORT_FORMATS.map((format) => ({ label: format, value: format }))} />
                   </Form.Item>
                 </Col>
@@ -709,11 +758,13 @@ export const LabelsConfigTab: React.FC = () => {
                 onMoveElement={moveElement}
                 onChangeElement={patchElementByKey}
                 onDeleteElement={deleteElementByKey}
+                onDuplicateElement={duplicateElementByKey}
                 onDropField={addFieldElement}
                 draggingField={draggingField}
                 onDropDraggingField={(field, xMm, yMm) => {
                   addFieldElement(field, xMm, yMm);
                   setDraggingField(null);
+                  setDragCursor(null);
                 }}
               />
             </Card>
@@ -724,6 +775,29 @@ export const LabelsConfigTab: React.FC = () => {
       <div>
         <Text type="secondary">Доступно полей: {fields.length}; категорий: {fieldCategories}</Text>
       </div>
+
+      {draggingField && dragCursor && (
+        <div
+          data-label-global-drag-preview
+          style={{
+            position: 'fixed',
+            left: dragCursor.x + 12,
+            top: dragCursor.y + 12,
+            zIndex: 3000,
+            padding: '4px 8px',
+            color: '#1677ff',
+            background: '#e6f4ff',
+            border: '1px dashed #1677ff',
+            borderRadius: 4,
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            pointerEvents: 'none',
+            fontSize: 12,
+            lineHeight: 1.3,
+          }}
+        >
+          {draggingField.label}
+        </div>
+      )}
 
       <Modal
         title="Сохранить шаблон как"
@@ -757,6 +831,7 @@ function LabelTemplatePreview({
   onMoveElement,
   onChangeElement,
   onDeleteElement,
+  onDuplicateElement,
   onDropField,
   draggingField,
   onDropDraggingField,
@@ -772,6 +847,7 @@ function LabelTemplatePreview({
   onMoveElement?: (elementKey: string, xMm: number, yMm: number) => void;
   onChangeElement?: (elementKey: string, patch: Partial<LabelTemplateElement>) => void;
   onDeleteElement?: (elementKey: string) => void;
+  onDuplicateElement?: (elementKey: string) => void;
   onDropField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
   draggingField?: LabelFieldCatalogItem | null;
   onDropDraggingField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
@@ -785,6 +861,7 @@ function LabelTemplatePreview({
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [hoveredElement, setHoveredElement] = useState<{ element: LabelTemplateElement; x: number; y: number } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ field: LabelFieldCatalogItem; xMm: number; yMm: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ element: LabelTemplateElement; x: number; y: number } | null>(null);
   const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 85;
   const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 88;
   const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
@@ -793,6 +870,7 @@ function LabelTemplatePreview({
   const previewWidth = Math.round(Math.min(760, Math.max(360, safeWidth * 7)) * zoom);
   const previewHeight = previewWidth * (safeHeight / safeWidth);
   const selectedElement = elements.find((element) => element.elementKey === selectedElementKey);
+  const selectedElementLocked = Boolean(selectedElement && isLabelElementLocked(selectedElement));
   const pointFromEvent = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
     const container = stageRef.current?.container();
     if (!container) return { x: 0, y: 0 };
@@ -808,7 +886,7 @@ function LabelTemplatePreview({
   }, [initialZoom]);
 
   useEffect(() => {
-    if (!canDrag || !selectedElementKey) {
+    if (!canDrag || !selectedElementKey || selectedElementLocked) {
       transformerRef.current?.nodes([]);
       transformerRef.current?.getLayer()?.batchDraw();
       return;
@@ -816,7 +894,7 @@ function LabelTemplatePreview({
     const node = nodeRefs.current.get(selectedElementKey);
     transformerRef.current?.nodes(node ? [node] : []);
     transformerRef.current?.getLayer()?.batchDraw();
-  }, [canDrag, elements, selectedElementKey]);
+  }, [canDrag, elements, selectedElementKey, selectedElementLocked]);
 
   useEffect(() => {
     if (!draggingField || !onDropDraggingField) return;
@@ -871,7 +949,7 @@ function LabelTemplatePreview({
 
   const handleMoveElement = (elementKey: string, xMm: number, yMm: number, event?: { altKey?: boolean }) => {
     const element = elements.find((item) => item.elementKey === elementKey);
-    if (!element) return;
+    if (!element || isLabelElementLocked(element)) return;
     const maxX = Math.max(0, safeWidth - Number(element.widthMm ?? 0));
     const maxY = Math.max(0, safeHeight - Number(element.heightMm ?? 0));
     const nextX = clamp(applySnap(xMm, event), 0, maxX);
@@ -884,6 +962,7 @@ function LabelTemplatePreview({
     node: Konva.Node,
     event: Konva.KonvaEventObject<Event>,
   ) => {
+    if (isLabelElementLocked(element)) return;
     const rotationStep = (event.evt as MouseEvent | KeyboardEvent | PointerEvent | undefined)?.shiftKey ? 15 : 1;
     const nextRotation = Math.round(Number(node.rotation() ?? 0) / rotationStep) * rotationStep;
     const nextSize = normalizeTransformedNode(element, node);
@@ -905,7 +984,7 @@ function LabelTemplatePreview({
     node: Konva.Node,
     event: Konva.KonvaEventObject<Event>,
   ) => {
-    if (element.kind === 'line') return;
+    if (element.kind === 'line' || isLabelElementLocked(element)) return;
     const nextSize = normalizeTransformedNode(element, node);
     patchGeometry(
       element.elementKey,
@@ -920,9 +999,19 @@ function LabelTemplatePreview({
     );
   };
 
+  const toggleElementLock = (element: LabelTemplateElement, locked: boolean) => {
+    onChangeElement?.(element.elementKey, {
+      style: {
+        ...(element.style ?? {}),
+        locked,
+      },
+    });
+    setContextMenu(null);
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!canDrag || !selectedElement) return;
-    if (event.key === 'Delete' || event.key === 'Backspace') {
+    if ((event.key === 'Delete' || event.key === 'Backspace') && !isLabelElementLocked(selectedElement)) {
       event.preventDefault();
       onDeleteElement?.(selectedElement.elementKey);
       return;
@@ -971,6 +1060,20 @@ function LabelTemplatePreview({
       field: draggingField,
       xMm: clamp(point.x, 0, safeWidth - 1),
       yMm: clamp(point.y, 0, safeHeight - 1),
+    });
+  };
+  const openContextMenuAt = (point: { x: number; y: number }) => {
+    if (!canDrag) return;
+    const element = findTopLabelElementAtPoint(sorted, point.x, point.y);
+    if (!element) {
+      setContextMenu(null);
+      return;
+    }
+    onSelectElement?.(element.elementKey);
+    setContextMenu({
+      element,
+      x: (point.x / safeWidth) * previewWidth,
+      y: (point.y / safeHeight) * previewHeight,
     });
   };
   return (
@@ -1030,6 +1133,15 @@ function LabelTemplatePreview({
         onDrop={handleDrop}
         onMouseMove={(event) => updateDragPreview(event)}
         onMouseUp={handleWrapperMouseUp}
+        onMouseDown={(event) => {
+          if (event.button !== 2) return;
+          event.preventDefault();
+          openContextMenuAt(pointFromEvent(event));
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          openContextMenuAt(pointFromEvent(event));
+        }}
         onKeyDown={handleKeyDown}
       >
         <Stage
@@ -1038,6 +1150,27 @@ function LabelTemplatePreview({
           height={previewHeight}
           scaleX={previewWidth / safeWidth}
           scaleY={previewHeight / safeHeight}
+          onMouseDown={(event) => {
+            if (event.evt.button !== 2) return;
+            event.evt.preventDefault();
+            const pointer = event.target.getStage()?.getPointerPosition();
+            if (pointer) {
+              openContextMenuAt({
+                x: (pointer.x / previewWidth) * safeWidth,
+                y: (pointer.y / previewHeight) * safeHeight,
+              });
+            }
+          }}
+          onContextMenu={(event) => {
+            event.evt.preventDefault();
+            const pointer = event.target.getStage()?.getPointerPosition();
+            if (pointer) {
+              openContextMenuAt({
+                x: (pointer.x / previewWidth) * safeWidth,
+                y: (pointer.y / previewHeight) * safeHeight,
+              });
+            }
+          }}
           onWheel={(event) => {
             if (!canDrag || !event.evt.ctrlKey) return;
             event.evt.preventDefault();
@@ -1053,7 +1186,7 @@ function LabelTemplatePreview({
                 element,
                 fieldLabels,
                 selected: selectedElementKey === element.elementKey,
-                draggable: Boolean(canDrag),
+                draggable: Boolean(canDrag && !isLabelElementLocked(element)),
                 safeWidth,
                 safeHeight,
                 onSelectElement,
@@ -1073,6 +1206,17 @@ function LabelTemplatePreview({
                   });
                 },
                 onLeaveElement: () => setHoveredElement(null),
+                onContextMenu: (menuElement, event) => {
+                  if (!canDrag) return;
+                  event.evt.preventDefault();
+                  const pointer = event.target.getStage()?.getPointerPosition();
+                  onSelectElement?.(menuElement.elementKey);
+                  setContextMenu({
+                    element: menuElement,
+                    x: pointer?.x ?? 0,
+                    y: pointer?.y ?? 0,
+                  });
+                },
               }),
             )}
             {dragPreview && (
@@ -1114,6 +1258,56 @@ function LabelTemplatePreview({
             )}
           </Layer>
         </Stage>
+        {contextMenu && (
+          <div
+            data-label-context-menu
+            style={{
+              position: 'absolute',
+              left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 170)),
+              top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 130)),
+              zIndex: 3,
+              minWidth: 160,
+              padding: 4,
+              background: '#fff',
+              border: '1px solid #d9d9d9',
+              borderRadius: 4,
+              boxShadow: '0 6px 16px rgba(0, 0, 0, 0.16)',
+            }}
+            onMouseLeave={() => setContextMenu(null)}
+          >
+            <Button
+              type="text"
+              size="small"
+              block
+              onClick={() => toggleElementLock(contextMenu.element, !isLabelElementLocked(contextMenu.element))}
+            >
+              {isLabelElementLocked(contextMenu.element) ? 'Разблокировать' : 'Заблокировать'}
+            </Button>
+            <Button
+              type="text"
+              size="small"
+              block
+              onClick={() => {
+                onDuplicateElement?.(contextMenu.element.elementKey);
+                setContextMenu(null);
+              }}
+            >
+              Сделать копию
+            </Button>
+            <Button
+              danger
+              type="text"
+              size="small"
+              block
+              onClick={() => {
+                onDeleteElement?.(contextMenu.element.elementKey);
+                setContextMenu(null);
+              }}
+            >
+              Удалить
+            </Button>
+          </div>
+        )}
         {hoveredElement && (
           <div
             style={{
@@ -1141,12 +1335,14 @@ function LabelTemplatePreview({
 
 function FieldPalette({
   fields,
+  usedFieldIds,
   disabled,
   search,
   onSearch,
   onBeginDrag,
 }: {
   fields: LabelFieldCatalogItem[];
+  usedFieldIds?: Set<string>;
   disabled?: boolean;
   search: string;
   onSearch: (value: string) => void;
@@ -1167,40 +1363,25 @@ function FieldPalette({
             <div key={category}>
               <Text type="secondary">{category}</Text>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-                {categoryFields.map((field) => (
-                  <Tag
-                    key={field.id}
-                    draggable={!disabled}
-                    onDragStart={(event) => {
-                      if (!disabled) onBeginDrag?.(field);
-                      event.dataTransfer.setData('application/x-label-field', field.id);
-                      event.dataTransfer.setData('text/plain', field.id);
-                      event.dataTransfer.effectAllowed = 'copy';
-                    }}
-                    onMouseDown={(event) => {
-                      if (disabled) return;
-                      event.preventDefault();
-                      onBeginDrag?.(field);
-                    }}
-                    onMouseDownCapture={(event) => {
-                      if (disabled) return;
-                      event.preventDefault();
-                      onBeginDrag?.(field);
-                    }}
-                    onPointerDown={(event) => {
-                      if (disabled) return;
-                      event.preventDefault();
-                      onBeginDrag?.(field);
-                    }}
-                    onPointerDownCapture={(event) => {
-                      if (disabled) return;
-                      event.preventDefault();
-                      onBeginDrag?.(field);
-                    }}
-                    style={{ cursor: disabled ? 'default' : 'grab', userSelect: 'none' }}
-                  >
-                    <span
+                {categoryFields.map((field) => {
+                  const used = usedFieldIds?.has(field.id) ?? false;
+                  return (
+                    <Tag
+                      key={field.id}
+                      color={used ? 'processing' : undefined}
+                      draggable={!disabled}
+                      onDragStart={(event) => {
+                        if (!disabled) onBeginDrag?.(field);
+                        event.dataTransfer.setData('application/x-label-field', field.id);
+                        event.dataTransfer.setData('text/plain', field.id);
+                        event.dataTransfer.effectAllowed = 'copy';
+                      }}
                       onMouseDown={(event) => {
+                        if (disabled) return;
+                        event.preventDefault();
+                        onBeginDrag?.(field);
+                      }}
+                      onMouseDownCapture={(event) => {
                         if (disabled) return;
                         event.preventDefault();
                         onBeginDrag?.(field);
@@ -1210,12 +1391,35 @@ function FieldPalette({
                         event.preventDefault();
                         onBeginDrag?.(field);
                       }}
-                      style={{ display: 'inline-block' }}
+                      onPointerDownCapture={(event) => {
+                        if (disabled) return;
+                        event.preventDefault();
+                        onBeginDrag?.(field);
+                      }}
+                      style={{
+                        cursor: disabled ? 'default' : 'grab',
+                        userSelect: 'none',
+                        fontWeight: used ? 600 : 400,
+                      }}
                     >
-                      {field.label}
-                    </span>
-                  </Tag>
-                ))}
+                      <span
+                        onMouseDown={(event) => {
+                          if (disabled) return;
+                          event.preventDefault();
+                          onBeginDrag?.(field);
+                        }}
+                        onPointerDown={(event) => {
+                          if (disabled) return;
+                          event.preventDefault();
+                          onBeginDrag?.(field);
+                        }}
+                        style={{ display: 'inline-block' }}
+                      >
+                        {field.label}
+                      </span>
+                    </Tag>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -1253,6 +1457,7 @@ function renderKonvaPreviewElement({
   onTransformEnd,
   onHoverElement,
   onLeaveElement,
+  onContextMenu,
 }: {
   element: LabelTemplateElement;
   fieldLabels: Map<string, string>;
@@ -1267,6 +1472,7 @@ function renderKonvaPreviewElement({
   onTransformEnd?: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
   onHoverElement?: (element: LabelTemplateElement, event: Konva.KonvaEventObject<MouseEvent>) => void;
   onLeaveElement?: () => void;
+  onContextMenu?: (element: LabelTemplateElement, event: Konva.KonvaEventObject<MouseEvent>) => void;
 }) {
   const x = Number(element.xMm ?? 0);
   const y = Number(element.yMm ?? 0);
@@ -1289,10 +1495,16 @@ function renderKonvaPreviewElement({
     draggable,
     onClick: select,
     onTap: select,
+    onMouseDown: (event: Konva.KonvaEventObject<MouseEvent>) => {
+      if (event.evt.button !== 2) return;
+      event.evt.preventDefault();
+      onContextMenu?.(element, event);
+    },
     onDragStart: select,
     onDragEnd: dragEnd,
     onTransform: (event: Konva.KonvaEventObject<Event>) => onTransform?.(event.target, event),
     onTransformEnd: (event: Konva.KonvaEventObject<Event>) => onTransformEnd?.(event.target, event),
+    onContextMenu: (event: Konva.KonvaEventObject<MouseEvent>) => onContextMenu?.(element, event),
     onMouseEnter: (event: Konva.KonvaEventObject<MouseEvent>) => {
       event.target.getStage()?.container().style.setProperty('cursor', draggable ? 'move' : 'default');
       onHoverElement?.(element, event);
@@ -1395,6 +1607,27 @@ function describeLabelElement(
     );
   }
   return `Статический текст: ${element.staticText || 'пусто'}`;
+}
+
+function isLabelElementLocked(element: LabelTemplateElement): boolean {
+  return Boolean((element.style as Record<string, unknown> | undefined)?.locked);
+}
+
+function findTopLabelElementAtPoint(
+  elements: LabelTemplateElement[],
+  xMm: number,
+  yMm: number,
+): LabelTemplateElement | null {
+  for (const element of elements.slice().reverse()) {
+    const x = Number(element.xMm ?? 0);
+    const y = Number(element.yMm ?? 0);
+    const width = Math.max(1, Number(element.widthMm ?? 0));
+    const height = Math.max(element.kind === 'line' ? 1 : 2, Number(element.heightMm ?? 0));
+    if (xMm >= x && xMm <= x + width && yMm >= y && yMm <= y + height) {
+      return element;
+    }
+  }
+  return null;
 }
 
 function normalizeTransformedNode(

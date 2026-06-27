@@ -111,7 +111,12 @@ describe('LabelsConfigTab wiring', () => {
 
   it('keeps template dimensions, resolution and formats on one settings row', () => {
     expect(tabSrc).toMatch(/<Row gutter=\{8\} align="top" wrap=\{false\}>/);
-    expect(tabSrc).toMatch(/name="canvasWidthMm" label="Ширина"[\s\S]*name="canvasHeightMm" label="Высота"[\s\S]*name="dpi" label="Разрешение"[\s\S]*name="defaultExportFormats" label="Форматы"/);
+    expect(tabSrc).toMatch(/name="canvasWidthMm" label=\{<span style=\{\{ fontSize: 11 \}\}>Ширина<\/span>\}/);
+    expect(tabSrc).toMatch(/name="canvasHeightMm" label=\{<span style=\{\{ fontSize: 11 \}\}>Высота<\/span>\}/);
+    expect(tabSrc).toMatch(/name="dpi" label=\{<span style=\{\{ fontSize: 11 \}\}>Разрешение<\/span>\}/);
+    expect(tabSrc).toMatch(/name="defaultExportFormats" label=\{<span style=\{\{ fontSize: 11 \}\}>Форматы<\/span>\}/);
+    expect(tabSrc).toMatch(/<Col flex="47px">[\s\S]*name="canvasWidthMm"/);
+    expect(tabSrc).toMatch(/<Col flex="67px">[\s\S]*name="dpi"/);
   });
 
   it('shows a hover tooltip that identifies the label element field', () => {
@@ -130,8 +135,22 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/onDropField/);
     expect(tabSrc).toMatch(/addFieldElement/);
     expect(tabSrc).toMatch(/dragPreview/);
+    expect(tabSrc).toMatch(/dragCursor/);
+    expect(tabSrc).toMatch(/data-label-global-drag-preview/);
     expect(tabSrc).toMatch(/updateDragPreview/);
     expect(tabSrc).toMatch(/text=\{dragPreview\.field\.label\}/);
+  });
+
+  it('highlights fields already placed on the label and supports element context actions', () => {
+    expect(tabSrc).toMatch(/usedFieldIds/);
+    expect(tabSrc).toMatch(/color=\{used \? 'processing' : undefined\}/);
+    expect(tabSrc).toMatch(/isLabelElementLocked/);
+    expect(tabSrc).toMatch(/Заблокировать/);
+    expect(tabSrc).toMatch(/Разблокировать/);
+    expect(tabSrc).toMatch(/Сделать копию/);
+    expect(tabSrc).toMatch(/duplicateElementByKey/);
+    expect(tabSrc).toMatch(/onContextMenu/);
+    expect(tabSrc).toMatch(/data-label-context-menu/);
   });
 
   it('strips read-only element ids before create or update payloads', () => {
