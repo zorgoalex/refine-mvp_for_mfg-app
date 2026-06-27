@@ -1723,7 +1723,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         }}
         rowSelection={rowSelection}
         showSorterTooltip={false}
-        pagination={{
+        pagination={groupingActive ? false : {
           pageSize: pageSize,
           showSizeChanger: true,
           showTotal: (total) => `Всего: ${total} позиций`,
