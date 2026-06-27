@@ -710,30 +710,69 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     };
   }
 
-  it('Combine 1: setCombineFilms false→true persists, bumps version, writes one audit + one outbox; replay is idempotent', async () => {
+  it('Combine 1: setCombineFilms false→true persists + audits + outbox; stale replay 409, same-requestId duplicate hits outbox ON CONFLICT; unchanged value is a no-op', async () => {
     const repo = new PgCutRepository(database, makeEchoFreecut());
     const job = await makeJobWithDetails(repo, [100, 101], 'Тест combine set', 'c1-create');
     expect(job.combineFilms).toBe(false);
+    const beforeVersion = job.version;
 
-    const updated = await repo.setCombineFilms({ currentUser: currentUser(), cutJobId: job.cutJobId, combineFilms: true, version: job.version, requestId: 'c1-set' });
+    const updated = await repo.setCombineFilms({ currentUser: currentUser(), cutJobId: job.cutJobId, combineFilms: true, version: beforeVersion, requestId: 'c1-set' });
     expect(updated.combineFilms).toBe(true);
-    expect(updated.version).toBe(job.version + 1);
+    expect(updated.version).toBe(beforeVersion + 1);
 
-    const dbRow = await pool.query(`SELECT combine_films, version FROM cut_job WHERE cut_job_id = $1`, [job.cutJobId]);
+    const dbRow = await pool.query(`SELECT combine_films FROM cut_job WHERE cut_job_id = $1`, [job.cutJobId]);
     expect(dbRow.rows[0].combine_films).toBe(true);
 
+    const expectedKey = `${CUT_AUDIT_EVENTS.combineFilmsChanged}:${job.cutJobId}:c1-set`;
     const audit = await pool.query(`SELECT count(*)::int AS n FROM audit_log WHERE event = $1`, [CUT_AUDIT_EVENTS.combineFilmsChanged]);
     expect(audit.rows[0].n).toBe(1);
-    const outbox = await pool.query(`SELECT count(*)::int AS n FROM outbox_events WHERE event_type = $1`, [CUT_AUDIT_EVENTS.combineFilmsChanged]);
-    expect(outbox.rows[0].n).toBe(1);
+    const outbox = await pool.query(`SELECT idempotency_key FROM outbox_events WHERE event_type = $1`, [CUT_AUDIT_EVENTS.combineFilmsChanged]);
+    expect(outbox.rows).toHaveLength(1);
+    expect(String(outbox.rows[0].idempotency_key)).toBe(expectedKey);
 
-    // Replay the SAME requestId at the now-current version → another change back
-    // is a real toggle, but a same-key duplicate must not double the outbox row.
-    // Here we toggle true→true (no-op): no version bump, no audit, no outbox.
-    const noop = await repo.setCombineFilms({ currentUser: currentUser(), cutJobId: job.cutJobId, combineFilms: true, version: updated.version, requestId: 'c1-set-2' });
-    expect(noop.version).toBe(updated.version);
-    const outbox2 = await pool.query(`SELECT count(*)::int AS n FROM outbox_events WHERE event_type = $1`, [CUT_AUDIT_EVENTS.combineFilmsChanged]);
-    expect(outbox2.rows[0].n).toBe(1);
+    // First-line dedupe: a literal retry of the SAME (requestId, version) hits the
+    // optimistic version guard — the first call already bumped, so 409 before any write.
+    await expect(
+      repo.setCombineFilms({ currentUser: currentUser(), cutJobId: job.cutJobId, combineFilms: true, version: beforeVersion, requestId: 'c1-set' }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_STALE_VERSION' });
+
+    // Second-line dedupe (outbox ON CONFLICT): a duplicate that DOES pass the version
+    // guard and IS a real change (true→false) but reuses the SAME requestId collides
+    // on the requestId-derived key -> ON CONFLICT DO NOTHING. No second row for that key.
+    const replay = await repo.setCombineFilms({ currentUser: currentUser(), cutJobId: job.cutJobId, combineFilms: false, version: updated.version, requestId: 'c1-set' });
+    expect(replay.combineFilms).toBe(false);
+    const outboxAfterReplay = await pool.query(`SELECT count(*)::int AS n FROM outbox_events WHERE idempotency_key = $1`, [expectedKey]);
+    expect(outboxAfterReplay.rows[0].n).toBe(1);
+
+    // No-op short-circuit: setting the current value (false→false) bumps nothing.
+    const noop = await repo.setCombineFilms({ currentUser: currentUser(), cutJobId: job.cutJobId, combineFilms: false, version: replay.version, requestId: 'c1-noop' });
+    expect(noop.version).toBe(replay.version);
+    const auditAfterNoop = await pool.query(`SELECT count(*)::int AS n FROM audit_log WHERE event = $1`, [CUT_AUDIT_EVENTS.combineFilmsChanged]);
+    expect(auditAfterNoop.rows[0].n).toBe(2); // the false→true and the true→false changes only
+  });
+
+  it('Combine 5: toggling combine_films re-cuts (request_hash folds the flag) even when the resolved groups are physically identical', async () => {
+    // Details 1 & 4 share sheet type 1 and have NO film (film_id NULL), so OFF and
+    // ON produce the SAME single group with film_id NULL — identical item set. Only
+    // the folded combineFilms flag distinguishes the two request hashes.
+    const repo = new PgCutRepository(database, makeEchoFreecut());
+    const job = await makeJobWithDetails(repo, [1, 4], 'Тест combine rehash', 'c5-create');
+
+    const readyOff = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'c5-off' });
+    expect(readyOff.status).toBe('ready');
+    const h1 = (await pool.query(`SELECT request_hash FROM cut_job WHERE cut_job_id = $1`, [job.cutJobId])).rows[0].request_hash as string;
+    expect(h1).toBeTruthy();
+
+    const set = await repo.setCombineFilms({ currentUser: currentUser(), cutJobId: job.cutJobId, combineFilms: true, version: readyOff.version, requestId: 'c5-set' });
+    const readyOn = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: set.version, requestId: 'c5-on' });
+    expect(readyOn.status).toBe('ready');
+    const h2 = (await pool.query(`SELECT request_hash FROM cut_job WHERE cut_job_id = $1`, [job.cutJobId])).rows[0].request_hash as string;
+
+    // The fold guarantees the toggle changes the hash → re-cut is NOT suppressed.
+    expect(h2).not.toBe(h1);
+    // Both calculate runs emitted their own calculated outbox row (distinct requestIds).
+    const calcOutbox = await pool.query(`SELECT count(*)::int AS n FROM outbox_events WHERE event_type = $1`, [CUT_AUDIT_EVENTS.calculated]);
+    expect(calcOutbox.rows[0].n).toBe(2);
   });
 
   it('Combine 2: calculate OFF (default) groups a 2-film same-material job by film → 2 groups', async () => {

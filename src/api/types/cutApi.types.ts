@@ -100,7 +100,8 @@ export interface CutJobTotals {
   details: number;
   area: number;
   sheets: number;
-  /** distinct non-null sheet materials among the job's details */
+  /** resolved sheet materials (override-aware): a per-job sheet override → 1,
+   *  else distinct non-null per-detail sheet materials */
   materialsCount: number;
   /** distinct non-null films among the job's details */
   filmsCount: number;

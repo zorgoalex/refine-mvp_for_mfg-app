@@ -135,9 +135,11 @@ function jobDto(overrides: Partial<CutJobDto> = {}): CutJobDto {
     paramProfileId: null,
     sheetMaterialTypeId: null,
     combineFilms: false,
-    totals: { positions: 0, details: 0, area: 0, sheets: 0 },
+    failureCode: null,
+    failureReason: null,
+    totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },
     items: [],
     groups: [],
     ...overrides,
-  };
+  } satisfies CutJobDto;
 }
