@@ -1046,6 +1046,8 @@ export const CutPage: React.FC = () => {
                       </div>
                     );
                   })()}
+                </div>
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
                   <div>
                     <Tooltip title="разные материалы кроятся отдельными группами; выключите, чтобы раскроить все детали вместе в одной группе; применится после команды «Повторить расчёт»">
                       <Checkbox
