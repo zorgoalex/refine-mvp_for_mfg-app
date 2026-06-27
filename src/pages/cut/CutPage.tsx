@@ -1047,28 +1047,26 @@ export const CutPage: React.FC = () => {
                     );
                   })()}
                   <div>
-                    <Checkbox
-                      checked={job.splitByMaterial}
-                      onChange={(e) => void setJobSplitByMaterial(e.target.checked)}
-                      disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
-                    >
-                      Разделять по материалу
-                    </Checkbox>
-                    <div style={{ marginTop: 4, color: '#8c8c8c', maxWidth: 260, fontSize: 12 }}>
-                      разные материалы кроятся отдельными группами; выключите, чтобы раскроить все детали вместе в одной группе; применится после команды «Повторить расчёт»
-                    </div>
+                    <Tooltip title="разные материалы кроятся отдельными группами; выключите, чтобы раскроить все детали вместе в одной группе; применится после команды «Повторить расчёт»">
+                      <Checkbox
+                        checked={job.splitByMaterial}
+                        onChange={(e) => void setJobSplitByMaterial(e.target.checked)}
+                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                      >
+                        Разделять по материалу
+                      </Checkbox>
+                    </Tooltip>
                   </div>
                   <div>
-                    <Checkbox
-                      checked={job.combineFilms}
-                      onChange={(e) => void setJobCombineFilms(e.target.checked)}
-                      disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
-                    >
-                      Объединить разные плёнки
-                    </Checkbox>
-                    <div style={{ marginTop: 4, color: '#8c8c8c', maxWidth: 260, fontSize: 12 }}>
-                      детали одного материала с разными плёнками кроятся вместе; применится после команды «Повторить расчёт»
-                    </div>
+                    <Tooltip title="детали одного материала с разными плёнками кроятся вместе; применится после команды «Повторить расчёт»">
+                      <Checkbox
+                        checked={job.combineFilms}
+                        onChange={(e) => void setJobCombineFilms(e.target.checked)}
+                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                      >
+                        Объединить разные плёнки
+                      </Checkbox>
+                    </Tooltip>
                   </div>
                 </div>
               </>
