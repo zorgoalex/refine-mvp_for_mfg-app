@@ -71,28 +71,28 @@ export const OrderProductionBlock: React.FC<OrderProductionBlockProps> = ({
         }}
       >
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Фрезеровка
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {commonValues.millingTypeName}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Обкат
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {commonValues.edgeTypeName}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Плёнка
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {commonValues.filmName}
           </Text>
         </div>

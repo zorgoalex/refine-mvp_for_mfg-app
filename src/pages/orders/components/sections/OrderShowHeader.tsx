@@ -247,7 +247,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         marginBottom: 24,
         border: '1px solid #1890ff',
         borderRadius: 6,
-        background: '#FFFFFF',
+        background: 'var(--app-surface)',
         overflow: 'hidden',
       }}
     >
@@ -264,7 +264,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
       >
         {/* Column 1: Order name + Priority + Order status */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Text strong style={{ fontSize: 15, color: '#111827' }}>
+          <Text strong style={{ fontSize: 15, color: 'var(--app-text)' }}>
             {record?.order_name || 'Заказ'}
           </Text>
           <Space size={8}>
@@ -273,10 +273,10 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
                 style={{
                   fontSize: 14,
                   marginRight: 4,
-                  color: record?.priority && record.priority <= 50 ? '#D97706' : '#6B7280'
+                  color: record?.priority && record.priority <= 50 ? '#D97706' : 'var(--app-text-muted)'
                 }}
               />
-              <Text style={{ fontSize: 13, color: '#111827' }}>
+              <Text style={{ fontSize: 13, color: 'var(--app-text)' }}>
                 {record?.priority !== undefined ? formatNumber(record.priority, 0) : '—'}
               </Text>
             </span>
@@ -308,7 +308,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
                 strong
                 style={{
                   fontSize: 16,
-                  color: '#111827',
+                  color: 'var(--app-text)',
                   cursor: 'context-menu',
                 }}
               >
@@ -316,14 +316,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               </Text>
             </Dropdown>
           ) : (
-            <Text strong style={{ fontSize: 16, color: '#111827' }}>
+            <Text strong style={{ fontSize: 16, color: 'var(--app-text)' }}>
               {record?.client_name || '—'}
             </Text>
           )}
           {primaryPhone && (
             <>
-              <span style={{ margin: '0 16px', color: '#E5E7EB' }}>|</span>
-              <Text style={{ fontSize: 12.8, fontStyle: 'italic', color: '#111827' }}>
+              <span style={{ margin: '0 16px', color: 'var(--app-border)' }}>|</span>
+              <Text style={{ fontSize: 12.8, fontStyle: 'italic', color: 'var(--app-text)' }}>
                 <span style={{ fontVariant: 'small-caps' }}>Тел.:</span> {primaryPhone}
               </Text>
             </>
@@ -362,7 +362,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
       >
         {/* Column 1: Dates + Production Stages */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Text style={{ fontSize: 13, color: '#111827' }}>
+          <Text style={{ fontSize: 13, color: 'var(--app-text)' }}>
             {record?.order_date ? dayjs(record.order_date).format('DD.MM.YYYY') : '—'}
             {' → '}
             {record?.planned_completion_date ? dayjs(record.planned_completion_date).format('DD.MM.YYYY') : '—'}
@@ -370,7 +370,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           {/* Production stages display */}
           {passedProductionCodes.length > 0 && (
             <>
-              <span style={{ color: '#E5E7EB' }}>|</span>
+              <span style={{ color: 'var(--app-border)' }}>|</span>
               <ProductionStagesDisplay
                 passedCodes={passedProductionCodes}
                 displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
@@ -389,7 +389,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           <Text
             style={{
               fontSize: 13,
-              color: '#6B7280',
+              color: 'var(--app-text-muted)',
               display: 'block',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -418,7 +418,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               const discountPercent = totalAmount > 0 ? (discount / totalAmount) * 100 : 0;
               items.push(
                 <span key="discount" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', fontWeight: 400, letterSpacing: '0.5px', fontVariant: 'small-caps' }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: 'var(--app-text)', fontWeight: 400, letterSpacing: '0.5px', fontVariant: 'small-caps' }}>
                     Скидка {formatNumber(discountPercent, 1)}%:
                   </Text>
                   <Text style={{ fontSize: 12, fontStyle: 'italic', color: '#cf1322', fontWeight: 600 }}>
@@ -454,7 +454,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             if (paidAmount > 0) {
               items.push(
                 <span key="paid" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', letterSpacing: '0.5px', fontVariant: 'small-caps' }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: 'var(--app-text)', letterSpacing: '0.5px', fontVariant: 'small-caps' }}>
                     Оплачено:
                   </Text>
                   <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#52c41a' }}>
@@ -468,7 +468,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             if (remainingAmount > 0) {
               items.push(
                 <span key="remaining" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: '#111827', letterSpacing: '0.5px', fontVariant: 'small-caps' }}>
+                  <Text style={{ fontSize: 9.9, fontStyle: 'italic', color: 'var(--app-text)', letterSpacing: '0.5px', fontVariant: 'small-caps' }}>
                     Остаток оплаты:
                   </Text>
                   <Text strong style={{ fontSize: 12, fontStyle: 'italic', color: '#D97706' }}>
@@ -481,7 +481,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             // Добавляем разделители между элементами
             return items.map((item, index) => (
               <React.Fragment key={index}>
-                {index > 0 && <span style={{ color: '#E5E7EB', margin: '0 4px' }}>|</span>}
+                {index > 0 && <span style={{ color: 'var(--app-border)', margin: '0 4px' }}>|</span>}
                 {item}
               </React.Fragment>
             ));
@@ -498,59 +498,59 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           alignItems: 'center',
           padding: '6px 16px',
           gap: 16,
-          background: '#FAFBFC',
+          background: 'var(--app-surface-muted)',
         }}
       >
         {/* Doweling Order (Присадка) - показываем последнюю из many-to-many */}
         {latestDowelingLink && (
           <>
-            <Text style={{ fontSize: 12, color: '#6B7280' }}>
+            <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
               Присадка: <Text strong style={{ color: '#DC2626' }}>
                 {latestDowelingLink.doweling_order?.doweling_order_name || '—'}
               </Text>
               {latestDowelingLink.doweling_order?.design_engineer_id && (
-                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#6B7280' }}>
-                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#111827' }}>
+                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text-muted)' }}>
+                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text)' }}>
                     {employeesMap.get(latestDowelingLink.doweling_order.design_engineer_id) || '—'}
                   </Text>
                 </span>
               )}
               {dowelingLinks.length > 1 && (
-                <span style={{ marginLeft: 4, color: '#6B7280' }}>
+                <span style={{ marginLeft: 4, color: 'var(--app-text-muted)' }}>
                   +{dowelingLinks.length - 1}
                 </span>
               )}
             </Text>
-            <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+            <div style={{ width: 1, height: 12, background: 'var(--app-border)' }} />
           </>
         )}
         {/* Fallback для обратной совместимости (из orders_view) */}
         {!latestDowelingLink && record?.doweling_order_name && (
           <>
-            <Text style={{ fontSize: 12, color: '#6B7280' }}>
+            <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
               Присадка: <Text strong style={{ color: '#DC2626' }}>{record.doweling_order_name}</Text>
               {record?.design_engineer && (
-                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#6B7280' }}>
-                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: '#111827' }}>{record.design_engineer}</Text>
+                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text-muted)' }}>
+                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text)' }}>{record.design_engineer}</Text>
                 </span>
               )}
             </Text>
-            <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+            <div style={{ width: 1, height: 12, background: 'var(--app-border)' }} />
           </>
         )}
 
         {/* Materials */}
         <div style={{ flex: 1 }}>
-          <Text style={{ fontSize: 12, color: '#6B7280' }}>Материал: </Text>
+          <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>Материал: </Text>
           {resolvedMaterialNames.length === 0 ? (
-            <Text style={{ fontSize: 12, color: '#6B7280' }}>—</Text>
+            <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>—</Text>
           ) : (
             resolvedMaterialNames.map((materialName, index) => {
               const color = getMaterialColor(materialName);
 
               return (
                 <React.Fragment key={`${materialName}-${index}`}>
-                  {index > 0 && <Text style={{ fontSize: 12, color: '#6B7280' }}>, </Text>}
+                  {index > 0 && <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>, </Text>}
                   <Text strong style={{ fontSize: 12, color }}>
                     {materialName}
                   </Text>
@@ -560,8 +560,8 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           )}
           {basisProjects.length > 0 && (
             <span style={{ marginLeft: 12 }}>
-              <Text style={{ fontSize: 12, color: '#6B7280' }}>Базис-проект: </Text>
-              <Text strong style={{ fontSize: 12, color: '#111827' }}>
+              <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>Базис-проект: </Text>
+              <Text strong style={{ fontSize: 12, color: 'var(--app-text)' }}>
                 {basisProjects.join(', ')}
               </Text>
             </span>
@@ -569,17 +569,17 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         </div>
 
         {/* Separator */}
-        <div style={{ width: 1, height: 12, background: '#E5E7EB' }} />
+        <div style={{ width: 1, height: 12, background: 'var(--app-border)' }} />
 
         {/* Production metrics */}
         <Space size={16}>
-          <Text style={{ fontSize: 12, color: '#111827' }}>
+          <Text style={{ fontSize: 12, color: 'var(--app-text)' }}>
             Позиций: <Text strong>{formatNumber(totals.positions_count, 0)}</Text>
           </Text>
-          <Text style={{ fontSize: 12, color: '#111827' }}>
+          <Text style={{ fontSize: 12, color: 'var(--app-text)' }}>
             Деталей: <Text strong>{formatNumber(totals.parts_count, 0)}</Text>
           </Text>
-          <Text style={{ fontSize: 12, color: '#111827' }}>
+          <Text style={{ fontSize: 12, color: 'var(--app-text)' }}>
             Площадь: <Text strong>{formatNumber(totals.total_area, 2)} м²</Text>
           </Text>
         </Space>

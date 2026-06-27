@@ -236,9 +236,9 @@ export const OrderFinanceSection: React.FC = () => {
     <div
       style={{
         padding: '12px 16px',
-        border: '1px solid #d9d9d9',
+        border: '1px solid var(--app-border)',
         borderRadius: '6px',
-        background: '#fafafa',
+        background: 'var(--app-surface-muted)',
       }}
     >
       <Form layout="vertical" size="small">
@@ -256,7 +256,7 @@ export const OrderFinanceSection: React.FC = () => {
                 precision={2}
                 formatter={(v) => formatNumber(v, 2)}
                 parser={numberParser}
-                style={{ width: '100%', background: '#f5f5f5' }}
+                style={{ width: '100%', background: 'var(--app-surface-muted)' }}
               />
             </Form.Item>
           </Col>
@@ -270,8 +270,8 @@ export const OrderFinanceSection: React.FC = () => {
                     fontSize: 11,
                     fontWeight: (header.discount || 0) > 0 && adjustmentMode === 'discount' ? 600 : 400,
                     color: adjustmentMode === 'discount'
-                      ? ((header.discount || 0) > 0 ? '#cf1322' : '#111827')  // красный если скидка > 0, иначе чёрный
-                      : '#8c8c8c'  // неактивный серый
+                      ? ((header.discount || 0) > 0 ? '#cf1322' : 'var(--app-text)')  // красный если скидка > 0, иначе чёрный
+                      : 'var(--app-text-muted)'  // неактивный серый
                   }}>
                     Скидка{adjustmentMode === 'discount' && adjustmentPercent > 0 ? ` ${adjustmentPercent.toFixed(1)}%` : ''}
                   </span>
@@ -285,8 +285,8 @@ export const OrderFinanceSection: React.FC = () => {
                     fontSize: 11,
                     fontWeight: (header.surcharge || 0) > 0 && adjustmentMode === 'surcharge' ? 600 : 400,
                     color: adjustmentMode === 'surcharge'
-                      ? ((header.surcharge || 0) > 0 ? '#fa8c16' : '#111827')  // ярко-оранжевый если наценка > 0, иначе чёрный
-                      : '#8c8c8c'  // неактивный серый
+                      ? ((header.surcharge || 0) > 0 ? '#fa8c16' : 'var(--app-text)')  // ярко-оранжевый если наценка > 0, иначе чёрный
+                      : 'var(--app-text-muted)'  // неактивный серый
                   }}>
                     Наценка{adjustmentMode === 'surcharge' && adjustmentPercent > 0 ? ` ${adjustmentPercent.toFixed(1)}%` : ''}
                   </span>
@@ -305,7 +305,7 @@ export const OrderFinanceSection: React.FC = () => {
                       onClick={togglePercentInput}
                       style={{
                         cursor: 'pointer',
-                        color: showPercentInput ? '#1890ff' : '#8c8c8c',
+                        color: showPercentInput ? '#1890ff' : 'var(--app-text-muted)',
                         fontSize: 9,
                         transform: showPercentInput ? 'rotate(180deg)' : 'rotate(0deg)',
                         transition: 'transform 0.3s ease'
@@ -315,7 +315,7 @@ export const OrderFinanceSection: React.FC = () => {
                       onClick={togglePercentInput}
                       style={{
                         cursor: 'pointer',
-                        color: showPercentInput ? '#1890ff' : '#8c8c8c',
+                        color: showPercentInput ? '#1890ff' : 'var(--app-text-muted)',
                         fontSize: 12
                       }}
                     />
@@ -376,7 +376,7 @@ export const OrderFinanceSection: React.FC = () => {
                 precision={2}
                 formatter={(v) => formatNumber(v, 2)}
                 parser={numberParser}
-                style={{ width: '100%', background: '#f5f5f5' }}
+                style={{ width: '100%', background: 'var(--app-surface-muted)' }}
               />
             </Form.Item>
           </Col>
@@ -414,7 +414,7 @@ export const OrderFinanceSection: React.FC = () => {
                   parser={numberParser}
                   style={{
                     width: '100%',
-                    background: remainingAmount > 0 ? '#fff2e8' : '#f6ffed',
+                    background: remainingAmount > 0 ? 'var(--app-warning-bg)' : 'var(--app-success-bg)',
                     color: remainingAmount > 0 ? '#d4380d' : '#389e0d',
                   }}
                 />

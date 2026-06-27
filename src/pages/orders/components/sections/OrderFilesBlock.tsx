@@ -14,7 +14,7 @@ interface OrderFilesBlockProps {
 
 export const OrderFilesBlock: React.FC<OrderFilesBlockProps> = ({ record, compact = false }) => {
   const renderLink = (url?: string | null, label?: string) => {
-    if (!url) return <Text style={{ fontSize: compact ? 12 : 13, color: '#8c8c8c' }}>—</Text>;
+    if (!url) return <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text-muted)' }}>—</Text>;
     
     return (
       <Link 
@@ -39,28 +39,28 @@ export const OrderFilesBlock: React.FC<OrderFilesBlockProps> = ({ record, compac
         }}
       >
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Файл раскроя
           </Text>
           {renderLink(record?.link_cutting_file)}
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Изображение раскроя
           </Text>
           {renderLink(record?.link_cutting_image_file)}
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             CAD файл
           </Text>
           {renderLink(record?.link_cad_file)}
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             PDF файл
           </Text>
           {renderLink(record?.link_pdf_file)}

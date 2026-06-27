@@ -385,7 +385,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 dropdownRender={(menu) => (
                   <>
                     {menu}
-                    <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px' }}>
+                    <div style={{ borderTop: '1px solid var(--app-border-soft)', padding: '8px' }}>
                       <Button
                         type="link"
                         icon={<PlusOutlined />}
@@ -412,7 +412,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 dropdownRender={(menu) => (
                   <>
                     {menu}
-                    <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px' }}>
+                    <div style={{ borderTop: '1px solid var(--app-border-soft)', padding: '8px' }}>
                       <Button
                         type="link"
                         icon={<PlusOutlined />}

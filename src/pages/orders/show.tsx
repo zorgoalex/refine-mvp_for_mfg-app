@@ -38,7 +38,7 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
   { key: 'projects', label: 'Проекты', color: '#722ed1' },
   { key: 'deadlines', label: 'Дедлайны', color: '#1677ff' },
   { key: 'finance', label: 'Финансы', color: '#faad14' },
-  { key: 'additional', label: 'Дополнительная информация', color: '#595959' },
+  { key: 'additional', label: 'Дополнительная информация', color: 'var(--app-text-muted)' },
 ];
 
 
@@ -645,7 +645,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 display: 'flex',
                 flexWrap: 'nowrap',
                 width: '100%',
-                borderBottom: '1px solid #d9d9d9',
+                borderBottom: '1px solid var(--app-border)',
                 overflow: 'hidden',
               }}
             >
@@ -665,11 +665,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       minWidth: 0,
                       height: 30,
                       padding: '4px 8px',
-                      border: '1px solid #d9d9d9',
-                      borderBottom: isActive ? '1px solid #fff' : '1px solid #d9d9d9',
+                      border: '1px solid var(--app-border)',
+                      borderBottom: isActive ? '1px solid var(--app-surface)' : '1px solid var(--app-border)',
                       borderRadius: '6px 6px 0 0',
-                      background: isActive ? '#fff' : '#fafafa',
-                      color: isActive ? tab.color : '#595959',
+                      background: isActive ? 'var(--app-surface)' : 'var(--app-surface-muted)',
+                      color: isActive ? tab.color : 'var(--app-text-muted)',
                       fontSize: 12,
                       fontWeight: 600,
                       cursor: 'pointer',
@@ -702,10 +702,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               <div
                 role="tabpanel"
                 style={{
-                  border: '1px solid #d9d9d9',
+                  border: '1px solid var(--app-border)',
                   borderTop: 'none',
                   padding: activeInfoPanel === 'additional' ? 8 : 12,
-                  background: '#fff',
+                  background: 'var(--app-surface)',
                 }}
               >
                 {activeInfoPanel === 'projects' && (
@@ -716,7 +716,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       initialProjects={record.projects ?? backendOrder?.projects ?? []}
                     />
                   ) : (
-                    <span style={{ color: '#8c8c8c', fontStyle: 'italic' }}>Проекты недоступны</span>
+                    <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>Проекты недоступны</span>
                   )
                 )}
 
@@ -757,7 +757,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
 
                       {/* Колонка 2 — Производство */}
-                      <div style={{ borderLeft: '1px solid #d9d9d9', paddingLeft: 12 }}>
+                      <div style={{ borderLeft: '1px solid var(--app-border)', paddingLeft: 12 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#fa8c16', marginBottom: 3 }}>
                           Производство
                         </div>
@@ -772,7 +772,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
 
                       {/* Колонка 3 — Присадки + Раскрой (вертикально, разделены горизонтально) */}
-                      <div style={{ borderLeft: '1px solid #d9d9d9', paddingLeft: 12 }}>
+                      <div style={{ borderLeft: '1px solid var(--app-border)', paddingLeft: 12 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#13c2c2', marginBottom: 3 }}>
                           Присадки
                         </div>
@@ -823,17 +823,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             ]}
                           />
                         ) : (
-                          <span style={{ color: '#8c8c8c', fontStyle: 'italic' }}>Нет связанных присадок</span>
+                          <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>Нет связанных присадок</span>
                         )}
 
                         {/* Раскрой — под присадками, горизонтальный разделитель */}
                         {cutColumnEnabled && (
-                          <div style={{ marginTop: 8, borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
+                          <div style={{ marginTop: 8, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
                             <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
                               Раскрой
                             </div>
                             {cutOrderJobs.length === 0 ? (
-                              <span style={{ fontSize: 12, color: '#8c8c8c' }}>—</span>
+                              <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>—</span>
                             ) : (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                                 {cutOrderJobs.map((j) => (
@@ -853,7 +853,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </div>
 
                     {/* Ниже — на всю ширину: Файлы, Бирки, Служебная информация */}
-                    <div style={{ marginTop: 12, borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
+                    <div style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
                       {/* Файлы */}
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#722ed1', marginBottom: 3 }}>
@@ -867,12 +867,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       )}
 
                       {/* Служебная информация — спойлер, по умолчанию свёрнут */}
-                      <details style={{ borderTop: '1px solid #d9d9d9', paddingTop: 8 }}>
+                      <details style={{ borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
                         <summary
                           style={{
                             fontSize: 12,
                             fontWeight: 600,
-                            color: '#8c8c8c',
+                            color: 'var(--app-text-muted)',
                             marginBottom: 3,
                             cursor: 'pointer',
                           }}
@@ -1097,7 +1097,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 const base = cutSelectMode ? 1 : 0;
                 return (
                   <Table.Summary fixed>
-                    <Table.Summary.Row style={{ backgroundColor: '#fafafa', fontWeight: 'bold' }}>
+                    <Table.Summary.Row style={{ backgroundColor: 'var(--app-surface-muted)', fontWeight: 'bold' }}>
                       {/* leading checkbox column (only while selecting for cut) */}
                       {cutSelectMode && <Table.Summary.Cell index={0} />}
                       {/* № - количество позиций */}

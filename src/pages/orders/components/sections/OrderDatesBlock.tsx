@@ -28,28 +28,28 @@ export const OrderDatesBlock: React.FC<OrderDatesBlockProps> = ({ record, compac
         }}
       >
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Дата завершения
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {formatDate(record?.completion_date)}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Дата выдачи
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {formatDate(record?.issue_date)}
           </Text>
         </div>
 
         <div>
-          <Text style={{ fontSize: compact ? 11 : 12, color: '#8c8c8c', display: 'block', marginBottom: compact ? 1 : 4 }}>
+          <Text style={{ fontSize: compact ? 11 : 12, color: 'var(--app-text-muted)', display: 'block', marginBottom: compact ? 1 : 4 }}>
             Дата оплаты
           </Text>
-          <Text style={{ fontSize: compact ? 12 : 13, color: '#262626' }}>
+          <Text style={{ fontSize: compact ? 12 : 13, color: 'var(--app-text)' }}>
             {formatDate(record?.payment_date)}
           </Text>
         </div>

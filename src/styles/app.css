@@ -11,6 +11,9 @@
   --app-highlight: #ffd666;
   --app-selection-bg: #e6f4ff;
   --app-selection-border: #1890ff;
+  --app-danger-bg: #fff2f0;
+  --app-warning-bg: #fff2e8;
+  --app-success-bg: #f6ffed;
   --app-shadow: rgba(0, 0, 0, 0.05);
   --app-workspace-gap: #f0f0f0;
 }
@@ -29,6 +32,9 @@
   --app-highlight: #5c3b00;
   --app-selection-bg: #102a43;
   --app-selection-border: #69b1ff;
+  --app-danger-bg: #3a1618;
+  --app-warning-bg: #3a2410;
+  --app-success-bg: #162b1b;
   --app-shadow: rgba(0, 0, 0, 0.35);
   --app-workspace-gap: #141414;
 }
@@ -216,6 +222,51 @@ body,
 
 .ant-table-tbody > tr:nth-child(odd):hover > td {
   background-color: var(--app-surface-muted) !important;
+}
+
+[data-theme="dark"] .ant-card,
+[data-theme="dark"] .ant-descriptions,
+[data-theme="dark"] .ant-table,
+[data-theme="dark"] .ant-table-container,
+[data-theme="dark"] .ant-table-content,
+[data-theme="dark"] .ant-table-thead > tr > th,
+[data-theme="dark"] .ant-table-tbody > tr > td,
+[data-theme="dark"] .ant-table-summary > tr > td,
+[data-theme="dark"] .ant-table-wrapper .ant-table-footer,
+[data-theme="dark"] .ant-tabs-content-holder,
+[data-theme="dark"] .ant-collapse,
+[data-theme="dark"] .ant-collapse-content {
+  background: var(--app-surface) !important;
+  color: var(--app-text) !important;
+  border-color: var(--app-border) !important;
+}
+
+[data-theme="dark"] .ant-table-summary > tr,
+[data-theme="dark"] .ant-table-summary > tr > td,
+[data-theme="dark"] .ant-table-tfoot > tr > td {
+  background: var(--app-surface-muted) !important;
+}
+
+[data-theme="dark"] .ant-table-cell-row-hover,
+[data-theme="dark"] .ant-table-row:hover > td {
+  background: var(--app-row-hover) !important;
+}
+
+[data-theme="dark"] .ant-tabs-tab,
+[data-theme="dark"] .ant-tabs-nav,
+[data-theme="dark"] .ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  background: var(--app-surface-muted) !important;
+  border-color: var(--app-border) !important;
+}
+
+[data-theme="dark"] .ant-tabs-tab-active,
+[data-theme="dark"] .ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+  background: var(--app-surface) !important;
+}
+
+[data-theme="dark"] [style*="background: var(--app-surface)"],
+[data-theme="dark"] [style*="backgroundColor: var(--app-surface)"] {
+  color: var(--app-text);
 }
 
 /* Компактные Collapse панели для формы просмотра заказа */

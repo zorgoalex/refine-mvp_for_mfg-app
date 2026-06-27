@@ -257,7 +257,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
       />
 
       {/* Apply to all checkbox */}
-      <div style={{ marginBottom: 16, padding: '8px 12px', backgroundColor: '#fafafa', borderRadius: 4 }}>
+      <div style={{ marginBottom: 16, padding: '8px 12px', backgroundColor: 'var(--app-surface-muted)', borderRadius: 4 }}>
         <Checkbox
           checked={applyToAll}
           onChange={(e) => setApplyToAll(e.target.checked)}
@@ -573,7 +573,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
 
       {/* Summary */}
       {enabledCount > 0 && (
-        <div style={{ marginTop: 12, padding: '8px 12px', backgroundColor: '#e6f7ff', borderRadius: 4 }}>
+        <div style={{ marginTop: 12, padding: '8px 12px', backgroundColor: 'var(--app-selection-bg)', borderRadius: 4 }}>
           <Text>
             Будет изменено полей: <Text strong>{enabledCount}</Text>
           </Text>

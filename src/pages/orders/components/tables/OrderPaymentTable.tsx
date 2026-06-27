@@ -465,10 +465,10 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
               ref: isHighlighted ? highlightedRowRef : undefined,
               style: {
                 backgroundColor: isCurrentlyEditing
-                  ? '#fffbe6' // Warm yellow for editing row
+                  ? 'var(--app-highlight)' // Warm yellow for editing row
                   : isHighlighted
-                  ? '#e6f7ff' // Light blue for highlighted row
-                  : (index! % 2 === 0 ? '#ffffff' : '#f5f5f5'),
+                  ? 'var(--app-selection-bg)' // Light blue for highlighted row
+                  : (index! % 2 === 0 ? 'var(--app-surface)' : 'var(--app-surface-muted)'),
                 boxShadow: isCurrentlyEditing ? '0 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
                 transform: isCurrentlyEditing ? 'scale(1.01)' : 'scale(1)',
                 position: isCurrentlyEditing ? 'relative' as const : 'relative' as const,

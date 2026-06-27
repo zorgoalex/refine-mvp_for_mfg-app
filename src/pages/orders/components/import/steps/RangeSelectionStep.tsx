@@ -175,9 +175,9 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
         left: 0,
         top: 0,
         zIndex: 3,
-        backgroundColor: '#fafafa',
-        borderRight: '1px solid #d9d9d9',
-        borderBottom: '1px solid #d9d9d9',
+        backgroundColor: 'var(--app-surface-muted)',
+        borderRight: '1px solid var(--app-border)',
+        borderBottom: '1px solid var(--app-border)',
       }} />
     );
 
@@ -195,8 +195,8 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
             position: 'sticky',
             top: 0,
             zIndex: 2,
-            backgroundColor: isInSelectedRange ? '#e6f7ff' : '#fafafa',
-            borderBottom: '1px solid #d9d9d9',
+            backgroundColor: isInSelectedRange ? 'var(--app-selection-bg)' : 'var(--app-surface-muted)',
+            borderBottom: '1px solid var(--app-border)',
             flexDirection: 'column',
             padding: '2px 4px',
             minHeight: 50,
@@ -229,8 +229,8 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
             position: 'sticky',
             left: 0,
             zIndex: 2,
-            backgroundColor: '#fafafa',
-            borderRight: '1px solid #d9d9d9',
+            backgroundColor: 'var(--app-surface-muted)',
+            borderRight: '1px solid var(--app-border)',
             fontWeight: 600,
           }}
         >
@@ -272,7 +272,7 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
       <style>{`
         .excel-grid-container {
           overflow: auto;
-          border: 1px solid #d9d9d9;
+          border: 1px solid var(--app-border);
           border-radius: 4px;
           user-select: none;
           height: ${gridHeight};
@@ -289,8 +289,8 @@ export const RangeSelectionStep: React.FC<RangeSelectionStepProps> = ({
         }
         .excel-cell {
           padding: 4px 6px;
-          border-right: 1px solid #f0f0f0;
-          border-bottom: 1px solid #f0f0f0;
+          border-right: 1px solid var(--app-border-soft);
+          border-bottom: 1px solid var(--app-border-soft);
           min-height: 26px;
           display: flex;
           align-items: center;

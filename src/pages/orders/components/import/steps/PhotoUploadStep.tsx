@@ -274,7 +274,7 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
       {/* Crop preview - shown after file selection, before analysis */}
       {showCropPreview && previewUrl && !isProcessing && (
         <div style={{
-          background: '#fafafa',
+          background: 'var(--app-surface-muted)',
           borderRadius: 8,
           padding: 16,
           marginBottom: 24,
@@ -329,7 +329,7 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
           <div style={{ marginBottom: 16 }}>
             {useFullImage ? (
               <div style={{
-                background: '#f5f5f5',
+                background: 'var(--app-surface-muted)',
                 borderRadius: 8,
                 padding: 16,
                 overflow: 'auto',
@@ -343,7 +343,7 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
                     style={{
                       display: 'block',
                       borderRadius: 4,
-                      border: '1px solid #d9d9d9',
+                      border: '1px solid var(--app-border)',
                     }}
                   />
                 </div>
@@ -391,7 +391,7 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
           display: 'flex',
           gap: 24,
           padding: '20px',
-          background: '#fafafa',
+          background: 'var(--app-surface-muted)',
           borderRadius: 8,
           marginBottom: 24,
         }}>
@@ -406,7 +406,7 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
                   maxHeight: 200,
                   objectFit: 'contain',
                   borderRadius: 4,
-                  border: '1px solid #d9d9d9',
+                  border: '1px solid var(--app-border)',
                 }}
                 preview={false}
               />
@@ -485,7 +485,7 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
                     maxHeight: 200,
                     objectFit: 'contain',
                     borderRadius: 4,
-                    border: '1px solid #d9d9d9',
+                    border: '1px solid var(--app-border)',
                   }}
                 />
               </div>
