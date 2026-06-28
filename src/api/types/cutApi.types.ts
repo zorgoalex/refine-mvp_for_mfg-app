@@ -72,8 +72,8 @@ export interface SheetPlacementPiece {
   width_mm: number;
   height_mm: number;
   rotated: boolean;
-  /** Operator-facing label resolved at render time (optional, absent in legacy records). */
-  label?: string;
+  /** Frozen label snapshot from calculate (absent in legacy records). */
+  label?: { orderId: number | null; detailNumber: number | null; widthMm: number | null; heightMm: number | null };
 }
 
 export interface SheetPlacements {
