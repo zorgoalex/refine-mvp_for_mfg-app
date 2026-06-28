@@ -20,15 +20,16 @@ describe('cut detail column', () => {
   it('summary row aligns with the selection column and the trailing Раскрой column', () => {
     const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
     // rowSelection (cutSelectMode) prepends a checkbox column → `base`. «Раскрой»
-    // is the LAST column (after «Пленка»), so it only appends a trailing cell.
+    // is appended as the last entry of detailColumns (conditionally via cutColumnEnabled)
+    // and flows through visibleDetailColumns.map, so no literal per-column indices needed.
     expect(show).toContain('const base = cutSelectMode ? 1 : 0');
     // leading checkbox summary cell only while selecting
     expect(show).toContain('{cutSelectMode && <Table.Summary.Cell index={0} />}');
-    // Сумма total cell at its fixed position (no cut gap — Раскрой is last)
-    expect(show).toContain('index={base + 10}');
-    // Пленка cell, then the trailing conditional Раскрой cell
-    expect(show).toContain('index={base + 11}');
-    expect(show).toContain('cutColumnEnabled && <Table.Summary.Cell index={base + 12}');
+    // Summary cells iterate visibleDetailColumns dynamically (Раскрой is the last
+    // element of detailColumns when cutColumnEnabled, so it is included in the map).
+    expect(show).toContain('visibleDetailColumns.map((column, index) =>');
+    // Every cell uses base + dynamic loop index (base shifts by 1 for the checkbox column)
+    expect(show).toContain('index={base + index}');
   });
 
   it('CutPage gates every open-job mutate affordance on isArchivedJob', () => {

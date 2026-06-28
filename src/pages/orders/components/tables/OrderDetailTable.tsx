@@ -6,7 +6,7 @@
 // Решение: используем useRef для синхронного хранения значений полей
 
 import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
-import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider } from 'antd';
+import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined } from '@ant-design/icons';
 import { useDragSelection } from '../../../../hooks/useDragSelection';
@@ -26,6 +26,7 @@ import {
 } from '../../../../hooks/useSheetMaterialOptions';
 import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
 import { buildGroupedRows, GROUP_TINT_COUNT, type GroupField } from '../../detailGrouping';
+import { groupCheckboxState, toggleGroupSelection } from '../../groupSelection';
 import {
   applyOrderDetailColumnSettings,
   OrderDetailColumnSettingsButton,
@@ -46,6 +47,9 @@ interface OrderDetailTableProps {
   onDragSelectionPending?: (pendingKeys: React.Key[], confirm: () => void, cancel: () => void) => void;
   groupField?: GroupField | null;
   showSeparation?: boolean;
+  cutSelectable?: boolean;
+  /** Grouping controls rendered inline on the same right-aligned row as the column-settings gear. */
+  groupingControls?: React.ReactNode;
 }
 
 // Exposed methods via ref
@@ -193,6 +197,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   onDragSelectionPending,
   groupField = null,
   showSeparation = true,
+  cutSelectable = false,
+  groupingControls,
 }, ref) => {
   const { header, details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
   const orderFormData = useOrderFormData();
@@ -237,11 +243,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   });
 
   const groupingActive = !!groupField && showSeparation;
-
-  const tableRows = useMemo(
-    () => (groupingActive ? buildGroupedRows(sortedDetails, groupField!) : sortedDetails),
-    [groupingActive, sortedDetails, groupField],
-  );
 
   const asDetail = useCallback(
     (row: any): OrderDetail | null =>
@@ -703,6 +704,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       sorter: (a: OrderDetail, b: OrderDetail) => a.detail_number - b.detail_number,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: DATA_COLUMN_COUNT } : {},
       render: (_: any, row: any) => {
+        if (row?.kind === 'separator') {
+          return <span style={{ fontWeight: 600, color: '#999', fontSize: '67%' }}>{(row as any).label}</span>;
+        }
         const d = asDetail(row);
         if (!d) return null;
         return <span style={{ color: '#999', fontSize: '67%' }}>{d.detail_number}</span>;
@@ -1285,8 +1289,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         columnWidth: 24,
         getCheckboxProps: (row: any) =>
           row?.kind === 'separator' ? { disabled: true, style: { display: 'none' } } : {},
-        renderCell: (checked: boolean, row: any, index: number, node: React.ReactNode) =>
-          row?.kind === 'separator' ? null : node,
+        renderCell: (_c: boolean, row: any, _i: number, node: React.ReactNode) => {
+          if (row?.kind !== 'separator') return node;
+          if (!cutSelectable) return null;
+          const state = groupCheckboxState(selectedRowKeys, row.selectionKeys);
+          if (state === 'empty') return null;
+          return (
+            <Checkbox
+              checked={state === 'checked'}
+              indeterminate={state === 'indeterminate'}
+              onChange={() => onSelectChange?.(toggleGroupSelection(selectedRowKeys, row.selectionKeys))}
+            />
+          );
+        },
       }
     : undefined;
 
@@ -1376,6 +1391,29 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const referencesLoading = useBackendReferences
     ? orderFormData.isLoading
     : !millingTypeSelectProps.options;
+
+  const groupLabelOf = useCallback((sample: any, field: string) => {
+    switch (field) {
+      case 'milling': return millingNameById.get(sample.milling_type_id) || '—';
+      case 'material': return sheetNameById.get(sample.sheet_material_type_id) || '—';
+      case 'film': return sample.film_id != null ? (filmNameById.get(sample.film_id) || '—') : '—';
+      case 'edge': return edgeNameById.get(sample.edge_type_id) || '—';
+      case 'price': return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
+      case 'note': return (sample.note || '').trim() || '—';
+      default: return '—';
+    }
+  }, [millingNameById, sheetNameById, filmNameById, edgeNameById]);
+
+  const tableRows = useMemo(
+    () => (groupingActive
+      ? buildGroupedRows(sortedDetails, groupField!, {
+          includeLeadingSeparator: cutSelectable,
+          groupKeyOf: (dd: any) => (dd.detail_id != null ? (dd.temp_id ?? dd.detail_id) : null),
+          groupLabelOf,
+        })
+      : sortedDetails),
+    [groupingActive, sortedDetails, groupField, cutSelectable, groupLabelOf],
+  );
 
   const selectRows = useCallback((predicate: (detail: OrderDetail) => boolean) => {
     if (!onSelectChange) return;
@@ -1751,7 +1789,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         className={dragSelection.isDragging ? 'drag-selection-active' : ''}
         style={{ position: 'relative' }}
       >
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        {groupingControls}
         <OrderDetailColumnSettingsButton
           tableKey="orderEdit"
           definitions={ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS}

@@ -484,6 +484,29 @@ async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string,
     await sepCheckbox.check();
     await expect(detailsTable.locator('tr.detail-group-separator')).not.toHaveCount(0);
     await screenshot(page, testInfo, 'edit-details-grouped');
+
+    // ── Group-select-to-cut assertions (edit form) ────────────────────────────
+    // Grouping is re-active (re-check above); the A group (МДФ 16мм) has EXACTLY 2
+    // persisted details. Guard: if the add-to-cut button is absent (flag off) skip.
+    const addToCutBtn = page.getByRole('button', { name: /Добавить выбранные в раскрой/ });
+    if (await addToCutBtn.count()) {
+      // baseline 0
+      await expect(addToCutBtn).toHaveText(/Добавить выбранные в раскрой \(0\)/);
+      // check the material A group (2 rows) via its separator checkbox
+      const sep = detailsTable.locator('tr.detail-group-separator').first();
+      await sep.locator('input[type="checkbox"]').check();
+      // exact union: the A group has 2 persisted rows → count 2
+      await expect(addToCutBtn).toHaveText(/Добавить выбранные в раскрой \(2\)/);
+      // group checkbox now checked (all of its rows selected)
+      await expect(sep.locator('input[type="checkbox"]')).toBeChecked();
+      // uncheck restores 0
+      await sep.locator('input[type="checkbox"]').uncheck();
+      await expect(addToCutBtn).toHaveText(/Добавить выбранные в раскрой \(0\)/);
+    } else {
+      console.log('[cut-group] edit add-to-cut button absent (flag off) — skipping');
+    }
+    // ── End group-select-to-cut assertions ──────────────────────────────────
+
     // ── End visual grouping assertions ───────────────────────────────────────
 
     await clickOrderTab(form, 'Даты');
@@ -526,15 +549,34 @@ async function verifyShowPage(
     // edit page (re-check step above) and persisted to localStorage; the show page
     // reads the same key and must render separators while the details section is open.
     await expect(page.locator('tr.detail-group-separator')).not.toHaveCount(0);
-    // Entering cut-select mode must suppress separators so no checkbox lands on one.
+    // Entering cut-select mode must KEEP separators visible (Tasks 3/4 pass
+    // includeLeadingSeparator + groupingActive without the old !cutSelectMode gate).
+    // Group checkbox on the first separator selects the whole group (EXACTLY 2 rows
+    // for the A group in the A,B,A fixture) and the union math works correctly.
     const cutSelectBtn = page.getByRole('button', { name: 'Выделить детали для раскроя' });
     if (await cutSelectBtn.count()) {
         await cutSelectBtn.click();
-        await expect(page.locator('tr.detail-group-separator')).toHaveCount(0);
-        await page.getByRole('button', { name: 'Отменить выбор' }).click();
+        // grouping stays visible during cut-select
         await expect(page.locator('tr.detail-group-separator')).not.toHaveCount(0);
+        const detailsTableShow = page.locator('table:has(th:has-text("Обкат"))'); // show details table
+        const showAdd = page.getByRole('button', { name: /Добавить выбранные в раскрой/ });
+        await expect(showAdd).toHaveText(/Добавить выбранные в раскрой \(0\)/);
+        // The fixture order is A,B,A by material → the first material group has EXACTLY 2 details.
+        // Check that group's separator → exact count 2 (proves union math + correct cardinality).
+        const showSep = page.locator('tr.detail-group-separator').first();
+        await showSep.locator('input[type="checkbox"]').check();
+        await expect(showAdd).toHaveText(/Добавить выбранные в раскрой \(2\)/);
+        // add one more individual row (a row NOT in that group) → union becomes 3
+        const otherRow = detailsTableShow.locator('tbody tr.ant-table-row:not(.detail-group-separator)').nth(2);
+        await otherRow.locator('input[type="checkbox"]').check();
+        await expect(showAdd).toHaveText(/Добавить выбранные в раскрой \(3\)/);
+        // uncheck the group → back to the single individual row (1)
+        await showSep.locator('input[type="checkbox"]').uncheck();
+        await expect(showAdd).toHaveText(/Добавить выбранные в раскрой \(1\)/);
+        // exit cut-select mode so the rest of the show-page flow runs without UI interference
+        await page.getByRole('button', { name: 'Отменить выбор' }).click();
     } else {
-        console.log('[grouping] cut-select button absent (flag off) — skipping cut-select guard');
+        console.log('[cut-group] show cut-select button absent (flag off) — skipping');
     }
     // ── End show-page cut-select guard ──────────────────────────────────────
 

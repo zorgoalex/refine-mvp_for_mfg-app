@@ -258,6 +258,8 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
       (item.materialNames ?? []).length > 0
         ? (item.materialNames ?? []).join(', ')
         : (item.headerMaterialName ?? null),
+    film_names: item.filmNames ?? [],
+    film_name: (item.filmNames ?? []).length > 0 ? (item.filmNames ?? []).join(', ') : null,
     milling_type_id: item.millingTypeId ?? null,
     milling_type_name: item.millingTypeName ?? null,
     doweling_order_id: item.dowelingOrderId ?? null,

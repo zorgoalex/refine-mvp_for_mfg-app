@@ -1313,6 +1313,9 @@ export const CutPage: React.FC = () => {
         const effectiveManual = !!(group.manualLayout?.isActive && !group.manualLayout?.isStale);
         // Render token for cache-busting (absent on groups without a manual layout).
         const renderVersion = group.renderToken;
+        // Stale: the manual layout pieces may not match the current auto set.
+        // (Declared before displayVariant below, which reads it.)
+        const isStale = group.manualLayout?.isStale ?? false;
         // Variant to pass to PNG/SVG fetch so the preview matches the toggle.
         // Guard: when the manual layout is stale, never pass variant=manual — the backend
         // hard-fails such requests with 409 CUT_MANUAL_LAYOUT_UNAVAILABLE. Fall back to 'auto'.
@@ -1325,8 +1328,6 @@ export const CutPage: React.FC = () => {
         const isDirtyGroup =
           isEditingGroup ||
           (group.manualLayout != null && showAlt !== persistedActive);
-        // Stale: the manual layout pieces may not match the current auto set.
-        const isStale = group.manualLayout?.isStale ?? false;
         // Edit is blocked when editorParams are absent or a recalc is required.
         const editDisabled = !(job.editorParams) || (job.requiresRecalc ?? false);
 
@@ -1379,6 +1380,7 @@ export const CutPage: React.FC = () => {
                     }
                   >
                     <Button
+                      className="app-hit-area-sm"
                       size="small"
                       onClick={() => enterEditMode(group)}
                       disabled={editDisabled || busy || isEditingGroup}
@@ -1399,6 +1401,7 @@ export const CutPage: React.FC = () => {
                   }
                 >
                   <Button
+                    className="app-hit-area-sm"
                     size="small"
                     onClick={() => void downloadGroupPdf(group)}
                     loading={busy}
@@ -1488,24 +1491,29 @@ export const CutPage: React.FC = () => {
                           : sheetPreviewItemStyle(widthMm, heightMm, rotate90)
                       }
                     >
-                      <Space>
-                        <Button
-                          size="small"
-                          onClick={() => loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion)}
-                        >
-                          Лист {sheet.sheetIndex + 1}
-                        </Button>
-                        <Button
-                          size="small"
-                          onClick={() => downloadSheetSvg(group, sheet.sheetIndex, displayVariant, renderVersion)}
-                        >
-                          SVG
-                        </Button>
-                      </Space>
-                      {/* Material of the details on this sheet. */}
-                      <div style={{ marginTop: 2, color: '#8c8c8c', fontSize: 12 }}>
-                        {matName ?? 'материал не задан'}
-                        {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
+                      <div className="cut-sheet-preview-header">
+                        <div className="cut-sheet-preview-title app-tabular">
+                          <strong>Лист {sheet.sheetIndex + 1}</strong>
+                          {' · '}
+                          {matName ?? 'материал не задан'}
+                          {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
+                        </div>
+                        <Space className="cut-sheet-preview-actions" size={8}>
+                          <Button
+                            className="app-hit-area-sm"
+                            size="small"
+                            onClick={() => loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion)}
+                          >
+                            Открыть
+                          </Button>
+                          <Button
+                            className="app-hit-area-sm"
+                            size="small"
+                            onClick={() => downloadSheetSvg(group, sheet.sheetIndex, displayVariant, renderVersion)}
+                          >
+                            SVG
+                          </Button>
+                        </Space>
                       </div>
                       {sheetThumbs[key] && !sheetImages[key] && (
                         <SheetPreview

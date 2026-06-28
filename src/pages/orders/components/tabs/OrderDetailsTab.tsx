@@ -1,7 +1,7 @@
 // Order Details Tab
 // Container for managing order details with toolbar and CRUD operations
 
-import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
 import { Card, Button, Space, Modal, message, Tooltip, Alert } from 'antd';
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
@@ -15,6 +15,10 @@ import { useSheetMaterialOptions, filterCuttableOptions } from '../../../../hook
 import { useDetailGrouping } from '../../useDetailGrouping';
 import { DetailGroupingControls } from '../DetailGroupingControls';
 import { authSession } from '../../../../api/authSession';
+import { AddToCutModal } from '../AddToCutModal';
+import { selectedDetailIds } from '../../groupSelection';
+import { featureFlags } from '../../../../config/featureFlags';
+import { can } from '../../../../utils/permissions';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -69,6 +73,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
   const [dragSelectionState, setDragSelectionState] = useState<DragSelectionState | null>(null);
   const tableRef = useRef<OrderDetailTableRef>(null);
+
+  const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
+  const [addToCutOpen, setAddToCutOpen] = useState(false);
+  const eligibleCutDetailIds = useMemo(
+    () => (cutEnabled ? selectedDetailIds(details as any[], selectedRowKeys) : []),
+    [cutEnabled, details, selectedRowKeys],
+  );
 
   // Expose methods via ref for parent (OrderForm) to call
   useImperativeHandle(ref, () => ({
@@ -470,6 +481,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           >
             Удалить выбранные ({selectedRowKeys.length})
           </Button>
+          {cutEnabled && (
+            <Button onClick={() => setAddToCutOpen(true)} disabled={eligibleCutDetailIds.length === 0}>
+              Добавить выбранные в раскрой ({eligibleCutDetailIds.length})
+            </Button>
+          )}
           <Button
             icon={<CalculatorOutlined />}
             onClick={handleRecalculateSums}
@@ -519,14 +535,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           />
         )}
 
-        {/* Detail grouping controls */}
-        <DetailGroupingControls
-          state={grouping.state}
-          onFieldChange={grouping.setField}
-          onToggleSeparation={grouping.setShowSeparation}
-        />
-
-        {/* Table */}
+        {/* Table — grouping controls are rendered inline on the gear row (right-aligned) */}
         <OrderDetailTable
           ref={tableRef}
           onEdit={handleEdit}
@@ -540,6 +549,14 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           onDragSelectionPending={handleDragSelectionPending}
           groupField={grouping.state.field}
           showSeparation={grouping.state.showSeparation}
+          cutSelectable={cutEnabled}
+          groupingControls={
+            <DetailGroupingControls
+              state={grouping.state}
+              onFieldChange={grouping.setField}
+              onToggleSeparation={grouping.setShowSeparation}
+            />
+          }
         />
 
         {/* Modal */}
@@ -562,6 +579,17 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           onApply={handleBulkEditApply}
           onCancel={() => setBulkEditModalOpen(false)}
         />
+
+        {/* Add to Cut Modal */}
+        {cutEnabled && header?.order_id != null && (
+          <AddToCutModal
+            open={addToCutOpen}
+            orderIds={[header.order_id]}
+            detailIds={eligibleCutDetailIds}
+            onClose={() => setAddToCutOpen(false)}
+            onDone={() => { setAddToCutOpen(false); handleSelectChange([]); }}
+          />
+        )}
       </Space>
     </Card>
   );

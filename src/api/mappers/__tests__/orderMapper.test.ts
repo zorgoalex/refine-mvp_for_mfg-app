@@ -132,6 +132,15 @@ function makeListItem(overrides: Partial<OrderListItemDto> = {}): OrderListItemD
 }
 
 describe('mapOrderListItemToLegacyRow — header-material fallback (critic R8)', () => {
+  it('maps backend detail filmNames for the orders list film column', () => {
+    const item = makeListItem({
+      filmNames: ['Пленка A', 'Пленка B'],
+    });
+    const row = mapOrderListItemToLegacyRow(item);
+    expect(row.film_names).toEqual(['Пленка A', 'Пленка B']);
+    expect(row.film_name).toBe('Пленка A, Пленка B');
+  });
+
   it('header-only order: uses headerMaterialName when materialNames is empty', () => {
     const item = makeListItem({
       materialNames: [],

@@ -52,10 +52,19 @@ export function extractGroupValue(detail: OrderDetail, field: GroupField): strin
 
 export type GroupedRow =
   | { kind: 'detail'; detail: OrderDetail; groupIndex: number }
-  | { kind: 'separator'; groupIndex: number; key: string };
+  | { kind: 'separator'; groupIndex: number; key: string; selectionKeys: Array<number | string>; label: string };
 
-export function buildGroupedRows(details: OrderDetail[], field: GroupField): GroupedRow[] {
-  // First-seen order of group keys, with the empty group forced last.
+export interface BuildGroupedRowsOptions {
+  includeLeadingSeparator?: boolean;
+  groupKeyOf?: (detail: OrderDetail) => number | string | null;
+  groupLabelOf?: (sampleDetail: OrderDetail, field: GroupField) => string;
+}
+
+export function buildGroupedRows(
+  details: OrderDetail[],
+  field: GroupField,
+  options?: BuildGroupedRowsOptions,
+): GroupedRow[] {
   const order: string[] = [];
   const buckets = new Map<string, OrderDetail[]>();
   for (const detail of details) {
@@ -68,12 +77,26 @@ export function buildGroupedRows(details: OrderDetail[], field: GroupField): Gro
   }
   if (buckets.has(EMPTY_GROUP_KEY)) order.push(EMPTY_GROUP_KEY);
 
+  const includeLeading = options?.includeLeadingSeparator ?? false;
+  const keyOf = options?.groupKeyOf ?? ((dd: OrderDetail) => (dd as any).detail_id ?? null);
+  const labelOf = options?.groupLabelOf ?? (() => '');
+
   const rows: GroupedRow[] = [];
   order.forEach((key, groupIndex) => {
-    if (groupIndex > 0) {
-      rows.push({ kind: 'separator', groupIndex, key: `__sep__:${field}:${key}:${groupIndex}` });
+    const groupDetails = buckets.get(key)!;
+    if (groupIndex > 0 || includeLeading) {
+      const selectionKeys = groupDetails
+        .map((dd) => keyOf(dd))
+        .filter((k): k is number | string => k !== null && k !== undefined);
+      rows.push({
+        kind: 'separator',
+        groupIndex,
+        key: `__sep__:${field}:${key}:${groupIndex}`,
+        selectionKeys,
+        label: labelOf(groupDetails[0], field),
+      });
     }
-    for (const detail of buckets.get(key)!) {
+    for (const detail of groupDetails) {
       rows.push({ kind: 'detail', detail, groupIndex });
     }
   });
