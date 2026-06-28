@@ -34,4 +34,10 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain('groupLabelOf');
     expect(table).toContain('row as any).label');
   });
+  it('edit tab wires add-to-cut with persisted-id mapping + group-selectable table', () => {
+    expect(tab).toContain('AddToCutModal');
+    expect(tab).toContain('Добавить выбранные в раскрой');
+    expect(tab).toContain('cutSelectable');
+    expect(tab).toContain('selectedDetailIds');
+  });
 });
