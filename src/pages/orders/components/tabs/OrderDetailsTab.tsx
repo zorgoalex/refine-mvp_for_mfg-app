@@ -519,14 +519,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           />
         )}
 
-        {/* Detail grouping controls */}
-        <DetailGroupingControls
-          state={grouping.state}
-          onFieldChange={grouping.setField}
-          onToggleSeparation={grouping.setShowSeparation}
-        />
-
-        {/* Table */}
+        {/* Table — grouping controls are rendered inline on the gear row (right-aligned) */}
         <OrderDetailTable
           ref={tableRef}
           onEdit={handleEdit}
@@ -540,6 +533,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           onDragSelectionPending={handleDragSelectionPending}
           groupField={grouping.state.field}
           showSeparation={grouping.state.showSeparation}
+          groupingControls={
+            <DetailGroupingControls
+              state={grouping.state}
+              onFieldChange={grouping.setField}
+              onToggleSeparation={grouping.setShowSeparation}
+            />
+          }
         />
 
         {/* Modal */}

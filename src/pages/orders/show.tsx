@@ -1096,7 +1096,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
                 Детали заказа
               </div>
-              <Space size="small">
+              <Space size="small" wrap>
+                <DetailGroupingControls
+                  state={grouping.state}
+                  onFieldChange={grouping.setField}
+                  onToggleSeparation={grouping.setShowSeparation}
+                />
                 {cutEnabled && details.length > 0 && (
                   <>
                     <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
@@ -1136,13 +1141,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   onChange={saveShowColumnSettings}
                 />
               </Space>
-            </div>
-            <div style={{ marginTop: 4 }}>
-              <DetailGroupingControls
-                state={grouping.state}
-                onFieldChange={grouping.setField}
-                onToggleSeparation={grouping.setShowSeparation}
-              />
             </div>
             <TableTopScroll>
             <Table

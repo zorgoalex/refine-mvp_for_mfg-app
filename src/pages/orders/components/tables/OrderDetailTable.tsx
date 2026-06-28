@@ -46,6 +46,8 @@ interface OrderDetailTableProps {
   onDragSelectionPending?: (pendingKeys: React.Key[], confirm: () => void, cancel: () => void) => void;
   groupField?: GroupField | null;
   showSeparation?: boolean;
+  /** Grouping controls rendered inline on the same right-aligned row as the column-settings gear. */
+  groupingControls?: React.ReactNode;
 }
 
 // Exposed methods via ref
@@ -193,6 +195,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   onDragSelectionPending,
   groupField = null,
   showSeparation = true,
+  groupingControls,
 }, ref) => {
   const { header, details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
   const orderFormData = useOrderFormData();
@@ -1751,7 +1754,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         className={dragSelection.isDragging ? 'drag-selection-active' : ''}
         style={{ position: 'relative' }}
       >
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        {groupingControls}
         <OrderDetailColumnSettingsButton
           tableKey="orderEdit"
           definitions={ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS}
