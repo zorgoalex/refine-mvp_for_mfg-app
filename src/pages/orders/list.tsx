@@ -27,6 +27,7 @@ import {
   DownloadOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
+import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 
 const { RangePicker } = DatePicker;
@@ -49,7 +50,47 @@ import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { ProjectFilter } from "./components/projects/ProjectFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
+import {
+  applyOrderDetailColumnSettings,
+  OrderDetailColumnSettingsButton,
+  useOrderDetailColumnPreferences,
+  type OrderDetailColumnDefinition,
+} from "./components/tables/OrderDetailColumnSettings";
 import "./list.css";
+
+const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
+  { key: 'order_id', label: 'id', lockVisible: true },
+  { key: 'order_name', label: 'Заказ', lockVisible: true },
+  { key: 'doweling_order_name', label: 'Прис.' },
+  { key: 'projects', label: 'Проект' },
+  { key: 'order_date', label: 'Дата заказа' },
+  { key: 'client_name', label: 'Клиент' },
+  { key: 'milling_type_name', label: 'Фрез-ка' },
+  { key: 'material_name', label: 'Материал' },
+  { key: 'notes', label: 'Примечание' },
+  { key: 'planned_completion_date', label: 'План. дата вып-я' },
+  { key: 'order_status_name', label: 'Статус заказа' },
+  { key: 'payment_status_name', label: 'Статус оплаты' },
+  { key: 'final_amount', label: 'Сумма, итого' },
+  { key: 'production_status_name', label: 'Этапы' },
+  { key: 'priority', label: 'Приоритет' },
+  { key: 'paid_amount', label: 'Сумма оплаты' },
+  { key: 'total_amount', label: 'Сумма заказа' },
+  { key: 'discount', label: 'Скидка' },
+  { key: 'surcharge', label: 'Наценка' },
+  { key: 'design_engineer', label: 'Конструктор' },
+  { key: 'payment_date', label: 'Дата оплаты' },
+  { key: 'issue_date', label: 'Дата выдачи заказа' },
+  { key: 'total_area', label: 'Площадь заказа' },
+  { key: 'completion_date', label: 'Дата выполнения' },
+  { key: 'parts_count', label: 'Кол-во деталей' },
+  { key: 'edge_type_name', label: 'Обкат' },
+  { key: 'film_name', label: 'Пленка' },
+  { key: 'created_by', label: 'Создано' },
+  { key: 'actions', label: 'Действия', lockVisible: true },
+];
+
+const ORDER_LIST_DEFAULT_ORDER = ORDER_LIST_COLUMN_DEFINITIONS.map((definition) => definition.key);
 
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -423,13 +464,25 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     }
   };
 
+  const { settings: orderListColumnSettings, saveSettings: saveOrderListColumnSettings } =
+    useOrderDetailColumnPreferences('orderList', ORDER_LIST_DEFAULT_ORDER, ORDER_LIST_COLUMN_DEFINITIONS);
+
   // Количество записей
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
   const ordersCompactPagination = useMemo(() => ({
     ...(tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination : {}),
     position: ['topRight', 'bottomRight'],
     size: 'small',
-  }), [tableProps?.pagination]);
+    showTotal: () => (
+      <OrderDetailColumnSettingsButton
+        tableKey="orderList"
+        definitions={ORDER_LIST_COLUMN_DEFINITIONS}
+        defaultOrder={ORDER_LIST_DEFAULT_ORDER}
+        settings={orderListColumnSettings}
+        onChange={saveOrderListColumnSettings}
+      />
+    ),
+  }), [orderListColumnSettings, saveOrderListColumnSettings, tableProps?.pagination]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -792,6 +845,181 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     );
   };
 
+  const orderListColumns: ColumnsType<any> = [
+    {
+      dataIndex: "order_id",
+      key: "order_id",
+      title: <span style={{ fontSize: '42%' }}>id</span>,
+      sorter: true,
+      fixed: "left",
+      width: 39,
+      className: "col-order-id",
+      onHeaderCell: () => ({ className: "col-order-id" }),
+      render: (value) => <span style={{ fontSize: '75%', whiteSpace: 'nowrap' }}>{value}</span>,
+    },
+    {
+      dataIndex: "order_name",
+      key: "order_name",
+      title: "Заказ",
+      sorter: true,
+      fixed: "left",
+      width: 80,
+      className: "orders-col orders-col--order-name",
+      render: (value) => <span style={{ letterSpacing: '0.5px' }}>{value}</span>,
+    },
+    {
+      dataIndex: "doweling_order_name",
+      key: "doweling_order_name",
+      title: "Прис.",
+      sorter: true,
+      width: 80,
+      className: "orders-col orders-col--doweling-name",
+      render: (_, record) => {
+        const latestLink = getLatestDoweling(record.order_id, record);
+        const dowelingName = latestLink?.doweling_order?.doweling_order_name;
+        return dowelingName ? (
+          <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{dowelingName}</span>
+        ) : null;
+      },
+    },
+    ...(useBackendOrdersRead && featureFlags.useBackendProjects
+      ? [{
+          dataIndex: "projects",
+          key: "projects",
+          title: "Проект",
+          width: 150,
+          className: "orders-col",
+          render: (projects: any[]) => {
+            const primary = projects?.find((project) => project.isPrimary) ?? projects?.[0];
+            return primary ? (
+              <span>{primary.code} · {primary.name}</span>
+            ) : (
+              <span style={{ color: 'var(--app-text-muted)' }}>Проект не указан</span>
+            );
+          },
+        }]
+      : []),
+    { dataIndex: "order_date", key: "order_date", title: "Дата заказа", sorter: true, width: 90, className: "orders-col orders-col--order-date", render: (value) => formatDate(value) },
+    { dataIndex: "client_name", key: "client_name", title: "Клиент", width: 99, className: "orders-col orders-col--client" },
+    {
+      dataIndex: "milling_type_name",
+      key: "milling_type_name",
+      title: "Фрез-ка",
+      width: 72,
+      className: "orders-col",
+      render: (_, record) => {
+        const millingTypeId = getCommonValue(record.order_id, "milling_type_id", record);
+        const value = (millingTypeId ? millingTypesMap[millingTypeId] : null) || record.milling_type_name;
+        if (!value) return null;
+        return (
+          <Tooltip title={value} placement="topLeft">
+            <span className="orders-status-value">{value}</span>
+          </Tooltip>
+        );
+      },
+    },
+    { dataIndex: "material_name", key: "material_name", title: "Материал", width: 95, className: "orders-col orders-col--wrap", render: (_, record) => getMaterialsList(record.order_id, record) },
+    { dataIndex: "notes", key: "notes", title: "Примечание", width: 130, className: "orders-col orders-col--wrap" },
+    { dataIndex: "planned_completion_date", key: "planned_completion_date", title: "План. дата вып-я", sorter: true, width: 100, className: "orders-col orders-col--planned-date", render: (value) => formatDate(value) },
+    { dataIndex: "order_status_name", key: "order_status_name", title: "Статус заказа", width: 100, className: "orders-col status order-status orders-col--wrap", render: (value) => renderStatus(value) },
+    {
+      dataIndex: "payment_status_name",
+      key: "payment_status_name",
+      title: "Статус оплаты",
+      width: 100,
+      className: "orders-col status payment-status orders-col--wrap",
+      render: (value) => {
+        const displayValue = value || "—";
+        let color = undefined;
+        if (value === 'Не оплачен') color = '#ff4d4f';
+        else if (value === 'Частично оплачен') color = '#d4a574';
+        else if (value === 'Оплачен') color = '#52c41a';
+
+        return (
+          <Tooltip title={displayValue} placement="topLeft">
+            <span className="orders-status-value" style={{ ...(color && { color, fontWeight: 500 }) }}>
+              {displayValue}
+            </span>
+          </Tooltip>
+        );
+      },
+    },
+    { dataIndex: "final_amount", key: "final_amount", title: "Сумма, итого", sorter: true, width: 90, className: "orders-col orders-col--amount", render: (value) => formatNumber(value as number, 0) },
+    {
+      dataIndex: "production_status_name",
+      key: "production_status_name",
+      title: "Этапы",
+      width: 90,
+      className: "orders-col status production-status",
+      render: (value, record) => {
+        const backendCodes = Array.isArray(record.passed_production_status_codes)
+          ? record.passed_production_status_codes
+          : [];
+        const codes = passedCodesByOrderId[record.order_id]
+          || (backendCodes.length > 0 ? backendCodes : getPassedCodesFromStatusName(value || ''));
+        return (
+          <ProductionStagesDisplay
+            passedCodes={codes}
+            displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+            codeToLetter={productionWorkflowDisplay?.codeToLetter}
+            codeToName={productionWorkflowDisplay?.codeToName}
+            fontSize={9}
+            showTooltip={true}
+            maxWidth={85}
+          />
+        );
+      },
+    },
+    { dataIndex: "priority", key: "priority", title: <StarFilled />, sorter: true, width: 60, className: "col-priority", onHeaderCell: () => ({ className: "col-priority" }) },
+    { dataIndex: "paid_amount", key: "paid_amount", title: "Сумма оплаты", sorter: true, width: 90, className: "orders-col orders-col--amount", render: (value) => formatNumber(value as number, 0) },
+    { dataIndex: "total_amount", key: "total_amount", title: "Сумма заказа", sorter: true, width: 90, className: "orders-col orders-col--amount", render: (value) => formatNumber(value as number, 0) },
+    { dataIndex: "discount", key: "discount", title: "Скидка", sorter: true, width: 88, className: "orders-col", render: (value) => formatNumber(value as number, 0) },
+    { dataIndex: "surcharge", key: "surcharge", title: "Наценка", sorter: true, width: 93, className: "orders-col", render: (value) => formatNumber(value as number, 0) },
+    {
+      key: "design_engineer",
+      title: "Конструктор",
+      width: 100,
+      className: "orders-col orders-col--wrap",
+      render: (_, record) => {
+        const latestLink = getLatestDoweling(record.order_id, record);
+        const engineerId = latestLink?.doweling_order?.design_engineer_id;
+        return engineerId ? employeesMap[engineerId] : null;
+      },
+    },
+    { dataIndex: "payment_date", key: "payment_date", title: "Дата оплаты", sorter: true, width: 104, className: "orders-col orders-col--payment-date", render: (value) => formatDate(value) },
+    { dataIndex: "issue_date", key: "issue_date", title: "Дата выдачи заказа", sorter: true, width: 86, className: "orders-col", render: (value) => <span style={{ fontSize: '80%' }}>{formatDate(value)}</span> },
+    { dataIndex: "total_area", key: "total_area", title: "Площадь заказа", sorter: true, width: 86, className: "orders-col", render: (value) => <span style={{ fontSize: '80%' }}>{value ?? ''}</span> },
+    { dataIndex: "completion_date", key: "completion_date", title: "Дата выполнения", sorter: true, width: 86, className: "orders-col", render: (value) => <span style={{ fontSize: '80%' }}>{formatDate(value)}</span> },
+    { dataIndex: "parts_count", key: "parts_count", title: "Кол-во деталей", sorter: true, width: 80, className: "orders-col" },
+    { dataIndex: "edge_type_name", key: "edge_type_name", title: "Обкат", width: 90, className: "orders-col orders-col--wrap", render: (_, record) => {
+      const edgeTypeId = getCommonValue(record.order_id, "edge_type_id");
+      return edgeTypeId ? edgeTypesMap[edgeTypeId] : null;
+    } },
+    { dataIndex: "film_name", key: "film_name", title: "Пленка", width: 120, className: "orders-col orders-col--wrap", render: (_, record) => {
+      const filmId = getCommonValue(record.order_id, "film_id");
+      return filmId ? filmsMap[filmId] : null;
+    } },
+    { dataIndex: "created_by", key: "created_by", title: "Создано", width: 86, className: "orders-col", render: (_, record) => (
+      <span style={{ fontSize: '80%' }}>
+        {createdByMap[record?.created_by] ?? record?.created_by}
+      </span>
+    ) },
+    {
+      key: "actions",
+      title: "Действия",
+      width: 100,
+      fixed: "right",
+      render: (_, record) => (
+        <Space size={4}>
+          <ShowButton hideText size="small" icon={<EyeOutlined style={{ fontSize: 12 }} />} recordItemId={record.order_id} meta={{ syncWithLocation: true }} />
+          <EditButton hideText size="small" icon={<EditOutlined style={{ fontSize: 12 }} />} recordItemId={record.order_id} meta={{ syncWithLocation: true }} />
+        </Space>
+      ),
+    },
+  ];
+
+  const visibleOrderListColumns = applyOrderDetailColumnSettings(orderListColumns, orderListColumnSettings);
+
   return (
     <>
       <List
@@ -1064,326 +1292,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               show("orders_view", record.order_id, "push");
             },
           })}
-        >
-          <Table.Column
-            dataIndex="order_id"
-            title={<span style={{ fontSize: '42%' }}>id</span>}
-            sorter
-            fixed="left"
-            width={39}
-            className="col-order-id"
-            onHeaderCell={() => ({ className: "col-order-id" })}
-            render={(value) => <span style={{ fontSize: '75%', whiteSpace: 'nowrap' }}>{value}</span>}
-          />
-          <Table.Column
-            dataIndex="order_name"
-            title="Заказ"
-            sorter
-            fixed="left"
-            width={80}
-            className="orders-col orders-col--order-name"
-            render={(value) => (
-              <span style={{ letterSpacing: '0.5px' }}>{value}</span>
-            )}
-          />
-          <Table.Column
-            dataIndex="doweling_order_name"
-            title="Прис."
-            sorter
-            width={80}
-            className="orders-col orders-col--doweling-name"
-            render={(_, record: any) => {
-              const latestLink = getLatestDoweling(record.order_id, record);
-              const dowelingName = latestLink?.doweling_order?.doweling_order_name;
-              return dowelingName ? (
-                <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{dowelingName}</span>
-              ) : null;
-            }}
-          />
-          {useBackendOrdersRead && featureFlags.useBackendProjects && (
-            <Table.Column
-              dataIndex="projects"
-              title="Проект"
-              width={150}
-              className="orders-col"
-              render={(projects: any[]) => {
-                const primary = projects?.find((project) => project.isPrimary) ?? projects?.[0];
-                return primary ? (
-                  <span>{primary.code} · {primary.name}</span>
-                ) : (
-                  <span style={{ color: 'var(--app-text-muted)' }}>Проект не указан</span>
-                );
-              }}
-            />
-          )}
-          <Table.Column
-            dataIndex="order_date"
-            title="Дата заказа"
-            sorter
-            width={90}
-            className="orders-col orders-col--order-date"
-            render={(value) => formatDate(value)}
-          />
-          <Table.Column
-            dataIndex="client_name"
-            title="Клиент"
-            width={99}
-            className="orders-col orders-col--client"
-          />
-          <Table.Column
-            dataIndex="milling_type_name"
-            title="Фрез-ка"
-            width={72}
-            className="orders-col"
-            render={(_, record: any) => {
-              const millingTypeId = getCommonValue(record.order_id, "milling_type_id", record);
-              const value = (millingTypeId ? millingTypesMap[millingTypeId] : null) || record.milling_type_name;
-              if (!value) return null;
-              return (
-                <Tooltip title={value} placement="topLeft">
-                  <span className="orders-status-value">{value}</span>
-                </Tooltip>
-              );
-            }}
-          />
-          <Table.Column
-            dataIndex="material_name"
-            title="Материал"
-            width={95}
-            className="orders-col orders-col--wrap"
-            render={(_, record: any) => getMaterialsList(record.order_id, record)}
-          />
-          <Table.Column
-            dataIndex="notes"
-            title="Примечание"
-            width={130}
-            className="orders-col orders-col--wrap"
-          />
-          <Table.Column
-            dataIndex="planned_completion_date"
-            title="План. дата вып-я"
-            sorter
-            width={100}
-            className="orders-col orders-col--planned-date"
-            render={(value) => formatDate(value)}
-          />
-          <Table.Column
-            dataIndex="order_status_name"
-            title="Статус заказа"
-            width={100}
-            className="orders-col status order-status orders-col--wrap"
-            render={(value) => renderStatus(value)}
-          />
-          <Table.Column
-            dataIndex="payment_status_name"
-            title="Статус оплаты"
-            width={100}
-            className="orders-col status payment-status orders-col--wrap"
-            render={(value) => {
-              const displayValue = value || "—";
-
-              // Определяем цвет в зависимости от статуса
-              let color = undefined;
-              if (value === 'Не оплачен') {
-                color = '#ff4d4f'; // красный
-              } else if (value === 'Частично оплачен') {
-                color = '#d4a574'; // светло-коричневый
-              } else if (value === 'Оплачен') {
-                color = '#52c41a'; // зеленый
-              }
-
-              return (
-                <Tooltip title={displayValue} placement="topLeft">
-                  <span
-                    className="orders-status-value"
-                    style={{
-                      ...(color && { color, fontWeight: 500 })
-                    }}
-                  >
-                    {displayValue}
-                  </span>
-                </Tooltip>
-              );
-            }}
-          />
-          <Table.Column
-            dataIndex="final_amount"
-            title="Сумма, итого"
-            sorter
-            width={90}
-            className="orders-col orders-col--amount"
-            render={(value) => formatNumber(value as number, 0)}
-          />
-          <Table.Column
-            dataIndex="production_status_name"
-            title="Этапы"
-            width={90}
-            className="orders-col status production-status"
-            render={(value, record: any) => {
-              // Сначала пробуем получить из events, если нет - fallback на статус
-              const backendCodes = Array.isArray(record.passed_production_status_codes)
-                ? record.passed_production_status_codes
-                : [];
-              const codes = passedCodesByOrderId[record.order_id]
-                || (backendCodes.length > 0 ? backendCodes : getPassedCodesFromStatusName(value || ''));
-              return (
-                <ProductionStagesDisplay
-                  passedCodes={codes}
-                  displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
-                  codeToLetter={productionWorkflowDisplay?.codeToLetter}
-                  codeToName={productionWorkflowDisplay?.codeToName}
-                  fontSize={9}
-                  showTooltip={true}
-                  maxWidth={85}
-                />
-              );
-            }}
-          />
-          <Table.Column
-            dataIndex="priority"
-            title={<StarFilled />}
-            sorter
-            width={60}
-            className="col-priority"
-            onHeaderCell={() => ({ className: "col-priority" })}
-          />
-          <Table.Column
-            dataIndex="paid_amount"
-            title="Сумма оплаты"
-            sorter
-            width={90}
-            className="orders-col orders-col--amount"
-            render={(value) => formatNumber(value as number, 0)}
-          />
-          <Table.Column
-            dataIndex="total_amount"
-            title="Сумма заказа"
-            sorter
-            width={90}
-            className="orders-col orders-col--amount"
-            render={(value) => formatNumber(value as number, 0)}
-          />
-          <Table.Column
-            dataIndex="discount"
-            title="Скидка"
-            sorter
-            width={88}
-            className="orders-col"
-            render={(value) => formatNumber(value as number, 0)}
-          />
-          <Table.Column
-            dataIndex="surcharge"
-            title="Наценка"
-            sorter
-            width={93}
-            className="orders-col"
-            render={(value) => formatNumber(value as number, 0)}
-          />
-          <Table.Column
-            key="design_engineer"
-            title="Конструктор"
-            width={100}
-            className="orders-col orders-col--wrap"
-            render={(_, record: any) => {
-              const latestLink = getLatestDoweling(record.order_id, record);
-              const engineerId = latestLink?.doweling_order?.design_engineer_id;
-              return engineerId ? employeesMap[engineerId] : null;
-            }}
-          />
-          <Table.Column
-            dataIndex="payment_date"
-            title="Дата оплаты"
-            sorter
-            width={104}
-            className="orders-col orders-col--payment-date"
-            render={(value) => formatDate(value)}
-          />
-          <Table.Column
-            dataIndex="issue_date"
-            title="Дата выдачи заказа"
-            sorter
-            width={86}
-            className="orders-col"
-            render={(value) => <span style={{ fontSize: '80%' }}>{formatDate(value)}</span>}
-          />
-          <Table.Column
-            dataIndex="total_area"
-            title="Площадь заказа"
-            sorter
-            width={86}
-            className="orders-col"
-            render={(value) => <span style={{ fontSize: '80%' }}>{value ?? ''}</span>}
-          />
-          <Table.Column
-            dataIndex="completion_date"
-            title="Дата выполнения"
-            sorter
-            width={86}
-            className="orders-col"
-            render={(value) => <span style={{ fontSize: '80%' }}>{formatDate(value)}</span>}
-          />
-          <Table.Column
-            dataIndex="parts_count"
-            title="Кол-во деталей"
-            sorter
-            width={80}
-            className="orders-col"
-          />
-          <Table.Column
-            dataIndex="edge_type_name"
-            title="Обкат"
-            width={90}
-            className="orders-col orders-col--wrap"
-            render={(_, record: any) => {
-              const edgeTypeId = getCommonValue(record.order_id, "edge_type_id");
-              return edgeTypeId ? edgeTypesMap[edgeTypeId] : null;
-            }}
-          />
-          <Table.Column
-            dataIndex="film_name"
-            title="Пленка"
-            width={120}
-            className="orders-col orders-col--wrap"
-            render={(_, record: any) => {
-              const filmId = getCommonValue(record.order_id, "film_id");
-              return filmId ? filmsMap[filmId] : null;
-            }}
-          />
-          <Table.Column
-            dataIndex="created_by"
-            title="Создано"
-            width={86}
-            className="orders-col"
-            render={(_, record: any) => (
-              <span style={{ fontSize: '80%' }}>
-                {createdByMap[record?.created_by] ?? record?.created_by}
-              </span>
-            )}
-          />
-          <Table.Column
-            title="Действия"
-            width={100}
-            fixed="right"
-            render={(_, record: any) => (
-              <Space size={4}>
-                <ShowButton
-                  hideText
-                  size="small"
-                  icon={<EyeOutlined style={{ fontSize: 12 }} />}
-                  recordItemId={record.order_id}
-                  meta={{ syncWithLocation: true }}
-                />
-                <EditButton
-                  hideText
-                  size="small"
-                  icon={<EditOutlined style={{ fontSize: 12 }} />}
-                  recordItemId={record.order_id}
-                  meta={{ syncWithLocation: true }}
-                />
-              </Space>
-            )}
-          />
-        </Table>
+          columns={visibleOrderListColumns}
+        />
       </List>
 
       <OrderCreateModal
