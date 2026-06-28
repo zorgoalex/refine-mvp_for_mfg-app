@@ -43,33 +43,46 @@ describe('extractGroupValue', () => {
 });
 
 describe('buildGroupedRows', () => {
-  it('clusters same-value rows, keeps input order within a group, empty group last, separators between groups', () => {
+  it('separators between groups carry the following group selectionKeys (default detail_id) + label', () => {
     const details = [
-      d({ detail_number: 1, milling_type_id: 5 }),
-      d({ detail_number: 2, milling_type_id: 0 }),   // empty
-      d({ detail_number: 3, milling_type_id: 7 }),
-      d({ detail_number: 4, milling_type_id: 5 }),
+      d({ detail_number: 1, detail_id: 11, milling_type_id: 5 }),
+      d({ detail_number: 2, detail_id: 12, milling_type_id: 0 }),   // empty group
+      d({ detail_number: 3, detail_id: 13, milling_type_id: 7 }),
+      d({ detail_number: 4, detail_id: 14, milling_type_id: 5 }),
     ];
-    const rows = buildGroupedRows(details, 'milling');
-    // groups in first-seen order, empty pushed last: [5,5], [7], [empty]
-    const kinds = rows.map(r => r.kind);
-    expect(kinds).toEqual(['detail', 'detail', 'separator', 'detail', 'separator', 'detail']);
-    const detailNums = rows
-      .filter((r): r is Extract<typeof r, { kind: 'detail' }> => r.kind === 'detail')
-      .map(r => r.detail.detail_number);
-    expect(detailNums).toEqual([1, 4, 3, 2]);
-    // group indices: first group 0, second 1, empty 2
-    const groupIdx = rows.filter(r => r.kind === 'detail').map(r => r.groupIndex);
-    expect(groupIdx).toEqual([0, 0, 1, 2]);
+    const rows = buildGroupedRows(details, 'milling', { groupLabelOf: (s) => `m${s.milling_type_id}` });
+    expect(rows.map(r => r.kind)).toEqual(['detail', 'detail', 'separator', 'detail', 'separator', 'detail']);
+    const sep1 = rows.find(r => r.kind === 'separator' && r.groupIndex === 1) as any;
+    expect(sep1.selectionKeys).toEqual([13]);   // group {7} → detail_id 13
+    expect(sep1.label).toBe('m7');
+    const sep2 = rows.find(r => r.kind === 'separator' && r.groupIndex === 2) as any;
+    expect(sep2.selectionKeys).toEqual([12]);   // empty group → detail_id 12
   });
-  it('single group → no separators', () => {
+  it('groupKeyOf can exclude rows (returns null) — temp-only rows dropped from selectionKeys', () => {
+    const details = [
+      d({ detail_number: 1, detail_id: 11, temp_id: 'a', milling_type_id: 5 }),
+      d({ detail_number: 2, temp_id: 'b', milling_type_id: 5 }), // no detail_id (unsaved)
+    ];
+    const rows = buildGroupedRows(details, 'milling', {
+      includeLeadingSeparator: true,
+      groupKeyOf: (x: any) => (x.detail_id != null ? (x.temp_id ?? x.detail_id) : null),
+    });
+    const sep = rows.find(r => r.kind === 'separator') as any;
+    expect(sep.selectionKeys).toEqual(['a']); // only the persisted row's rowKey
+  });
+  it('includeLeadingSeparator adds a separator before the first group', () => {
+    const rows = buildGroupedRows([d({ detail_id: 1, milling_type_id: 5 }), d({ detail_id: 2, milling_type_id: 7 })], 'milling', { includeLeadingSeparator: true });
+    expect(rows.map(r => r.kind)).toEqual(['separator', 'detail', 'separator', 'detail']);
+    expect((rows[0] as any).selectionKeys).toEqual([1]);
+  });
+  it('single group, no leading separator → no separators', () => {
     const rows = buildGroupedRows([d({ milling_type_id: 5 }), d({ milling_type_id: 5 })], 'milling');
     expect(rows.every(r => r.kind === 'detail')).toBe(true);
   });
   it('separator keys are unique', () => {
     const rows = buildGroupedRows(
       [d({ milling_type_id: 1 }), d({ milling_type_id: 2 }), d({ milling_type_id: 3 })],
-      'milling'
+      'milling', { includeLeadingSeparator: true },
     );
     const sepKeys = rows.filter(r => r.kind === 'separator').map(r => (r as any).key);
     expect(new Set(sepKeys).size).toBe(sepKeys.length);
