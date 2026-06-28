@@ -2,6 +2,7 @@ import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Table, Breadcrumb, message, Dropdown, Tooltip, Space } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined } from "@ant-design/icons";
+import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -31,6 +32,12 @@ import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.ty
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
+import {
+  applyOrderDetailColumnSettings,
+  OrderDetailColumnSettingsButton,
+  useOrderDetailColumnPreferences,
+  type OrderDetailColumnDefinition,
+} from "./components/tables/OrderDetailColumnSettings";
 
 type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'additional';
 
@@ -40,6 +47,24 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
   { key: 'finance', label: 'Финансы', color: '#faad14' },
   { key: 'additional', label: 'Дополнительная информация', color: 'var(--app-text-muted)' },
 ];
+
+const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
+  { key: 'detail_number', label: '№', lockVisible: true },
+  { key: 'height', label: 'Высота' },
+  { key: 'width', label: 'Ширина' },
+  { key: 'quantity', label: 'Кол-во' },
+  { key: 'area', label: 'м²' },
+  { key: 'milling_type', label: 'Фрезеровка' },
+  { key: 'edge_type', label: 'Обкат' },
+  { key: 'material', label: 'Материал' },
+  { key: 'note', label: 'Пр-е' },
+  { key: 'milling_cost_per_sqm', label: 'Цена за кв.м.' },
+  { key: 'detail_cost', label: 'Сумма' },
+  { key: 'film', label: 'Пленка' },
+  { key: 'cut_job', label: 'Раскрой' },
+];
+
+const ORDER_DETAIL_SHOW_DEFAULT_ORDER = ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS.map((definition) => definition.key);
 
 
 
@@ -540,6 +565,137 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }
   };
 
+  const { settings: showColumnSettings, saveSettings: saveShowColumnSettings } = useOrderDetailColumnPreferences(
+    'orderShow',
+    ORDER_DETAIL_SHOW_DEFAULT_ORDER,
+    ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS,
+  );
+
+  const detailColumns: ColumnsType<any> = [
+    {
+      title: '№',
+      dataIndex: 'detail_number',
+      key: 'detail_number',
+      width: 43,
+      align: 'center',
+    },
+    {
+      title: 'Высота',
+      dataIndex: 'height',
+      key: 'height',
+      width: 72,
+      align: 'center',
+    },
+    {
+      title: 'Ширина',
+      dataIndex: 'width',
+      key: 'width',
+      width: 72,
+      align: 'center',
+    },
+    {
+      title: 'Кол-во',
+      dataIndex: 'quantity',
+      key: 'quantity',
+      width: 63,
+      align: 'center',
+    },
+    {
+      title: 'м²',
+      dataIndex: 'area',
+      key: 'area',
+      width: 72,
+      align: 'center',
+      render: (value) => value ? value.toFixed(2) : '0.00',
+    },
+    {
+      title: 'Фрезеровка',
+      key: 'milling_type',
+      width: 128,
+      render: (_, detail) => millingTypesMap.get(detail.milling_type_id) || '—',
+    },
+    {
+      title: 'Обкат',
+      key: 'edge_type',
+      width: 51,
+      render: (_, detail) => {
+        const edgeTypeName = edgeTypesMap.get(detail.edge_type_id) || '—';
+        return <span style={{ fontSize: '0.86em' }}>{edgeTypeName}</span>;
+      },
+    },
+    {
+      title: 'Материал',
+      key: 'material',
+      width: 77,
+      render: (_, detail) => {
+        const materialName =
+          resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '—';
+        return <span style={{ fontSize: '0.86em' }}>{materialName}</span>;
+      },
+    },
+    {
+      title: 'Пр-е',
+      dataIndex: 'note',
+      key: 'note',
+      render: (value) => (
+        <span style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+          {value || ''}
+        </span>
+      ),
+    },
+    {
+      title: 'Цена за кв.м.',
+      dataIndex: 'milling_cost_per_sqm',
+      key: 'milling_cost_per_sqm',
+      width: 70,
+      align: 'right',
+      render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
+    },
+    {
+      title: 'Сумма',
+      dataIndex: 'detail_cost',
+      key: 'detail_cost',
+      width: 65,
+      align: 'right',
+      render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
+    },
+    {
+      title: 'Пленка',
+      key: 'film',
+      width: 104,
+      render: (_, detail) => {
+        if (!detail.film_id) return '';
+        const filmName = filmsMap.get(detail.film_id);
+        return (
+          <span
+            style={{ fontSize: '0.86em', wordBreak: 'break-word', whiteSpace: 'normal' }}
+          >
+            {filmName || ''}
+          </span>
+        );
+      },
+    },
+    ...(cutColumnEnabled
+      ? [
+          {
+            title: 'Раскрой',
+            key: 'cut_job',
+            width: 150,
+            render: (_: unknown, detail: any) => {
+              const ref = cutJobByDetailId.get(detail.detail_id);
+              if (!ref) return '—';
+              return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
+            },
+          },
+        ]
+      : []),
+  ];
+
+  const visibleDetailColumns = useMemo(
+    () => applyOrderDetailColumnSettings(detailColumns, showColumnSettings),
+    [detailColumns, showColumnSettings],
+  );
+
   return (
     <Show
       isLoading={showLoading}
@@ -896,37 +1052,46 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
                 Детали заказа
               </div>
-              {cutEnabled && details.length > 0 && (
-                <Space size="small">
-                  <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
-                    {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
-                  </Button>
-                  {cutSelectMode && (
-                    <>
-                      <Button
-                        size="small"
-                        onClick={() =>
-                          setCutSelectedDetailIds(
-                            cutSelectedDetailIds.length === details.length
-                              ? []
-                              : details.map((d: any) => d.detail_id),
-                          )
-                        }
-                      >
-                        {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
-                      </Button>
-                      <Button
-                        size="small"
-                        type="primary"
-                        disabled={cutSelectedDetailIds.length === 0}
-                        onClick={() => setCutModalOpen(true)}
-                      >
-                        Добавить выбранные в раскрой ({cutSelectedDetailIds.length})
-                      </Button>
-                    </>
-                  )}
-                </Space>
-              )}
+              <Space size="small">
+                {cutEnabled && details.length > 0 && (
+                  <>
+                    <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
+                      {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+                    </Button>
+                    {cutSelectMode && (
+                      <>
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            setCutSelectedDetailIds(
+                              cutSelectedDetailIds.length === details.length
+                                ? []
+                                : details.map((d: any) => d.detail_id),
+                            )
+                          }
+                        >
+                          {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
+                        </Button>
+                        <Button
+                          size="small"
+                          type="primary"
+                          disabled={cutSelectedDetailIds.length === 0}
+                          onClick={() => setCutModalOpen(true)}
+                        >
+                          Добавить выбранные в раскрой ({cutSelectedDetailIds.length})
+                        </Button>
+                      </>
+                    )}
+                  </>
+                )}
+                <OrderDetailColumnSettingsButton
+                  tableKey="orderShow"
+                  definitions={ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS}
+                  defaultOrder={ORDER_DETAIL_SHOW_DEFAULT_ORDER}
+                  settings={showColumnSettings}
+                  onChange={saveShowColumnSettings}
+                />
+              </Space>
             </div>
             <TableTopScroll>
             <Table
@@ -963,179 +1128,52 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   cell: (props: any) => <td {...props} style={{ ...props.style, padding: '2px 4px', fontSize: '80%' }} />
                 }
               }}
-              columns={[
-                {
-                  title: '№',
-                  dataIndex: 'detail_number',
-                  key: 'detail_number',
-                  width: 43,
-                  align: 'center',
-                },
-                {
-                  title: 'Высота',
-                  dataIndex: 'height',
-                  key: 'height',
-                  width: 72,
-                  align: 'center',
-                },
-                {
-                  title: 'Ширина',
-                  dataIndex: 'width',
-                  key: 'width',
-                  width: 72,
-                  align: 'center',
-                },
-                {
-                  title: 'Кол-во',
-                  dataIndex: 'quantity',
-                  key: 'quantity',
-                  width: 63,
-                  align: 'center',
-                },
-                {
-                  title: 'м²',
-                  dataIndex: 'area',
-                  key: 'area',
-                  width: 72,
-                  align: 'center',
-                  render: (value) => value ? value.toFixed(2) : '0.00',
-                },
-                {
-                  title: 'Фрезеровка',
-                  key: 'milling_type',
-                  width: 128,
-                  render: (_, record) => millingTypesMap.get(record.milling_type_id) || '—',
-                },
-                {
-                  title: 'Обкат',
-                  key: 'edge_type',
-                  width: 51,
-                  render: (_, record) => {
-                    const edgeTypeName = edgeTypesMap.get(record.edge_type_id) || '—';
-                    return <span style={{ fontSize: '0.86em' }}>{edgeTypeName}</span>;
-                  },
-                },
-                {
-                  title: 'Материал',
-                  key: 'material',
-                  width: 77,
-                  render: (_, record) => {
-                    const materialName =
-                      resolveDetailMaterialName(record, resolvedNameByDetailId, materialsMap) || '—';
-                    return <span style={{ fontSize: '0.86em' }}>{materialName}</span>;
-                  },
-                },
-                {
-                  title: 'Пр-е',
-                  dataIndex: 'note',
-                  key: 'note',
-                  // Без фиксированной ширины - занимает оставшееся пространство
-                  render: (value) => (
-                    <span style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
-                      {value || ''}
-                    </span>
-                  ),
-                },
-                {
-                  title: 'Цена за кв.м.',
-                  dataIndex: 'milling_cost_per_sqm',
-                  key: 'milling_cost_per_sqm',
-                  width: 70,
-                  align: 'right',
-                  render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
-                },
-                {
-                  title: 'Сумма',
-                  dataIndex: 'detail_cost',
-                  key: 'detail_cost',
-                  width: 65,
-                  align: 'right',
-                  render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
-                },
-                {
-                  title: 'Пленка',
-                  key: 'film',
-                  width: 104,
-                  render: (_, record) => {
-                    if (!record.film_id) return '';
-                    const filmName = filmsMap.get(record.film_id);
-                    return (
-                      <span
-                        style={{ fontSize: '0.86em', wordBreak: 'break-word', whiteSpace: 'normal' }}
-                      >
-                        {filmName || ''}
-                      </span>
-                    );
-                  },
-                },
-                // «Раскрой» — last column (after «Пленка»), read-only deep-link.
-                ...(cutColumnEnabled
-                  ? [
-                      {
-                        title: 'Раскрой',
-                        key: 'cut_job',
-                        width: 150,
-                        render: (_: unknown, record: any) => {
-                          const ref = cutJobByDetailId.get(record.detail_id);
-                          if (!ref) return '—';
-                          return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
-                        },
-                      },
-                    ]
-                  : []),
-              ]}
+              columns={visibleDetailColumns}
               summary={() => {
                 const totalCount = details.length;
                 const totalQuantity = details.reduce((sum, d) => sum + (d.quantity || 0), 0);
                 const totalArea = details.reduce((sum, d) => sum + (d.area || 0), 0);
                 const totalCost = details.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
 
-                // Footer cells must line up with the RENDERED columns.
-                // rowSelection (cutSelectMode) prepends a checkbox column → `base`.
-                // The «Раскрой» column is the LAST column (after «Пленка»), so it
-                // only appends a trailing cell and does not shift the others.
                 const base = cutSelectMode ? 1 : 0;
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ backgroundColor: 'var(--app-surface-muted)', fontWeight: 'bold' }}>
-                      {/* leading checkbox column (only while selecting for cut) */}
                       {cutSelectMode && <Table.Summary.Cell index={0} />}
-                      {/* № - количество позиций */}
-                      <Table.Summary.Cell index={base + 0} align="center">
-                        <span style={{ color: '#1890ff' }}>{totalCount}</span>
-                      </Table.Summary.Cell>
-                      {/* Высота */}
-                      <Table.Summary.Cell index={base + 1} />
-                      {/* Ширина */}
-                      <Table.Summary.Cell index={base + 2} />
-                      {/* Кол-во */}
-                      <Table.Summary.Cell index={base + 3} align="center">
-                        <span style={{ color: '#1890ff' }}>{totalQuantity}</span>
-                      </Table.Summary.Cell>
-                      {/* м² */}
-                      <Table.Summary.Cell index={base + 4} align="center">
-                        <span style={{ color: '#1890ff' }}>{totalArea.toFixed(2)}</span>
-                      </Table.Summary.Cell>
-                      {/* Фрезеровка */}
-                      <Table.Summary.Cell index={base + 5} />
-                      {/* Обкат */}
-                      <Table.Summary.Cell index={base + 6} />
-                      {/* Материал */}
-                      <Table.Summary.Cell index={base + 7} />
-                      {/* Пр-е */}
-                      <Table.Summary.Cell index={base + 8} />
-                      {/* Цена за кв.м. */}
-                      <Table.Summary.Cell index={base + 9} />
-                      {/* Сумма */}
-                      <Table.Summary.Cell index={base + 10} align="right">
-                        <span style={{ color: '#52c41a' }}>
-                          {totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </span>
-                      </Table.Summary.Cell>
-                      {/* Пленка */}
-                      <Table.Summary.Cell index={base + 11} />
-                      {/* Раскрой — last column (conditional), trailing summary cell */}
-                      {cutColumnEnabled && <Table.Summary.Cell index={base + 12} />}
+                      {visibleDetailColumns.map((column, index) => {
+                        const key = String(column.key ?? '');
+                        if (key === 'detail_number') {
+                          return (
+                            <Table.Summary.Cell key={key} index={base + index} align="center">
+                              <span style={{ color: '#1890ff' }}>{totalCount}</span>
+                            </Table.Summary.Cell>
+                          );
+                        }
+                        if (key === 'quantity') {
+                          return (
+                            <Table.Summary.Cell key={key} index={base + index} align="center">
+                              <span style={{ color: '#1890ff' }}>{totalQuantity}</span>
+                            </Table.Summary.Cell>
+                          );
+                        }
+                        if (key === 'area') {
+                          return (
+                            <Table.Summary.Cell key={key} index={base + index} align="center">
+                              <span style={{ color: '#1890ff' }}>{totalArea.toFixed(2)}</span>
+                            </Table.Summary.Cell>
+                          );
+                        }
+                        if (key === 'detail_cost') {
+                          return (
+                            <Table.Summary.Cell key={key} index={base + index} align="right">
+                              <span style={{ color: '#52c41a' }}>
+                                {totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              </span>
+                            </Table.Summary.Cell>
+                          );
+                        }
+                        return <Table.Summary.Cell key={key || index} index={base + index} />;
+                      })}
                     </Table.Summary.Row>
                   </Table.Summary>
                 );

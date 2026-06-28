@@ -20,27 +20,36 @@ describe('ProfilePreferencesController', () => {
     const controller = createController({
       async get(command) {
         calls.push(`get:${command.currentUser.id}`);
-        return { themeMode: 'light' };
+        return { themeMode: 'light', orderDetailColumns: {} };
       },
       async update(command) {
-        calls.push(`update:${command.currentUser.id}:${command.preferences.themeMode}`);
-        return { themeMode: 'dark' };
+        calls.push(`update:${command.currentUser.id}:${command.preferences.themeMode}:${Object.keys(command.preferences.orderDetailColumns ?? {}).join(',')}`);
+        return { themeMode: 'dark', orderDetailColumns: command.preferences.orderDetailColumns ?? {} };
       },
     });
 
     await expect(controller.get({ user: currentUser('15') })).resolves.toEqual({
-      preferences: { themeMode: 'light' },
+      preferences: { themeMode: 'light', orderDetailColumns: {} },
     });
-    await expect(controller.update({ user: currentUser('15') }, { themeMode: 'dark' })).resolves.toEqual({
-      preferences: { themeMode: 'dark' },
+    await expect(controller.update({ user: currentUser('15') }, {
+      themeMode: 'dark',
+      orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } },
+    })).resolves.toEqual({
+      preferences: { themeMode: 'dark', orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } } },
     });
-    expect(calls).toEqual(['get:15', 'update:15:dark']);
+    expect(calls).toEqual(['get:15', 'update:15:dark:orderEdit']);
   });
 
   it('validates update body', () => {
     expect(parseUpdateUserPreferencesRequest({ themeMode: 'dark' })).toEqual({ themeMode: 'dark' });
+    expect(parseUpdateUserPreferencesRequest({
+      orderDetailColumns: { orderShow: { order: ['detail_number', 'height'], hidden: ['note'] } },
+    })).toEqual({
+      orderDetailColumns: { orderShow: { order: ['detail_number', 'height'], hidden: ['note'] } },
+    });
     expect(parseUpdateUserPreferencesRequest({})).toEqual({});
     expect(() => parseUpdateUserPreferencesRequest({ themeMode: 'system' })).toThrow(ApiError);
+    expect(() => parseUpdateUserPreferencesRequest({ orderDetailColumns: { orderShow: { order: [7], hidden: [] } } })).toThrow(ApiError);
     expect(() => parseUpdateUserPreferencesRequest(null)).toThrow(ApiError);
   });
 });

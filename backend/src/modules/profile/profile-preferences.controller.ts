@@ -8,6 +8,13 @@ import type { UserPreferencesDto, UserPreferencesResponseDto } from './profile-p
 
 const updatePreferencesSchema = z.object({
   themeMode: z.enum(['light', 'dark']).optional(),
+  orderDetailColumns: z.record(
+    z.string().min(1).max(80),
+    z.object({
+      order: z.array(z.string().min(1).max(80)).max(80),
+      hidden: z.array(z.string().min(1).max(80)).max(80),
+    }),
+  ).optional(),
 });
 
 export function parseUpdateUserPreferencesRequest(body: unknown): Partial<UserPreferencesDto> {
