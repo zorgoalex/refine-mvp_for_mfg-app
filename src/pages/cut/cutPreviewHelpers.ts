@@ -1,4 +1,5 @@
 import type { CutJobItemDto, SheetPlacementPiece, SheetPlacements } from '../../api/types/cutApi.types';
+import { orientPieceRect } from './cutLayoutGeometry';
 
 /** Rounded mm side label, e.g. "2800 мм". */
 export function formatSheetSide(mm: number): string {
@@ -111,11 +112,15 @@ export function buildSheetPieceOverlays(
 
       const x = placements.trim_mm.left + piece.x_mm;
       const y = placements.trim_mm.top + piece.y_mm;
-      const w = piece.width_mm;
-      const h = piece.height_mm;
-      const rect = landscape
-        ? { x: sheetH - (y + h), y: x, w: h, h: w, vw: sheetH, vh: sheetW }
-        : { x, y, w, h, vw: sheetW, vh: sheetH };
+      // Single canonical transform (Codex R4 MAJOR #4): shared orientPieceRect
+      // ensures FE preview and BE render cannot drift.  Coords are in full-sheet
+      // space (trim already added above) as the T1 coordinate-space contract requires.
+      const rect = orientPieceRect(
+        { x, y, w: piece.width_mm, h: piece.height_mm },
+        sheetW,
+        sheetH,
+        landscape,
+      );
 
       return {
         key: `${piece.item_id}:${piece.instance}`,

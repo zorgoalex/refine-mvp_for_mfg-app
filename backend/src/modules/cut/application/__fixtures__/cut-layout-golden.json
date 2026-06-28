@@ -85,5 +85,66 @@
       "filmTexture": {}
     },
     "expected": []
+  },
+  {
+    "name": "orient portrait - identity transform with sheet extents",
+    "kind": "orient",
+    "input": {
+      "rect": { "x": 10, "y": 20, "w": 100, "h": 50 },
+      "sheetW": 2800,
+      "sheetH": 2070,
+      "landscape": false
+    },
+    "expected": { "x": 10, "y": 20, "w": 100, "h": 50, "vw": 2800, "vh": 2070 }
+  },
+  {
+    "name": "orient landscape - 90 CW rotation swaps dims and remaps coords",
+    "kind": "orient",
+    "input": {
+      "rect": { "x": 10, "y": 20, "w": 100, "h": 50 },
+      "sheetW": 2800,
+      "sheetH": 2070,
+      "landscape": true
+    },
+    "expected": { "x": 2000, "y": 10, "w": 50, "h": 100, "vw": 2070, "vh": 2800 }
+  },
+  {
+    "name": "snap to left edge within threshold",
+    "kind": "snap",
+    "input": {
+      "rect": { "x": 3, "y": 100, "w": 600, "h": 400 },
+      "others": [],
+      "usableW": 2780,
+      "usableH": 2050,
+      "gapMm": 3,
+      "thresholdMm": 8
+    },
+    "expected": { "x": 0, "y": 100 }
+  },
+  {
+    "name": "snap to neighbour right edge plus gap",
+    "kind": "snap",
+    "input": {
+      "rect": { "x": 607, "y": 0, "w": 600, "h": 400 },
+      "others": [{ "x": 0, "y": 0, "w": 600, "h": 400 }],
+      "usableW": 2780,
+      "usableH": 2050,
+      "gapMm": 3,
+      "thresholdMm": 8
+    },
+    "expected": { "x": 603, "y": 0 }
+  },
+  {
+    "name": "no snap when no candidate within threshold",
+    "kind": "snap",
+    "input": {
+      "rect": { "x": 900, "y": 900, "w": 100, "h": 100 },
+      "others": [],
+      "usableW": 2780,
+      "usableH": 2050,
+      "gapMm": 3,
+      "thresholdMm": 8
+    },
+    "expected": { "x": 900, "y": 900 }
   }
 ]

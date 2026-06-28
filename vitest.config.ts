@@ -26,6 +26,8 @@ export default defineConfig({
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),
+            // Shared pure-TS geometry module (same alias as vite.config.ts).
+            '@shared': path.resolve(__dirname, 'backend/src/shared'),
         },
     },
 });
