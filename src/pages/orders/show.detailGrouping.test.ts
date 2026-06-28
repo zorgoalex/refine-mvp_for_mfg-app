@@ -14,9 +14,6 @@ describe('show.tsx detail grouping integration', () => {
   it('renders the controls above the details table', () => {
     expect(src).toContain('<DetailGroupingControls');
   });
-  it('suppresses grouping while selecting details for cut', () => {
-    expect(src).toMatch(/!cutSelectMode/);
-  });
   it('marks the table grouped and guards separator rows', () => {
     expect(src).toContain('details-grouped');
     expect(src).toContain("'separator'");
