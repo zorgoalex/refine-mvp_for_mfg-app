@@ -73,7 +73,7 @@
 - `src/types/` — типы доменных сущностей.
 - `src/utils/excel/` — подготовка и отправка данных для Excel/Google Drive.
 - `api/` — Vercel Functions: auth, users, refresh, VLM, export.
-- `backend/` — NestJS backend stage-1: `/api/v1/*` + `/health/live`/`/health/ready`; модули auth/session, users, orders (read/write, export, JSON snapshot), payments, production actions, client phones, VLM, deadlines, projects, notifications.
+- `backend/` — NestJS backend stage-1: `/api/v1/*` + `/health/live`/`/health/ready`; модули auth/session, users, orders (read/write, export, JSON snapshot), payments, production actions, client phones, VLM, deadlines, projects, notifications, cut-jobs.
 - `ops/` — VPS bootstrap/deploy scripts and tracked Docker Compose templates.
 - `public/templates/order_template.xlsx` — шаблон Excel.
 - `vercel.json` — rewrites, headers и настройки функций.
@@ -92,6 +92,7 @@
 - `/payments-analytics` — агрегированный список платежей (`payments_view`).
 - `/clients` и `/clients-analytics` — клиенты и клиентская аналитика.
 - `/configuration` — настройки приложения.
+- `/cut` — задания раскроя.
 
 Справочники и производственные сущности также зарегистрированы в `src/App.tsx`: материалы, плёнки, типы фрезеровок, типы кромок, поставщики, производители, статусы заказов/оплат/производства, цеха, участки, сотрудники, пользователи и другие ресурсы.
 
@@ -385,6 +386,33 @@ Audit:
 ## Twenty CRM sync
 
 Backend поддерживает одностороннюю проекцию ERP→Twenty CRM: клиенты синхронизируются как Company, заказы — как ErpOrder. Синхронизация fail-closed по умолчанию и включается флагом `BACKEND_ENABLE_TWENTY_SYNC=true` на бэкенде. Дополнительные флаги управляют relay-owner (`BACKEND_TWENTY_SYNC_RELAY_OWNER`), dry-run режимом (`BACKEND_TWENTY_SYNC_DRY_RUN=true`) и параметрами воркера (интервал, batch size, lease). Для первоначальной синхронизации существующих данных запустить `npm run crm-sync:backfill` внутри пакета `backend/` (поддерживает `--dry-run`). Переменные `TWENTY_SYNC_BASE_URL` и `TWENTY_SYNC_API_KEY` настраиваются в `ops/templates/env.vps.example`; реальный ключ никогда не коммитится.
+
+## Раскрой
+
+Страница `/cut` отображает список заданий раскроя. Каждое задание охватывает набор деталей, сгруппированных по материалу; рассчитанные (ready) задания содержат SVG/PDF-рендер раскладки листов. Backend-модуль `cut-jobs` обслуживает операции через `/api/v1/cut-jobs`.
+
+### Ручной редактор раскроя
+
+Для готового задания оператор может нажать «Редактировать раскрой» и перейти в SVG-редактор:
+перетащить детали между листами группы, повернуть каждую деталь — и сохранить результат как альтернативный (ручной) вариант через «Сохранить изменения». Изменения хранятся отдельно на сервере и не влияют на исходные данные заказа.
+
+Переключатель «Показать альтернативный раскрой» позволяет сравнить авто- и ручной варианты прямо в карточке задания. Редактор доступен только пользователям с правом `cut.manage` и фиксирует каждое сохранение в системном журнале с outbox-событием.
+
+### Параметр `variant` для рендер- и PDF-эндпоинтов
+
+Эндпоинты рендера листов и PDF-экспорта принимают query-параметр `variant`:
+
+| Значение | Поведение |
+|---|---|
+| `auto` (по умолчанию) | Автоматически рассчитанный вариант |
+| `manual` | Сохранённый оператором ручной вариант |
+| `active` | Тот вариант, который сейчас активен в задании |
+
+Фронтенд передаёт `?variant=active` при печати задания, чтобы распечатать именно тот вариант, который видит оператор.
+
+### Миграция существующих заданий (cutover)
+
+Задания, рассчитанные до введения редактора, не содержат параметров `editorParams`, необходимых для SVG-редактора. При открытии такого задания будет показан промпт с предложением выполнить «Повторить расчёт». После однократного пересчёта `editorParams` заполняются и редактор становится доступен без потери уже размещённых деталей.
 
 ## Установка и запуск
 
