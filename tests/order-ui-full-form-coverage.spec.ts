@@ -453,12 +453,12 @@ async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string,
     // Tint must be GROUP-based, not row-based: walk rows in DOM order; detail rows
     // between separators must share one tint parity, and parity must flip across each
     // separator. A row-index zebra would fail this check on the A,A group.
+    // Distinct light hue per group: rows carry detail-group-tint-N (N cycles the palette).
     const tintSequence = await detailsTable.locator('tbody tr').evaluateAll((rows) =>
         rows.map((r) => {
             if (r.classList.contains('detail-group-separator')) return 'SEP';
-            if (r.classList.contains('detail-group-tint-0')) return '0';
-            if (r.classList.contains('detail-group-tint-1')) return '1';
-            return 'OTHER';
+            const tintClass = Array.from(r.classList).find((c) => /^detail-group-tint-\d+$/.test(c));
+            return tintClass ? tintClass.replace('detail-group-tint-', '') : 'OTHER';
         }),
     );
     // Split on SEP, drop empty buckets; each group must be uniform; adjacent groups differ.
@@ -466,7 +466,7 @@ async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string,
     let cur: string[] = [];
     for (const t of tintSequence) {
         if (t === 'SEP') { if (cur.length) groups.push(cur); cur = []; }
-        else if (t === '0' || t === '1') cur.push(t);
+        else if (t !== 'OTHER') cur.push(t);
     }
     if (cur.length) groups.push(cur);
     expect(groups.length).toBeGreaterThanOrEqual(2);

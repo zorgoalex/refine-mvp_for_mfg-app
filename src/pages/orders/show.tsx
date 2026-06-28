@@ -31,7 +31,7 @@ import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.ty
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
-import { buildGroupedRows } from './detailGrouping';
+import { buildGroupedRows, GROUP_TINT_COUNT } from './detailGrouping';
 import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { authSession } from '../../api/authSession';
@@ -981,7 +981,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 if (row?.kind === 'separator') return 'detail-group-separator';
                 if (!groupingActive) return index % 2 === 0 ? 'table-row-light' : 'table-row-dark';
                 const groupIndex = row?.kind === 'detail' ? row.groupIndex : index;
-                return `detail-group-tint-${groupIndex % 2}`;
+                return `detail-group-tint-${groupIndex % GROUP_TINT_COUNT}`;
               }}
               onRow={(row: any) => ({
                 onDoubleClick: () => {

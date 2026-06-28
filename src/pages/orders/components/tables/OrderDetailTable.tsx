@@ -25,7 +25,7 @@ import {
   filterCuttableOptions,
 } from '../../../../hooks/useSheetMaterialOptions';
 import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
-import { buildGroupedRows, type GroupField } from '../../detailGrouping';
+import { buildGroupedRows, GROUP_TINT_COUNT, type GroupField } from '../../detailGrouping';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -1741,7 +1741,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             return dragSelection.isInPendingSelection(rowKey) ? 'drag-selection-pending' : '';
           }
           const groupIndex = row?.kind === 'detail' ? row.groupIndex : 0;
-          const classes = [`detail-group-tint-${groupIndex % 2}`];
+          const classes = [`detail-group-tint-${groupIndex % GROUP_TINT_COUNT}`];
           if (isEditing(record)) classes.push('dg-editing');
           else if (dragSelection.isInPendingSelection(rowKey)) classes.push('dg-pending');
           else if (highlightedRowKey !== null && rowKey === highlightedRowKey) classes.push('dg-highlight');

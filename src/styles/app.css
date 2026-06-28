@@ -16,9 +16,15 @@
   --app-success-bg: #f6ffed;
   --app-shadow: rgba(0, 0, 0, 0.05);
   --app-workspace-gap: #f0f0f0;
-  /* Detail visual-grouping: two clearly-distinct per-group tints. */
-  --app-group-tint-0: #ffffff;
-  --app-group-tint-1: #cfe0f2;
+  /* Detail visual-grouping: distinct LIGHT pastel hue per group (cycles). */
+  --app-group-tint-0: #eef4fc;
+  --app-group-tint-1: #eef8f0;
+  --app-group-tint-2: #fdf7ea;
+  --app-group-tint-3: #fceff5;
+  --app-group-tint-4: #f3effb;
+  --app-group-tint-5: #eaf8f8;
+  --app-group-tint-6: #fdf2ec;
+  --app-group-tint-7: #f1f4f8;
 }
 
 :root[data-theme="dark"],
@@ -40,8 +46,14 @@
   --app-success-bg: #162b1b;
   --app-shadow: rgba(0, 0, 0, 0.35);
   --app-workspace-gap: #141414;
-  --app-group-tint-0: #1f1f1f;
-  --app-group-tint-1: #33414f;
+  --app-group-tint-0: #20303f;
+  --app-group-tint-1: #1d3024;
+  --app-group-tint-2: #322c18;
+  --app-group-tint-3: #321f2b;
+  --app-group-tint-4: #272035;
+  --app-group-tint-5: #16302f;
+  --app-group-tint-6: #33251a;
+  --app-group-tint-7: #232a33;
 }
 
 html,
@@ -463,16 +475,19 @@ body,
 .details-grouped .ant-table-tbody > tr.table-row-dark > td {
   background-color: transparent;
 }
-/* Opaque per-GROUP backgrounds (theme-var based → dark-theme aware).
+/* Opaque per-GROUP backgrounds — a distinct LIGHT pastel hue per group (NOT a
+   two-colour zebra); group index cycles through the palette (% GROUP_TINT_COUNT).
    !important so they beat the global per-row zebra AND the dark-theme
    `[data-theme="dark"] .ant-table-tbody > tr > td { background: ... !important }`
    rule, which otherwise flattens every group to one color. */
-.details-grouped .ant-table-tbody > tr.detail-group-tint-0 > td {
-  background-color: var(--app-group-tint-0) !important;
-}
-.details-grouped .ant-table-tbody > tr.detail-group-tint-1 > td {
-  background-color: var(--app-group-tint-1) !important;
-}
+.details-grouped .ant-table-tbody > tr.detail-group-tint-0 > td { background-color: var(--app-group-tint-0) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-1 > td { background-color: var(--app-group-tint-1) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-2 > td { background-color: var(--app-group-tint-2) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-3 > td { background-color: var(--app-group-tint-3) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-4 > td { background-color: var(--app-group-tint-4) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-5 > td { background-color: var(--app-group-tint-5) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-6 > td { background-color: var(--app-group-tint-6) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-7 > td { background-color: var(--app-group-tint-7) !important; }
 /* Non-functional separator band between groups. */
 .details-grouped .ant-table-tbody > tr.detail-group-separator > td {
   background-color: var(--app-surface-muted, #e6ebf2) !important;
@@ -490,4 +505,10 @@ body,
    use !important and would otherwise wash out group boundaries on hover). */
 .details-grouped .ant-table-tbody > tr.detail-group-tint-0:hover > td { background-color: var(--app-group-tint-0) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-tint-1:hover > td { background-color: var(--app-group-tint-1) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-2:hover > td { background-color: var(--app-group-tint-2) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-3:hover > td { background-color: var(--app-group-tint-3) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-4:hover > td { background-color: var(--app-group-tint-4) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-5:hover > td { background-color: var(--app-group-tint-5) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-6:hover > td { background-color: var(--app-group-tint-6) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-tint-7:hover > td { background-color: var(--app-group-tint-7) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-separator:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }

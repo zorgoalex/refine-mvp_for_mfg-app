@@ -19,6 +19,11 @@ export const GROUP_FIELDS: GroupFieldDef[] = [
 
 export const EMPTY_GROUP_KEY = '__EMPTY__';
 
+// Number of distinct per-group tint classes (.detail-group-tint-0..N-1) defined in
+// app.css. Group index cycles through them so each group gets its own light hue
+// (NOT a two-colour zebra). Keep in sync with the palette in app.css.
+export const GROUP_TINT_COUNT = 8;
+
 const idValue = (raw: unknown): string => {
   if (raw === null || raw === undefined) return EMPTY_GROUP_KEY;
   const num = Number(raw);
