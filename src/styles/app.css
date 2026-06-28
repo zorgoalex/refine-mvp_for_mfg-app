@@ -16,9 +16,9 @@
   --app-success-bg: #f6ffed;
   --app-shadow: rgba(0, 0, 0, 0.05);
   --app-workspace-gap: #f0f0f0;
-  /* Detail visual-grouping: two clearly-distinct-but-subtle per-group tints. */
+  /* Detail visual-grouping: two clearly-distinct per-group tints. */
   --app-group-tint-0: #ffffff;
-  --app-group-tint-1: #e8eef6;
+  --app-group-tint-1: #cfe0f2;
 }
 
 :root[data-theme="dark"],
@@ -41,7 +41,7 @@
   --app-shadow: rgba(0, 0, 0, 0.35);
   --app-workspace-gap: #141414;
   --app-group-tint-0: #1f1f1f;
-  --app-group-tint-1: #2c333d;
+  --app-group-tint-1: #33414f;
 }
 
 html,
@@ -476,7 +476,7 @@ body,
 /* Non-functional separator band between groups. */
 .details-grouped .ant-table-tbody > tr.detail-group-separator > td {
   background-color: var(--app-surface-muted, #e6ebf2) !important;
-  height: 10px;
+  height: 20px;
   padding: 0 !important;
   border-top: none;
   cursor: default;
