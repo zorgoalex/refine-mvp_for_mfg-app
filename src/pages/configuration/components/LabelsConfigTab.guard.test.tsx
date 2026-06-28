@@ -96,7 +96,7 @@ describe('LabelsConfigTab wiring', () => {
 
   it('defaults the edit visual to compact mode and can expand it', () => {
     expect(tabSrc).toMatch(/visualExpanded/);
-    expect(tabSrc).toMatch(/initialZoom=\{visualExpanded \? 1\.3 : 0\.7\}/);
+    expect(tabSrc).toMatch(/initialZoom=\{visualExpanded \? 1\.3 : 0\.6\}/);
     expect(tabSrc).toMatch(/Увеличить визуал/);
     expect(tabSrc).toMatch(/leftColumnSpan = visualExpanded \? 10 : 14/);
     expect(tabSrc).toMatch(/rightColumnSpan = visualExpanded \? 14 : 10/);

@@ -753,7 +753,7 @@ export const LabelsConfigTab: React.FC = () => {
                 fields={sourceFields}
                 selectedElementKey={selectedElementKey}
                 canDrag={canManage}
-                initialZoom={visualExpanded ? 1.3 : 0.7}
+                initialZoom={visualExpanded ? 1.3 : 0.6}
                 onSelectElement={setSelectedElementKey}
                 onMoveElement={moveElement}
                 onChangeElement={patchElementByKey}
