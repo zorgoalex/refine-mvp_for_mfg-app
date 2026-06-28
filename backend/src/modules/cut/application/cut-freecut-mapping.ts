@@ -1,5 +1,5 @@
 import { ApiError } from '../../../common/errors/api-error';
-import { PieceLabelSnapshot } from '../../../../../shared/cut-geometry';
+import { PieceLabelSnapshot } from '../../../shared/cut-geometry';
 
 /**
  * Freecut request/response mapping (plan §6). One cut_group per cuttable key

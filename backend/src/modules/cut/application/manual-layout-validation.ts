@@ -4,4 +4,4 @@
  * keeps existing relative path references (./manual-layout-validation) working
  * inside the backend module tree.
  */
-export * from '../../../../../shared/cut-geometry';
+export * from '../../../shared/cut-geometry';

@@ -5,6 +5,7 @@
     "moduleResolution": "Node",
     "lib": ["ES2022"],
     "outDir": "dist",
+    "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -13,12 +14,8 @@
     "emitDecoratorMetadata": true,
     "sourceMap": true,
     "declaration": true,
-    "resolveJsonModule": true,
-    "paths": {
-      "@shared/cut-geometry": ["../shared/cut-geometry/index.ts"],
-      "@shared/*": ["../shared/*"]
-    }
+    "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "../shared/**/*.ts"],
+  "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts", "**/*.integration.ts"]
 }

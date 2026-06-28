@@ -13,13 +13,16 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         // Shared pure-TS geometry/validation module (no FE/BE deps).
-        // Task 9 imports: import { ... } from '@shared/cut-geometry'
-        "@shared": resolve(__dirname, "shared"),
+        // Lives under backend/src/shared so the backend Docker build context
+        // (backend/ only) includes it. Task 9 imports:
+        //   import { ... } from '@shared/cut-geometry'
+        "@shared": resolve(__dirname, "backend/src/shared"),
       },
     },
     server: {
       fs: {
-        // Allow Vite dev server to serve files from the repo root (shared/).
+        // backend/src is already under the Vite root (repo root); this keeps
+        // the dev server allowed to serve the shared module from there.
         allow: [resolve(__dirname)],
       },
       port: 5173,
