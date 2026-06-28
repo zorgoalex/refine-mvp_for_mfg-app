@@ -26,6 +26,12 @@ import {
 } from '../../../../hooks/useSheetMaterialOptions';
 import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
 import { buildGroupedRows, GROUP_TINT_COUNT, type GroupField } from '../../detailGrouping';
+import {
+  applyOrderDetailColumnSettings,
+  OrderDetailColumnSettingsButton,
+  useOrderDetailColumnPreferences,
+  type OrderDetailColumnDefinition,
+} from './OrderDetailColumnSettings';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -62,6 +68,29 @@ interface FieldValues {
   milling_cost_per_sqm: number | null;
   detail_cost: number | null;
 }
+
+const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
+  { key: 'detail_number', label: '№', lockVisible: true },
+  { key: 'height', label: 'Высота' },
+  { key: 'width', label: 'Ширина' },
+  { key: 'quantity', label: 'Кол-во' },
+  { key: 'area', label: 'Площадь' },
+  { key: 'milling_type_id', label: 'Фрезеровка' },
+  { key: 'edge_type_id', label: 'Обкат' },
+  { key: 'sheet_material_type_id', label: 'Материал' },
+  { key: 'note', label: 'Примечание' },
+  { key: 'milling_cost_per_sqm', label: 'Цена за кв.м.' },
+  { key: 'detail_cost', label: 'Сумма' },
+  { key: 'film_id', label: 'Пленка' },
+  { key: 'priority', label: 'Пр-т' },
+  { key: 'production_status_id', label: 'Статус' },
+  { key: 'basis_project', label: 'Базис проект' },
+  { key: 'basis_data', label: 'Базис данные' },
+  { key: 'detail_name', label: 'Название детали' },
+  { key: 'actions', label: 'Действия', lockVisible: true },
+];
+
+const ORDER_DETAIL_EDIT_DEFAULT_ORDER = ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS.map((definition) => definition.key);
 
 const FitSummaryText: React.FC<{
   children: React.ReactNode;
@@ -657,6 +686,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     recalcSum('milling_cost_per_sqm', value);
   }, [recalcSum]);
 
+  const { settings: columnSettings, saveSettings: saveColumnSettings } = useOrderDetailColumnPreferences(
+    'orderEdit',
+    ORDER_DETAIL_EDIT_DEFAULT_ORDER,
+    ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS,
+  );
+
   const columns: ColumnsType<any> = [
     {
       title: <div style={{ textAlign: 'center', fontSize: '70%' }}>№</div>,
@@ -1223,20 +1258,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     },
   ];
 
-  // Number of data columns (excl. AntD-injected selection column).
+  const visibleColumns = useMemo(
+    () => applyOrderDetailColumnSettings(columns, columnSettings),
+    [columns, columnSettings],
+  );
+
+  // Number of visible data columns (excl. AntD-injected selection column).
   // Used to set colSpan on separator rows so they span the full width.
-  // Derived from columns.length to stay in sync automatically.
-  const DATA_COLUMN_COUNT = columns.length;
+  const DATA_COLUMN_COUNT = visibleColumns.length;
 
   // Plain conditional — no memo — so render closures (isEditing, lookup maps,
   // Form watches) are always fresh. A stale memo on [groupingActive] would
   // freeze the closures captured at activation, breaking inline editing.
   const renderedColumns = groupingActive
-    ? columns.map((col: any) => {
+    ? visibleColumns.map((col: any) => {
         const { sorter, defaultSortOrder, sortOrder, ...rest } = col;
         return rest;
       })
-    : columns;
+    : visibleColumns;
 
   const rowSelection = onSelectChange
     ? {
@@ -1712,6 +1751,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         className={dragSelection.isDragging ? 'drag-selection-active' : ''}
         style={{ position: 'relative' }}
       >
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+        <OrderDetailColumnSettingsButton
+          tableKey="orderEdit"
+          definitions={ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS}
+          defaultOrder={ORDER_DETAIL_EDIT_DEFAULT_ORDER}
+          settings={columnSettings}
+          onChange={saveColumnSettings}
+        />
+      </div>
       <Table<any>
         className={`order-details-table${groupingActive ? ' details-grouped' : ''}`}
         dataSource={tableRows as any}
@@ -1750,54 +1798,42 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         summary={() => (
           <Table.Summary fixed="bottom">
             <Table.Summary.Row style={{ backgroundColor: 'var(--app-surface-muted)', fontWeight: 'bold' }}>
-              {/* Checkbox column */}
-              <Table.Summary.Cell index={0} />
-              {/* № */}
-              <Table.Summary.Cell index={1} align="center">
-                <FitSummaryText align="center" style={{ color: '#666' }}>{details.length}</FitSummaryText>
-              </Table.Summary.Cell>
-              {/* Высота */}
-              <Table.Summary.Cell index={2} />
-              {/* Ширина */}
-              <Table.Summary.Cell index={3} />
-              {/* Кол-во */}
-              <Table.Summary.Cell index={4} align="right">
-                <FitSummaryText align="right" style={{ color: '#1890ff' }}>{formatNumber(totals.quantity, 0)}</FitSummaryText>
-              </Table.Summary.Cell>
-              {/* Площадь */}
-              <Table.Summary.Cell index={5} align="right">
-                <FitSummaryText align="right" style={{ color: '#1890ff' }}>
-                  {`${formatNumber(totals.area, 2)} м\u00B2`}
-                </FitSummaryText>
-              </Table.Summary.Cell>
-              {/* Фрезеровка */}
-              <Table.Summary.Cell index={6} />
-              {/* Обкат */}
-              <Table.Summary.Cell index={7} />
-              {/* Материал */}
-              <Table.Summary.Cell index={8} />
-              {/* Примечание */}
-              <Table.Summary.Cell index={9} />
-              {/* Цена за кв.м. */}
-              <Table.Summary.Cell index={10} />
-              {/* Сумма */}
-              <Table.Summary.Cell index={11} align="right">
-                <FitSummaryText align="right" style={{ color: '#52c41a' }}>{formatNumber(totals.detail_cost, 2)}</FitSummaryText>
-              </Table.Summary.Cell>
-              {/* Пленка */}
-              <Table.Summary.Cell index={12} />
-              {/* Пр-т */}
-              <Table.Summary.Cell index={13} />
-              {/* Статус */}
-              <Table.Summary.Cell index={14} />
-              {/* Базис проект */}
-              <Table.Summary.Cell index={15} />
-              {/* Базис данные */}
-              <Table.Summary.Cell index={16} />
-              {/* detail_name */}
-              <Table.Summary.Cell index={17} />
-              {/* Действия */}
-              <Table.Summary.Cell index={18} />
+              {rowSelection && <Table.Summary.Cell index={0} />}
+              {visibleColumns.map((column, index) => {
+                const key = String(column.key ?? '');
+                const base = rowSelection ? 1 : 0;
+                if (key === 'detail_number') {
+                  return (
+                    <Table.Summary.Cell key={key} index={base + index} align="center">
+                      <FitSummaryText align="center" style={{ color: '#666' }}>{details.length}</FitSummaryText>
+                    </Table.Summary.Cell>
+                  );
+                }
+                if (key === 'quantity') {
+                  return (
+                    <Table.Summary.Cell key={key} index={base + index} align="right">
+                      <FitSummaryText align="right" style={{ color: '#1890ff' }}>{formatNumber(totals.quantity, 0)}</FitSummaryText>
+                    </Table.Summary.Cell>
+                  );
+                }
+                if (key === 'area') {
+                  return (
+                    <Table.Summary.Cell key={key} index={base + index} align="right">
+                      <FitSummaryText align="right" style={{ color: '#1890ff' }}>
+                        {`${formatNumber(totals.area, 2)} м\u00B2`}
+                      </FitSummaryText>
+                    </Table.Summary.Cell>
+                  );
+                }
+                if (key === 'detail_cost') {
+                  return (
+                    <Table.Summary.Cell key={key} index={base + index} align="right">
+                      <FitSummaryText align="right" style={{ color: '#52c41a' }}>{formatNumber(totals.detail_cost, 2)}</FitSummaryText>
+                    </Table.Summary.Cell>
+                  );
+                }
+                return <Table.Summary.Cell key={key || index} index={base + index} />;
+              })}
             </Table.Summary.Row>
           </Table.Summary>
         )}

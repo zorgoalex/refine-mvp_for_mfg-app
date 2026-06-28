@@ -2,8 +2,16 @@ import type { CurrentUser } from '../../permissions/current-user';
 
 export type ThemeMode = 'light' | 'dark';
 
+export interface OrderDetailColumnPreferenceDto {
+  order: string[];
+  hidden: string[];
+}
+
+export type OrderDetailColumnPreferencesDto = Record<string, OrderDetailColumnPreferenceDto>;
+
 export interface UserPreferencesDto {
   themeMode: ThemeMode;
+  orderDetailColumns: OrderDetailColumnPreferencesDto;
 }
 
 export interface UserPreferencesResponseDto {
