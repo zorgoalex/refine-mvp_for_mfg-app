@@ -5983,6 +5983,90 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/manual-layout:
+    patch:
+      tags:
+        - CutJobs
+      operationId: saveManualLayout
+      summary: Save manual layout moves for a cut group
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      parameters:
+        - name: cutJobId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - jobVersion
+                - active
+                - placements
+              properties:
+                jobVersion:
+                  type: integer
+                active:
+                  type: boolean
+                placements:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required:
+                      - itemId
+                      - instance
+                      - sheetIndex
+                      - xMm
+                      - yMm
+                      - rotated
+                    properties:
+                      itemId:
+                        type: string
+                        minLength: 1
+                      instance:
+                        type: integer
+                        minimum: 1
+                      sheetIndex:
+                        type: integer
+                        minimum: 0
+                      xMm:
+                        type: number
+                      yMm:
+                        type: number
+                      rotated:
+                        type: boolean
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex.png}:
     get:
       tags:

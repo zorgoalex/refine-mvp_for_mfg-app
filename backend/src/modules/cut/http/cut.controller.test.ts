@@ -13,6 +13,7 @@ import {
   parseSetSheetMaterialBody,
   parseSetCombineFilmsBody,
   parseSetSplitByMaterialBody,
+  parseSaveManualLayoutBody,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -352,6 +353,51 @@ it('PATCH setSplitByMaterial delegates parsed args to CutService.setSplitByMater
   const dto = await controller.setSplitByMaterial(request, '42', { splitByMaterial: false, version: 3 });
   expect(service.setSplitByMaterial).toHaveBeenCalledWith(expect.objectContaining({
     cutJobId: 42, splitByMaterial: false, version: 3, requestId: 'req-split',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+describe('parseSaveManualLayoutBody', () => {
+  it('parses a valid moves body', () => {
+    const out = parseSaveManualLayoutBody({
+      jobVersion: 3,
+      active: true,
+      placements: [{ itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 5, yMm: 7, rotated: false }],
+    });
+    expect(out.jobVersion).toBe(3);
+    expect(out.placements[0].itemId).toBe('det-1');
+  });
+  it('rejects a body carrying geometry (width/height not allowed — strict)', () => {
+    expect(() => parseSaveManualLayoutBody({
+      jobVersion: 1,
+      active: false,
+      placements: [{ itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 0, yMm: 0, rotated: false, widthMm: 999 }],
+    })).toThrow();
+  });
+  it('rejects a move missing sheetIndex', () => {
+    expect(() => parseSaveManualLayoutBody({
+      jobVersion: 1,
+      active: false,
+      placements: [{ itemId: 'det-1', instance: 1, xMm: 0, yMm: 0, rotated: false }],
+    })).toThrow();
+  });
+});
+
+it('PATCH saveManualLayout delegates parsed args to CutService.saveManualLayout', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    saveManualLayout: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-manual' } as never;
+  const placements = [{ itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 5, yMm: 7, rotated: false }];
+  const dto = await controller.saveManualLayout(request, '42', '100', {
+    jobVersion: 3,
+    active: true,
+    placements,
+  });
+  expect(service.saveManualLayout).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, cutGroupId: 100, jobVersion: 3, active: true, placements, requestId: 'req-manual',
   }));
   expect(dto).toBe(serviceReturn);
 });

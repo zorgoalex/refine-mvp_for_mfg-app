@@ -12,7 +12,7 @@ import type {
   CutSelectionCriteriaDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
-import type { CutSheetTypeOption } from '../application/cut-command.types';
+import type { CutSheetTypeOption, ManualMove } from '../application/cut-command.types';
 import { CutPdfCache, type PdfEnsureResult } from '../application/cut-pdf-cache';
 import { CutRuntimeConfigService } from './cut-runtime-config.service';
 
@@ -73,6 +73,25 @@ const setSplitByMaterialBodySchema = z
   .object({
     splitByMaterial: z.boolean(),
     version: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const manualMoveSchema = z
+  .object({
+    itemId: z.string().min(1),
+    instance: z.number().int().min(1),
+    sheetIndex: z.number().int().min(0),
+    xMm: z.number(),
+    yMm: z.number(),
+    rotated: z.boolean(),
+  })
+  .strict();
+
+const saveManualLayoutBodySchema = z
+  .object({
+    jobVersion: z.number().int().nonnegative(),
+    active: z.boolean(),
+    placements: z.array(manualMoveSchema),
   })
   .strict();
 
@@ -326,6 +345,31 @@ export class CutController {
     });
   }
 
+  @ApiOperation({ operationId: 'saveManualLayout', summary: 'Save manual layout moves for a cut group' })
+  @Patch(':cutJobId/groups/:groupId/manual-layout')
+  async saveManualLayout(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('groupId') groupId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { jobVersion, active, placements } = parseSaveManualLayoutBody(body);
+    const job = await this.cut.saveManualLayout({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      cutGroupId: parseCutJobId(groupId),
+      jobVersion,
+      active,
+      placements,
+      requestId: request.requestId,
+    });
+    if (job.status === 'ready' && job.pdfPrewarmState === 'pending') {
+      this.prewarmJobPdf(currentUser, job.cutJobId, job.version, request.requestId);
+    }
+    return job;
+  }
+
   @ApiOperation({ operationId: 'renderCutSheetPng', summary: 'Render a per-sheet PNG' })
   @Get(':cutJobId/groups/:groupId/sheets/:sheetIndex.png')
   async renderPng(
@@ -551,6 +595,10 @@ export function parseSetCombineFilmsBody(body: unknown): { combineFilms: boolean
 
 export function parseSetSplitByMaterialBody(body: unknown): { splitByMaterial: boolean; version: number } {
   return parse(setSplitByMaterialBodySchema, body);
+}
+
+export function parseSaveManualLayoutBody(body: unknown): { jobVersion: number; active: boolean; placements: ManualMove[] } {
+  return parse(saveManualLayoutBodySchema, body);
 }
 
 /** Query CSV (`orderIds=9,10`) → number arrays. */
