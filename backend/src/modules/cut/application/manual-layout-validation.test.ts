@@ -7,6 +7,8 @@ import {
   orientPieceRect,
   rotatePiece,
   snapDraggedPiece,
+  manualSetMatchesAuto,
+  reconstructManualSheets,
 } from './manual-layout-validation';
 import golden from './__fixtures__/cut-layout-golden.json';
 
@@ -224,4 +226,48 @@ it.each(golden.filter((c) => c.kind === 'orient'))('golden BE orient: $name', (c
   expect(
     orientPieceRect(c.input.rect, c.input.sheetW, c.input.sheetH, c.input.landscape),
   ).toEqual(c.expected);
+});
+
+// ── Task 2: item-set guard + authoritative reconstruction ─────────────────
+
+const lbl = (orderId: number, detailNumber: number, widthMm: number, heightMm: number) => ({ orderId, detailNumber, widthMm, heightMm });
+const autoPieces = [
+  { itemId: 'det-1', instance: 1, baseW: 600, baseH: 400, label: lbl(9, 1, 600, 400) },
+  { itemId: 'det-2', instance: 1, baseW: 600, baseH: 400, label: lbl(9, 2, 600, 400) },
+  { itemId: 'det-3', instance: 1, baseW: 300, baseH: 300, label: lbl(9, 3, 300, 300) },
+];
+const autoSheets = [
+  { sheetIndex: 0, sheet_width_mm: 2800, sheet_height_mm: 2070, trim_mm: { left: 10, right: 10, top: 10, bottom: 10 } },
+  { sheetIndex: 1, sheet_width_mm: 2800, sheet_height_mm: 2070, trim_mm: { left: 10, right: 10, top: 10, bottom: 10 } },
+];
+const trim = { left: 10, right: 10, top: 10, bottom: 10 };
+const move = (itemId: string, sheetIndex: number, rotated = false) => ({ itemId, instance: 1, sheetIndex, xMm: 0, yMm: 0, rotated });
+
+describe('manualSetMatchesAuto', () => {
+  it('ok when moves cover the exact auto set', () => {
+    expect(manualSetMatchesAuto({ moves: [move('det-1', 0), move('det-2', 1), move('det-3', 1)], autoPieces }).ok).toBe(true);
+  });
+  it('rejects a dropped piece', () => {
+    expect(manualSetMatchesAuto({ moves: [move('det-1', 0), move('det-2', 0)], autoPieces }).ok).toBe(false);
+  });
+  it('rejects a duplicated piece', () => {
+    expect(manualSetMatchesAuto({ moves: [move('det-1', 0), move('det-1', 1), move('det-2', 0), move('det-3', 0)], autoPieces }).ok).toBe(false);
+  });
+});
+
+describe('reconstructManualSheets', () => {
+  it('uses authoritative dims, swaps on rotation, ignores client geometry', () => {
+    const r = reconstructManualSheets({ moves: [{ ...move('det-1', 0, true), xMm: 5, yMm: 7 }], autoPieces, autoSheets, trim });
+    const p = r.sheets.find((s) => s.sheetIndex === 0)!.placements.pieces[0];
+    expect([p.width_mm, p.height_mm, p.rotated, p.x_mm, p.y_mm]).toEqual([400, 600, true, 5, 7]);
+    expect(r.sheets[0].placements.sheet_width_mm).toBe(2800);
+  });
+  it('rejects a sheetIndex out of range (no new stock)', () => {
+    const r = reconstructManualSheets({ moves: [move('det-1', 2)], autoPieces, autoSheets, trim });
+    expect(r.error?.code).toBe('foreign_sheet');
+  });
+  it('preserves real sheet_index for every stock sheet (no renumber) (Codex R14 MAJOR #4)', () => {
+    const r = reconstructManualSheets({ moves: [move('det-1', 1), move('det-2', 1), move('det-3', 0)], autoPieces, autoSheets, trim });
+    expect(r.sheets.map((s) => s.sheetIndex).sort()).toEqual([0, 1]); // both stock indices kept, incl. the one with a piece moved off
+  });
 });

@@ -277,3 +277,126 @@ export function validateSheetPlacements(args: {
 
   return out;
 }
+
+// ── Task 2: item-set guard + authoritative reconstruction ─────────────────
+
+/**
+ * PieceLabel is structurally identical to PieceLabelSnapshot — alias so the
+ * Task-2 API surface uses the documented name without introducing a duplicate shape.
+ */
+export type PieceLabel = PieceLabelSnapshot;
+
+/** A single client "move" instruction from the manual-layout editor. */
+export type ManualMove = {
+  itemId: string;
+  instance: number;
+  sheetIndex: number;
+  xMm: number;
+  yMm: number;
+  rotated: boolean;
+};
+
+/**
+ * Authoritative descriptor for a piece from the auto layout.
+ * baseW/baseH are the UNROTATED intrinsic dimensions.
+ * label is the frozen snapshot copied from the auto placement (Codex R8 #1, R10 #1).
+ */
+export type AutoPieceSpec = {
+  itemId: string;
+  instance: number;
+  baseW: number;
+  baseH: number;
+  label: PieceLabel;
+};
+
+/**
+ * Authoritative descriptor for a sheet from the auto layout.
+ * sheetIndex is the PERSISTED value (may be sparse/non-zero).
+ */
+export type AutoSheetSpec = {
+  sheetIndex: number;
+  sheet_width_mm: number;
+  sheet_height_mm: number;
+  trim_mm: GeomSheet['trim_mm'];
+};
+
+const moveKey = (id: string, inst: number) => `${id}#${inst}`;
+
+/**
+ * Returns ok=true iff the multiset of (itemId, instance) in `moves` exactly
+ * equals the multiset in `autoPieces` — no added, dropped, or duplicated items.
+ */
+export function manualSetMatchesAuto(args: {
+  moves: ManualMove[];
+  autoPieces: AutoPieceSpec[];
+}): { ok: boolean; reason?: string } {
+  const want = new Set(args.autoPieces.map((p) => moveKey(p.itemId, p.instance)));
+  const seen = new Set<string>();
+  for (const m of args.moves) {
+    const k = moveKey(m.itemId, m.instance);
+    if (!want.has(k)) return { ok: false, reason: `Лишняя деталь ${k}` };
+    if (seen.has(k)) return { ok: false, reason: `Дубль детали ${k}` };
+    seen.add(k);
+  }
+  if (seen.size !== want.size) return { ok: false, reason: 'Набор деталей не совпадает с расчётным' };
+  return { ok: true };
+}
+
+/**
+ * Rebuilds authoritative sheet placements from the auto layout + client moves.
+ *
+ * - Rejects any sheetIndex NOT in the auto layout's actual persisted sheet_index
+ *   value set (Codex R20 MAJOR #3 — may be sparse/non-zero; NOT a dense 0..N-1 range).
+ * - Uses authoritative intrinsic dims from autoPieces (swapped when rotated).
+ * - Returns exactly the auto layout's stock sheets (same sheetIndex values), even
+ *   empty ones — never renumbers or drops stock sheets (Codex R14 MAJOR #4).
+ * - Client width/height values are never read.
+ */
+export function reconstructManualSheets(args: {
+  moves: ManualMove[];
+  autoPieces: AutoPieceSpec[];
+  autoSheets: AutoSheetSpec[];
+  trim: GeomSheet['trim_mm'];
+}): {
+  sheets: { sheetIndex: number; placements: GeomSheet }[];
+  error?: { code: 'foreign_sheet' | 'set_mismatch' | 'grain_unknown'; message: string };
+} {
+  const specByKey = new Map(args.autoPieces.map((p) => [moveKey(p.itemId, p.instance), p]));
+  // Authoritative stock = the EXACT persisted sheet_index VALUES of the auto layout
+  // (Codex R20 MAJOR #3 — NOT a synthetic dense 0..N-1 range).
+  const byIndex = new Map<number, GeomSheet>();
+  for (const a of args.autoSheets) {
+    byIndex.set(a.sheetIndex, {
+      trim_mm: args.trim,
+      sheet_width_mm: a.sheet_width_mm,
+      sheet_height_mm: a.sheet_height_mm,
+      pieces: [],
+    });
+  }
+  for (const m of args.moves) {
+    // Reject any sheetIndex not present in the auto layout's persisted sheet_index set
+    // (Codex R20 MAJOR #3 — checked FIRST, before any set-completeness concern).
+    if (!byIndex.has(m.sheetIndex)) {
+      return { sheets: [], error: { code: 'foreign_sheet', message: `Недопустимый лист ${m.sheetIndex}` } };
+    }
+    const spec = specByKey.get(moveKey(m.itemId, m.instance));
+    if (!spec) {
+      return { sheets: [], error: { code: 'set_mismatch', message: `Неизвестная деталь ${moveKey(m.itemId, m.instance)}` } };
+    }
+    const w = m.rotated ? spec.baseH : spec.baseW;
+    const h = m.rotated ? spec.baseW : spec.baseH;
+    byIndex.get(m.sheetIndex)!.pieces.push({
+      item_id: m.itemId,
+      instance: m.instance,
+      x_mm: m.xMm,
+      y_mm: m.yMm,
+      width_mm: w,
+      height_mm: h,
+      rotated: m.rotated,
+      label: spec.label,
+    });
+  }
+  return {
+    sheets: Array.from(byIndex.entries()).map(([sheetIndex, placements]) => ({ sheetIndex, placements })),
+  };
+}
