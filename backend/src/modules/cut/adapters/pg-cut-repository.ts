@@ -52,6 +52,7 @@ import type {
   DetailPlacementsQuery,
   EligibleDetailsQuery,
   GetCutJobQuery,
+  GetRenderCacheTokenArgs,
   ListCutJobsQuery,
   RemoveCutItemCommand,
   RenderGroupPdfQuery,
@@ -286,6 +287,27 @@ function stableJson(v: unknown): string {
 
 function sheetsMatchCanonical(existing: import('../dto/cut.dto').CutManualSheetDto[], canonical: import('../dto/cut.dto').CutManualSheetDto[]): boolean {
   return stableJson(existing) === stableJson(canonical);
+}
+
+// ── Task 7: variant helpers ───────────────────────────────────────────────────
+
+/**
+ * Resolve the *effective* render variant from the requested variant and the
+ * current manual layout state.
+ *
+ * - `auto`   → always auto (use `cut_group_sheet`).
+ * - `manual` → always manual (caller must hard-fail when unavailable).
+ * - `active` → manual iff `effectiveActive = isActive && !isStale`; else auto.
+ */
+export function resolveEffectiveVariant(
+  variant: 'auto' | 'manual' | 'active',
+  manual: { isActive: boolean; isStale: boolean } | null,
+): 'auto' | 'manual' {
+  if (variant === 'auto') return 'auto';
+  if (variant === 'manual') return 'manual';
+  // active
+  const effectiveActive = manual !== null && manual.isActive && !manual.isStale;
+  return effectiveActive ? 'manual' : 'auto';
 }
 
 export class PgCutRepository implements CutRepositoryPort {
@@ -1005,7 +1027,28 @@ export class PgCutRepository implements CutRepositoryPort {
       return { ...group, groupKey, manualLayout };
     });
 
-    return { ...base, groups: enrichedGroups, editorParams, requiresRecalc };
+    // Task 7 Rule 10: populate renderToken on each group and the whole job.
+    // Token encodes: job version + per-group manual layout version + effectiveActive.
+    // Always uses 'active' semantics: if the manual layout is active+fresh, it IS
+    // the current rendered output; if stale, auto is the current output.
+    const enrichedGroupsWithTokens: CutGroupDto[] = enrichedGroups.map((group) => {
+      const ml = group.manualLayout;
+      const effectiveActive = ml != null && ml.isActive && !ml.isStale;
+      const manualVersion = ml?.version ?? 0;
+      const renderToken = `j${base.version}:m${manualVersion}:a${effectiveActive ? 1 : 0}`;
+      return { ...group, renderToken };
+    });
+
+    // Job render token: aggregates job version + all groups' individual tokens.
+    const jobRenderToken = `j${base.version}:${enrichedGroupsWithTokens
+      .map((g) => {
+        const ml = g.manualLayout;
+        const ea = ml != null && ml.isActive && !ml.isStale;
+        return `g${g.cutGroupId}:m${ml?.version ?? 0}:a${ea ? 1 : 0}`;
+      })
+      .join(',')}`;
+
+    return { ...base, groups: enrichedGroupsWithTokens, editorParams, requiresRecalc, renderToken: jobRenderToken };
   }
 
   // ── Task 4: manual-layout read/persist/invalidate ────────────────────────
@@ -1443,7 +1486,10 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer> {
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90);
+    // PNG is NOT recalc-blocked (rule 5): only PDF endpoints enforce the print-block.
+    const variant = query.variant ?? 'auto';
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, variant, query.cutJobId);
+    // Rule 8: blank sheets are index-stable and never 404 for PNG/SVG.
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, query.sheetIndex);
@@ -1459,7 +1505,10 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async renderSheetSvg(query: RenderSheetSvgQuery): Promise<string> {
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90);
+    // SVG is NOT recalc-blocked (rule 5): only PDF endpoints enforce the print-block.
+    const variant = query.variant ?? 'auto';
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, variant, query.cutJobId);
+    // Rule 8: blank sheets are index-stable and never 404 for SVG.
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, query.sheetIndex);
@@ -1468,12 +1517,22 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer> {
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90);
-    if (sheets.length === 0) {
+    // Rule 5: group PDF is blocked while the job requires recalculation.
+    // PNG/SVG are NOT blocked; only PDF/print surfaces enforce this.
+    if (query.cutJobId !== undefined) {
+      if (await this.checkRequiresRecalc(query.cutJobId)) {
+        throw new ApiError(409, 'CUT_RECALC_REQUIRED', 'Требуется пересчёт раскроя перед печатью');
+      }
+    }
+    const variant = query.variant ?? 'auto';
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, variant, query.cutJobId);
+    // Rule 8: skip blank sheets in PDF assembly only (index-stable for PNG/SVG).
+    const printableSheets = sheets.filter((s) => s.placements.pieces.length > 0);
+    if (printableSheets.length === 0) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, 0);
     }
     return buildSheetsPdf(
-      sheets.map((s) => ({
+      printableSheets.map((s) => ({
         svg: s.svg,
         sheetWidthMm: query.rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
         sheetHeightMm: query.rotate90 ? s.placements.sheet_width_mm : s.placements.sheet_height_mm,
@@ -1482,14 +1541,33 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async renderJobPdf(query: RenderJobPdfQuery): Promise<Buffer> {
+    // Rule 4: variant=manual is PER-GROUP; the whole-job PDF can't coherently pick one
+    // group's manual layout. Reject explicitly instead of silently ignoring it.
+    if (query.variant === 'manual') {
+      throw new ApiError(
+        422,
+        'CUT_MANUAL_VARIANT_NOT_JOB_SCOPED',
+        'variant=manual не поддерживается для PDF всего задания. Используйте endpoint группы.',
+      );
+    }
+    // Rule 5: job PDF is blocked while the job requires recalculation.
+    if (await this.checkRequiresRecalc(query.cutJobId)) {
+      throw new ApiError(409, 'CUT_RECALC_REQUIRED', 'Требуется пересчёт раскроя перед печатью');
+    }
+    // Rule 4 (active): for variant=active each group resolves effectiveActive independently
+    // (a mixed manual+auto job is fine). For variant=auto all groups use auto.
+    const variant = query.variant ?? 'auto';
     const groups = await this.database.query<{ cut_group_id: string | number }>(
       `SELECT cut_group_id FROM cut_group WHERE cut_job_id = $1 ORDER BY cut_group_id`,
       [query.cutJobId],
     );
     const pdfSheets: Array<{ svg: string; sheetWidthMm: number; sheetHeightMm: number }> = [];
     for (const groupRow of groups.rows) {
-      const { sheets } = await this.loadGroupRenderContext(toNum(groupRow.cut_group_id), query.rotate90);
+      const cutGroupId = toNum(groupRow.cut_group_id);
+      const { sheets } = await this.loadGroupRenderContext(cutGroupId, query.rotate90, variant, query.cutJobId);
+      // Rule 8: skip blank sheets in PDF assembly.
       for (const sheet of sheets) {
+        if (sheet.placements.pieces.length === 0) continue;
         pdfSheets.push({
           svg: sheet.svg,
           sheetWidthMm: query.rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
@@ -1548,22 +1626,82 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   /**
-   * Load every sheet of a group as a ready-to-render SVG, with a per-group label
-   * context (order/detail + "instance N/qty"). Shared by PNG/SVG/PDF render.
+   * Load every sheet of a group as a ready-to-render SVG, with per-group label
+   * context (frozen label snapshot or live order/detail fallback) and fill-by-order
+   * coloring. Shared by PNG/SVG/PDF render paths.
+   *
+   * Task 7 additions:
+   *   - `variant`: which sheet source to use (auto/manual/active).
+   *   - `cutJobId`: when provided, asserts the group belongs to the job (rule 6).
+   *   - Frozen label snapshot used when `piece.label` is present (rule 7).
+   *   - Blank sheets included for PNG/SVG (index-stable); caller filters for PDF.
    */
   private async loadGroupRenderContext(
     cutGroupId: number,
     rotate90 = false,
+    variant: 'auto' | 'manual' | 'active' = 'auto',
+    cutJobId?: number,
   ): Promise<{ sheets: Array<{ sheetIndex: number; placements: SheetPlacementsJson; svg: string }> }> {
-    const allSheets = await this.database.query<{ sheet_index: number; placements: SheetPlacementsJson }>(
-      `SELECT cgs.sheet_index, cgs.placements FROM cut_group_sheet cgs WHERE cgs.cut_group_id = $1 ORDER BY cgs.sheet_index`,
+    // Rule 6: load group metadata + assert job ownership when cutJobId provided.
+    const groupRes = await this.database.query<{
+      cut_job_id: string | number;
+      group_key: string | null;
+    }>(
+      `SELECT cut_job_id, group_key FROM cut_group WHERE cut_group_id = $1`,
       [cutGroupId],
     );
+    if (groupRes.rows.length === 0) {
+      throw new CutGroupSheetNotFoundError(cutGroupId, 0);
+    }
+    const resolvedJobId = toNum(groupRes.rows[0].cut_job_id);
+    const groupKey = groupRes.rows[0].group_key ?? null;
+
+    if (cutJobId !== undefined && resolvedJobId !== cutJobId) {
+      throw new ApiError(
+        404,
+        'CUT_GROUP_NOT_FOUND',
+        `cut_group ${cutGroupId} не принадлежит заданию ${cutJobId}`,
+      );
+    }
+
+    // Load manual layout for variant resolution.
+    const manualLayout = groupKey
+      ? await this.getManualLayoutByKey(resolvedJobId, groupKey)
+      : null;
+
+    // Rule 3: resolve effective variant.
+    const effectiveVariant = resolveEffectiveVariant(variant, manualLayout);
+
+    // Rule 3: for explicit `manual` requests, hard-fail when layout is unavailable.
+    if (variant === 'manual' && effectiveVariant !== 'manual') {
+      throw new ApiError(
+        409,
+        'CUT_MANUAL_LAYOUT_UNAVAILABLE',
+        'Ручная раскладка недоступна или устарела для этой группы. Используйте автоматическую раскладку.',
+      );
+    }
+
+    // Resolve the sheets source based on effective variant.
+    let rawSheets: Array<{ sheetIndex: number; placements: SheetPlacementsJson }>;
+
+    if (effectiveVariant === 'manual' && manualLayout !== null) {
+      // Use manual layout sheets (includes blank retained-stock sheets).
+      rawSheets = manualLayout.sheets.map((s) => ({ sheetIndex: s.sheetIndex, placements: s.placements }));
+    } else {
+      // Auto variant: read from cut_group_sheet.
+      const autoSheets = await this.database.query<{ sheet_index: number; placements: SheetPlacementsJson }>(
+        `SELECT cgs.sheet_index, cgs.placements FROM cut_group_sheet cgs WHERE cgs.cut_group_id = $1 ORDER BY cgs.sheet_index`,
+        [cutGroupId],
+      );
+      rawSheets = autoSheets.rows.map((row) => ({ sheetIndex: toNum(row.sheet_index), placements: row.placements }));
+    }
+
     const quantities = computeGroupItemQuantities(
-      allSheets.rows.map((row) => ({ sheetIndex: 0, placements: row.placements })),
+      rawSheets.map((s) => ({ sheetIndex: s.sheetIndex, placements: s.placements })),
     );
 
-    // Map freecut item_id -> detail/order label.
+    // Rule 7: build live detail lookup for LEGACY rows (pre-Task 4) that lack
+    // a frozen label snapshot. New rows written by calculate always have piece.label.
     const items = await this.database.query<{
       order_detail_id: string | number;
       order_id: string | number;
@@ -1596,11 +1734,26 @@ export class PgCutRepository implements CutRepositoryPort {
     const fillByOrder = createOrderFillResolver(items.rows.map((row) => toNum(row.order_id)));
 
     const labelFor = (piece: FreecutPlacement): string[] => {
+      // Rule 7: use the frozen label snapshot when present (calc persists it).
+      // Fall back to the live order_details join ONLY for legacy pre-Task-4 rows
+      // whose stored placements have no label field.
+      const frozenLabel = (piece as { label?: PieceLabelSnapshot }).label;
+      if (frozenLabel) {
+        return composePieceLabelLines({
+          orderId: frozenLabel.orderId,
+          detailId: parseFreecutItemId(piece.item_id),
+          detailNumber: frozenLabel.detailNumber,
+          widthMm: frozenLabel.widthMm,
+          heightMm: frozenLabel.heightMm,
+          itemId: piece.item_id,
+          instance: piece.instance,
+          qty: quantities.get(piece.item_id) ?? 1,
+        });
+      }
+      // Legacy fallback: live join.
       const detailId = parseFreecutItemId(piece.item_id);
       const detail = detailId === null ? null : detailById.get(detailId) ?? null;
       const orderId = detail?.orderId ?? null;
-      // Order on line 1, detail (+ instance N/qty) on line 2 — rendered as
-      // separate <tspan> lines by buildSheetSvg.
       return composePieceLabelLines({
         orderId,
         detailId,
@@ -1612,19 +1765,106 @@ export class PgCutRepository implements CutRepositoryPort {
         qty: quantities.get(piece.item_id) ?? 1,
       });
     };
+
     const fillFor = (piece: FreecutPlacement): string => {
-      const detailId = parseFreecutItemId(piece.item_id);
-      const orderId = detailId === null ? null : detailById.get(detailId)?.orderId ?? null;
+      // For fill color, prefer the frozen orderId from the label snapshot.
+      const frozenLabel = (piece as { label?: PieceLabelSnapshot }).label;
+      const orderId = frozenLabel?.orderId !== undefined
+        ? frozenLabel.orderId
+        : (parseFreecutItemId(piece.item_id) === null
+          ? null
+          : detailById.get(parseFreecutItemId(piece.item_id)!)?.orderId ?? null);
       return fillByOrder(orderId);
     };
 
     return {
-      sheets: allSheets.rows.map((row) => ({
-        sheetIndex: toNum(row.sheet_index),
-        placements: row.placements,
-        svg: buildSheetSvg({ sheet: row.placements, labelFor, fillFor, rotate90 }),
+      sheets: rawSheets.map((s) => ({
+        sheetIndex: s.sheetIndex,
+        placements: s.placements,
+        svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90 }),
       })),
     };
+  }
+
+  /**
+   * Non-throwing recalculation check: returns true when the current calc inputs
+   * diverge from the stored last_calc_basis (same logic as getJob.requiresRecalc).
+   * Used by PDF render endpoints to enforce the print-block (rule 5).
+   */
+  private async checkRequiresRecalc(cutJobId: number): Promise<boolean> {
+    const calcRow = await this.database.query<{ last_calc_basis: string | null }>(
+      `SELECT last_calc_basis FROM cut_job WHERE cut_job_id = $1`,
+      [cutJobId],
+    );
+    const lastCalcBasis = calcRow.rows[0]?.last_calc_basis ?? null;
+    const basisInputs = await this.loadCurrentCalcBasisInputs(cutJobId);
+    if (basisInputs !== null && lastCalcBasis !== null) {
+      return basisOf(basisInputs) !== lastCalcBasis;
+    }
+    return true; // null basis (never calculated) → conservative: requiresRecalc
+  }
+
+  /**
+   * Task 7 Rule 9: opaque server-owned render cache token. Changes whenever the
+   * rendered output for the given scope would change:
+   *   - For a group: job version + manual layout version + effectiveActive.
+   *   - For a job: job version + per-group tokens aggregated.
+   * 'active' variant semantics are always used (mirrors getJob.renderToken logic).
+   */
+  async getRenderCacheToken(args: GetRenderCacheTokenArgs): Promise<string> {
+    if (args.cutGroupId !== undefined) {
+      // Group-scoped token.
+      const groupRes = await this.database.query<{
+        cut_job_id: string | number;
+        group_key: string | null;
+      }>(
+        `SELECT cut_job_id, group_key FROM cut_group WHERE cut_group_id = $1`,
+        [args.cutGroupId],
+      );
+      const resolvedJobId = toNum(groupRes.rows[0]?.cut_job_id ?? 0);
+      const groupKey = groupRes.rows[0]?.group_key ?? null;
+
+      const jobRes = await this.database.query<{ version: string | number }>(
+        `SELECT version FROM cut_job WHERE cut_job_id = $1`,
+        [resolvedJobId],
+      );
+      const jobVersion = toNum(jobRes.rows[0]?.version ?? 0);
+
+      const manual = groupKey ? await this.getManualLayoutByKey(resolvedJobId, groupKey) : null;
+      const effectiveActive = manual !== null && manual.isActive && !manual.isStale;
+      const manualVersion = manual?.version ?? 0;
+
+      return `j${jobVersion}:m${manualVersion}:a${effectiveActive ? 1 : 0}`;
+    }
+
+    if (args.cutJobId !== undefined) {
+      // Job-scoped token: aggregate from job version + all groups.
+      const jobRes = await this.database.query<{ version: string | number }>(
+        `SELECT version FROM cut_job WHERE cut_job_id = $1`,
+        [args.cutJobId],
+      );
+      const jobVersion = toNum(jobRes.rows[0]?.version ?? 0);
+
+      const groupsRes = await this.database.query<{ cut_group_id: string | number; group_key: string | null }>(
+        `SELECT cut_group_id, group_key FROM cut_group WHERE cut_job_id = $1 ORDER BY cut_group_id`,
+        [args.cutJobId],
+      );
+
+      const manualLayouts = await this.listManualLayoutsForJob(args.cutJobId);
+      const mlByKey = new Map(manualLayouts.map((ml) => [ml.groupKey, ml]));
+
+      const groupTokenParts = groupsRes.rows.map((row) => {
+        const gKey = row.group_key ?? null;
+        const ml = gKey ? (mlByKey.get(gKey) ?? null) : null;
+        const effectiveActive = ml !== null && ml.isActive && !ml.isStale;
+        const mlVersion = ml?.version ?? 0;
+        return `g${toNum(row.cut_group_id)}:m${mlVersion}:a${effectiveActive ? 1 : 0}`;
+      });
+
+      return `j${jobVersion}:${groupTokenParts.join(',')}`;
+    }
+
+    return 'none';
   }
 
   private async reserveDetail(

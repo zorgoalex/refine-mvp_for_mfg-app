@@ -14,6 +14,7 @@ import {
   parseSetCombineFilmsBody,
   parseSetSplitByMaterialBody,
   parseSaveManualLayoutBody,
+  parseVariant,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -39,6 +40,8 @@ function jobDto(): CutJobDto {
     totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },
     items: [],
     groups: [],
+    // Task 7: renderToken is populated by getJob (aggregates job version + per-group manual tokens).
+    renderToken: 'j0:',
   };
 }
 
@@ -55,7 +58,13 @@ function createController(options: {
     }),
   } as unknown as CutRuntimeConfigService;
   const pdfCache = options.pdfCache ?? new CutPdfCache({ ttlMs: 1000 });
-  return new CutController(options.service as unknown as CutService, runtimeConfig, pdfCache);
+  // Task 7: provide a default getRenderCacheToken so group/job PDF tests don't need
+  // to mock it explicitly. Returns a stable 'tok' sentinel.
+  const defaultService: Partial<CutService> = {
+    getRenderCacheToken: vi.fn(async () => 'tok'),
+  };
+  const service = { ...defaultService, ...options.service };
+  return new CutController(service as unknown as CutService, runtimeConfig, pdfCache);
 }
 
 function fakeResponse() {
@@ -207,6 +216,17 @@ describe('CutController', () => {
     expect(() => parseCreateCutJobRequest({ name: '' })).toThrow(ApiError);
     expect(parseAddItemsRequest({ detailIds: [3], version: 2 }).version).toBe(2);
     expect(parseEligibleCriteria({ orderIds: '9,10', filmIds: '5' })).toMatchObject({ orderIds: [9, 10], filmIds: [5] });
+  });
+
+  // Task 7: parseVariant
+  it('parseVariant defaults to auto and maps manual/active (R25 MAJOR: no default flip)', () => {
+    expect(parseVariant(undefined)).toBe('auto');
+    expect(parseVariant('')).toBe('auto');
+    expect(parseVariant('MANUAL')).toBe('manual');
+    expect(parseVariant('manual')).toBe('manual');
+    expect(parseVariant('active')).toBe('active');
+    expect(parseVariant('ACTIVE')).toBe('active');
+    expect(parseVariant('unknown')).toBe('auto');
   });
 
   // Variant B Task 11: GET /cut-jobs/sheet-types — cut.view-gated sheet lookup.

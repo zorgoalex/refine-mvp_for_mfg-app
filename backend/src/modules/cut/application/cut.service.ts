@@ -26,6 +26,7 @@ import type {
   SetCutJobCombineFilmsCommand,
   SetCutJobSplitByMaterialCommand,
   SetPdfPrewarmStateQuery,
+  GetRenderCacheTokenArgs,
 } from './cut-command.types';
 
 export interface CutServicePorts {
@@ -183,6 +184,14 @@ export class CutService {
       });
     }
     return this.ports.cut.saveManualLayout(command);
+  }
+
+  /**
+   * Task 7: server-owned render cache token. Thin pass-through — no permission
+   * gate needed (controller already checked cut.view before calling this).
+   */
+  async getRenderCacheToken(args: GetRenderCacheTokenArgs): Promise<string> {
+    return this.ports.cut.getRenderCacheToken(args);
   }
 
   private require(

@@ -221,6 +221,12 @@ export interface SetCutJobSplitByMaterialCommand {
   requestId?: string;
 }
 
+export interface GetRenderCacheTokenArgs {
+  cutJobId?: number;
+  cutGroupId?: number;
+  variant: 'auto' | 'manual' | 'active';
+}
+
 export interface CutRepositoryPort {
   createJob(command: CreateCutJobCommand): Promise<CutJobDto>;
   recordPermissionDenied(input: CutPermissionDeniedInput): Promise<void>;
@@ -261,4 +267,10 @@ export interface CutRepositoryPort {
   ): Promise<Array<{ groupKey: string; sheets: CutManualSheetDto[]; isActive: boolean; isStale: boolean; version: number }>>;
   // ── Task 5: manual-layout save command ───────────────────────────────────
   saveManualLayout(command: SaveManualLayoutCommand): Promise<CutJobDto>;
+  // ── Task 7: render variant + server-side render cache token ──────────────
+  /** Returns an opaque server-owned token that changes whenever the rendered
+   *  output would change (job version + per-group manual layout version +
+   *  effectiveActive). Used by the controller to build cache keys so a manual
+   *  save or active-selector flip busts the in-process PDF cache. */
+  getRenderCacheToken(args: GetRenderCacheTokenArgs): Promise<string>;
 }

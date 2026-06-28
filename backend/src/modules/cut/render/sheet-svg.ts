@@ -1,3 +1,4 @@
+import { orientPieceRect } from '../../../shared/cut-geometry';
 import type {
   BackMappedSheet,
   FreecutPlacement,
@@ -162,12 +163,11 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 40));
 
-  // 90° CW transpose into the swapped h×w viewBox. A point (px,py) maps to
-  // (h - py, px); a rect's top-left (x,y) maps to (h - (y + ph), x) with sides
-  // swapped. Labels are placed at the transposed CENTRE without any rotate()
-  // transform, so the text stays horizontal.
-  const vbW = rotate90 ? h : w;
-  const vbH = rotate90 ? w : h;
+  // orientPieceRect (shared/cut-geometry, Task 1 Codex R4 MAJOR #4) provides the
+  // canonical portrait/landscape transform used by BOTH the SVG renderer and the
+  // editor overlay — eliminating the risk of the two drifting. Derive viewBox dims
+  // from a full-sheet sentinel rect so the function is called once, not per piece.
+  const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90);
 
   const pieces = sheet.pieces
     .map((piece) => {
@@ -175,13 +175,9 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const y = sheet.trim_mm.top + piece.y_mm;
       const pw = piece.width_mm;
       const ph = piece.height_mm;
-      const rect = rotate90
-        ? { x: h - (y + ph), y: x, w: ph, h: pw }
-        : { x, y, w: pw, h: ph };
-      const cx0 = x + pw / 2;
-      const cy0 = y + ph / 2;
-      const cx = rotate90 ? h - cy0 : cx0;
-      const cy = rotate90 ? cx0 : cy0;
+      const rect = orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90);
+      const cx = rect.x + rect.w / 2;
+      const cy = rect.y + rect.h / 2;
       const resolved = labelFor(piece);
       const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;
       const lines = Array.isArray(resolved) ? resolved : [resolved];

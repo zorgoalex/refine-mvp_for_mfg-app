@@ -702,10 +702,11 @@ describeIntegration('PgCutRepository (integration)', () => {
     const calculated = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'rp2' });
     const cutGroupId = calculated.groups[0].cutGroupId;
 
-    const svg = await repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, sheetIndex: 0 });
+    const svg = await repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId: job.cutJobId, sheetIndex: 0 });
     expect(svg).toContain('<svg');
 
-    const groupPdf = await repo.renderGroupPdf({ currentUser: currentUser(), cutGroupId });
+    // Task 7 Rule 6: pass cutJobId so the repo can assert group↔job ownership.
+    const groupPdf = await repo.renderGroupPdf({ currentUser: currentUser(), cutGroupId, cutJobId: job.cutJobId });
     expect(groupPdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
 
     const jobPdf = await repo.renderJobPdf({ currentUser: currentUser(), cutJobId: job.cutJobId });

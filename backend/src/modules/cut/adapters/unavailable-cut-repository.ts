@@ -103,6 +103,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
   saveManualLayout() {
     return Promise.reject(unavailable());
   }
+
+  getRenderCacheToken() {
+    return Promise.reject(unavailable());
+  }
 }
 
 function unavailable(): ApiError {

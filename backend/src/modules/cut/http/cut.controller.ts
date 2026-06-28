@@ -381,13 +381,15 @@ export class CutController {
     @Res() response: Response,
   ): Promise<void> {
     const currentUser = this.requireRead(request);
-    parseCutJobId(cutJobId);
+    const parsedJobId = parseCutJobId(cutJobId);
     const png = await this.cut.renderSheetPng({
       currentUser,
+      cutJobId: parsedJobId,
       cutGroupId: parseCutJobId(groupId),
       sheetIndex: parseSheetIndex(sheetIndex),
       preset: parsePreset(query.preset),
       rotate90: parseOrientation(query.orientation),
+      variant: parseVariant(query.variant),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/png');
@@ -406,12 +408,14 @@ export class CutController {
     @Res() response: Response,
   ): Promise<void> {
     const currentUser = this.requireRead(request);
-    parseCutJobId(cutJobId);
+    const parsedJobId = parseCutJobId(cutJobId);
     const svg = await this.cut.renderSheetSvg({
       currentUser,
+      cutJobId: parsedJobId,
       cutGroupId: parseCutJobId(groupId),
       sheetIndex: parseSheetIndex(sheetIndex),
       rotate90: parseOrientation(query.orientation),
+      variant: parseVariant(query.variant),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');
@@ -429,12 +433,16 @@ export class CutController {
     @Res() response: Response,
   ): Promise<void> {
     const currentUser = this.requireRead(request);
-    parseCutJobId(cutJobId);
+    const parsedJobId = parseCutJobId(cutJobId);
     const cutGroupId = parseCutJobId(groupId);
     const rotate90 = parseOrientation(query.orientation);
-    // Orientation is part of the cache key so portrait and landscape PDFs don't collide.
-    const result = this.pdfCache.ensure(`group:${cutGroupId}:${rotate90 ? 'L' : 'P'}`, () =>
-      this.cut.renderGroupPdf({ currentUser, cutGroupId, rotate90, requestId: request.requestId }),
+    const variant = parseVariant(query.variant);
+    // Task 7 Rule 9: cache key includes server-owned render token so a manual save
+    // or active-selector flip busts the in-process cache (Codex R10 BLOCKER #2).
+    const renderToken = await this.cut.getRenderCacheToken({ cutGroupId, variant });
+    const result = this.pdfCache.ensure(
+      `group:${cutGroupId}:${renderToken}:${rotate90 ? 'L' : 'P'}`,
+      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, variant, requestId: request.requestId }),
     );
     this.sendPdf(response, result, `cut-group-${cutGroupId}.pdf`);
   }
@@ -450,25 +458,33 @@ export class CutController {
     const currentUser = this.requireRead(request);
     const id = parseCutJobId(cutJobId);
     const rotate90 = parseOrientation(query.orientation);
-    // getJob gives the current version (cache discriminator) + enforces cut.view.
+    const variant = parseVariant(query.variant);
+    // getJob gives the current version + renderToken (cache discriminator for manual layouts).
     const job = await this.cut.getJob({ currentUser, cutJobId: id, requestId: request.requestId });
-    const result = this.ensureJobPdf(currentUser, id, job.version, request.requestId, rotate90);
+    // Task 7 Rule 10: renderToken aggregates job version + all per-group manual tokens;
+    // any manual save or active-selector flip changes the token → busts the cache.
+    const renderToken = job.renderToken ?? `v${job.version}`;
+    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant);
     this.sendPdf(response, result, `cut-job-${id}.pdf`);
   }
 
   private ensureJobPdf(
     currentUser: RequestWithCurrentUser['user'],
     cutJobId: number,
+    renderToken: string,
     version: number,
     requestId: string | undefined,
     rotate90 = false,
+    variant: 'auto' | 'manual' | 'active' = 'auto',
   ) {
+    // Task 7: cache key uses renderToken (job version + per-group manual tokens)
+    // so a manual save or active-selector flip always busts the in-process cache.
     // Orientation discriminates the cache. pdf_prewarm_state tracks only the
     // default (portrait) job PDF surfaced in the UI — the landscape variant is
     // on-demand and must not write the prewarm state.
     return this.pdfCache.ensure(
-      `job:${cutJobId}:v${version}:${rotate90 ? 'L' : 'P'}`,
-      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, requestId }),
+      `job:${cutJobId}:${renderToken}:${rotate90 ? 'L' : 'P'}`,
+      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, variant, requestId }),
       (state, reason) => {
         if (rotate90) return;
         void this.cut.setPdfPrewarmState({ cutJobId, version, state, reason }).catch(() => undefined);
@@ -476,14 +492,18 @@ export class CutController {
     );
   }
 
-  /** Fire-and-forget whole-job PDF pre-warm (kicked after a successful calculate). */
+  /** Fire-and-forget whole-job PDF pre-warm (kicked after a successful calculate).
+   * Uses `auto` variant for the prewarm key — newly calculated jobs have no manual layout yet.
+   * The token is `v${version}` at this point (no groups have manual rows post-calculate).
+   */
   private prewarmJobPdf(
     currentUser: RequestWithCurrentUser['user'],
     cutJobId: number,
     version: number,
     requestId: string | undefined,
   ): void {
-    this.ensureJobPdf(currentUser, cutJobId, version, requestId);
+    // token at prewarm time = `v${version}` (no manual layout yet post-calculate)
+    this.ensureJobPdf(currentUser, cutJobId, `v${version}`, version, requestId);
   }
 
   private sendPdf(response: Response, result: PdfEnsureResult, filename: string): void {
@@ -567,6 +587,20 @@ export function parsePreset(value: string | undefined): string {
  *  the layout 90° (long side horizontal). Default (absent / 'portrait') → false. */
 export function parseOrientation(value: string | undefined): boolean {
   return (value ?? '').trim().toLowerCase() === 'landscape';
+}
+
+/**
+ * Task 7: parse the ?variant query parameter.
+ *
+ * - Absent / unknown → 'auto' (default preserves behaviour for all existing callers).
+ * - 'manual'         → use the group's stored manual layout sheets (hard-fails if unavailable).
+ * - 'active'         → use manual when effectiveActive (is_active && !is_stale); else auto.
+ */
+export function parseVariant(value: string | undefined): 'auto' | 'manual' | 'active' {
+  const v = (value ?? '').trim().toLowerCase();
+  if (v === 'manual') return 'manual';
+  if (v === 'active') return 'active';
+  return 'auto';
 }
 
 export function parseCreateCutJobRequest(body: unknown) {
