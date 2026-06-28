@@ -7,7 +7,7 @@ describe('configuration tabs layout', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
 
     expect(source).toContain('configuration-tabs-wrap');
-    expect(source).toContain("tabBarGutter={8}");
+    expect(source).toContain("tabBarGutter={4}");
   });
 
   it('registers the table visibility tab in the configuration screen', () => {
