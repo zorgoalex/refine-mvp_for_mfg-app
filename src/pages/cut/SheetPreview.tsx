@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Tooltip } from 'antd';
 import { displayedSheetExtents, formatSheetSide, type CutPieceOverlay } from './cutPreviewHelpers';
+import { fitLabelScale } from './pieceLabel';
 
 const sideLabelStyle: React.CSSProperties = {
   position: 'absolute',
@@ -47,36 +48,94 @@ function renderOverlayTooltip(overlay: CutPieceOverlay): React.ReactNode {
   );
 }
 
+const BASE_FONT_PX = 11;
+
 function OverlayLayer({
   overlays,
+  imgWidthPx,
+  imgHeightPx,
   onClick,
   onDoubleClick,
 }: {
   overlays?: CutPieceOverlay[];
+  /** Rendered image width in px (used for auto-shrink font fitting). */
+  imgWidthPx: number;
+  /** Rendered image height in px (used for auto-shrink font fitting). */
+  imgHeightPx: number;
   onClick?: () => void;
   onDoubleClick?: () => void;
 }) {
   if (!overlays || overlays.length === 0) return null;
   return (
     <>
-      {overlays.map((overlay) => (
-        <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)} mouseEnterDelay={0.15}>
-          <span
-            aria-label={`Заказ ${overlay.orderId ?? '—'}, позиция ${overlay.detailNumber ?? '—'}`}
-            onClick={onClick}
-            onDoubleClick={onDoubleClick}
-            style={{
-              position: 'absolute',
-              left: `${overlay.leftPct}%`,
-              top: `${overlay.topPct}%`,
-              width: `${overlay.widthPct}%`,
-              height: `${overlay.heightPct}%`,
-              cursor: 'help',
-              background: 'rgba(255,255,255,0.01)',
-            }}
-          />
-        </Tooltip>
-      ))}
+      {overlays.map((overlay) => {
+        // Compute the overlay box's rendered pixel dimensions for font fitting.
+        const boxWpx = imgWidthPx > 0 ? imgWidthPx * (overlay.widthPct / 100) : 0;
+        const boxHpx = imgHeightPx > 0 ? imgHeightPx * (overlay.heightPct / 100) : 0;
+        const scale = fitLabelScale({
+          lines: overlay.labelLines,
+          boxW: boxWpx,
+          boxH: boxHpx,
+          baseFont: BASE_FONT_PX,
+        });
+        const font = BASE_FONT_PX * scale;
+
+        return (
+          <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)} mouseEnterDelay={0.15}>
+            <span
+              aria-label={`Заказ ${overlay.orderId ?? '—'}, позиция ${overlay.detailNumber ?? '—'}`}
+              onClick={onClick}
+              onDoubleClick={onDoubleClick}
+              style={{
+                position: 'absolute',
+                left: `${overlay.leftPct}%`,
+                top: `${overlay.topPct}%`,
+                width: `${overlay.widthPct}%`,
+                height: `${overlay.heightPct}%`,
+                cursor: 'help',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Visible 3-line label covering the server-rendered baked text */}
+              <span
+                style={{
+                  background: 'rgba(255,255,255,0.7)',
+                  borderRadius: 3,
+                  padding: '0 2px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  lineHeight: 1.15,
+                  pointerEvents: 'none',
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                }}
+              >
+                {overlay.labelLines.map((line, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      fontSize: font,
+                      fontVariantNumeric: 'tabular-nums',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: '100%',
+                      color: '#1d3557',
+                    }}
+                  >
+                    {line}
+                  </span>
+                ))}
+              </span>
+            </span>
+          </Tooltip>
+        );
+      })}
     </>
   );
 }
@@ -96,6 +155,16 @@ export function SheetPreview({
   onOpen,
   onCollapse,
 }: SheetPreviewProps) {
+  // Track the full-view image's rendered pixel size (set via onLoad) so
+  // OverlayLayer can compute pixel-accurate font sizes for label auto-shrink.
+  const [fullImgSize, setFullImgSize] = useState({ w: 0, h: 0 });
+
+  // For the thumbnail the height is fixed (thumbHeight); width follows aspect ratio.
+  const { horizontalMm, verticalMm } = displayedSheetExtents(widthMm, heightMm, landscape);
+  const thumbAspect = verticalMm > 0 ? horizontalMm / verticalMm : 1;
+  const thumbImgW = thumbHeight * thumbAspect;
+  const thumbImgH = thumbHeight;
+
   if (!full) {
     return (
       <div style={{ marginTop: 4 }}>
@@ -109,13 +178,17 @@ export function SheetPreview({
               style={{ height: thumbHeight, width: 'auto', maxWidth: '100%', cursor: 'pointer', display: 'block' }}
             />
           </Tooltip>
-          <OverlayLayer overlays={overlays} onClick={onOpen} />
+          <OverlayLayer
+            overlays={overlays}
+            imgWidthPx={thumbImgW}
+            imgHeightPx={thumbImgH}
+            onClick={onOpen}
+          />
         </span>
       </div>
     );
   }
 
-  const { horizontalMm, verticalMm } = displayedSheetExtents(widthMm, heightMm, landscape);
   return (
     <div style={{ marginTop: 4, maxWidth: '100%', overflow: 'auto' }}>
       <Tooltip title="Двойной клик — свернуть до превью">
@@ -130,9 +203,18 @@ export function SheetPreview({
               src={src}
               alt={alt}
               onDoubleClick={onCollapse}
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                setFullImgSize({ w: img.clientWidth, h: img.clientHeight });
+              }}
               style={{ width: '100%', display: 'block' }}
             />
-            <OverlayLayer overlays={overlays} onDoubleClick={onCollapse} />
+            <OverlayLayer
+              overlays={overlays}
+              imgWidthPx={fullImgSize.w}
+              imgHeightPx={fullImgSize.h}
+              onDoubleClick={onCollapse}
+            />
           </span>
           <span style={{ ...sideLabelStyle, top: 2, left: '50%', transform: 'translateX(-50%)' }}>
             {formatSheetSide(horizontalMm)}

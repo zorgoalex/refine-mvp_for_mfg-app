@@ -23,6 +23,7 @@ import {
   usableExtent,
 } from './cutLayoutGeometry';
 import type { ManualViolation } from './cutLayoutGeometry';
+import { buildPieceLabelLines, fitLabelScale } from './pieceLabel';
 
 // ── Props contract ─────────────────────────────────────────────────────────
 
@@ -33,6 +34,12 @@ export interface SheetEditorProps {
   landscape: boolean;
   onChange: (sheets: SheetEditorProps['sheets']) => void;
   violations: ManualViolation[];
+  /**
+   * Label info keyed by piece.item_id (e.g. "det-42").
+   * Provides orderId, detailNumber and qty for the 3-line piece label.
+   * Falls back to piece.label when an item_id is absent from the map.
+   */
+  labelInfoByItemId: Map<string, { orderId: number | null; detailNumber: number | null; qty: number | null }>;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────
@@ -223,7 +230,7 @@ function buildDisplaySheets(
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function SheetEditor(props: SheetEditorProps): JSX.Element {
-  const { sheets, gap, filmTextureByItemId, landscape, onChange, violations } = props;
+  const { sheets, gap, filmTextureByItemId, landscape, onChange, violations, labelInfoByItemId } = props;
 
   const [selected, setSelected] = useState<SelectedPiece | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -504,6 +511,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
         const svgDisplayW = Math.min(MAX_SVG_WIDTH_PX, vw);
         const svgDisplayH = (svgDisplayW / vw) * vh;
+        // Conversion factor: how many mm per display pixel at this sheet's scale.
+        // Used to keep UI controls (rotate handle, selected stroke) at a fixed
+        // SCREEN pixel size regardless of sheet zoom.
+        const mmPerPx = vw / svgDisplayW;
 
         const isDropTarget = drag !== null && drag.targetSheetIndex === sheetIndex;
 
@@ -606,15 +617,26 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 // Visual style: violations take priority (red), then selection (blue), then default
                 const fillColor = isViolating ? '#fff1f0' : '#e6f4ff';
                 const strokeColor = isViolating ? '#ff4d4f' : isSelected ? '#1677ff' : '#91caff';
-                const strokeWidth = isViolating || isSelected ? 1.5 : 0.8;
+                // Scale stroke width so it renders at a fixed screen pixel size.
+                // Selected/violating: ~2px on screen; default: ~0.8px.
+                const strokeWidth = (isViolating || isSelected ? 2 : 0.8) * mmPerPx;
 
-                // Label text: use frozen label snapshot if present, else fallback
-                const labelText = piece.label
-                  ? `${piece.label.detailNumber ?? ''} ${piece.label.widthMm ?? piece.width_mm}×${piece.label.heightMm ?? piece.height_mm}`
-                  : `${piece.item_id}#${piece.instance}`;
-
-                // Cap font size so it always fits inside the piece
-                const fontSize = Math.max(4, Math.min(r.w, r.h) * 0.25);
+                // 3-line auto-shrink label: resolve label info from the prop map,
+                // falling back to the frozen piece.label snapshot.
+                const labelInfo = labelInfoByItemId.get(piece.item_id);
+                const labelLines = buildPieceLabelLines({
+                  orderId: labelInfo?.orderId ?? piece.label?.orderId ?? null,
+                  detailNumber: labelInfo?.detailNumber ?? piece.label?.detailNumber ?? null,
+                  instance: piece.instance,
+                  qty: labelInfo?.qty ?? null,
+                  widthMm: piece.width_mm,
+                  heightMm: piece.height_mm,
+                });
+                // Base font capped to fit the piece; auto-shrink further if needed.
+                const baseFont = Math.max(4, Math.min(r.w, r.h) * 0.25);
+                const labelScale = fitLabelScale({ lines: labelLines, boxW: r.w, boxH: r.h, baseFont });
+                const fontSize = baseFont * labelScale;
+                const lineH = fontSize * 1.2;
 
                 return (
                   <g
@@ -659,24 +681,34 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       data-testid={`piece-rect-${sheetIndex}-${piece.item_id}-${piece.instance}`}
                     />
 
-                    {/* Upright label centered on the piece */}
-                    <text
-                      x={r.x + r.w / 2}
-                      y={r.y + r.h / 2}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fontSize={fontSize}
-                      fill={isViolating ? '#cf1322' : '#1d3557'}
-                      pointerEvents="none"
-                      style={{ userSelect: 'none' }}
-                    >
-                      {labelText}
-                    </text>
+                    {/* 3-line auto-shrink label — vertically centered on the piece */}
+                    {(() => {
+                      const cx = r.x + r.w / 2;
+                      const cy = r.y + r.h / 2;
+                      const textFill = isViolating ? '#cf1322' : '#1d3557';
+                      const commonProps = {
+                        textAnchor: 'middle' as const,
+                        dominantBaseline: 'middle' as const,
+                        fontSize,
+                        fill: textFill,
+                        pointerEvents: 'none' as const,
+                        style: { userSelect: 'none' as const },
+                      };
+                      return (
+                        <>
+                          <text {...commonProps} x={cx} y={cy - lineH}>{labelLines[0]}</text>
+                          <text {...commonProps} x={cx} y={cy}>{labelLines[1]}</text>
+                          <text {...commonProps} x={cx} y={cy + lineH}>{labelLines[2]}</text>
+                        </>
+                      );
+                    })()}
 
-                    {/* Rotate control — shown only on the selected piece when not dragging */}
+                    {/* Rotate control — shown only on the selected piece when not dragging.
+                        Sized in FIXED SCREEN PIXELS via mmPerPx so it's always clickable
+                        regardless of sheet zoom (a 2800mm sheet at 700px = 4mm/px scale). */}
                     {isSelected && drag === null && (
                       <g
-                        transform={`translate(${r.x + r.w - 10}, ${r.y + 2})`}
+                        transform={`translate(${r.x + r.w - 7 * mmPerPx}, ${r.y + 7 * mmPerPx})`}
                         role="button"
                         aria-label="Повернуть на 90°"
                         data-testid={`rotate-piece-${sheetIndex}-${piece.item_id}-${piece.instance}`}
@@ -686,13 +718,14 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                           handleRotateButton(sheetIndex, piece.item_id, piece.instance);
                         }}
                       >
-                        <circle cx={4} cy={4} r={4.5} fill="#1677ff" opacity={0.9} />
+                        {/* Circle center at (0,0); transform moves it to the top-right corner */}
+                        <circle cx={0} cy={0} r={7 * mmPerPx} fill="#1677ff" opacity={0.9} />
                         <text
-                          x={4}
-                          y={4.5}
+                          x={0}
+                          y={0}
                           textAnchor="middle"
                           dominantBaseline="middle"
-                          fontSize={5.5}
+                          fontSize={8 * mmPerPx}
                           fill="#fff"
                           pointerEvents="none"
                           style={{ userSelect: 'none' }}

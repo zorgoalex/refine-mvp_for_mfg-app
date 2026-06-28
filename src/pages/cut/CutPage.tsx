@@ -805,6 +805,23 @@ export const CutPage: React.FC = () => {
     [workingSheets, job?.items],
   );
 
+  // Memoized label-info map for the active editor: keyed by piece.item_id ("det-N"),
+  // provides orderId, detailNumber and qty for the 3-line piece label.
+  const editorLabelInfoByItemId = useMemo(() => {
+    const map = new Map<string, { orderId: number | null; detailNumber: number | null; qty: number | null }>();
+    for (const item of job?.items ?? []) {
+      const key = `det-${item.orderDetailId}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          orderId: item.orderId,
+          detailNumber: item.detail?.detailNumber ?? null,
+          qty: item.qty ?? null,
+        });
+      }
+    }
+    return map;
+  }, [job?.items]);
+
   const jobColumns: ColumnsType<CutJobDto> = useMemo(
     () => [
       { title: '#', dataIndex: 'cutJobId', key: 'id', width: 70 },
@@ -1460,6 +1477,7 @@ export const CutPage: React.FC = () => {
                   sheets={workingSheets}
                   gap={{ kerfMm: job.editorParams.kerfMm, spacingMm: job.editorParams.spacingMm }}
                   filmTextureByItemId={editorFilmTextureByItemId}
+                  labelInfoByItemId={editorLabelInfoByItemId}
                   landscape={!sheetPortrait}
                   onChange={handleEditorChange}
                   violations={violations}

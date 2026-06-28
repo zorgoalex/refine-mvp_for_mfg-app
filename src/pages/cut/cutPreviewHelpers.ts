@@ -1,5 +1,6 @@
 import type { CutJobItemDto, SheetPlacementPiece, SheetPlacements } from '../../api/types/cutApi.types';
 import { orientPieceRect } from './cutLayoutGeometry';
+import { buildPieceLabelLines } from './pieceLabel';
 
 /** Rounded mm side label, e.g. "2800 мм". */
 export function formatSheetSide(mm: number): string {
@@ -61,6 +62,8 @@ export interface CutPieceOverlay {
   widthPct: number;
   heightPct: number;
   tooltipRows: CutPieceTooltipRow[];
+  /** Pre-built 3-line label for the on-screen preview overlay (always length 3). */
+  labelLines: string[];
 }
 
 export function parseCutPieceDetailId(itemId: string): number | null {
@@ -132,6 +135,14 @@ export function buildSheetPieceOverlays(
         widthPct: (rect.w / rect.vw) * 100,
         heightPct: (rect.h / rect.vh) * 100,
         tooltipRows: buildCutPieceTooltipRows(item, piece),
+        labelLines: buildPieceLabelLines({
+          orderId: item.orderId,
+          detailNumber: item.detail?.detailNumber ?? null,
+          instance: piece.instance,
+          qty: item.qty ?? null,
+          widthMm: piece.width_mm,
+          heightMm: piece.height_mm,
+        }),
       };
     })
     .filter((overlay): overlay is CutPieceOverlay => overlay !== null);
