@@ -14,7 +14,7 @@ import {
   CreateButton,
   useSelect,
 } from "@refinedev/antd";
-import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload } from "antd";
+import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown } from "antd";
 import {
   EyeOutlined,
   EditOutlined,
@@ -26,6 +26,7 @@ import {
   CheckCircleOutlined,
   DownloadOutlined,
   UploadOutlined,
+  DatabaseOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
@@ -474,15 +475,26 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     position: ['topRight', 'bottomRight'],
     size: 'small',
     showTotal: () => (
-      <OrderDetailColumnSettingsButton
-        tableKey="orderList"
-        definitions={ORDER_LIST_COLUMN_DEFINITIONS}
-        defaultOrder={ORDER_LIST_DEFAULT_ORDER}
-        settings={orderListColumnSettings}
-        onChange={saveOrderListColumnSettings}
-      />
+      <Space size={4}>
+        {useBackendCut && (
+          <Button
+            size="small"
+            disabled={selectedCutOrderIds.length === 0}
+            onClick={() => setAddToCutOpen(true)}
+          >
+            Добавить в раскрой ({selectedCutOrderIds.length})
+          </Button>
+        )}
+        <OrderDetailColumnSettingsButton
+          tableKey="orderList"
+          definitions={ORDER_LIST_COLUMN_DEFINITIONS}
+          defaultOrder={ORDER_LIST_DEFAULT_ORDER}
+          settings={orderListColumnSettings}
+          onChange={saveOrderListColumnSettings}
+        />
+      </Space>
     ),
-  }), [orderListColumnSettings, saveOrderListColumnSettings, tableProps?.pagination]);
+  }), [orderListColumnSettings, saveOrderListColumnSettings, tableProps?.pagination, useBackendCut, selectedCutOrderIds]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -1068,32 +1080,45 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             >
               Создать заказ
             </Button>
-            <Button
-              icon={<DownloadOutlined />}
-              onClick={() => setSnapshotBatchOpen(true)}
-            >
-              Выгрузка JSON
-            </Button>
-            <Upload
-              accept=".erp-order.json,.json,.erp-order-batch.zip,.zip,application/json,application/zip"
-              showUploadList={false}
-              beforeUpload={(file) => {
-                void handleSnapshotImport(file);
-                return false;
+            <Dropdown
+              trigger={["click"]}
+              menu={{
+                items: [
+                  {
+                    key: "export",
+                    label: (
+                      <span>
+                        <DownloadOutlined /> Выгрузка JSON
+                      </span>
+                    ),
+                    onClick: () => setSnapshotBatchOpen(true),
+                  },
+                  {
+                    key: "import",
+                    label: (
+                      <Upload
+                        accept=".erp-order.json,.json,.erp-order-batch.zip,.zip,application/json,application/zip"
+                        showUploadList={false}
+                        beforeUpload={(file) => {
+                          void handleSnapshotImport(file);
+                          return false;
+                        }}
+                      >
+                        <span>
+                          <UploadOutlined /> Загрузка JSON
+                        </span>
+                      </Upload>
+                    ),
+                  },
+                ],
               }}
             >
-              <Button icon={<UploadOutlined />} loading={snapshotImporting}>
-                Загрузка JSON
-              </Button>
-            </Upload>
-            {useBackendCut && (
               <Button
-                disabled={selectedCutOrderIds.length === 0}
-                onClick={() => setAddToCutOpen(true)}
-              >
-                Добавить в раскрой ({selectedCutOrderIds.length})
-              </Button>
-            )}
+                icon={<DatabaseOutlined />}
+                title="JSON: выгрузка / загрузка"
+                loading={snapshotImporting}
+              />
+            </Dropdown>
           </>
         )}
       >
