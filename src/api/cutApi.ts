@@ -9,6 +9,7 @@ import type {
   CutSelectionCriteria,
   CutSheetTypeOption,
   EligibleDetailsResponse,
+  SaveManualLayoutRequest,
 } from './types/cutApi.types';
 
 /**
@@ -99,37 +100,98 @@ export const cutApi = {
     sheetIndex: number,
     preset: string = 'screen',
     landscape = false,
+    variant?: 'auto' | 'manual' | 'active',
+    renderToken?: string,
   ): Promise<Blob> {
     const path = apiRoutes.cutJobs.sheetPng(
       validateCutJobId(cutJobId),
       validateCutJobId(groupId),
       sheetIndex,
     );
-    const orient = landscape ? '&orientation=landscape' : '';
-    const { blob } = await httpClient.download(`${path}?preset=${encodeURIComponent(preset)}${orient}`);
+    const params = new URLSearchParams();
+    params.append('preset', preset);
+    if (landscape) params.append('orientation', 'landscape');
+    if (variant) params.append('variant', variant);
+    if (renderToken) params.append('renderVersion', renderToken);
+    const { blob } = await httpClient.download(`${path}?${params.toString()}`);
     return blob;
   },
 
-  async fetchSheetSvg(cutJobId: number, groupId: number, sheetIndex: number, landscape = false): Promise<Blob> {
+  async fetchSheetSvg(
+    cutJobId: number,
+    groupId: number,
+    sheetIndex: number,
+    landscape = false,
+    variant?: 'auto' | 'manual' | 'active',
+    renderToken?: string,
+  ): Promise<Blob> {
     const path = apiRoutes.cutJobs.sheetSvg(
       validateCutJobId(cutJobId),
       validateCutJobId(groupId),
       sheetIndex,
     );
-    const { blob } = await httpClient.download(landscape ? `${path}?orientation=landscape` : path);
+    const params = new URLSearchParams();
+    if (landscape) params.append('orientation', 'landscape');
+    if (variant) params.append('variant', variant);
+    if (renderToken) params.append('renderVersion', renderToken);
+    const qs = params.toString();
+    const { blob } = await httpClient.download(qs ? `${path}?${qs}` : path);
     return blob;
   },
 
-  /** Group PDF. 202 (cold cache) -> `{ pending: true }`; caller retries. */
-  fetchGroupPdf(cutJobId: number, groupId: number, landscape = false): Promise<CutPdfResult> {
+  /**
+   * Group PDF. 202 (cold cache) -> `{ pending: true }`; caller retries.
+   * When `renderToken` is given, appends `variant=active&renderVersion=<token>`
+   * so the browser fetches the active layout and busts the render cache.
+   */
+  fetchGroupPdf(
+    cutJobId: number,
+    groupId: number,
+    landscape = false,
+    renderToken?: string,
+  ): Promise<CutPdfResult> {
     const path = apiRoutes.cutJobs.groupPdf(validateCutJobId(cutJobId), validateCutJobId(groupId));
-    return downloadPdf(landscape ? `${path}?orientation=landscape` : path);
+    const params = new URLSearchParams();
+    if (landscape) params.append('orientation', 'landscape');
+    if (renderToken) {
+      params.append('variant', 'active');
+      params.append('renderVersion', renderToken);
+    }
+    const qs = params.toString();
+    return downloadPdf(qs ? `${path}?${qs}` : path);
   },
 
-  /** Whole-job PDF. 202 (cold cache) -> `{ pending: true }`; caller retries. */
-  fetchJobPdf(cutJobId: number, landscape = false): Promise<CutPdfResult> {
+  /**
+   * Whole-job PDF. 202 (cold cache) -> `{ pending: true }`; caller retries.
+   * When `renderToken` is given, appends `variant=active&renderVersion=<token>`
+   * so the browser fetches the active layout and busts the render cache.
+   */
+  fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string): Promise<CutPdfResult> {
     const path = apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId));
-    return downloadPdf(landscape ? `${path}?orientation=landscape` : path);
+    const params = new URLSearchParams();
+    if (landscape) params.append('orientation', 'landscape');
+    if (renderToken) {
+      params.append('variant', 'active');
+      params.append('renderVersion', renderToken);
+    }
+    const qs = params.toString();
+    return downloadPdf(qs ? `${path}?${qs}` : path);
+  },
+
+  /**
+   * Save (or update) the manual placement layout for a cut group.
+   * PATCH /cut-jobs/:cutJobId/groups/:groupId/manual-layout
+   * Returns the full updated CutJobDto with the new renderToken.
+   */
+  async saveManualLayout(
+    cutJobId: number,
+    cutGroupId: number,
+    body: SaveManualLayoutRequest,
+  ): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(
+      apiRoutes.cutJobs.manualLayout(validateCutJobId(cutJobId), validateCutJobId(cutGroupId)),
+      body,
+    );
   },
 
   async setProfile(cutJobId: number, paramProfileId: number | null, version: number): Promise<CutJobDto> {

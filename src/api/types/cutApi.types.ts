@@ -41,6 +41,8 @@ export interface CutDetailInfoDto {
   edgeTypeName: string | null;
   filmId: number | null;
   filmName: string | null;
+  /** Whether the film has a texture/grain direction (null when no film). */
+  filmTexture: boolean | null;
   priority: number | null;
   productionStatusId: number | null;
   productionStatusName: string | null;
@@ -88,6 +90,21 @@ export interface CutGroupSheetDto {
   placements: SheetPlacements;
 }
 
+/** A single sheet in a manual layout (no DB sheet row — light shape). */
+export interface CutManualSheet {
+  sheetIndex: number;
+  placements: SheetPlacements;
+}
+
+/** Saved manual placement layout for a cut group. */
+export interface CutManualLayout {
+  groupKey: string;
+  sheets: CutManualSheet[];
+  isActive: boolean;
+  isStale: boolean;
+  version: number;
+}
+
 export interface CutGroupDto {
   cutGroupId: number;
   sheetMaterialTypeId: number | null;
@@ -95,6 +112,10 @@ export interface CutGroupDto {
   status: string;
   summary: Record<string, unknown> | null;
   sheets: CutGroupSheetDto[];
+  /** Saved manual layout for this group (null when none, absent on list endpoint). */
+  manualLayout?: CutManualLayout | null;
+  /** Opaque render token for cache-busting render endpoints (present on single-job GET). */
+  renderToken?: string;
 }
 
 export interface CutJobTotals {
@@ -107,6 +128,29 @@ export interface CutJobTotals {
   materialsCount: number;
   /** distinct non-null films among the job's details */
   filmsCount: number;
+}
+
+/** Per-job editor geometry params (trim is read from placements.trim_mm). */
+export interface CutEditorParams {
+  kerfMm: number;
+  spacingMm: number;
+}
+
+/** A single manual placement move (input body for PATCH manual-layout). */
+export interface CutManualMove {
+  itemId: string;
+  instance: number;
+  sheetIndex: number;
+  xMm: number;
+  yMm: number;
+  rotated: boolean;
+}
+
+/** Body for PATCH /cut-jobs/:cutJobId/groups/:groupId/manual-layout */
+export interface SaveManualLayoutRequest {
+  jobVersion: number;
+  active: boolean;
+  placements: CutManualMove[];
 }
 
 export interface CutJobDto {
@@ -132,6 +176,18 @@ export interface CutJobDto {
   items: CutJobItemDto[];
   groups: CutGroupDto[];
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;
+  /**
+   * Editor geometry params (present on single-job GET, absent on list).
+   * Optional to avoid breaking list-endpoint consumers.
+   */
+  editorParams?: CutEditorParams | null;
+  /**
+   * True when the stored manual layout is stale and must be recalculated before
+   * the editor can save again. Present on single-job GET, absent on list.
+   */
+  requiresRecalc?: boolean;
+  /** Opaque render token for cache-busting render endpoints (present on single-job GET). */
+  renderToken?: string;
 }
 
 export type CutIneligibleReason = 'deleted' | 'wrong_status' | 'not_cuttable' | 'no_sheet_spec';
