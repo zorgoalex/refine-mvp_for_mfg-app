@@ -5,6 +5,7 @@ import type {
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutJobDto,
+  CutManualSheetDto,
   EligibleDetailsResponseDto,
   CutSelectionCriteriaDto,
 } from '../dto/cut.dto';
@@ -238,4 +239,20 @@ export interface CutRepositoryPort {
   renderJobPdf(query: RenderJobPdfQuery): Promise<Buffer>;
   setPdfPrewarmState(query: SetPdfPrewarmStateQuery): Promise<void>;
   listSheetTypesForCut(query: ListSheetTypesForCutQuery): Promise<CutSheetTypeOption[]>;
+  // ── Task 4: manual-layout read/persist ──────────────────────────────────
+  getManualLayoutByKey(
+    cutJobId: number,
+    groupKey: string,
+  ): Promise<{ sheets: CutManualSheetDto[]; isActive: boolean; isStale: boolean; version: number } | null>;
+  upsertManualLayout(args: {
+    cutJobId: number;
+    groupKey: string;
+    sheets: CutManualSheetDto[];
+    active: boolean;
+    basedOnJobVersion: number;
+    createdBy: number | null;
+  }): Promise<void>;
+  listManualLayoutsForJob(
+    cutJobId: number,
+  ): Promise<Array<{ groupKey: string; sheets: CutManualSheetDto[]; isActive: boolean; isStale: boolean; version: number }>>;
 }

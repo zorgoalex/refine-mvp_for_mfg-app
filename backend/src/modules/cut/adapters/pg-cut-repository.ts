@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { PieceLabelSnapshot } from '../../../shared/cut-geometry';
 import { buildCutAuditEvent, buildCutDeniedEvent, CUT_AUDIT_EVENTS, type CutAuditActor } from '../application/cut-audit';
 import {
   classifyDetailEligibility,
@@ -27,7 +29,7 @@ import {
   shouldMarkCutFailed,
 } from '../application/cut-failure-reason';
 import { ApiError } from '../../../common/errors/api-error';
-import { type CutConfigPort } from '../application/cut-config';
+import { type CutConfigPort, type CutGrainRules } from '../application/cut-config';
 import { PgCutConfigRepository } from './pg-cut-config-repository';
 import { resolveCalcParams } from './resolve-calc-params';
 import type {
@@ -56,10 +58,13 @@ import type {
   CutDetailInfoDto,
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
+  CutEditorParamsDto,
   CutGroupDto,
   CutJobDto,
   CutJobRefDto,
   CutJobTotals,
+  CutManualLayoutDto,
+  CutManualSheetDto,
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
@@ -137,12 +142,85 @@ interface CalcItemRow extends QueryResultRow {
   qty: string | number;
   width_mm: string | number;
   height_mm: string | number;
+  detail_number: string | number | null;
   material_id?: string | number | null;
   sheet_material_type_id: string | number | null;
   film_id: string | number | null;
   film_texture: boolean | null;
   smt_width_mm: string | number | null;
   smt_height_mm: string | number | null;
+}
+
+// ── Manual-layout helpers (Task 4) ──────────────────────────────────────────
+
+/**
+ * Stable text key encoding the grouping mode for a cut group. Written to
+ * `cut_group.group_key` at calculate time and used to match manual layouts
+ * across recalculations.
+ *
+ * Encoding:
+ *   !splitByMaterial           → 'all'
+ *   splitByMaterial+combineFilms → 'm:<smtId|null>|f:all'
+ *   else                       → 'm:<smtId|null>|f:<filmId|null>'
+ */
+export function logicalGroupKey(g: {
+  splitByMaterial: boolean;
+  combineFilms: boolean;
+  sheetMaterialTypeId: number | null;
+  filmId: number | null;
+}): string {
+  if (!g.splitByMaterial) return 'all';
+  if (g.combineFilms) return `m:${g.sheetMaterialTypeId ?? 'null'}|f:all`;
+  return `m:${g.sheetMaterialTypeId ?? 'null'}|f:${g.filmId ?? 'null'}`;
+}
+
+interface BasisInputItem {
+  orderDetailId: number;
+  qty: number;
+  widthMm: number;
+  heightMm: number;
+  sheetMaterialTypeId: number | null;
+  filmId: number | null;
+  filmTexture: boolean | null;
+}
+interface BasisSheetType {
+  sheetMaterialTypeId: number;
+  widthMm: number;
+  heightMm: number;
+}
+interface BasisInputs {
+  params: import('../application/cut-freecut-mapping').FreecutParams;
+  grainRules: import('../application/cut-config').CutGrainRules;
+  combineFilms: boolean;
+  splitByMaterial: boolean;
+  sheetOverride: { sheetMaterialTypeId: number; widthMm: number; heightMm: number } | null;
+  items: BasisInputItem[];
+  sheetTypes: BasisSheetType[];
+}
+
+/**
+ * Stable SHA-256 hash of all calc-relevant inputs. Same inputs → same hash;
+ * any structural change flips it → requiresRecalc=true.
+ * Hashes: resolved params, grain rules, combineFilms, splitByMaterial,
+ * sheet-override dims (NOT is_cuttable), per-detail cut fields incl. qty
+ * (NOT note, NOT updated_at), used sheet-type dims only (NOT is_cuttable).
+ * Items and sheetTypes are sorted by id for determinism.
+ */
+function basisOf(inputs: BasisInputs): string {
+  const canonical = {
+    p: inputs.params,
+    g: inputs.grainRules,
+    cf: inputs.combineFilms,
+    sbm: inputs.splitByMaterial,
+    so: inputs.sheetOverride,
+    items: [...inputs.items]
+      .sort((a, b) => a.orderDetailId - b.orderDetailId)
+      .map((i) => ({ id: i.orderDetailId, q: i.qty, w: i.widthMm, h: i.heightMm, smt: i.sheetMaterialTypeId, f: i.filmId, ft: i.filmTexture })),
+    smts: [...inputs.sheetTypes]
+      .sort((a, b) => a.sheetMaterialTypeId - b.sheetMaterialTypeId)
+      .map((s) => ({ id: s.sheetMaterialTypeId, w: s.widthMm, h: s.heightMm })),
+  };
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
 /** Idempotency key for the profile-changed outbox event. Stable for a given
@@ -278,6 +356,7 @@ export class PgCutRepository implements CutRepositoryPort {
       }
 
       await bumpVersion(tx, command.cutJobId);
+      await this.invalidateManualLayoutsForJob(tx, command.cutJobId, 'items_added');
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.itemAdded,
         cutJobId: command.cutJobId,
@@ -315,6 +394,7 @@ export class PgCutRepository implements CutRepositoryPort {
       const removedSheetTypeId = removedRow.sheet_material_type_id === null ? null : toNum(removedRow.sheet_material_type_id);
 
       await bumpVersion(tx, command.cutJobId);
+      await this.invalidateManualLayoutsForJob(tx, command.cutJobId, 'item_removed');
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.itemRemoved,
         cutJobId: command.cutJobId,
@@ -363,6 +443,7 @@ export class PgCutRepository implements CutRepositoryPort {
       //   - split_by_material = true (default): different materials must NOT be
       //     merged, so the override only FILLS details that have no sheet
       //     (no_sheet_spec); materialed details keep their own sheet and split.
+      let sheetOverrideForBasis: { sheetMaterialTypeId: number; widthMm: number; heightMm: number } | null = null;
       if (job.sheetMaterialTypeId !== null) {
         const sheetRes = await tx.query<{ width_mm: string | number; height_mm: string | number }>(
           `SELECT width_mm, height_mm FROM sheet_material_types
@@ -372,13 +453,15 @@ export class PgCutRepository implements CutRepositoryPort {
         if (sheetRes.rows.length === 0) {
           throw new CutSheetMaterialNotCuttableError(job.sheetMaterialTypeId);
         }
+        const overrideDims = {
+          sheetMaterialTypeId: job.sheetMaterialTypeId,
+          widthMm: toNum(sheetRes.rows[0].width_mm),
+          heightMm: toNum(sheetRes.rows[0].height_mm),
+        };
+        sheetOverrideForBasis = overrideDims;
         items = applySheetOverride(
           items,
-          {
-            sheetMaterialTypeId: job.sheetMaterialTypeId,
-            widthMm: toNum(sheetRes.rows[0].width_mm),
-            heightMm: toNum(sheetRes.rows[0].height_mm),
-          },
+          { sheetMaterialTypeId: overrideDims.sheetMaterialTypeId, widthMm: overrideDims.widthMm, heightMm: overrideDims.heightMm },
           { onlyNoSheetSpec: job.splitByMaterial },
         );
       }
@@ -390,6 +473,9 @@ export class PgCutRepository implements CutRepositoryPort {
       // ON DELETE SET NULL (items stay active/reserved), set explicitly for clarity.
       await tx.query(`UPDATE cut_job_item SET cut_group_id = NULL WHERE cut_job_id = $1 AND cut_group_id IS NOT NULL`, [command.cutJobId]);
       await tx.query(`DELETE FROM cut_group WHERE cut_job_id = $1`, [command.cutJobId]);
+      // Hard-invalidate any existing manual layouts NOW (in Phase 1's committed tx)
+      // so a Phase-2 freecut failure still leaves them stale+inactive on the failed job.
+      await this.invalidateManualLayoutsForJob(tx, command.cutJobId, 'recalc');
 
       // Multi-material fan-out (plan §6): one cut_group + one freecut call per
       // cuttable key (sheet_material_type_id, film_id). Slice-2 removes the
@@ -463,7 +549,41 @@ export class PgCutRepository implements CutRepositoryPort {
         [command.cutJobId],
       );
 
-      return { groupPreps, params, expectedVersion: job.version + 1 };
+      // Freeze the basis from the Phase-1 snapshot (Codex R16 BLOCKER #1):
+      // compute basisOf from the EXACT inputs used to build the freecut request.
+      // Carried in prep and persisted in Phase 3. NOT recomputed after freecut
+      // returns (params/grain/stock/details may have changed in the gap).
+      const usedSheetTypeMap = new Map<number, { widthMm: number; heightMm: number }>();
+      for (const { group } of groupPreps) {
+        if (group.sheetMaterialTypeId !== null && group.smtWidthMm !== null && group.smtHeightMm !== null) {
+          usedSheetTypeMap.set(group.sheetMaterialTypeId, { widthMm: group.smtWidthMm, heightMm: group.smtHeightMm });
+        }
+      }
+      const basisItems: BasisInputItem[] = groupPreps.flatMap(({ group }) =>
+        group.items.map((item) => ({
+          orderDetailId: item.orderDetailId,
+          qty: item.qty,
+          widthMm: item.widthMm,
+          heightMm: item.heightMm,
+          sheetMaterialTypeId: group.sheetMaterialTypeId,
+          filmId: group.filmId,
+          filmTexture: item.filmTexture,
+        })),
+      );
+      const basisSheetTypes: BasisSheetType[] = [...usedSheetTypeMap.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([id, dims]) => ({ sheetMaterialTypeId: id, widthMm: dims.widthMm, heightMm: dims.heightMm }));
+      const calcBasis = basisOf({
+        params,
+        grainRules,
+        combineFilms: job.combineFilms,
+        splitByMaterial: job.splitByMaterial,
+        sheetOverride: sheetOverrideForBasis,
+        items: basisItems,
+        sheetTypes: basisSheetTypes,
+      });
+
+      return { groupPreps, params, expectedVersion: job.version + 1, calcBasis, calcParams: params };
       })
       // A Phase 1 validation failure (no items / no sheet spec / instance|body
       // limit) is a calculation outcome: persist a matching reason. Guard on the
@@ -509,10 +629,19 @@ export class PgCutRepository implements CutRepositoryPort {
       let totalSheets = 0;
       let totalUnplaced = 0;
       for (const { group, response } of responses) {
+        // Compute the stable group key (written to cut_group.group_key so manual
+        // layouts survive recalculations that keep the same logical grouping).
+        const gKey = logicalGroupKey({
+          splitByMaterial: job.splitByMaterial,
+          combineFilms: job.combineFilms,
+          sheetMaterialTypeId: group.sheetMaterialTypeId,
+          filmId: group.filmId,
+        });
+
         const groupInsert = await tx.query<{ cut_group_id: string | number }>(
           `
-          INSERT INTO cut_group (cut_job_id, sheet_material_type_id, film_id, status, summary)
-          VALUES ($1, $2, $3, 'ready', $4::jsonb)
+          INSERT INTO cut_group (cut_job_id, sheet_material_type_id, film_id, status, summary, group_key)
+          VALUES ($1, $2, $3, 'ready', $4::jsonb, $5)
           RETURNING cut_group_id
           `,
           [
@@ -520,6 +649,7 @@ export class PgCutRepository implements CutRepositoryPort {
             group.sheetMaterialTypeId,
             group.filmId,
             response.summary ? JSON.stringify(response.summary) : null,
+            gKey,
           ],
         );
         const cutGroupId = toNum(groupInsert.rows[0].cut_group_id);
@@ -532,13 +662,34 @@ export class PgCutRepository implements CutRepositoryPort {
           [cutGroupId, command.cutJobId, group.items.map((item) => item.orderDetailId)],
         );
 
+        // Build a label lookup from the Phase-1 snapshot so render never re-reads
+        // order_details (Codex R8/R10 BLOCKER #1).
+        const labelByItemId = new Map<string, PieceLabelSnapshot>(
+          group.items.map((item) => [
+            freecutItemId(item.orderDetailId),
+            {
+              orderId: item.orderId,
+              detailNumber: item.detailNumber,
+              widthMm: item.widthMm,
+              heightMm: item.heightMm,
+            },
+          ]),
+        );
+
         for (const sheet of backMapSolutions(response)) {
+          const placementsWithLabels: SheetPlacementsJson = {
+            ...sheet.placements,
+            pieces: sheet.placements.pieces.map((piece) => ({
+              ...piece,
+              label: labelByItemId.get(piece.item_id) ?? { orderId: null, detailNumber: null, widthMm: piece.width_mm, heightMm: piece.height_mm },
+            })),
+          };
           await tx.query(
             `
             INSERT INTO cut_group_sheet (cut_group_id, sheet_index, sheet_material_type_id, placements)
             VALUES ($1, $2, $3, $4::jsonb)
             `,
-            [cutGroupId, sheet.sheetIndex, group.sheetMaterialTypeId, JSON.stringify(sheet.placements)],
+            [cutGroupId, sheet.sheetIndex, group.sheetMaterialTypeId, JSON.stringify(placementsWithLabels)],
           );
           totalSheets += 1;
         }
@@ -570,10 +721,11 @@ export class PgCutRepository implements CutRepositoryPort {
       await tx.query(
         `
         UPDATE cut_job
-        SET status = 'ready', request_hash = $2, version = version + 1, updated_at = now()
+        SET status = 'ready', request_hash = $2, version = version + 1, updated_at = now(),
+            last_calc_params = $3::jsonb, last_calc_basis = $4
         WHERE cut_job_id = $1
         `,
-        [command.cutJobId, requestHash],
+        [command.cutJobId, requestHash, JSON.stringify(prep.calcParams), prep.calcBasis],
       );
 
       await this.audit(tx, command.currentUser, {
@@ -738,8 +890,242 @@ export class PgCutRepository implements CutRepositoryPort {
     });
   }
 
-  getJob(query: GetCutJobQuery): Promise<CutJobDto> {
-    return loadJob(this.database, query.cutJobId);
+  async getJob(query: GetCutJobQuery): Promise<CutJobDto> {
+    const base = await loadJob(this.database, query.cutJobId);
+
+    // Read last_calc_params and last_calc_basis from cut_job (single extra query).
+    const calcRow = await this.database.query<{ last_calc_params: unknown; last_calc_basis: string | null }>(
+      `SELECT last_calc_params, last_calc_basis FROM cut_job WHERE cut_job_id = $1`,
+      [query.cutJobId],
+    );
+    const lastCalcBasis = calcRow.rows[0]?.last_calc_basis ?? null;
+    const lastCalcParamsRaw = (calcRow.rows[0]?.last_calc_params ?? null) as FreecutParams | null;
+
+    // Compute requiresRecalc via non-throwing probe (Codex R12 BLOCKER #2).
+    // Returns true when: last_calc_basis is null, probe returns null, or basis differs.
+    let requiresRecalc = true;
+    const basisInputs = await this.loadCurrentCalcBasisInputs(query.cutJobId);
+    if (basisInputs !== null && lastCalcBasis !== null) {
+      requiresRecalc = basisOf(basisInputs) !== lastCalcBasis;
+    }
+
+    // editorParams from the frozen last_calc_params (null for legacy/pre-migration jobs).
+    const editorParams: CutEditorParamsDto | null = lastCalcParamsRaw
+      ? { kerfMm: lastCalcParamsRaw.kerf_mm, spacingMm: lastCalcParamsRaw.spacing_mm }
+      : null;
+
+    // Read group_key for each cut_group (extra query scoped to single job).
+    const groupKeyResult = await this.database.query<{ cut_group_id: string | number; group_key: string | null }>(
+      `SELECT cut_group_id, group_key FROM cut_group WHERE cut_job_id = $1`,
+      [query.cutJobId],
+    );
+    const groupKeyMap = new Map(groupKeyResult.rows.map((r) => [toNum(r.cut_group_id), r.group_key ?? null]));
+
+    // Read manual layouts for this job and index by group_key.
+    const manualLayouts = await this.listManualLayoutsForJob(query.cutJobId);
+    const manualLayoutMap = new Map(manualLayouts.map((ml) => [ml.groupKey, ml]));
+
+    // Enrich groups with groupKey + manualLayout (single-job path only).
+    const enrichedGroups: CutGroupDto[] = base.groups.map((group) => {
+      const groupKey = groupKeyMap.get(group.cutGroupId) ?? null;
+      const ml = groupKey ? (manualLayoutMap.get(groupKey) ?? null) : null;
+      const manualLayout: CutManualLayoutDto | null = ml
+        ? { groupKey: ml.groupKey, sheets: ml.sheets, isActive: ml.isActive, isStale: ml.isStale, version: ml.version }
+        : null;
+      return { ...group, groupKey, manualLayout };
+    });
+
+    return { ...base, groups: enrichedGroups, editorParams, requiresRecalc };
+  }
+
+  // ── Task 4: manual-layout read/persist/invalidate ────────────────────────
+
+  async getManualLayoutByKey(
+    cutJobId: number,
+    groupKey: string,
+  ): Promise<{ sheets: CutManualSheetDto[]; isActive: boolean; isStale: boolean; version: number } | null> {
+    const result = await this.database.query<{
+      sheets: unknown;
+      is_active: boolean;
+      is_stale: boolean;
+      version: string | number;
+    }>(
+      `SELECT sheets, is_active, is_stale, version
+       FROM cut_group_manual_layout
+       WHERE cut_job_id = $1 AND group_key = $2
+       LIMIT 1`,
+      [cutJobId, groupKey],
+    );
+    if (!result.rows[0]) return null;
+    const row = result.rows[0];
+    return {
+      sheets: row.sheets as CutManualSheetDto[],
+      isActive: row.is_active,
+      isStale: row.is_stale,
+      version: Number(row.version),
+    };
+  }
+
+  async upsertManualLayout(args: {
+    cutJobId: number;
+    groupKey: string;
+    sheets: CutManualSheetDto[];
+    active: boolean;
+    basedOnJobVersion: number;
+    createdBy: number | null;
+  }): Promise<void> {
+    await this.database.query(
+      `INSERT INTO cut_group_manual_layout
+         (cut_job_id, group_key, sheets, is_active, is_stale, based_on_job_version, version, created_by)
+       VALUES ($1, $2, $3::jsonb, $4, FALSE, $5, 1, $6)
+       ON CONFLICT (cut_job_id, group_key) DO UPDATE
+         SET sheets              = EXCLUDED.sheets,
+             is_active           = EXCLUDED.is_active,
+             is_stale            = FALSE,
+             based_on_job_version = EXCLUDED.based_on_job_version,
+             version             = cut_group_manual_layout.version + 1,
+             updated_at          = now()`,
+      [args.cutJobId, args.groupKey, JSON.stringify(args.sheets), args.active, args.basedOnJobVersion, args.createdBy],
+    );
+  }
+
+  async listManualLayoutsForJob(
+    cutJobId: number,
+  ): Promise<Array<{ groupKey: string; sheets: CutManualSheetDto[]; isActive: boolean; isStale: boolean; version: number }>> {
+    const result = await this.database.query<{
+      group_key: string;
+      sheets: unknown;
+      is_active: boolean;
+      is_stale: boolean;
+      version: string | number;
+    }>(
+      `SELECT group_key, sheets, is_active, is_stale, version
+       FROM cut_group_manual_layout
+       WHERE cut_job_id = $1`,
+      [cutJobId],
+    );
+    return result.rows.map((row) => ({
+      groupKey: row.group_key,
+      sheets: row.sheets as CutManualSheetDto[],
+      isActive: row.is_active,
+      isStale: row.is_stale,
+      version: Number(row.version),
+    }));
+  }
+
+  /** Hard-invalidates all active/non-stale manual layouts for a job.
+   *  Called inside the caller's existing transaction so it participates in
+   *  the same atomicity boundary (a rolled-back caller rolls this back too). */
+  private async invalidateManualLayoutsForJob(tx: DatabaseClient, cutJobId: number, _reason: string): Promise<void> {
+    await tx.query(
+      `UPDATE cut_group_manual_layout
+       SET is_stale = TRUE, is_active = FALSE, updated_at = now()
+       WHERE cut_job_id = $1 AND (is_stale = FALSE OR is_active = TRUE)`,
+      [cutJobId],
+    );
+  }
+
+  /** Non-throwing probe: loads the same inputs calculate uses to build its
+   *  freecut request (Phase 1 snapshot) without strict profile validation.
+   *  Returns null when the current params cannot be resolved (inactive profile),
+   *  which makes requiresRecalc=true (conservative, correct direction). */
+  private async loadCurrentCalcBasisInputs(cutJobId: number): Promise<BasisInputs | null> {
+    const jobRes = await this.database.query<{
+      params: FreecutParams | null;
+      param_profile_id: string | number | null;
+      sheet_material_type_id: string | number | null;
+      combine_films: boolean | null;
+      split_by_material: boolean | null;
+    }>(
+      `SELECT params, param_profile_id, sheet_material_type_id, combine_films, split_by_material
+       FROM cut_job WHERE cut_job_id = $1`,
+      [cutJobId],
+    );
+    if (!jobRes.rows[0]) return null;
+    const job = jobRes.rows[0];
+
+    const combineFilms = job.combine_films === true;
+    const splitByMaterial = job.split_by_material !== false;
+
+    let items = await loadCalcItems(this.database, cutJobId);
+
+    // Sheet override (no active/cuttable guard — non-throwing probe).
+    let sheetOverride: { sheetMaterialTypeId: number; widthMm: number; heightMm: number } | null = null;
+    const sheetMaterialTypeId =
+      job.sheet_material_type_id === null || job.sheet_material_type_id === undefined
+        ? null
+        : toNum(job.sheet_material_type_id);
+    if (sheetMaterialTypeId !== null) {
+      const sheetRes = await this.database.query<{ width_mm: string | number; height_mm: string | number }>(
+        `SELECT width_mm, height_mm FROM sheet_material_types WHERE sheet_material_type_id = $1`,
+        [sheetMaterialTypeId],
+      );
+      if (sheetRes.rows[0]) {
+        const sw = {
+          sheetMaterialTypeId,
+          widthMm: toNum(sheetRes.rows[0].width_mm),
+          heightMm: toNum(sheetRes.rows[0].height_mm),
+        };
+        sheetOverride = sw;
+        items = applySheetOverride(
+          items,
+          { sheetMaterialTypeId: sw.sheetMaterialTypeId, widthMm: sw.widthMm, heightMm: sw.heightMm },
+          { onlyNoSheetSpec: splitByMaterial },
+        );
+      }
+    }
+
+    // Non-throwing param probe: inactive/missing profile → return null → requiresRecalc=true.
+    // ALSO swallow any throw from the config resolvers (malformed/corrupt stored profile
+    // params or grain-rule rows raise 422). getJob must stay loadable: any failure to
+    // resolve the current basis → null → requiresRecalc=true, editorParams=null. The
+    // strict calculate path keeps its own throwing resolver and still rejects.
+    let params: FreecutParams;
+    let grainRules: CutGrainRules;
+    try {
+      const profileId =
+        job.param_profile_id === null || job.param_profile_id === undefined ? null : toNum(job.param_profile_id);
+      let profileParams: FreecutParams | null = null;
+      if (profileId !== null) {
+        profileParams = await this.config.getParamsByProfileId(profileId);
+        if (profileParams === null) return null; // inactive/missing profile
+      }
+      params = resolveCalcParams({
+        profileId,
+        jobParams: (job.params ?? null) as FreecutParams | null,
+        profileParams,
+        defaultParams: await this.config.getDefaultParams(),
+      });
+      grainRules = await this.config.getGrainRules();
+    } catch {
+      return null; // malformed/corrupt stored config → cannot resolve basis
+    }
+
+    // Use groupByCuttableKey to mirror Phase 1's group-level sheetMaterialTypeId
+    // (for splitByMaterial=false, the representative sheet matters for the hash).
+    const groups = [...groupByCuttableKey(items, combineFilms, splitByMaterial).values()];
+    const usedSheetTypeMap = new Map<number, { widthMm: number; heightMm: number }>();
+    for (const group of groups) {
+      if (group.sheetMaterialTypeId !== null && group.smtWidthMm !== null && group.smtHeightMm !== null) {
+        usedSheetTypeMap.set(group.sheetMaterialTypeId, { widthMm: group.smtWidthMm, heightMm: group.smtHeightMm });
+      }
+    }
+    const sheetTypes: BasisSheetType[] = [...usedSheetTypeMap.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([id, dims]) => ({ sheetMaterialTypeId: id, widthMm: dims.widthMm, heightMm: dims.heightMm }));
+    const basisItems: BasisInputItem[] = groups.flatMap((group) =>
+      group.items.map((item) => ({
+        orderDetailId: item.orderDetailId,
+        qty: item.qty,
+        widthMm: item.widthMm,
+        heightMm: item.heightMm,
+        sheetMaterialTypeId: group.sheetMaterialTypeId,
+        filmId: group.filmId,
+        filmTexture: item.filmTexture,
+      })),
+    );
+
+    return { params, grainRules, combineFilms, splitByMaterial, sheetOverride, items: basisItems, sheetTypes };
   }
 
   async listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]> {
@@ -1448,6 +1834,8 @@ export class PgCutRepository implements CutRepositoryPort {
         `UPDATE cut_job SET combine_films = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
         [command.cutJobId, command.combineFilms],
       );
+      // Grouping changes: existing manual layouts keyed by old group_key are no longer valid.
+      await this.invalidateManualLayoutsForJob(tx, command.cutJobId, 'combine_films_changed');
 
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.combineFilmsChanged,
@@ -1508,6 +1896,8 @@ export class PgCutRepository implements CutRepositoryPort {
         `UPDATE cut_job SET split_by_material = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
         [command.cutJobId, command.splitByMaterial],
       );
+      // Grouping changes: existing manual layouts keyed by old group_key are no longer valid.
+      await this.invalidateManualLayoutsForJob(tx, command.cutJobId, 'split_by_material_changed');
 
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.splitByMaterialChanged,
@@ -1564,7 +1954,7 @@ interface CuttableGroup {
   smtWidthMm: number | null;
   smtHeightMm: number | null;
   orderIds: number[];
-  items: Array<{ orderDetailId: number; orderId: number; qty: number; widthMm: number; heightMm: number; filmTexture: boolean | null }>;
+  items: Array<{ orderDetailId: number; orderId: number; qty: number; widthMm: number; heightMm: number; detailNumber: number | null; filmTexture: boolean | null }>;
 }
 
 /** Per-job sheet override (migration 040). When a job has a chosen sheet, every
@@ -1643,17 +2033,18 @@ export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false, sp
       qty: toNum(row.qty),
       widthMm: toNum(row.width_mm),
       heightMm: toNum(row.height_mm),
+      detailNumber: numOrNull(row.detail_number),
       filmTexture: row.film_texture,
     });
   }
   return groups;
 }
 
-async function loadCalcItems(tx: TransactionClient, cutJobId: number): Promise<CalcItemRow[]> {
-  const result = await tx.query<CalcItemRow>(
+async function loadCalcItems(client: DatabaseClient, cutJobId: number): Promise<CalcItemRow[]> {
+  const result = await client.query<CalcItemRow>(
     `
     SELECT cji.cut_job_item_id, cji.order_detail_id, cji.order_id, cji.qty,
-           od.width AS width_mm, od.height AS height_mm, od.material_id,
+           od.width AS width_mm, od.height AS height_mm, od.detail_number, od.material_id,
            od.sheet_material_type_id, od.film_id, f.film_texture,
            smt.width_mm AS smt_width_mm, smt.height_mm AS smt_height_mm
     FROM cut_job_item cji

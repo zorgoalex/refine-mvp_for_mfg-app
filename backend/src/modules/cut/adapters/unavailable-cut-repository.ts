@@ -87,6 +87,18 @@ export class UnavailableCutRepository implements CutRepositoryPort {
   setSplitByMaterial() {
     return Promise.reject(unavailable());
   }
+
+  getManualLayoutByKey() {
+    return Promise.reject(unavailable());
+  }
+
+  upsertManualLayout() {
+    return Promise.reject(unavailable());
+  }
+
+  listManualLayoutsForJob() {
+    return Promise.reject(unavailable());
+  }
 }
 
 function unavailable(): ApiError {

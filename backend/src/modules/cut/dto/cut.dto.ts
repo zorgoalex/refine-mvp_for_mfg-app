@@ -99,6 +99,8 @@ export interface CutGroupDto {
   status: string;
   summary: Record<string, unknown> | null;
   sheets: CutGroupSheetDto[];
+  /** Stable group identity key (e.g. "m:5|f:3"). Populated only on single-job getJob; absent on list. */
+  groupKey?: string | null;
   /** Populated only on single-job getJob; absent on list. */
   manualLayout?: CutManualLayoutDto | null;
   /** Opaque browser-cache token for render endpoints; absent on list. */
