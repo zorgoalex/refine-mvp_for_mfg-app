@@ -1357,6 +1357,7 @@ export const CutPage: React.FC = () => {
                       }))
                     }
                     disabled={isEditingGroup}
+                    data-testid={`show-alternative-cb-${group.cutGroupId}`}
                   >
                     Показать альтернативный раскрой
                   </Checkbox>
@@ -1376,6 +1377,7 @@ export const CutPage: React.FC = () => {
                       size="small"
                       onClick={() => enterEditMode(group)}
                       disabled={editDisabled || busy || isEditingGroup}
+                      data-testid={`edit-layout-btn-${group.cutGroupId}`}
                     >
                       Редактировать раскрой
                     </Button>
@@ -1396,6 +1398,7 @@ export const CutPage: React.FC = () => {
                     onClick={() => void downloadGroupPdf(group)}
                     loading={busy}
                     disabled={isDirtyGroup || (job.requiresRecalc ?? false)}
+                    data-testid={`download-group-pdf-btn-${group.cutGroupId}`}
                   >
                     Скачать PDF
                   </Button>
@@ -1424,6 +1427,7 @@ export const CutPage: React.FC = () => {
                       disabled={violations.length > 0 || (job.requiresRecalc ?? false) || busy}
                       onClick={() => void saveManualLayoutForGroup(group)}
                       loading={busy}
+                      data-testid="save-manual-layout-btn"
                     >
                       Сохранить изменения
                     </Button>
@@ -1436,6 +1440,7 @@ export const CutPage: React.FC = () => {
                       setViolations([]);
                     }}
                     disabled={busy}
+                    data-testid="cancel-edit-btn"
                   >
                     Отменить редактирование
                   </Button>

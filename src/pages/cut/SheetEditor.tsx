@@ -490,7 +490,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+    <div data-testid="sheet-editor" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
       {displaySheets.map(({ sheetIndex, placements }) => {
         const W = placements.sheet_width_mm;
         const H = placements.sheet_height_mm;
@@ -508,7 +508,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         const isDropTarget = drag !== null && drag.targetSheetIndex === sheetIndex;
 
         return (
-          <div key={sheetIndex} style={{ display: 'inline-block', verticalAlign: 'top' }}>
+          <div key={sheetIndex} data-testid={`sheet-editor-sheet-${sheetIndex}`} style={{ display: 'inline-block', verticalAlign: 'top' }}>
             <div
               style={{
                 marginBottom: 4,
@@ -619,6 +619,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 return (
                   <g
                     key={pKey(piece.item_id, piece.instance)}
+                    data-testid={`piece-${sheetIndex}-${piece.item_id}-${piece.instance}`}
                     opacity={isDraggingThis ? 0.45 : 1}
                     style={{ cursor: drag ? 'grabbing' : 'grab' }}
                     onPointerDown={(e) => {
@@ -655,6 +656,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       fill={fillColor}
                       stroke={strokeColor}
                       strokeWidth={strokeWidth}
+                      data-testid={`piece-rect-${sheetIndex}-${piece.item_id}-${piece.instance}`}
                     />
 
                     {/* Upright label centered on the piece */}
@@ -677,6 +679,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                         transform={`translate(${r.x + r.w - 10}, ${r.y + 2})`}
                         role="button"
                         aria-label="Повернуть на 90°"
+                        data-testid={`rotate-piece-${sheetIndex}-${piece.item_id}-${piece.instance}`}
                         style={{ cursor: 'pointer' }}
                         onClick={(e) => {
                           e.stopPropagation();

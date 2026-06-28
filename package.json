@@ -16,6 +16,7 @@
     "test:backend:production-actions-integration": "vitest run --config vitest.production-actions-integration.config.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:cut-manual-layout": "playwright test tests/cut-manual-layout.spec.ts --project=chromium",
     "test:e2e:frontend-pages": "playwright test tests/frontend-pages-smoke.spec.ts",
     "test:e2e:frontend-pages-stage-canary": "FRONTEND_PAGES_STAGE_CANARY=true PLAYWRIGHT_SKIP_WEB_SERVER=true playwright test tests/frontend-pages-stage-canary.spec.ts --project=chromium",
     "test:e2e:calendar": "playwright test tests/calendar-frontend.spec.ts",
