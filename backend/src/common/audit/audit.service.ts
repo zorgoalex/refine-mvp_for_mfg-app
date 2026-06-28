@@ -91,6 +91,7 @@ export class AuditService {
       statusField: 'denied', statusCode: event.reason,
       before: {}, after: {}, diff: {},
       metadata: { ...(event.metadata ?? {}), source: event.source, denied: true, reason: event.reason, requiredPermissions: event.requiredPermissions ?? [] },
+      relatedEntities: event.relatedEntities ?? [],
     });
   }
 }

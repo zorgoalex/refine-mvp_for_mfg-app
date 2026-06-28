@@ -48,5 +48,6 @@ export interface DeniedAuditEvent {
   relatedUserId?: number | null;
   reason: string;
   requiredPermissions?: readonly string[];
+  relatedEntities?: AuditRelatedEntity[];
   metadata?: Record<string, unknown>;
 }

@@ -67,6 +67,24 @@ export interface CutJobItemDto {
   detail: CutDetailInfoDto | null;
 }
 
+export interface CutManualSheetDto {
+  sheetIndex: number;
+  placements: SheetPlacementsJson;
+}
+
+export interface CutManualLayoutDto {
+  groupKey: string;
+  sheets: CutManualSheetDto[];
+  isActive: boolean;
+  isStale: boolean;
+  version: number;
+}
+
+export interface CutEditorParamsDto {
+  kerfMm: number;
+  spacingMm: number;
+}
+
 export interface CutGroupSheetDto {
   cutGroupSheetId: number;
   sheetIndex: number;
@@ -81,6 +99,10 @@ export interface CutGroupDto {
   status: string;
   summary: Record<string, unknown> | null;
   sheets: CutGroupSheetDto[];
+  /** Populated only on single-job getJob; absent on list. */
+  manualLayout?: CutManualLayoutDto | null;
+  /** Opaque browser-cache token for render endpoints; absent on list. */
+  renderToken?: string;
 }
 
 export interface CutJobTotals {
@@ -125,6 +147,12 @@ export interface CutJobDto {
   items: CutJobItemDto[];
   groups: CutGroupDto[];
   unplaced?: Array<{ itemId: string; instance: number; reason: string }>;
+  /** Populated only on single-job getJob; absent on list. */
+  editorParams?: CutEditorParamsDto | null;
+  /** true when calc inputs changed since last calculate (Codex R4 BLOCKER #1). Absent on list. */
+  requiresRecalc?: boolean;
+  /** Opaque browser-cache token for render endpoints; absent on list. */
+  renderToken?: string;
 }
 
 /** A cut job a detail is placed in (informational, not exclusive). */

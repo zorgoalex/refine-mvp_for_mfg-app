@@ -265,4 +265,28 @@ describe('AuditService.recordDenied', () => {
     expect(params[14]).toBe('denied');   // status_field
     expect(params[17]).toBe('order_scope_denied'); // status_code
   });
+
+  it('forwards relatedEntities from denied event into bridge rows', async () => {
+    const captured: Captured[] = [];
+    await new AuditService().recordDenied(fakeClient(captured, 'aud-d1'), {
+      event: 'cut_job.permission_denied',
+      entityType: 'cut_job',
+      entityId: 10,
+      actorUserId: 5,
+      requestId: 'req-denied-bridge',
+      source: 'backend-cut-command',
+      reason: 'missing cut.manage',
+      relatedEntities: [
+        { entityType: 'cut_group', entityId: 42 },
+        { entityType: 'order', entityId: 7 },
+      ],
+    });
+
+    const bridge = captured.filter(q =>
+      q.text.includes('INSERT INTO audit_log_related_entity'),
+    );
+    expect(bridge).toHaveLength(2);
+    expect(bridge[0].params).toEqual(['aud-d1', 'cut_group', 42]);
+    expect(bridge[1].params).toEqual(['aud-d1', 'order', 7]);
+  });
 });

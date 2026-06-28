@@ -61,7 +61,7 @@ export interface BuildCutDeniedEventInput {
   source: string;
   reason: string;
   requiredPermissions?: readonly string[];
-  related?: Pick<CutRelatedDimensions, 'orderIds'>;
+  related?: Pick<CutRelatedDimensions, 'orderIds' | 'cutGroupIds'>;
   metadata?: Record<string, unknown>;
 }
 
@@ -120,6 +120,7 @@ export function buildCutDeniedEvent(input: BuildCutDeniedEventInput): DeniedAudi
     relatedOrderId: orderIds[0] ?? null,
     reason: input.reason,
     requiredPermissions: input.requiredPermissions,
+    relatedEntities: buildRelatedEntities(input.related),
     metadata: input.metadata,
   };
 }

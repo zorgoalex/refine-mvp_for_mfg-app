@@ -9,6 +9,25 @@ import type {
   CutSelectionCriteriaDto,
 } from '../dto/cut.dto';
 
+export interface ManualMove {
+  itemId: string;
+  instance: number;
+  sheetIndex: number;
+  xMm: number;
+  yMm: number;
+  rotated: boolean;
+}
+
+export interface SaveManualLayoutCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  cutGroupId: number;
+  jobVersion: number;
+  placements: ManualMove[];
+  active: boolean;
+  requestId?: string;
+}
+
 export interface CreateCutJobCommand {
   currentUser: CurrentUser;
   dto: CreateCutJobRequestDto;
@@ -66,29 +85,35 @@ export interface EligibleDetailsQuery {
 
 export interface RenderSheetPngQuery {
   currentUser: CurrentUser;
+  cutJobId?: number;
   cutGroupId: number;
   sheetIndex: number;
   /** render preset NAME; px resolved from cut_render_presets config at render time */
   preset: string;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
+  variant?: 'auto' | 'manual' | 'active';
   requestId?: string;
 }
 
 export interface RenderSheetSvgQuery {
   currentUser: CurrentUser;
+  cutJobId?: number;
   cutGroupId: number;
   sheetIndex: number;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
+  variant?: 'auto' | 'manual' | 'active';
   requestId?: string;
 }
 
 export interface RenderGroupPdfQuery {
   currentUser: CurrentUser;
+  cutJobId?: number;
   cutGroupId: number;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
+  variant?: 'auto' | 'manual' | 'active';
   requestId?: string;
 }
 
@@ -97,6 +122,7 @@ export interface RenderJobPdfQuery {
   cutJobId: number;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
+  variant?: 'auto' | 'manual' | 'active';
   requestId?: string;
 }
 

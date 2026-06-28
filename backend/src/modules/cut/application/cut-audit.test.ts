@@ -118,4 +118,25 @@ describe('cut audit contract (§11)', () => {
     expect(denied.requiredPermissions).toEqual(['cut.manage']);
     expect(denied.reason).toBe('missing cut.manage');
   });
+
+  it('buildCutDeniedEvent enriches denied event with cut_group and order relatedEntities bridge rows', () => {
+    const denied = buildCutDeniedEvent({
+      cutJobId: 10,
+      actor,
+      requestId: 'req-denied-bridge',
+      source: 'manual',
+      reason: 'missing cut.manage',
+      requiredPermissions: ['cut.manage'],
+      related: { orderIds: [7], cutGroupIds: [42] },
+    });
+
+    expect(denied.event).toBe(CUT_AUDIT_EVENTS.permissionDenied);
+    expect(denied.relatedEntities).toEqual(
+      expect.arrayContaining([
+        { entityType: 'order', entityId: 7 },
+        { entityType: 'cut_group', entityId: 42 },
+      ]),
+    );
+    expect(denied.relatedEntities).toHaveLength(2);
+  });
 });
