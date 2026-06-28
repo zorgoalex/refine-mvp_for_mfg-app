@@ -10,6 +10,8 @@ interface AddToCutModalProps {
   orderIds: number[];
   /** Detail-level mode: when non-empty, only these chosen details (∩ eligible) are added. */
   detailIds?: number[];
+  /** Optional selected group label appended to the auto-generated cut name. */
+  nameSuffix?: string | null;
   onClose: () => void;
   onDone?: (job: CutJobDto) => void;
 }
@@ -20,7 +22,7 @@ interface AddToCutModalProps {
  * an existing draft job or creates a new one; the selected orders' eligible
  * details are resolved on the backend and reserved.
  */
-export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, detailIds, onClose, onDone }) => {
+export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, detailIds, nameSuffix, onClose, onDone }) => {
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [name, setName] = useState('');
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
@@ -36,10 +38,12 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
   useEffect(() => {
     if (!open) return;
     setName(
-      (detailMode
-        ? `Раскрой заказ ${orderIds.join(', ')} (детали)`
-        : `Раскрой ${orderIds.join(', ')}`
-      ).slice(0, 200),
+      buildDefaultCutName(
+        detailMode
+          ? `Раскрой заказ ${orderIds.join(', ')} (детали)`
+          : `Раскрой ${orderIds.join(', ')}`,
+        nameSuffix,
+      ),
     );
     cutApi
       .list()
@@ -51,7 +55,7 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
       .listPlacements(detailMode ? { detailIds: detailIds ?? [] } : { orderIds })
       .then(setPlacements)
       .catch(() => setPlacements(null));
-  }, [open, orderIds, detailMode, detailIds]);
+  }, [open, orderIds, detailMode, detailIds, nameSuffix]);
 
   const submit = useCallback(async () => {
     if (orderIds.length === 0) return;
@@ -155,4 +159,10 @@ async function resolveExistingJob(targetJobId: number | null): Promise<CutJobDto
   }
   // Re-fetch for the freshest optimistic version before reserving.
   return cutApi.get(targetJobId);
+}
+
+function buildDefaultCutName(baseName: string, suffix?: string | null): string {
+  const trimmedSuffix = (suffix ?? '').trim();
+  const name = trimmedSuffix ? `${baseName} — ${trimmedSuffix}` : baseName;
+  return name.slice(0, 200);
 }

@@ -32,7 +32,7 @@ import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.ty
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
-import { buildGroupedRows, GROUP_TINT_COUNT } from './detailGrouping';
+import { buildGroupedRows, GROUP_TINT_COUNT, selectedGroupLabelForCut } from './detailGrouping';
 import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
@@ -401,6 +401,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       ? buildGroupedRows(details, grouping.state.field!, { includeLeadingSeparator: cutSelectMode, groupLabelOf })
       : details),
     [groupingActive, details, grouping.state.field, cutSelectMode, groupLabelOf],
+  );
+
+  const cutSelectedGroupName = useMemo(
+    () =>
+      selectedGroupLabelForCut(
+        details,
+        cutSelectedDetailIds,
+        groupingActive ? grouping.state.field : null,
+        groupLabelOf,
+      ),
+    [details, cutSelectedDetailIds, groupingActive, grouping.state.field, groupLabelOf],
   );
 
   // Hook for updating order
@@ -1301,6 +1312,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               open={cutModalOpen}
               orderIds={[record.order_id]}
               detailIds={cutSelectedDetailIds}
+              nameSuffix={cutSelectedGroupName}
               onClose={() => setCutModalOpen(false)}
               onDone={() => {
                 setCutModalOpen(false);

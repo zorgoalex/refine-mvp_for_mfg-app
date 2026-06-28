@@ -102,3 +102,25 @@ export function buildGroupedRows(
   });
   return rows;
 }
+
+export function selectedGroupLabelForCut(
+  details: ReadonlyArray<OrderDetail>,
+  selectedDetailIds: ReadonlyArray<number>,
+  field: GroupField | null | undefined,
+  groupLabelOf: (sampleDetail: OrderDetail, field: GroupField) => string,
+): string | null {
+  if (!field || selectedDetailIds.length === 0) return null;
+
+  const selected = new Set(selectedDetailIds);
+  const selectedDetails = details.filter(
+    (detail) => detail.detail_id != null && selected.has(detail.detail_id),
+  );
+  if (selectedDetails.length === 0) return null;
+
+  const groupValues = new Set(selectedDetails.map((detail) => extractGroupValue(detail, field)));
+  if (groupValues.size !== 1) return null;
+
+  const label = groupLabelOf(selectedDetails[0], field).trim();
+  if (!label || ['—', '-', '–'].includes(label)) return null;
+  return label;
+}

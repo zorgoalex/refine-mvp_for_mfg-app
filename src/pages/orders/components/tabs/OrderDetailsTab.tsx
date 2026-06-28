@@ -17,8 +17,10 @@ import { DetailGroupingControls } from '../DetailGroupingControls';
 import { authSession } from '../../../../api/authSession';
 import { AddToCutModal } from '../AddToCutModal';
 import { selectedDetailIds } from '../../groupSelection';
+import { selectedGroupLabelForCut, type GroupField } from '../../detailGrouping';
 import { featureFlags } from '../../../../config/featureFlags';
 import { can } from '../../../../utils/permissions';
+import { useOrderFormData } from '../../../../hooks/useOrderFormData';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -46,6 +48,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
 
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
   const grouping = useDetailGrouping(groupingUserId, header?.order_id ?? 'new');
+  const orderFormData = useOrderFormData(featureFlags.useBackendReferences);
 
   // Sheet-material quick-add default: first active cuttable type; falls back to
   // undefined so form validation prompts the user if no cuttable types are loaded.
@@ -79,6 +82,46 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
   const eligibleCutDetailIds = useMemo(
     () => (cutEnabled ? selectedDetailIds(details as any[], selectedRowKeys) : []),
     [cutEnabled, details, selectedRowKeys],
+  );
+  const sheetNameById = useMemo(
+    () => new Map(orderFormData.references.sheetMaterialTypes.map((option) => [option.value, option.label])),
+    [orderFormData.references.sheetMaterialTypes],
+  );
+  const groupLabelOf = useCallback(
+    (sample: OrderDetail, field: GroupField) => {
+      switch (field) {
+        case 'milling':
+          return orderFormData.references.millingTypeNameById.get(sample.milling_type_id) || '—';
+        case 'material':
+          return sample.material_name_resolved || sheetNameById.get(sample.sheet_material_type_id ?? 0) || '—';
+        case 'film':
+          return sample.film_id != null ? (orderFormData.references.filmNameById.get(sample.film_id) || '—') : '—';
+        case 'edge':
+          return orderFormData.references.edgeTypeNameById.get(sample.edge_type_id) || '—';
+        case 'price':
+          return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
+        case 'note':
+          return (sample.note || '').trim() || '—';
+        default:
+          return '—';
+      }
+    },
+    [
+      orderFormData.references.edgeTypeNameById,
+      orderFormData.references.filmNameById,
+      orderFormData.references.millingTypeNameById,
+      sheetNameById,
+    ],
+  );
+  const cutSelectedGroupName = useMemo(
+    () =>
+      selectedGroupLabelForCut(
+        details,
+        eligibleCutDetailIds,
+        grouping.state.showSeparation ? grouping.state.field : null,
+        groupLabelOf,
+      ),
+    [details, eligibleCutDetailIds, grouping.state.field, grouping.state.showSeparation, groupLabelOf],
   );
 
   // Expose methods via ref for parent (OrderForm) to call
@@ -586,6 +629,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
             open={addToCutOpen}
             orderIds={[header.order_id]}
             detailIds={eligibleCutDetailIds}
+            nameSuffix={cutSelectedGroupName}
             onClose={() => setAddToCutOpen(false)}
             onDone={() => { setAddToCutOpen(false); handleSelectChange([]); }}
           />
