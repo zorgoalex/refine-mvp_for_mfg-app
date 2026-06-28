@@ -111,6 +111,7 @@ export const OrderDetailColumnSettingsButton: React.FC<OrderDetailColumnSettings
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(settings);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const hasHiddenColumns = settings.hidden.length > 0;
@@ -133,13 +134,31 @@ export const OrderDetailColumnSettingsButton: React.FC<OrderDetailColumnSettings
 
   const hidden = useMemo(() => new Set(draft.hidden), [draft.hidden]);
 
+  const saveDraft = useCallback(async (next: OrderDetailColumnPreference) => {
+    setSaving(true);
+    setSaveError(false);
+    try {
+      await onChange(next);
+    } catch {
+      setSaveError(true);
+      message.error('Не удалось сохранить настройки колонок');
+    } finally {
+      setSaving(false);
+    }
+  }, [onChange]);
+
+  const updateDraft = useCallback((next: OrderDetailColumnPreference) => {
+    setDraft(next);
+    void saveDraft(next);
+  }, [saveDraft]);
+
   const move = (key: string, direction: -1 | 1) => {
     const index = draft.order.indexOf(key);
     const nextIndex = index + direction;
     if (index < 0 || nextIndex < 0 || nextIndex >= draft.order.length) return;
     const nextOrder = [...draft.order];
     [nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]];
-    setDraft({ ...draft, order: nextOrder });
+    updateDraft({ ...draft, order: nextOrder });
   };
 
   const moveTo = (fromKey: string, toKey: string) => {
@@ -151,7 +170,7 @@ export const OrderDetailColumnSettingsButton: React.FC<OrderDetailColumnSettings
     const nextOrder = [...draft.order];
     const [moved] = nextOrder.splice(fromIndex, 1);
     nextOrder.splice(toIndex, 0, moved);
-    setDraft({ ...draft, order: nextOrder });
+    updateDraft({ ...draft, order: nextOrder });
   };
 
   const toggleVisible = (key: string, checked: boolean) => {
@@ -161,25 +180,13 @@ export const OrderDetailColumnSettingsButton: React.FC<OrderDetailColumnSettings
     const nextHidden = new Set(draft.hidden);
     if (checked) nextHidden.delete(key);
     else nextHidden.add(key);
-    setDraft({ ...draft, hidden: Array.from(nextHidden) });
+    updateDraft({ ...draft, hidden: Array.from(nextHidden) });
   };
 
   const reset = () => {
     setDragKey(null);
     setDragOverKey(null);
-    setDraft(normalizeOrderDetailColumnSettings(defaultOrder, definitions));
-  };
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await onChange(draft);
-      setOpen(false);
-    } catch {
-      message.error('Не удалось сохранить настройки колонок');
-    } finally {
-      setSaving(false);
-    }
+    updateDraft(normalizeOrderDetailColumnSettings(defaultOrder, definitions));
   };
 
   return (
@@ -206,17 +213,15 @@ export const OrderDetailColumnSettingsButton: React.FC<OrderDetailColumnSettings
           setDragKey(null);
           setDragOverKey(null);
         }}
-        onOk={save}
-        okText="Сохранить"
-        cancelText="Отмена"
-        confirmLoading={saving}
         width={520}
-        footer={(_, { OkBtn, CancelBtn }) => (
+        footer={() => (
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Button onClick={reset}>Сбросить по умолчанию</Button>
             <Space>
-              <CancelBtn />
-              <OkBtn />
+              <span style={{ color: saveError ? '#ff4d4f' : 'var(--app-text-muted)', fontSize: 12 }}>
+                {saveError ? 'Ошибка сохранения' : saving ? 'Сохранение...' : 'Сохраняется автоматически'}
+              </span>
+              <Button onClick={() => setOpen(false)}>Закрыть</Button>
             </Space>
           </Space>
         )}
