@@ -31,6 +31,7 @@ describe('PgOrderReadRepository', () => {
           notes: 'List note',
           materialIds: [10, 11],
           materialNames: ['MDF 16', 'MDF 18'],
+          filmNames: ['Film A', 'Film B'],
           millingTypeId: 1,
           millingTypeName: 'Modern',
           dowelingOrderId: 700,
@@ -275,6 +276,7 @@ describe('PgOrderReadRepository Variant B (sheet-only reads)', () => {
 
     expect(result.data[0].sheetMaterialTypeIds).toEqual([5, 6]);
     expect(result.data[0].materialIds).toEqual([]);
+    expect(result.data[0].filmNames).toEqual(['Пленка A', 'Пленка B']);
   });
 });
 
@@ -355,6 +357,7 @@ function createDatabaseWithSheetAggregate() {
               ...orderRow(),
               material_ids: [],
               material_names: ['МДФ 16', 'МДФ 19'],
+              film_names: ['Пленка A', 'Пленка B'],
               sheet_material_type_ids: [5, 6],
             },
           ],
@@ -619,6 +622,7 @@ function orderRow() {
     ref_key_1c: null,
     material_ids: [10, 11],
     material_names: ['MDF 16', 'MDF 18'],
+    film_names: ['Film A', 'Film B'],
     milling_type_id: 1,
     milling_type_name: 'Modern',
     latest_doweling_order_id: 700,

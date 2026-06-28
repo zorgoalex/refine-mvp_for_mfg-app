@@ -96,6 +96,7 @@ interface OrderHeaderRow extends QueryResultRow {
   header_sheet_material_type_id: string | number | null;
   material_ids: unknown[] | null;
   material_names: unknown[] | null;
+  film_names: unknown[] | null;
   sheet_material_type_ids: unknown[] | null;
   material_id: string | number | null;
   milling_type_id: string | number | null;
@@ -364,6 +365,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.*,
         material_projection.material_ids,
         material_projection.material_names,
+        film_projection.film_names,
         material_projection.sheet_material_type_ids,
         milling_projection.milling_type_id,
         milling_projection.milling_type_name,
@@ -392,6 +394,19 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           ${listDetailNameGroupBy}
         ) materials
       ) material_projection ON true
+      LEFT JOIN LATERAL (
+        SELECT ARRAY_AGG(films.film_name ORDER BY films.first_detail_number, films.first_detail_id) AS film_names
+        FROM (
+          SELECT
+            f.film_name,
+            MIN(od.detail_number) AS first_detail_number,
+            MIN(od.detail_id) AS first_detail_id
+          FROM order_details od
+          INNER JOIN films f ON f.film_id = od.film_id
+          WHERE od.order_id = o.order_id AND od.delete_flag = false
+          GROUP BY f.film_name
+        ) films
+      ) film_projection ON true
       LEFT JOIN LATERAL (
         SELECT
           CASE WHEN COUNT(DISTINCT od.milling_type_id) = 1 THEN MIN(od.milling_type_id) END AS milling_type_id,
@@ -1057,6 +1072,7 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
     // Variant B: materialIds is empty (material_id is NULL post-034); sheetMaterialTypeIds is authoritative.
     materialIds: toNumberArray(row.material_ids),
     materialNames: toStringArray(row.material_names),
+    filmNames: toStringArray(row.film_names),
     sheetMaterialTypeIds: toNumberArray(row.sheet_material_type_ids),
     headerMaterialName: row.header_material_name ?? null,
     headerSheetMaterialTypeId: toNullableNumber(row.header_sheet_material_type_id),

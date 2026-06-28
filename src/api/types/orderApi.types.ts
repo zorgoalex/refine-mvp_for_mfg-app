@@ -533,6 +533,7 @@ export interface OrderListItemDto {
   /** @deprecated Variant B: always empty post-034; use sheetMaterialTypeIds. */
   materialIds?: number[];
   materialNames?: string[];
+  filmNames?: string[];
   /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
   sheetMaterialTypeIds?: number[];
   /** SP3/R8: header material name fallback for header-only orders with no details. */
