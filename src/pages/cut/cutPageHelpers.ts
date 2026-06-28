@@ -1,5 +1,33 @@
 /** Pure helpers for the /cut page (unit-tested under vitest env=node, no jsdom). */
 
+import { parseCutPieceDetailId } from './cutPreviewHelpers';
+
+/**
+ * Builds a filmTexture lookup map for SheetEditor.
+ * For each piece in the working sheets, resolves the detail via job.items
+ * to decide whether it has a textured film (grain-locked → no rotation).
+ * Keyed by piece.item_id.
+ */
+export function buildFilmTextureMap(
+  sheets: ReadonlyArray<{ placements: { pieces: ReadonlyArray<{ item_id: string }> } }>,
+  items: ReadonlyArray<{ orderDetailId: number; detail: { filmTexture: boolean | null } | null }>,
+): Map<string, boolean> {
+  const map = new Map<string, boolean>();
+  for (const sheet of sheets) {
+    for (const piece of sheet.placements.pieces) {
+      if (map.has(piece.item_id)) continue;
+      const detailId = parseCutPieceDetailId(piece.item_id);
+      if (detailId === null) {
+        map.set(piece.item_id, false);
+        continue;
+      }
+      const item = items.find((it) => it.orderDetailId === detailId);
+      map.set(piece.item_id, Boolean(item?.detail?.filmTexture));
+    }
+  }
+  return map;
+}
+
 /** Parse a `?job=<id>` deep-link param into a positive cut job id, or null. */
 export function parseJobQueryParam(search: string): number | null {
   const raw = new URLSearchParams(search).get('job');

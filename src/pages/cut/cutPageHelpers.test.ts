@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCutAddWarning,
+  buildFilmTextureMap,
   formatPlacementsMessage,
   CUT_JOB_STATUS_FILTER_ALL,
   cutJobCounts,
@@ -160,5 +161,76 @@ describe('cutPageHelpers', () => {
     expect(distinctOrderIdsFromItems([{ orderId: 9 }, { orderId: 10 }, { orderId: 9 }])).toEqual([9, 10]);
     expect(distinctOrderIdsFromItems([])).toEqual([]);
     expect(distinctOrderIdsFromItems([{ orderId: 0 }, { orderId: -1 }, { orderId: 7 }])).toEqual([7]);
+  });
+});
+
+describe('buildFilmTextureMap', () => {
+  const makePiece = (item_id: string) => ({ item_id });
+  const makeSheet = (...itemIds: string[]) => ({
+    placements: { pieces: itemIds.map(makePiece) },
+  });
+  const makeItem = (orderDetailId: number, filmTexture: boolean | null) => ({
+    orderDetailId,
+    detail: { filmTexture },
+  });
+  const makeItemNoDetail = (orderDetailId: number) => ({
+    orderDetailId,
+    detail: null,
+  });
+
+  it('returns true for a piece whose detail has filmTexture=true', () => {
+    const sheets = [makeSheet('det-1')];
+    const items = [makeItem(1, true)];
+    const map = buildFilmTextureMap(sheets, items);
+    expect(map.get('det-1')).toBe(true);
+  });
+
+  it('returns false for a piece whose detail has filmTexture=false', () => {
+    const sheets = [makeSheet('det-2')];
+    const items = [makeItem(2, false)];
+    const map = buildFilmTextureMap(sheets, items);
+    expect(map.get('det-2')).toBe(false);
+  });
+
+  it('returns false for a piece whose detail has filmTexture=null', () => {
+    const sheets = [makeSheet('det-3')];
+    const items = [makeItem(3, null)];
+    const map = buildFilmTextureMap(sheets, items);
+    expect(map.get('det-3')).toBe(false);
+  });
+
+  it('returns false for a piece whose detail is null', () => {
+    const sheets = [makeSheet('det-4')];
+    const items = [makeItemNoDetail(4)];
+    const map = buildFilmTextureMap(sheets, items);
+    expect(map.get('det-4')).toBe(false);
+  });
+
+  it('returns false for a piece with an unrecognised item_id format', () => {
+    const sheets = [makeSheet('group-7')];
+    const items = [makeItem(7, true)];
+    const map = buildFilmTextureMap(sheets, items);
+    expect(map.get('group-7')).toBe(false);
+  });
+
+  it('deduplicates: same item_id across sheets is only resolved once', () => {
+    const sheets = [makeSheet('det-1'), makeSheet('det-1')];
+    const items = [makeItem(1, true)];
+    const map = buildFilmTextureMap(sheets, items);
+    expect(map.size).toBe(1);
+    expect(map.get('det-1')).toBe(true);
+  });
+
+  it('handles multiple pieces across multiple sheets', () => {
+    const sheets = [makeSheet('det-10', 'det-20'), makeSheet('det-30')];
+    const items = [makeItem(10, true), makeItem(20, null), makeItem(30, false)];
+    const map = buildFilmTextureMap(sheets, items);
+    expect(map.get('det-10')).toBe(true);
+    expect(map.get('det-20')).toBe(false);
+    expect(map.get('det-30')).toBe(false);
+  });
+
+  it('returns an empty map for empty sheets', () => {
+    expect(buildFilmTextureMap([], [])).toEqual(new Map());
   });
 });

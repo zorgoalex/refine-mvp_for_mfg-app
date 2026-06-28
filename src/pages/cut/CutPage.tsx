@@ -26,17 +26,17 @@ import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, fo
 import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
+import { SheetEditor } from './SheetEditor';
 import { authSession } from '../../api/authSession';
 import type {
   CutGroupDto,
   CutJobDto,
   CutJobItemDto,
   EligibleDetailDto,
+  SheetPlacements,
 } from '../../api/types/cutApi.types';
-import { can } from '../../utils/permissions';
-import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
-import { useTabStore } from '../../stores/tabStore';
-import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { validateSheetPlacements, movesFromSheets } from './cutLayoutGeometry';
+import type { ManualViolation } from './cutLayoutGeometry';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
   CUT_JOB_STATUS_FILTER_OPTIONS,
@@ -53,8 +53,12 @@ import {
   safeHttpHref,
   selectableDetailIds,
   triggerBlobDownload,
+  buildFilmTextureMap,
 } from './cutPageHelpers';
-
+import { can } from '../../utils/permissions';
+import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
+import { useTabStore } from '../../stores/tabStore';
+import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 const { Panel } = Collapse;
 
 // Built-in fallback preset names (used until the backend config list loads).
@@ -227,6 +231,17 @@ export const CutPage: React.FC = () => {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
 
+  // ── Manual layout editor state ──────────────────────────────────────────────
+  // The group currently open for editing (null = no editor active).
+  const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
+  // Working sheets for the active editor (seeded from manualLayout or auto sheets).
+  const [workingSheets, setWorkingSheets] = useState<{ sheetIndex: number; placements: SheetPlacements }[]>([]);
+  // Current geometry violations (empty = all clear, save enabled).
+  const [violations, setViolations] = useState<ManualViolation[]>([]);
+  // Per-group alternative-view toggle: true = show manual variant, false = show auto.
+  // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
+  const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
+
   // Render presets and cut profiles are config-driven (/configuration "Раскрой").
   // Load active names from the backend, falling back to the built-ins.
   const loadCutConfig = useCallback(async () => {
@@ -392,6 +407,17 @@ export const CutPage: React.FC = () => {
         const fresh = await cutApi.get(cutJobId);
         if (openSeqRef.current !== seq) return; // superseded by a newer openJob
         setJob(fresh);
+        // Initialise per-group alternative-view toggle from persisted isActive so
+        // the checkbox position matches the last saved manual-layout state.
+        const initAlt: Record<number, boolean> = {};
+        for (const g of fresh.groups) {
+          initAlt[g.cutGroupId] = g.manualLayout?.isActive ?? false;
+        }
+        setShowAlternativeByGroup(initAlt);
+        // Reset any open editor (a reopened job starts without an active edit).
+        setEditingGroupId(null);
+        setWorkingSheets([]);
+        setViolations([]);
         // Prefill the eligible-load criteria with the order(s) this job was built
         // from (the reserved items' orders) so "Загрузить подходящие детали" is
         // scoped to those orders instead of scanning everything. Material/film
@@ -567,16 +593,18 @@ export const CutPage: React.FC = () => {
   }, [job, loadJobs, handleError, resetSheetViews]);
 
   const loadSheet = useCallback(
-    async (group: CutGroupDto, sheetIndex: number) => {
+    async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
       if (!job) return;
-      const key = `${group.cutGroupId}:${sheetIndex}`;
+      // Cache key includes variant + renderVersion so toggling or re-saving never
+      // serves a stale blob (Codex R7 BLOCKER #1, R9 MAJOR #2).
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${renderVersion ?? ''}`;
       const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90);
+        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetImages((prev) => {
@@ -592,9 +620,11 @@ export const CutPage: React.FC = () => {
 
   // Small layout preview for a ready job's sheet, fetched once with the light
   // 'thumb' preset. Deduped via thumbReqRef so the auto-load effect is idempotent.
+  // variant + renderVersion are included in the key so toggling auto↔manual
+  // or saving a new manual layout always fetches a fresh thumb (R9 MAJOR #2).
   const loadThumb = useCallback(
-    async (cutJobId: number, group: CutGroupDto, sheetIndex: number) => {
-      const key = `${group.cutGroupId}:${sheetIndex}`;
+    async (cutJobId: number, group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${renderVersion ?? ''}`;
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
@@ -604,7 +634,7 @@ export const CutPage: React.FC = () => {
         : sheetPortrait;
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90);
+        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetThumbs((prev) => {
@@ -621,24 +651,29 @@ export const CutPage: React.FC = () => {
 
   // Auto-load per-sheet previews when a ready job's layout is present, so an
   // operator sees the cut result inline without clicking each sheet.
+  // Passes the current per-group variant so toggling auto↔manual immediately
+  // requests the correct thumb (variant changes cause the effect to re-run).
   useEffect(() => {
     if (!job || job.status !== 'ready') return;
     for (const group of job.groups) {
+      const showAlt = showAlternativeByGroup[group.cutGroupId] ?? false;
+      const groupVariant: 'auto' | 'manual' | 'active' = showAlt ? 'manual' : 'auto';
+      const groupRenderVersion = group.renderToken;
       for (const sheet of group.sheets) {
-        void loadThumb(job.cutJobId, group, sheet.sheetIndex);
+        void loadThumb(job.cutJobId, group, sheet.sheetIndex, groupVariant, groupRenderVersion);
       }
     }
-  }, [job, loadThumb]);
+  }, [job, showAlternativeByGroup, loadThumb]);
 
   const downloadSheetSvg = useCallback(
-    async (group: CutGroupDto, sheetIndex: number) => {
+    async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
       if (!job) return;
       try {
         const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
         const rotate90 = sheet
           ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
           : sheetPortrait;
-        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90);
+        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion);
         triggerBlobDownload(blob, `cut-${job.cutJobId}-g${group.cutGroupId}-s${sheetIndex + 1}.svg`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить SVG');
@@ -652,7 +687,8 @@ export const CutPage: React.FC = () => {
       if (!job) return;
       setBusy(true);
       try {
-        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait));
+        // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
+        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken));
         triggerBlobDownload(result.blob, result.fileName ?? `cut-group-${group.cutGroupId}.pdf`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить PDF группы');
@@ -667,7 +703,8 @@ export const CutPage: React.FC = () => {
     if (!job) return;
     setBusy(true);
     try {
-      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait));
+      // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
+      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken));
       triggerBlobDownload(result.blob, result.fileName ?? `cut-job-${job.cutJobId}.pdf`);
     } catch (error) {
       handleError(error, 'Не удалось выгрузить PDF раскроя');
@@ -676,7 +713,97 @@ export const CutPage: React.FC = () => {
     }
   }, [job, sheetPortrait, handleError]);
 
+  // ── Manual layout editor callbacks ─────────────────────────────────────────
+
+  /**
+   * Enter edit mode for a group: seed workingSheets from the non-stale manual
+   * layout when one exists (isActive does NOT gate editability — a saved but
+   * currently-hidden manual stays editable, Codex R17 BLOCKER #2). Falls back
+   * to the auto sheets when manualLayout is absent or stale.
+   */
+  const enterEditMode = useCallback(
+    (group: CutGroupDto) => {
+      if (!job) return;
+      const seed =
+        group.manualLayout && !group.manualLayout.isStale
+          ? group.manualLayout.sheets.map((s) => ({ sheetIndex: s.sheetIndex, placements: s.placements }))
+          : group.sheets.map((s) => ({ sheetIndex: s.sheetIndex, placements: s.placements }));
+      setWorkingSheets(seed);
+      setViolations([]);
+      setEditingGroupId(group.cutGroupId);
+    },
+    [job],
+  );
+
+  /**
+   * Called by SheetEditor on every geometry change. Re-validates all sheets
+   * and stores both the new working sheets and the fresh violation list.
+   * Trim authority: uses placements.trim_mm (not editorParams), per brief §3.
+   */
+  const handleEditorChange = useCallback(
+    (nextSheets: { sheetIndex: number; placements: SheetPlacements }[]) => {
+      setWorkingSheets(nextSheets);
+      if (!job?.editorParams) {
+        setViolations([]);
+        return;
+      }
+      const gap = { kerfMm: job.editorParams.kerfMm, spacingMm: job.editorParams.spacingMm };
+      const filmTextureByItemId = buildFilmTextureMap(nextSheets, job.items);
+      const newViolations = nextSheets.flatMap((s) =>
+        validateSheetPlacements({
+          sheetIndex: s.sheetIndex,
+          placements: s.placements,
+          gap,
+          filmTextureByItemId,
+        }),
+      );
+      setViolations(newViolations);
+    },
+    [job],
+  );
+
+  /**
+   * Save the manual layout for a group: derives moves from workingSheets,
+   * sends PATCH /manual-layout, refetches the job, and clears the editor.
+   * resetSheetViews() ensures the next preview fetch is never served a stale
+   * blob (Codex R7 / R9 — "manual already active → edit → save again" bust).
+   */
+  const saveManualLayoutForGroup = useCallback(
+    async (group: CutGroupDto) => {
+      if (!job || !job.editorParams) return;
+      const showAlt = showAlternativeByGroup[group.cutGroupId] ?? false;
+      const moves = movesFromSheets(workingSheets);
+      setBusy(true);
+      try {
+        const updated = await cutApi.saveManualLayout(job.cutJobId, group.cutGroupId, {
+          jobVersion: job.version,
+          active: showAlt,
+          placements: moves,
+        });
+        setJob(updated);
+        void loadJobs();
+        resetSheetViews();
+        setEditingGroupId(null);
+        setWorkingSheets([]);
+        setViolations([]);
+      } catch (error) {
+        // Surface 422 violations + 409 recalc/stale with the backend message.
+        handleError(error, 'Не удалось сохранить ручной раскрой');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [job, workingSheets, showAlternativeByGroup, loadJobs, handleError, resetSheetViews],
+  );
+
   const filteredJobs = useMemo(() => filterJobsByStatus(jobs, statusFilter), [jobs, statusFilter]);
+
+  // Memoized film-texture map for the active editor — avoids rebuilding a new Map
+  // on every render in edit mode (the SheetEditor prop would otherwise change ref).
+  const editorFilmTextureByItemId = useMemo(
+    () => buildFilmTextureMap(workingSheets, job?.items ?? []),
+    [workingSheets, job?.items],
+  );
 
   const jobColumns: ColumnsType<CutJobDto> = useMemo(
     () => [
@@ -890,6 +1017,16 @@ export const CutPage: React.FC = () => {
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
 
+  // Dirty guard: any group has an active editor session OR its toggle differs
+  // from the persisted isActive. While dirty, whole-job PDF is disabled.
+  const anyGroupDirty =
+    job != null &&
+    job.groups.some((g) => {
+      if (editingGroupId === g.cutGroupId) return true;
+      if (!g.manualLayout) return false;
+      return (showAlternativeByGroup[g.cutGroupId] ?? false) !== g.manualLayout.isActive;
+    });
+
   if (!can('cut.view')) {
     return <Alert type="error" message="Недостаточно прав для просмотра раскроя" showIcon />;
   }
@@ -1095,9 +1232,23 @@ export const CutPage: React.FC = () => {
               style={{ width: 140 }}
             />
             {job.groups.length > 0 && (
-              <Button onClick={downloadJobPdf} loading={busy}>
-                Скачать PDF (весь раскрой)
-              </Button>
+              <Tooltip
+                title={
+                  anyGroupDirty
+                    ? 'несохранённые изменения'
+                    : (job.requiresRecalc ?? false)
+                    ? 'требуется пересчёт'
+                    : undefined
+                }
+              >
+                <Button
+                  onClick={downloadJobPdf}
+                  loading={busy}
+                  disabled={anyGroupDirty || (job.requiresRecalc ?? false)}
+                >
+                  Скачать PDF (весь раскрой)
+                </Button>
+              </Tooltip>
             )}
           </Space>
         </Card>
@@ -1153,15 +1304,103 @@ export const CutPage: React.FC = () => {
         const title = matName
           ? `Раскрой: ${matName} · ${group.sheets.length} л.`
           : `Группа #${group.cutGroupId}`;
+
+        // ── Per-group manual-layout state ───────────────────────────────────
+        // Current toggle value (operator choice, not yet persisted).
+        const showAlt = showAlternativeByGroup[group.cutGroupId] ?? false;
+        // effectiveManual: which variant the preview/print actually shows.
+        // isActive drives PRINT; isStale means the pieces drifted (recalc needed).
+        const effectiveManual = !!(group.manualLayout?.isActive && !group.manualLayout?.isStale);
+        // Render token for cache-busting (absent on groups without a manual layout).
+        const renderVersion = group.renderToken;
+        // Variant to pass to PNG/SVG fetch so the preview matches the toggle.
+        const displayVariant: 'auto' | 'manual' | 'active' = showAlt ? 'manual' : 'auto';
+        // Is this group currently open in the editor?
+        const isEditingGroup = editingGroupId === group.cutGroupId;
+        // Persisted active flag (what the backend currently has).
+        const persistedActive = group.manualLayout?.isActive ?? false;
+        // Group is dirty when: in edit mode OR toggle differs from persisted isActive.
+        const isDirtyGroup =
+          isEditingGroup ||
+          (group.manualLayout != null && showAlt !== persistedActive);
+        // Stale: the manual layout pieces may not match the current auto set.
+        const isStale = group.manualLayout?.isStale ?? false;
+        // Edit is blocked when editorParams are absent or a recalc is required.
+        const editDisabled = !(job.editorParams) || (job.requiresRecalc ?? false);
+
         return (
           <Card
             key={group.cutGroupId}
             size="small"
-            title={title}
+            title={
+              <Space size="small">
+                {title}
+                {/* «устарел» badge: shown when manual layout is stale OR requiresRecalc */}
+                {(isStale || (job.requiresRecalc ?? false)) && (
+                  <Tag color="warning">устарел</Tag>
+                )}
+                {effectiveManual && !isStale && (
+                  <Tag color="blue">ручной раскрой активен</Tag>
+                )}
+              </Space>
+            }
             extra={
-              <Button size="small" onClick={() => downloadGroupPdf(group)} loading={busy}>
-                Скачать PDF
-              </Button>
+              <Space>
+                {/* «Показать альтернативный раскрой» — only shown when a manual layout exists */}
+                {group.manualLayout && (
+                  <Checkbox
+                    checked={showAlt}
+                    onChange={(e) =>
+                      setShowAlternativeByGroup((prev) => ({
+                        ...prev,
+                        [group.cutGroupId]: e.target.checked,
+                      }))
+                    }
+                    disabled={isEditingGroup}
+                  >
+                    Показать альтернативный раскрой
+                  </Checkbox>
+                )}
+                {/* «Редактировать раскрой» — full-scale group view only; disabled on requiresRecalc */}
+                {canManage && !isArchivedJob && (
+                  <Tooltip
+                    title={
+                      (job.requiresRecalc ?? false)
+                        ? 'Требуется пересчёт'
+                        : !(job.editorParams)
+                        ? 'Редактор недоступен'
+                        : undefined
+                    }
+                  >
+                    <Button
+                      size="small"
+                      onClick={() => enterEditMode(group)}
+                      disabled={editDisabled || busy || isEditingGroup}
+                    >
+                      Редактировать раскрой
+                    </Button>
+                  </Tooltip>
+                )}
+                {/* «Скачать PDF» — disabled while dirty or requiresRecalc */}
+                <Tooltip
+                  title={
+                    isDirtyGroup
+                      ? 'несохранённые изменения'
+                      : (job.requiresRecalc ?? false)
+                      ? 'требуется пересчёт'
+                      : undefined
+                  }
+                >
+                  <Button
+                    size="small"
+                    onClick={() => void downloadGroupPdf(group)}
+                    loading={busy}
+                    disabled={isDirtyGroup || (job.requiresRecalc ?? false)}
+                  >
+                    Скачать PDF
+                  </Button>
+                </Tooltip>
+              </Space>
             }
           >
             <Text type="secondary">{formatGroupSummary(group.summary)}</Text>
@@ -1173,67 +1412,120 @@ export const CutPage: React.FC = () => {
                 </>
               )}
             </div>
-            {/* Previews flow in wrapping rows (not a single column). */}
-            <div style={sheetPreviewListStyle}>
-              {group.sheets.map((sheet) => {
-                const key = `${group.cutGroupId}:${sheet.sheetIndex}`;
-                const widthMm = sheet.placements.sheet_width_mm;
-                const heightMm = sheet.placements.sheet_height_mm;
-                const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
-                const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90);
-                return (
-                  <div
-                    key={key}
-                    style={
-                      // Open (enlarged) sheet spans the full previews row so the
-                      // image can grow ~2× instead of being capped by the thumbnail
-                      // column width.
-                      sheetImages[key]
-                        ? { flex: '1 1 100%', maxWidth: '100%' }
-                        : sheetPreviewItemStyle(widthMm, heightMm, rotate90)
-                    }
+
+            {/* ── Editor mode ────────────────────────────────────────────────── */}
+            {isEditingGroup && job.editorParams && (
+              <div style={{ marginTop: 12 }}>
+                <Space style={{ marginBottom: 8 }}>
+                  <Tooltip title={violations.length > 0 ? `${violations.length} нарушений геометрии` : undefined}>
+                    <Button
+                      type="primary"
+                      size="small"
+                      disabled={violations.length > 0 || (job.requiresRecalc ?? false) || busy}
+                      onClick={() => void saveManualLayoutForGroup(group)}
+                      loading={busy}
+                    >
+                      Сохранить изменения
+                    </Button>
+                  </Tooltip>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setEditingGroupId(null);
+                      setWorkingSheets([]);
+                      setViolations([]);
+                    }}
+                    disabled={busy}
                   >
-                    <Space>
-                      <Button size="small" onClick={() => loadSheet(group, sheet.sheetIndex)}>
-                        Лист {sheet.sheetIndex + 1}
-                      </Button>
-                      <Button size="small" onClick={() => downloadSheetSvg(group, sheet.sheetIndex)}>
-                        SVG
-                      </Button>
-                    </Space>
-                    {/* Material of the details on this sheet. */}
-                    <div style={{ marginTop: 2, color: '#8c8c8c', fontSize: 12 }}>
-                      {matName ?? 'материал не задан'}
-                      {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
+                    Отменить редактирование
+                  </Button>
+                  {violations.length > 0 && (
+                    <Text type="danger">{violations.length} нарушений геометрии — исправьте перед сохранением</Text>
+                  )}
+                </Space>
+                <SheetEditor
+                  sheets={workingSheets}
+                  gap={{ kerfMm: job.editorParams.kerfMm, spacingMm: job.editorParams.spacingMm }}
+                  filmTextureByItemId={editorFilmTextureByItemId}
+                  landscape={!sheetPortrait}
+                  onChange={handleEditorChange}
+                  violations={violations}
+                />
+              </div>
+            )}
+
+            {/* ── Normal sheet previews (hidden while in editor mode) ─────────── */}
+            {!isEditingGroup && (
+              /* Previews flow in wrapping rows (not a single column). */
+              <div style={sheetPreviewListStyle}>
+                {group.sheets.map((sheet) => {
+                  // Cache key includes variant + renderVersion so toggling auto↔manual
+                  // or saving a new manual never serves a stale blob (R7/R9 fix).
+                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${renderVersion ?? ''}`;
+                  const widthMm = sheet.placements.sheet_width_mm;
+                  const heightMm = sheet.placements.sheet_height_mm;
+                  const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
+                  const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90);
+                  return (
+                    <div
+                      key={key}
+                      style={
+                        // Open (enlarged) sheet spans the full previews row so the
+                        // image can grow ~2× instead of being capped by the thumbnail
+                        // column width.
+                        sheetImages[key]
+                          ? { flex: '1 1 100%', maxWidth: '100%' }
+                          : sheetPreviewItemStyle(widthMm, heightMm, rotate90)
+                      }
+                    >
+                      <Space>
+                        <Button
+                          size="small"
+                          onClick={() => loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion)}
+                        >
+                          Лист {sheet.sheetIndex + 1}
+                        </Button>
+                        <Button
+                          size="small"
+                          onClick={() => downloadSheetSvg(group, sheet.sheetIndex, displayVariant, renderVersion)}
+                        >
+                          SVG
+                        </Button>
+                      </Space>
+                      {/* Material of the details on this sheet. */}
+                      <div style={{ marginTop: 2, color: '#8c8c8c', fontSize: 12 }}>
+                        {matName ?? 'материал не задан'}
+                        {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
+                      </div>
+                      {sheetThumbs[key] && !sheetImages[key] && (
+                        <SheetPreview
+                          src={sheetThumbs[key]}
+                          alt={`Превью листа ${sheet.sheetIndex + 1}`}
+                          widthMm={widthMm}
+                          heightMm={heightMm}
+                          landscape={rotate90}
+                          full={false}
+                          overlays={overlays}
+                          onOpen={() => loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion)}
+                        />
+                      )}
+                      {sheetImages[key] && (
+                        <SheetPreview
+                          src={sheetImages[key]}
+                          alt={`Лист ${sheet.sheetIndex + 1}`}
+                          widthMm={widthMm}
+                          heightMm={heightMm}
+                          landscape={rotate90}
+                          full
+                          overlays={overlays}
+                          onCollapse={() => collapseSheet(key)}
+                        />
+                      )}
                     </div>
-                    {sheetThumbs[key] && !sheetImages[key] && (
-                      <SheetPreview
-                        src={sheetThumbs[key]}
-                        alt={`Превью листа ${sheet.sheetIndex + 1}`}
-                        widthMm={widthMm}
-                        heightMm={heightMm}
-                        landscape={rotate90}
-                        full={false}
-                        overlays={overlays}
-                        onOpen={() => loadSheet(group, sheet.sheetIndex)}
-                      />
-                    )}
-                    {sheetImages[key] && (
-                      <SheetPreview
-                        src={sheetImages[key]}
-                        alt={`Лист ${sheet.sheetIndex + 1}`}
-                        widthMm={widthMm}
-                        heightMm={heightMm}
-                        landscape={rotate90}
-                        full
-                        overlays={overlays}
-                        onCollapse={() => collapseSheet(key)}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
         );
       })}
