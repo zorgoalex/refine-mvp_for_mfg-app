@@ -857,6 +857,40 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     );
   };
 
+  // Функция: возвращает уникальные пленки всех деталей заказа (аналог getMaterialsList)
+  const getFilmsList = (orderId: number, record?: any) => {
+    const details = detailsByOrderId[orderId] || [];
+    let filmNames: string[] = [];
+
+    if (details.length > 0) {
+      const names = details
+        .map((d) => (d.film_id != null ? filmsMap[d.film_id] : null))
+        .filter((v): v is string => Boolean(v));
+      filmNames = Array.from(new Set(names));
+    } else if (Array.isArray(record?.film_names)) {
+      filmNames = record.film_names;
+    } else if (record?.film_name) {
+      filmNames = String(record.film_name).split(",");
+    }
+
+    filmNames = filmNames
+      .map((name) => String(name).trim())
+      .filter((name) => name && name.toLowerCase() !== "нд" && !["—", "-", "–"].includes(name));
+
+    if (filmNames.length === 0) return null;
+
+    return (
+      <>
+        {filmNames.map((name, index) => (
+          <span key={index}>
+            {name}
+            {index < filmNames.length - 1 && ", "}
+          </span>
+        ))}
+      </>
+    );
+  };
+
   const orderListColumns: ColumnsType<any> = [
     {
       dataIndex: "order_id",
@@ -1007,10 +1041,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       const edgeTypeId = getCommonValue(record.order_id, "edge_type_id");
       return edgeTypeId ? edgeTypesMap[edgeTypeId] : null;
     } },
-    { dataIndex: "film_name", key: "film_name", title: "Пленка", width: 120, className: "orders-col orders-col--wrap", render: (_, record) => {
-      const filmId = getCommonValue(record.order_id, "film_id");
-      return filmId ? filmsMap[filmId] : null;
-    } },
+    { dataIndex: "film_name", key: "film_name", title: "Пленка", width: 120, className: "orders-col orders-col--wrap", render: (_, record) => getFilmsList(record.order_id, record) },
     { dataIndex: "created_by", key: "created_by", title: "Создано", width: 86, className: "orders-col", render: (_, record) => (
       <span style={{ fontSize: '80%' }}>
         {createdByMap[record?.created_by] ?? record?.created_by}
