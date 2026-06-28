@@ -1748,4 +1748,153 @@ describeIntegration('PgCutRepository (integration)', () => {
       expect(piece.height_mm).toBe(400);
     });
   });
+
+  // ── Task 7: render variant + cache-token behavior ─────────────────────────
+  describe('Task 7: render variant + cache token', () => {
+    const singlePiece: FreecutOptimizeResponse = {
+      status: 'ok',
+      summary: { used_stock_count: 1, waste_percent: 10 },
+      solutions: [
+        {
+          stock_id: 'smt-1',
+          index: 0,
+          width_mm: 2800,
+          height_mm: 2070,
+          trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
+          placements: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 600, height_mm: 400, rotated: false }],
+        },
+      ],
+    };
+    // 50mm offset from the auto position so manual bytes differ from auto bytes.
+    const validMove = { itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 50, yMm: 50, rotated: false };
+
+    async function makeT7Job(): Promise<{
+      repo: PgCutRepository; cutJobId: number; cutGroupId: number; groupKey: string; jobVersion: number;
+    }> {
+      const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(singlePiece)));
+      const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'T7-job', detailIds: [1] }, requestId: 't7-c' });
+      const calculated = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 't7-calc' });
+      const groupRow = await pool.query<{ group_key: string; cut_group_id: string | number }>(
+        'SELECT group_key, cut_group_id FROM cut_group WHERE cut_job_id = $1 LIMIT 1',
+        [job.cutJobId],
+      );
+      return {
+        repo,
+        cutJobId: job.cutJobId,
+        cutGroupId: Number(groupRow.rows[0].cut_group_id),
+        groupKey: groupRow.rows[0].group_key,
+        jobVersion: calculated.version,
+      };
+    }
+
+    it('FIX 1: variant=manual with NO manual layout → 409 CUT_MANUAL_LAYOUT_UNAVAILABLE (NOT auto bytes)', async () => {
+      const { repo, cutJobId, cutGroupId } = await makeT7Job();
+      await expect(
+        repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId, sheetIndex: 0, variant: 'manual' }),
+      ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_MANUAL_LAYOUT_UNAVAILABLE' });
+    });
+
+    it('FIX 1: variant=manual with a STALE manual layout → 409 (NOT stale bytes)', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await makeT7Job();
+      await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [validMove], active: true,
+      });
+      await pool.query(`UPDATE cut_group_manual_layout SET is_stale = TRUE WHERE cut_job_id = $1`, [cutJobId]);
+      await expect(
+        repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId, sheetIndex: 0, variant: 'manual' }),
+      ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_MANUAL_LAYOUT_UNAVAILABLE' });
+    });
+
+    it('variant=manual (fresh) renders DIFFERENT bytes than variant=auto after a manual save', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await makeT7Job();
+      await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [validMove], active: true,
+      });
+      const svgManual = await repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId, sheetIndex: 0, variant: 'manual' });
+      const svgAuto = await repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId, sheetIndex: 0, variant: 'auto' });
+      expect(svgManual).toContain('<svg');
+      expect(svgAuto).toContain('<svg');
+      expect(svgManual).not.toBe(svgAuto);
+    });
+
+    it('variant=active falls back to AUTO when the manual layout is stale (bytes equal auto)', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await makeT7Job();
+      await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [validMove], active: true,
+      });
+      await pool.query(`UPDATE cut_group_manual_layout SET is_stale = TRUE WHERE cut_job_id = $1`, [cutJobId]);
+      const svgActive = await repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId, sheetIndex: 0, variant: 'active' });
+      const svgAuto = await repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId, sheetIndex: 0, variant: 'auto' });
+      expect(svgActive).toBe(svgAuto);
+    });
+
+    it('a raw order_details edit (requiresRecalc) does NOT flip variant=manual to auto, and frozen labels keep SVG byte-stable', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await makeT7Job();
+      await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [validMove], active: true,
+      });
+      const before = await repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId, sheetIndex: 0, variant: 'manual' });
+      await pool.query('UPDATE order_details SET width = width + 100 WHERE detail_id = 1');
+      try {
+        const after = await repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId, sheetIndex: 0, variant: 'manual' });
+        // is_stale is NOT set by a raw DB edit → manual stays manual (no 409, no auto fallback);
+        // frozen label snapshot → identical bytes despite the width change.
+        expect(after).toBe(before);
+      } finally {
+        await pool.query('UPDATE order_details SET width = width - 100 WHERE detail_id = 1');
+      }
+    });
+
+    it('Rule 8: a blank RETAINED-stock manual sheet renders a valid SVG (NOT 404)', async () => {
+      const { repo, cutJobId, cutGroupId, groupKey, jobVersion } = await makeT7Job();
+      await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [validMove], active: true,
+      });
+      // Append a blank retained-stock sheet (sheetIndex 1, no pieces) to the manual layout JSON.
+      const blankSheet = [{
+        sheetIndex: 1,
+        placements: { trim_mm: { left: 10, right: 10, top: 10, bottom: 10 }, sheet_width_mm: 2800, sheet_height_mm: 2070, pieces: [] },
+      }];
+      await pool.query(
+        `UPDATE cut_group_manual_layout SET sheets = sheets || $2::jsonb WHERE cut_job_id = $1 AND group_key = $3`,
+        [cutJobId, JSON.stringify(blankSheet), groupKey],
+      );
+      const svg = await repo.renderSheetSvg({ currentUser: currentUser(), cutGroupId, cutJobId, sheetIndex: 1, variant: 'manual' });
+      expect(svg).toContain('<svg');
+    });
+
+    it('Rule 6: group↔job mismatch (wrong cutJobId for the group) → 404 CUT_GROUP_NOT_FOUND', async () => {
+      const { repo, cutGroupId } = await makeT7Job();
+      await expect(
+        repo.renderGroupPdf({ currentUser: currentUser(), cutGroupId, cutJobId: 999999 }),
+      ).rejects.toMatchObject({ statusCode: 404, code: 'CUT_GROUP_NOT_FOUND' });
+    });
+
+    it('Rule 4: whole-job PDF variant=manual → 422 CUT_MANUAL_VARIANT_NOT_JOB_SCOPED', async () => {
+      const { repo, cutJobId } = await makeT7Job();
+      await expect(
+        repo.renderJobPdf({ currentUser: currentUser(), cutJobId, variant: 'manual' }),
+      ).rejects.toMatchObject({ statusCode: 422, code: 'CUT_MANUAL_VARIANT_NOT_JOB_SCOPED' });
+    });
+
+    it('FIX 2/3: group + job render tokens CHANGE after a manual save (busts the PDF cache)', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await makeT7Job();
+      const groupTokenBefore = await repo.getRenderCacheToken({ cutGroupId });
+      const jobTokenBefore = await repo.getRenderCacheToken({ cutJobId });
+      await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [validMove], active: true,
+      });
+      const groupTokenAfter = await repo.getRenderCacheToken({ cutGroupId });
+      const jobTokenAfter = await repo.getRenderCacheToken({ cutJobId });
+      expect(groupTokenAfter).not.toBe(groupTokenBefore);
+      expect(jobTokenAfter).not.toBe(jobTokenBefore);
+    });
+
+    it('FIX 3: job renderToken from getJob matches getRenderCacheToken (prewarm/export share a key)', async () => {
+      const { repo, cutJobId } = await makeT7Job();
+      const job = await repo.getJob({ currentUser: currentUser(), cutJobId, requestId: 't7-token' });
+      const token = await repo.getRenderCacheToken({ cutJobId });
+      expect(job.renderToken).toBe(token);
+    });
+  });
 });

@@ -209,6 +209,83 @@ describe('CutController', () => {
     expect(renderJobPdf).toHaveBeenCalledTimes(1);
   });
 
+  // Task 7 FIX 2: variant is a cache-key dimension — auto and active must not collide.
+  it('FIX 2: group PDF auto and active do NOT share a cache slot (same layout token)', async () => {
+    const renderGroupPdf = vi.fn(async (q: { variant?: string }) =>
+      Buffer.from(q.variant === 'active' ? '%PDF-active' : '%PDF-auto'));
+    // Same token for both → only `variant` separates the keys.
+    const getRenderCacheToken = vi.fn(async () => 'tok');
+    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
+    const controller = createController({ service: { renderGroupPdf, getRenderCacheToken }, pdfCache });
+
+    // Warm both variants.
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'auto' }, fakeResponse().res as never);
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, fakeResponse().res as never);
+    await pdfCache.whenIdle();
+
+    const autoWarm = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'auto' }, autoWarm.res as never);
+    const activeWarm = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, activeWarm.res as never);
+
+    // Each variant gets ITS OWN bytes — no cross-serving from one shared slot.
+    expect(autoWarm.state.sent).toEqual(Buffer.from('%PDF-auto'));
+    expect(activeWarm.state.sent).toEqual(Buffer.from('%PDF-active'));
+    expect(renderGroupPdf).toHaveBeenCalledTimes(2);
+  });
+
+  // Task 7 FIX 2: a render-token change (manual save / active flip) busts the cache.
+  it('FIX 2: group PDF re-renders after the render token changes', async () => {
+    let n = 0;
+    const renderGroupPdf = vi.fn(async () => Buffer.from(`%PDF-${++n}`));
+    let token = 'tok-v1';
+    const getRenderCacheToken = vi.fn(async () => token);
+    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
+    const controller = createController({ service: { renderGroupPdf, getRenderCacheToken }, pdfCache });
+
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, fakeResponse().res as never);
+    await pdfCache.whenIdle();
+    // Manual save changes the layout token.
+    token = 'tok-v2';
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, fakeResponse().res as never);
+    await pdfCache.whenIdle();
+
+    const after = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, after.res as never);
+    expect(after.state.sent).toEqual(Buffer.from('%PDF-2'));
+    expect(renderGroupPdf).toHaveBeenCalledTimes(2);
+  });
+
+  // Task 7 FIX 3: prewarm (post-calculate) and export must share the SAME token key,
+  // so the first export after a calculate is served warm (no cold synchronous miss).
+  it('FIX 3: post-calculate prewarm and export share the token key (first export is warm)', async () => {
+    const pdf = Buffer.from('%PDF-job');
+    const renderJobPdf = vi.fn(async () => pdf);
+    const calculate = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7 }));
+    const getJob = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7, renderToken: 'jtok' }));
+    // getRenderCacheToken({cutJobId}) === job.renderToken from getJob.
+    const getRenderCacheToken = vi.fn(async () => 'jtok');
+    const setPdfPrewarmState = vi.fn(async () => undefined);
+    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
+    const controller = createController({
+      service: { calculate, renderJobPdf, getJob, getRenderCacheToken, setPdfPrewarmState },
+      pdfCache,
+    });
+
+    // calculate → fires fire-and-forget prewarm (status ready).
+    await controller.calculate({ user: currentUser() } as never, '42', { version: 0 });
+    // Wait for the async prewarm chain (getRenderCacheToken → ensure → render) to register.
+    for (let i = 0; i < 50 && renderJobPdf.mock.calls.length === 0; i++) await Promise.resolve();
+    await pdfCache.whenIdle();
+
+    // First export must be served WARM from the prewarmed slot (same token key).
+    const warm = fakeResponse();
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', {}, warm.res as never);
+    expect(warm.headers['Content-Type']).toBe('application/pdf');
+    expect(warm.state.sent).toBe(pdf);
+    expect(renderJobPdf).toHaveBeenCalledTimes(1); // prewarm rendered once; export reused it
+  });
+
   it('parses ids, bodies, and criteria', () => {
     expect(parseCutJobId('42')).toBe(42);
     expect(() => parseCutJobId('0')).toThrow(ApiError);

@@ -437,11 +437,13 @@ export class CutController {
     const cutGroupId = parseCutJobId(groupId);
     const rotate90 = parseOrientation(query.orientation);
     const variant = parseVariant(query.variant);
-    // Task 7 Rule 9: cache key includes server-owned render token so a manual save
-    // or active-selector flip busts the in-process cache (Codex R10 BLOCKER #2).
-    const renderToken = await this.cut.getRenderCacheToken({ cutGroupId, variant });
+    // Task 7 Rule 9: cache key includes the server-owned render token (layout state)
+    // so a manual save or active-selector flip busts the in-process cache. FIX 2:
+    // the requested `variant` is a SEPARATE key dimension — `auto` and `active` can
+    // render different bytes for the same layout state and must not share a slot.
+    const renderToken = await this.cut.getRenderCacheToken({ cutGroupId });
     const result = this.pdfCache.ensure(
-      `group:${cutGroupId}:${renderToken}:${rotate90 ? 'L' : 'P'}`,
+      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}`,
       () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, variant, requestId: request.requestId }),
     );
     this.sendPdf(response, result, `cut-group-${cutGroupId}.pdf`);
@@ -479,11 +481,12 @@ export class CutController {
   ) {
     // Task 7: cache key uses renderToken (job version + per-group manual tokens)
     // so a manual save or active-selector flip always busts the in-process cache.
+    // FIX 2: `variant` is a separate key dimension (auto vs active can differ).
     // Orientation discriminates the cache. pdf_prewarm_state tracks only the
     // default (portrait) job PDF surfaced in the UI — the landscape variant is
     // on-demand and must not write the prewarm state.
     return this.pdfCache.ensure(
-      `job:${cutJobId}:${renderToken}:${rotate90 ? 'L' : 'P'}`,
+      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}`,
       () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, variant, requestId }),
       (state, reason) => {
         if (rotate90) return;
@@ -492,9 +495,12 @@ export class CutController {
     );
   }
 
-  /** Fire-and-forget whole-job PDF pre-warm (kicked after a successful calculate).
-   * Uses `auto` variant for the prewarm key — newly calculated jobs have no manual layout yet.
-   * The token is `v${version}` at this point (no groups have manual rows post-calculate).
+  /** Fire-and-forget whole-job PDF pre-warm (kicked after a successful calculate
+   *  or manual save). FIX 3: the prewarm MUST key on the same render token the
+   *  default export reads (`getRenderCacheToken({cutJobId})` === `job.renderToken`),
+   *  otherwise the prewarm warms a key the export never looks up and the first
+   *  export is a cold synchronous miss. Uses the default `auto` variant (the
+   *  surfaced whole-job PDF), matching exportJobPdf's default key dimension.
    */
   private prewarmJobPdf(
     currentUser: RequestWithCurrentUser['user'],
@@ -502,8 +508,12 @@ export class CutController {
     version: number,
     requestId: string | undefined,
   ): void {
-    // token at prewarm time = `v${version}` (no manual layout yet post-calculate)
-    this.ensureJobPdf(currentUser, cutJobId, `v${version}`, version, requestId);
+    void this.cut
+      .getRenderCacheToken({ cutJobId })
+      .then((renderToken) => {
+        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId);
+      })
+      .catch(() => undefined);
   }
 
   private sendPdf(response: Response, result: PdfEnsureResult, filename: string): void {

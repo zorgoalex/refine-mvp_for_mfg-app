@@ -296,18 +296,28 @@ function sheetsMatchCanonical(existing: import('../dto/cut.dto').CutManualSheetD
  * current manual layout state.
  *
  * - `auto`   → always auto (use `cut_group_sheet`).
- * - `manual` → always manual (caller must hard-fail when unavailable).
- * - `active` → manual iff `effectiveActive = isActive && !isStale`; else auto.
+ * - `manual` → manual ONLY when a layout is present AND not stale; else auto.
+ *              The caller MUST hard-fail (409) when an explicit `manual` request
+ *              resolves to `auto` — there is NO silent auto fallback for `manual`.
+ *              (`is_active` is NOT required: an explicit manual request prints the
+ *              stored manual layout regardless of the active-selector flag.)
+ * - `active` → manual iff `effectiveActive = isActive && !isStale`; else auto
+ *              (this is the ONLY variant that legitimately falls back to auto).
+ *
+ * Returning a plain `'auto' | 'manual'` (the actual sheet source) keeps the
+ * unavailable-manual decision in one place: a `manual` request that yields
+ * `'auto'` here means the manual layout is missing or stale → the caller 409s.
  */
 export function resolveEffectiveVariant(
   variant: 'auto' | 'manual' | 'active',
   manual: { isActive: boolean; isStale: boolean } | null,
 ): 'auto' | 'manual' {
   if (variant === 'auto') return 'auto';
-  if (variant === 'manual') return 'manual';
-  // active
-  const effectiveActive = manual !== null && manual.isActive && !manual.isStale;
-  return effectiveActive ? 'manual' : 'auto';
+  // A present, non-stale layout is required to render manual sheets at all.
+  const usable = manual !== null && !manual.isStale;
+  if (variant === 'manual') return usable ? 'manual' : 'auto';
+  // active: additionally requires the layout to be the active one.
+  return usable && manual.isActive ? 'manual' : 'auto';
 }
 
 export class PgCutRepository implements CutRepositoryPort {
@@ -1517,6 +1527,12 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer> {
+    const variant = query.variant ?? 'auto';
+    // Rule 6 BEFORE Rule 5: load + assert group↔job ownership first so a wrong
+    // cutJobId yields 404 CUT_GROUP_NOT_FOUND, not a 409 recalc block (a missing
+    // job makes checkRequiresRecalc conservatively true). This also resolves the
+    // variant (manual-unavailable → 409) on the validated group.
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, variant, query.cutJobId);
     // Rule 5: group PDF is blocked while the job requires recalculation.
     // PNG/SVG are NOT blocked; only PDF/print surfaces enforce this.
     if (query.cutJobId !== undefined) {
@@ -1524,8 +1540,6 @@ export class PgCutRepository implements CutRepositoryPort {
         throw new ApiError(409, 'CUT_RECALC_REQUIRED', 'Требуется пересчёт раскроя перед печатью');
       }
     }
-    const variant = query.variant ?? 'auto';
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, variant, query.cutJobId);
     // Rule 8: skip blank sheets in PDF assembly only (index-stable for PNG/SVG).
     const printableSheets = sheets.filter((s) => s.placements.pieces.length > 0);
     if (printableSheets.length === 0) {
@@ -1821,8 +1835,13 @@ export class PgCutRepository implements CutRepositoryPort {
         `SELECT cut_job_id, group_key FROM cut_group WHERE cut_group_id = $1`,
         [args.cutGroupId],
       );
-      const resolvedJobId = toNum(groupRes.rows[0]?.cut_job_id ?? 0);
-      const groupKey = groupRes.rows[0]?.group_key ?? null;
+      // FIX 5: surface a missing group instead of masking it as job 0 (which would
+      // mint a bogus stable token and let a wrong group share a cache slot).
+      if (groupRes.rows.length === 0) {
+        throw new CutGroupSheetNotFoundError(args.cutGroupId, 0);
+      }
+      const resolvedJobId = toNum(groupRes.rows[0].cut_job_id);
+      const groupKey = groupRes.rows[0].group_key ?? null;
 
       const jobRes = await this.database.query<{ version: string | number }>(
         `SELECT version FROM cut_job WHERE cut_job_id = $1`,

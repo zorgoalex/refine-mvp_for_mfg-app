@@ -224,7 +224,11 @@ export interface SetCutJobSplitByMaterialCommand {
 export interface GetRenderCacheTokenArgs {
   cutJobId?: number;
   cutGroupId?: number;
-  variant: 'auto' | 'manual' | 'active';
+  // NOTE: no `variant` here on purpose. The token encodes the layout STATE
+  // (job version + per-group manual layout version + effectiveActive) and is
+  // variant-independent. The controller adds the requested variant as a separate
+  // cache-key dimension so `auto` and `active` (which can render different bytes
+  // for the same state) never collide on one cache slot.
 }
 
 export interface CutRepositoryPort {
