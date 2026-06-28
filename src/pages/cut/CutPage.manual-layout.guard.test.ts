@@ -32,4 +32,13 @@ describe('CutPage manual-layout guard', () => {
     expect(src).toMatch(/effectiveManual/);
     expect(src).toMatch(/requiresRecalc/);
   });
+
+  it('disables the alternative-view checkbox with tooltip when manualLayout is stale (prevents variant=manual 409)', () => {
+    // The stale-disable tooltip must be present.
+    expect(src).toContain('Ручной раскрой устарел — пересчитайте');
+    // The checkbox disabled prop must include isStale.
+    expect(src).toMatch(/disabled=\{[^}]*isStale/);
+    // displayVariant must be guarded so stale never passes variant=manual to the backend.
+    expect(src).toMatch(/displayVariant.*isStale|showAlt && !isStale/s);
+  });
 });

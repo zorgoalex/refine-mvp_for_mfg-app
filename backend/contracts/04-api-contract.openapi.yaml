@@ -6076,6 +6076,21 @@ paths:
       security:
         - bearerAuth: []
       x-permission: cut.view
+      parameters:
+        - name: variant
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [auto, manual, active]
+            default: auto
+          description: Which layout variant to render (auto = algorithm layout, manual = saved manual layout, active = whichever is marked active). Default auto.
+        - name: renderVersion
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque cache-bust token; ignored by the server but forwarded by the browser to bypass stale cached responses after a manual layout is saved.
       responses:
         '200':
           description: OK
@@ -6086,6 +6101,17 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            Conflict: manual layout unavailable (CUT_MANUAL_LAYOUT_UNAVAILABLE — variant=manual
+            requested but no non-stale manual layout exists for this group), or a recalculation
+            is required before rendering (CUT_RECALC_REQUIRED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -6102,6 +6128,21 @@ paths:
       security:
         - bearerAuth: []
       x-permission: cut.view
+      parameters:
+        - name: variant
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [auto, manual, active]
+            default: auto
+          description: Which layout variant to render (auto = algorithm layout, manual = saved manual layout, active = whichever is marked active). Default auto.
+        - name: renderVersion
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque cache-bust token; ignored by the server but forwarded by the browser to bypass stale cached responses after a manual layout is saved.
       responses:
         '200':
           description: OK
@@ -6112,6 +6153,17 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            Conflict: manual layout unavailable (CUT_MANUAL_LAYOUT_UNAVAILABLE — variant=manual
+            requested but no non-stale manual layout exists for this group), or a recalculation
+            is required before rendering (CUT_RECALC_REQUIRED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -6128,6 +6180,21 @@ paths:
       security:
         - bearerAuth: []
       x-permission: cut.view
+      parameters:
+        - name: variant
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [auto, manual, active]
+            default: auto
+          description: Which layout variant to render (auto = algorithm layout, manual = saved manual layout, active = whichever is marked active). Default auto.
+        - name: renderVersion
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque cache-bust token; ignored by the server but forwarded by the browser to bypass stale cached responses after a manual layout is saved.
       responses:
         '200':
           description: OK
@@ -6140,6 +6207,17 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            Conflict: manual layout unavailable (CUT_MANUAL_LAYOUT_UNAVAILABLE — variant=manual
+            requested but no non-stale manual layout exists for this group), or a recalculation
+            is required before PDF export (CUT_RECALC_REQUIRED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -6156,6 +6234,25 @@ paths:
       security:
         - bearerAuth: []
       x-permission: cut.view
+      parameters:
+        - name: variant
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [auto, manual, active]
+            default: auto
+          description: >-
+            Which layout variant to render (auto = algorithm layout, active = whichever is marked
+            active per group). Note: variant=manual is NOT supported on whole-job PDF export —
+            manual layouts are per-group and cannot be applied job-wide; the server returns 422
+            CUT_MANUAL_VARIANT_NOT_JOB_SCOPED if variant=manual is requested here. Default auto.
+        - name: renderVersion
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque cache-bust token; ignored by the server but forwarded by the browser to bypass stale cached responses after a manual layout is saved.
       responses:
         '200':
           description: OK
@@ -6168,8 +6265,22 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            A recalculation is required before PDF export (CUT_RECALC_REQUIRED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '422':
-          $ref: '#/components/responses/ValidationError'
+          description: >-
+            Validation error or unsupported variant for this endpoint
+            (CUT_MANUAL_VARIANT_NOT_JOB_SCOPED — variant=manual is not supported on the
+            whole-job PDF; manual layouts are per-group. Use variant=auto or variant=active instead).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '503':
           $ref: '#/components/responses/FeatureDisabled'
         '500':

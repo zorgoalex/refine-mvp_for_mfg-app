@@ -1314,7 +1314,9 @@ export const CutPage: React.FC = () => {
         // Render token for cache-busting (absent on groups without a manual layout).
         const renderVersion = group.renderToken;
         // Variant to pass to PNG/SVG fetch so the preview matches the toggle.
-        const displayVariant: 'auto' | 'manual' | 'active' = showAlt ? 'manual' : 'auto';
+        // Guard: when the manual layout is stale, never pass variant=manual — the backend
+        // hard-fails such requests with 409 CUT_MANUAL_LAYOUT_UNAVAILABLE. Fall back to 'auto'.
+        const displayVariant: 'auto' | 'manual' | 'active' = showAlt && !isStale ? 'manual' : 'auto';
         // Is this group currently open in the editor?
         const isEditingGroup = editingGroupId === group.cutGroupId;
         // Persisted active flag (what the backend currently has).
@@ -1346,21 +1348,24 @@ export const CutPage: React.FC = () => {
             }
             extra={
               <Space>
-                {/* «Показать альтернативный раскрой» — only shown when a manual layout exists */}
+                {/* «Показать альтернативный раскрой» — only shown when a manual layout exists.
+                    Disabled (with tooltip) when the layout is stale: variant=manual would 409. */}
                 {group.manualLayout && (
-                  <Checkbox
-                    checked={showAlt}
-                    onChange={(e) =>
-                      setShowAlternativeByGroup((prev) => ({
-                        ...prev,
-                        [group.cutGroupId]: e.target.checked,
-                      }))
-                    }
-                    disabled={isEditingGroup}
-                    data-testid={`show-alternative-cb-${group.cutGroupId}`}
-                  >
-                    Показать альтернативный раскрой
-                  </Checkbox>
+                  <Tooltip title={isStale ? 'Ручной раскрой устарел — пересчитайте' : undefined}>
+                    <Checkbox
+                      checked={showAlt}
+                      onChange={(e) =>
+                        setShowAlternativeByGroup((prev) => ({
+                          ...prev,
+                          [group.cutGroupId]: e.target.checked,
+                        }))
+                      }
+                      disabled={isEditingGroup || isStale}
+                      data-testid={`show-alternative-cb-${group.cutGroupId}`}
+                    >
+                      Показать альтернативный раскрой
+                    </Checkbox>
+                  </Tooltip>
                 )}
                 {/* «Редактировать раскрой» — full-scale group view only; disabled on requiresRecalc */}
                 {canManage && !isArchivedJob && (
