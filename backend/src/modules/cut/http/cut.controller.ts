@@ -497,10 +497,15 @@ export class CutController {
 
   /** Fire-and-forget whole-job PDF pre-warm (kicked after a successful calculate
    *  or manual save). FIX 3: the prewarm MUST key on the same render token the
-   *  default export reads (`getRenderCacheToken({cutJobId})` === `job.renderToken`),
+   *  export reads (`getRenderCacheToken({cutJobId})` === `job.renderToken`),
    *  otherwise the prewarm warms a key the export never looks up and the first
-   *  export is a cold synchronous miss. Uses the default `auto` variant (the
-   *  surfaced whole-job PDF), matching exportJobPdf's default key dimension.
+   *  export is a cold synchronous miss.
+   *  FIX 4: it must ALSO warm the same `variant` dimension. The FE `fetchJobPdf`
+   *  always passes `job.renderToken` (always present on the single-job GET), so it
+   *  always requests `variant=active` → export key `job:{id}:active:{token}:P`.
+   *  Warming with the default `auto` would warm a slot the real download never
+   *  reads. `active` resolves per-group `effectiveActive` — exactly the surfaced
+   *  whole-job PDF. Orientation is unchanged (portrait, as before).
    */
   private prewarmJobPdf(
     currentUser: RequestWithCurrentUser['user'],
@@ -511,7 +516,7 @@ export class CutController {
     void this.cut
       .getRenderCacheToken({ cutJobId })
       .then((renderToken) => {
-        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId);
+        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId, false, 'active');
       })
       .catch(() => undefined);
   }

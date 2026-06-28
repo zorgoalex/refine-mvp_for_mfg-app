@@ -256,9 +256,11 @@ describe('CutController', () => {
     expect(renderGroupPdf).toHaveBeenCalledTimes(2);
   });
 
-  // Task 7 FIX 3: prewarm (post-calculate) and export must share the SAME token key,
-  // so the first export after a calculate is served warm (no cold synchronous miss).
-  it('FIX 3: post-calculate prewarm and export share the token key (first export is warm)', async () => {
+  // Task 7 FIX 3 + FIX 4: prewarm (post-calculate) and the REAL FE export must share
+  // the SAME key — same token AND same `variant` dimension. The FE always passes
+  // job.renderToken → variant=active, so the prewarm must warm the `active` slot,
+  // not `auto`. Otherwise the first export is a cold synchronous miss.
+  it('FIX 3/4: post-calculate prewarm warms the variant=active key the FE export reads (first export is warm)', async () => {
     const pdf = Buffer.from('%PDF-job');
     const renderJobPdf = vi.fn(async () => pdf);
     const calculate = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7 }));
@@ -278,9 +280,13 @@ describe('CutController', () => {
     for (let i = 0; i < 50 && renderJobPdf.mock.calls.length === 0; i++) await Promise.resolve();
     await pdfCache.whenIdle();
 
-    // First export must be served WARM from the prewarmed slot (same token key).
+    // FIX 4: the prewarm rendered the ACTIVE variant (what the FE surfaces), not auto.
+    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({ variant: 'active' }));
+
+    // The REAL FE export passes job.renderToken → variant=active. It must be served WARM
+    // from the prewarmed slot (identical id + variant + token + orientation).
     const warm = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', {}, warm.res as never);
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active' }, warm.res as never);
     expect(warm.headers['Content-Type']).toBe('application/pdf');
     expect(warm.state.sent).toBe(pdf);
     expect(renderJobPdf).toHaveBeenCalledTimes(1); // prewarm rendered once; export reused it
