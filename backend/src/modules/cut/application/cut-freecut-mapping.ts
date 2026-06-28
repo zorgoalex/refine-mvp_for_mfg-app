@@ -1,4 +1,5 @@
 import { ApiError } from '../../../common/errors/api-error';
+import { PieceLabelSnapshot } from '../../../../../shared/cut-geometry';
 
 /**
  * Freecut request/response mapping (plan §6). One cut_group per cuttable key
@@ -182,12 +183,20 @@ export interface FreecutOptimizeResponse {
   unplaced_items?: Array<{ item_id: string; instance: number; reason: string }>;
 }
 
+/**
+ * Persisted placement piece type. Extends FreecutPlacement with an optional
+ * display label snapshot (Codex R13 MAJOR #4). The label field is populated
+ * by Task 4 (persist step) — not here. FreecutPlacement and backMapSolutions
+ * are intentionally left unchanged.
+ */
+export type SheetPlacementPieceJson = FreecutPlacement & { label?: PieceLabelSnapshot };
+
 /** Frozen per-sheet placements JSONB (plan §3). Render source of truth. */
 export interface SheetPlacementsJson {
   trim_mm: TrimMm;
   sheet_width_mm: number;
   sheet_height_mm: number;
-  pieces: FreecutPlacement[];
+  pieces: SheetPlacementPieceJson[];
 }
 
 export interface BackMappedSheet {

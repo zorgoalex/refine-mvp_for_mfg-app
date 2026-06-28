@@ -1,0 +1,89 @@
+[
+  {
+    "name": "legal layout - gap satisfies kerf+spacing",
+    "kind": "validate",
+    "input": {
+      "placements": {
+        "sheet_width_mm": 2800,
+        "sheet_height_mm": 2070,
+        "trim_mm": { "left": 10, "right": 10, "top": 10, "bottom": 10 },
+        "pieces": [
+          { "item_id": "det-1", "instance": 1, "x_mm": 0, "y_mm": 0, "width_mm": 600, "height_mm": 400, "rotated": false },
+          { "item_id": "det-2", "instance": 1, "x_mm": 603, "y_mm": 0, "width_mm": 600, "height_mm": 400, "rotated": false }
+        ]
+      },
+      "gap": { "kerfMm": 2, "spacingMm": 1 },
+      "filmTexture": {}
+    },
+    "expected": []
+  },
+  {
+    "name": "overlap - gap below effective kerf+spacing threshold",
+    "kind": "validate",
+    "input": {
+      "placements": {
+        "sheet_width_mm": 2800,
+        "sheet_height_mm": 2070,
+        "trim_mm": { "left": 10, "right": 10, "top": 10, "bottom": 10 },
+        "pieces": [
+          { "item_id": "det-1", "instance": 1, "x_mm": 0, "y_mm": 0, "width_mm": 600, "height_mm": 400, "rotated": false },
+          { "item_id": "det-2", "instance": 1, "x_mm": 601, "y_mm": 0, "width_mm": 600, "height_mm": 400, "rotated": false }
+        ]
+      },
+      "gap": { "kerfMm": 2, "spacingMm": 1 },
+      "filmTexture": {}
+    },
+    "expected": ["overlap"]
+  },
+  {
+    "name": "off-sheet - piece extends past usable right edge",
+    "kind": "validate",
+    "input": {
+      "placements": {
+        "sheet_width_mm": 2800,
+        "sheet_height_mm": 2070,
+        "trim_mm": { "left": 10, "right": 10, "top": 10, "bottom": 10 },
+        "pieces": [
+          { "item_id": "det-1", "instance": 1, "x_mm": 2400, "y_mm": 0, "width_mm": 600, "height_mm": 400, "rotated": false }
+        ]
+      },
+      "gap": { "kerfMm": 2, "spacingMm": 1 },
+      "filmTexture": {}
+    },
+    "expected": ["off_sheet"]
+  },
+  {
+    "name": "grain rotation - film-textured detail placed rotated",
+    "kind": "validate",
+    "input": {
+      "placements": {
+        "sheet_width_mm": 2800,
+        "sheet_height_mm": 2070,
+        "trim_mm": { "left": 10, "right": 10, "top": 10, "bottom": 10 },
+        "pieces": [
+          { "item_id": "det-1", "instance": 1, "x_mm": 0, "y_mm": 0, "width_mm": 600, "height_mm": 400, "rotated": true }
+        ]
+      },
+      "gap": { "kerfMm": 2, "spacingMm": 1 },
+      "filmTexture": { "det-1": true }
+    },
+    "expected": ["grain_rotation"]
+  },
+  {
+    "name": "flush to usable boundary - no violation",
+    "kind": "validate",
+    "input": {
+      "placements": {
+        "sheet_width_mm": 2800,
+        "sheet_height_mm": 2070,
+        "trim_mm": { "left": 10, "right": 10, "top": 10, "bottom": 10 },
+        "pieces": [
+          { "item_id": "det-1", "instance": 1, "x_mm": 0, "y_mm": 0, "width_mm": 2780, "height_mm": 2050, "rotated": false }
+        ]
+      },
+      "gap": { "kerfMm": 2, "spacingMm": 1 },
+      "filmTexture": {}
+    },
+    "expected": []
+  }
+]

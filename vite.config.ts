@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -9,7 +10,18 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    resolve: {
+      alias: {
+        // Shared pure-TS geometry/validation module (no FE/BE deps).
+        // Task 9 imports: import { ... } from '@shared/cut-geometry'
+        "@shared": resolve(__dirname, "shared"),
+      },
+    },
     server: {
+      fs: {
+        // Allow Vite dev server to serve files from the repo root (shared/).
+        allow: [resolve(__dirname)],
+      },
       port: 5173,
       proxy: {
         // New backend endpoints are versioned and served by NestJS.
