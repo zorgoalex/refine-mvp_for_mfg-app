@@ -140,6 +140,10 @@ export interface CutPermissionDeniedInput {
   requiredPermissions: readonly string[];
   requestId?: string;
   cutJobId?: number;
+  /** When present, enriches the denied audit with cut_group + order bridge rows. */
+  cutGroupId?: number;
+  /** Extra metadata merged into the denied audit's metadata_json. */
+  metadata?: Record<string, unknown>;
 }
 
 export interface DetailPlacementsQuery {
@@ -255,4 +259,6 @@ export interface CutRepositoryPort {
   listManualLayoutsForJob(
     cutJobId: number,
   ): Promise<Array<{ groupKey: string; sheets: CutManualSheetDto[]; isActive: boolean; isStale: boolean; version: number }>>;
+  // ── Task 5: manual-layout save command ───────────────────────────────────
+  saveManualLayout(command: SaveManualLayoutCommand): Promise<CutJobDto>;
 }

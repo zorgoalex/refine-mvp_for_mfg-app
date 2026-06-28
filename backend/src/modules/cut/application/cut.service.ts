@@ -20,6 +20,7 @@ import type {
   RenderJobPdfQuery,
   RenderSheetPngQuery,
   RenderSheetSvgQuery,
+  SaveManualLayoutCommand,
   SetCutJobProfileCommand,
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
@@ -147,6 +148,41 @@ export class CutService {
   async setSplitByMaterial(command: SetCutJobSplitByMaterialCommand) {
     this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
     return this.ports.cut.setSplitByMaterial(command);
+  }
+
+  /**
+   * Task 5: Save a manual sheet-placement override for one cut_group.
+   *
+   * Does NOT use the generic `require()` helper because the generic path fires
+   * the denial write fire-and-forget and cannot carry bridge rows (Codex R23
+   * BLOCKER #2). Instead this method:
+   *   1. Explicitly checks `cut.manage` via `permissions.canUser`.
+   *   2. On denial: AWAITS the enriched `recordPermissionDenied` call (which
+   *      emits cut_group + order bridge rows on the permission_denied audit row)
+   *      BEFORE throwing 403.
+   *   3. On success: delegates to the repo which owns the full transaction.
+   */
+  async saveManualLayout(command: SaveManualLayoutCommand) {
+    if (!this.permissions.canUser(command.currentUser, 'cut.manage')) {
+      // Await the enriched denial so bridge rows are committed before the 403.
+      // This is the only service method that awaits the denial (not fire-and-forget).
+      if (command.currentUser) {
+        await this.ports.cut
+          .recordPermissionDenied({
+            currentUser: command.currentUser,
+            requiredPermissions: ['cut.manage'],
+            requestId: command.requestId,
+            cutJobId: command.cutJobId,
+            cutGroupId: command.cutGroupId,
+            metadata: { action: 'manual_layout_save' },
+          })
+          .catch(() => undefined);
+      }
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['cut.manage'],
+      });
+    }
+    return this.ports.cut.saveManualLayout(command);
   }
 
   private require(

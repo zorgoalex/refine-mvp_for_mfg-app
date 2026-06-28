@@ -4,7 +4,17 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import type { PieceLabelSnapshot } from '../../../shared/cut-geometry';
+import {
+  type PieceLabelSnapshot,
+  type AutoPieceSpec,
+  type AutoSheetSpec,
+  type GapParams,
+  type GeomSheet,
+  type ManualViolation,
+  manualSetMatchesAuto,
+  reconstructManualSheets,
+  validateSheetPlacements,
+} from '../../../shared/cut-geometry';
 import { buildCutAuditEvent, buildCutDeniedEvent, CUT_AUDIT_EVENTS, type CutAuditActor } from '../application/cut-audit';
 import {
   classifyDetailEligibility,
@@ -48,6 +58,7 @@ import type {
   RenderJobPdfQuery,
   RenderSheetPngQuery,
   RenderSheetSvgQuery,
+  SaveManualLayoutCommand,
   SetCutJobProfileCommand,
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
@@ -248,6 +259,35 @@ export function splitByMaterialChangedOutboxKey(cutJobId: number, requestId: str
   return `${CUT_AUDIT_EVENTS.splitByMaterialChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
+/** Idempotency key for the manual-layout-saved outbox event. Keyed by the
+ *  POST-BUMP job version (nextVersion) — NOT by requestId — so each distinct
+ *  save produces exactly one outbox row (Codex R11 MAJOR #4). requestId rides
+ *  only in the payload for relay dedupe/trace. */
+export function manualLayoutSavedOutboxKey(cutJobId: number, nextVersion: number): string {
+  return `${CUT_AUDIT_EVENTS.manualLayoutSaved}:${cutJobId}:v${nextVersion}`;
+}
+
+/**
+ * Stable key-sorted JSON of CutManualSheetDto[] for no-op comparison.
+ * Required because PostgreSQL JSONB normalises key order on round-trip, so
+ * JSON.stringify of a DB-read object differs from a freshly-computed object
+ * with the same values but insertion-order keys.
+ */
+function stableJson(v: unknown): string {
+  return JSON.stringify(v, (_key, x: unknown) => {
+    if (x !== null && typeof x === 'object' && !Array.isArray(x)) {
+      return Object.fromEntries(
+        Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)),
+      );
+    }
+    return x;
+  });
+}
+
+function sheetsMatchCanonical(existing: import('../dto/cut.dto').CutManualSheetDto[], canonical: import('../dto/cut.dto').CutManualSheetDto[]): boolean {
+  return stableJson(existing) === stableJson(canonical);
+}
+
 export class PgCutRepository implements CutRepositoryPort {
   private readonly config: CutConfigPort;
 
@@ -259,15 +299,43 @@ export class PgCutRepository implements CutRepositoryPort {
     this.config = config ?? new PgCutConfigRepository(database);
   }
 
-  /** Audited RBAC denial (plan §11). Best-effort: a failed audit write must not
-   *  mask the 403, so callers fire-and-forget and swallow errors. Uses the audit
-   *  service's own connection (no surrounding tx needed). */
+  /** Audited RBAC denial (plan §11). Best-effort for generic denials (fire-and-
+   *  forget); for save-manual-layout denials the service AWAITS this call before
+   *  throwing 403 (to ensure bridge rows are committed). Uses the audit service's
+   *  own pool connection (no surrounding tx needed).
+   *
+   *  Enrichment: when `cutGroupId` is present, verifies the group belongs to the
+   *  job and resolves its distinct order ids → emits `cut_group` + `order` bridge
+   *  rows on the `cut_job.permission_denied` audit row. On group mismatch only the
+   *  cutJobId bridge (no group rows) is written. */
   async recordPermissionDenied(input: import('../application/cut-command.types').CutPermissionDeniedInput): Promise<void> {
     const actor: CutAuditActor = {
       id: input.currentUser.id,
       username: input.currentUser.username,
       role: input.currentUser.role,
     };
+
+    let related: { cutGroupIds?: number[]; orderIds?: number[] } | undefined;
+    let metadata: Record<string, unknown> | undefined;
+
+    if (input.cutGroupId != null && input.cutJobId != null) {
+      // Verify the cut_group belongs to cut_job; if so, resolve its order ids.
+      const groupCheck = await this.database.query<{ cut_group_id: string | number }>(
+        `SELECT cut_group_id FROM cut_group WHERE cut_group_id = $1 AND cut_job_id = $2`,
+        [input.cutGroupId, input.cutJobId],
+      );
+      if (groupCheck.rows.length > 0) {
+        const orderRes = await this.database.query<{ order_id: string | number }>(
+          `SELECT DISTINCT order_id FROM cut_job_item WHERE cut_group_id = $1 AND is_active = true`,
+          [input.cutGroupId],
+        );
+        const orderIds = orderRes.rows.map((r) => toNum(r.order_id));
+        related = { cutGroupIds: [input.cutGroupId], orderIds };
+      }
+      // Enrich metadata for the save denial (always, when cutGroupId is present).
+      metadata = { ...(input.metadata ?? {}), permission: 'cut.manage', action: 'manual_layout_save' };
+    }
+
     await auditService.recordDenied(
       this.database,
       buildCutDeniedEvent({
@@ -277,6 +345,8 @@ export class PgCutRepository implements CutRepositoryPort {
         source: AUDIT_SOURCE,
         reason: 'permission_denied',
         requiredPermissions: input.requiredPermissions,
+        related,
+        metadata,
       }),
     );
   }
@@ -1931,6 +2001,298 @@ export class PgCutRepository implements CutRepositoryPort {
 
       return loadJob(tx, command.cutJobId);
     });
+  }
+
+  /**
+   * Task 5: Persist a manual sheet-placement override for one cut_group.
+   *
+   * One transaction:
+   *   validate → reconstruct → canonicalize → no-op compare →
+   *   upsert layout → version bump → audit + bridge rows + outbox →
+   *   prewarm-pending
+   *
+   * Returns the fully enriched getJob output (with manualLayout populated)
+   * read AFTER the transaction commits.
+   */
+  async saveManualLayout(command: SaveManualLayoutCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+
+      // ── 1. Load cut_job FOR UPDATE; version guard + recalc-basis guard ──────
+      const jobRes = await tx.query<{
+        status: string;
+        version: string | number;
+        last_calc_basis: string | null;
+        last_calc_params: FreecutParams | null;
+      }>(
+        `SELECT status, version, last_calc_basis, last_calc_params
+         FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const jobRow = jobRes.rows[0];
+      if (!jobRow) throw new CutJobNotFoundError(command.cutJobId);
+
+      const currentVersion = toNum(jobRow.version);
+      if (command.jobVersion !== currentVersion) {
+        throw new CutStaleVersionError(command.cutJobId, command.jobVersion, currentVersion);
+      }
+
+      // Recalc-basis guard: reject when current inputs diverge from last_calc_basis.
+      // Uses the same basisOf helper as getJob.requiresRecalc; a null basis (never
+      // calculated) always triggers the guard.
+      const lastCalcBasis = jobRow.last_calc_basis ?? null;
+      // loadCurrentCalcBasisInputs uses this.database (pool) — acceptable here; the
+      // cut_job row is locked so no concurrent mutation of its defining fields.
+      const basisInputs = await this.loadCurrentCalcBasisInputs(command.cutJobId);
+      if (basisInputs === null || lastCalcBasis === null || basisOf(basisInputs) !== lastCalcBasis) {
+        throw new ApiError(409, 'CUT_RECALC_REQUIRED', 'Требуется пересчёт перед сохранением ручной раскладки');
+      }
+
+      // kerf/spacing come exclusively from the frozen last_calc_params snapshot.
+      const lastCalcParams = jobRow.last_calc_params;
+      if (!lastCalcParams) {
+        throw new ApiError(409, 'CUT_RECALC_REQUIRED', 'Нет параметров расчёта. Требуется пересчёт');
+      }
+      const gap: GapParams = { kerfMm: lastCalcParams.kerf_mm, spacingMm: lastCalcParams.spacing_mm };
+
+      // ── 2. Load cut_group → verify it belongs to this job; get group_key ────
+      const groupRes = await tx.query<{ cut_group_id: string | number; group_key: string | null }>(
+        `SELECT cut_group_id, group_key FROM cut_group WHERE cut_group_id = $1 AND cut_job_id = $2`,
+        [command.cutGroupId, command.cutJobId],
+      );
+      if (!groupRes.rows[0]) {
+        throw new ApiError(404, 'CUT_GROUP_NOT_FOUND', `cut_group ${command.cutGroupId} не принадлежит заданию ${command.cutJobId}`);
+      }
+      const groupKey = groupRes.rows[0].group_key;
+      if (!groupKey) {
+        throw new ApiError(409, 'CUT_RECALC_REQUIRED', 'Группа не имеет ключа (group_key). Требуется пересчёт');
+      }
+
+      // ── 3. Load authoritative auto layout from cut_group_sheet ───────────────
+      const sheetsRes = await tx.query<{ sheet_index: string | number; placements: SheetPlacementsJson }>(
+        `SELECT sheet_index, placements FROM cut_group_sheet WHERE cut_group_id = $1 ORDER BY sheet_index`,
+        [command.cutGroupId],
+      );
+      if (!sheetsRes.rows.length) {
+        throw new ApiError(409, 'CUT_RECALC_REQUIRED', 'Нет листов для группы. Требуется пересчёт');
+      }
+
+      // Build autoSheets + autoPieces; assert single trim authority across all sheets.
+      let sharedTrim: GeomSheet['trim_mm'] | null = null;
+      const autoSheets: AutoSheetSpec[] = [];
+      const autoPieceMap = new Map<string, AutoPieceSpec>();
+
+      for (const sheetRow of sheetsRes.rows) {
+        const pl = sheetRow.placements;
+        const sheetIndex = toNum(sheetRow.sheet_index);
+
+        if (sharedTrim === null) {
+          sharedTrim = pl.trim_mm;
+        } else if (
+          pl.trim_mm.left !== sharedTrim.left ||
+          pl.trim_mm.right !== sharedTrim.right ||
+          pl.trim_mm.top !== sharedTrim.top ||
+          pl.trim_mm.bottom !== sharedTrim.bottom
+        ) {
+          throw new ApiError(500, 'CUT_LAYOUT_INCONSISTENT', 'Несовместимые поля (trim) листов в группе');
+        }
+
+        autoSheets.push({
+          sheetIndex,
+          sheet_width_mm: pl.sheet_width_mm,
+          sheet_height_mm: pl.sheet_height_mm,
+          trim_mm: pl.trim_mm,
+        });
+
+        for (const piece of pl.pieces) {
+          const key = `${piece.item_id}#${piece.instance}`;
+          if (!autoPieceMap.has(key)) {
+            // Base dims are the UNROTATED intrinsic size.
+            const baseW = piece.rotated ? piece.height_mm : piece.width_mm;
+            const baseH = piece.rotated ? piece.width_mm : piece.height_mm;
+            autoPieceMap.set(key, {
+              itemId: piece.item_id,
+              instance: piece.instance,
+              baseW,
+              baseH,
+              label: piece.label ?? {
+                orderId: null,
+                detailNumber: null,
+                widthMm: piece.width_mm,
+                heightMm: piece.height_mm,
+              },
+            });
+          }
+        }
+      }
+
+      const trim = sharedTrim!;
+      const autoPieces = [...autoPieceMap.values()];
+
+      // ── 4. Load film textures for items in this group ─────────────────────
+      const itemsRes = await tx.query<{ order_detail_id: string | number; film_texture: boolean | null }>(
+        `SELECT cji.order_detail_id, f.film_texture
+         FROM cut_job_item cji
+         JOIN order_details od ON od.detail_id = cji.order_detail_id
+         LEFT JOIN films f ON f.film_id = od.film_id
+         WHERE cji.cut_group_id = $1 AND cji.is_active = true`,
+        [command.cutGroupId],
+      );
+
+      const filmTextureByItemId = new Map<string, boolean>();
+      for (const r of itemsRes.rows) {
+        const itemId = freecutItemId(toNum(r.order_detail_id));
+        if (r.film_texture !== null) {
+          filmTextureByItemId.set(itemId, r.film_texture);
+        }
+      }
+
+      // Distinct order ids for the group (for audit bridge rows).
+      const orderRes = await tx.query<{ order_id: string | number }>(
+        `SELECT DISTINCT order_id FROM cut_job_item WHERE cut_group_id = $1 AND is_active = true`,
+        [command.cutGroupId],
+      );
+      const groupOrderIds = orderRes.rows.map((r) => toNum(r.order_id));
+
+      // ── 5. Completeness guard (manualSetMatchesAuto) ──────────────────────
+      const matchResult = manualSetMatchesAuto({ moves: command.placements, autoPieces });
+      if (!matchResult.ok) {
+        throw new ApiError(422, 'CUT_MANUAL_LAYOUT_INVALID', matchResult.reason ?? 'Набор деталей не совпадает с расчётным');
+      }
+
+      // ── 6. Reconstruct authoritative sheet placements ─────────────────────
+      const reconstructResult = reconstructManualSheets({ moves: command.placements, autoPieces, autoSheets, trim });
+      if (reconstructResult.error) {
+        throw new ApiError(422, 'CUT_MANUAL_LAYOUT_INVALID', reconstructResult.error.message);
+      }
+      const reconstructedSheets = reconstructResult.sheets;
+
+      // ── 7. Geometry/grain validation ──────────────────────────────────────
+      const allViolations: ManualViolation[] = [];
+      for (const { sheetIndex, placements: sheetPlacements } of reconstructedSheets) {
+        const violations = validateSheetPlacements({ sheetIndex, placements: sheetPlacements, gap, filmTextureByItemId });
+        allViolations.push(...violations);
+      }
+      if (allViolations.length > 0) {
+        throw new ApiError(422, 'CUT_MANUAL_LAYOUT_INVALID', 'Нарушения в расположении деталей на листе', { violations: allViolations });
+      }
+
+      // ── 8. Canonicalize: preserve auto sheet_index values, empty sheets retained ─
+      const canonicalSheets: import('../dto/cut.dto').CutManualSheetDto[] = reconstructedSheets.map(({ sheetIndex, placements: p }) => ({
+        sheetIndex,
+        placements: p,
+      }));
+
+      // ── 9. No-op short-circuit ────────────────────────────────────────────
+      // Short-circuit ONLY when the FULL target persisted state already matches:
+      // canonical sheets AND is_active AND is_stale=false AND
+      // based_on_job_version === jobVersion (the incoming version).
+      // A STALE row re-saved with unchanged geometry must NOT short-circuit.
+      const existingRes = await tx.query<{
+        sheets: import('../dto/cut.dto').CutManualSheetDto[];
+        is_active: boolean;
+        is_stale: boolean;
+        based_on_job_version: string | number;
+      }>(
+        `SELECT sheets, is_active, is_stale, based_on_job_version
+         FROM cut_group_manual_layout
+         WHERE cut_job_id = $1 AND group_key = $2
+         LIMIT 1`,
+        [command.cutJobId, groupKey],
+      );
+
+      const existing = existingRes.rows[0];
+      if (
+        existing &&
+        !existing.is_stale &&
+        existing.is_active === command.active &&
+        Number(existing.based_on_job_version) === command.jobVersion &&
+        sheetsMatchCanonical(existing.sheets, canonicalSheets)
+      ) {
+        // Identical re-save: no version bump, no audit, no outbox.
+        return;
+      }
+
+      // ── 10. Persist: version bump + prewarm reset + upsert + audit + outbox ─
+      const nextVersion = currentVersion + 1;
+
+      // Bump version and reset pdf_prewarm_state (new version → no warmed PDF yet).
+      await tx.query(
+        `UPDATE cut_job SET version = $2, pdf_prewarm_state = 'pending', updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, nextVersion],
+      );
+
+      // Upsert manual layout within the TX (not via this.upsertManualLayout which
+      // uses this.database; we need the write inside this transaction boundary).
+      await tx.query(
+        `INSERT INTO cut_group_manual_layout
+           (cut_job_id, group_key, sheets, is_active, is_stale, based_on_job_version, version, created_by)
+         VALUES ($1, $2, $3::jsonb, $4, FALSE, $5, 1, $6)
+         ON CONFLICT (cut_job_id, group_key) DO UPDATE
+           SET sheets               = EXCLUDED.sheets,
+               is_active            = EXCLUDED.is_active,
+               is_stale             = FALSE,
+               based_on_job_version = EXCLUDED.based_on_job_version,
+               version              = cut_group_manual_layout.version + 1,
+               updated_at           = now()`,
+        [command.cutJobId, groupKey, JSON.stringify(canonicalSheets), command.active, nextVersion, numOrNull(command.currentUser.id)],
+      );
+
+      // Audit: before/after metadata + cut_group + order bridge rows.
+      const beforeSheets = existing ? (existing.sheets as import('../dto/cut.dto').CutManualSheetDto[]) : [];
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.manualLayoutSaved,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        related: { cutGroupIds: [command.cutGroupId], orderIds: groupOrderIds },
+        before: {
+          cutGroupId: command.cutGroupId,
+          active: existing?.is_active ?? null,
+          perSheetCounts: beforeSheets.map((s) => s.placements.pieces.length),
+        },
+        after: {
+          cutGroupId: command.cutGroupId,
+          active: command.active,
+          perSheetCounts: canonicalSheets.map((s) => s.placements.pieces.length),
+        },
+        metadata: {
+          cutGroupId: command.cutGroupId,
+          active: command.active,
+          perSheetCounts: {
+            before: beforeSheets.map((s) => s.placements.pieces.length),
+            after: canonicalSheets.map((s) => s.placements.pieces.length),
+          },
+          movedCount: command.placements.length,
+          rotatedCount: command.placements.filter((m) => m.rotated).length,
+        },
+      });
+
+      // Outbox event: idempotency key is (cutJobId, nextVersion) — the immutable
+      // mutation identity. requestId rides in payload for relay dedupe only.
+      await tx.query(
+        `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+         VALUES ($1, $2, $3, $4::jsonb, $5)
+         ON CONFLICT (idempotency_key) DO NOTHING`,
+        [
+          CUT_AUDIT_EVENTS.manualLayoutSaved,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            cutGroupId: command.cutGroupId,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+            occurredAtJobVersion: nextVersion,
+            active: command.active,
+          }),
+          manualLayoutSavedOutboxKey(command.cutJobId, nextVersion),
+        ],
+      );
+    });
+
+    // Return the fully enriched job (with manualLayout, editorParams, requiresRecalc)
+    // read after the transaction commits. Uses this.getJob which queries this.database.
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 }
 

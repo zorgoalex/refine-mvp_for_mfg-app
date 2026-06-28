@@ -99,6 +99,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
   listManualLayoutsForJob() {
     return Promise.reject(unavailable());
   }
+
+  saveManualLayout() {
+    return Promise.reject(unavailable());
+  }
 }
 
 function unavailable(): ApiError {

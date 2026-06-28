@@ -1459,4 +1459,292 @@ describeIntegration('PgCutRepository (integration)', () => {
     const res = await repo.listDetailLastReady({ currentUser: currentUser(), detailIds: [dA] });
     expect(res.details.find((d) => d.orderDetailId === dA)?.cutJobId).toBe(jobNewId);
   });
+
+  // ── Task 5: saveManualLayout integration tests ────────────────────────────
+
+  describe('Task 5: saveManualLayout', () => {
+    // Single-piece freecut response so moves lists stay minimal.
+    // Only det-1:1 — no det-2 confusion vs. cut_job_item membership.
+    const singlePieceResponse: FreecutOptimizeResponse = {
+      status: 'ok',
+      summary: { used_stock_count: 1, waste_percent: 10 },
+      solutions: [
+        {
+          stock_id: 'smt-1',
+          index: 0,
+          width_mm: 2800,
+          height_mm: 2070,
+          trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
+          placements: [
+            { item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 600, height_mm: 400, rotated: false },
+          ],
+        },
+      ],
+    };
+
+    /** Creates + calculates a single-piece (det-1 only) fixture job for Task-5 tests. */
+    async function createSinglePieceJob(): Promise<{
+      repo: PgCutRepository;
+      cutJobId: number;
+      cutGroupId: number;
+      groupKey: string;
+      jobVersion: number;
+    }> {
+      const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(singlePieceResponse)));
+      const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'T5-job', detailIds: [1] }, requestId: 't5-c' });
+      const calculated = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 't5-calc' });
+      const groupRow = await pool.query<{ group_key: string; cut_group_id: string | number }>(
+        'SELECT group_key, cut_group_id FROM cut_group WHERE cut_job_id = $1 LIMIT 1',
+        [job.cutJobId],
+      );
+      return {
+        repo,
+        cutJobId: job.cutJobId,
+        cutGroupId: Number(groupRow.rows[0].cut_group_id),
+        groupKey: groupRow.rows[0].group_key,
+        jobVersion: calculated.version,
+      };
+    }
+
+    // A move that is geometrically valid (within usable area, no overlap) but
+    // NOT identical to the auto position (50mm offset), so first save is not a no-op.
+    const validMove = { itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 50, yMm: 50, rotated: false };
+
+    it('rejects stale jobVersion with 409 CUT_STALE_VERSION', async () => {
+      const { repo, cutJobId, cutGroupId } = await createSinglePieceJob();
+      await expect(
+        repo.saveManualLayout({
+          currentUser: currentUser(), cutJobId, cutGroupId,
+          jobVersion: 9999, placements: [validMove], active: true,
+        }),
+      ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_STALE_VERSION' });
+    });
+
+    it('rejects when recalc is required (basis mismatch) with 409 CUT_RECALC_REQUIRED', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await createSinglePieceJob();
+      // Shift a dimension so basisOf(currentInputs) differs from last_calc_basis.
+      await pool.query('UPDATE order_details SET width = width + 100 WHERE detail_id = 1');
+      try {
+        await expect(
+          repo.saveManualLayout({
+            currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [validMove], active: true,
+          }),
+        ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_RECALC_REQUIRED' });
+      } finally {
+        await pool.query('UPDATE order_details SET width = width - 100 WHERE detail_id = 1');
+      }
+    });
+
+    it('rejects placements for non-existent cutGroupId with 404 CUT_GROUP_NOT_FOUND', async () => {
+      const { repo, cutJobId, jobVersion } = await createSinglePieceJob();
+      await expect(
+        repo.saveManualLayout({
+          currentUser: currentUser(), cutJobId, cutGroupId: 999999,
+          jobVersion, placements: [validMove], active: true,
+        }),
+      ).rejects.toMatchObject({ statusCode: 404, code: 'CUT_GROUP_NOT_FOUND' });
+    });
+
+    it('rejects moves that drop a detail (incomplete set) with 422 CUT_MANUAL_LAYOUT_INVALID', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await createSinglePieceJob();
+      // Empty move list: det-1 is missing.
+      await expect(
+        repo.saveManualLayout({
+          currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [], active: true,
+        }),
+      ).rejects.toMatchObject({ statusCode: 422, code: 'CUT_MANUAL_LAYOUT_INVALID' });
+    });
+
+    it('rejects placements with a foreign sheetIndex with 422 CUT_MANUAL_LAYOUT_INVALID', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await createSinglePieceJob();
+      const foreignSheetMove = { itemId: 'det-1', instance: 1, sheetIndex: 99, xMm: 0, yMm: 0, rotated: false };
+      await expect(
+        repo.saveManualLayout({
+          currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [foreignSheetMove], active: true,
+        }),
+      ).rejects.toMatchObject({ statusCode: 422, code: 'CUT_MANUAL_LAYOUT_INVALID' });
+    });
+
+    it('rejects off-sheet placement with 422 CUT_MANUAL_LAYOUT_INVALID', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await createSinglePieceJob();
+      const offSheetMove = { itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 9999, yMm: 9999, rotated: false };
+      await expect(
+        repo.saveManualLayout({
+          currentUser: currentUser(), cutJobId, cutGroupId, jobVersion, placements: [offSheetMove], active: true,
+        }),
+      ).rejects.toMatchObject({ statusCode: 422, code: 'CUT_MANUAL_LAYOUT_INVALID' });
+    });
+
+    it('persists valid layout, bumps version, sets pdf_prewarm_state=pending, writes audit + bridge rows + outbox, returns enriched job', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await createSinglePieceJob();
+      // Pre-mark prewarm as ready to verify it gets reset.
+      await pool.query(`UPDATE cut_job SET pdf_prewarm_state = 'ready' WHERE cut_job_id = $1`, [cutJobId]);
+
+      const result = await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion,
+        placements: [validMove], active: true, requestId: 't5-happy',
+      });
+      const nextVersion = jobVersion + 1;
+
+      // Version bumped.
+      expect(result.version).toBe(nextVersion);
+      // manualLayout is per-group in groups[i].manualLayout.
+      const groupDto = result.groups.find((g) => g.cutGroupId === cutGroupId);
+      expect(groupDto?.manualLayout).not.toBeNull();
+      expect(groupDto?.manualLayout?.isActive).toBe(true);
+      expect(groupDto?.manualLayout?.isStale).toBe(false);
+
+      // pdf_prewarm_state reset to pending.
+      const jobRow = await pool.query(`SELECT pdf_prewarm_state, version FROM cut_job WHERE cut_job_id = $1`, [cutJobId]);
+      expect(jobRow.rows[0].pdf_prewarm_state).toBe('pending');
+      expect(Number(jobRow.rows[0].version)).toBe(nextVersion);
+
+      // Audit row exists with correct event + before/after.
+      const audit = await pool.query<{ audit_id: string | number; after_json: Record<string, unknown> }>(
+        `SELECT audit_id, after_json FROM audit_log WHERE event = 'cut_job.manual_layout_saved' AND entity_id = $1`,
+        [String(cutJobId)],
+      );
+      expect(audit.rows).toHaveLength(1);
+      expect(audit.rows[0].after_json).toMatchObject({ cutGroupId, active: true });
+
+      // Bridge rows: at least cut_group row + order row (order_id=9 from the fixture seed).
+      const bridge = await pool.query(
+        `SELECT entity_type, entity_id::bigint FROM audit_log_related_entity WHERE audit_id = $1`,
+        [audit.rows[0].audit_id],
+      );
+      const byType = new Map<string, number[]>();
+      for (const r of bridge.rows) {
+        const arr = byType.get(r.entity_type) ?? [];
+        arr.push(Number(r.entity_id));
+        byType.set(r.entity_type, arr);
+      }
+      expect(byType.get('cut_group')).toContain(cutGroupId);
+      expect(byType.get('order')).toContain(9); // order_id=9 from the fixture seed
+
+      // Outbox row with version-based idempotency key.
+      const outboxKey = `cut_job.manual_layout_saved:${cutJobId}:v${nextVersion}`;
+      const outbox = await pool.query(
+        `SELECT payload_json FROM outbox_events WHERE idempotency_key = $1`,
+        [outboxKey],
+      );
+      expect(outbox.rows).toHaveLength(1);
+      expect(outbox.rows[0].payload_json).toMatchObject({ cutJobId, cutGroupId, active: true });
+    });
+
+    it('outbox payload carries requestId', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await createSinglePieceJob();
+      await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion,
+        placements: [validMove], active: true, requestId: 'my-req-123',
+      });
+      const nextVersion = jobVersion + 1;
+      const outbox = await pool.query(
+        `SELECT payload_json FROM outbox_events WHERE idempotency_key = $1`,
+        [`cut_job.manual_layout_saved:${cutJobId}:v${nextVersion}`],
+      );
+      expect(outbox.rows[0].payload_json.requestId).toBe('my-req-123');
+    });
+
+    it('no-op short-circuit: identical re-save at same version does NOT bump version, audit, or outbox', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await createSinglePieceJob();
+      // First save: creates the row.
+      const saved = await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion,
+        placements: [validMove], active: true, requestId: 't5-noop-a',
+      });
+      const v1 = saved.version;
+
+      // Second save: same moves, same active, same based_on_job_version (v1) — no-op.
+      const result2 = await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId,
+        jobVersion: v1, placements: [validMove], active: true, requestId: 't5-noop-b',
+      });
+      expect(result2.version).toBe(v1); // no bump
+
+      // Only one audit row from the first save.
+      const auditCount = await pool.query(
+        `SELECT COUNT(*)::int n FROM audit_log WHERE event = 'cut_job.manual_layout_saved' AND entity_id = $1`,
+        [String(cutJobId)],
+      );
+      expect(auditCount.rows[0].n).toBe(1);
+
+      // No second outbox row.
+      const outboxCount = await pool.query(
+        `SELECT COUNT(*)::int n FROM outbox_events WHERE event_type = 'cut_job.manual_layout_saved' AND aggregate_id = $1`,
+        [String(cutJobId)],
+      );
+      expect(outboxCount.rows[0].n).toBe(1);
+    });
+
+    it('stale row re-saved with unchanged geometry is NOT a no-op (clears is_stale, bumps version)', async () => {
+      const { repo, cutJobId, cutGroupId, groupKey, jobVersion } = await createSinglePieceJob();
+      // First save.
+      const saved = await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion,
+        placements: [validMove], active: true, requestId: 't5-stale-a',
+      });
+      const v1 = saved.version;
+      // Verify saved.
+      const before = await repo.getManualLayoutByKey(cutJobId, groupKey);
+      expect(before?.isStale).toBe(false);
+
+      // Manually set is_stale=TRUE (simulates an upstream invalidation that did NOT
+      // change groupKey / group identity — e.g. a job-level audit event that calls
+      // invalidateManualLayoutsForJob with the SAME group_key).
+      await pool.query(
+        `UPDATE cut_group_manual_layout SET is_stale = TRUE WHERE cut_job_id = $1 AND group_key = $2`,
+        [cutJobId, groupKey],
+      );
+
+      // Re-save at current job version with IDENTICAL moves.
+      // Must NOT be short-circuited (is_stale=true overrides the geometry no-op).
+      const result2 = await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId,
+        jobVersion: v1, placements: [validMove], active: true, requestId: 't5-stale-b',
+      });
+      expect(result2.version).toBe(v1 + 1); // version bumped
+
+      // Stale cleared.
+      const after = await repo.getManualLayoutByKey(cutJobId, groupKey);
+      expect(after?.isStale).toBe(false);
+    });
+
+    it('optimistic-concurrency replay: re-send with the old jobVersion after a successful save → 409', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await createSinglePieceJob();
+      // First save bumps to v+1.
+      await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion,
+        placements: [validMove], active: true, requestId: 't5-oc-a',
+      });
+      // Retry with original (now stale) version.
+      await expect(
+        repo.saveManualLayout({
+          currentUser: currentUser(), cutJobId, cutGroupId,
+          jobVersion, // stale — job is now at jobVersion+1
+          placements: [validMove], active: true, requestId: 't5-oc-b',
+        }),
+      ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_STALE_VERSION' });
+    });
+
+    it('ignores client-supplied geometry — dims come from authoritative auto layout (Codex R24 #3)', async () => {
+      const { repo, cutJobId, cutGroupId, jobVersion } = await createSinglePieceJob();
+      // Supply obviously wrong dims (999x888) — the canonical output must use auto dims (600x400).
+      const moveWithWrongDims = {
+        itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 50, yMm: 50, rotated: false,
+        // width_mm / height_mm are NOT part of ManualMove; backend ignores any extras.
+      };
+      const result = await repo.saveManualLayout({
+        currentUser: currentUser(), cutJobId, cutGroupId, jobVersion,
+        placements: [moveWithWrongDims], active: true,
+      });
+      // Canonical piece must have the auto dims (600x400), not any client-supplied value.
+      // manualLayout is per-group in groups[i].manualLayout.
+      const groupDto = result.groups.find((g) => g.cutGroupId === cutGroupId);
+      const layout = groupDto?.manualLayout;
+      expect(layout).not.toBeNull();
+      const piece = layout!.sheets[0].placements.pieces[0];
+      expect(piece.width_mm).toBe(600);
+      expect(piece.height_mm).toBe(400);
+    });
+  });
 });
