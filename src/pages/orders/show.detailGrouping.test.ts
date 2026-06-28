@@ -25,4 +25,20 @@ describe('show.tsx detail grouping integration', () => {
     // dataSource is grouped ONLY when groupingActive; otherwise plain details
     expect(src).toMatch(/groupingActive\s*\?\s*[^:]*buildGroupedRows[\s\S]*?:\s*details/);
   });
+  it('keeps grouping visible during cut-select (no !cutSelectMode suppression)', () => {
+    expect(src).not.toMatch(/groupingActive[^\n]*!cutSelectMode/);
+  });
+  it('renders a group checkbox on separators and filters non-numeric keys', () => {
+    expect(src).toContain('groupCheckboxState');
+    expect(src).toContain('toggleGroupSelection');
+    expect(src).toContain('filterNumericKeys');
+    expect(src).toContain('renderCell');
+  });
+  it('passes includeLeadingSeparator while cut-selecting', () => {
+    expect(src).toContain('includeLeadingSeparator');
+  });
+  it('renders the group label on separator rows + resolves it via groupLabelOf', () => {
+    expect(src).toContain('groupLabelOf');
+    expect(src).toContain('row.label');
+  });
 });

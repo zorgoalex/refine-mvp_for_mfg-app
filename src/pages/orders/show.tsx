@@ -1,9 +1,9 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Table, Breadcrumb, message, Dropdown, Tooltip, Space } from "antd";
+import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
@@ -35,6 +35,7 @@ import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsP
 import { buildGroupedRows, GROUP_TINT_COUNT } from './detailGrouping';
 import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
+import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
 import {
   applyOrderDetailColumnSettings,
@@ -374,14 +375,32 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
   const grouping = useDetailGrouping(groupingUserId, record?.order_id ?? 'new');
 
-  // Active only when a field is chosen, separation is on, and NOT cut-selecting.
-  const groupingActive = !!grouping.state.field && grouping.state.showSeparation && !cutSelectMode;
+  // Active only when a field is chosen and separation is on (grouping stays
+  // visible even during cut-select so users can select by group).
+  const groupingActive = !!grouping.state.field && grouping.state.showSeparation;
+
+  // Resolve a human-readable group label per field using the show page lookup maps.
+  const groupLabelOf = useCallback((sample: any, field: string) => {
+    switch (field) {
+      case 'milling': return millingTypesMap.get(sample.milling_type_id) || '—';
+      case 'material': return resolveDetailMaterialName(sample, resolvedNameByDetailId, materialsMap) || '—';
+      case 'film': return (sample.film_id != null ? filmsMap.get(sample.film_id) : '') || '—';
+      case 'edge': return edgeTypesMap.get(sample.edge_type_id) || '—';
+      case 'price': return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
+      case 'note': return (sample.note || '').trim() || '—';
+      default: return '—';
+    }
+  }, [millingTypesMap, materialsMap, resolvedNameByDetailId, filmsMap, edgeTypesMap]);
 
   // Grouped (clustered + separators) only when active; otherwise RAW order.
-  // No explicit annotation: show.tsx does NOT import OrderDetail; let TS infer.
+  // During cut-select we include a leading separator so the first group also
+  // gets a header checkbox. No explicit annotation: show.tsx does NOT import
+  // OrderDetail; let TS infer.
   const groupedDataSource = useMemo(
-    () => (groupingActive ? buildGroupedRows(details, grouping.state.field!) : details),
-    [groupingActive, details, grouping.state.field],
+    () => (groupingActive
+      ? buildGroupedRows(details, grouping.state.field!, { includeLeadingSeparator: cutSelectMode, groupLabelOf })
+      : details),
+    [groupingActive, details, grouping.state.field, cutSelectMode, groupLabelOf],
   );
 
   // Hook for updating order
@@ -730,6 +749,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             return { colSpan: index === 0 ? visibleDetailColumns.length : 0 };
           },
           render: (value: any, row: any, renderIndex: number) => {
+            if (row?.kind === 'separator') {
+              return index === 0
+                ? <span style={{ fontWeight: 600, color: 'var(--app-text-muted)' }}>{row.label}</span>
+                : null;
+            }
             const detail = asDetail(row);
             if (!detail) return null;
             const detailValue = dataIndex ? detail[dataIndex] : value;
@@ -1152,7 +1176,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 cutSelectMode
                   ? {
                       selectedRowKeys: cutSelectedDetailIds,
-                      onChange: (keys) => setCutSelectedDetailIds(keys.map(Number)),
+                      onChange: (keys) => setCutSelectedDetailIds(filterNumericKeys(keys)),
+                      getCheckboxProps: (row: any) => (row?.kind === 'separator' ? { disabled: true } : {}),
+                      renderCell: (_c: boolean, row: any, _i: number, node: React.ReactNode) => {
+                        if (row?.kind !== 'separator') return node;
+                        const state = groupCheckboxState(cutSelectedDetailIds, row.selectionKeys);
+                        if (state === 'empty') return null;
+                        return (
+                          <Checkbox
+                            checked={state === 'checked'}
+                            indeterminate={state === 'indeterminate'}
+                            onChange={() => setCutSelectedDetailIds(filterNumericKeys(toggleGroupSelection(cutSelectedDetailIds, row.selectionKeys)))}
+                          />
+                        );
+                      },
                     }
                   : undefined
               }
