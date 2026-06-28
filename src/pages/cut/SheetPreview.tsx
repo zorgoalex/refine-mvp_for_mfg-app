@@ -7,6 +7,7 @@ const sideLabelStyle: React.CSSProperties = {
   color: '#595959',
   fontSize: 12,
   fontWeight: 600,
+  fontVariantNumeric: 'tabular-nums',
   whiteSpace: 'nowrap',
   pointerEvents: 'none',
 };
@@ -30,7 +31,7 @@ export interface SheetPreviewProps {
 
 function renderOverlayTooltip(overlay: CutPieceOverlay): React.ReactNode {
   return (
-    <div style={{ maxWidth: 520, maxHeight: 420, overflow: 'auto' }}>
+    <div className="app-tabular" style={{ maxWidth: 520, maxHeight: 420, overflow: 'auto' }}>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>
         Заказ {overlay.orderId ?? '—'} · позиция {overlay.detailNumber ?? '—'}
       </div>
@@ -101,10 +102,11 @@ export function SheetPreview({
         <span style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}>
           <Tooltip title="Открыть лист в полном размере">
             <img
+              className="app-image-outline"
               src={src}
               alt={alt}
               onClick={onOpen}
-              style={{ height: thumbHeight, width: 'auto', maxWidth: '100%', cursor: 'pointer', border: '1px solid #f0f0f0', display: 'block' }}
+              style={{ height: thumbHeight, width: 'auto', maxWidth: '100%', cursor: 'pointer', display: 'block' }}
             />
           </Tooltip>
           <OverlayLayer overlays={overlays} onClick={onOpen} />
@@ -124,10 +126,11 @@ export function SheetPreview({
               image can actually grow to this width. */}
           <span style={{ position: 'relative', display: 'inline-block', maxWidth: 1800, width: '100%' }}>
             <img
+              className="app-image-outline"
               src={src}
               alt={alt}
               onDoubleClick={onCollapse}
-              style={{ width: '100%', border: '1px solid #f0f0f0', display: 'block' }}
+              style={{ width: '100%', display: 'block' }}
             />
             <OverlayLayer overlays={overlays} onDoubleClick={onCollapse} />
           </span>

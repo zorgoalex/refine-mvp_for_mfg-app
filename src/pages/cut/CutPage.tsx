@@ -1159,7 +1159,7 @@ export const CutPage: React.FC = () => {
             size="small"
             title={title}
             extra={
-              <Button size="small" onClick={() => downloadGroupPdf(group)} loading={busy}>
+              <Button className="app-hit-area-sm" size="small" onClick={() => downloadGroupPdf(group)} loading={busy}>
                 Скачать PDF
               </Button>
             }
@@ -1193,18 +1193,21 @@ export const CutPage: React.FC = () => {
                         : sheetPreviewItemStyle(widthMm, heightMm, rotate90)
                     }
                   >
-                    <Space>
-                      <Button size="small" onClick={() => loadSheet(group, sheet.sheetIndex)}>
-                        Лист {sheet.sheetIndex + 1}
-                      </Button>
-                      <Button size="small" onClick={() => downloadSheetSvg(group, sheet.sheetIndex)}>
-                        SVG
-                      </Button>
-                    </Space>
-                    {/* Material of the details on this sheet. */}
-                    <div style={{ marginTop: 2, color: '#8c8c8c', fontSize: 12 }}>
-                      {matName ?? 'материал не задан'}
-                      {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
+                    <div className="cut-sheet-preview-header">
+                      <div className="cut-sheet-preview-title app-tabular">
+                        <strong>Лист {sheet.sheetIndex + 1}</strong>
+                        {' · '}
+                        {matName ?? 'материал не задан'}
+                        {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
+                      </div>
+                      <Space className="cut-sheet-preview-actions" size={8}>
+                        <Button className="app-hit-area-sm" size="small" onClick={() => loadSheet(group, sheet.sheetIndex)}>
+                          Открыть
+                        </Button>
+                        <Button className="app-hit-area-sm" size="small" onClick={() => downloadSheetSvg(group, sheet.sheetIndex)}>
+                          SVG
+                        </Button>
+                      </Space>
                     </div>
                     {sheetThumbs[key] && !sheetImages[key] && (
                       <SheetPreview
