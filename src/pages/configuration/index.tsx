@@ -596,7 +596,7 @@ export const ConfigurationPage: React.FC = () => {
         onChange={setActiveTab}
         items={tabItems}
         type="card"
-        tabBarGutter={8}
+        tabBarGutter={4}
       />
     </Card>
   );

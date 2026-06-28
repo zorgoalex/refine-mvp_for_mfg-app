@@ -1,6 +1,6 @@
 // src/pages/orders/detailGrouping.test.ts
 import { describe, it, expect } from 'vitest';
-import { GROUP_FIELDS, extractGroupValue, buildGroupedRows } from './detailGrouping';
+import { GROUP_FIELDS, extractGroupValue, buildGroupedRows, selectedGroupLabelForCut } from './detailGrouping';
 import type { OrderDetail } from '../../types/orders';
 
 const d = (over: Partial<OrderDetail>): OrderDetail =>
@@ -86,5 +86,30 @@ describe('buildGroupedRows', () => {
     );
     const sepKeys = rows.filter(r => r.kind === 'separator').map(r => (r as any).key);
     expect(new Set(sepKeys).size).toBe(sepKeys.length);
+  });
+});
+
+describe('selectedGroupLabelForCut', () => {
+  it('returns the current group label when all selected details are in one group', () => {
+    const details = [
+      d({ detail_id: 11, film_id: 5 }),
+      d({ detail_id: 12, film_id: 5 }),
+      d({ detail_id: 13, film_id: 7 }),
+    ];
+
+    expect(
+      selectedGroupLabelForCut(details, [11, 12], 'film', () => 'Кашемир-Фокус прайм'),
+    ).toBe('Кашемир-Фокус прайм');
+  });
+
+  it('returns null for mixed groups, missing grouping, or empty labels', () => {
+    const details = [
+      d({ detail_id: 11, milling_type_id: 5 }),
+      d({ detail_id: 12, milling_type_id: 7 }),
+    ];
+
+    expect(selectedGroupLabelForCut(details, [11, 12], 'milling', () => 'Модерн')).toBeNull();
+    expect(selectedGroupLabelForCut(details, [11], null, () => 'Модерн')).toBeNull();
+    expect(selectedGroupLabelForCut(details, [11], 'milling', () => '—')).toBeNull();
   });
 });

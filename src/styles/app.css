@@ -573,7 +573,15 @@ html {
 }
 
 .configuration-tabs-wrap.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
-  margin: 2px 0 4px 0 !important;
+  min-height: 20px;
+  margin: 1px 0 2px 0 !important;
+  padding: 2px 8px !important;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.configuration-tabs-wrap.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-btn {
+  line-height: 16px;
 }
 
 /* ----- Order-detail visual grouping (purely visual; non-functional rows) ----- */
