@@ -26,4 +26,12 @@ describe('edit-form detail grouping', () => {
   it('makes row selection separator-aware', () => {
     expect(table).toContain('getCheckboxProps');
   });
+  it('renders a persisted-only group checkbox + group label on separators when cutSelectable', () => {
+    expect(table).toContain('cutSelectable');
+    expect(table).toContain('groupCheckboxState');
+    expect(table).toContain('toggleGroupSelection');
+    expect(table).toMatch(/detail_id\s*!=\s*null/); // groupKeyOf excludes temp-only rows
+    expect(table).toContain('groupLabelOf');
+    expect(table).toContain('row as any).label');
+  });
 });
