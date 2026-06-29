@@ -20,6 +20,7 @@ export {
   orientPieceRect,
   snapDraggedPiece,
   rotatePiece,
+  moveAllowed,
 } from '@shared/cut-geometry';
 
 export type {
@@ -29,6 +30,8 @@ export type {
   ManualViolation,
   GapParams,
   PieceLabelSnapshot,
+  SnapResult,
+  MoveBlockReason,
 } from '@shared/cut-geometry';
 
 // ── FE-only: movesFromSheets ──────────────────────────────────────────────────

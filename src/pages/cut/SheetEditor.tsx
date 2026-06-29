@@ -64,6 +64,10 @@ interface DragState {
   /** Offset (pointer − piece oriented top-left) in the target sheet's SVG space. */
   svgOffsetX: number;
   svgOffsetY: number;
+  /** Snap guide coordinate in mm along the X axis (null = no snap active on X). */
+  guideXmm: number | null;
+  /** Snap guide coordinate in mm along the Y axis (null = no snap active on Y). */
+  guideYmm: number | null;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -71,8 +75,8 @@ interface DragState {
 /** Maximum display width (px) of a single sheet SVG. */
 const MAX_SVG_WIDTH_PX = 700;
 
-/** Snap threshold (mm): snap engages when the nearest candidate is within this range. */
-const SNAP_THRESHOLD_MM = 10;
+/** Snap threshold (px): snap engages when the nearest candidate is within this many screen pixels. */
+const SNAP_THRESHOLD_PX = 10;
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
@@ -337,6 +341,16 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
       const { usableW, usableH } = usableExtent(targetSheet.placements);
 
+      // Compute the target sheet's mm-per-pixel ratio for scale-aware snap threshold.
+      const targetOriented = orientPieceRect(
+        { x: 0, y: 0, w: targetSheet.placements.sheet_width_mm, h: targetSheet.placements.sheet_height_mm },
+        targetSheet.placements.sheet_width_mm,
+        targetSheet.placements.sheet_height_mm,
+        ls,
+      );
+      const targetSvgDisplayW = Math.min(MAX_SVG_WIDTH_PX, targetOriented.vw);
+      const targetMmPerPx = targetOriented.vw / targetSvgDisplayW;
+
       // Apply snap (shared geometry — no inline math)
       const snapped = snapDraggedPiece({
         rect: { x: raw.x_mm, y: raw.y_mm, w: piece.width_mm, h: piece.height_mm },
@@ -344,7 +358,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         usableW,
         usableH,
         gapMm,
-        thresholdMm: SNAP_THRESHOLD_MM,
+        thresholdMm: SNAP_THRESHOLD_PX * targetMmPerPx,
       });
 
       const clamped = clampToUsable(
@@ -362,6 +376,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         currentY_mm: clamped.y_mm,
         svgOffsetX,
         svgOffsetY,
+        guideXmm: snapped.guideX,
+        guideYmm: snapped.guideY,
       };
       dragRef.current = next;
       setDrag(next);
@@ -584,6 +600,27 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 );
               })()}
 
+              {/* Snap guide lines — shown only on the drop-target sheet while dragging */}
+              {isDropTarget && drag && (drag.guideXmm !== null || drag.guideYmm !== null) && (() => {
+                const strokeMm = mmPerPx; // ~1px on screen
+                const guides: JSX.Element[] = [];
+                if (drag.guideXmm !== null) {
+                  const g = orientPieceRect(
+                    { x: trim.left + drag.guideXmm - strokeMm / 2, y: trim.top, w: strokeMm, h: usableH },
+                    W, H, landscape,
+                  );
+                  guides.push(<rect key="gx" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
+                }
+                if (drag.guideYmm !== null) {
+                  const g = orientPieceRect(
+                    { x: trim.left, y: trim.top + drag.guideYmm - strokeMm / 2, w: usableW, h: strokeMm },
+                    W, H, landscape,
+                  );
+                  guides.push(<rect key="gy" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
+                }
+                return <>{guides}</>;
+              })()}
+
               {/* Pieces */}
               {placements.pieces.map((piece) => {
                 // Apply canonical orientation transform (shared, matches preview renderer)
@@ -665,6 +702,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                         currentY_mm: piece.y_mm,
                         svgOffsetX: pt.x - origin.x,
                         svgOffsetY: pt.y - origin.y,
+                        guideXmm: null,
+                        guideYmm: null,
                       };
                       dragRef.current = newDrag;
                       setDrag(newDrag);

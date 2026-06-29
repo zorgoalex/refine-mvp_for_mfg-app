@@ -15,4 +15,8 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/<svg/);
     expect(src).toMatch(/onChange\(/);
   });
+  it('uses scale-aware snap threshold (SNAP_THRESHOLD_PX) and captures guide lines (guideXmm)', () => {
+    expect(src).toMatch(/SNAP_THRESHOLD_PX/);
+    expect(src).toMatch(/guideXmm/);
+  });
 });
