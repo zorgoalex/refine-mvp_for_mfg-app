@@ -423,3 +423,28 @@ export function reconstructManualSheets(args: {
     sheets: Array.from(byIndex.entries()).map(([sheetIndex, placements]) => ({ sheetIndex, placements })),
   };
 }
+
+export type MoveBlockReason = 'material' | 'film';
+
+/**
+ * Guard for moving a piece onto a target sheet. Mirrors the cut grouping rules:
+ * when splitByMaterial, materials must match; when combineFilms is off, films
+ * must match. In the per-group editor these always hold; the guard defends
+ * against data anomalies and documents the invariant.
+ */
+export function moveAllowed(args: {
+  pieceMaterialTypeId: number | null;
+  pieceFilmId: number | null;
+  targetMaterialTypeId: number | null;
+  targetFilmId: number | null;
+  splitByMaterial: boolean;
+  combineFilms: boolean;
+}): { ok: true } | { ok: false; reason: MoveBlockReason } {
+  if (args.splitByMaterial && args.pieceMaterialTypeId !== args.targetMaterialTypeId) {
+    return { ok: false, reason: 'material' };
+  }
+  if (!args.combineFilms && args.pieceFilmId !== args.targetFilmId) {
+    return { ok: false, reason: 'film' };
+  }
+  return { ok: true };
+}

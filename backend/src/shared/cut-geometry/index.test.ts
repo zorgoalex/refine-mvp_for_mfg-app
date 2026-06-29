@@ -12,6 +12,7 @@ import {
   orientPieceRect,
   rotatePiece,
   snapDraggedPiece,
+  moveAllowed,
 } from './index';
 
 const sheet = {
@@ -204,5 +205,32 @@ describe('snapDraggedPiece', () => {
     expect(r.y).toBe(103);
     expect(r.guideX).toBe(103);
     expect(r.guideY).toBe(103);
+  });
+});
+
+describe('moveAllowed', () => {
+  const base = {
+    pieceMaterialTypeId: 1, pieceFilmId: 10,
+    targetMaterialTypeId: 1, targetFilmId: 10,
+    splitByMaterial: true, combineFilms: false,
+  };
+
+  it('allows matching material and film', () => {
+    expect(moveAllowed(base)).toEqual({ ok: true });
+  });
+  it('blocks different material when splitByMaterial', () => {
+    expect(moveAllowed({ ...base, targetMaterialTypeId: 2 })).toEqual({ ok: false, reason: 'material' });
+  });
+  it('ignores material mismatch when splitByMaterial is false', () => {
+    expect(moveAllowed({ ...base, targetMaterialTypeId: 2, splitByMaterial: false })).toEqual({ ok: true });
+  });
+  it('blocks different film when combineFilms is false', () => {
+    expect(moveAllowed({ ...base, targetFilmId: 20 })).toEqual({ ok: false, reason: 'film' });
+  });
+  it('ignores film mismatch when combineFilms is true', () => {
+    expect(moveAllowed({ ...base, targetFilmId: 20, combineFilms: true })).toEqual({ ok: true });
+  });
+  it('reports material first when both mismatch', () => {
+    expect(moveAllowed({ ...base, targetMaterialTypeId: 2, targetFilmId: 20 })).toEqual({ ok: false, reason: 'material' });
   });
 });
