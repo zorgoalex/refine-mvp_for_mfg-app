@@ -117,10 +117,20 @@ export function selectedGroupLabelForCut(
   );
   if (selectedDetails.length === 0) return null;
 
-  const groupValues = new Set(selectedDetails.map((detail) => extractGroupValue(detail, field)));
-  if (groupValues.size !== 1) return null;
+  const labels: string[] = [];
+  const seenGroups = new Set<string>();
+  const seenLabels = new Set<string>();
 
-  const label = groupLabelOf(selectedDetails[0], field).trim();
-  if (!label || ['—', '-', '–'].includes(label)) return null;
-  return label;
+  for (const detail of selectedDetails) {
+    const groupValue = extractGroupValue(detail, field);
+    if (seenGroups.has(groupValue)) continue;
+    seenGroups.add(groupValue);
+
+    const label = groupLabelOf(detail, field).trim();
+    if (!label || ['—', '-', '–'].includes(label) || seenLabels.has(label)) continue;
+    seenLabels.add(label);
+    labels.push(label);
+  }
+
+  return labels.length > 0 ? labels.join(', ') : null;
 }

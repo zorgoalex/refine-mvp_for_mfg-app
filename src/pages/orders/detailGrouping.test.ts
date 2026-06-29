@@ -90,7 +90,7 @@ describe('buildGroupedRows', () => {
 });
 
 describe('selectedGroupLabelForCut', () => {
-  it('returns the current group label when all selected details are in one group', () => {
+  it('returns the current group label when selected details are in one group', () => {
     const details = [
       d({ detail_id: 11, film_id: 5 }),
       d({ detail_id: 12, film_id: 5 }),
@@ -102,13 +102,35 @@ describe('selectedGroupLabelForCut', () => {
     ).toBe('Кашемир-Фокус прайм');
   });
 
-  it('returns null for mixed groups, missing grouping, or empty labels', () => {
+  it('returns all unique selected group labels in detail order', () => {
+    const details = [
+      d({ detail_id: 11, milling_type_id: 5 }),
+      d({ detail_id: 12, milling_type_id: 7 }),
+      d({ detail_id: 13, milling_type_id: 5 }),
+      d({ detail_id: 14, milling_type_id: 9 }),
+    ];
+    const labels = new Map([
+      [5, 'Модерн'],
+      [7, 'Классика'],
+      [9, 'Модерн'],
+    ]);
+
+    expect(
+      selectedGroupLabelForCut(
+        details,
+        [11, 12, 13, 14],
+        'milling',
+        (sample) => labels.get(sample.milling_type_id) ?? '—',
+      ),
+    ).toBe('Модерн, Классика');
+  });
+
+  it('returns null for missing grouping or empty labels', () => {
     const details = [
       d({ detail_id: 11, milling_type_id: 5 }),
       d({ detail_id: 12, milling_type_id: 7 }),
     ];
 
-    expect(selectedGroupLabelForCut(details, [11, 12], 'milling', () => 'Модерн')).toBeNull();
     expect(selectedGroupLabelForCut(details, [11], null, () => 'Модерн')).toBeNull();
     expect(selectedGroupLabelForCut(details, [11], 'milling', () => '—')).toBeNull();
   });
