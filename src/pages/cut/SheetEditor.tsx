@@ -766,6 +766,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       setMenu({ clientX: e.clientX, clientY: e.clientY, sheetIndex, item_id: piece.item_id, instance: piece.instance });
                     }}
                     onPointerDown={(e) => {
+                      if (e.button !== 0) return;
                       setMenu(null);
                       e.stopPropagation();
                       const svgEl = svgRefsMap.current.get(sheetIndex);

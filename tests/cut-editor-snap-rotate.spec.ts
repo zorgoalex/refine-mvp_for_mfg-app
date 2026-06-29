@@ -515,6 +515,64 @@ test.describe('Cut editor: snap guides, rotate menu, cross-sheet guard (mocked-l
     await expect(page.getByTestId('piece-rect-0-det-1-0')).not.toBeVisible({ timeout: 3000 });
   });
 
+  // ── SR5: right-click opens menu without disturbing layout ─────────────────
+  //
+  // Regression guard for the phantom-drag bug: a right-click (button=2) on a
+  // piece used to fire onPointerDown and set drag state BEFORE onContextMenu
+  // ran. The pointerup that followed would then commit a zero-displacement
+  // same-sheet "drag" (calling onChange with unchanged positions) and the
+  // drag cursor would flash. Fix: onPointerDown returns early for button !== 0.
+  //
+  // Assertions:
+  //   1. Right-click opens the context menu (onContextMenu still works).
+  //   2. «Поворот» item is present and visible.
+  //   3. Escape closes the menu.
+  //   4. No .ant-message-notice warning appeared (no cross-sheet guard fired).
+  //   5. Piece is unchanged: still on sheet 0, bounding box identical to before
+  //      (not rotated, not moved).
+  test('SR5: right-click opens menu without disturbing layout', async ({ page }) => {
+    test.setTimeout(90000);
+    await setupMocks(page);
+    await openJob(page);
+    await enterEditor(page);
+
+    const rectA = page.getByTestId('piece-rect-0-det-1-0');
+    await expect(rectA).toBeVisible();
+
+    // Record bounding box before right-click to detect any unintended rotation or move.
+    const boxBefore = await rectA.boundingBox();
+    expect(boxBefore).not.toBeNull();
+
+    // Right-click piece A — onContextMenu should fire and open the menu.
+    await rectA.click({ button: 'right' });
+
+    // 1. Context menu portal must be visible.
+    const ctxMenu = page.getByTestId('piece-context-menu');
+    await expect(ctxMenu).toBeVisible({ timeout: 5000 });
+
+    // 2. «Поворот» item must be present (piece det-1 has filmTexture=false → not disabled).
+    await expect(ctxMenu.getByText('Поворот')).toBeVisible();
+
+    // 3. Escape closes the menu.
+    await page.keyboard.press('Escape');
+    await expect(ctxMenu).not.toBeVisible({ timeout: 3000 });
+
+    // 4. No ant message warning (no material/film guard fired spuriously).
+    await expect(page.locator('.ant-message-notice')).not.toBeVisible();
+
+    // 5. Piece is still on sheet 0 — not moved to sheet 1.
+    await expect(rectA).toBeVisible();
+    await expect(page.getByTestId('piece-rect-1-det-1-0')).not.toBeVisible();
+
+    // 5b. Bounding box unchanged — right-click did not rotate or reposition the piece.
+    const boxAfter = await rectA.boundingBox();
+    expect(boxAfter).not.toBeNull();
+    expect(Math.abs(boxAfter!.x - boxBefore!.x)).toBeLessThan(2);
+    expect(Math.abs(boxAfter!.y - boxBefore!.y)).toBeLessThan(2);
+    expect(Math.abs(boxAfter!.width - boxBefore!.width)).toBeLessThan(2);
+    expect(Math.abs(boxAfter!.height - boxBefore!.height)).toBeLessThan(2);
+  });
+
   // ── SR4: cross-sheet drag blocked by material mismatch ─────────────────────
   //
   // Fixture engineering: piece det-1 has sheetMaterialTypeId=2, but the editing
