@@ -24,4 +24,10 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/Поворот/);
     expect(src).toMatch(/createPortal/);
   });
+  it('imports moveAllowed from cutLayoutGeometry for cross-sheet guard', () => {
+    expect(src).toMatch(/moveAllowed/);
+  });
+  it('accepts pieceMetaByItemId prop for per-piece material/film lookup', () => {
+    expect(src).toMatch(/pieceMetaByItemId/);
+  });
 });

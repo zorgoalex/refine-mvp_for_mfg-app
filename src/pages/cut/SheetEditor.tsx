@@ -22,6 +22,7 @@ import {
   rotatePiece,
   orientPieceRect,
   usableExtent,
+  moveAllowed,
 } from './cutLayoutGeometry';
 import type { ManualViolation } from './cutLayoutGeometry';
 import { buildPieceLabelLines, fitLabelScale } from './pieceLabel';
@@ -41,6 +42,16 @@ export interface SheetEditorProps {
    * Falls back to piece.label when an item_id is absent from the map.
    */
   labelInfoByItemId: Map<string, { orderId: number | null; detailNumber: number | null; qty: number | null }>;
+  /** Job-level flag: when true, pieces from different materials cannot share a sheet. */
+  splitByMaterial: boolean;
+  /** Job-level flag: when false, pieces with different films cannot share a sheet. */
+  combineFilms: boolean;
+  /** The target group's sheet material type id (null = no spec). */
+  groupMaterialTypeId: number | null;
+  /** The target group's film id (null = no film). */
+  groupFilmId: number | null;
+  /** item_id ("det-<id>") → its detail's material/film for cross-sheet guard. */
+  pieceMetaByItemId: Map<string, { materialTypeId: number | null; filmId: number | null }>;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────
@@ -235,7 +246,20 @@ function buildDisplaySheets(
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function SheetEditor(props: SheetEditorProps): JSX.Element {
-  const { sheets, gap, filmTextureByItemId, landscape, onChange, violations, labelInfoByItemId } = props;
+  const {
+    sheets,
+    gap,
+    filmTextureByItemId,
+    landscape,
+    onChange,
+    violations,
+    labelInfoByItemId,
+    splitByMaterial,
+    combineFilms,
+    groupMaterialTypeId,
+    groupFilmId,
+    pieceMetaByItemId,
+  } = props;
 
   const [selected, setSelected] = useState<SelectedPiece | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -263,6 +287,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   onChangeRef.current = onChange;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+
+  // Guard ref: keeps cross-sheet move policy current for the window-level handleUp handler.
+  const guardRef = useRef({ splitByMaterial, combineFilms, groupMaterialTypeId, groupFilmId, pieceMetaByItemId });
+  guardRef.current = { splitByMaterial, combineFilms, groupMaterialTypeId, groupFilmId, pieceMetaByItemId };
 
   // Ref map: sheetIndex → SVG element (for hit testing during cross-sheet drag)
   const svgRefsMap = useRef<Map<number, SVGSVGElement>>(new Map());
@@ -415,6 +443,30 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
       }
 
       const updatedPiece: SheetPlacementPiece = { ...piece, x_mm: currentX_mm, y_mm: currentY_mm };
+
+      // Cross-sheet move guard: abort (snap-back) if material or film policy is violated.
+      if (targetSheetIndex !== sourceSheetIndex) {
+        const g = guardRef.current;
+        const meta = g.pieceMetaByItemId.get(item_id) ?? { materialTypeId: null, filmId: null };
+        const verdict = moveAllowed({
+          pieceMaterialTypeId: meta.materialTypeId,
+          pieceFilmId: meta.filmId,
+          targetMaterialTypeId: g.groupMaterialTypeId,
+          targetFilmId: g.groupFilmId,
+          splitByMaterial: g.splitByMaterial,
+          combineFilms: g.combineFilms,
+        });
+        if (!verdict.ok) {
+          void message.warning(
+            verdict.reason === 'material'
+              ? 'Нельзя переместить: другой материал листа'
+              : 'Нельзя переместить: другая плёнка (объединение плёнок выключено)',
+          );
+          dragRef.current = null;
+          setDrag(null);
+          return; // piece stays on source sheet (snap-back)
+        }
+      }
 
       // Build next sheets immutably: move piece from source → target
       const nextSheets = currentSheets.map((s) => {

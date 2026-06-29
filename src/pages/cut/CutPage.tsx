@@ -815,6 +815,25 @@ export const CutPage: React.FC = () => {
     [workingSheets, job?.items],
   );
 
+  // The group currently open in the editor (used to pass material/film target to SheetEditor).
+  const editingGroup = useMemo(
+    () => job?.groups.find((g) => g.cutGroupId === editingGroupId) ?? null,
+    [job, editingGroupId],
+  );
+
+  // Per-piece material/film map for the cross-sheet move guard in SheetEditor.
+  // Keyed by piece item_id format "det-<orderDetailId>".
+  const pieceMetaByItemId = useMemo(() => {
+    const m = new Map<string, { materialTypeId: number | null; filmId: number | null }>();
+    for (const it of job?.items ?? []) {
+      m.set(`det-${it.orderDetailId}`, {
+        materialTypeId: it.detail?.sheetMaterialTypeId ?? null,
+        filmId: it.detail?.filmId ?? null,
+      });
+    }
+    return m;
+  }, [job?.items]);
+
   // Memoized label-info map for the active editor: keyed by piece.item_id ("det-N"),
   // provides orderId, detailNumber and qty for the 3-line piece label.
   const editorLabelInfoByItemId = useMemo(() => {
@@ -1491,6 +1510,11 @@ export const CutPage: React.FC = () => {
                   landscape={!sheetPortrait}
                   onChange={handleEditorChange}
                   violations={violations}
+                  splitByMaterial={job.splitByMaterial}
+                  combineFilms={job.combineFilms}
+                  groupMaterialTypeId={editingGroup?.sheetMaterialTypeId ?? null}
+                  groupFilmId={editingGroup?.filmId ?? null}
+                  pieceMetaByItemId={pieceMetaByItemId}
                 />
               </div>
             )}
