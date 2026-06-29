@@ -565,13 +565,12 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
 
   // ── Scenario 3: calculate with override on mixed-material + no_sheet_spec ─
 
-  it('Scenario 3: calculate with override — details spanning two materials + one no_sheet_spec → all placed on chosen sheet, job = ready', async () => {
+  it('Scenario 3: calculate with override — details spanning two materials + one no_sheet_spec → all placed on chosen sheet (split=true, Variant B), job = ready, requiresRecalc=false', async () => {
     // Details used:
     //   detail 1 (SMT 1), detail 2 (SMT 2), detail 3 (no_sheet_spec = NULL)
-    // Under legacy behavior, detail 2 and detail 3 would either fan out to a
-    // different group or raise CutNoSheetSpecError. With override = SMT 1
-    // (2800×2070), applySheetOverride rewrites ALL items to that sheet, so
-    // freecut sees ONE group with the override sheet and places every detail.
+    // Variant B: applySheetOverride rewrites ALL items to the override sheet
+    // regardless of split_by_material. split_by_material stays at the DEFAULT (true)
+    // to prove the new behavior — no need to flip it off.
     const repo = new PgCutRepository(database, makeEchoFreecut());
 
     // detail 3 has no_sheet_spec → createJob would reject it via the eligibility
@@ -602,30 +601,20 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
       requestId: 's3-set',
     });
     expect(afterSet.sheetMaterialTypeId).toBe(1);
+    // split_by_material is still true (default) — Variant B: override forces all regardless.
+    expect(afterSet.splitByMaterial).toBe(true);
 
-    // Cram-all is now opt-in: under split_by_material=true (default, migration 043)
-    // the override only fills no-sheet details. To force EVERY detail onto the one
-    // chosen sheet (this scenario's intent) turn split_by_material OFF.
-    const afterSplit = await repo.setSplitByMaterial({
-      currentUser: currentUser(),
-      cutJobId: job.cutJobId,
-      splitByMaterial: false,
-      version: afterSet.version,
-      requestId: 's3-split',
-    });
-    expect(afterSplit.splitByMaterial).toBe(false);
-
-    // Calculate: all items (detail 1, 2, 3) must be cut on SMT 1 → one group.
+    // Calculate: with Variant B override, all items (detail 1, 2, 3) must be cut on
+    // SMT 1 → one group, even though split_by_material=true.
     const calculated = await repo.calculate({
       currentUser: currentUser(),
       cutJobId: job.cutJobId,
-      version: afterSplit.version,
+      version: afterSet.version,
       requestId: 's3-calc',
     });
 
     expect(calculated.status).toBe('ready');
-    // With the override applied, all items fall into the same group (SMT 1).
-    // The echo freecut places them all → exactly 1 group.
+    // With the override applied to ALL items, freecut sees ONE group with override sheet.
     expect(calculated.groups).toHaveLength(1);
     expect(calculated.groups[0].sheetMaterialTypeId).toBe(1);
 
@@ -641,6 +630,12 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     // All items assigned to the same group.
     const groupIds = new Set(assignRows.rows.map((r) => Number(r.cut_group_id)));
     expect(groupIds.size).toBe(1);
+
+    // Variant B consistency check: basisOf is identical between calculate and
+    // loadCurrentCalcBasisInputs (both use onlyNoSheetSpec=false), so the job
+    // must report requiresRecalc=false immediately after a successful calculate.
+    const afterCalcJob = await repo.getJob({ currentUser: currentUser(), cutJobId: job.cutJobId });
+    expect(afterCalcJob.requiresRecalc).toBe(false);
   });
 
   // ── Scenario 4: calculate after chosen sheet is deactivated ─────────────
@@ -899,22 +894,35 @@ describeIntegration('PgCutRepository — per-job sheet override (integration)', 
     expect(ready.totals.materialsCount).toBe(1);
   });
 
-  it('Split 3: split_by_material=true + sheet override fills ONLY the no-sheet detail; materialed detail keeps its own material (no merge)', async () => {
+  it('Split 3 (Variant B): split_by_material=true + sheet override forces ALL details onto the override sheet — materialed detail no longer keeps its own sheet', async () => {
     const repo = new PgCutRepository(database, makeEchoFreecut());
-    // Detail 100 = material 1; detail 3 = no_sheet_spec (sheet null).
+    // Detail 100 = SMT 1, film_id=10; detail 3 = no_sheet_spec (SMT null, film null).
+    // OLD behavior: override only filled no-sheet detail 3 onto SMT 2; detail 100 (own SMT 1)
+    //   stayed on SMT 1 → 2 groups: {SMT 1, film 10} and {SMT 2, film null}.
+    // Variant B: override forces ALL details onto SMT 2 regardless of split_by_material.
+    //   Both details are rewritten to SMT 2. With split_by_material=true and different
+    //   films (10 vs null), groupByCuttableKey still makes 2 groups — but now BOTH are
+    //   on SMT 2, not SMT 1+2 as before.
     const job = await makeJobWithDetails(repo, [100], 'Тест split override fill', 's3m-create');
     await pool.query(`INSERT INTO cut_job_item (cut_job_id, order_detail_id, order_id, qty, is_active) VALUES ($1, 3, 10, 1, true)`, [job.cutJobId]);
-    // Set the override sheet to material 2 (cuttable). split stays true (default).
+    // Set the override sheet to SMT 2 (cuttable). split stays true (default).
     const set = await repo.setSheetMaterial({ currentUser: currentUser(), cutJobId: job.cutJobId, sheetMaterialTypeId: 2, version: job.version, requestId: 's3m-sheet' });
     const ready = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: set.version, requestId: 's3m-calc' });
     expect(ready.status).toBe('ready');
 
-    const groups = await pool.query(`SELECT sheet_material_type_id FROM cut_group WHERE cut_job_id = $1 ORDER BY sheet_material_type_id`, [job.cutJobId]);
-    // Material 1 (detail 100, kept its own sheet) + material 2 (detail 3, filled by override) → 2 groups, NOT merged.
-    expect(groups.rows).toHaveLength(2);
-    expect(groups.rows.map((r) => Number(r.sheet_material_type_id))).toEqual([1, 2]);
-    // header «Материалов» resolves the no-sheet detail to the override → {1, 2} → 2.
-    expect(ready.totals.materialsCount).toBe(2);
+    const groups = await pool.query(
+      `SELECT sheet_material_type_id FROM cut_group WHERE cut_job_id = $1 ORDER BY sheet_material_type_id`,
+      [job.cutJobId],
+    );
+    // Variant B: detail 100 is forced from SMT 1 to SMT 2 by the override.
+    // Both groups land on SMT 2 (not SMT 1+2 as in old behavior).
+    expect(groups.rows).toHaveLength(2); // 2 groups because film_id differs (10 vs null)
+    expect(groups.rows.map((r) => Number(r.sheet_material_type_id))).toEqual([2, 2]); // BOTH on override sheet!
+
+    // Variant B consistency: basisOf is identical in calculate and loadCurrentCalcBasisInputs
+    // (both use onlyNoSheetSpec=false), so requiresRecalc must be false right after calculate.
+    const afterCalcJob = await repo.getJob({ currentUser: currentUser(), cutJobId: job.cutJobId });
+    expect(afterCalcJob.requiresRecalc).toBe(false);
   });
 
   it('Split 4: setSplitByMaterial true→false persists + audits + outbox; stale 409, same-requestId duplicate hits ON CONFLICT; unchanged is a no-op', async () => {

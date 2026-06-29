@@ -1224,11 +1224,16 @@ export const CutPage: React.FC = () => {
                       <Checkbox
                         checked={job.splitByMaterial}
                         onChange={(e) => void setJobSplitByMaterial(e.target.checked)}
-                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob || job.sheetMaterialTypeId != null}
                       >
                         Разделять по материалу
                       </Checkbox>
                     </Tooltip>
+                    {job.sheetMaterialTypeId != null && (
+                      <div style={{ color: '#fa8c16', fontSize: 12, marginTop: 2, maxWidth: 280 }}>
+                        «Разделять по материалу» не применяется: выбран лист раскроя — весь раскрой на выбранном листе.
+                      </div>
+                    )}
                   </div>
                   <div>
                     <Tooltip title="детали одного материала с разными плёнками кроятся вместе; применится после команды «Повторить расчёт»">

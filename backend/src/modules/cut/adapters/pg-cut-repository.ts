@@ -538,13 +538,10 @@ export class PgCutRepository implements CutRepositoryPort {
 
       // Per-job sheet override (migration 040). Validate it is still active +
       // cuttable (it may have been deactivated after selection) — reject with 422,
-      // precondition passthrough (job is NOT marked failed). How it is applied
-      // depends on split_by_material (migration 043):
-      //   - split_by_material = false: cut EVERY detail on the chosen sheet (the
-      //     deliberate "all in one group" case).
-      //   - split_by_material = true (default): different materials must NOT be
-      //     merged, so the override only FILLS details that have no sheet
-      //     (no_sheet_spec); materialed details keep their own sheet and split.
+      // precondition passthrough (job is NOT marked failed).
+      // Variant B: a chosen sheet override ALWAYS forces EVERY detail onto the
+      // chosen sheet, regardless of split_by_material. «Разделять по материалу»
+      // is irrelevant when an override is present — the whole job is cut on one sheet.
       let sheetOverrideForBasis: { sheetMaterialTypeId: number; widthMm: number; heightMm: number } | null = null;
       if (job.sheetMaterialTypeId !== null) {
         const sheetRes = await tx.query<{ width_mm: string | number; height_mm: string | number }>(
@@ -564,7 +561,7 @@ export class PgCutRepository implements CutRepositoryPort {
         items = applySheetOverride(
           items,
           { sheetMaterialTypeId: overrideDims.sheetMaterialTypeId, widthMm: overrideDims.widthMm, heightMm: overrideDims.heightMm },
-          { onlyNoSheetSpec: job.splitByMaterial },
+          { onlyNoSheetSpec: false },
         );
       }
 
@@ -1173,6 +1170,9 @@ export class PgCutRepository implements CutRepositoryPort {
     let items = await loadCalcItems(this.database, cutJobId);
 
     // Sheet override (no active/cuttable guard — non-throwing probe).
+    // Variant B: a chosen sheet override forces EVERY detail onto the chosen sheet,
+    // regardless of split_by_material. onlyNoSheetSpec is always false when an
+    // override is present, matching the calculate() path exactly so basisOf is identical.
     let sheetOverride: { sheetMaterialTypeId: number; widthMm: number; heightMm: number } | null = null;
     const sheetMaterialTypeId =
       job.sheet_material_type_id === null || job.sheet_material_type_id === undefined
@@ -1193,7 +1193,7 @@ export class PgCutRepository implements CutRepositoryPort {
         items = applySheetOverride(
           items,
           { sheetMaterialTypeId: sw.sheetMaterialTypeId, widthMm: sw.widthMm, heightMm: sw.heightMm },
-          { onlyNoSheetSpec: splitByMaterial },
+          { onlyNoSheetSpec: false },
         );
       }
     }
