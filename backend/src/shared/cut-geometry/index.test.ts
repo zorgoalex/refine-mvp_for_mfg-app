@@ -52,6 +52,17 @@ describe('piecesClear', () => {
     // y clear: a=[0,100] b=[110,210] — gapY=10 >= 3 → true
     expect(piecesClear(a, { x: 50, y: 110, w: 100, h: 100 }, 3)).toBe(true);
   });
+  it('clear: purely diagonal pieces whose corner distance >= gap', () => {
+    // Neither axis is separated by the full gap (gapX=gapY=8 < 10), but the
+    // true corner-to-corner clearance is sqrt(8^2+8^2)=11.31 >= 10, so the
+    // pieces do not actually collide and there is room for the tool. A
+    // one-axis check would wrongly flag this as an overlap.
+    expect(piecesClear(a, { x: 108, y: 108, w: 100, h: 100 }, 10)).toBe(true);
+  });
+  it('not clear: diagonal pieces whose corner distance is below gap', () => {
+    // gapX=gapY=5 → corner distance sqrt(50)=7.07 < 10 → genuine sub-kerf.
+    expect(piecesClear(a, { x: 105, y: 105, w: 100, h: 100 }, 10)).toBe(false);
+  });
 });
 
 describe('pieceWithinUsable', () => {

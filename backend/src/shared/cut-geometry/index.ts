@@ -86,16 +86,24 @@ export function usableExtent(p: {
 }
 
 /**
- * Returns true when rects a and b have at least gapMm clearance on at least
- * one axis (i.e. they do not overlap AND respect the required gap).
+ * Returns true when rects a and b are at least gapMm apart, measured as the
+ * TRUE minimum (Euclidean) clearance between the two axis-aligned rectangles
+ * (0 when they overlap).
  *
- * The gap check is one-axis: two rects that are far apart on X are clear
- * regardless of how close they are on Y. This mirrors the freecut behaviour.
+ * This is method-agnostic: it flags genuine geometric faults — real overlaps
+ * and sub-kerf clearances — for any layout, and never false-flags a valid
+ * diagonal arrangement whose corner-to-corner distance already exceeds the
+ * gap (a one-axis check would, because each single-axis gap can be below the
+ * required clearance while the pieces still cannot collide).
+ *
+ * dx/dy are the per-axis separations, clamped to >= 0 (a negative raw value
+ * means the projections overlap on that axis, contributing 0 distance).
  */
 export function piecesClear(a: PieceRect, b: PieceRect, gapMm: number, eps = DEFAULT_EPS): boolean {
-  const gapX = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w));
-  const gapY = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h));
-  return gapX >= gapMm - eps || gapY >= gapMm - eps;
+  const dx = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), 0);
+  const dy = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h), 0);
+  const gap = Math.max(0, gapMm);
+  return dx * dx + dy * dy >= gap * gap - eps;
 }
 
 /**
