@@ -460,9 +460,9 @@ test.describe('Cut manual layout editor (mocked-local)', () => {
     // placements[] items have itemId/instance/sheetIndex/xMm/yMm/rotated — NO width/height.
     const body = JSON.parse(patchRequest.postData() ?? '{}');
     expect(body).toHaveProperty('jobVersion', 1);
-    // I-1: assert the VALUE, not mere existence. First save with showAlt=false
-    // (fixture isActive:false) must send active=false, not undefined.
-    expect(body.active).toBe(false);
+    // A manual save always activates the edited layout (active: true) so the
+    // alternative (manual) view is shown by default after editing.
+    expect(body.active).toBe(true);
     expect(Array.isArray(body.placements)).toBe(true);
     expect(body.placements.length).toBeGreaterThan(0);
 

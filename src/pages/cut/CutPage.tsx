@@ -781,16 +781,18 @@ export const CutPage: React.FC = () => {
   const saveManualLayoutForGroup = useCallback(
     async (group: CutGroupDto) => {
       if (!job || !job.editorParams) return;
-      const showAlt = showAlternativeByGroup[group.cutGroupId] ?? false;
       const moves = movesFromSheets(workingSheets);
       setBusy(true);
       try {
+        // After a manual edit the saved layout becomes the active one and the
+        // alternative (manual) view is shown by default (active: true + toggle on).
         const updated = await cutApi.saveManualLayout(job.cutJobId, group.cutGroupId, {
           jobVersion: job.version,
-          active: showAlt,
+          active: true,
           placements: moves,
         });
         setJob(updated);
+        setShowAlternativeByGroup((prev) => ({ ...prev, [group.cutGroupId]: true }));
         void loadJobs();
         resetSheetViews();
         setEditingGroupId(null);
@@ -803,7 +805,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, workingSheets, showAlternativeByGroup, loadJobs, handleError, resetSheetViews],
+    [job, workingSheets, loadJobs, handleError, resetSheetViews],
   );
 
   const filteredJobs = useMemo(() => filterJobsByStatus(jobs, statusFilter), [jobs, statusFilter]);
