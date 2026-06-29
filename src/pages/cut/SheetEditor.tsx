@@ -681,15 +681,17 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 const strokeMm = mmPerPx; // ~1px on screen
                 const guides: JSX.Element[] = [];
                 if (drag.guideXmm !== null) {
+                  const gx = Math.max(0, Math.min(usableW, drag.guideXmm));
                   const g = orientPieceRect(
-                    { x: trim.left + drag.guideXmm - strokeMm / 2, y: trim.top, w: strokeMm, h: usableH },
+                    { x: trim.left + gx - strokeMm / 2, y: trim.top, w: strokeMm, h: usableH },
                     W, H, landscape,
                   );
                   guides.push(<rect key="gx" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
                 }
                 if (drag.guideYmm !== null) {
+                  const gy = Math.max(0, Math.min(usableH, drag.guideYmm));
                   const g = orientPieceRect(
-                    { x: trim.left, y: trim.top + drag.guideYmm - strokeMm / 2, w: usableW, h: strokeMm },
+                    { x: trim.left, y: trim.top + gy - strokeMm / 2, w: usableW, h: strokeMm },
                     W, H, landscape,
                   );
                   guides.push(<rect key="gy" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
