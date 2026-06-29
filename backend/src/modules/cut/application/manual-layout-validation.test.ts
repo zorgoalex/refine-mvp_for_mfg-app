@@ -169,7 +169,7 @@ describe('snapDraggedPiece', () => {
       gapMm: 3,
       thresholdMm: 10,
     });
-    expect(result).toEqual({ x: 0, y: 50 });
+    expect(result).toEqual({ x: 0, y: 50, guideX: 0, guideY: null });
   });
 
   it('does not snap when distance exceeds threshold', () => {
@@ -181,7 +181,7 @@ describe('snapDraggedPiece', () => {
       gapMm: 3,
       thresholdMm: 10,
     });
-    expect(result).toEqual({ x: 20, y: 20 });
+    expect(result).toEqual({ x: 20, y: 20, guideX: null, guideY: null });
   });
 
   it('snaps x to neighbor right edge + gap', () => {
