@@ -136,6 +136,7 @@ export function buildSheetPieceOverlays(
         heightPct: (rect.h / rect.vh) * 100,
         tooltipRows: buildCutPieceTooltipRows(item, piece),
         labelLines: buildPieceLabelLines({
+          orderName: item.orderName ?? null,
           orderId: item.orderId,
           detailNumber: item.detail?.detailNumber ?? null,
           instance: piece.instance,

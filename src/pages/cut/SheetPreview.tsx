@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Tooltip } from 'antd';
 import { displayedSheetExtents, formatSheetSide, type CutPieceOverlay } from './cutPreviewHelpers';
-import { fitLabelScale } from './pieceLabel';
+import { fitLabelScale, LINE1_SCALE, splitDimsLine } from './pieceLabel';
 
 const sideLabelStyle: React.CSSProperties = {
   position: 'absolute',
@@ -72,13 +72,16 @@ function OverlayLayer({
         // Compute the overlay box's rendered pixel dimensions for font fitting.
         const boxWpx = imgWidthPx > 0 ? imgWidthPx * (overlay.widthPct / 100) : 0;
         const boxHpx = imgHeightPx > 0 ? imgHeightPx * (overlay.heightPct / 100) : 0;
+        // line1Scale so the fit accounts for the order-name line being LINE1_SCALE× larger.
         const scale = fitLabelScale({
           lines: overlay.labelLines,
           boxW: boxWpx,
           boxH: boxHpx,
           baseFont: BASE_FONT_PX,
+          line1Scale: LINE1_SCALE,
         });
         const font = BASE_FONT_PX * scale;
+        const font0 = font * LINE1_SCALE;
 
         return (
           <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)} mouseEnterDelay={0.15}>
@@ -103,8 +106,8 @@ function OverlayLayer({
               {/* 3-line label overlay. The PNG image has no baked labels
                   (backend renders with showLabels=false for the on-screen
                   preview), so this overlay is the sole label source.
-                  A subtle semi-transparent background keeps it legible over
-                  the coloured piece fill without obscuring the layout. */}
+                  L0 (order name) is large+bold; L2 (dims) has a half-size '*'.
+                  A subtle semi-transparent background keeps it legible. */}
               <span
                 style={{
                   background: 'rgba(255,255,255,0.78)',
@@ -119,22 +122,43 @@ function OverlayLayer({
                   overflow: 'hidden',
                 }}
               >
-                {overlay.labelLines.map((line, i) => (
-                  <span
-                    key={i}
-                    style={{
-                      fontSize: font,
-                      fontVariantNumeric: 'tabular-nums',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      maxWidth: '100%',
-                      color: '#1d3557',
-                    }}
-                  >
-                    {line}
-                  </span>
-                ))}
+                {overlay.labelLines.map((line, i) => {
+                  const baseLineStyle: React.CSSProperties = {
+                    fontVariantNumeric: 'tabular-nums',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: '100%',
+                    color: '#1d3557',
+                  };
+                  if (i === 0) {
+                    // L0: order name — large + bold
+                    return (
+                      <span key={i} style={{ ...baseLineStyle, fontSize: font0, fontWeight: 600 }}>
+                        {line}
+                      </span>
+                    );
+                  }
+                  if (i === 2) {
+                    // L2: dims — render '*' at half size via 0.5em inner span
+                    const dims = splitDimsLine(line);
+                    if (dims) {
+                      return (
+                        <span key={i} style={{ ...baseLineStyle, fontSize: font }}>
+                          {dims.w}
+                          <span style={{ fontSize: '0.5em' }}>*</span>
+                          {dims.h}
+                        </span>
+                      );
+                    }
+                  }
+                  // L1 (position line) and fallback
+                  return (
+                    <span key={i} style={{ ...baseLineStyle, fontSize: font }}>
+                      {line}
+                    </span>
+                  );
+                })}
               </span>
             </span>
           </Tooltip>

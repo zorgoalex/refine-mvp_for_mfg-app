@@ -65,6 +65,8 @@ export interface CutJobItemDto {
   cutGroupId: number | null;
   /** Resolved order-detail fields (null when the source detail no longer exists). */
   detail: CutDetailInfoDto | null;
+  /** Order name from orders.order_name (present only on enriched single-job read). */
+  orderName?: string | null;
 }
 
 export interface CutManualSheetDto {

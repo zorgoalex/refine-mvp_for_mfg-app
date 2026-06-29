@@ -23,7 +23,7 @@ import {
   usableExtent,
 } from './cutLayoutGeometry';
 import type { ManualViolation } from './cutLayoutGeometry';
-import { buildPieceLabelLines, fitLabelScale } from './pieceLabel';
+import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
 
 // ── Props contract ─────────────────────────────────────────────────────────
 
@@ -36,10 +36,10 @@ export interface SheetEditorProps {
   violations: ManualViolation[];
   /**
    * Label info keyed by piece.item_id (e.g. "det-42").
-   * Provides orderId, detailNumber and qty for the 3-line piece label.
+   * Provides orderName, orderId, detailNumber and qty for the 3-line piece label.
    * Falls back to piece.label when an item_id is absent from the map.
    */
-  labelInfoByItemId: Map<string, { orderId: number | null; detailNumber: number | null; qty: number | null }>;
+  labelInfoByItemId: Map<string, { orderName: string | null; orderId: number | null; detailNumber: number | null; qty: number | null }>;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────
@@ -625,6 +625,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 // falling back to the frozen piece.label snapshot.
                 const labelInfo = labelInfoByItemId.get(piece.item_id);
                 const labelLines = buildPieceLabelLines({
+                  orderName: labelInfo?.orderName ?? null,
                   orderId: labelInfo?.orderId ?? piece.label?.orderId ?? null,
                   detailNumber: labelInfo?.detailNumber ?? piece.label?.detailNumber ?? null,
                   instance: piece.instance,
@@ -633,10 +634,14 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   heightMm: piece.height_mm,
                 });
                 // Base font capped to fit the piece; auto-shrink further if needed.
+                // line1Scale accounts for the order-name line being LINE1_SCALE× larger.
                 const baseFont = Math.max(4, Math.min(r.w, r.h) * 0.25);
-                const labelScale = fitLabelScale({ lines: labelLines, boxW: r.w, boxH: r.h, baseFont });
+                const labelScale = fitLabelScale({ lines: labelLines, boxW: r.w, boxH: r.h, baseFont, line1Scale: LINE1_SCALE });
                 const fontSize = baseFont * labelScale;
+                // Vertical positions: block of (L0_tall, L1, L2) centered at cy.
+                // L0 height = fontSize * LINE1_SCALE * 1.2; L1/L2 height = fontSize * 1.2.
                 const lineH = fontSize * 1.2;
+                const font0 = fontSize * LINE1_SCALE;
 
                 return (
                   <g
@@ -681,24 +686,49 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       data-testid={`piece-rect-${sheetIndex}-${piece.item_id}-${piece.instance}`}
                     />
 
-                    {/* 3-line auto-shrink label — vertically centered on the piece */}
+                    {/* 3-line auto-shrink label — vertically centered on the piece.
+                        L0 (order name) renders at font0 = fontSize*LINE1_SCALE (large+bold).
+                        L2 (dims) uses tspans to render the '*' at half-size. */}
                     {(() => {
                       const cx = r.x + r.w / 2;
                       const cy = r.y + r.h / 2;
                       const textFill = isViolating ? '#cf1322' : '#1d3557';
-                      const commonProps = {
+                      // Block height = (LINE1_SCALE + 1 + 1) * lineH.
+                      // Vertical centers derived from block being centered at cy:
+                      //   y0 = cy - lineH
+                      //   y1 = cy + lineH * (LINE1_SCALE - 1) / 2
+                      //   y2 = cy + lineH * (LINE1_SCALE + 1) / 2
+                      const y0 = cy - lineH;
+                      const y1 = cy + lineH * (LINE1_SCALE - 1) / 2;
+                      const y2 = cy + lineH * (LINE1_SCALE + 1) / 2;
+                      const sharedProps = {
                         textAnchor: 'middle' as const,
                         dominantBaseline: 'middle' as const,
-                        fontSize,
                         fill: textFill,
                         pointerEvents: 'none' as const,
                         style: { userSelect: 'none' as const },
                       };
+                      const dimsLine = splitDimsLine(labelLines[2]);
                       return (
                         <>
-                          <text {...commonProps} x={cx} y={cy - lineH}>{labelLines[0]}</text>
-                          <text {...commonProps} x={cx} y={cy}>{labelLines[1]}</text>
-                          <text {...commonProps} x={cx} y={cy + lineH}>{labelLines[2]}</text>
+                          {/* L0: order name — large + bold */}
+                          <text {...sharedProps} x={cx} y={y0} fontSize={font0} fontWeight={600}>
+                            {labelLines[0]}
+                          </text>
+                          {/* L1: # position · instance/qty */}
+                          <text {...sharedProps} x={cx} y={y1} fontSize={fontSize}>
+                            {labelLines[1]}
+                          </text>
+                          {/* L2: dimensions with half-size '*' separator */}
+                          <text {...sharedProps} x={cx} y={y2} fontSize={fontSize}>
+                            {dimsLine ? (
+                              <>
+                                <tspan>{dimsLine.w}</tspan>
+                                <tspan fontSize={fontSize * 0.5}>*</tspan>
+                                <tspan>{dimsLine.h}</tspan>
+                              </>
+                            ) : labelLines[2]}
+                          </text>
                         </>
                       );
                     })()}

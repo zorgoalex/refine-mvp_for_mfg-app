@@ -2786,6 +2786,8 @@ interface ItemRow extends QueryResultRow {
   link_cutting_image_file?: string | null;
   link_cad_file?: string | null;
   link_pdf_file?: string | null;
+  /** Present only on the enriched path (ENRICHED_ITEMS_QUERY). */
+  order_name?: string | null;
 }
 
 // Enriched item query: joins order_details + dictionaries to resolve the order
@@ -2806,7 +2808,8 @@ const ENRICHED_ITEMS_QUERY = `
          od.film_id, f.film_name,
          od.priority, od.production_status_id, ps.production_status_name,
          od.joint_order_id, od.note,
-         od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file
+         od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file,
+         o.order_name AS order_name
   FROM cut_job_item i
   -- delete_flag in the JOIN (not WHERE): a reserved detail that was later soft-
   -- deleted must still return its item row, but with detail: null (canonical
@@ -2818,6 +2821,7 @@ const ENRICHED_ITEMS_QUERY = `
   LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
   LEFT JOIN films f ON f.film_id = od.film_id
   LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+  LEFT JOIN orders o ON o.order_id = i.order_id
   WHERE i.cut_job_id = $1 AND i.is_active = true
   ORDER BY i.cut_job_item_id
 `;
@@ -2970,6 +2974,8 @@ async function loadJob(
       qty: toNum(row.qty),
       cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
       detail: includeItemDetails ? mapItemDetail(row) : null,
+      // orderName is only present on the enriched (single-job) path; undefined on the light/list path.
+      ...(includeItemDetails ? { orderName: row.order_name ?? null } : {}),
     })),
     groups,
   };

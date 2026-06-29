@@ -5,6 +5,8 @@
  */
 
 export interface PieceLabelInput {
+  /** Order name from orders.order_name. Fallback to "Заказ {orderId}" when null/empty. */
+  orderName: string | null;
   orderId: number | null;
   detailNumber: number | null;
   /** This piece's copy ordinal among the position's qty copies. */
@@ -20,6 +22,12 @@ const CHAR_W = 0.6;
 /** Line height multiplier (em units). */
 const LINE_H = 1.2;
 
+/**
+ * Scale factor applied to line 1 (order name) relative to the base font.
+ * Export so SheetEditor and SheetPreview use the exact same multiplier.
+ */
+export const LINE1_SCALE = 1.7;
+
 /** Format a mm dimension: integer → no decimal; float → 1 decimal place. */
 function fmtDim(mm: number): string {
   if (!isFinite(mm)) return '0';
@@ -27,27 +35,39 @@ function fmtDim(mm: number): string {
 }
 
 /**
+ * Split a dims line of the form "{w}*{h}" into its parts.
+ * Returns { w, h } when the asterisk separator is present, or null otherwise.
+ * Pure and testable; used by SheetEditor (SVG tspan) and SheetPreview (span).
+ */
+export function splitDimsLine(line: string): { w: string; h: string } | null {
+  const idx = line.indexOf('*');
+  if (idx < 0) return null;
+  return { w: line.slice(0, idx), h: line.slice(idx + 1) };
+}
+
+/**
  * Build three label lines for a cut piece.
  *
- * Line 1: `Заказ {orderId}`
- * Line 2: `Поз. {detailNumber} · {instance}/{qty}` (or without `/qty` when qty unknown)
- * Line 3: `{widthMm}×{heightMm}` (integer dims have no decimal; floats 1 decimal)
+ * Line 1: order name (large/bold) — `orders.order_name`, or `Заказ {orderId}` fallback.
+ * Line 2: `# {detailNumber} · {instance}/{qty}` (base font). `# —` when detailNumber null.
+ * Line 3: `{widthMm}*{heightMm}` — asterisk separator; integer dims have no decimal, floats 1 dp.
  *
  * Always returns exactly 3 non-empty strings.
  */
 export function buildPieceLabelLines(p: PieceLabelInput): string[] {
-  // Line 1: order identifier
-  const line1 = p.orderId !== null ? `Заказ ${p.orderId}` : 'Заказ —';
+  // Line 1: order name or fallback
+  const nm = p.orderName?.trim();
+  const line1 = nm || (p.orderId !== null ? `Заказ ${p.orderId}` : 'Заказ —');
 
-  // Line 2: position + copy ordinal
-  const pos = p.detailNumber !== null ? `Поз. ${p.detailNumber}` : 'Поз. —';
+  // Line 2: position + copy ordinal (# prefix, not Поз.)
+  const pos = p.detailNumber !== null ? `# ${p.detailNumber}` : '# —';
   const line2 =
     p.qty !== null
       ? `${pos} · ${p.instance}/${p.qty}`
       : `${pos} · ${p.instance}`;
 
-  // Line 3: rendered dimensions
-  const line3 = `${fmtDim(p.widthMm)}×${fmtDim(p.heightMm)}`;
+  // Line 3: rendered dimensions with asterisk separator (not ×)
+  const line3 = `${fmtDim(p.widthMm)}*${fmtDim(p.heightMm)}`;
 
   return [line1, line2, line3];
 }
@@ -55,6 +75,12 @@ export function buildPieceLabelLines(p: PieceLabelInput): string[] {
 /**
  * Compute a font scale factor so that `lines` fit inside a box of `boxW × boxH`
  * (any consistent unit — mm for SVG, px for HTML).
+ *
+ * @param line1Scale  Optional scale multiplier for line 0 (the large order-name line).
+ *   Default 1 (all lines same size — backward-compatible). Pass `LINE1_SCALE` (1.7)
+ *   for the 3-line label with a large first line. Affects both width and height fit:
+ *   - Width:  line 0 width = chars × baseFont × CHAR_W × line1Scale.
+ *   - Height: block height = Σ (baseFont × scale_i × LINE_H) for i in lines.
  *
  * Returns a value in `[minScale, 1]`:
  *   - 1 when everything fits at base font.
@@ -67,14 +93,23 @@ export function fitLabelScale(args: {
   boxH: number;
   baseFont: number;
   minScale?: number;
+  line1Scale?: number;
 }): number {
-  const { lines, boxW, boxH, baseFont, minScale = 0.3 } = args;
+  const { lines, boxW, boxH, baseFont, minScale = 0.3, line1Scale = 1 } = args;
 
   if (baseFont <= 0 || boxW <= 0 || boxH <= 0) return minScale;
 
-  const maxChars = Math.max(...lines.map((l) => l.length), 1);
-  const longestLineWidth = maxChars * baseFont * CHAR_W;
-  const blockHeight = 3 * baseFont * LINE_H;
+  // Per-line scale: line 0 uses line1Scale, all others use 1.
+  const lineScales = lines.map((_, i) => (i === 0 ? line1Scale : 1));
+
+  // Widest effective line width (baseFont at scale 1 is the reference unit).
+  const longestLineWidth = Math.max(
+    ...lines.map((l, i) => l.length * baseFont * CHAR_W * lineScales[i]),
+    1,
+  );
+
+  // Block height: sum of per-line heights.
+  const blockHeight = lineScales.reduce((acc, s) => acc + baseFont * s * LINE_H, 0);
 
   const widthFit = boxW / longestLineWidth;
   const heightFit = boxH / blockHeight;
