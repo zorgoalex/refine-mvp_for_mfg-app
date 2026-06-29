@@ -119,7 +119,7 @@
       "gapMm": 3,
       "thresholdMm": 8
     },
-    "expected": { "x": 0, "y": 100 }
+    "expected": { "x": 0, "y": 100, "guideX": 0, "guideY": null }
   },
   {
     "name": "snap to neighbour right edge plus gap",
@@ -132,7 +132,7 @@
       "gapMm": 3,
       "thresholdMm": 8
     },
-    "expected": { "x": 603, "y": 0 }
+    "expected": { "x": 603, "y": 0, "guideX": 603, "guideY": 0 }
   },
   {
     "name": "no snap when no candidate within threshold",
@@ -145,6 +145,6 @@
       "gapMm": 3,
       "thresholdMm": 8
     },
-    "expected": { "x": 900, "y": 900 }
+    "expected": { "x": 900, "y": 900, "guideX": null, "guideY": null }
   }
 ]

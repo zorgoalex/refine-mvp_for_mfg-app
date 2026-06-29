@@ -158,17 +158,29 @@ export function rotatePiece<T extends { width_mm: number; height_mm: number; rot
 
 // ── Drag snap (Codex R13 MAJOR #3) ──────────────────────────────────────
 
+/** Result of a snap: snapped x/y plus the guide-line coordinate per axis. */
+export interface SnapResult {
+  x: number;
+  y: number;
+  guideX: number | null;
+  guideY: number | null;
+}
+
+interface SnapCandidate {
+  /** Target value for the dragged piece's left (x) / top (y). */
+  pos: number;
+  /** Coordinate (usable mm) of the dragged edge that lines up — for the guide. */
+  guideAt: number;
+}
+
 /**
  * Best-effort axis-independent snap for a dragged piece.
  *
- * Independently snaps x and y to the nearest candidate position:
- *   - Sheet edges (0 and usable boundary)
- *   - Left edge of existing pieces minus gap (align right side of dragged piece)
- *   - Right edge of existing pieces plus gap (align left side of dragged piece)
- *   - (Same logic applied on Y axis)
- *
- * Returns the original coordinate unchanged if the nearest candidate is
- * further than thresholdMm away.
+ * Per axis, candidates are: sheet edges, neighbour contact (±gap), and
+ * neighbour edge alignment (shared left/right or top/bottom line). x and y are
+ * snapped independently; corner-to-corner emerges when both axes snap to the
+ * same neighbour. Returns the chosen guide coordinate per snapped axis (null
+ * when that axis did not snap).
  */
 export function snapDraggedPiece(args: {
   rect: PieceRect;
@@ -177,48 +189,51 @@ export function snapDraggedPiece(args: {
   usableH: number;
   gapMm: number;
   thresholdMm: number;
-}): { x: number; y: number } {
+}): SnapResult {
   const { rect, others, usableW, usableH, gapMm, thresholdMm } = args;
 
-  // Candidate snapping positions for left edge (x) of the dragged piece
-  const xCandidates: number[] = [0, usableW - rect.w];
-  // Candidate snapping positions for top edge (y) of the dragged piece
-  const yCandidates: number[] = [0, usableH - rect.h];
+  const xCandidates: SnapCandidate[] = [
+    { pos: 0, guideAt: 0 },
+    { pos: usableW - rect.w, guideAt: usableW },
+  ];
+  const yCandidates: SnapCandidate[] = [
+    { pos: 0, guideAt: 0 },
+    { pos: usableH - rect.h, guideAt: usableH },
+  ];
 
   for (const o of others) {
-    // Snap left edge of dragged piece to: right edge of other + gap
-    xCandidates.push(o.x + o.w + gapMm);
-    // Snap right edge of dragged piece to: left edge of other - gap
-    xCandidates.push(o.x - rect.w - gapMm);
-    // Same on Y axis
-    yCandidates.push(o.y + o.h + gapMm);
-    yCandidates.push(o.y - rect.h - gapMm);
+    // X: contact (dragged left↔neighbour right+gap, dragged right↔neighbour left−gap)
+    xCandidates.push({ pos: o.x + o.w + gapMm, guideAt: o.x + o.w + gapMm });
+    xCandidates.push({ pos: o.x - rect.w - gapMm, guideAt: o.x - gapMm });
+    // X: alignment (left edges, right edges)
+    xCandidates.push({ pos: o.x, guideAt: o.x });
+    xCandidates.push({ pos: o.x + o.w - rect.w, guideAt: o.x + o.w });
+    // Y: contact
+    yCandidates.push({ pos: o.y + o.h + gapMm, guideAt: o.y + o.h + gapMm });
+    yCandidates.push({ pos: o.y - rect.h - gapMm, guideAt: o.y - gapMm });
+    // Y: alignment
+    yCandidates.push({ pos: o.y, guideAt: o.y });
+    yCandidates.push({ pos: o.y + o.h - rect.h, guideAt: o.y + o.h });
   }
 
-  let bestX = rect.x;
-  let bestXDist = Infinity;
-  for (const c of xCandidates) {
-    const d = Math.abs(c - rect.x);
-    if (d < bestXDist) {
-      bestXDist = d;
-      bestX = c;
+  const pick = (cands: SnapCandidate[], current: number): { value: number; guide: number | null } => {
+    let bestPos = current;
+    let bestGuide: number | null = null;
+    let bestDist = Infinity;
+    for (const c of cands) {
+      const d = Math.abs(c.pos - current);
+      if (d < bestDist) {
+        bestDist = d;
+        bestPos = c.pos;
+        bestGuide = c.guideAt;
+      }
     }
-  }
-
-  let bestY = rect.y;
-  let bestYDist = Infinity;
-  for (const c of yCandidates) {
-    const d = Math.abs(c - rect.y);
-    if (d < bestYDist) {
-      bestYDist = d;
-      bestY = c;
-    }
-  }
-
-  return {
-    x: bestXDist <= thresholdMm ? bestX : rect.x,
-    y: bestYDist <= thresholdMm ? bestY : rect.y,
+    return bestDist <= thresholdMm ? { value: bestPos, guide: bestGuide } : { value: current, guide: null };
   };
+
+  const sx = pick(xCandidates, rect.x);
+  const sy = pick(yCandidates, rect.y);
+  return { x: sx.value, y: sy.value, guideX: sx.guide, guideY: sy.guide };
 }
 
 // ── Validation ────────────────────────────────────────────────────────────
@@ -407,4 +422,29 @@ export function reconstructManualSheets(args: {
   return {
     sheets: Array.from(byIndex.entries()).map(([sheetIndex, placements]) => ({ sheetIndex, placements })),
   };
+}
+
+export type MoveBlockReason = 'material' | 'film';
+
+/**
+ * Guard for moving a piece onto a target sheet. Mirrors the cut grouping rules:
+ * when splitByMaterial, materials must match; when combineFilms is off, films
+ * must match. In the per-group editor these always hold; the guard defends
+ * against data anomalies and documents the invariant.
+ */
+export function moveAllowed(args: {
+  pieceMaterialTypeId: number | null;
+  pieceFilmId: number | null;
+  targetMaterialTypeId: number | null;
+  targetFilmId: number | null;
+  splitByMaterial: boolean;
+  combineFilms: boolean;
+}): { ok: true } | { ok: false; reason: MoveBlockReason } {
+  if (args.splitByMaterial && args.pieceMaterialTypeId !== args.targetMaterialTypeId) {
+    return { ok: false, reason: 'material' };
+  }
+  if (!args.combineFilms && args.pieceFilmId !== args.targetFilmId) {
+    return { ok: false, reason: 'film' };
+  }
+  return { ok: true };
 }

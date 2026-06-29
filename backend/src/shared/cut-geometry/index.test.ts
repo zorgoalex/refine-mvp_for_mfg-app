@@ -12,6 +12,7 @@ import {
   orientPieceRect,
   rotatePiece,
   snapDraggedPiece,
+  moveAllowed,
 } from './index';
 
 const sheet = {
@@ -153,12 +154,12 @@ describe('snapDraggedPiece', () => {
 
   it('snaps x to left edge when within threshold', () => {
     const r = snapDraggedPiece({ rect: { x: 4, y: 50, w: 100, h: 100 }, others: [], ...common });
-    expect(r).toEqual({ x: 0, y: 50 });
+    expect(r).toEqual({ x: 0, y: 50, guideX: 0, guideY: null });
   });
 
   it('does not snap when beyond threshold', () => {
     const r = snapDraggedPiece({ rect: { x: 20, y: 20, w: 100, h: 100 }, others: [], ...common });
-    expect(r).toEqual({ x: 20, y: 20 });
+    expect(r).toEqual({ x: 20, y: 20, guideX: null, guideY: null });
   });
 
   it('snaps x to neighbor right edge + gap', () => {
@@ -168,5 +169,68 @@ describe('snapDraggedPiece', () => {
       ...common,
     });
     expect(r.x).toBe(103);
+    expect(r.guideX).toBe(103);
+  });
+
+  it('snaps x to align left edges with a neighbour', () => {
+    // neighbour left edge at x=500; dragged left edge near it (502) → align to 500
+    const r = snapDraggedPiece({
+      rect: { x: 502, y: 400, w: 100, h: 100 },
+      others: [{ x: 500, y: 0, w: 200, h: 100 }],
+      ...common,
+    });
+    expect(r.x).toBe(500);
+    expect(r.guideX).toBe(500);
+  });
+
+  it('snaps x to align right edges with a neighbour', () => {
+    // neighbour right edge at x=700; dragged right edge near it → dragged x = 600, guide at 700
+    const r = snapDraggedPiece({
+      rect: { x: 603, y: 400, w: 100, h: 100 },
+      others: [{ x: 500, y: 0, w: 200, h: 100 }],
+      ...common,
+    });
+    expect(r.x).toBe(600);
+    expect(r.guideX).toBe(700);
+  });
+
+  it('snaps both axes to a neighbour corner (corner-to-corner)', () => {
+    // neighbour occupies [0,100]x[0,100]; dragged near its bottom-right contact corner
+    const r = snapDraggedPiece({
+      rect: { x: 101, y: 101, w: 100, h: 100 },
+      others: [{ x: 0, y: 0, w: 100, h: 100 }],
+      ...common,
+    });
+    expect(r.x).toBe(103); // contact right of neighbour
+    expect(r.y).toBe(103);
+    expect(r.guideX).toBe(103);
+    expect(r.guideY).toBe(103);
+  });
+});
+
+describe('moveAllowed', () => {
+  const base = {
+    pieceMaterialTypeId: 1, pieceFilmId: 10,
+    targetMaterialTypeId: 1, targetFilmId: 10,
+    splitByMaterial: true, combineFilms: false,
+  };
+
+  it('allows matching material and film', () => {
+    expect(moveAllowed(base)).toEqual({ ok: true });
+  });
+  it('blocks different material when splitByMaterial', () => {
+    expect(moveAllowed({ ...base, targetMaterialTypeId: 2 })).toEqual({ ok: false, reason: 'material' });
+  });
+  it('ignores material mismatch when splitByMaterial is false', () => {
+    expect(moveAllowed({ ...base, targetMaterialTypeId: 2, splitByMaterial: false })).toEqual({ ok: true });
+  });
+  it('blocks different film when combineFilms is false', () => {
+    expect(moveAllowed({ ...base, targetFilmId: 20 })).toEqual({ ok: false, reason: 'film' });
+  });
+  it('ignores film mismatch when combineFilms is true', () => {
+    expect(moveAllowed({ ...base, targetFilmId: 20, combineFilms: true })).toEqual({ ok: true });
+  });
+  it('reports material first when both mismatch', () => {
+    expect(moveAllowed({ ...base, targetMaterialTypeId: 2, targetFilmId: 20 })).toEqual({ ok: false, reason: 'material' });
   });
 });

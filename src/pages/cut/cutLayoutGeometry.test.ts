@@ -16,6 +16,7 @@ import {
   rotatePiece,
   validateSheetPlacements,
   movesFromSheets,
+  moveAllowed,
 } from './cutLayoutGeometry';
 import type { SheetPlacements } from '../../api/types/cutApi.types';
 import type { GeomSheet } from '@shared/cut-geometry';
@@ -74,7 +75,7 @@ describe('snapDraggedPiece', () => {
       gapMm: 3,
       thresholdMm: 8,
     });
-    expect(out).toEqual({ x: 900, y: 900 });
+    expect(out).toEqual({ x: 900, y: 900, guideX: null, guideY: null });
   });
 });
 
@@ -228,6 +229,14 @@ describe('golden FE/BE parity', () => {
   it.each(golden.filter((c) => c.kind === 'snap'))('golden snap: $name', (c) => {
     const input = c.input as Parameters<typeof snapDraggedPiece>[0];
     expect(snapDraggedPiece(input)).toEqual(c.expected);
+  });
+});
+
+// ── moveAllowed re-export ─────────────────────────────────────────────────────
+
+describe('moveAllowed re-export', () => {
+  it('re-exports moveAllowed as a function', () => {
+    expect(typeof moveAllowed).toBe('function');
   });
 });
 
