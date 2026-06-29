@@ -23,7 +23,7 @@ import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
-import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait } from './cutPreviewHelpers';
+import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, selectVariantSheets } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
@@ -1384,6 +1384,9 @@ export const CutPage: React.FC = () => {
           (group.manualLayout != null && showAlt !== persistedActive);
         // Edit is blocked when editorParams are absent or a recalc is required.
         const editDisabled = !(job.editorParams) || (job.requiresRecalc ?? false);
+        // Preview sheets: honour displayVariant so count/overlays follow the
+        // manual layout when the operator has switched to the manual view.
+        const previewSheets = selectVariantSheets(group, displayVariant);
 
         return (
           <Card
@@ -1531,7 +1534,7 @@ export const CutPage: React.FC = () => {
             {!isEditingGroup && (
               /* Previews flow in wrapping rows (not a single column). */
               <div style={sheetPreviewListStyle}>
-                {group.sheets.map((sheet) => {
+                {previewSheets.map((sheet) => {
                   // Cache key includes variant + renderVersion so toggling auto↔manual
                   // or saving a new manual never serves a stale blob (R7/R9 fix).
                   const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${renderVersion ?? ''}`;

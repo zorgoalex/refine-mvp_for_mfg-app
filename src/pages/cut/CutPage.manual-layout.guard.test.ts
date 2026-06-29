@@ -41,4 +41,9 @@ describe('CutPage manual-layout guard', () => {
     // displayVariant must be guarded so stale never passes variant=manual to the backend.
     expect(src).toMatch(/displayVariant.*isStale|showAlt && !isStale/s);
   });
+
+  it('preview block uses selectVariantSheets to honour the active display variant', () => {
+    expect(src).toMatch(/selectVariantSheets/);
+    expect(src).toMatch(/previewSheets\.map/);
+  });
 });

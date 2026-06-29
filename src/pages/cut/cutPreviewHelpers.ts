@@ -1,4 +1,4 @@
-import type { CutJobItemDto, SheetPlacementPiece, SheetPlacements } from '../../api/types/cutApi.types';
+import type { CutGroupDto, CutJobItemDto, SheetPlacementPiece, SheetPlacements } from '../../api/types/cutApi.types';
 import { orientPieceRect } from './cutLayoutGeometry';
 import { buildPieceLabelLines } from './pieceLabel';
 
@@ -147,6 +147,33 @@ export function buildSheetPieceOverlays(
       };
     })
     .filter((overlay): overlay is CutPieceOverlay => overlay !== null);
+}
+
+/**
+ * Returns the sheets to use for the preview block, honouring the active
+ * display variant.  When the operator switches to 'manual' (and the layout is
+ * not stale), this returns `group.manualLayout.sheets`; otherwise it returns
+ * the auto `group.sheets`.  'active' is treated the same as 'manual' for
+ * forward-compatibility (the preview never produces 'active' today).
+ */
+export function selectVariantSheets(
+  group: CutGroupDto,
+  variant: 'auto' | 'manual' | 'active',
+): { sheetIndex: number; placements: SheetPlacements }[] {
+  if (
+    (variant === 'manual' || variant === 'active') &&
+    group.manualLayout &&
+    !group.manualLayout.isStale
+  ) {
+    return group.manualLayout.sheets.map((s) => ({
+      sheetIndex: s.sheetIndex,
+      placements: s.placements,
+    }));
+  }
+  return group.sheets.map((s) => ({
+    sheetIndex: s.sheetIndex,
+    placements: s.placements,
+  }));
 }
 
 function formatTooltipValue(value: unknown): string {

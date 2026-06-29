@@ -30,4 +30,9 @@ describe('SheetEditor source contract', () => {
   it('accepts pieceMetaByItemId prop for per-piece material/film lookup', () => {
     expect(src).toMatch(/pieceMetaByItemId/);
   });
+  it('shows live per-sheet detail count in the editor sheet header', () => {
+    // "дет." label must appear adjacent to placements.pieces.length in the header.
+    expect(src).toMatch(/дет\./);
+    expect(src).toMatch(/placements\.pieces\.length/);
+  });
 });

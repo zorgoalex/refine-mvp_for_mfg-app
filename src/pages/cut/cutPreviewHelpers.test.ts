@@ -6,9 +6,49 @@ import {
   formatSheetSide,
   parseCutPieceDetailId,
   parseStoredPortrait,
+  selectVariantSheets,
   sheetOrientationKey,
 } from './cutPreviewHelpers';
-import type { CutJobItemDto, SheetPlacements } from '../../api/types/cutApi.types';
+import type { CutGroupDto, CutJobItemDto, SheetPlacements } from '../../api/types/cutApi.types';
+
+// ── Shared fixtures for selectVariantSheets ──────────────────────────────────
+const makeSheet = (sheetIndex: number, pieceItemIds: string[]): { sheetIndex: number; placements: SheetPlacements } => ({
+  sheetIndex,
+  placements: {
+    trim_mm: { left: 10, top: 10, right: 10, bottom: 10 },
+    sheet_width_mm: 2800,
+    sheet_height_mm: 2070,
+    pieces: pieceItemIds.map((item_id) => ({
+      item_id,
+      instance: 1,
+      x_mm: 0,
+      y_mm: 0,
+      width_mm: 600,
+      height_mm: 400,
+      rotated: false,
+    })),
+  },
+});
+
+/** Auto layout: piece det-1 on sheet 0, piece det-2 on sheet 1. */
+const autoSheet0 = makeSheet(0, ['det-1']);
+const autoSheet1 = makeSheet(1, ['det-2']);
+
+/** Manual layout: piece det-1 moved to sheet 1, det-2 stayed on sheet 0 (different from auto). */
+const manualSheet0 = makeSheet(0, ['det-2']);
+const manualSheet1 = makeSheet(1, ['det-1']);
+
+const baseGroup: CutGroupDto = {
+  cutGroupId: 5,
+  sheetMaterialTypeId: 9,
+  filmId: null,
+  status: 'ready',
+  summary: null,
+  sheets: [
+    { cutGroupSheetId: 10, sheetIndex: 0, pngCacheKey: null, placements: autoSheet0.placements },
+    { cutGroupSheetId: 11, sheetIndex: 1, pngCacheKey: null, placements: autoSheet1.placements },
+  ],
+};
 
 describe('cutPreviewHelpers', () => {
   describe('formatSheetSide', () => {
@@ -132,6 +172,88 @@ describe('cutPreviewHelpers', () => {
       expect(rows).toContainEqual({ label: 'Плёнка', value: 'Белая матовая' });
       expect(rows.some((row) => row.label.endsWith('ID') || row.label.includes('ID '))).toBe(false);
       expect(rows.some((row) => row.label === 'detail_name' || row.label === 'note' || row.label === 'film_id')).toBe(false);
+    });
+  });
+
+  describe('selectVariantSheets', () => {
+    it('(a) variant "auto" always returns auto sheets regardless of manualLayout', () => {
+      const group: CutGroupDto = {
+        ...baseGroup,
+        manualLayout: {
+          groupKey: 'k1',
+          sheets: [manualSheet0, manualSheet1],
+          isActive: true,
+          isStale: false,
+          version: 1,
+        },
+      };
+      const result = selectVariantSheets(group, 'auto');
+      // Must return auto distribution: sheet 0 has det-1, sheet 1 has det-2.
+      expect(result).toHaveLength(2);
+      expect(result[0].sheetIndex).toBe(0);
+      expect(result[0].placements.pieces.map((p) => p.item_id)).toEqual(['det-1']);
+      expect(result[1].sheetIndex).toBe(1);
+      expect(result[1].placements.pieces.map((p) => p.item_id)).toEqual(['det-2']);
+    });
+
+    it('(b) variant "manual" with non-stale manualLayout returns manual sheets (moved pieces differ from auto)', () => {
+      const group: CutGroupDto = {
+        ...baseGroup,
+        manualLayout: {
+          groupKey: 'k1',
+          sheets: [manualSheet0, manualSheet1],
+          isActive: true,
+          isStale: false,
+          version: 1,
+        },
+      };
+      const result = selectVariantSheets(group, 'manual');
+      // Manual distribution: sheet 0 has det-2, sheet 1 has det-1.
+      expect(result).toHaveLength(2);
+      expect(result[0].sheetIndex).toBe(0);
+      expect(result[0].placements.pieces.map((p) => p.item_id)).toEqual(['det-2']);
+      expect(result[1].sheetIndex).toBe(1);
+      expect(result[1].placements.pieces.map((p) => p.item_id)).toEqual(['det-1']);
+      // Counts per sheet differ from auto (1 piece each, but different pieces).
+      expect(result[0].placements.pieces.length).toBe(1);
+      expect(result[1].placements.pieces.length).toBe(1);
+    });
+
+    it('(c) variant "manual" but manualLayout.isStale=true falls back to auto', () => {
+      const group: CutGroupDto = {
+        ...baseGroup,
+        manualLayout: {
+          groupKey: 'k1',
+          sheets: [manualSheet0, manualSheet1],
+          isActive: true,
+          isStale: true, // stale → must not use manual sheets
+          version: 1,
+        },
+      };
+      const result = selectVariantSheets(group, 'manual');
+      // Falls back to auto: sheet 0 has det-1.
+      expect(result[0].placements.pieces.map((p) => p.item_id)).toEqual(['det-1']);
+    });
+
+    it('(d) variant "manual" but manualLayout absent falls back to auto', () => {
+      const group: CutGroupDto = { ...baseGroup, manualLayout: undefined };
+      const result = selectVariantSheets(group, 'manual');
+      expect(result[0].placements.pieces.map((p) => p.item_id)).toEqual(['det-1']);
+    });
+
+    it('variant "active" with non-stale manualLayout returns manual sheets (same as "manual")', () => {
+      const group: CutGroupDto = {
+        ...baseGroup,
+        manualLayout: {
+          groupKey: 'k1',
+          sheets: [manualSheet0, manualSheet1],
+          isActive: true,
+          isStale: false,
+          version: 1,
+        },
+      };
+      const result = selectVariantSheets(group, 'active');
+      expect(result[0].placements.pieces.map((p) => p.item_id)).toEqual(['det-2']);
     });
   });
 });

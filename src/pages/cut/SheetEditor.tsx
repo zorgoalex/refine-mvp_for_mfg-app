@@ -620,7 +620,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 fontWeight: 600,
               }}
             >
-              Лист {sheetIndex + 1}
+              Лист {sheetIndex + 1} · дет. {placements.pieces.length}
             </div>
 
             <svg
