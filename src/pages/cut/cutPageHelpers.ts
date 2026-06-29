@@ -262,3 +262,13 @@ export function formatGroupSummary(summary: Record<string, unknown> | null): str
   }
   return parts.join(', ');
 }
+
+export function formatSheetPieceCounts(
+  sheets: ReadonlyArray<{ sheetIndex: number; placements: { pieces: ReadonlyArray<unknown> } }>,
+): string {
+  if (sheets.length === 0) return '';
+  const counts = [...sheets]
+    .sort((a, b) => a.sheetIndex - b.sheetIndex)
+    .map((sheet) => `л.${sheet.sheetIndex + 1} — ${sheet.placements.pieces.length}`);
+  return `деталей на листах: ${counts.join(', ')}`;
+}

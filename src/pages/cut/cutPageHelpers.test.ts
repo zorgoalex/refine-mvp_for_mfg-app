@@ -10,6 +10,7 @@ import {
   distinctOrderIdsFromItems,
   filterJobsByStatus,
   formatGroupSummary,
+  formatSheetPieceCounts,
   noSheetSpecMessage,
   parseIdCsv,
   parseJobQueryParam,
@@ -57,6 +58,17 @@ describe('cutPageHelpers', () => {
   it('formats a freecut group summary compactly', () => {
     expect(formatGroupSummary({ used_stock_count: 2, waste_percent: 12.5 })).toBe('листов: 2, остаток: 13%');
     expect(formatGroupSummary(null)).toBe('');
+  });
+
+  it('formats per-sheet piece counts for the group summary line', () => {
+    expect(
+      formatSheetPieceCounts([
+        { sheetIndex: 0, placements: { pieces: [{ item_id: 'det-1' }, { item_id: 'det-2' }] } },
+        { sheetIndex: 1, placements: { pieces: [] } },
+        { sheetIndex: 2, placements: { pieces: [{ item_id: 'det-3' }] } },
+      ]),
+    ).toBe('деталей на листах: л.1 — 2, л.2 — 0, л.3 — 1');
+    expect(formatSheetPieceCounts([])).toBe('');
   });
 
   it('pollPdf retries on a cold-cache 202 and resolves once the PDF is ready', async () => {

@@ -47,6 +47,7 @@ import {
   distinctOrderIdsFromItems,
   filterJobsByStatus,
   formatGroupSummary,
+  formatSheetPieceCounts,
   noSheetSpecMessage,
   parseIdCsv,
   parseJobQueryParam,
@@ -1357,6 +1358,10 @@ export const CutPage: React.FC = () => {
           (group.manualLayout != null && showAlt !== persistedActive);
         // Edit is blocked when editorParams are absent or a recalc is required.
         const editDisabled = !(job.editorParams) || (job.requiresRecalc ?? false);
+        const summarySheets = showAlt && group.manualLayout && !isStale ? group.manualLayout.sheets : group.sheets;
+        const groupSummaryLine = [formatGroupSummary(group.summary), formatSheetPieceCounts(summarySheets)]
+          .filter(Boolean)
+          .join(', ');
 
         return (
           <Card
@@ -1441,7 +1446,7 @@ export const CutPage: React.FC = () => {
               </Space>
             }
           >
-            <Text type="secondary">{formatGroupSummary(group.summary)}</Text>
+            <Text type="secondary">{groupSummaryLine}</Text>
             <div style={{ marginTop: 4, color: '#595959', fontSize: 13 }}>
               Материал раскроя: <b>{matName ?? 'не задан'}</b>
               {filmText && (
