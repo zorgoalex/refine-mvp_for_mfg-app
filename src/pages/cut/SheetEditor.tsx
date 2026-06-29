@@ -14,13 +14,15 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { message } from 'antd';
+import { createPortal } from 'react-dom';
+import { Menu, message } from 'antd';
 import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutApi.types';
 import {
   snapDraggedPiece,
   rotatePiece,
   orientPieceRect,
   usableExtent,
+  moveAllowed,
 } from './cutLayoutGeometry';
 import type { ManualViolation } from './cutLayoutGeometry';
 import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
@@ -40,6 +42,16 @@ export interface SheetEditorProps {
    * Falls back to piece.label when an item_id is absent from the map.
    */
   labelInfoByItemId: Map<string, { orderName: string | null; orderId: number | null; detailNumber: number | null; qty: number | null }>;
+  /** Job-level flag: when true, pieces from different materials cannot share a sheet. */
+  splitByMaterial: boolean;
+  /** Job-level flag: when false, pieces with different films cannot share a sheet. */
+  combineFilms: boolean;
+  /** The target group's sheet material type id (null = no spec). */
+  groupMaterialTypeId: number | null;
+  /** The target group's film id (null = no film). */
+  groupFilmId: number | null;
+  /** item_id ("det-<id>") → its detail's material/film for cross-sheet guard. */
+  pieceMetaByItemId: Map<string, { materialTypeId: number | null; filmId: number | null }>;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────
@@ -64,6 +76,10 @@ interface DragState {
   /** Offset (pointer − piece oriented top-left) in the target sheet's SVG space. */
   svgOffsetX: number;
   svgOffsetY: number;
+  /** Snap guide coordinate in mm along the X axis (null = no snap active on X). */
+  guideXmm: number | null;
+  /** Snap guide coordinate in mm along the Y axis (null = no snap active on Y). */
+  guideYmm: number | null;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -71,8 +87,8 @@ interface DragState {
 /** Maximum display width (px) of a single sheet SVG. */
 const MAX_SVG_WIDTH_PX = 700;
 
-/** Snap threshold (mm): snap engages when the nearest candidate is within this range. */
-const SNAP_THRESHOLD_MM = 10;
+/** Snap threshold (px): snap engages when the nearest candidate is within this many screen pixels. */
+const SNAP_THRESHOLD_PX = 10;
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
@@ -230,10 +246,31 @@ function buildDisplaySheets(
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function SheetEditor(props: SheetEditorProps): JSX.Element {
-  const { sheets, gap, filmTextureByItemId, landscape, onChange, violations, labelInfoByItemId } = props;
+  const {
+    sheets,
+    gap,
+    filmTextureByItemId,
+    landscape,
+    onChange,
+    violations,
+    labelInfoByItemId,
+    splitByMaterial,
+    combineFilms,
+    groupMaterialTypeId,
+    groupFilmId,
+    pieceMetaByItemId,
+  } = props;
 
   const [selected, setSelected] = useState<SelectedPiece | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [menu, setMenu] = useState<{
+    clientX: number;
+    clientY: number;
+    sheetIndex: number;
+    item_id: string;
+    instance: number;
+  } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   // ── Stable refs for window-level event handlers (avoid re-subscription on every state change) ──
   const dragRef = useRef<DragState | null>(null);
@@ -250,6 +287,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   onChangeRef.current = onChange;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+
+  // Guard ref: keeps cross-sheet move policy current for the window-level handleUp handler.
+  const guardRef = useRef({ splitByMaterial, combineFilms, groupMaterialTypeId, groupFilmId, pieceMetaByItemId });
+  guardRef.current = { splitByMaterial, combineFilms, groupMaterialTypeId, groupFilmId, pieceMetaByItemId };
 
   // Ref map: sheetIndex → SVG element (for hit testing during cross-sheet drag)
   const svgRefsMap = useRef<Map<number, SVGSVGElement>>(new Map());
@@ -337,6 +378,16 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
       const { usableW, usableH } = usableExtent(targetSheet.placements);
 
+      // Compute the target sheet's mm-per-pixel ratio for scale-aware snap threshold.
+      const targetOriented = orientPieceRect(
+        { x: 0, y: 0, w: targetSheet.placements.sheet_width_mm, h: targetSheet.placements.sheet_height_mm },
+        targetSheet.placements.sheet_width_mm,
+        targetSheet.placements.sheet_height_mm,
+        ls,
+      );
+      const targetSvgDisplayW = Math.min(MAX_SVG_WIDTH_PX, targetOriented.vw);
+      const targetMmPerPx = targetOriented.vw / targetSvgDisplayW;
+
       // Apply snap (shared geometry — no inline math)
       const snapped = snapDraggedPiece({
         rect: { x: raw.x_mm, y: raw.y_mm, w: piece.width_mm, h: piece.height_mm },
@@ -344,7 +395,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         usableW,
         usableH,
         gapMm,
-        thresholdMm: SNAP_THRESHOLD_MM,
+        thresholdMm: SNAP_THRESHOLD_PX * targetMmPerPx,
       });
 
       const clamped = clampToUsable(
@@ -362,6 +413,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         currentY_mm: clamped.y_mm,
         svgOffsetX,
         svgOffsetY,
+        guideXmm: snapped.guideX,
+        guideYmm: snapped.guideY,
       };
       dragRef.current = next;
       setDrag(next);
@@ -390,6 +443,30 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
       }
 
       const updatedPiece: SheetPlacementPiece = { ...piece, x_mm: currentX_mm, y_mm: currentY_mm };
+
+      // Cross-sheet move guard: abort (snap-back) if material or film policy is violated.
+      if (targetSheetIndex !== sourceSheetIndex) {
+        const g = guardRef.current;
+        const meta = g.pieceMetaByItemId.get(item_id) ?? { materialTypeId: null, filmId: null };
+        const verdict = moveAllowed({
+          pieceMaterialTypeId: meta.materialTypeId,
+          pieceFilmId: meta.filmId,
+          targetMaterialTypeId: g.groupMaterialTypeId,
+          targetFilmId: g.groupFilmId,
+          splitByMaterial: g.splitByMaterial,
+          combineFilms: g.combineFilms,
+        });
+        if (!verdict.ok) {
+          void message.warning(
+            verdict.reason === 'material'
+              ? 'Нельзя переместить: другой материал листа'
+              : 'Нельзя переместить: другая плёнка (объединение плёнок выключено)',
+          );
+          dragRef.current = null;
+          setDrag(null);
+          return; // piece stays on source sheet (snap-back)
+        }
+      }
 
       // Build next sheets immutably: move piece from source → target
       const nextSheets = currentSheets.map((s) => {
@@ -462,6 +539,21 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []); // Empty deps intentional: all mutable state is accessed through refs above
+
+  // ── Close context menu on outside interaction ─────────────────────────────
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null); };
+    const onAny = () => setMenu(null);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onAny);
+    window.addEventListener('scroll', onAny, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onAny);
+      window.removeEventListener('scroll', onAny, true);
+    };
+  }, [menu]);
 
   // ── Rotate button handler ─────────────────────────────────────────────────
   const handleRotateButton = useCallback(
@@ -584,6 +676,29 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 );
               })()}
 
+              {/* Snap guide lines — shown only on the drop-target sheet while dragging */}
+              {isDropTarget && drag && (drag.guideXmm !== null || drag.guideYmm !== null) && (() => {
+                const strokeMm = mmPerPx; // ~1px on screen
+                const guides: JSX.Element[] = [];
+                if (drag.guideXmm !== null) {
+                  const gx = Math.max(0, Math.min(usableW, drag.guideXmm));
+                  const g = orientPieceRect(
+                    { x: trim.left + gx - strokeMm / 2, y: trim.top, w: strokeMm, h: usableH },
+                    W, H, landscape,
+                  );
+                  guides.push(<rect key="gx" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
+                }
+                if (drag.guideYmm !== null) {
+                  const gy = Math.max(0, Math.min(usableH, drag.guideYmm));
+                  const g = orientPieceRect(
+                    { x: trim.left, y: trim.top + gy - strokeMm / 2, w: usableW, h: strokeMm },
+                    W, H, landscape,
+                  );
+                  guides.push(<rect key="gy" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
+                }
+                return <>{guides}</>;
+              })()}
+
               {/* Pieces */}
               {placements.pieces.map((piece) => {
                 // Apply canonical orientation transform (shared, matches preview renderer)
@@ -649,7 +764,15 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                     data-testid={`piece-${sheetIndex}-${piece.item_id}-${piece.instance}`}
                     opacity={isDraggingThis ? 0.45 : 1}
                     style={{ cursor: drag ? 'grabbing' : 'grab' }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelected({ sheetIndex, item_id: piece.item_id, instance: piece.instance });
+                      setMenu({ clientX: e.clientX, clientY: e.clientY, sheetIndex, item_id: piece.item_id, instance: piece.instance });
+                    }}
                     onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      setMenu(null);
                       e.stopPropagation();
                       const svgEl = svgRefsMap.current.get(sheetIndex);
                       if (!svgEl) return;
@@ -670,6 +793,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                         currentY_mm: piece.y_mm,
                         svgOffsetX: pt.x - origin.x,
                         svgOffsetY: pt.y - origin.y,
+                        guideXmm: null,
+                        guideYmm: null,
                       };
                       dragRef.current = newDrag;
                       setDrag(newDrag);
@@ -771,6 +896,33 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
           </div>
         );
       })}
+      {menu &&
+        createPortal(
+          <div
+            data-testid="piece-context-menu"
+            style={{ position: 'fixed', top: menu.clientY, left: menu.clientX, zIndex: 2000 }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <Menu
+              selectable={false}
+              style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.15)', borderRadius: 6 }}
+              items={[
+                {
+                  key: 'rotate',
+                  label: 'Поворот',
+                  disabled: filmTextureByItemId.get(menu.item_id) === true,
+                },
+              ]}
+              onClick={({ key }) => {
+                if (key === 'rotate') {
+                  handleRotateButton(menu.sheetIndex, menu.item_id, menu.instance);
+                }
+                closeMenu();
+              }}
+            />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

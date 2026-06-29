@@ -15,4 +15,19 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/<svg/);
     expect(src).toMatch(/onChange\(/);
   });
+  it('uses scale-aware snap threshold (SNAP_THRESHOLD_PX) and captures guide lines (guideXmm)', () => {
+    expect(src).toMatch(/SNAP_THRESHOLD_PX/);
+    expect(src).toMatch(/guideXmm/);
+  });
+  it('has right-click context menu with onContextMenu, Поворот label, and createPortal', () => {
+    expect(src).toMatch(/onContextMenu/);
+    expect(src).toMatch(/Поворот/);
+    expect(src).toMatch(/createPortal/);
+  });
+  it('imports moveAllowed from cutLayoutGeometry for cross-sheet guard', () => {
+    expect(src).toMatch(/moveAllowed/);
+  });
+  it('accepts pieceMetaByItemId prop for per-piece material/film lookup', () => {
+    expect(src).toMatch(/pieceMetaByItemId/);
+  });
 });
