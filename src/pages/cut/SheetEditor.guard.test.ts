@@ -19,4 +19,9 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/SNAP_THRESHOLD_PX/);
     expect(src).toMatch(/guideXmm/);
   });
+  it('has right-click context menu with onContextMenu, Поворот label, and createPortal', () => {
+    expect(src).toMatch(/onContextMenu/);
+    expect(src).toMatch(/Поворот/);
+    expect(src).toMatch(/createPortal/);
+  });
 });

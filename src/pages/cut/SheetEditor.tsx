@@ -14,7 +14,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { message } from 'antd';
+import { createPortal } from 'react-dom';
+import { Menu, message } from 'antd';
 import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutApi.types';
 import {
   snapDraggedPiece,
@@ -238,6 +239,14 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
   const [selected, setSelected] = useState<SelectedPiece | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [menu, setMenu] = useState<{
+    clientX: number;
+    clientY: number;
+    sheetIndex: number;
+    item_id: string;
+    instance: number;
+  } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   // ── Stable refs for window-level event handlers (avoid re-subscription on every state change) ──
   const dragRef = useRef<DragState | null>(null);
@@ -479,6 +488,21 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []); // Empty deps intentional: all mutable state is accessed through refs above
 
+  // ── Close context menu on outside interaction ─────────────────────────────
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null); };
+    const onAny = () => setMenu(null);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onAny);
+    window.addEventListener('scroll', onAny, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onAny);
+      window.removeEventListener('scroll', onAny, true);
+    };
+  }, [menu]);
+
   // ── Rotate button handler ─────────────────────────────────────────────────
   const handleRotateButton = useCallback(
     (sheetIndex: number, item_id: string, instance: number) => {
@@ -681,7 +705,14 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                     data-testid={`piece-${sheetIndex}-${piece.item_id}-${piece.instance}`}
                     opacity={isDraggingThis ? 0.45 : 1}
                     style={{ cursor: drag ? 'grabbing' : 'grab' }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelected({ sheetIndex, item_id: piece.item_id, instance: piece.instance });
+                      setMenu({ clientX: e.clientX, clientY: e.clientY, sheetIndex, item_id: piece.item_id, instance: piece.instance });
+                    }}
                     onPointerDown={(e) => {
+                      setMenu(null);
                       e.stopPropagation();
                       const svgEl = svgRefsMap.current.get(sheetIndex);
                       if (!svgEl) return;
@@ -780,6 +811,33 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
           </div>
         );
       })}
+      {menu &&
+        createPortal(
+          <div
+            data-testid="piece-context-menu"
+            style={{ position: 'fixed', top: menu.clientY, left: menu.clientX, zIndex: 2000 }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <Menu
+              selectable={false}
+              style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.15)', borderRadius: 6 }}
+              items={[
+                {
+                  key: 'rotate',
+                  label: 'Поворот',
+                  disabled: filmTextureByItemId.get(menu.item_id) === true,
+                },
+              ]}
+              onClick={({ key }) => {
+                if (key === 'rotate') {
+                  handleRotateButton(menu.sheetIndex, menu.item_id, menu.instance);
+                }
+                closeMenu();
+              }}
+            />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
