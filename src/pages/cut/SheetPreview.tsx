@@ -165,9 +165,6 @@ export function SheetPreview({
 
   // For the thumbnail the height is fixed (thumbHeight); width follows aspect ratio.
   const { horizontalMm, verticalMm } = displayedSheetExtents(widthMm, heightMm, landscape);
-  const thumbAspect = verticalMm > 0 ? horizontalMm / verticalMm : 1;
-  const thumbImgW = thumbHeight * thumbAspect;
-  const thumbImgH = thumbHeight;
 
   if (!full) {
     return (
@@ -182,12 +179,8 @@ export function SheetPreview({
               style={{ height: thumbHeight, width: 'auto', maxWidth: '100%', cursor: 'pointer', display: 'block' }}
             />
           </Tooltip>
-          <OverlayLayer
-            overlays={overlays}
-            imgWidthPx={thumbImgW}
-            imgHeightPx={thumbImgH}
-            onClick={onOpen}
-          />
+          {/* Thumbnails show NO detail labels — only the cut layout. Detail data
+              (order/position/dims) appears solely in the full (enlarged) view. */}
         </span>
       </div>
     );
