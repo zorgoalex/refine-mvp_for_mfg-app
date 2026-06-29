@@ -110,6 +110,9 @@ export const cutApi = {
     );
     const params = new URLSearchParams();
     params.append('preset', preset);
+    // On-screen preview always requests no baked labels so the HTML overlay
+    // is the sole label source and there is no double-label collision.
+    params.append('labels', 'off');
     if (landscape) params.append('orientation', 'landscape');
     if (variant) params.append('variant', variant);
     if (renderToken) params.append('renderVersion', renderToken);

@@ -142,6 +142,30 @@ describe('CutController', () => {
     expect(sent).toBe(png);
   });
 
+  it('PNG route: labels=off → showLabels:false; absent/other → showLabels:true', async () => {
+    const calls: Array<{ showLabels: boolean | undefined }> = [];
+    const renderSheetPng = vi.fn(async (q: { showLabels?: boolean }) => {
+      calls.push({ showLabels: q.showLabels });
+      return Buffer.from('PNG');
+    });
+    const controller = createController({ service: { renderSheetPng } });
+    const fakeRes = {
+      setHeader: () => undefined,
+      send: () => undefined,
+    };
+
+    // labels=off → showLabels: false
+    await controller.renderPng({ user: currentUser() } as never, '42', '100', '0', { preset: 'screen', labels: 'off' }, fakeRes as never);
+    // no labels param → showLabels: true (default)
+    await controller.renderPng({ user: currentUser() } as never, '42', '100', '0', { preset: 'screen' }, fakeRes as never);
+    // labels=on → showLabels: true
+    await controller.renderPng({ user: currentUser() } as never, '42', '100', '0', { preset: 'screen', labels: 'on' }, fakeRes as never);
+
+    expect(calls[0]?.showLabels).toBe(false);
+    expect(calls[1]?.showLabels).toBe(true);
+    expect(calls[2]?.showLabels).toBe(true);
+  });
+
   it('renders a sheet SVG with the svg content type', async () => {
     const controller = createController({ service: { renderSheetSvg: vi.fn(async () => '<svg/>') } });
     const { res, headers, state } = fakeResponse();

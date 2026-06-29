@@ -100,18 +100,22 @@ function OverlayLayer({
                 overflow: 'hidden',
               }}
             >
-              {/* Visible 3-line label covering the server-rendered baked text */}
+              {/* 3-line label overlay. The PNG image has no baked labels
+                  (backend renders with showLabels=false for the on-screen
+                  preview), so this overlay is the sole label source.
+                  A subtle semi-transparent background keeps it legible over
+                  the coloured piece fill without obscuring the layout. */}
               <span
                 style={{
-                  background: 'rgba(255,255,255,0.7)',
+                  background: 'rgba(255,255,255,0.78)',
                   borderRadius: 3,
-                  padding: '0 2px',
+                  padding: '1px 4px',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   lineHeight: 1.15,
                   pointerEvents: 'none',
-                  maxWidth: '100%',
+                  maxWidth: '90%',
                   overflow: 'hidden',
                 }}
               >

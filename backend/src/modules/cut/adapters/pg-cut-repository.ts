@@ -1498,7 +1498,8 @@ export class PgCutRepository implements CutRepositoryPort {
   async renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer> {
     // PNG is NOT recalc-blocked (rule 5): only PDF endpoints enforce the print-block.
     const variant = query.variant ?? 'auto';
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, variant, query.cutJobId);
+    const showLabels = query.showLabels ?? true;
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, variant, query.cutJobId, showLabels);
     // Rule 8: blank sheets are index-stable and never 404 for PNG/SVG.
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
@@ -1655,6 +1656,7 @@ export class PgCutRepository implements CutRepositoryPort {
     rotate90 = false,
     variant: 'auto' | 'manual' | 'active' = 'auto',
     cutJobId?: number,
+    showLabels = true,
   ): Promise<{ sheets: Array<{ sheetIndex: number; placements: SheetPlacementsJson; svg: string }> }> {
     // Rule 6: load group metadata + assert job ownership when cutJobId provided.
     const groupRes = await this.database.query<{
@@ -1795,7 +1797,7 @@ export class PgCutRepository implements CutRepositoryPort {
       sheets: rawSheets.map((s) => ({
         sheetIndex: s.sheetIndex,
         placements: s.placements,
-        svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90 }),
+        svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, showLabels }),
       })),
     };
   }

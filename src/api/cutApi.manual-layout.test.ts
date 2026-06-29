@@ -100,12 +100,19 @@ describe('cutApi manual-layout', () => {
     expect(url).toContain('variant=manual');
     expect(url).toContain('renderVersion=tokPNG');
     expect(url).toContain('preset=screen');
+    // On-screen preview always requests no baked labels
+    expect(url).toContain('labels=off');
   });
 
-  it('fetchSheetPng without new params keeps existing call style (no variant/renderVersion)', async () => {
+  it('fetchSheetPng always includes labels=off (on-screen preview, no baked labels)', async () => {
     const fetchMock = imgFetch('image/png', 'PNG');
     await cutApi.fetchSheetPng(42, 100, 0, 'thumb');
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/groups/100/sheets/0.png?preset=thumb');
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('labels=off');
+    expect(url).toContain('preset=thumb');
+    // No other params beyond preset+labels when called with defaults
+    expect(url).not.toContain('variant');
+    expect(url).not.toContain('renderVersion');
   });
 
   it('fetchSheetPng with active variant appends variant=active', async () => {
@@ -113,6 +120,7 @@ describe('cutApi manual-layout', () => {
     await cutApi.fetchSheetPng(5, 9, 2, 'screen', false, 'active');
     const url = fetchMock.mock.calls[0][0] as string;
     expect(url).toContain('variant=active');
+    expect(url).toContain('labels=off');
     expect(url).not.toContain('renderVersion');
   });
 

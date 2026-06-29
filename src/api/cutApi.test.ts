@@ -52,7 +52,11 @@ describe('cutApi', () => {
     await cutApi.fetchSheetPng(42, 100, 0, 'thumb');
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/groups/100/sheets/0.svg');
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/cut-jobs/42/groups/100/sheets/0.png?preset=thumb');
+    // PNG always includes labels=off (no baked labels; HTML overlay is the sole label source)
+    const pngUrl = fetchMock.mock.calls[1][0] as string;
+    expect(pngUrl).toContain('/api/v1/cut-jobs/42/groups/100/sheets/0.png');
+    expect(pngUrl).toContain('preset=thumb');
+    expect(pngUrl).toContain('labels=off');
   });
 
   it('returns pending on a cold-cache 202 PDF and the blob once warm', async () => {

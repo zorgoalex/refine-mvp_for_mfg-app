@@ -94,6 +94,13 @@ export interface RenderSheetPngQuery {
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
   variant?: 'auto' | 'manual' | 'active';
+  /**
+   * When false, baked piece-label `<text>` elements are omitted from the SVG
+   * before rasterisation. The on-screen PNG preview passes false so the HTML
+   * overlay is the sole label source (no double-label collision).
+   * Defaults to true. SVG download and PDF print are unaffected (always true).
+   */
+  showLabels?: boolean;
   requestId?: string;
 }
 

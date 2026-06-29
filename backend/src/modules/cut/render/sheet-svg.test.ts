@@ -132,6 +132,43 @@ describe('buildSheetSvg rotate90 (landscape, upright labels)', () => {
   });
 });
 
+describe('buildSheetSvg showLabels=false (on-screen PNG preview — no baked labels)', () => {
+  it('omits all piece <text> elements when showLabels=false', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => ['11301', 'поз. 1', '2647X565'], showLabels: false });
+    // No <text> elements for any piece label string
+    expect(svg).not.toContain('<text');
+    expect(svg).not.toContain('11301');
+    expect(svg).not.toContain('поз. 1');
+    expect(svg).not.toContain('2647X565');
+  });
+
+  it('still renders piece <rect> elements and the sheet outline when showLabels=false', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => ['11301', 'поз. 1', '2647X565'], showLabels: false });
+    // Sheet outline rect
+    expect(svg).toMatch(/<rect x="0" y="0" width="2800" height="2070"/);
+    // Piece rects are present (trim offset: x=10, y=15)
+    expect(svg).toMatch(/<rect[^>]*x="10"[^>]*y="15"/);
+    expect(svg).toMatch(/<rect[^>]*x="620"[^>]*y="15"/);
+  });
+
+  it('renders labels when showLabels=true (default)', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => ['11301', 'поз. 1', '2647X565'] });
+    expect(svg).toContain('<text');
+    expect(svg).toContain('11301');
+    expect(svg).toContain('поз. 1');
+    expect(svg).toContain('2647X565');
+  });
+
+  it('showLabels=false is equivalent to showLabels=false with explicit false value', () => {
+    const a = buildSheetSvg({ sheet, labelFor: () => 'X', showLabels: false });
+    const b = buildSheetSvg({ sheet, labelFor: () => 'X', showLabels: false });
+    expect(a).toBe(b);
+    expect(a).not.toContain('<text');
+    // Rects still present
+    expect(a).toContain('<rect');
+  });
+});
+
 describe('computeGroupItemQuantities', () => {
   it('counts total placed instances per item across all sheets (qty=3 over 2 sheets)', () => {
     const sheets: BackMappedSheet[] = [

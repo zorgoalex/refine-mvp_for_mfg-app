@@ -390,6 +390,7 @@ export class CutController {
       preset: parsePreset(query.preset),
       rotate90: parseOrientation(query.orientation),
       variant: parseVariant(query.variant),
+      showLabels: query.labels !== 'off',
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/png');

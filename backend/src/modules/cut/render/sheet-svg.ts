@@ -142,6 +142,16 @@ export interface BuildSheetSvgInput {
    * (horizontal) on screen and in print, regardless of orientation.
    */
   rotate90?: boolean;
+  /**
+   * When false, piece label `<text>` elements are omitted entirely.
+   * Piece rects, fills, and the sheet outline are always rendered.
+   * Defaults to true so every existing caller keeps labels.
+   *
+   * Use showLabels=false for the on-screen PNG preview so the HTML overlay
+   * is the sole label source (no double-label collision).
+   * SVG download and PDF print always keep labels (showLabels=true).
+   */
+  showLabels?: boolean;
 }
 
 function escapeXml(value: string): string {
@@ -158,7 +168,7 @@ function num(value: number): string {
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
-  const { sheet, labelFor, fillFor, rotate90 = false } = input;
+  const { sheet, labelFor, fillFor, rotate90 = false, showLabels = true } = input;
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 40));
@@ -178,8 +188,14 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const rect = orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
-      const resolved = labelFor(piece);
       const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;
+      const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
+        rect.h,
+      )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`;
+      if (!showLabels) {
+        return rectEl;
+      }
+      const resolved = labelFor(piece);
       const lines = Array.isArray(resolved) ? resolved : [resolved];
       // Vertically centre N lines around cy: the first tspan lifts by
       // (N-1)/2 line-heights, each subsequent line drops one line-height. em
@@ -191,9 +207,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
         })
         .join('');
       return [
-        `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
-          rect.h,
-        )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`,
+        rectEl,
         `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
           fontMm,
         )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,
