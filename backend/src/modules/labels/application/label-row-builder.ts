@@ -22,6 +22,10 @@ export function buildLabelRows(input: {
   const expanded: LabelRow[] = [];
   for (const detail of input.details) {
     const copyCount = Math.max(0, Math.trunc(detail.quantity || 0));
+    const detailOrderFields = detail.orderFields && Object.keys(detail.orderFields).length > 0
+      ? detail.orderFields
+      : input.orderFields ?? {};
+    const detailOrderName = readOrderNameFromFields(detailOrderFields) ?? input.orderName;
     for (let copyIndex = 1; copyIndex <= copyCount; copyIndex += 1) {
       expanded.push({
         rowIndex: expanded.length + 1,
@@ -29,7 +33,7 @@ export function buildLabelRows(input: {
         orderId: detail.orderId,
         copyIndex,
         copyCount,
-        values: buildBaseValues(input.orderName, input.orderFields ?? {}, input.template.customFieldSchema, detail, input.useBasisFields ?? true),
+        values: buildBaseValues(detailOrderName, detailOrderFields, input.template.customFieldSchema, detail, input.useBasisFields ?? true),
       });
     }
   }
@@ -43,6 +47,11 @@ export function buildLabelRows(input: {
   }
 
   return expanded;
+}
+
+function readOrderNameFromFields(orderFields: Record<string, unknown>): string | null {
+  const value = orderFields.order_name;
+  return value == null ? null : String(value);
 }
 
 export function hashLabelRows(rows: LabelRow[]): string {

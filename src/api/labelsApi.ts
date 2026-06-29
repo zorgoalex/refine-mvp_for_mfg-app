@@ -2,12 +2,15 @@ import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import type {
   GenerateOrderLabelsInput,
+  GenerateDetailLabelsInput,
+  DetailLabelsPreview,
   LabelFieldCatalogItem,
   LabelTemplate,
   LabelTemplateInput,
   OrderLabelData,
   OrderLabelGeneration,
   OrderLabelsPreview,
+  PreviewDetailLabelsInput,
   LatestOrderLabelsPreview,
   PreviewOrderLabelsInput,
   UpdateLabelTemplateInput,
@@ -60,6 +63,14 @@ export const labelsApi = {
     return httpClient.post<OrderLabelGeneration>(apiRoutes.labels.orderGenerate(validateId(orderId, 'orderId')), input);
   },
 
+  previewDetailLabels(input: PreviewDetailLabelsInput): Promise<DetailLabelsPreview> {
+    return httpClient.post<DetailLabelsPreview>(apiRoutes.labels.detailPreview, input);
+  },
+
+  generateDetailLabels(input: GenerateDetailLabelsInput): Promise<OrderLabelGeneration> {
+    return httpClient.post<OrderLabelGeneration>(apiRoutes.labels.detailGenerate, input);
+  },
+
   getLatest(orderId: number): Promise<LatestOrderLabelsPreview> {
     return httpClient.get<LatestOrderLabelsPreview>(apiRoutes.labels.latest(validateId(orderId, 'orderId')));
   },
@@ -72,6 +83,13 @@ export const labelsApi = {
   async downloadGeneration(orderId: number, generationId: number): Promise<{ blob: Blob; fileName: string | null }> {
     const { blob, fileName } = await httpClient.download(
       apiRoutes.labels.generationExport(validateId(orderId, 'orderId'), validateId(generationId, 'generationId')),
+    );
+    return { blob, fileName };
+  },
+
+  async downloadDetailGeneration(generationId: number): Promise<{ blob: Blob; fileName: string | null }> {
+    const { blob, fileName } = await httpClient.download(
+      apiRoutes.labels.detailGenerationExport(validateId(generationId, 'generationId')),
     );
     return { blob, fileName };
   },

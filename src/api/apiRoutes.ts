@@ -106,6 +106,10 @@ export const apiRoutes = {
     latestExport: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/latest/export`),
     generationExport: (orderId: number, generationId: number) =>
       backendApiPath(`/orders/${orderId}/labels/generations/${generationId}/export`),
+    detailPreview: backendApiPath('/labels/preview'),
+    detailGenerate: backendApiPath('/labels/generate'),
+    detailGenerationExport: (generationId: number) =>
+      backendApiPath(`/labels/generations/${generationId}/export`),
   },
   clientPhones: {
     list: backendApiPath('/client-phones'),

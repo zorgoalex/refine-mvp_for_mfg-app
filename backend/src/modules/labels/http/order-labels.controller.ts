@@ -13,6 +13,7 @@ import type {
   OrderLabelsPreviewDto,
 } from '../application/labels.types';
 import { generateOrderLabelsSchema, previewOrderLabelsSchema, updateOrderLabelDataSchema } from '../dto/order-label.dto';
+import { generateDetailLabelsSchema, previewDetailLabelsSchema } from '../dto/order-label.dto';
 import { assertLabelsEnabled, requireUser } from './label-fields.controller';
 import { parseId } from './label-templates.controller';
 import { LabelsRuntimeConfigService } from './labels-runtime-config.service';
@@ -143,6 +144,65 @@ export class OrderLabelActionsController {
     const result = await this.service.exportOrderLabels({
       ...this.context(request),
       orderId: parseId(orderId),
+      generationId: parseId(generationId),
+    });
+    response.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    return new StreamableFile(result.body, { type: result.contentType });
+  }
+
+  private context(request: RequestWithCurrentUser): LabelsContext {
+    return { currentUser: requireUser(request), requestId: request.requestId ?? '' };
+  }
+}
+
+@ApiTags('Labels')
+@ApiBearerAuth()
+@Controller('labels')
+export class DetailLabelActionsController {
+  constructor(
+    private readonly service: LabelsService,
+    private readonly runtimeConfig: LabelsRuntimeConfigService,
+  ) {}
+
+  @ApiOperation({ operationId: 'previewDetailLabels', summary: 'Preview labels for explicit detail instances across orders' })
+  @Post('preview')
+  @HttpCode(200)
+  async preview(
+    @Req() request: RequestWithCurrentUser,
+    @Body() body: unknown,
+  ) {
+    assertLabelsEnabled(this.runtimeConfig);
+    return this.service.previewDetailLabels({
+      ...this.context(request),
+      input: parse(previewDetailLabelsSchema, body),
+    });
+  }
+
+  @ApiOperation({ operationId: 'generateDetailLabels', summary: 'Generate labels for explicit detail instances across orders' })
+  @Post('generate')
+  @HttpCode(200)
+  async generate(
+    @Req() request: RequestWithCurrentUser,
+    @Body() body: unknown,
+  ): Promise<OrderLabelGenerationDto> {
+    assertLabelsEnabled(this.runtimeConfig);
+    return this.service.generateDetailLabels({
+      ...this.context(request),
+      input: parse(generateDetailLabelsSchema, body),
+    });
+  }
+
+  @ApiOperation({ operationId: 'exportDetailLabelGeneration', summary: 'Export an explicit-detail label generation' })
+  @Get('generations/:generationId/export')
+  @Header('Content-Type', 'application/zip')
+  async exportGeneration(
+    @Req() request: RequestWithCurrentUser,
+    @Param('generationId') generationId: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    assertLabelsEnabled(this.runtimeConfig);
+    const result = await this.service.exportDetailLabels({
+      ...this.context(request),
       generationId: parseId(generationId),
     });
     response.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);

@@ -51,6 +51,41 @@ describe('labelsApi', () => {
     expect(result.blob).toBeInstanceOf(Blob);
   });
 
+  it('supports orderless detail label preview/generate/export endpoints', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ previewToken: 'detail-preview-token', svgPages: [] }), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ generationId: 9 }), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(new Blob(['zip']), {
+          headers: { 'Content-Disposition': 'attachment; filename=\"detail-labels.zip\"' },
+        }),
+      );
+
+    await labelsApi.previewDetailLabels({ templateId: 1, templateVersion: 2, detailIds: [101, 202] });
+    await labelsApi.generateDetailLabels({
+      templateId: 1,
+      templateVersion: 2,
+      detailIds: [101, 202],
+      previewToken: 'detail-preview-token',
+      exportFormats: ['bmp'],
+      idempotencyKey: 'detail-generate-1',
+    });
+    const downloaded = await labelsApi.downloadDetailGeneration(9);
+
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/labels/preview', expect.any(Object));
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/labels/generate', expect.any(Object));
+    expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/labels/generations/9/export', expect.any(Object));
+    expect(downloaded.fileName).toBe('detail-labels.zip');
+  });
+
   it('loads latest label preview through the read endpoint', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ generationId: 7, orderId: 42, svgPages: ['<svg />'] }), {

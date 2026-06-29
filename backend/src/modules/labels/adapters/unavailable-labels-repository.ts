@@ -33,10 +33,19 @@ export class UnavailableLabelsRepository implements LabelsPort {
   async generateOrderLabels() {
     return unavailable();
   }
+  async previewDetailLabels() {
+    return unavailable();
+  }
+  async generateDetailLabels() {
+    return unavailable();
+  }
   async getLatestOrderLabelsPreview() {
     return unavailable();
   }
   async exportOrderLabels() {
+    return unavailable();
+  }
+  async exportDetailLabels() {
     return unavailable();
   }
   async recordPermissionDenied() {

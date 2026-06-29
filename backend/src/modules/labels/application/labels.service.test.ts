@@ -169,6 +169,43 @@ describe('LabelsService', () => {
     ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
     expect(repo.recordPermissionDenied).toHaveBeenLastCalledWith(expect.objectContaining({ targetEntityType: 'order' }));
   });
+
+  it('supports labels preview/generate/export for explicit details across orders', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+
+    await service.previewDetailLabels({
+      currentUser: { ...manager, permissions: ['labels.view'] },
+      requestId: 'req-preview',
+      input: { templateId: 1, templateVersion: 1, detailIds: [101, 202] },
+    });
+    expect(repo.previewDetailLabels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ detailIds: [101, 202] }),
+      }),
+    );
+
+    await service.generateDetailLabels({
+      currentUser: manager,
+      requestId: 'req-generate',
+      input: {
+        templateId: 1,
+        templateVersion: 1,
+        detailIds: [101, 202],
+        previewToken: 'detail-preview-token-12345',
+        exportFormats: ['bmp'],
+        idempotencyKey: 'detail-labels-generate-1',
+      },
+    });
+    expect(repo.generateDetailLabels).toHaveBeenCalledOnce();
+
+    await service.exportDetailLabels({
+      currentUser: manager,
+      requestId: 'req-export',
+      generationId: 9,
+    });
+    expect(repo.exportDetailLabels).toHaveBeenCalledWith(expect.objectContaining({ generationId: 9 }));
+  });
 });
 
 function validInput(overrides: Partial<LabelTemplateInput> = {}): LabelTemplateInput {
@@ -218,6 +255,23 @@ function fakeRepo(): LabelsPort {
     updateOrderLabelData: vi.fn(),
     previewOrderLabels: vi.fn(),
     generateOrderLabels: vi.fn(),
+    previewDetailLabels: vi.fn(async () => ({
+      generationScope: 'details',
+      templateId: 1,
+      templateVersion: 1,
+      labelCount: 2,
+      rows: [],
+      svgPages: [],
+      previewToken: 'detail-preview-token-12345',
+    })),
+    generateDetailLabels: vi.fn(async () => ({
+      generationId: 9,
+      orderId: null,
+      templateId: 1,
+      templateVersion: 1,
+      labelCount: 2,
+      generatedAt: '2026-06-24T00:00:00.000Z',
+    })),
     getLatestOrderLabelsPreview: vi.fn(async () => ({
       generationId: 1,
       orderId: 42,
@@ -228,6 +282,11 @@ function fakeRepo(): LabelsPort {
       svgPages: [],
     })),
     exportOrderLabels: vi.fn(),
+    exportDetailLabels: vi.fn(async () => ({
+      filename: 'labels-generation-9.zip',
+      contentType: 'application/zip',
+      body: Buffer.from('zip'),
+    })),
     recordPermissionDenied: vi.fn(async () => undefined),
   };
 }

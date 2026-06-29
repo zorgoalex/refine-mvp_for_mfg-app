@@ -6,12 +6,12 @@ import { UnavailableLabelsRepository } from './adapters/unavailable-labels-repos
 import { LabelsService } from './application/labels.service';
 import { LabelFieldsController } from './http/label-fields.controller';
 import { LabelTemplatesController } from './http/label-templates.controller';
-import { OrderLabelActionsController, OrderLabelsController } from './http/order-labels.controller';
+import { DetailLabelActionsController, OrderLabelActionsController, OrderLabelsController } from './http/order-labels.controller';
 import { LabelsRuntimeConfigService } from './http/labels-runtime-config.service';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [LabelFieldsController, LabelTemplatesController, OrderLabelsController, OrderLabelActionsController],
+  controllers: [LabelFieldsController, LabelTemplatesController, OrderLabelsController, OrderLabelActionsController, DetailLabelActionsController],
   providers: [
     LabelsRuntimeConfigService,
     {

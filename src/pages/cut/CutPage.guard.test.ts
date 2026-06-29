@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // backend-owned, no-Hasura-write surface (CLAUDE.md principle 2/3) and keeps the
 // no_sheet_spec onboarding signal (plan §5).
 const source = readFileSync(fileURLToPath(new URL('./CutPage.tsx', import.meta.url)), 'utf8');
+const sheetLabelSource = readFileSync(fileURLToPath(new URL('./CutSheetLabelGenerateAction.tsx', import.meta.url)), 'utf8');
 
 describe('CutPage source guards', () => {
   it('drives every command/read through cutApi, never Hasura', () => {
@@ -104,6 +105,15 @@ describe('CutPage source guards', () => {
     expect(source).toContain('loadThumb');
     expect(source).toContain("'thumb'");
     expect(source).toContain('sheetThumbs');
+  });
+
+  it('mounts per-sheet label generation actions using detail ids from sheet placements', () => {
+    expect(source).toContain('CutSheetLabelGenerateAction');
+    expect(source).toContain('detailIdsForSheet');
+    expect(source).toContain('sheet.placements.pieces');
+    expect(sheetLabelSource).toContain('Бирки');
+    expect(sheetLabelSource).toContain('labelsApi.previewDetailLabels');
+    expect(sheetLabelSource).toContain('labelsApi.generateDetailLabels');
   });
 
   it('resets previews on recalculate and revokes blob URLs (no stale preview, no leak)', () => {

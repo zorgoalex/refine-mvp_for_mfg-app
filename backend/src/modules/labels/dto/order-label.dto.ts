@@ -44,3 +44,20 @@ export const generateOrderLabelsSchema = previewOrderLabelsSchema
     idempotencyKey: z.string().trim().min(8).max(200),
   })
   .strict();
+
+export const previewDetailLabelsSchema = z
+  .object({
+    templateId: z.number().int().positive(),
+    templateVersion: z.number().int().min(1),
+    detailIds: z.array(z.number().int().positive()).min(1).max(5000),
+    useBasisFields: z.boolean().optional().default(true),
+  })
+  .strict();
+
+export const generateDetailLabelsSchema = previewDetailLabelsSchema
+  .extend({
+    previewToken: z.string().trim().min(20).max(4000),
+    exportFormats: z.array(z.enum(['bmp', 'png', 'emf'])).min(1).max(3),
+    idempotencyKey: z.string().trim().min(8).max(200),
+  })
+  .strict();

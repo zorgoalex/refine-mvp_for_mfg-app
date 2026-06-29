@@ -98,6 +98,33 @@ describe('label row builder', () => {
     });
   });
 
+  it('uses per-detail order fields when one label batch contains details from multiple orders', () => {
+    const rows = buildLabelRows({
+      orderName: null,
+      today: '2026-06-24',
+      template: { customFieldSchema: {} },
+      details: [
+        detail({
+          detailId: 101,
+          orderId: 42,
+          detailNumber: '1',
+          orderFields: { order_id: 42, order_name: 'ORDER-42', client_name: 'Client A' },
+        }),
+        detail({
+          detailId: 202,
+          orderId: 77,
+          detailNumber: '2',
+          orderFields: { order_id: 77, order_name: 'ORDER-77', client_name: 'Client B' },
+        }),
+      ],
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.orderId)).toEqual([42, 77]);
+    expect(rows.map((row) => row.values['order.order_name'])).toEqual(['ORDER-42', 'ORDER-77']);
+    expect(rows.map((row) => row.values['order.client_name'])).toEqual(['Client A', 'Client B']);
+  });
+
   it('maps custom fields from detail/order source fields unless manually overridden', () => {
     const [row] = buildLabelRows({
       orderName: 'ERP-548',

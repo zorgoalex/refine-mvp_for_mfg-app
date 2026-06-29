@@ -105,6 +105,20 @@ export interface GenerateOrderLabelsInput extends PreviewOrderLabelsInput {
   idempotencyKey: string;
 }
 
+export interface PreviewDetailLabelsInput {
+  templateId: number;
+  templateVersion: number;
+  /** May include repeated ids; repeated ids represent physical instances on a cut sheet. */
+  detailIds: number[];
+  useBasisFields?: boolean;
+}
+
+export interface GenerateDetailLabelsInput extends PreviewDetailLabelsInput {
+  previewToken: string;
+  exportFormats: LabelExportFormat[];
+  idempotencyKey: string;
+}
+
 export interface OrderLabelsPreview {
   orderId: number;
   templateId: number;
@@ -115,9 +129,19 @@ export interface OrderLabelsPreview {
   previewToken: string;
 }
 
+export interface DetailLabelsPreview {
+  generationScope: 'details';
+  templateId: number;
+  templateVersion: number;
+  labelCount: number;
+  rows: unknown[];
+  svgPages: string[];
+  previewToken: string;
+}
+
 export interface OrderLabelGeneration {
   generationId: number;
-  orderId: number;
+  orderId: number | null;
   templateId: number;
   templateVersion: number;
   labelCount: number;

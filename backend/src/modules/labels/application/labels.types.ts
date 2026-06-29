@@ -114,7 +114,21 @@ export interface PreviewOrderLabelsInput {
   useBasisFields?: boolean;
 }
 
+export interface PreviewDetailLabelsInput {
+  templateId: number;
+  templateVersion: number;
+  /** May contain repeated ids; multiplicity represents physical detail instances. */
+  detailIds: number[];
+  useBasisFields?: boolean;
+}
+
 export interface GenerateOrderLabelsInput extends PreviewOrderLabelsInput {
+  previewToken: string;
+  exportFormats: LabelExportFormat[];
+  idempotencyKey: string;
+}
+
+export interface GenerateDetailLabelsInput extends PreviewDetailLabelsInput {
   previewToken: string;
   exportFormats: LabelExportFormat[];
   idempotencyKey: string;
@@ -130,9 +144,19 @@ export interface OrderLabelsPreviewDto {
   previewToken: string;
 }
 
+export interface DetailLabelsPreviewDto {
+  generationScope: 'details';
+  templateId: number;
+  templateVersion: number;
+  labelCount: number;
+  rows: unknown[];
+  svgPages: string[];
+  previewToken: string;
+}
+
 export interface OrderLabelGenerationDto {
   generationId: number;
-  orderId: number;
+  orderId: number | null;
   templateId: number;
   templateVersion: number;
   labelCount: number;
@@ -140,6 +164,7 @@ export interface OrderLabelGenerationDto {
 }
 
 export interface LatestOrderLabelsPreviewDto extends OrderLabelGenerationDto {
+  orderId: number;
   svgPages: string[];
 }
 
@@ -192,9 +217,21 @@ export interface GenerateOrderLabelsCommand extends LabelsContext {
   input: GenerateOrderLabelsInput;
 }
 
+export interface PreviewDetailLabelsCommand extends LabelsContext {
+  input: PreviewDetailLabelsInput;
+}
+
+export interface GenerateDetailLabelsCommand extends LabelsContext {
+  input: GenerateDetailLabelsInput;
+}
+
 export interface ExportOrderLabelsQuery extends LabelsContext {
   orderId: number;
   generationId?: number;
+}
+
+export interface ExportDetailLabelsQuery extends LabelsContext {
+  generationId: number;
 }
 
 export interface LabelsPermissionDeniedInput {
@@ -215,7 +252,10 @@ export interface LabelsPort {
   updateOrderLabelData(command: UpdateOrderLabelDataCommand): Promise<OrderLabelDataDto>;
   previewOrderLabels(command: PreviewOrderLabelsCommand): Promise<OrderLabelsPreviewDto>;
   generateOrderLabels(command: GenerateOrderLabelsCommand): Promise<OrderLabelGenerationDto>;
+  previewDetailLabels(command: PreviewDetailLabelsCommand): Promise<DetailLabelsPreviewDto>;
+  generateDetailLabels(command: GenerateDetailLabelsCommand): Promise<OrderLabelGenerationDto>;
   getLatestOrderLabelsPreview(query: ExportOrderLabelsQuery): Promise<LatestOrderLabelsPreviewDto>;
   exportOrderLabels(query: ExportOrderLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }>;
+  exportDetailLabels(query: ExportDetailLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }>;
   recordPermissionDenied(input: LabelsPermissionDeniedInput): Promise<void>;
 }

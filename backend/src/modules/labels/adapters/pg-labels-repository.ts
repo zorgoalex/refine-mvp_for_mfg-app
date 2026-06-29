@@ -11,7 +11,9 @@ import type {
   CreateLabelTemplateCommand,
   DeleteLabelTemplateCommand,
   ExportOrderLabelsQuery,
+  ExportDetailLabelsQuery,
   GenerateOrderLabelsCommand,
+  GenerateDetailLabelsCommand,
   GetOrderLabelDataQuery,
   GetLabelTemplateQuery,
   LabelExportFormat,
@@ -20,12 +22,14 @@ import type {
   LabelTemplateElementInput,
   LabelsPermissionDeniedInput,
   LabelsPort,
+  DetailLabelsPreviewDto,
   LatestOrderLabelsPreviewDto,
   ListLabelTemplatesQuery,
   OrderLabelDataDetailDto,
   OrderLabelDataDto,
   OrderLabelGenerationDto,
   OrderLabelsPreviewDto,
+  PreviewDetailLabelsCommand,
   PreviewOrderLabelsCommand,
   UpdateOrderLabelDataCommand,
   UpdateLabelTemplateCommand,
@@ -93,7 +97,7 @@ interface OrderFieldsRow extends QueryResultRow {
 
 interface GenerationRow extends QueryResultRow {
   order_label_generation_id: string | number;
-  order_id: string | number;
+  order_id: string | number | null;
   label_template_id: string | number;
   template_version: string | number;
   label_count: string | number;
@@ -574,13 +578,136 @@ export class PgLabelsRepository implements LabelsPort {
     });
   }
 
+  async previewDetailLabels(command: PreviewDetailLabelsCommand): Promise<DetailLabelsPreviewDto> {
+    const template = await this.readTemplate(this.database, command.input.templateId, true);
+    assertTemplateVersion(template.version, command.input.templateVersion);
+    const detailIds = command.input.detailIds;
+    const useBasisFields = command.input.useBasisFields ?? true;
+    const details = await readDetailLabelDetails(
+      this.database,
+      detailIds,
+      template.labelTemplateId,
+      template.customFieldSchema,
+    );
+    const rows = buildLabelRows({ orderName: null, template, details, useBasisFields });
+    const rowHash = hashLabelRows(rows);
+    const svgPages = renderSvgPages(template, rows).pages;
+    return {
+      generationScope: 'details',
+      templateId: template.labelTemplateId,
+      templateVersion: template.version,
+      labelCount: rows.length,
+      rows,
+      svgPages,
+      previewToken: encodePreviewToken({
+        generationScope: 'details',
+        templateId: template.labelTemplateId,
+        templateVersion: template.version,
+        detailIds,
+        useBasisFields,
+        rowHash,
+      }),
+    };
+  }
+
+  async generateDetailLabels(command: GenerateDetailLabelsCommand): Promise<OrderLabelGenerationDto> {
+    return this.database.transaction(async (tx) => {
+      const template = await this.readTemplate(tx, command.input.templateId, true, true);
+      assertTemplateVersion(template.version, command.input.templateVersion);
+      const detailIds = command.input.detailIds;
+      const useBasisFields = command.input.useBasisFields ?? true;
+      const details = await readDetailLabelDetails(tx, detailIds, template.labelTemplateId, template.customFieldSchema);
+      const rows = buildLabelRows({ orderName: null, template, details, useBasisFields });
+      const rowHash = hashLabelRows(rows);
+      const token = decodePreviewToken(command.input.previewToken);
+      if (
+        token.generationScope !== 'details' ||
+        token.templateId !== template.labelTemplateId ||
+        token.templateVersion !== template.version ||
+        token.rowHash !== rowHash ||
+        JSON.stringify(token.detailIds ?? []) !== JSON.stringify(detailIds) ||
+        (token.useBasisFields ?? true) !== useBasisFields
+      ) {
+        throw new ApiError(409, 'LABEL_PREVIEW_TOKEN_STALE', 'Label preview token is stale');
+      }
+
+      const requestHash = hashRequest({
+        generationScope: 'details',
+        templateId: template.labelTemplateId,
+        templateVersion: template.version,
+        detailIds,
+        useBasisFields,
+        rowHash,
+        exportFormats: command.input.exportFormats,
+      });
+      const existing = await claimIdempotency<OrderLabelGenerationDto>(
+        tx,
+        command.input.idempotencyKey,
+        'detail_labels.generate',
+        actorId(command.currentUser),
+        'label_generation',
+        'details',
+        requestHash,
+      );
+      if (existing) {
+        return existing;
+      }
+
+      const inserted = await tx.query<GenerationRow>(
+        `INSERT INTO order_label_generations
+          (order_id, label_template_id, template_version, idempotency_key, request_hash, preview_token_hash,
+           detail_filters, generation_scope, scope_json, template_snapshot, rows_snapshot, label_count,
+           export_formats, export_artifacts, generated_by, request_id)
+         VALUES (NULL,$1,$2,$3,$4,$5,$6::jsonb,'details',$7::jsonb,$8::jsonb,$9::jsonb,$10,$11::text[],'{}'::jsonb,$12,$13)
+         RETURNING order_label_generation_id, order_id, label_template_id, template_version, label_count, generated_at,
+                   template_snapshot, rows_snapshot, export_formats`,
+        [
+          template.labelTemplateId,
+          template.version,
+          command.input.idempotencyKey,
+          requestHash,
+          sha256(command.input.previewToken),
+          JSON.stringify({ detailIds, useBasisFields }),
+          JSON.stringify({ detailIds, orderIds: [...new Set(details.map((detail) => detail.orderId))] }),
+          JSON.stringify(template),
+          JSON.stringify(rows),
+          rows.length,
+          command.input.exportFormats,
+          actorId(command.currentUser),
+          command.requestId,
+        ],
+      );
+      const generation = mapGenerationRow(inserted.rows[0]);
+      await auditService.record(tx, {
+        event: 'detail_labels.generated',
+        entityType: 'order_label_generation',
+        entityId: generation.generationId,
+        actorUserId: actorId(command.currentUser),
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId: command.requestId,
+        source: 'backend.labels',
+        before: null,
+        after: { ...generation, exportFormats: command.input.exportFormats, detailIds },
+        diff: { labelCount: generation.labelCount },
+        metadata: { idempotencyKey: command.input.idempotencyKey, generationScope: 'details' },
+        relatedEntities: [
+          { entityType: 'order_label_generation', entityId: generation.generationId },
+          ...details.map((detail) => ({ entityType: 'order_detail', entityId: detail.detailId })),
+        ],
+      });
+      await completeIdempotency(tx, command.input.idempotencyKey, generation);
+      return generation;
+    });
+  }
+
   async exportOrderLabels(query: ExportOrderLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }> {
     const generation = query.generationId
       ? await readGeneration(this.database, query.orderId, query.generationId)
       : await readLatestGeneration(this.database, query.orderId);
     const body = await renderLabelsZip({
       generationId: generation.generationId,
-      orderId: generation.orderId,
+      orderId: generation.orderId ?? query.orderId,
       template: generation.template,
       rows: generation.rows,
       formats: generation.exportFormats,
@@ -593,12 +720,29 @@ export class PgLabelsRepository implements LabelsPort {
     };
   }
 
+  async exportDetailLabels(query: ExportDetailLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }> {
+    const generation = await readDetailGeneration(this.database, query.generationId);
+    const body = await renderLabelsZip({
+      generationId: generation.generationId,
+      orderId: generation.orderId ?? 0,
+      template: generation.template,
+      rows: generation.rows,
+      formats: generation.exportFormats,
+      generatedAt: generation.generatedAt,
+    });
+    return {
+      filename: `labels-generation-${generation.generationId}.zip`,
+      contentType: 'application/zip',
+      body,
+    };
+  }
+
   async getLatestOrderLabelsPreview(query: ExportOrderLabelsQuery): Promise<LatestOrderLabelsPreviewDto> {
     const generation = await readLatestGeneration(this.database, query.orderId);
     const svgPages = renderSvgPages(generation.template, generation.rows).pages;
     return {
       generationId: generation.generationId,
-      orderId: generation.orderId,
+      orderId: generation.orderId ?? query.orderId,
       templateId: generation.template.labelTemplateId,
       templateVersion: generation.template.version,
       labelCount: generation.rows.length,
@@ -668,7 +812,8 @@ export class PgLabelsRepository implements LabelsPort {
 }
 
 interface PreviewTokenPayload {
-  orderId: number;
+  generationScope?: 'order' | 'details';
+  orderId?: number;
   templateId: number;
   templateVersion: number;
   detailIds: number[];
@@ -782,7 +927,7 @@ async function readGeneration(
   generationId: number,
 ): Promise<{
   generationId: number;
-  orderId: number;
+  orderId: number | null;
   template: LabelTemplateDto;
   rows: LabelRow[];
   exportFormats: LabelExportFormat[];
@@ -820,7 +965,7 @@ async function readLatestGeneration(client: DatabaseClient, orderId: number): Pr
 function mapGenerationRow(row: GenerationRow): OrderLabelGenerationDto {
   return {
     generationId: toNumber(row.order_label_generation_id),
-    orderId: toNumber(row.order_id),
+    orderId: row.order_id == null ? null : toNumber(row.order_id),
     templateId: toNumber(row.label_template_id),
     templateVersion: toNumber(row.template_version),
     labelCount: toNumber(row.label_count),
@@ -830,7 +975,7 @@ function mapGenerationRow(row: GenerationRow): OrderLabelGenerationDto {
 
 function mapGenerationSnapshotRow(row: GenerationRow): {
   generationId: number;
-  orderId: number;
+  orderId: number | null;
   template: LabelTemplateDto;
   rows: LabelRow[];
   exportFormats: LabelExportFormat[];
@@ -838,12 +983,36 @@ function mapGenerationSnapshotRow(row: GenerationRow): {
 } {
   return {
     generationId: toNumber(row.order_label_generation_id),
-    orderId: toNumber(row.order_id),
+    orderId: row.order_id == null ? null : toNumber(row.order_id),
     template: row.template_snapshot,
     rows: row.rows_snapshot,
     exportFormats: row.export_formats,
     generatedAt: new Date(row.generated_at).toISOString(),
   };
+}
+
+async function readDetailGeneration(
+  client: DatabaseClient,
+  generationId: number,
+): Promise<{
+  generationId: number;
+  orderId: number | null;
+  template: LabelTemplateDto;
+  rows: LabelRow[];
+  exportFormats: LabelExportFormat[];
+  generatedAt: string;
+}> {
+  const result = await client.query<GenerationRow>(
+    `SELECT order_label_generation_id, order_id, label_template_id, template_version, label_count, generated_at,
+            template_snapshot, rows_snapshot, export_formats
+     FROM order_label_generations
+     WHERE order_label_generation_id=$1 AND generation_scope='details'`,
+    [generationId],
+  );
+  if (result.rowCount === 0) {
+    throw new ApiError(404, 'ORDER_LABEL_GENERATION_NOT_FOUND', 'Label generation not found', { generationId });
+  }
+  return mapGenerationSnapshotRow(result.rows[0]);
 }
 
 async function assertOrderExists(client: DatabaseClient, orderId: number): Promise<void> {
@@ -892,6 +1061,59 @@ async function readOrderLabelDetails(
     throw new OrderLabelDataNotFoundError(orderId);
   }
   return result.rows.map((row) => mapOrderLabelDetail(row, currentSchema));
+}
+
+async function readDetailLabelDetails(
+  client: DatabaseClient,
+  detailIds: number[],
+  templateId: number,
+  currentSchema: Record<string, unknown>,
+): Promise<OrderLabelDataDetailDto[]> {
+  const uniqueDetailIds = [...new Set(detailIds)];
+  const result = await client.query<OrderLabelDetailRow>(
+    `SELECT od.detail_id, od.order_id, od.detail_number, od.detail_name, od.height, od.width, od.quantity,
+            od.material_name, od.note, od.basis_project, od.basis_data,
+            row_to_json(od)::jsonb AS detail_fields,
+            ld.bazis_fields, ld.custom_fields, ld.custom_field_schema_snapshot, ld.version
+     FROM order_details_view od
+     LEFT JOIN order_label_detail_data ld
+       ON ld.order_id=od.order_id AND ld.detail_id=od.detail_id AND ld.label_template_id=$2
+     WHERE od.detail_id = ANY($1::bigint[])
+     ORDER BY array_position($1::bigint[], od.detail_id), od.detail_id`,
+    [uniqueDetailIds, templateId],
+  );
+  const byId = new Map<number, OrderLabelDataDetailDto>();
+  for (const row of result.rows) {
+    byId.set(toNumber(row.detail_id), mapOrderLabelDetail(row, currentSchema));
+  }
+  const missing = uniqueDetailIds.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    throw new ApiError(422, 'LABEL_DETAIL_INVALID', 'One or more label details were not found', { detailIds: missing });
+  }
+  const orderFieldsByOrderId = await readOrderFieldsByIds(client, [...new Set(result.rows.map((row) => toNumber(row.order_id)))]);
+  const counts = new Map<number, number>();
+  for (const detailId of detailIds) {
+    counts.set(detailId, (counts.get(detailId) ?? 0) + 1);
+  }
+  return uniqueDetailIds.map((detailId) => {
+    const detail = byId.get(detailId)!;
+    return {
+      ...detail,
+      quantity: counts.get(detailId) ?? 0,
+      orderFields: orderFieldsByOrderId.get(detail.orderId) ?? {},
+    };
+  });
+}
+
+async function readOrderFieldsByIds(client: DatabaseClient, orderIds: number[]): Promise<Map<number, Record<string, unknown>>> {
+  if (orderIds.length === 0) return new Map();
+  const result = await client.query<{ order_id: string | number; order_fields: Record<string, unknown> | null }>(
+    `SELECT o.order_id, row_to_json(o)::jsonb AS order_fields
+     FROM orders_view o
+     WHERE o.order_id = ANY($1::bigint[])`,
+    [orderIds],
+  );
+  return new Map(result.rows.map((row) => [toNumber(row.order_id), row.order_fields ?? {}]));
 }
 
 function mapOrderLabelDetail(

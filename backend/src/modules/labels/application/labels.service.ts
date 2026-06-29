@@ -10,6 +10,7 @@ import type {
   GetLabelTemplateQuery,
   GetOrderLabelDataQuery,
   GenerateOrderLabelsCommand,
+  GenerateDetailLabelsCommand,
   LabelTemplateElementInput,
   LabelTemplateInput,
   LabelsPort,
@@ -21,6 +22,9 @@ import type {
   LatestOrderLabelsPreviewDto,
   OrderLabelsPreviewDto,
   ExportOrderLabelsQuery,
+  ExportDetailLabelsQuery,
+  DetailLabelsPreviewDto,
+  PreviewDetailLabelsCommand,
   PreviewOrderLabelsCommand,
   UpdateOrderLabelDataCommand,
   UpdateLabelTemplateCommand,
@@ -97,6 +101,16 @@ export class LabelsService {
     return this.repo.generateOrderLabels(command);
   }
 
+  async previewDetailLabels(command: PreviewDetailLabelsCommand): Promise<DetailLabelsPreviewDto> {
+    await this.require(command, [VIEW, GENERATE, MANAGE_TEMPLATES]);
+    return this.repo.previewDetailLabels(command);
+  }
+
+  async generateDetailLabels(command: GenerateDetailLabelsCommand): Promise<OrderLabelGenerationDto> {
+    await this.require(command, [GENERATE]);
+    return this.repo.generateDetailLabels(command);
+  }
+
   async getLatestOrderLabelsPreview(query: ExportOrderLabelsQuery): Promise<LatestOrderLabelsPreviewDto> {
     await this.require(query, [VIEW, GENERATE], query.orderId, 'order');
     return this.repo.getLatestOrderLabelsPreview(query);
@@ -105,6 +119,11 @@ export class LabelsService {
   async exportOrderLabels(query: ExportOrderLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }> {
     await this.require(query, [GENERATE], query.orderId, 'order');
     return this.repo.exportOrderLabels(query);
+  }
+
+  async exportDetailLabels(query: ExportDetailLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }> {
+    await this.require(query, [GENERATE]);
+    return this.repo.exportDetailLabels(query);
   }
 
   private async require(

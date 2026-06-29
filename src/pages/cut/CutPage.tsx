@@ -27,6 +27,7 @@ import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrienta
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
+import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
 import { authSession } from '../../api/authSession';
 import type {
   CutGroupDto,
@@ -118,6 +119,15 @@ function groupFilmNames(job: CutJobDto, group: CutGroupDto): string[] {
     if (name) names.add(name);
   }
   return [...names];
+}
+
+function detailIdsForSheet(sheet: { placements: SheetPlacements }): number[] {
+  return sheet.placements.pieces
+    .map((piece) => {
+      const match = /^det-(\d+)$/.exec(piece.item_id);
+      return match ? Number(match[1]) : null;
+    })
+    .filter((value): value is number => Number.isInteger(value) && value > 0);
 }
 
 /** Revoke every blob object URL in a key->url map (leak guard on reset/unmount). */
@@ -1497,6 +1507,7 @@ export const CutPage: React.FC = () => {
                   const heightMm = sheet.placements.sheet_height_mm;
                   const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
                   const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90);
+                  const sheetDetailIds = detailIdsForSheet(sheet);
                   return (
                     <div
                       key={key}
@@ -1531,6 +1542,12 @@ export const CutPage: React.FC = () => {
                           >
                             SVG
                           </Button>
+                          <CutSheetLabelGenerateAction
+                            detailIds={sheetDetailIds}
+                            cutJobId={job.cutJobId}
+                            cutGroupId={group.cutGroupId}
+                            sheetIndex={sheet.sheetIndex}
+                          />
                         </Space>
                       </div>
                       {sheetThumbs[key] && !sheetImages[key] && (
