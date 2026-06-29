@@ -2,11 +2,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Checkbox, Modal, Select, Space, Typography, message } from 'antd';
 import { DownloadOutlined, TagsOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../api/labelsApi';
-import type { DetailLabelsPreview, LabelTemplate } from '../../api/types/labelsApi.types';
+import type { DetailLabelsPreview, LabelExportFormat, LabelTemplate } from '../../api/types/labelsApi.types';
 import { can } from '../../utils/permissions';
 import { saveLabelBlob } from '../orders/components/labels/labelDownloads';
 
 const { Text } = Typography;
+
+/** Selectable export file formats for generated labels (checkboxes in the modal). */
+const EXPORT_FORMAT_OPTIONS: { value: LabelExportFormat; label: string }[] = [
+  { value: 'bmp', label: 'BMP' },
+  { value: 'png', label: 'PNG' },
+  { value: 'emf', label: 'EMF' },
+];
 
 interface CutSheetLabelGenerateActionProps {
   detailIds: number[];
@@ -26,6 +33,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [useBasisFields, setUseBasisFields] = useState(true);
+  const [exportFormats, setExportFormats] = useState<LabelExportFormat[]>([]);
   const [preview, setPreview] = useState<DetailLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -35,6 +43,12 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     [templateId, templates],
   );
   const disabled = !canGenerate || detailIds.length === 0;
+
+  // Seed the export-format checkboxes from the selected template's defaults
+  // whenever the chosen template changes; the operator can then toggle them.
+  useEffect(() => {
+    if (selectedTemplate) setExportFormats(selectedTemplate.defaultExportFormats);
+  }, [selectedTemplate?.labelTemplateId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open) return;
@@ -74,7 +88,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
   }, [generating, open, runPreview, selectedTemplate, useBasisFields]);
 
   const runGenerate = async () => {
-    if (!selectedTemplate || !preview) return;
+    if (!selectedTemplate || !preview || exportFormats.length === 0) return;
     setGenerating(true);
     try {
       const generationPreview = await labelsApi.previewDetailLabels({
@@ -88,7 +102,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
         templateVersion: selectedTemplate.version,
         detailIds,
         previewToken: generationPreview.previewToken,
-        exportFormats: selectedTemplate.defaultExportFormats,
+        exportFormats,
         useBasisFields,
         idempotencyKey: `cut-sheet-labels-${cutJobId}-${cutGroupId}-${sheetIndex}-${Date.now()}`,
       });
@@ -125,7 +139,14 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
           <Button key="preview" onClick={runPreview} loading={loading} disabled={!selectedTemplate || generating}>
             Предпросмотр
           </Button>,
-          <Button key="generate" type="primary" icon={<DownloadOutlined />} onClick={runGenerate} loading={generating} disabled={!preview}>
+          <Button
+            key="generate"
+            type="primary"
+            icon={<DownloadOutlined />}
+            onClick={runGenerate}
+            loading={generating}
+            disabled={!preview || exportFormats.length === 0}
+          >
             Сформировать и скачать
           </Button>,
         ]}
@@ -157,6 +178,16 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
           <Checkbox checked={useBasisFields} onChange={(event) => setUseBasisFields(event.target.checked)}>
             Использовать поля базис проекта
           </Checkbox>
+          <div>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+              Форматы файлов бирок
+            </Text>
+            <Checkbox.Group
+              options={EXPORT_FORMAT_OPTIONS}
+              value={exportFormats}
+              onChange={(values) => setExportFormats(values as LabelExportFormat[])}
+            />
+          </div>
           {preview && (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary">Бирок: {preview.labelCount}. Показана первая.</Text>

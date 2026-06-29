@@ -114,6 +114,10 @@ describe('CutPage source guards', () => {
     expect(sheetLabelSource).toContain('Бирки');
     expect(sheetLabelSource).toContain('labelsApi.previewDetailLabels');
     expect(sheetLabelSource).toContain('labelsApi.generateDetailLabels');
+    // Operator picks the export file formats via checkboxes (bmp/png/emf).
+    expect(sheetLabelSource).toContain('Форматы файлов бирок');
+    expect(sheetLabelSource).toContain('Checkbox.Group');
+    expect(sheetLabelSource).toContain('EXPORT_FORMAT_OPTIONS');
   });
 
   it('resets previews on recalculate and revokes blob URLs (no stale preview, no leak)', () => {
