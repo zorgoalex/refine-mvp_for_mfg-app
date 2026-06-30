@@ -24,6 +24,10 @@ describe('CutPage manual-layout guard', () => {
     expect(src).toMatch(/устарел/);
   });
 
+  it('«устарел» badge requires recalc OR an ACTIVE stale manual — an inactive stale manual must not flag the group (so «Рассчитать» clears it)', () => {
+    expect(src).toMatch(/\(job\.requiresRecalc \?\? false\) \|\| \(isStale && persistedActive\)/);
+  });
+
   it('keys the sheet-blob cache by renderVersion (busts on same-variant re-save)', () => {
     expect(src).toMatch(/renderVersion/);
   });

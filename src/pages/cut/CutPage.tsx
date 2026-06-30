@@ -1402,8 +1402,11 @@ export const CutPage: React.FC = () => {
             title={
               <Space size="small">
                 {title}
-                {/* «устарел» badge: shown when manual layout is stale OR requiresRecalc */}
-                {(isStale || (job.requiresRecalc ?? false)) && (
+                {/* «устарел» badge: the auto layout needs a recalc, OR the ACTIVE
+                    manual layout has drifted stale. An INACTIVE stale manual (not
+                    shown/printed) must NOT flag the group — otherwise «Рассчитать»
+                    can never clear the badge while a dangling old manual exists. */}
+                {((job.requiresRecalc ?? false) || (isStale && persistedActive)) && (
                   <Tag color="warning">устарел</Tag>
                 )}
                 {effectiveManual && !isStale && (
