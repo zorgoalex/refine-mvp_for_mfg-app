@@ -35,6 +35,17 @@ describe('CutPage source guards', () => {
     expect(source).toMatch(/minHeight:\s*Math\.round\(basis/);
   });
 
+  it('per-sheet button toggles Развернуть/Свернуть and collapses an opened sheet', () => {
+    expect(source).toContain("'Свернуть' : 'Развернуть'");
+    expect(source).toMatch(/sheetImages\[key\]\s*\?\s*collapseSheet\(key\)/);
+  });
+
+  it('group header is sticky so it stays on screen while scrolling a tall group', () => {
+    expect(source).toMatch(/headStyle=\{\{[\s\S]*position:\s*'sticky'[\s\S]*top:\s*0/);
+    // theme-aware background so the sticky header is opaque in light and dark.
+    expect(source).toContain('background: token.colorBgContainer');
+  });
+
   it('explains a failed cut instead of a bare status: Alert + reason + retry', () => {
     // Durable failure reason shown prominently (Alert) and on the list tag (Tooltip).
     expect(source).toContain('job.failureReason');

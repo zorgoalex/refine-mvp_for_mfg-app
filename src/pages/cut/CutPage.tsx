@@ -14,6 +14,7 @@ import {
   Tooltip,
   Typography,
   message,
+  theme,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigation } from '@refinedev/core';
@@ -147,6 +148,9 @@ const revokeObjectUrls = (map: Record<string, string>): void => {
  */
 export const CutPage: React.FC = () => {
   const canManage = can('cut.manage');
+  // Theme-aware bg for the sticky group header (app uses AntD dark/default
+  // algorithm, no CSS vars — read the token directly).
+  const { token } = theme.useToken();
   // Variant B Task 11: cut.view-gated sheet-type options for the filter Select.
   // Gated on cut.view only — no sheet_materials.view required (worker can use filter).
   const { enabled: sheetFilterEnabled, options: sheetTypeOptions, rawOptions: sheetOptions } = useCutSheetTypeOptions();
@@ -1399,6 +1403,15 @@ export const CutPage: React.FC = () => {
           <Card
             key={group.cutGroupId}
             size="small"
+            // Sticky group header: keeps the group name, «устарел» badge,
+            // «Редактировать раскрой» and «Скачать PDF» on screen while the
+            // operator scrolls through a tall group with many sheets.
+            headStyle={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 5,
+              background: token.colorBgContainer,
+            }}
             title={
               <Space size="small">
                 {title}
@@ -1584,9 +1597,13 @@ export const CutPage: React.FC = () => {
                           <Button
                             className="app-hit-area-sm"
                             size="small"
-                            onClick={() => loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion)}
+                            onClick={() =>
+                              sheetImages[key]
+                                ? collapseSheet(key)
+                                : loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion)
+                            }
                           >
-                            Открыть
+                            {sheetImages[key] ? 'Свернуть' : 'Развернуть'}
                           </Button>
                           <Button
                             className="app-hit-area-sm"
