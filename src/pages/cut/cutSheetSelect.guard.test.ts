@@ -13,6 +13,10 @@ describe('CutPage sheet-variant selector wiring', () => {
     expect(src).toMatch(/isMixedMaterialSelection/);
     expect(src).toMatch(/раскроены на одном выбранном листе/);
   });
+  it('offers an explicit «Как у деталей» default option (null) to clear the override', () => {
+    expect(src).toMatch(/value: null as number \| null, label: 'Как у деталей/);
+    expect(src).toMatch(/allowClear/);
+  });
   it('reads each detail material via the nested detail field (not a non-existent top-level field)', () => {
     expect(src).toMatch(/items\.map\([\s\S]*?detail\??\.sheetMaterialTypeId/);
   });

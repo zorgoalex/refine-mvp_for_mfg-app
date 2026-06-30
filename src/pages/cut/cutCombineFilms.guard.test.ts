@@ -14,7 +14,7 @@ describe('CutPage combine-films toggle wiring', () => {
     // mirror the sheet/profile control gating
     expect(src).toMatch(/!canManage \|\| busy \|\| job\.status === 'calculating' \|\| isArchivedJob/);
   });
-  it('notes that the change applies after «Повторить расчёт»', () => {
-    expect(src).toMatch(/применится после команды «Повторить расчёт»/);
+  it('notes that the change applies after «Рассчитать»', () => {
+    expect(src).toMatch(/применится после команды «Рассчитать»/);
   });
 });
