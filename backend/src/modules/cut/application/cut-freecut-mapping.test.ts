@@ -8,6 +8,7 @@ import {
   backMapSolutions,
   buildOptimizeRequest,
   grainRuleForFilm,
+  resolveVacuumDirection,
   validateGrainRule,
 } from './cut-freecut-mapping';
 
@@ -195,5 +196,80 @@ describe('placement back-mapping (BLOCKER-2 / MAJOR-8)', () => {
     };
     const sheets = backMapSolutions(response);
     expect(sheets).toHaveLength(0);
+  });
+});
+
+describe('resolveVacuumDirection — orientation-aware long/short-side mapping', () => {
+  it('portrait stock (w=1050,h=2080): width→height (long axis is height), height→width', () => {
+    expect(resolveVacuumDirection('width', 1050, 2080)).toBe('height');
+    expect(resolveVacuumDirection('height', 1050, 2080)).toBe('width');
+  });
+
+  it('landscape stock (w=2800,h=2070): width→width, height→height (no change — no regression)', () => {
+    expect(resolveVacuumDirection('width', 2800, 2070)).toBe('width');
+    expect(resolveVacuumDirection('height', 2800, 2070)).toBe('height');
+  });
+
+  it('optimal passes through unchanged regardless of dims', () => {
+    expect(resolveVacuumDirection('optimal', 1050, 2080)).toBe('optimal');
+    expect(resolveVacuumDirection('optimal', 2800, 2070)).toBe('optimal');
+  });
+
+  it('undefined passes through unchanged regardless of dims', () => {
+    expect(resolveVacuumDirection(undefined, 1050, 2080)).toBeUndefined();
+    expect(resolveVacuumDirection(undefined, 2800, 2070)).toBeUndefined();
+  });
+
+  it('square stock (w==h): longIsWidth=true → width→width, height→height', () => {
+    expect(resolveVacuumDirection('width', 1500, 1500)).toBe('width');
+    expect(resolveVacuumDirection('height', 1500, 1500)).toBe('height');
+  });
+});
+
+describe('buildOptimizeRequest vacuum direction resolution integration', () => {
+  const items = [
+    {
+      id: 'det-1',
+      width_mm: 600,
+      height_mm: 400,
+      qty: 1,
+      rotation: 'allow_90' as const,
+      pattern_direction: 'none' as const,
+    },
+  ];
+  const baseParams = {
+    kerf_mm: 2,
+    spacing_mm: 1,
+    trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
+    objective: 'min_waste' as const,
+  };
+
+  it('vacuum_table + portrait stock + direction=width → outgoing direction=height (inverted sheet fix)', () => {
+    const portraitStock = { id: 'smt-portrait', width_mm: 1050, height_mm: 2080 };
+    const inputParams = { ...baseParams, layout_mode: 'vacuum_table' as const, vacuum: { direction: 'width' as const } };
+    const request = buildOptimizeRequest({ stock: portraitStock, items, params: inputParams });
+    expect(request.params.vacuum?.direction).toBe('height');
+    // input.params must NOT be mutated
+    expect(inputParams.vacuum.direction).toBe('width');
+  });
+
+  it('vacuum_table + landscape stock + direction=width → outgoing direction=width (unchanged)', () => {
+    const landscapeStock = { id: 'smt-landscape', width_mm: 2800, height_mm: 2070 };
+    const request = buildOptimizeRequest({
+      stock: landscapeStock,
+      items,
+      params: { ...baseParams, layout_mode: 'vacuum_table', vacuum: { direction: 'width' } },
+    });
+    expect(request.params.vacuum?.direction).toBe('width');
+  });
+
+  it('non-vacuum layout (guillotine) with no vacuum → params.vacuum stays undefined', () => {
+    const stock = { id: 'smt-9', width_mm: 2800, height_mm: 2070 };
+    const request = buildOptimizeRequest({
+      stock,
+      items,
+      params: { ...baseParams, layout_mode: 'guillotine' },
+    });
+    expect(request.params.vacuum).toBeUndefined();
   });
 });

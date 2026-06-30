@@ -118,10 +118,45 @@ export interface BuildOptimizeRequestInput {
   includeSvg?: boolean;
 }
 
+/**
+ * Resolve a vacuum-profile direction (intent relative to the sheet's LONG/SHORT
+ * side) to the freecut stock-axis value, which is keyed to the stock's stored
+ * width/height fields. Stored 'width' = «по длине/вдоль» = along the LONG side;
+ * stored 'height' = «по ширине/поперёк» = along the SHORT side. 'optimal'/undefined
+ * pass through unchanged. Makes the layout orientation-independent so a portrait-
+ * stored sheet (width<height) is not inverted.
+ */
+export function resolveVacuumDirection(
+  direction: 'optimal' | 'width' | 'height' | undefined,
+  stockWidthMm: number,
+  stockHeightMm: number,
+): 'optimal' | 'width' | 'height' | undefined {
+  if (direction !== 'width' && direction !== 'height') return direction;
+  const longIsWidth = stockWidthMm >= stockHeightMm;
+  // 'width' intent = along the LONG side; 'height' intent = along the SHORT side.
+  if (direction === 'width') return longIsWidth ? 'width' : 'height';
+  return longIsWidth ? 'height' : 'width';
+}
+
 export function buildOptimizeRequest(input: BuildOptimizeRequestInput): OptimizeRequest {
+  const resolvedParams =
+    input.params.layout_mode === 'vacuum_table' && input.params.vacuum
+      ? {
+          ...input.params,
+          vacuum: {
+            ...input.params.vacuum,
+            direction: resolveVacuumDirection(
+              input.params.vacuum.direction,
+              input.stock.width_mm,
+              input.stock.height_mm,
+            ),
+          },
+        }
+      : input.params;
+
   return {
     units: 'mm',
-    params: { ...input.params, include_svg: input.includeSvg === true },
+    params: { ...resolvedParams, include_svg: input.includeSvg === true },
     // qty:0 = unlimited stock unless a warehouse constraint is applied later.
     stock: [
       {
