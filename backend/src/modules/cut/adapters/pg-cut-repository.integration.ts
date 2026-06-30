@@ -575,6 +575,27 @@ describeIntegration('PgCutRepository (integration)', () => {
     expect(stored.rows[0].params).toHaveProperty('kerf_mm');
   });
 
+  it('calculate returns enriched DTO: editorParams, requiresRecalc, renderToken present without extra getJob', async () => {
+    // Regression guard: calculate must return the fully enriched job so the frontend
+    // edit button stays enabled after recalc without a page reload.
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Enriched dto', detailIds: [1] }, requestId: 'enr1' });
+
+    const calculated = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'enr2' });
+
+    // editorParams must be present with numeric kerf/spacing (from last_calc_params).
+    expect(calculated.editorParams).not.toBeNull();
+    expect(typeof calculated.editorParams?.kerfMm).toBe('number');
+    expect(typeof calculated.editorParams?.spacingMm).toBe('number');
+
+    // Right after a successful calc the basis matches the current state - not stale.
+    expect(calculated.requiresRecalc).toBe(false);
+
+    // renderToken must be a non-empty string.
+    expect(typeof calculated.renderToken).toBe('string');
+    expect((calculated.renderToken ?? '').length).toBeGreaterThan(0);
+  });
+
   it('recalculation replaces the prior result set (no stale groups), and a failed re-cut leaves none', async () => {
     const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
     const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест recut', detailIds: [1, 2] }, requestId: 'rr1' });

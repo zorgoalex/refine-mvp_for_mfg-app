@@ -719,7 +719,7 @@ export class PgCutRepository implements CutRepositoryPort {
     }
 
     // Phase 3 — persist ALL groups + a single audit + a single outbox row.
-    return this.database.transaction(async (tx) => {
+    await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, prep.expectedVersion);
@@ -872,6 +872,10 @@ export class PgCutRepository implements CutRepositoryPort {
 
       return loadJob(tx, command.cutJobId);
     });
+
+    // Return the fully enriched job (with editorParams, requiresRecalc, renderToken)
+    // read after the transaction commits — mirrors setSheetMaterial and other mutations.
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
   /**
