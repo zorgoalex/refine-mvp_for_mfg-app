@@ -28,8 +28,16 @@ describe('CutPage manual-layout guard', () => {
     expect(src).toMatch(/\(job\.requiresRecalc \?\? false\) \|\| \(isStale && persistedActive\)/);
   });
 
-  it('keys the sheet-blob cache by renderVersion (busts on same-variant re-save)', () => {
+  it('busts the sheet-blob cache via resetSheetViews on every render-changing op; renderVersion stays in the FETCH (server bust), not the client key', () => {
+    // renderVersion is still passed to the fetch for server render-cache busting.
     expect(src).toMatch(/renderVersion/);
+    // The client blob cache key is group:sheet:variant (NO renderVersion) so a
+    // version bump that does not recompute the layout (profile/material change)
+    // re-uses the cached preview instead of re-fetching/flickering.
+    expect(src).toMatch(/`\$\{group\.cutGroupId\}:\$\{sheetIndex\}:\$\{variant\}`/);
+    // resetSheetViews clears blobs + the dedup set + bumps the epoch.
+    expect(src).toContain('thumbReqRef.current = new Set()');
+    expect(src).toMatch(/viewEpochRef\.current \+= 1/);
   });
 
   it('derives effectiveManual (is_active && !is_stale) for display and disables editor on requiresRecalc', () => {

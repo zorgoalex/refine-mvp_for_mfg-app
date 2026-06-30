@@ -40,6 +40,12 @@ describe('CutPage source guards', () => {
     expect(source).toMatch(/sheetImages\[key\]\s*\?\s*collapseSheet\(key\)/);
   });
 
+  it('editor sheet orientation matches the preview (per-sheet sheetPreviewRotate90, not raw !sheetPortrait)', () => {
+    // The SheetEditor landscape prop derives from the working sheet dims via the
+    // same helper the preview uses, so a landscape sheet opens landscape in the editor.
+    expect(source).toMatch(/landscape=\{\(\(\) => \{[\s\S]*sheetPreviewRotate90\(\s*p\.sheet_width_mm/);
+  });
+
   it('group header is sticky, offset below the workspace tab-bar, opaque in both themes', () => {
     expect(source).toMatch(/headStyle=\{\{[\s\S]*position:\s*'sticky'[\s\S]*top:\s*stickyHeaderTop/);
     // theme-aware background so the sticky header is opaque in light and dark.
