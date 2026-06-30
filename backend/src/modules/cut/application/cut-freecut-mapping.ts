@@ -138,6 +138,38 @@ export function resolveVacuumDirection(
   return longIsWidth ? 'height' : 'width';
 }
 
+/**
+ * Force detail orientation for a directional vacuum profile. 'width' = «по длине»
+ * = long edge along the sheet's LONG side; 'height' = «по ширине» = long edge along
+ * the SHORT side. Plain details (pattern_direction === 'none') are re-oriented and
+ * rotation is forbidden so freecut lays them exactly as chosen instead of rotating
+ * for min-waste. Textured details (pattern_direction !== 'none') keep their grain
+ * orientation (film roll runs along the table's длина). 'optimal'/undefined: items
+ * unchanged (free rotation).
+ */
+export function orientItemsForVacuumDirection(
+  items: readonly FreecutItem[],
+  stockWidthMm: number,
+  stockHeightMm: number,
+  direction: 'optimal' | 'width' | 'height' | undefined,
+): FreecutItem[] {
+  if (direction !== 'width' && direction !== 'height') return [...items];
+  const longAxisIsX = stockWidthMm >= stockHeightMm;
+  const longEdgeAlongLongSide = direction === 'width'; // «по длине»
+  const longEdgeAlongX = longEdgeAlongLongSide ? longAxisIsX : !longAxisIsX;
+  return items.map((item) => {
+    if (item.pattern_direction !== 'none') return item; // textured: grain wins
+    const longEdge = Math.max(item.width_mm, item.height_mm);
+    const shortEdge = Math.min(item.width_mm, item.height_mm);
+    return {
+      ...item,
+      width_mm: longEdgeAlongX ? longEdge : shortEdge,
+      height_mm: longEdgeAlongX ? shortEdge : longEdge,
+      rotation: 'forbid',
+    };
+  });
+}
+
 export function buildOptimizeRequest(input: BuildOptimizeRequestInput): OptimizeRequest {
   const resolvedParams =
     input.params.layout_mode === 'vacuum_table' && input.params.vacuum
@@ -154,6 +186,16 @@ export function buildOptimizeRequest(input: BuildOptimizeRequestInput): Optimize
         }
       : input.params;
 
+  const orientedItems =
+    input.params.layout_mode === 'vacuum_table' && input.params.vacuum
+      ? orientItemsForVacuumDirection(
+          input.items,
+          input.stock.width_mm,
+          input.stock.height_mm,
+          input.params.vacuum.direction,
+        )
+      : [...input.items];
+
   return {
     units: 'mm',
     params: { ...resolvedParams, include_svg: input.includeSvg === true },
@@ -166,7 +208,7 @@ export function buildOptimizeRequest(input: BuildOptimizeRequestInput): Optimize
         qty: input.stock.qty ?? 0,
       },
     ],
-    items: input.items,
+    items: orientedItems,
   };
 }
 

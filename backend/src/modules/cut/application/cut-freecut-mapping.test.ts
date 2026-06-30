@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import {
+  type FreecutRotation,
   MAX_BODY_BYTES,
   MAX_INSTANCES,
   assertWithinBodyLimit,
@@ -8,6 +9,7 @@ import {
   backMapSolutions,
   buildOptimizeRequest,
   grainRuleForFilm,
+  orientItemsForVacuumDirection,
   resolveVacuumDirection,
   validateGrainRule,
 } from './cut-freecut-mapping';
@@ -226,6 +228,55 @@ describe('resolveVacuumDirection — orientation-aware long/short-side mapping',
   });
 });
 
+describe('orientItemsForVacuumDirection — force plain-detail orientation for vacuum profiles', () => {
+  const plainItem = (w: number, h: number, rot: FreecutRotation = 'allow_90') => ({
+    id: 'det-1', width_mm: w, height_mm: h, qty: 2, rotation: rot,
+    pattern_direction: 'none' as const,
+  });
+  const texturedItem = (w: number, h: number) => ({
+    id: 'det-2', width_mm: w, height_mm: h, qty: 1, rotation: 'forbid' as const,
+    pattern_direction: 'along_height' as const,
+  });
+
+  it('portrait stock (w1050,h2080), width (по длине): plain 707×407 → 407×707 forbid (long edge along Y=long)', () => {
+    const result = orientItemsForVacuumDirection([plainItem(707, 407)], 1050, 2080, 'width');
+    expect(result[0]).toMatchObject({ width_mm: 407, height_mm: 707, rotation: 'forbid' });
+  });
+
+  it('portrait stock (w1050,h2080), height (по ширине): plain 707×407 → 707×407 forbid (long edge along X=short)', () => {
+    const result = orientItemsForVacuumDirection([plainItem(707, 407)], 1050, 2080, 'height');
+    expect(result[0]).toMatchObject({ width_mm: 707, height_mm: 407, rotation: 'forbid' });
+  });
+
+  it('landscape stock (w2800,h2070), width (по длине): plain 707×407 → 707×407 forbid (long edge along X=long)', () => {
+    const result = orientItemsForVacuumDirection([plainItem(707, 407)], 2800, 2070, 'width');
+    expect(result[0]).toMatchObject({ width_mm: 707, height_mm: 407, rotation: 'forbid' });
+  });
+
+  it('textured item (along_height) with directional vacuum → returned UNCHANGED (grain wins)', () => {
+    const item = texturedItem(707, 407);
+    const result = orientItemsForVacuumDirection([item], 1050, 2080, 'width');
+    expect(result[0]).toEqual(item);
+  });
+
+  it('optimal direction → items unchanged (rotation stays as input)', () => {
+    const item = plainItem(707, 407, 'allow_90');
+    const result = orientItemsForVacuumDirection([item], 1050, 2080, 'optimal');
+    expect(result[0]).toEqual(item);
+  });
+
+  it('undefined direction → items unchanged', () => {
+    const item = plainItem(707, 407, 'allow_90');
+    const result = orientItemsForVacuumDirection([item], 1050, 2080, undefined);
+    expect(result[0]).toEqual(item);
+  });
+
+  it('square plain item (500×500), width → forbid, dims 500×500', () => {
+    const result = orientItemsForVacuumDirection([plainItem(500, 500)], 2800, 2070, 'width');
+    expect(result[0]).toMatchObject({ width_mm: 500, height_mm: 500, rotation: 'forbid' });
+  });
+});
+
 describe('buildOptimizeRequest vacuum direction resolution integration', () => {
   const items = [
     {
@@ -271,5 +322,34 @@ describe('buildOptimizeRequest vacuum direction resolution integration', () => {
       params: { ...baseParams, layout_mode: 'guillotine' },
     });
     expect(request.params.vacuum).toBeUndefined();
+  });
+
+  it('vacuum_table + portrait stock + width: plain item re-oriented + forbid; textured untouched; input.items NOT mutated', () => {
+    const portraitStock = { id: 'smt-portrait', width_mm: 1050, height_mm: 2080 };
+    const plainItem = { id: 'det-10', width_mm: 707, height_mm: 407, qty: 2, rotation: 'allow_90' as const, pattern_direction: 'none' as const };
+    const texturedItem = { id: 'det-11', width_mm: 900, height_mm: 300, qty: 1, rotation: 'forbid' as const, pattern_direction: 'along_height' as const };
+    const inputItems = [plainItem, texturedItem];
+    const inputParams = { ...baseParams, layout_mode: 'vacuum_table' as const, vacuum: { direction: 'width' as const } };
+
+    const request = buildOptimizeRequest({ stock: portraitStock, items: inputItems, params: inputParams });
+
+    // plain item: portrait w=1050<h=2080 so longAxisIsX=false; width→longEdgeAlongX=false → width_mm=407, height_mm=707
+    expect(request.items[0]).toMatchObject({ id: 'det-10', width_mm: 407, height_mm: 707, rotation: 'forbid' });
+    // textured: unchanged
+    expect(request.items[1]).toEqual(texturedItem);
+    // input.items must NOT be mutated
+    expect(inputItems[0].width_mm).toBe(707);
+    expect(inputItems[0].rotation).toBe('allow_90');
+  });
+
+  it('guillotine layout → items pass through unchanged (no orientation applied)', () => {
+    const stock = { id: 'smt-9', width_mm: 1050, height_mm: 2080 };
+    const plainItem = { id: 'det-20', width_mm: 707, height_mm: 407, qty: 1, rotation: 'allow_90' as const, pattern_direction: 'none' as const };
+    const request = buildOptimizeRequest({
+      stock,
+      items: [plainItem],
+      params: { ...baseParams, layout_mode: 'guillotine' },
+    });
+    expect(request.items[0]).toEqual(plainItem);
   });
 });
