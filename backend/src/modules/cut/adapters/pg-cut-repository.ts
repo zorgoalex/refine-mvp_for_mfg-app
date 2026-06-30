@@ -869,12 +869,11 @@ export class PgCutRepository implements CutRepositoryPort {
           `${CUT_AUDIT_EVENTS.calculated}:${command.cutJobId}:${requestHash}`,
         ],
       );
-
-      return loadJob(tx, command.cutJobId);
     });
 
     // Return the fully enriched job (with editorParams, requiresRecalc, renderToken)
     // read after the transaction commits — mirrors setSheetMaterial and other mutations.
+    // (No in-transaction loadJob: getJob below re-reads the committed row.)
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
