@@ -872,8 +872,12 @@ export class PgCutRepository implements CutRepositoryPort {
     });
 
     // Return the fully enriched job (with editorParams, requiresRecalc, renderToken)
-    // read after the transaction commits — mirrors setSheetMaterial and other mutations.
-    // (No in-transaction loadJob: getJob below re-reads the committed row.)
+    // via a post-commit read, same as saveManualLayout. This matters specifically
+    // for calculate: a successful calc clears requiresRecalc, so the «Редактировать
+    // раскрой» button must see editorParams in this response (the FE does setJob with
+    // it). The simple setters (setSheetMaterial/setProfile/…) return the base loadJob,
+    // but they always leave requiresRecalc=true, which keeps edit disabled regardless,
+    // so their partial DTO is harmless; calculate is the one case that needs getJob.
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
