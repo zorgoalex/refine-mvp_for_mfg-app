@@ -575,9 +575,9 @@ describeIntegration('PgCutRepository (integration)', () => {
     expect(stored.rows[0].params).toHaveProperty('kerf_mm');
   });
 
-  it('calculate returns enriched DTO: editorParams, requiresRecalc, renderToken present without extra getJob', async () => {
-    // Regression guard: calculate must return the fully enriched job so the frontend
-    // edit button stays enabled after recalc without a page reload.
+  it('calculate returns enriched DTO via post-commit getJob: editorParams, requiresRecalc, renderToken present', async () => {
+    // Regression guard: calculate (and all cut setters) must return the fully enriched
+    // job via a post-commit getJob so the frontend setJob call always has complete data.
     const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
     const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Enriched dto', detailIds: [1] }, requestId: 'enr1' });
 
@@ -594,6 +594,38 @@ describeIntegration('PgCutRepository (integration)', () => {
     // renderToken must be a non-empty string.
     expect(typeof calculated.renderToken).toBe('string');
     expect((calculated.renderToken ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('setProfile returns enriched DTO (post-commit getJob): requiresRecalc=true + editorParams + renderToken after changing profile on a ready job', async () => {
+    // Regression guard (MAJOR fix): setters were returning bare loadJob which lacks
+    // editorParams/requiresRecalc/renderToken. After changing profile/material/etc. on
+    // a READY job the FE must see requiresRecalc=true so the «устарел» badge shows and
+    // PDF/edit buttons are disabled — without requiring a page refresh.
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+    const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Setter enriched', detailIds: [1] }, requestId: 'senr1' });
+
+    // First calculate to make the job READY (requiresRecalc becomes false).
+    const calculated = await repo.calculate({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'senr2' });
+    expect(calculated.requiresRecalc).toBe(false);
+
+    // Insert a new profile and set it — this invalidates the calc basis (requiresRecalc → true).
+    const profileId = await insertProfile(pool, 'P-stale-test', { kerf_mm: 7 });
+    const updated = await repo.setProfile({
+      currentUser: currentUser(),
+      cutJobId: job.cutJobId,
+      paramProfileId: profileId,
+      version: calculated.version,
+      requestId: 'senr3',
+    });
+
+    // The setter must return the enriched DTO with requiresRecalc=true (stale).
+    expect(updated.requiresRecalc).toBe(true);
+    // editorParams must still be present (from the prior calc's last_calc_params).
+    expect(updated.editorParams).not.toBeNull();
+    expect(typeof updated.editorParams?.kerfMm).toBe('number');
+    // renderToken must be a non-empty string.
+    expect(typeof updated.renderToken).toBe('string');
+    expect((updated.renderToken ?? '').length).toBeGreaterThan(0);
   });
 
   it('recalculation replaces the prior result set (no stale groups), and a failed re-cut leaves none', async () => {
