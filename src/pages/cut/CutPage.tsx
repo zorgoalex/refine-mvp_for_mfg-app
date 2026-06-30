@@ -1201,7 +1201,7 @@ export const CutPage: React.FC = () => {
                     />
                     {job.status === 'ready' && (
                       <div style={{ marginTop: 4, color: '#ad8b00', whiteSpace: 'nowrap' }}>
-                        изменение профиля применится после команды «Повторить расчёт»
+                        изменение профиля применится после команды «Рассчитать»
                       </div>
                     )}
                   </div>
@@ -1209,6 +1209,9 @@ export const CutPage: React.FC = () => {
                     const jobMt = jobMaterialTypeIds(job.items.map((i) => i.detail?.sheetMaterialTypeId ?? null), sheetOptions);
                     const { preferred, others } = partitionSheetOptions(sheetOptions, jobMt);
                     const grouped = [
+                      // Explicit default = clear the override so detail materials are used
+                      // (in addition to the field's ✕ clear). Re-enables «Разделять по материалу».
+                      { value: null as number | null, label: 'Как у деталей (по умолчанию)' },
                       ...(preferred.length ? [{ label: 'Материал деталей', options: preferred.map((o) => ({ value: o.sheetMaterialTypeId, label: formatSheetOptionLabel(o) })) }] : []),
                       ...(others.length ? [{ label: 'Другие листы', options: others.map((o) => ({ value: o.sheetMaterialTypeId, label: formatSheetOptionLabel(o) })) }] : []),
                     ];
@@ -1239,7 +1242,7 @@ export const CutPage: React.FC = () => {
                 </div>
                 <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
                   <div>
-                    <Tooltip title="разные материалы кроятся отдельными группами; выключите, чтобы раскроить все детали вместе в одной группе; применится после команды «Повторить расчёт»">
+                    <Tooltip title="разные материалы кроятся отдельными группами; выключите, чтобы раскроить все детали вместе в одной группе; применится после команды «Рассчитать»">
                       <Checkbox
                         checked={job.splitByMaterial}
                         onChange={(e) => void setJobSplitByMaterial(e.target.checked)}
@@ -1250,12 +1253,12 @@ export const CutPage: React.FC = () => {
                     </Tooltip>
                     {job.sheetMaterialTypeId != null && (
                       <div style={{ color: '#fa8c16', fontSize: 12, marginTop: 2, maxWidth: 280 }}>
-                        «Разделять по материалу» не применяется: выбран лист раскроя — весь раскрой на выбранном листе.
+                        Весь раскрой на выбранном листе.
                       </div>
                     )}
                   </div>
                   <div>
-                    <Tooltip title="детали одного материала с разными плёнками кроятся вместе; применится после команды «Повторить расчёт»">
+                    <Tooltip title="детали одного материала с разными плёнками кроятся вместе; применится после команды «Рассчитать»">
                       <Checkbox
                         checked={job.combineFilms}
                         onChange={(e) => void setJobCombineFilms(e.target.checked)}
