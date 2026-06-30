@@ -40,10 +40,13 @@ describe('CutPage source guards', () => {
     expect(source).toMatch(/sheetImages\[key\]\s*\?\s*collapseSheet\(key\)/);
   });
 
-  it('group header is sticky so it stays on screen while scrolling a tall group', () => {
-    expect(source).toMatch(/headStyle=\{\{[\s\S]*position:\s*'sticky'[\s\S]*top:\s*0/);
+  it('group header is sticky, offset below the workspace tab-bar, opaque in both themes', () => {
+    expect(source).toMatch(/headStyle=\{\{[\s\S]*position:\s*'sticky'[\s\S]*top:\s*stickyHeaderTop/);
     // theme-aware background so the sticky header is opaque in light and dark.
     expect(source).toContain('background: token.colorBgContainer');
+    // offset is measured from the global sticky workspace tab-bar (not hard-coded 0).
+    expect(source).toContain(".querySelector('.workspace-tabs')");
+    expect(source).toMatch(/ResizeObserver/);
   });
 
   it('explains a failed cut instead of a bare status: Alert + reason + retry', () => {

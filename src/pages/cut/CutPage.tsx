@@ -151,6 +151,21 @@ export const CutPage: React.FC = () => {
   // Theme-aware bg for the sticky group header (app uses AntD dark/default
   // algorithm, no CSS vars — read the token directly).
   const { token } = theme.useToken();
+  // The sticky group header must sit BELOW the global sticky workspace tab-bar
+  // (.workspace-tabs, top:0 z-index:20) — otherwise it pins under the tabs and
+  // gets obscured. Measure the tab-bar height at runtime (it has a dynamic
+  // 20px gap border) and offset the header by it. Falls back to 0 when the cut
+  // page is not rendered inside the workspace tabs.
+  const [stickyHeaderTop, setStickyHeaderTop] = useState(0);
+  useEffect(() => {
+    const tabs = document.querySelector('.workspace-tabs');
+    if (!tabs) return;
+    const measure = () => setStickyHeaderTop(tabs.getBoundingClientRect().height);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(tabs);
+    return () => ro.disconnect();
+  }, []);
   // Variant B Task 11: cut.view-gated sheet-type options for the filter Select.
   // Gated on cut.view only — no sheet_materials.view required (worker can use filter).
   const { enabled: sheetFilterEnabled, options: sheetTypeOptions, rawOptions: sheetOptions } = useCutSheetTypeOptions();
@@ -1408,7 +1423,7 @@ export const CutPage: React.FC = () => {
             // operator scrolls through a tall group with many sheets.
             headStyle={{
               position: 'sticky',
-              top: 0,
+              top: stickyHeaderTop,
               zIndex: 5,
               background: token.colorBgContainer,
             }}
