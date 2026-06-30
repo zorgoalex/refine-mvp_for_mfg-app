@@ -15,6 +15,7 @@ describe('CutPage combine-films toggle wiring', () => {
     expect(src).toMatch(/!canManage \|\| busy \|\| job\.status === 'calculating' \|\| isArchivedJob/);
   });
   it('notes that the change applies after «Рассчитать»', () => {
-    expect(src).toMatch(/применится после команды «Рассчитать»/);
+    // anchored to the combine-films tooltip so a localized copy regression is caught
+    expect(src).toMatch(/плёнками кроятся вместе; применится после команды «Рассчитать»/);
   });
 });
