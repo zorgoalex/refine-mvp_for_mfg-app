@@ -14,6 +14,7 @@ import {
   Tooltip,
   Typography,
   message,
+  theme,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigation } from '@refinedev/core';
@@ -108,6 +109,10 @@ function sheetPreviewItemStyle(widthMm: number, heightMm: number, rotate90: bool
   return {
     flex: `0 1 ${basis}px`,
     maxWidth: '100%',
+    // Reserve the thumbnail's image-area height so that when a preview reloads
+    // (its cache key is bumped by a job version change, e.g. on profile/material
+    // change) the row does not momentarily collapse and bounce the page scroll.
+    minHeight: Math.round(basis / Math.max(ratio, 0.01)),
   };
 }
 
@@ -143,6 +148,40 @@ const revokeObjectUrls = (map: Record<string, string>): void => {
  */
 export const CutPage: React.FC = () => {
   const canManage = can('cut.manage');
+  // Theme-aware bg for the sticky group header (app uses AntD dark/default
+  // algorithm, no CSS vars — read the token directly).
+  const { token } = theme.useToken();
+  // The sticky group header must sit BELOW the global sticky workspace tab-bar
+  // (.workspace-tabs, top:0 z-index:20) — otherwise it pins under the tabs and
+  // gets obscured. Measure the tab-bar height at runtime (it has a dynamic
+  // 20px gap border) and offset the header by it. Falls back to 0 when the cut
+  // page is not rendered inside the workspace tabs.
+  const [stickyHeaderTop, setStickyHeaderTop] = useState(0);
+  useEffect(() => {
+    let ro: ResizeObserver | null = null;
+    // Attach a ResizeObserver to the tab-bar once it exists. WorkspaceTabs renders
+    // null until the current tab is opened (useTabSync), so on a cold /cut load the
+    // bar mounts LATE — a one-shot querySelector would miss it and leave the offset
+    // at 0 (overlap bug). Watch the DOM until the bar appears, then measure + observe.
+    const attach = (): boolean => {
+      const tabs = document.querySelector('.workspace-tabs');
+      if (!tabs) return false;
+      const measure = () => setStickyHeaderTop(tabs.getBoundingClientRect().height);
+      measure();
+      ro = new ResizeObserver(measure);
+      ro.observe(tabs);
+      return true;
+    };
+    if (attach()) return () => ro?.disconnect();
+    const mo = new MutationObserver(() => {
+      if (attach()) mo.disconnect();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      ro?.disconnect();
+    };
+  }, []);
   // Variant B Task 11: cut.view-gated sheet-type options for the filter Select.
   // Gated on cut.view only — no sheet_materials.view required (worker can use filter).
   const { enabled: sheetFilterEnabled, options: sheetTypeOptions, rawOptions: sheetOptions } = useCutSheetTypeOptions();
@@ -627,13 +666,16 @@ export const CutPage: React.FC = () => {
   const loadSheet = useCallback(
     async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
       if (!job) return;
-      // Cache key includes variant + renderVersion so toggling or re-saving never
-      // serves a stale blob (Codex R7 BLOCKER #1, R9 MAJOR #2).
-      // origin is part of the key: a persisted RAW-origin job that opens while the
-      // state still holds the default TL must not reuse (dedupe to) a TL blob —
-      // distinct keys force the correct-origin fetch and the render reads the
-      // matching slot (Codex code-review R1 [REGRESSION-DEBT]).
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${renderVersion ?? ''}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+      // Client cache key = group:sheet:variant:orientation:origin. NO renderVersion —
+      // a version bump that does not recompute the layout (profile/material change)
+      // re-uses the cached blob instead of re-fetching/flickering. Orientation AND
+      // origin are in the key because each changes the rendered image and a job
+      // switch can rehydrate a different saved orientation/origin (so it must
+      // re-fetch, not dedupe to a stale-pref blob — Codex code-review R1
+      // [REGRESSION-DEBT] for origin). Layout changes still bust via
+      // resetSheetViews() (clears maps + thumbReqRef + epoch); renderVersion stays
+      // in the FETCH to bust the SERVER render cache.
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
       const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
@@ -656,15 +698,18 @@ export const CutPage: React.FC = () => {
 
   // Small layout preview for a ready job's sheet, fetched once with the light
   // 'thumb' preset. Deduped via thumbReqRef so the auto-load effect is idempotent.
-  // variant + renderVersion are included in the key so toggling auto↔manual
-  // or saving a new manual layout always fetches a fresh thumb (R9 MAJOR #2).
+  // Client cache key = group:sheet:variant:orientation (NO renderVersion). Orientation
+  // is in the key so a job-switch that rehydrates a different saved orientation re-fetches
+  // instead of deduping to a stale-orientation thumb. resetSheetViews() (calculate / save /
+  // orientation toggle / job switch) clears the maps + thumbReqRef + epoch on layout change.
+  // renderVersion is still passed to the FETCH (server render-cache bust); out of the client
+  // key so a no-recalc version bump (profile/material change) does not re-fetch/flicker.
   const loadThumb = useCallback(
     async (cutJobId: number, group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
-      // origin is part of the key: a persisted RAW-origin job that opens while the
-      // state still holds the default TL must not reuse (dedupe to) a TL blob —
-      // distinct keys force the correct-origin fetch and the render reads the
-      // matching slot (Codex code-review R1 [REGRESSION-DEBT]).
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${renderVersion ?? ''}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+      // origin in the key too (same rehydration reason as orientation — a persisted
+      // RAW-origin job opening with the stale default-TL state must re-fetch, not
+      // dedupe to a TL thumb; Codex code-review R1 [REGRESSION-DEBT]).
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
@@ -1430,11 +1475,23 @@ export const CutPage: React.FC = () => {
           <Card
             key={group.cutGroupId}
             size="small"
+            // Sticky group header: keeps the group name, «устарел» badge,
+            // «Редактировать раскрой» and «Скачать PDF» on screen while the
+            // operator scrolls through a tall group with many sheets.
+            headStyle={{
+              position: 'sticky',
+              top: stickyHeaderTop,
+              zIndex: 5,
+              background: token.colorBgContainer,
+            }}
             title={
               <Space size="small">
                 {title}
-                {/* «устарел» badge: shown when manual layout is stale OR requiresRecalc */}
-                {(isStale || (job.requiresRecalc ?? false)) && (
+                {/* «устарел» badge: the auto layout needs a recalc, OR the ACTIVE
+                    manual layout has drifted stale. An INACTIVE stale manual (not
+                    shown/printed) must NOT flag the group — otherwise «Рассчитать»
+                    can never clear the badge while a dangling old manual exists. */}
+                {((job.requiresRecalc ?? false) || (isStale && persistedActive)) && (
                   <Tag color="warning">устарел</Tag>
                 )}
                 {effectiveManual && !isStale && (
@@ -1556,20 +1613,18 @@ export const CutPage: React.FC = () => {
                   gap={{ kerfMm: job.editorParams.kerfMm, spacingMm: job.editorParams.spacingMm }}
                   filmTextureByItemId={editorFilmTextureByItemId}
                   labelInfoByItemId={editorLabelInfoByItemId}
-                  // Match the preview's per-sheet rotate decision (sheetPreviewRotate90
-                  // on the group's stock dims) instead of the bare `!sheetPortrait`,
-                  // so the editor and the sheet cards always show the same orientation
-                  // (a 2800×2070 sheet in portrait rotates in BOTH). All sheets in one
-                  // group share a stock size, so the first sheet is representative.
-                  landscape={
-                    workingSheets.length > 0
-                      ? sheetPreviewRotate90(
-                          workingSheets[0].placements.sheet_width_mm,
-                          workingSheets[0].placements.sheet_height_mm,
-                          sheetPortrait,
-                        )
-                      : !sheetPortrait
-                  }
+                  // Match the preview orientation EXACTLY: the preview rotates each
+                  // sheet via sheetPreviewRotate90(dims, sheetPortrait) (per-sheet,
+                  // dimension-aware), but the editor previously got a raw `!sheetPortrait`
+                  // that ignored the sheet's actual w/h — so a landscape sheet opened
+                  // portrait. All sheets in a group share dimensions, so derive the
+                  // rotate flag from the group's representative (first) working sheet.
+                  landscape={(() => {
+                    const p = workingSheets[0]?.placements;
+                    return p
+                      ? sheetPreviewRotate90(p.sheet_width_mm, p.sheet_height_mm, sheetPortrait)
+                      : !sheetPortrait;
+                  })()}
                   originTopLeft={sheetOriginTopLeft}
                   onChange={handleEditorChange}
                   violations={violations}
@@ -1587,9 +1642,19 @@ export const CutPage: React.FC = () => {
               /* Previews flow in wrapping rows (not a single column). */
               <div style={sheetPreviewListStyle}>
                 {previewSheets.map((sheet) => {
-                  // Cache key includes variant + renderVersion so toggling auto↔manual
-                  // or saving a new manual never serves a stale blob (R7/R9 fix).
-                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${renderVersion ?? ''}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+                  // Client cache key = group:sheet:variant:orientation:origin (NO
+                  // renderVersion) — must match loadSheet/loadThumb. resetSheetViews()
+                  // busts on layout change; orientation AND origin are in the key (a job
+                  // switch may rehydrate a different saved orientation/origin); renderVersion
+                  // stays only in the fetch (server bust). Keeps the cached preview stable
+                  // across no-recalc version bumps.
+                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+                  // Stable React element identity per (group, sheet) — deliberately NOT
+                  // the cache key. A renderVersion bump (e.g. changing profile/material,
+                  // which only marks the job stale) then refreshes the image in place
+                  // instead of unmounting/remounting the whole preview row, which used to
+                  // collapse the list and bounce the page scroll down-then-back.
+                  const elemKey = `${group.cutGroupId}:${sheet.sheetIndex}`;
                   const widthMm = sheet.placements.sheet_width_mm;
                   const heightMm = sheet.placements.sheet_height_mm;
                   const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
@@ -1597,7 +1662,7 @@ export const CutPage: React.FC = () => {
                   const sheetDetailIds = detailIdsForSheet(sheet);
                   return (
                     <div
-                      key={key}
+                      key={elemKey}
                       style={
                         // Open (enlarged) sheet spans the full previews row so the
                         // image can grow ~2× instead of being capped by the thumbnail
@@ -1620,9 +1685,13 @@ export const CutPage: React.FC = () => {
                           <Button
                             className="app-hit-area-sm"
                             size="small"
-                            onClick={() => loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion)}
+                            onClick={() =>
+                              sheetImages[key]
+                                ? collapseSheet(key)
+                                : loadSheet(group, sheet.sheetIndex, displayVariant, renderVersion)
+                            }
                           >
-                            Открыть
+                            {sheetImages[key] ? 'Свернуть' : 'Развернуть'}
                           </Button>
                           <Button
                             className="app-hit-area-sm"

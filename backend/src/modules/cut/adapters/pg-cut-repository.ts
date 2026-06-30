@@ -719,7 +719,7 @@ export class PgCutRepository implements CutRepositoryPort {
     }
 
     // Phase 3 — persist ALL groups + a single audit + a single outbox row.
-    return this.database.transaction(async (tx) => {
+    await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, prep.expectedVersion);
@@ -869,9 +869,14 @@ export class PgCutRepository implements CutRepositoryPort {
           `${CUT_AUDIT_EVENTS.calculated}:${command.cutJobId}:${requestHash}`,
         ],
       );
-
-      return loadJob(tx, command.cutJobId);
     });
+
+    // All cut commands (calculate + setters) return the fully enriched job via a
+    // post-commit getJob read (with editorParams, requiresRecalc, renderToken).
+    // The FE does setJob(response) after each command, so it must always receive
+    // complete enriched data — including the correct requiresRecalc state so the
+    // «устарел» badge and PDF/edit button guards reflect reality without a reload.
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
   /**
@@ -2004,8 +2009,8 @@ export class PgCutRepository implements CutRepositoryPort {
     );
   }
 
-  setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto> {
-    return this.database.transaction(async (tx) => {
+  async setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const jobRes = await tx.query<{ cut_job_id: string | number; status: string; version: string | number; param_profile_id: string | number | null }>(
         `SELECT cut_job_id, status, version, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
@@ -2031,7 +2036,7 @@ export class PgCutRepository implements CutRepositoryPort {
       // mirrors the repo's existing no-op handling and prevents fake
       // profile_changed rows + needless stale-version conflicts on replays.
       if (beforeProfileId === command.paramProfileId) {
-        return loadJob(tx, command.cutJobId);
+        return;
       }
 
       await tx.query(
@@ -2068,13 +2073,12 @@ export class PgCutRepository implements CutRepositoryPort {
           profileChangedOutboxKey(command.cutJobId, command.requestId, command.version),
         ],
       );
-
-      return loadJob(tx, command.cutJobId);
     });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
-  setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto> {
-    return this.database.transaction(async (tx) => {
+  async setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const jobRes = await tx.query<{ status: string; version: string | number; sheet_material_type_id: string | number | null }>(
         `SELECT status, version, sheet_material_type_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
@@ -2098,7 +2102,7 @@ export class PgCutRepository implements CutRepositoryPort {
       // No-op short-circuit: an unchanged selection must NOT bump version,
       // write audit, or emit an outbox event.
       if (beforeId === command.sheetMaterialTypeId) {
-        return loadJob(tx, command.cutJobId);
+        return;
       }
 
       await tx.query(
@@ -2136,13 +2140,12 @@ export class PgCutRepository implements CutRepositoryPort {
           sheetMaterialChangedOutboxKey(command.cutJobId, command.requestId, command.version),
         ],
       );
-
-      return loadJob(tx, command.cutJobId);
     });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
-  setCombineFilms(command: SetCutJobCombineFilmsCommand): Promise<CutJobDto> {
-    return this.database.transaction(async (tx) => {
+  async setCombineFilms(command: SetCutJobCombineFilmsCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const jobRes = await tx.query<{ status: string; version: string | number; combine_films: boolean | null }>(
         `SELECT status, version, combine_films FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
@@ -2159,7 +2162,7 @@ export class PgCutRepository implements CutRepositoryPort {
       // No-op short-circuit: an unchanged value must NOT bump version, write
       // audit, or emit an outbox event.
       if (before === command.combineFilms) {
-        return loadJob(tx, command.cutJobId);
+        return;
       }
 
       await tx.query(
@@ -2198,13 +2201,12 @@ export class PgCutRepository implements CutRepositoryPort {
           combineFilmsChangedOutboxKey(command.cutJobId, command.requestId, command.version),
         ],
       );
-
-      return loadJob(tx, command.cutJobId);
     });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
-  setSplitByMaterial(command: SetCutJobSplitByMaterialCommand): Promise<CutJobDto> {
-    return this.database.transaction(async (tx) => {
+  async setSplitByMaterial(command: SetCutJobSplitByMaterialCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const jobRes = await tx.query<{ status: string; version: string | number; split_by_material: boolean | null }>(
         `SELECT status, version, split_by_material FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
@@ -2221,7 +2223,7 @@ export class PgCutRepository implements CutRepositoryPort {
       // No-op short-circuit: an unchanged value must NOT bump version, write audit,
       // or emit an outbox event.
       if (before === command.splitByMaterial) {
-        return loadJob(tx, command.cutJobId);
+        return;
       }
 
       await tx.query(
@@ -2260,9 +2262,8 @@ export class PgCutRepository implements CutRepositoryPort {
           splitByMaterialChangedOutboxKey(command.cutJobId, command.requestId, command.version),
         ],
       );
-
-      return loadJob(tx, command.cutJobId);
     });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
   /**

@@ -26,6 +26,38 @@ describe('CutPage source guards', () => {
     expect(source).toContain("can('cut.view')");
   });
 
+  it('uses a stable React element key for sheet previews (decoupled from the cache key) to avoid scroll-jump on re-render', () => {
+    // elemKey is per (group, sheet) — NOT the renderVersion-bearing cache key — so a
+    // version bump (profile/material change) refreshes in place instead of remounting.
+    expect(source).toContain('const elemKey = `${group.cutGroupId}:${sheet.sheetIndex}`');
+    expect(source).toContain('key={elemKey}');
+    // Thumbnail container reserves height so a reload does not collapse the row.
+    expect(source).toMatch(/minHeight:\s*Math\.round\(basis/);
+  });
+
+  it('per-sheet button toggles Развернуть/Свернуть and collapses an opened sheet', () => {
+    expect(source).toContain("'Свернуть' : 'Развернуть'");
+    expect(source).toMatch(/sheetImages\[key\]\s*\?\s*collapseSheet\(key\)/);
+  });
+
+  it('editor sheet orientation matches the preview (per-sheet sheetPreviewRotate90, not raw !sheetPortrait)', () => {
+    // The SheetEditor landscape prop derives from the working sheet dims via the
+    // same helper the preview uses, so a landscape sheet opens landscape in the editor.
+    expect(source).toMatch(/landscape=\{\(\(\) => \{[\s\S]*sheetPreviewRotate90\(\s*p\.sheet_width_mm/);
+  });
+
+  it('group header is sticky, offset below the workspace tab-bar, opaque in both themes', () => {
+    expect(source).toMatch(/headStyle=\{\{[\s\S]*position:\s*'sticky'[\s\S]*top:\s*stickyHeaderTop/);
+    // theme-aware background so the sticky header is opaque in light and dark.
+    expect(source).toContain('background: token.colorBgContainer');
+    // offset is measured from the global sticky workspace tab-bar (not hard-coded 0).
+    expect(source).toContain(".querySelector('.workspace-tabs')");
+    expect(source).toMatch(/ResizeObserver/);
+    // handles the LATE mount of the tab-bar (WorkspaceTabs renders null until the
+    // tab opens) so the offset is not stuck at 0 on a cold load.
+    expect(source).toMatch(/MutationObserver/);
+  });
+
   it('explains a failed cut instead of a bare status: Alert + reason + retry', () => {
     // Durable failure reason shown prominently (Alert) and on the list tag (Tooltip).
     expect(source).toContain('job.failureReason');
