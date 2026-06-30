@@ -253,6 +253,11 @@ describe('orientItemsForVacuumDirection — force plain-detail orientation for v
     expect(result[0]).toMatchObject({ width_mm: 707, height_mm: 407, rotation: 'forbid' });
   });
 
+  it('landscape stock (w2800,h2070), height (по ширине): plain 707×407 → 407×707 forbid (long edge along Y=short)', () => {
+    const result = orientItemsForVacuumDirection([plainItem(707, 407)], 2800, 2070, 'height');
+    expect(result[0]).toMatchObject({ width_mm: 407, height_mm: 707, rotation: 'forbid' });
+  });
+
   it('textured item (along_height) with directional vacuum → returned UNCHANGED (grain wins)', () => {
     const item = texturedItem(707, 407);
     const result = orientItemsForVacuumDirection([item], 1050, 2080, 'width');
