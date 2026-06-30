@@ -47,6 +47,9 @@ describe('CutPage source guards', () => {
     // offset is measured from the global sticky workspace tab-bar (not hard-coded 0).
     expect(source).toContain(".querySelector('.workspace-tabs')");
     expect(source).toMatch(/ResizeObserver/);
+    // handles the LATE mount of the tab-bar (WorkspaceTabs renders null until the
+    // tab opens) so the offset is not stuck at 0 on a cold load.
+    expect(source).toMatch(/MutationObserver/);
   });
 
   it('explains a failed cut instead of a bare status: Alert + reason + retry', () => {

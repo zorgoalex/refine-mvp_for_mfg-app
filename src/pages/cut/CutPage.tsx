@@ -158,13 +158,29 @@ export const CutPage: React.FC = () => {
   // page is not rendered inside the workspace tabs.
   const [stickyHeaderTop, setStickyHeaderTop] = useState(0);
   useEffect(() => {
-    const tabs = document.querySelector('.workspace-tabs');
-    if (!tabs) return;
-    const measure = () => setStickyHeaderTop(tabs.getBoundingClientRect().height);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(tabs);
-    return () => ro.disconnect();
+    let ro: ResizeObserver | null = null;
+    // Attach a ResizeObserver to the tab-bar once it exists. WorkspaceTabs renders
+    // null until the current tab is opened (useTabSync), so on a cold /cut load the
+    // bar mounts LATE — a one-shot querySelector would miss it and leave the offset
+    // at 0 (overlap bug). Watch the DOM until the bar appears, then measure + observe.
+    const attach = (): boolean => {
+      const tabs = document.querySelector('.workspace-tabs');
+      if (!tabs) return false;
+      const measure = () => setStickyHeaderTop(tabs.getBoundingClientRect().height);
+      measure();
+      ro = new ResizeObserver(measure);
+      ro.observe(tabs);
+      return true;
+    };
+    if (attach()) return () => ro?.disconnect();
+    const mo = new MutationObserver(() => {
+      if (attach()) mo.disconnect();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      ro?.disconnect();
+    };
   }, []);
   // Variant B Task 11: cut.view-gated sheet-type options for the filter Select.
   // Gated on cut.view only — no sheet_materials.view required (worker can use filter).
