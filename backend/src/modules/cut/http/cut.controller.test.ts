@@ -15,6 +15,7 @@ import {
   parseSetSplitByMaterialBody,
   parseSaveManualLayoutBody,
   parseVariant,
+  parseOriginTopLeft,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -334,6 +335,86 @@ describe('CutController', () => {
     expect(parseVariant('active')).toBe('active');
     expect(parseVariant('ACTIVE')).toBe('active');
     expect(parseVariant('unknown')).toBe('auto');
+  });
+
+  // Origin top-left: default ON; only explicit 'raw' selects the legacy 90° CW.
+  it('parseOriginTopLeft defaults to true and only false on explicit raw', () => {
+    expect(parseOriginTopLeft(undefined)).toBe(true);
+    expect(parseOriginTopLeft('')).toBe(true);
+    expect(parseOriginTopLeft('tl')).toBe(true);
+    expect(parseOriginTopLeft('anything')).toBe(true);
+    expect(parseOriginTopLeft('raw')).toBe(false);
+    expect(parseOriginTopLeft('RAW')).toBe(false);
+  });
+
+  // R2-round2 finding #2: the RAW half must not be silently dead — the render
+  // endpoints forward the parsed origin into the service render call.
+  it('PNG/SVG endpoints forward originTopLeft (default true; origin=raw → false)', async () => {
+    const pngCalls: Array<boolean | undefined> = [];
+    const svgCalls: Array<boolean | undefined> = [];
+    const renderSheetPng = vi.fn(async (q: { originTopLeft?: boolean }) => { pngCalls.push(q.originTopLeft); return Buffer.from('P'); });
+    const renderSheetSvg = vi.fn(async (q: { originTopLeft?: boolean }) => { svgCalls.push(q.originTopLeft); return '<svg/>'; });
+    const controller = createController({ service: { renderSheetPng, renderSheetSvg } });
+    const noop = { setHeader: () => undefined, send: () => undefined };
+
+    await controller.renderPng({ user: currentUser() } as never, '42', '100', '0', { preset: 'screen' }, noop as never);
+    await controller.renderPng({ user: currentUser() } as never, '42', '100', '0', { preset: 'screen', origin: 'raw' }, noop as never);
+    await controller.renderSvg({ user: currentUser() } as never, '42', '100', '0', {}, noop as never);
+    await controller.renderSvg({ user: currentUser() } as never, '42', '100', '0', { origin: 'raw' }, noop as never);
+
+    expect(pngCalls).toEqual([true, false]);
+    expect(svgCalls).toEqual([true, false]);
+  });
+
+  // R1: origin (TL/RAW) is a PDF cache-key dimension — a top-left and a raw render
+  // produce different bytes for the same layout+orientation and must not collide.
+  it('group PDF: origin=tl and origin=raw do NOT share a cache slot (same token)', async () => {
+    const renderGroupPdf = vi.fn(async (q: { originTopLeft?: boolean }) =>
+      Buffer.from(q.originTopLeft ? '%PDF-tl' : '%PDF-raw'));
+    const getRenderCacheToken = vi.fn(async () => 'tok');
+    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
+    const controller = createController({ service: { renderGroupPdf, getRenderCacheToken }, pdfCache });
+
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, fakeResponse().res as never); // default tl
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { origin: 'raw' }, fakeResponse().res as never);
+    await pdfCache.whenIdle();
+
+    const tlWarm = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, tlWarm.res as never);
+    const rawWarm = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { origin: 'raw' }, rawWarm.res as never);
+
+    expect(tlWarm.state.sent).toEqual(Buffer.from('%PDF-tl'));
+    expect(rawWarm.state.sent).toEqual(Buffer.from('%PDF-raw'));
+    expect(renderGroupPdf).toHaveBeenCalledTimes(2);
+  });
+
+  // R1: the post-calculate prewarm must warm the SURFACED origin (default top-left),
+  // so the FE export (origin=tl) is served warm.
+  it('prewarm warms originTopLeft=true and the default-origin export is served warm', async () => {
+    const pdf = Buffer.from('%PDF-job-tl');
+    const renderJobPdf = vi.fn(async () => pdf);
+    const calculate = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7 }));
+    const getJob = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7, renderToken: 'jtok' }));
+    const getRenderCacheToken = vi.fn(async () => 'jtok');
+    const setPdfPrewarmState = vi.fn(async () => undefined);
+    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
+    const controller = createController({
+      service: { calculate, renderJobPdf, getJob, getRenderCacheToken, setPdfPrewarmState },
+      pdfCache,
+    });
+
+    await controller.calculate({ user: currentUser() } as never, '42', { version: 0 });
+    for (let i = 0; i < 50 && renderJobPdf.mock.calls.length === 0; i++) await Promise.resolve();
+    await pdfCache.whenIdle();
+
+    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({ originTopLeft: true }));
+
+    // FE export with default origin (tl) reuses the prewarmed slot (no second render).
+    const warm = fakeResponse();
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active' }, warm.res as never);
+    expect(warm.state.sent).toBe(pdf);
+    expect(renderJobPdf).toHaveBeenCalledTimes(1);
   });
 
   // Variant B Task 11: GET /cut-jobs/sheet-types — cut.view-gated sheet lookup.

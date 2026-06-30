@@ -63,6 +63,17 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).not.toMatch(/JSON\.stringify\(r\.params\)/);
   });
 
+  it('ProfileModal exposes the same quality + group-shift controls as the default-settings card (parity)', () => {
+    // «Качество» Segmented bound to params.quality
+    expect(tabSrc).toMatch(/label="Качество"/);
+    expect(tabSrc).toMatch(/setField\('quality',/);
+    // «Сжимать группы деталей» Switch bound to params.groupShift
+    expect(tabSrc).toMatch(/Сжимать группы деталей/);
+    expect(tabSrc).toMatch(/setField\('groupShift',/);
+    // these were previously absent from the created-profile form (locked to balanced + no group_shift)
+    expect(tabSrc).toMatch(/<Segmented/);
+  });
+
   it('vacuum_table option exists in the ProfileModal layout_mode control', () => {
     expect(tabSrc).toMatch(/vacuum_table/);
     expect(tabSrc).toMatch(/Вакуумный стол/);

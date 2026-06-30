@@ -138,6 +138,26 @@ describe('CutPage source guards', () => {
     expect(source).toContain('viewEpochRef.current !== epoch');
   });
 
+  it('origin toggle: resets previews (drop stale opposite-origin blobs) and threads origin everywhere', () => {
+    // origin is NOT a local blob-cache key dimension; like the orientation toggle
+    // it must call resetSheetViews so stale opposite-origin PNGs/thumbs are dropped.
+    const toggle = source.slice(source.indexOf('const toggleSheetOriginTopLeft'));
+    const body = toggle.slice(0, toggle.indexOf('],'));
+    expect(body).toContain('saveSheetOriginTopLeft');
+    expect(body).toContain('resetSheetViews()');
+    // Operator-facing checkbox, default ON via the state initialiser.
+    expect(source).toContain('Точка отсчёта — верхний левый угол');
+    expect(source).toContain('useState(true)');
+    // Threaded into the render fetches, overlays, and the editor.
+    expect(source).toContain('sheetOriginTopLeft');
+    expect(source).toContain('originTopLeft={sheetOriginTopLeft}');
+    // Editor rotate decision aligned with the preview (sheetPreviewRotate90), not bare !sheetPortrait.
+    expect(source).not.toContain('landscape={!sheetPortrait}');
+    // origin is a blob cache-key dimension: a RAW-pref job opening with the stale
+    // default-TL state must not dedupe to a TL thumb (code-review R1 regression).
+    expect(source).toContain("${sheetOriginTopLeft ? 'tl' : 'raw'}");
+  });
+
   it('refreshes the job after a failed calculate so the reason + fresh version show', () => {
     // The calculate catch must reload the job (persisted reason + bumped version),
     // otherwise the Alert never renders and a retry would 409 on a stale version.

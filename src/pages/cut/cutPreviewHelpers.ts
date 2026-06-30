@@ -47,6 +47,35 @@ export function saveSheetOrientationPortrait(userId: string, cutJobId: number, p
   }
 }
 
+/** localStorage key for a user's per-job origin (top-left vs raw) preference. */
+export function sheetOriginKey(userId: string, cutJobId: number): string {
+  return `cut:sheet-origin-tl:${userId}:${cutJobId}`;
+}
+
+/** Parse a stored origin value. Default (absent / unknown) = top-left (true).
+ *  Only the explicit 'raw' value selects the legacy 90° CW origin. */
+export function parseStoredOriginTopLeft(raw: string | null): boolean {
+  return raw !== 'raw';
+}
+
+/** Read the per-user per-job origin-top-left preference (default true). */
+export function loadSheetOriginTopLeft(userId: string, cutJobId: number): boolean {
+  try {
+    return parseStoredOriginTopLeft(localStorage.getItem(sheetOriginKey(userId, cutJobId)));
+  } catch {
+    return true;
+  }
+}
+
+/** Persist the per-user per-job origin-top-left preference. */
+export function saveSheetOriginTopLeft(userId: string, cutJobId: number, originTopLeft: boolean): void {
+  try {
+    localStorage.setItem(sheetOriginKey(userId, cutJobId), originTopLeft ? 'tl' : 'raw');
+  } catch {
+    // ignore storage failures (private mode / quota)
+  }
+}
+
 export interface CutPieceTooltipRow {
   label: string;
   value: string;
@@ -102,6 +131,7 @@ export function buildSheetPieceOverlays(
   placements: SheetPlacements,
   items: readonly CutJobItemDto[],
   landscape: boolean,
+  originTopLeft = false,
 ): CutPieceOverlay[] {
   const itemByDetail = new Map(items.map((item) => [item.orderDetailId, item]));
   const sheetW = placements.sheet_width_mm;
@@ -123,6 +153,7 @@ export function buildSheetPieceOverlays(
         sheetW,
         sheetH,
         landscape,
+        originTopLeft,
       );
 
       return {

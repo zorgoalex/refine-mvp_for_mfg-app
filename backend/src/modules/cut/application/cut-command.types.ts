@@ -93,6 +93,9 @@ export interface RenderSheetPngQuery {
   preset: string;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
+  /** when rotated, anchor the dense cluster at the view's top-left (transpose)
+   *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
+  originTopLeft?: boolean;
   variant?: 'auto' | 'manual' | 'active';
   /**
    * When false, baked piece-label `<text>` elements are omitted from the SVG
@@ -111,6 +114,9 @@ export interface RenderSheetSvgQuery {
   sheetIndex: number;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
+  /** when rotated, anchor the dense cluster at the view's top-left (transpose)
+   *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
+  originTopLeft?: boolean;
   variant?: 'auto' | 'manual' | 'active';
   requestId?: string;
 }
@@ -121,6 +127,9 @@ export interface RenderGroupPdfQuery {
   cutGroupId: number;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
+  /** when rotated, anchor the dense cluster at the view's top-left (transpose)
+   *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
+  originTopLeft?: boolean;
   variant?: 'auto' | 'manual' | 'active';
   requestId?: string;
 }
@@ -130,6 +139,9 @@ export interface RenderJobPdfQuery {
   cutJobId: number;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
+  /** when rotated, anchor the dense cluster at the view's top-left (transpose)
+   *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
+  originTopLeft?: boolean;
   variant?: 'auto' | 'manual' | 'active';
   requestId?: string;
 }

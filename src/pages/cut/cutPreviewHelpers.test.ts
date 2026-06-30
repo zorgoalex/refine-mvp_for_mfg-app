@@ -6,8 +6,10 @@ import {
   formatSheetSide,
   parseCutPieceDetailId,
   parseStoredPortrait,
+  parseStoredOriginTopLeft,
   selectVariantSheets,
   sheetOrientationKey,
+  sheetOriginKey,
 } from './cutPreviewHelpers';
 import type { CutGroupDto, CutJobItemDto, SheetPlacements } from '../../api/types/cutApi.types';
 
@@ -84,6 +86,24 @@ describe('cutPreviewHelpers', () => {
     });
   });
 
+  describe('sheetOriginKey', () => {
+    it('namespaces the origin pref per user + job (distinct from orientation key)', () => {
+      expect(sheetOriginKey('78', 175)).toBe('cut:sheet-origin-tl:78:175');
+      expect(sheetOriginKey('78', 175)).not.toBe(sheetOrientationKey('78', 175));
+    });
+  });
+
+  describe('parseStoredOriginTopLeft', () => {
+    it('defaults to top-left (true) for absent/unknown', () => {
+      expect(parseStoredOriginTopLeft(null)).toBe(true);
+      expect(parseStoredOriginTopLeft('tl')).toBe(true);
+      expect(parseStoredOriginTopLeft('garbage')).toBe(true);
+    });
+    it('returns false only for the explicit raw value', () => {
+      expect(parseStoredOriginTopLeft('raw')).toBe(false);
+    });
+  });
+
   describe('cut piece overlay helpers', () => {
     const placements: SheetPlacements = {
       trim_mm: { left: 10, top: 15, right: 10, bottom: 10 },
@@ -148,12 +168,23 @@ describe('cutPreviewHelpers', () => {
       });
     });
 
-    it('transposes overlay percentages for landscape preview', () => {
+    it('transposes overlay percentages for landscape preview (legacy 90° CW, origin top-right)', () => {
       const overlay = buildSheetPieceOverlays(placements, [item], true)[0];
       expect(overlay.leftPct).toBe(((2070 - (15 + 400)) / 2070) * 100);
       expect(overlay.topPct).toBe((10 / 2800) * 100);
       expect(overlay.widthPct).toBe((400 / 2070) * 100);
       expect(overlay.heightPct).toBe((600 / 2800) * 100);
+    });
+
+    it('anchors overlay at the top-left under originTopLeft (transpose, no right-edge mirror)', () => {
+      const overlay = buildSheetPieceOverlays(placements, [item], true, true)[0];
+      // transpose: left = (trim.top + y_mm)/sheetH, top = (trim.left + x_mm)/sheetW
+      expect(overlay.leftPct).toBe((15 / 2070) * 100);
+      expect(overlay.topPct).toBe((10 / 2800) * 100);
+      expect(overlay.widthPct).toBe((400 / 2070) * 100);
+      expect(overlay.heightPct).toBe((600 / 2800) * 100);
+      // distinct from the legacy 90° CW left edge
+      expect(overlay.leftPct).not.toBe(((2070 - (15 + 400)) / 2070) * 100);
     });
 
     it('builds tooltip rows like the order detail table with resolved names, not bare ids', () => {

@@ -128,6 +128,33 @@ describe('orientPieceRect', () => {
     // y' = x = 10, w' = h = 50, h' = w = 100
     expect(orientPieceRect(r, 2800, 2070, true)).toEqual({ x: 2000, y: 10, w: 50, h: 100, vw: 2070, vh: 2800 });
   });
+
+  it('landscape originTopLeft=false keeps the legacy 90° CW (explicit default)', () => {
+    expect(orientPieceRect(r, 2800, 2070, true, false)).toEqual({ x: 2000, y: 10, w: 50, h: 100, vw: 2070, vh: 2800 });
+  });
+
+  it('landscape originTopLeft=true: transpose (axis swap), same viewBox dims as 90° CW', () => {
+    // x' = y = 20, y' = x = 10, w' = h = 50, h' = w = 100; vw/vh unchanged (sheetH×sheetW)
+    expect(orientPieceRect(r, 2800, 2070, true, true)).toEqual({ x: 20, y: 10, w: 50, h: 100, vw: 2070, vh: 2800 });
+  });
+
+  it('transpose maps the dense (0,0) corner to the view top-left (0,0)', () => {
+    const corner = { x: 0, y: 0, w: 600, h: 300 };
+    const t = orientPieceRect(corner, 2800, 2070, true, true);
+    expect(t.x).toBe(0);
+    expect(t.y).toBe(0);
+  });
+
+  it('legacy 90° CW sends the (0,0) corner toward the top-right (x near sheetH)', () => {
+    const corner = { x: 0, y: 0, w: 600, h: 300 };
+    const cw = orientPieceRect(corner, 2800, 2070, true, false);
+    // x' = sheetH - (0 + 300) = 1770 — right half of the 2070-wide rotated view
+    expect(cw.x).toBe(1770);
+  });
+
+  it('originTopLeft is ignored when not rotated (portrait identity unchanged)', () => {
+    expect(orientPieceRect(r, 2800, 2070, false, true)).toEqual({ x: 10, y: 20, w: 100, h: 50, vw: 2800, vh: 2070 });
+  });
 });
 
 describe('rotatePiece', () => {

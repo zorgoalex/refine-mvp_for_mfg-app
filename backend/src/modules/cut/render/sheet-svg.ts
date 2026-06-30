@@ -143,6 +143,14 @@ export interface BuildSheetSvgInput {
    */
   rotate90?: boolean;
   /**
+   * When the layout is rotated (`rotate90=true`), choose the rotated transform:
+   * `false` (default) = 90° CW (dense cluster at the view's top-right, legacy);
+   * `true` = transpose so the dense cluster anchors at the view's top-left
+   * (operator loads the sheet portrait from the top-left). Ignored when
+   * `rotate90=false`. Passed straight to `orientPieceRect`.
+   */
+  originTopLeft?: boolean;
+  /**
    * When false, piece label `<text>` elements are omitted entirely.
    * Piece rects, fills, and the sheet outline are always rendered.
    * Defaults to true so every existing caller keeps labels.
@@ -168,7 +176,7 @@ function num(value: number): string {
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
-  const { sheet, labelFor, fillFor, rotate90 = false, showLabels = true } = input;
+  const { sheet, labelFor, fillFor, rotate90 = false, originTopLeft = false, showLabels = true } = input;
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 40));
@@ -177,7 +185,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   // canonical portrait/landscape transform used by BOTH the SVG renderer and the
   // editor overlay — eliminating the risk of the two drifting. Derive viewBox dims
   // from a full-sheet sentinel rect so the function is called once, not per piece.
-  const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90);
+  const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
   const pieces = sheet.pieces
     .map((piece) => {
@@ -185,7 +193,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const y = sheet.trim_mm.top + piece.y_mm;
       const pw = piece.width_mm;
       const ph = piece.height_mm;
-      const rect = orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90);
+      const rect = orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90, originTopLeft);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
       const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;

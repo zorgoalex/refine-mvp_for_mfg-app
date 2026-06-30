@@ -126,16 +126,31 @@ export function pieceWithinUsable(
  * math in render/sheet-svg.ts and cutPreviewHelpers.ts so the two cannot drift.
  *
  * Coordinates: r is in full-sheet space (trim already added).
- *   Portrait:  identity, vw=sheetW, vh=sheetH.
- *   Landscape: 90° CW rotation — new x = sheetH-(y+h), new y = x, w↔h swap.
+ *   Portrait (landscape=false): identity, vw=sheetW, vh=sheetH.
+ *   Landscape (landscape=true): one of two rotated transforms, both with the same
+ *   viewBox dims vw=sheetH, vh=sheetW (only the piece placement differs):
+ *     - originTopLeft=false → 90° CW: new x = sheetH-(y+h), new y = x, w↔h swap.
+ *       freecut packs its dense cluster at its own (0,0); after 90° CW that
+ *       corner lands at the rotated view's TOP-RIGHT.
+ *     - originTopLeft=true  → transpose (reflection across the diagonal):
+ *       new x = y, new y = x, w↔h swap. freecut's dense (0,0) maps to (0,0) =
+ *       the rotated view's TOP-LEFT, matching how an operator loads the sheet
+ *       portrait from the top-left. The layout is mirrored left↔right vs the raw
+ *       freecut result (physically equivalent for rectangular parts — flip the
+ *       sheet). Default false keeps the legacy 90° CW behaviour for every existing
+ *       caller. Plan: 2026-06-30-cut-origin-tl-and-profile-parity.
  */
 export function orientPieceRect(
   r: { x: number; y: number; w: number; h: number },
   sheetW: number,
   sheetH: number,
   landscape: boolean,
+  originTopLeft = false,
 ): { x: number; y: number; w: number; h: number; vw: number; vh: number } {
   if (landscape) {
+    if (originTopLeft) {
+      return { x: r.y, y: r.x, w: r.h, h: r.w, vw: sheetH, vh: sheetW };
+    }
     return { x: sheetH - (r.y + r.h), y: r.x, w: r.h, h: r.w, vw: sheetH, vh: sheetW };
   }
   return { x: r.x, y: r.y, w: r.w, h: r.h, vw: sheetW, vh: sheetH };

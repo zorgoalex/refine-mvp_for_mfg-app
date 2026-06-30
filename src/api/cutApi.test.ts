@@ -51,12 +51,48 @@ describe('cutApi', () => {
     await cutApi.fetchSheetSvg(42, 100, 0);
     await cutApi.fetchSheetPng(42, 100, 0, 'thumb');
 
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/groups/100/sheets/0.svg');
+    const svgUrl = fetchMock.mock.calls[0][0] as string;
+    expect(svgUrl).toContain('/api/v1/cut-jobs/42/groups/100/sheets/0.svg');
+    // origin defaults to top-left (transpose); emitted explicitly so the RAW half
+    // is never silently dead and browser cache keys differ.
+    expect(svgUrl).toContain('origin=tl');
     // PNG always includes labels=off (no baked labels; HTML overlay is the sole label source)
     const pngUrl = fetchMock.mock.calls[1][0] as string;
     expect(pngUrl).toContain('/api/v1/cut-jobs/42/groups/100/sheets/0.png');
     expect(pngUrl).toContain('preset=thumb');
     expect(pngUrl).toContain('labels=off');
+    expect(pngUrl).toContain('origin=tl');
+  });
+
+  it('emits origin=raw on every render URL when originTopLeft is false (RAW half not dead)', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementation(() => new Response('PNG', { status: 200, headers: { 'Content-Type': 'image/png' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.fetchSheetPng(42, 100, 0, 'screen', false, undefined, undefined, false);
+    await cutApi.fetchSheetSvg(42, 100, 0, false, undefined, undefined, false);
+    await cutApi.fetchGroupPdf(42, 100, false, undefined, false);
+    await cutApi.fetchJobPdf(42, false, undefined, false);
+
+    for (const call of fetchMock.mock.calls) {
+      expect(call[0] as string).toContain('origin=raw');
+      expect(call[0] as string).not.toContain('origin=tl');
+    }
+  });
+
+  it('emits origin=tl on every render URL by default (originTopLeft omitted)', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementation(() => new Response('PNG', { status: 200, headers: { 'Content-Type': 'image/png' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.fetchSheetPng(42, 100, 0);
+    await cutApi.fetchSheetSvg(42, 100, 0);
+    await cutApi.fetchGroupPdf(42, 100);
+    await cutApi.fetchJobPdf(42);
+
+    for (const call of fetchMock.mock.calls) {
+      expect(call[0] as string).toContain('origin=tl');
+    }
   });
 
   it('returns pending on a cold-cache 202 PDF and the blob once warm', async () => {
@@ -67,8 +103,10 @@ describe('cutApi', () => {
 
     await expect(cutApi.fetchJobPdf(42)).resolves.toEqual({ pending: true });
     await expect(cutApi.fetchGroupPdf(42, 100)).resolves.toMatchObject({ pending: false });
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/export.pdf');
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/cut-jobs/42/groups/100/export.pdf');
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/cut-jobs/42/export.pdf');
+    expect(fetchMock.mock.calls[0][0]).toContain('origin=tl');
+    expect(fetchMock.mock.calls[1][0]).toContain('/api/v1/cut-jobs/42/groups/100/export.pdf');
+    expect(fetchMock.mock.calls[1][0]).toContain('origin=tl');
   });
 
   it('validates cut job ids before fetch', async () => {

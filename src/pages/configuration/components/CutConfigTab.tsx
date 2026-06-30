@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Radio,
   Row,
+  Segmented,
   Select,
   Space,
   Spin,
@@ -34,6 +35,7 @@ import {
   DEFAULT_PARAM_FORM,
   type FreecutLayoutMode,
   type FreecutObjective,
+  type FreecutQuality,
   type FreecutRetryStrategy,
   type ParamProfileForm,
   extractEligibilityCodes,
@@ -443,6 +445,36 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
           </Col>
         </Row>
         <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item
+              label="Качество"
+              tooltip={QUALITY_META.tooltip}
+              extra={QUALITY_META.short}
+              style={{ marginBottom: 12 }}
+            >
+              <Segmented
+                value={params.quality}
+                onChange={(v) => setField('quality', v as FreecutQuality)}
+                options={[
+                  { value: 'fast', label: 'Быстро' },
+                  { value: 'balanced', label: 'Баланс' },
+                  { value: 'quality', label: 'Качество' },
+                ]}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              label="Сжимать группы деталей"
+              tooltip={GROUP_SHIFT_META.tooltip}
+              extra={GROUP_SHIFT_META.short}
+              style={{ marginBottom: 12 }}
+            >
+              <Switch checked={params.groupShift} onChange={(v) => setField('groupShift', v)} />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={12}>
           <Col span={8}>{numberField('time_limit_ms')}</Col>
           <Col span={8}>{numberField('restarts')}</Col>
           <Col span={8}>
@@ -525,6 +557,14 @@ const RETRY_META = {
 const VACUUM_DIRECTION_META = {
   short: 'Ориентация деталей на вакуумном столе',
   tooltip: 'Авто — оптимизатор выбирает направление. Вдоль — детали укладываются вдоль длинной стороны листа. Поперёк — поперёк длинной стороны.',
+};
+const QUALITY_META = {
+  short: 'Скорость против плотности',
+  tooltip: 'Быстро — считает быстрее, упаковка чуть свободнее. Баланс — рекомендуемый компромисс. Качество — плотнее раскрой, дольше расчёт.',
+};
+const GROUP_SHIFT_META = {
+  short: 'Подтягивать крайние группы к центру',
+  tooltip: 'Постобработка: сдвигает отдельно стоящие группы деталей к плотному кластеру, закрывая узкие коридоры — остаток листа цельнее. Может немного удлинить расчёт.',
 };
 
 interface PresetModalProps {

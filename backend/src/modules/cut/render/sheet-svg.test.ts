@@ -130,6 +130,35 @@ describe('buildSheetSvg rotate90 (landscape, upright labels)', () => {
       buildSheetSvg({ sheet, labelFor: () => 'X' }),
     );
   });
+
+  it('originTopLeft=false (default) keeps the legacy 90° CW transpose-right layout', () => {
+    expect(buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: false })).toBe(
+      buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true }),
+    );
+  });
+});
+
+describe('buildSheetSvg rotate90 + originTopLeft (transpose, dense cluster top-left)', () => {
+  it('keeps the same h×w viewBox as the 90° CW path', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true });
+    expect(svg).toContain('viewBox="0 0 2070 2800"');
+    expect(svg).toMatch(/<rect x="0" y="0" width="2070" height="2800"/);
+  });
+
+  it('transposes each piece rect (x,y,w,h) -> (trim.top+y, trim.left+x, h, w) — no right-edge mirror', () => {
+    // piece 1 full rect x=10,y=15,w=600,h=400 -> transpose (15, 10, 400, 600).
+    // Contrast with the 90° CW result x=1655 (right edge): transpose anchors top-left.
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true });
+    expect(svg).toMatch(/<rect x="15" y="10" width="400" height="600"/);
+    expect(svg).not.toMatch(/<rect x="1655"/);
+  });
+
+  it('keeps labels upright at the transposed centre', () => {
+    // piece 1 transposed rect (15,10,400,600) -> centre (215, 310)
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true });
+    expect(svg).toMatch(/<text x="215" y="310"[^>]*>/);
+    expect(svg).not.toMatch(/rotate\(/);
+  });
 });
 
 describe('buildSheetSvg showLabels=false (on-screen PNG preview — no baked labels)', () => {

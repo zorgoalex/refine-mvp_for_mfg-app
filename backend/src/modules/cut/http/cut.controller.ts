@@ -389,6 +389,7 @@ export class CutController {
       sheetIndex: parseSheetIndex(sheetIndex),
       preset: parsePreset(query.preset),
       rotate90: parseOrientation(query.orientation),
+      originTopLeft: parseOriginTopLeft(query.origin),
       variant: parseVariant(query.variant),
       showLabels: query.labels !== 'off',
       requestId: request.requestId,
@@ -416,6 +417,7 @@ export class CutController {
       cutGroupId: parseCutJobId(groupId),
       sheetIndex: parseSheetIndex(sheetIndex),
       rotate90: parseOrientation(query.orientation),
+      originTopLeft: parseOriginTopLeft(query.origin),
       variant: parseVariant(query.variant),
       requestId: request.requestId,
     });
@@ -437,15 +439,18 @@ export class CutController {
     const parsedJobId = parseCutJobId(cutJobId);
     const cutGroupId = parseCutJobId(groupId);
     const rotate90 = parseOrientation(query.orientation);
+    const originTopLeft = parseOriginTopLeft(query.origin);
     const variant = parseVariant(query.variant);
     // Task 7 Rule 9: cache key includes the server-owned render token (layout state)
     // so a manual save or active-selector flip busts the in-process cache. FIX 2:
     // the requested `variant` is a SEPARATE key dimension — `auto` and `active` can
     // render different bytes for the same layout state and must not share a slot.
+    // origin (TL/RAW) is ALSO a separate key dimension: a top-left (transpose) and
+    // a raw 90° CW render produce different bytes for the same layout+orientation.
     const renderToken = await this.cut.getRenderCacheToken({ cutGroupId });
     const result = this.pdfCache.ensure(
-      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}`,
-      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, variant, requestId: request.requestId }),
+      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}`,
+      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, originTopLeft, variant, requestId: request.requestId }),
     );
     this.sendPdf(response, result, `cut-group-${cutGroupId}.pdf`);
   }
@@ -461,13 +466,14 @@ export class CutController {
     const currentUser = this.requireRead(request);
     const id = parseCutJobId(cutJobId);
     const rotate90 = parseOrientation(query.orientation);
+    const originTopLeft = parseOriginTopLeft(query.origin);
     const variant = parseVariant(query.variant);
     // getJob gives the current version + renderToken (cache discriminator for manual layouts).
     const job = await this.cut.getJob({ currentUser, cutJobId: id, requestId: request.requestId });
     // Task 7 Rule 10: renderToken aggregates job version + all per-group manual tokens;
     // any manual save or active-selector flip changes the token → busts the cache.
     const renderToken = job.renderToken ?? `v${job.version}`;
-    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant);
+    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant, originTopLeft);
     this.sendPdf(response, result, `cut-job-${id}.pdf`);
   }
 
@@ -479,18 +485,20 @@ export class CutController {
     requestId: string | undefined,
     rotate90 = false,
     variant: 'auto' | 'manual' | 'active' = 'auto',
+    originTopLeft = false,
   ) {
     // Task 7: cache key uses renderToken (job version + per-group manual tokens)
     // so a manual save or active-selector flip always busts the in-process cache.
     // FIX 2: `variant` is a separate key dimension (auto vs active can differ).
-    // Orientation discriminates the cache. pdf_prewarm_state tracks only the
-    // default (portrait) job PDF surfaced in the UI — the landscape variant is
-    // on-demand and must not write the prewarm state.
+    // Orientation AND origin (TL/RAW) discriminate the cache. pdf_prewarm_state
+    // tracks only the default surfaced job PDF (portrait + top-left origin, the
+    // UI default) — the landscape and raw-origin variants are on-demand and must
+    // not write the prewarm state.
     return this.pdfCache.ensure(
-      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}`,
-      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, variant, requestId }),
+      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}`,
+      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, originTopLeft, variant, requestId }),
       (state, reason) => {
-        if (rotate90) return;
+        if (rotate90 || !originTopLeft) return;
         void this.cut.setPdfPrewarmState({ cutJobId, version, state, reason }).catch(() => undefined);
       },
     );
@@ -506,7 +514,12 @@ export class CutController {
    *  always requests `variant=active` → export key `job:{id}:active:{token}:P`.
    *  Warming with the default `auto` would warm a slot the real download never
    *  reads. `active` resolves per-group `effectiveActive` — exactly the surfaced
-   *  whole-job PDF. Orientation is unchanged (portrait, as before).
+   *  whole-job PDF. Orientation is unchanged (portrait, as before). FIX 5: it must
+   *  ALSO warm the surfaced origin dimension — the FE default checkbox is ON
+   *  (top-left), so `fetchJobPdf` requests `origin=tl` → export key
+   *  `job:{id}:active:{token}:P:TL`. Warming with the legacy RAW origin would warm
+   *  a slot the real download never reads. Matches the ensureJobPdf prewarm-state
+   *  guard (`rotate90 || !originTopLeft` → no state write).
    */
   private prewarmJobPdf(
     currentUser: RequestWithCurrentUser['user'],
@@ -517,7 +530,7 @@ export class CutController {
     void this.cut
       .getRenderCacheToken({ cutJobId })
       .then((renderToken) => {
-        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId, false, 'active');
+        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId, false, 'active', true);
       })
       .catch(() => undefined);
   }
@@ -603,6 +616,14 @@ export function parsePreset(value: string | undefined): string {
  *  the layout 90° (long side horizontal). Default (absent / 'portrait') → false. */
 export function parseOrientation(value: string | undefined): boolean {
   return (value ?? '').trim().toLowerCase() === 'landscape';
+}
+
+/** Origin flag for rotated sheet renders: `?origin=raw` keeps the legacy 90° CW
+ *  layout (dense cluster top-right); anything else (absent / 'tl') → true =
+ *  transpose so the dense cluster anchors at the rotated view's top-left. Default
+ *  ON matches the operator-facing checkbox default. Ignored when not rotated. */
+export function parseOriginTopLeft(value: string | undefined): boolean {
+  return (value ?? '').trim().toLowerCase() !== 'raw';
 }
 
 /**

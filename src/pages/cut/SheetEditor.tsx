@@ -25,6 +25,7 @@ import {
   moveAllowed,
 } from './cutLayoutGeometry';
 import type { ManualViolation } from './cutLayoutGeometry';
+import { orientedOrigin, svgToUsable } from './sheetEditorGeometry';
 import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
 
 // ── Props contract ─────────────────────────────────────────────────────────
@@ -34,6 +35,10 @@ export interface SheetEditorProps {
   gap: { kerfMm: number; spacingMm: number };
   filmTextureByItemId: Map<string, boolean>;
   landscape: boolean;
+  /** When rotated, anchor the dense cluster at the view's top-left (transpose)
+   *  instead of the legacy 90° CW top-right. Must match the preview/render so the
+   *  editor and the sheet cards show the same orientation. Default false. */
+  originTopLeft?: boolean;
   onChange: (sheets: SheetEditorProps['sheets']) => void;
   violations: ManualViolation[];
   /**
@@ -123,64 +128,6 @@ function clientToSVG(
   };
 }
 
-/**
- * Get the oriented SVG top-left corner of a piece using the shared
- * orientPieceRect transform (Codex R4 MAJOR #4: single canonical transform).
- * Coordinates are in full-sheet space (trim already added).
- */
-function orientedOrigin(
-  piece: SheetPlacementPiece,
-  placements: SheetPlacements,
-  landscape: boolean,
-): { x: number; y: number } {
-  const r = orientPieceRect(
-    {
-      x: placements.trim_mm.left + piece.x_mm,
-      y: placements.trim_mm.top + piece.y_mm,
-      w: piece.width_mm,
-      h: piece.height_mm,
-    },
-    placements.sheet_width_mm,
-    placements.sheet_height_mm,
-    landscape,
-  );
-  return { x: r.x, y: r.y };
-}
-
-/**
- * Invert the orientPieceRect transform to recover piece usable-area coords
- * from a pointer position in the target sheet's SVG space.
- *
- * Portrait:  svgX = trim.left + x_mm,  svgY = trim.top + y_mm
- * Landscape: svgX = sheetH - (trim.top + y_mm + height_mm),  svgY = trim.left + x_mm
- *
- * @param pieceHeightMm  Current piece height (after any rotation), used for landscape inversion.
- */
-function svgToUsable(
-  svgX: number,
-  svgY: number,
-  svgOffsetX: number,
-  svgOffsetY: number,
-  pieceHeightMm: number,
-  placements: SheetPlacements,
-  landscape: boolean,
-): { x_mm: number; y_mm: number } {
-  // Piece oriented top-left in SVG space = pointer position minus stored offset
-  const ox = svgX - svgOffsetX;
-  const oy = svgY - svgOffsetY;
-  const trim = placements.trim_mm;
-  if (landscape) {
-    return {
-      x_mm: oy - trim.left,
-      y_mm: placements.sheet_height_mm - trim.top - pieceHeightMm - ox,
-    };
-  }
-  return {
-    x_mm: ox - trim.left,
-    y_mm: oy - trim.top,
-  };
-}
-
 /** Clamp piece origin so the piece stays within the usable area. */
 function clampToUsable(
   x_mm: number,
@@ -251,6 +198,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     gap,
     filmTextureByItemId,
     landscape,
+    originTopLeft = false,
     onChange,
     violations,
     labelInfoByItemId,
@@ -279,6 +227,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   sheetsRef.current = sheets;
   const landscapeRef = useRef(landscape);
   landscapeRef.current = landscape;
+  const originTopLeftRef = useRef(originTopLeft);
+  originTopLeftRef.current = originTopLeft;
   const gapRef = useRef(gap);
   gapRef.current = gap;
   const filmTextureRef = useRef(filmTextureByItemId);
@@ -311,6 +261,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
       if (!d) return;
 
       const ls = landscapeRef.current;
+      const otl = originTopLeftRef.current;
       const currentSheets = sheetsRef.current;
       const currentGap = gapRef.current;
       const gapMm = currentGap.kerfMm + currentGap.spacingMm;
@@ -355,6 +306,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
           { ...piece, x_mm: d.currentX_mm, y_mm: d.currentY_mm },
           targetSheet.placements,
           ls,
+          otl,
         );
         svgOffsetX = svgPt.x - currentOrigin.x;
         svgOffsetY = svgPt.y - currentOrigin.y;
@@ -369,6 +321,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         piece.height_mm,
         targetSheet.placements,
         ls,
+        otl,
       );
 
       // Other pieces on target (excluding the dragged piece)
@@ -384,6 +337,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         targetSheet.placements.sheet_width_mm,
         targetSheet.placements.sheet_height_mm,
         ls,
+        otl,
       );
       const targetSvgDisplayW = Math.min(MAX_SVG_WIDTH_PX, targetOriented.vw);
       const targetMmPerPx = targetOriented.vw / targetSvgDisplayW;
@@ -597,7 +551,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         const { usableW, usableH } = usableExtent(placements);
 
         // Canonical SVG viewBox dimensions: use orientPieceRect on the full sheet rect
-        const sheetOriented = orientPieceRect({ x: 0, y: 0, w: W, h: H }, W, H, landscape);
+        const sheetOriented = orientPieceRect({ x: 0, y: 0, w: W, h: H }, W, H, landscape, originTopLeft);
         const vw = sheetOriented.vw;
         const vh = sheetOriented.vh;
 
@@ -660,6 +614,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   W,
                   H,
                   landscape,
+                  originTopLeft,
                 );
                 return (
                   <rect
@@ -684,7 +639,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   const gx = Math.max(0, Math.min(usableW, drag.guideXmm));
                   const g = orientPieceRect(
                     { x: trim.left + gx - strokeMm / 2, y: trim.top, w: strokeMm, h: usableH },
-                    W, H, landscape,
+                    W, H, landscape, originTopLeft,
                   );
                   guides.push(<rect key="gx" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
                 }
@@ -692,7 +647,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   const gy = Math.max(0, Math.min(usableH, drag.guideYmm));
                   const g = orientPieceRect(
                     { x: trim.left, y: trim.top + gy - strokeMm / 2, w: usableW, h: strokeMm },
-                    W, H, landscape,
+                    W, H, landscape, originTopLeft,
                   );
                   guides.push(<rect key="gy" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
                 }
@@ -712,6 +667,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   W,
                   H,
                   landscape,
+                  originTopLeft,
                 );
 
                 const isSelected =
@@ -777,7 +733,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       const svgEl = svgRefsMap.current.get(sheetIndex);
                       if (!svgEl) return;
                       const pt = clientToSVG(svgEl, e.clientX, e.clientY);
-                      const origin = orientedOrigin(piece, placements, landscape);
+                      const origin = orientedOrigin(piece, placements, landscape, originTopLeft);
                       const sel: SelectedPiece = {
                         sheetIndex,
                         item_id: piece.item_id,

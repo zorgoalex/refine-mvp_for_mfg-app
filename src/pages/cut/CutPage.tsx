@@ -23,7 +23,7 @@ import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
-import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, selectVariantSheets } from './cutPreviewHelpers';
+import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, saveSheetOriginTopLeft, selectVariantSheets } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
@@ -154,6 +154,10 @@ export const CutPage: React.FC = () => {
   // Per-user, per-job sheet preview orientation (portrait by default), persisted
   // in localStorage. Landscape rotates the render server-side (labels stay upright).
   const [sheetPortrait, setSheetPortrait] = useState(true);
+  // Per-user, per-job origin anchor for the rotated (portrait) render: when true
+  // (default) the dense cluster sits at the view's top-left (transpose); when
+  // false it keeps the legacy 90° CW top-right. Persisted in localStorage.
+  const [sheetOriginTopLeft, setSheetOriginTopLeft] = useState(true);
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
@@ -202,11 +206,13 @@ export const CutPage: React.FC = () => {
     });
   }, []);
 
-  // Load this user's saved orientation for the opened job (default portrait).
+  // Load this user's saved orientation + origin for the opened job (default
+  // portrait, origin top-left).
   useEffect(() => {
     if (!job) return;
     const uid = authSession.getUser()?.id ?? 'anon';
     setSheetPortrait(loadSheetOrientationPortrait(uid, job.cutJobId));
+    setSheetOriginTopLeft(loadSheetOriginTopLeft(uid, job.cutJobId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.cutJobId]);
 
@@ -217,6 +223,22 @@ export const CutPage: React.FC = () => {
       if (job) {
         const uid = authSession.getUser()?.id ?? 'anon';
         saveSheetOrientationPortrait(uid, job.cutJobId, portrait);
+      }
+      resetSheetViews();
+    },
+    [job, resetSheetViews],
+  );
+
+  // Toggle + persist origin anchor; like the orientation toggle, origin is NOT a
+  // local blob-cache key dimension, so drop ALL cached previews (revoke blobs +
+  // bump epoch + clear thumb dedup) so stale opposite-origin PNGs/thumbs cannot
+  // linger on screen and every sheet re-fetches with the new `origin=` URL.
+  const toggleSheetOriginTopLeft = useCallback(
+    (originTopLeft: boolean) => {
+      setSheetOriginTopLeft(originTopLeft);
+      if (job) {
+        const uid = authSession.getUser()?.id ?? 'anon';
+        saveSheetOriginTopLeft(uid, job.cutJobId, originTopLeft);
       }
       resetSheetViews();
     },
@@ -607,14 +629,18 @@ export const CutPage: React.FC = () => {
       if (!job) return;
       // Cache key includes variant + renderVersion so toggling or re-saving never
       // serves a stale blob (Codex R7 BLOCKER #1, R9 MAJOR #2).
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${renderVersion ?? ''}`;
+      // origin is part of the key: a persisted RAW-origin job that opens while the
+      // state still holds the default TL must not reuse (dedupe to) a TL blob —
+      // distinct keys force the correct-origin fetch and the render reads the
+      // matching slot (Codex code-review R1 [REGRESSION-DEBT]).
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${renderVersion ?? ''}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
       const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion);
+        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion, sheetOriginTopLeft);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetImages((prev) => {
@@ -625,7 +651,7 @@ export const CutPage: React.FC = () => {
         handleError(error, 'Не удалось загрузить лист раскроя');
       }
     },
-    [job, preset, sheetPortrait, handleError],
+    [job, preset, sheetPortrait, sheetOriginTopLeft, handleError],
   );
 
   // Small layout preview for a ready job's sheet, fetched once with the light
@@ -634,7 +660,11 @@ export const CutPage: React.FC = () => {
   // or saving a new manual layout always fetches a fresh thumb (R9 MAJOR #2).
   const loadThumb = useCallback(
     async (cutJobId: number, group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${renderVersion ?? ''}`;
+      // origin is part of the key: a persisted RAW-origin job that opens while the
+      // state still holds the default TL must not reuse (dedupe to) a TL blob —
+      // distinct keys force the correct-origin fetch and the render reads the
+      // matching slot (Codex code-review R1 [REGRESSION-DEBT]).
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${renderVersion ?? ''}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
@@ -644,7 +674,7 @@ export const CutPage: React.FC = () => {
         : sheetPortrait;
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion);
+        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion, sheetOriginTopLeft);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetThumbs((prev) => {
@@ -656,7 +686,7 @@ export const CutPage: React.FC = () => {
         thumbReqRef.current.delete(reqKey);
       }
     },
-    [sheetPortrait],
+    [sheetPortrait, sheetOriginTopLeft],
   );
 
   // Auto-load per-sheet previews when a ready job's layout is present, so an
@@ -683,13 +713,13 @@ export const CutPage: React.FC = () => {
         const rotate90 = sheet
           ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
           : sheetPortrait;
-        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion);
+        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion, sheetOriginTopLeft);
         triggerBlobDownload(blob, `cut-${job.cutJobId}-g${group.cutGroupId}-s${sheetIndex + 1}.svg`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить SVG');
       }
     },
-    [job, sheetPortrait, handleError],
+    [job, sheetPortrait, sheetOriginTopLeft, handleError],
   );
 
   const downloadGroupPdf = useCallback(
@@ -698,7 +728,7 @@ export const CutPage: React.FC = () => {
       setBusy(true);
       try {
         // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
-        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken));
+        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetOriginTopLeft));
         triggerBlobDownload(result.blob, result.fileName ?? `cut-group-${group.cutGroupId}.pdf`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить PDF группы');
@@ -706,7 +736,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, sheetPortrait, handleError],
+    [job, sheetPortrait, sheetOriginTopLeft, handleError],
   );
 
   const downloadJobPdf = useCallback(async () => {
@@ -714,14 +744,14 @@ export const CutPage: React.FC = () => {
     setBusy(true);
     try {
       // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
-      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken));
+      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetOriginTopLeft));
       triggerBlobDownload(result.blob, result.fileName ?? `cut-job-${job.cutJobId}.pdf`);
     } catch (error) {
       handleError(error, 'Не удалось выгрузить PDF раскроя');
     } finally {
       setBusy(false);
     }
-  }, [job, sheetPortrait, handleError]);
+  }, [job, sheetPortrait, sheetOriginTopLeft, handleError]);
 
   // ── Manual layout editor callbacks ─────────────────────────────────────────
 
@@ -1347,9 +1377,14 @@ export const CutPage: React.FC = () => {
       )}
 
       {job && job.groups.length > 0 && (
-        <Checkbox checked={sheetPortrait} onChange={(e) => toggleSheetPortrait(e.target.checked)}>
-          Книжная ориентация листа (вертикально) — снимите для альбомной
-        </Checkbox>
+        <Space direction="vertical" size={4}>
+          <Checkbox checked={sheetPortrait} onChange={(e) => toggleSheetPortrait(e.target.checked)}>
+            Книжная ориентация листа (вертикально) — снимите для альбомной
+          </Checkbox>
+          <Checkbox checked={sheetOriginTopLeft} onChange={(e) => toggleSheetOriginTopLeft(e.target.checked)}>
+            Точка отсчёта — верхний левый угол (как загружается лист) — снимите для старого варианта
+          </Checkbox>
+        </Space>
       )}
 
       {job?.groups.map((group) => {
@@ -1521,7 +1556,21 @@ export const CutPage: React.FC = () => {
                   gap={{ kerfMm: job.editorParams.kerfMm, spacingMm: job.editorParams.spacingMm }}
                   filmTextureByItemId={editorFilmTextureByItemId}
                   labelInfoByItemId={editorLabelInfoByItemId}
-                  landscape={!sheetPortrait}
+                  // Match the preview's per-sheet rotate decision (sheetPreviewRotate90
+                  // on the group's stock dims) instead of the bare `!sheetPortrait`,
+                  // so the editor and the sheet cards always show the same orientation
+                  // (a 2800×2070 sheet in portrait rotates in BOTH). All sheets in one
+                  // group share a stock size, so the first sheet is representative.
+                  landscape={
+                    workingSheets.length > 0
+                      ? sheetPreviewRotate90(
+                          workingSheets[0].placements.sheet_width_mm,
+                          workingSheets[0].placements.sheet_height_mm,
+                          sheetPortrait,
+                        )
+                      : !sheetPortrait
+                  }
+                  originTopLeft={sheetOriginTopLeft}
                   onChange={handleEditorChange}
                   violations={violations}
                   splitByMaterial={job.splitByMaterial}
@@ -1540,11 +1589,11 @@ export const CutPage: React.FC = () => {
                 {previewSheets.map((sheet) => {
                   // Cache key includes variant + renderVersion so toggling auto↔manual
                   // or saving a new manual never serves a stale blob (R7/R9 fix).
-                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${renderVersion ?? ''}`;
+                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${renderVersion ?? ''}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
                   const widthMm = sheet.placements.sheet_width_mm;
                   const heightMm = sheet.placements.sheet_height_mm;
                   const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
-                  const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90);
+                  const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, sheetOriginTopLeft);
                   const sheetDetailIds = detailIdsForSheet(sheet);
                   return (
                     <div
