@@ -26,6 +26,15 @@ describe('CutPage source guards', () => {
     expect(source).toContain("can('cut.view')");
   });
 
+  it('uses a stable React element key for sheet previews (decoupled from the cache key) to avoid scroll-jump on re-render', () => {
+    // elemKey is per (group, sheet) — NOT the renderVersion-bearing cache key — so a
+    // version bump (profile/material change) refreshes in place instead of remounting.
+    expect(source).toContain('const elemKey = `${group.cutGroupId}:${sheet.sheetIndex}`');
+    expect(source).toContain('key={elemKey}');
+    // Thumbnail container reserves height so a reload does not collapse the row.
+    expect(source).toMatch(/minHeight:\s*Math\.round\(basis/);
+  });
+
   it('explains a failed cut instead of a bare status: Alert + reason + retry', () => {
     // Durable failure reason shown prominently (Alert) and on the list tag (Tooltip).
     expect(source).toContain('job.failureReason');

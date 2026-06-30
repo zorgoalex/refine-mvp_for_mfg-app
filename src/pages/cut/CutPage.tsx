@@ -108,6 +108,10 @@ function sheetPreviewItemStyle(widthMm: number, heightMm: number, rotate90: bool
   return {
     flex: `0 1 ${basis}px`,
     maxWidth: '100%',
+    // Reserve the thumbnail's image-area height so that when a preview reloads
+    // (its cache key is bumped by a job version change, e.g. on profile/material
+    // change) the row does not momentarily collapse and bounce the page scroll.
+    minHeight: Math.round(basis / Math.max(ratio, 0.01)),
   };
 }
 
@@ -1541,6 +1545,12 @@ export const CutPage: React.FC = () => {
                   // Cache key includes variant + renderVersion so toggling auto↔manual
                   // or saving a new manual never serves a stale blob (R7/R9 fix).
                   const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${renderVersion ?? ''}`;
+                  // Stable React element identity per (group, sheet) — deliberately NOT
+                  // the cache key. A renderVersion bump (e.g. changing profile/material,
+                  // which only marks the job stale) then refreshes the image in place
+                  // instead of unmounting/remounting the whole preview row, which used to
+                  // collapse the list and bounce the page scroll down-then-back.
+                  const elemKey = `${group.cutGroupId}:${sheet.sheetIndex}`;
                   const widthMm = sheet.placements.sheet_width_mm;
                   const heightMm = sheet.placements.sheet_height_mm;
                   const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
@@ -1548,7 +1558,7 @@ export const CutPage: React.FC = () => {
                   const sheetDetailIds = detailIdsForSheet(sheet);
                   return (
                     <div
-                      key={key}
+                      key={elemKey}
                       style={
                         // Open (enlarged) sheet spans the full previews row so the
                         // image can grow ~2× instead of being capped by the thumbnail
