@@ -644,14 +644,15 @@ export const CutPage: React.FC = () => {
   const loadSheet = useCallback(
     async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
       if (!job) return;
-      // Client cache key = group:sheet:variant (NO renderVersion). Every render-
-      // changing op (calculate / manual save / orientation toggle / job switch)
-      // calls resetSheetViews(), which clears the blob maps + thumbReqRef + bumps
-      // the epoch — that is what busts stale blobs (R7/R9). renderVersion is still
-      // passed to the FETCH to bust the SERVER render cache. Keeping it OUT of the
-      // client key means a mere version bump (profile/material change, no recalc)
-      // re-uses the cached blob instead of needlessly re-fetching/flickering.
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}`;
+      // Client cache key = group:sheet:variant:orientation. NO renderVersion —
+      // a version bump that does not recompute the layout (profile/material change)
+      // re-uses the cached blob instead of re-fetching/flickering. Orientation IS
+      // in the key because it changes the rendered image and a job switch can
+      // rehydrate a different saved orientation (so it must re-fetch, not dedupe to
+      // a stale-orientation blob). Layout changes still bust via resetSheetViews()
+      // (clears maps + thumbReqRef + epoch); renderVersion stays in the FETCH to
+      // bust the SERVER render cache.
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}`;
       const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
@@ -674,14 +675,15 @@ export const CutPage: React.FC = () => {
 
   // Small layout preview for a ready job's sheet, fetched once with the light
   // 'thumb' preset. Deduped via thumbReqRef so the auto-load effect is idempotent.
-  // Client cache key = group:sheet:variant (NO renderVersion) — resetSheetViews()
-  // (called on calculate / manual save / orientation toggle / job switch) clears the
-  // maps + thumbReqRef + bumps the epoch and is what forces a fresh thumb. renderVersion
-  // is still passed to the FETCH (server render-cache bust); keeping it out of the client
-  // key avoids a needless re-fetch on a version bump that did not change the layout.
+  // Client cache key = group:sheet:variant:orientation (NO renderVersion). Orientation
+  // is in the key so a job-switch that rehydrates a different saved orientation re-fetches
+  // instead of deduping to a stale-orientation thumb. resetSheetViews() (calculate / save /
+  // orientation toggle / job switch) clears the maps + thumbReqRef + epoch on layout change.
+  // renderVersion is still passed to the FETCH (server render-cache bust); out of the client
+  // key so a no-recalc version bump (profile/material change) does not re-fetch/flicker.
   const loadThumb = useCallback(
     async (cutJobId: number, group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}`;
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}`;
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
@@ -1608,12 +1610,12 @@ export const CutPage: React.FC = () => {
               /* Previews flow in wrapping rows (not a single column). */
               <div style={sheetPreviewListStyle}>
                 {previewSheets.map((sheet) => {
-                  // Client cache key = group:sheet:variant (NO renderVersion) — must
-                  // match loadSheet/loadThumb. resetSheetViews() busts stale blobs on
-                  // every render-changing op; renderVersion stays only in the fetch
-                  // (server bust). This keeps the cached preview stable across version
-                  // bumps that don't change the layout (profile/material change).
-                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}`;
+                  // Client cache key = group:sheet:variant:orientation (NO renderVersion)
+                  // — must match loadSheet/loadThumb. resetSheetViews() busts on layout
+                  // change; orientation is in the key (job switch may rehydrate a different
+                  // saved orientation); renderVersion stays only in the fetch (server bust).
+                  // Keeps the cached preview stable across no-recalc version bumps.
+                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}`;
                   // Stable React element identity per (group, sheet) — deliberately NOT
                   // the cache key. A renderVersion bump (e.g. changing profile/material,
                   // which only marks the job stale) then refreshes the image in place
