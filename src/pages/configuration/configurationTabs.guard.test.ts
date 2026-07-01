@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  CONFIGURATION_ACTIVE_TAB_STORAGE_KEY,
+  resolveConfigurationActiveTab,
+} from './index';
 
 describe('configuration tabs layout', () => {
   it('uses a wrapping tab bar so configuration tabs do not require horizontal scrolling', () => {
@@ -16,5 +20,15 @@ describe('configuration tabs layout', () => {
     expect(source).toContain("key: 'table-visibility'");
     expect(source).toContain('Видимость таблиц для юзеров');
     expect(source).toContain('<TableVisibilityByRoleTab />');
+  });
+
+  it('restores the last active configuration tab when it is still available', () => {
+    expect(CONFIGURATION_ACTIVE_TAB_STORAGE_KEY).toBe('configuration:activeTab');
+    expect(resolveConfigurationActiveTab('cut', ['orders', 'cut', 'labels'])).toBe('cut');
+  });
+
+  it('falls back to the first available configuration tab when the stored tab is unavailable', () => {
+    expect(resolveConfigurationActiveTab('labels', ['orders', 'cut'])).toBe('orders');
+    expect(resolveConfigurationActiveTab(null, ['orders', 'cut'])).toBe('orders');
   });
 });

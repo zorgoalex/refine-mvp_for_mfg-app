@@ -38,6 +38,29 @@ import { RESOURCE_LABELS } from '../../utils/tabLabels';
 
 const { Text } = Typography;
 
+export const CONFIGURATION_ACTIVE_TAB_STORAGE_KEY = 'configuration:activeTab';
+
+export const resolveConfigurationActiveTab = (storedKey: string | null | undefined, availableKeys: string[]): string => {
+  if (storedKey && availableKeys.includes(storedKey)) return storedKey;
+  return availableKeys[0] ?? 'orders';
+};
+
+const readStoredConfigurationActiveTab = (): string | null => {
+  try {
+    return window.sessionStorage.getItem(CONFIGURATION_ACTIVE_TAB_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredConfigurationActiveTab = (key: string): void => {
+  try {
+    window.sessionStorage.setItem(CONFIGURATION_ACTIVE_TAB_STORAGE_KEY, key);
+  } catch {
+    // Ignore storage failures; tab selection still works for the current mount.
+  }
+};
+
 interface RoleRow {
   role_id: number | string;
   role_name: string;
@@ -468,7 +491,7 @@ const TableVisibilityByRoleTab: React.FC = () => {
 // Главная страница конфигурации
 // ============================================================================
 export const ConfigurationPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('orders');
+  const [activeTab, setActiveTab] = useState(() => readStoredConfigurationActiveTab() ?? 'orders');
 
   const tabItems = [
     {
@@ -581,6 +604,21 @@ export const ConfigurationPage: React.FC = () => {
       : []),
   ];
 
+  const availableTabKeys = tabItems.map((item) => item.key);
+  const resolvedActiveTab = resolveConfigurationActiveTab(activeTab, availableTabKeys);
+
+  useEffect(() => {
+    if (resolvedActiveTab !== activeTab) {
+      setActiveTab(resolvedActiveTab);
+    }
+    writeStoredConfigurationActiveTab(resolvedActiveTab);
+  }, [activeTab, resolvedActiveTab]);
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    writeStoredConfigurationActiveTab(key);
+  };
+
   return (
     <Card
       title={
@@ -592,8 +630,8 @@ export const ConfigurationPage: React.FC = () => {
     >
       <Tabs
         className="configuration-tabs-wrap"
-        activeKey={activeTab}
-        onChange={setActiveTab}
+        activeKey={resolvedActiveTab}
+        onChange={handleTabChange}
         items={tabItems}
         type="card"
         tabBarGutter={4}

@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-01",
+    title: "Конфигурация: возврат к последней вкладке",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Экран конфигурации запоминает открытую вкладку в текущей сессии: после перехода в заказы, раскрой или другой раздел возврат в конфигурацию открывает ту же вкладку.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-01",
     title: "Редактор бирок: выравнивание значений полей",
     services: ["ERP"],
     repositories: ["repo_erp"],
