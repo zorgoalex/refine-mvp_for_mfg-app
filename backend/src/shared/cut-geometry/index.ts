@@ -435,7 +435,14 @@ export function reconstructManualSheets(args: {
     });
   }
   return {
-    sheets: Array.from(byIndex.entries()).map(([sheetIndex, placements]) => ({ sheetIndex, placements })),
+    // Drop sheets that ended up empty (all their pieces were moved to other
+    // sheets). Empty sheets are not wanted in a cut group. The REAL sheet_index
+    // of the surviving sheets is preserved (no renumber, Codex R14 MAJOR #4);
+    // only the emptied indices disappear. `byIndex` was still seeded from the
+    // full auto-sheet stock above, so the foreign-sheet guard is unaffected.
+    sheets: Array.from(byIndex.entries())
+      .filter(([, placements]) => placements.pieces.length > 0)
+      .map(([sheetIndex, placements]) => ({ sheetIndex, placements })),
   };
 }
 

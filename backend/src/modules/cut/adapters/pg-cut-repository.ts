@@ -2440,7 +2440,9 @@ export class PgCutRepository implements CutRepositoryPort {
         throw new ApiError(422, 'CUT_MANUAL_LAYOUT_INVALID', 'Нарушения в расположении деталей на листе', { violations: allViolations });
       }
 
-      // ── 8. Canonicalize: preserve auto sheet_index values, empty sheets retained ─
+      // ── 8. Canonicalize: preserve auto sheet_index values; empty sheets dropped ─
+      //   reconstructManualSheets keeps the REAL sheet_index of every surviving
+      //   sheet (no renumber) but omits sheets left empty after a cross-sheet move.
       const canonicalSheets: import('../dto/cut.dto').CutManualSheetDto[] = reconstructedSheets.map(({ sheetIndex, placements: p }) => ({
         sheetIndex,
         placements: p,
@@ -2470,7 +2472,11 @@ export class PgCutRepository implements CutRepositoryPort {
         !existing.is_stale &&
         existing.is_active === command.active &&
         Number(existing.based_on_job_version) === command.jobVersion &&
-        sheetsMatchCanonical(existing.sheets, canonicalSheets)
+        // Compare empty-filtered on both sides: canonicalSheets already omits empty
+        // sheets, and a legacy row saved before that rule may still carry them.
+        // Without this filter a genuine no-op re-save of such a row would differ
+        // only by empty sheets and force a needless version bump/audit/outbox.
+        sheetsMatchCanonical(existing.sheets.filter((s) => s.placements.pieces.length > 0), canonicalSheets)
       ) {
         // Identical re-save: no version bump, no audit, no outbox.
         return;

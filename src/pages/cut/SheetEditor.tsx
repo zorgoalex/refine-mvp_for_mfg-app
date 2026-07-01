@@ -539,8 +539,26 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div data-testid="sheet-editor" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
-      {displaySheets.map(({ sheetIndex, placements }) => {
+    <div
+      data-testid="sheet-editor"
+      // Disable native text selection / drag-image. Grabbing a piece must not let
+      // the browser start a text selection over the SVG <text> labels — that
+      // produced a translucent "phantom" layer of all the sheet's label text
+      // dragging with the cursor while the real piece stayed put (intermittent,
+      // browser-dependent). userSelect:none + a prevented dragstart kill it.
+      onDragStart={(e) => e.preventDefault()}
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 16,
+        alignItems: 'flex-start',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        msUserSelect: 'none',
+        MozUserSelect: 'none',
+      }}
+    >
+      {displaySheets.map(({ sheetIndex, placements }, sheetPos) => {
         const W = placements.sheet_width_mm;
         const H = placements.sheet_height_mm;
         const trim = placements.trim_mm;
@@ -570,7 +588,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 fontWeight: 600,
               }}
             >
-              Лист {sheetIndex + 1} · дет. {placements.pieces.length}
+              Лист {sheetPos + 1} · дет. {placements.pieces.length}
             </div>
 
             <svg
@@ -726,6 +744,9 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       if (e.button !== 0) return;
                       setMenu(null);
                       e.stopPropagation();
+                      // Prevent the browser from starting a native text selection /
+                      // drag of the SVG label text under the pointer (phantom-text drag).
+                      e.preventDefault();
                       const svgEl = svgRefsMap.current.get(sheetIndex);
                       if (!svgEl) return;
                       const pt = clientToSVG(svgEl, e.clientX, e.clientY);

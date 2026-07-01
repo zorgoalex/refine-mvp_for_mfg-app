@@ -56,6 +56,7 @@ import {
   selectableDetailIds,
   triggerBlobDownload,
   buildFilmTextureMap,
+  pruneEmptySheets,
 } from './cutPageHelpers';
 import { can } from '../../utils/permissions';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
@@ -751,7 +752,7 @@ export const CutPage: React.FC = () => {
   }, [job, showAlternativeByGroup, loadThumb]);
 
   const downloadSheetSvg = useCallback(
-    async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
+    async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string, displayNo?: number) => {
       if (!job) return;
       try {
         const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
@@ -759,7 +760,10 @@ export const CutPage: React.FC = () => {
           ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
           : sheetPortrait;
         const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion, sheetOriginTopLeft);
-        triggerBlobDownload(blob, `cut-${job.cutJobId}-g${group.cutGroupId}-s${sheetIndex + 1}.svg`);
+        // Filename uses the displayed sheet number (dense 1..N) so it matches the
+        // "Лист N" the operator sees, not the possibly-sparse real sheetIndex.
+        const fileNo = displayNo ?? sheetIndex + 1;
+        triggerBlobDownload(blob, `cut-${job.cutJobId}-g${group.cutGroupId}-s${fileNo}.svg`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить SVG');
       }
@@ -827,14 +831,19 @@ export const CutPage: React.FC = () => {
    */
   const handleEditorChange = useCallback(
     (nextSheets: { sheetIndex: number; placements: SheetPlacements }[]) => {
-      setWorkingSheets(nextSheets);
+      // Drop sheets emptied by a cross-sheet move: empty sheets are not wanted in
+      // a group. Real sheet_index is preserved for survivors (no renumber) so the
+      // moves still validate against the auto stock on save; the editor just stops
+      // rendering the blank sheet immediately. Mirrors reconstructManualSheets.
+      const effective = pruneEmptySheets(nextSheets);
+      setWorkingSheets(effective);
       if (!job?.editorParams) {
         setViolations([]);
         return;
       }
       const gap = { kerfMm: job.editorParams.kerfMm, spacingMm: job.editorParams.spacingMm };
-      const filmTextureByItemId = buildFilmTextureMap(nextSheets, job.items);
-      const newViolations = nextSheets.flatMap((s) =>
+      const filmTextureByItemId = buildFilmTextureMap(effective, job.items);
+      const newViolations = effective.flatMap((s) =>
         validateSheetPlacements({
           sheetIndex: s.sheetIndex,
           placements: s.placements,
@@ -1641,7 +1650,11 @@ export const CutPage: React.FC = () => {
             {!isEditingGroup && (
               /* Previews flow in wrapping rows (not a single column). */
               <div style={sheetPreviewListStyle}>
-                {previewSheets.map((sheet) => {
+                {previewSheets.map((sheet, sheetPos) => {
+                  // Display number is the DENSE position (1..N): the manual layout may
+                  // omit an emptied sheet, leaving a gap in the real sheet_index. Real
+                  // sheet.sheetIndex is still used for cache keys, fetch and labels.
+                  const sheetNo = sheetPos + 1;
                   // Client cache key = group:sheet:variant:orientation:origin (NO
                   // renderVersion) — must match loadSheet/loadThumb. resetSheetViews()
                   // busts on layout change; orientation AND origin are in the key (a job
@@ -1674,7 +1687,7 @@ export const CutPage: React.FC = () => {
                     >
                       <div className="cut-sheet-preview-header">
                         <div className="cut-sheet-preview-title app-tabular">
-                          <strong>Лист {sheet.sheetIndex + 1}</strong>
+                          <strong>Лист {sheetNo}</strong>
                           {' · '}
                           {matName ?? 'материал не задан'}
                           {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
@@ -1696,7 +1709,7 @@ export const CutPage: React.FC = () => {
                           <Button
                             className="app-hit-area-sm"
                             size="small"
-                            onClick={() => downloadSheetSvg(group, sheet.sheetIndex, displayVariant, renderVersion)}
+                            onClick={() => downloadSheetSvg(group, sheet.sheetIndex, displayVariant, renderVersion, sheetNo)}
                           >
                             SVG
                           </Button>
@@ -1711,7 +1724,7 @@ export const CutPage: React.FC = () => {
                       {sheetThumbs[key] && !sheetImages[key] && (
                         <SheetPreview
                           src={sheetThumbs[key]}
-                          alt={`Превью листа ${sheet.sheetIndex + 1}`}
+                          alt={`Превью листа ${sheetNo}`}
                           widthMm={widthMm}
                           heightMm={heightMm}
                           landscape={rotate90}
@@ -1723,7 +1736,7 @@ export const CutPage: React.FC = () => {
                       {sheetImages[key] && (
                         <SheetPreview
                           src={sheetImages[key]}
-                          alt={`Лист ${sheet.sheetIndex + 1}`}
+                          alt={`Лист ${sheetNo}`}
                           widthMm={widthMm}
                           heightMm={heightMm}
                           landscape={rotate90}

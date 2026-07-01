@@ -15,6 +15,7 @@ import {
   parseJobQueryParam,
   safeHttpHref,
   pollPdf,
+  pruneEmptySheets,
   restrictDetailIds,
   selectableDetailIds,
 } from './cutPageHelpers';
@@ -232,5 +233,27 @@ describe('buildFilmTextureMap', () => {
 
   it('returns an empty map for empty sheets', () => {
     expect(buildFilmTextureMap([], [])).toEqual(new Map());
+  });
+});
+
+describe('pruneEmptySheets', () => {
+  const s = (sheetIndex: number, pieceCount: number) => ({
+    sheetIndex,
+    placements: { pieces: Array.from({ length: pieceCount }, (_, i) => ({ id: i })) },
+  });
+
+  it('drops a sheet with no pieces, keeping real sheetIndex of survivors', () => {
+    const out = pruneEmptySheets([s(0, 3), s(1, 0), s(2, 2)]);
+    expect(out.map((x) => x.sheetIndex)).toEqual([0, 2]); // index 1 dropped, no renumber
+  });
+
+  it('keeps all sheets when none are empty', () => {
+    const input = [s(0, 1), s(1, 2)];
+    expect(pruneEmptySheets(input).map((x) => x.sheetIndex)).toEqual([0, 1]);
+  });
+
+  it('falls back to the input when every sheet is empty (defensive, should not happen)', () => {
+    const input = [s(0, 0), s(1, 0)];
+    expect(pruneEmptySheets(input).map((x) => x.sheetIndex)).toEqual([0, 1]);
   });
 });

@@ -28,6 +28,21 @@ export function buildFilmTextureMap(
   return map;
 }
 
+/**
+ * Drops sheets left empty after a cross-sheet move — empty sheets are not wanted
+ * in a cut group. Preserves the real sheetIndex of surviving sheets (NO renumber,
+ * so the moves still validate against the auto stock on save); mirrors the backend
+ * reconstructManualSheets. Never returns an empty array: if every sheet is empty
+ * (should not happen — a move always lands a piece somewhere) the input is returned
+ * unchanged as a defensive fallback.
+ */
+export function pruneEmptySheets<T extends { placements: { pieces: ReadonlyArray<unknown> } }>(
+  sheets: ReadonlyArray<T>,
+): T[] {
+  const pruned = sheets.filter((s) => s.placements.pieces.length > 0);
+  return pruned.length > 0 ? pruned : [...sheets];
+}
+
 /** Parse a `?job=<id>` deep-link param into a positive cut job id, or null. */
 export function parseJobQueryParam(search: string): number | null {
   const raw = new URLSearchParams(search).get('job');

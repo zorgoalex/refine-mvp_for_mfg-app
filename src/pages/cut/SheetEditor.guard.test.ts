@@ -35,6 +35,20 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/дет\./);
     expect(src).toMatch(/placements\.pieces\.length/);
   });
+  it('disables native text selection / drag so grabbing a piece cannot drag the label layer', () => {
+    // Phantom-text bug: without userSelect:none + a prevented dragstart, pressing on
+    // a piece let the browser start a text selection over the SVG <text> labels and
+    // drag that translucent layer with the cursor while the real piece stayed put.
+    expect(src).toMatch(/userSelect:\s*'none'/);
+    expect(src).toMatch(/onDragStart=\{\(e\)\s*=>\s*e\.preventDefault\(\)\}/);
+    // The piece pointer-down must also preventDefault to stop selection initiation.
+    expect(src).toMatch(/native text selection[\s\S]{0,120}e\.preventDefault\(\)/);
+  });
+  it('numbers editor sheets by display position, not the (possibly sparse) sheetIndex', () => {
+    // A group's manual layout may omit an emptied sheet, leaving a gap in sheetIndex.
+    // The "Лист N" header must use the dense render position so numbering stays 1..N.
+    expect(src).toMatch(/Лист \{sheetPos \+ 1\}/);
+  });
   it('keeps the original grab offset when crossing sheets (no teleport to old coords)', () => {
     // Regression: crossing to a new sheet must NOT re-anchor the piece to its old
     // usable coords (d.currentX_mm/d.currentY_mm). Re-anchoring teleported the piece

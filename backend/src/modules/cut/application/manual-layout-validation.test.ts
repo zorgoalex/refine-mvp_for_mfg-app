@@ -270,4 +270,12 @@ describe('reconstructManualSheets', () => {
     const r = reconstructManualSheets({ moves: [move('det-1', 1), move('det-2', 1), move('det-3', 0)], autoPieces, autoSheets, trim });
     expect(r.sheets.map((s) => s.sheetIndex).sort()).toEqual([0, 1]); // both stock indices kept, incl. the one with a piece moved off
   });
+  it('drops a sheet left empty after all its pieces move away (empty sheets not wanted)', () => {
+    // Every piece placed on sheet 0 → auto stock sheet 1 ends up empty and must
+    // be omitted from the result. The surviving sheet keeps its real index (0).
+    const r = reconstructManualSheets({ moves: [move('det-1', 0), move('det-2', 0), move('det-3', 0)], autoPieces, autoSheets, trim });
+    expect(r.error).toBeUndefined();
+    expect(r.sheets.map((s) => s.sheetIndex)).toEqual([0]);
+    expect(r.sheets[0].placements.pieces).toHaveLength(3);
+  });
 });
