@@ -82,7 +82,10 @@ function renderElement(
   }
   const value = element.sourceField ? values[element.sourceField] : element.staticText;
   const sizeMm = fontSizeMm(element.style.fontSize);
-  return `<text x="${x}" y="${y + sizeMm}" font-family="DejaVu Sans, Arial, sans-serif" font-size="${sizeMm}">${escapeXml(
+  const align = labelTextAlign(element.style.textAlign);
+  const textX = align === 'left' ? x : align === 'right' ? x + w : x + w / 2;
+  const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
+  return `<text x="${textX}" y="${y + sizeMm}" text-anchor="${anchor}" font-family="DejaVu Sans, Arial, sans-serif" font-size="${sizeMm}">${escapeXml(
     value == null ? '' : String(value),
   )}</text>`;
 }
@@ -122,6 +125,10 @@ function px(mm: number, dpi: number): number {
 function fontSizeMm(value: unknown): number {
   const sizePt = Number(value ?? 10);
   return Math.max(1.8, sizePt * 0.3528);
+}
+
+function labelTextAlign(value: unknown): 'left' | 'center' | 'right' {
+  return value === 'left' || value === 'right' ? value : 'center';
 }
 
 function escapeXml(value: string): string {

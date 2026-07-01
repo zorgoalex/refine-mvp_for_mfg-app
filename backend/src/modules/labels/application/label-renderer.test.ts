@@ -15,6 +15,24 @@ describe('label renderer', () => {
     expect(svg).toContain('<rect ');
   });
 
+  it('aligns text values inside their template box with center as the default', () => {
+    const base = template();
+    base.elements = [
+      { ...base.elements[0], elementKey: 'center', xMm: 10, widthMm: 30, style: {} },
+      { ...base.elements[0], elementKey: 'left', xMm: 10, widthMm: 30, style: { textAlign: 'left' }, zIndex: 1 },
+      { ...base.elements[0], elementKey: 'right', xMm: 10, widthMm: 30, style: { textAlign: 'right' }, zIndex: 2 },
+    ];
+
+    const svg = renderSvgPages(base, [row({ 'bazis.name': 'Side' })]).pages[0];
+
+    expect(svg).toContain('<text x="25"');
+    expect(svg).toContain('text-anchor="middle"');
+    expect(svg).toContain('<text x="10"');
+    expect(svg).toContain('text-anchor="start"');
+    expect(svg).toContain('<text x="40"');
+    expect(svg).toContain('text-anchor="end"');
+  });
+
   it('renders content-bearing BMP/PNG and sample-compatible BMP-backed .emf entries in a ZIP', async () => {
     const zip = await renderLabelsZip({
       generationId: 7,

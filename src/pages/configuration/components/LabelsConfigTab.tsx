@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import { AlignCenterOutlined, AlignLeftOutlined, AlignRightOutlined, CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import type Konva from 'konva';
 import { Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import { labelsApi } from '../../../api/labelsApi';
@@ -1009,6 +1009,18 @@ function LabelTemplatePreview({
     setContextMenu(null);
   };
 
+  const setElementTextAlign = (element: LabelTemplateElement, textAlign: LabelTextAlign) => {
+    if (element.kind !== 'text' || isLabelElementLocked(element)) return;
+    const style = { ...(element.style ?? {}) };
+    if (textAlign === 'center') {
+      delete style.textAlign;
+    } else {
+      style.textAlign = textAlign;
+    }
+    onChangeElement?.(element.elementKey, { style });
+    setContextMenu(null);
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!canDrag || !selectedElement) return;
     if ((event.key === 'Delete' || event.key === 'Backspace') && !isLabelElementLocked(selectedElement)) {
@@ -1264,10 +1276,10 @@ function LabelTemplatePreview({
             data-label-context-menu
             style={{
               position: 'absolute',
-              left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 170)),
-              top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 130)),
+              left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 190)),
+              top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 230)),
               zIndex: 3,
-              minWidth: 160,
+              minWidth: 180,
               padding: 4,
               background: '#fff',
               border: '1px solid #d9d9d9',
@@ -1276,6 +1288,42 @@ function LabelTemplatePreview({
             }}
             onMouseLeave={() => setContextMenu(null)}
           >
+            {contextMenu.element.kind === 'text' && (
+              <div style={{ padding: '4px 4px 6px' }}>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>
+                  Выравнивание значения
+                </Text>
+                <Space.Compact block>
+                  <Tooltip title="Выровнять значение по левой стороне поля">
+                    <Button
+                      size="small"
+                      icon={<AlignLeftOutlined />}
+                      type={getLabelTextAlign(contextMenu.element) === 'left' ? 'primary' : 'default'}
+                      disabled={isLabelElementLocked(contextMenu.element)}
+                      onClick={() => setElementTextAlign(contextMenu.element, 'left')}
+                    />
+                  </Tooltip>
+                  <Tooltip title="Выровнять значение по центру поля">
+                    <Button
+                      size="small"
+                      icon={<AlignCenterOutlined />}
+                      type={getLabelTextAlign(contextMenu.element) === 'center' ? 'primary' : 'default'}
+                      disabled={isLabelElementLocked(contextMenu.element)}
+                      onClick={() => setElementTextAlign(contextMenu.element, 'center')}
+                    />
+                  </Tooltip>
+                  <Tooltip title="Выровнять значение по правой стороне поля">
+                    <Button
+                      size="small"
+                      icon={<AlignRightOutlined />}
+                      type={getLabelTextAlign(contextMenu.element) === 'right' ? 'primary' : 'default'}
+                      disabled={isLabelElementLocked(contextMenu.element)}
+                      onClick={() => setElementTextAlign(contextMenu.element, 'right')}
+                    />
+                  </Tooltip>
+                </Space.Compact>
+              </div>
+            )}
             <Button
               type="text"
               size="small"
@@ -1564,6 +1612,7 @@ function renderKonvaPreviewElement({
   }
 
   const fontSize = Math.max(1.8, Number(element.style?.fontSize ?? 10) * 0.35);
+  const textAlign = getLabelTextAlign(element);
   const text = element.sourceField
     ? PREVIEW_FIELD_VALUES[element.sourceField] ?? fieldLabels.get(element.sourceField) ?? element.sourceField
     : element.staticText ?? '';
@@ -1578,6 +1627,7 @@ function renderKonvaPreviewElement({
         fontSize={fontSize}
         fontStyle={String(element.style?.fontWeight ?? 'normal') === 'bold' ? 'bold' : 'normal'}
         fill="black"
+        align={textAlign}
         wrap="none"
         ellipsis={false}
       />
@@ -1615,6 +1665,13 @@ function describeLabelElement(
 
 function isLabelElementLocked(element: LabelTemplateElement): boolean {
   return Boolean((element.style as Record<string, unknown> | undefined)?.locked);
+}
+
+type LabelTextAlign = 'left' | 'center' | 'right';
+
+function getLabelTextAlign(element: LabelTemplateElement): LabelTextAlign {
+  const value = (element.style as Record<string, unknown> | undefined)?.textAlign;
+  return value === 'left' || value === 'right' ? value : 'center';
 }
 
 function findTopLabelElementAtPoint(

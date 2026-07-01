@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-01",
+    title: "Редактор бирок: выравнивание значений полей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В контекстном меню текстового поля бирки можно выбрать выравнивание значения: по левому краю, по центру или по правому краю. Выбранное выравнивание применяется в превью и в экспортируемых бирках.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-06-28",
     title: "Раскрой: подписи деталей в три строки и видимый поворот",
     services: ["Cutting", "ERP"],

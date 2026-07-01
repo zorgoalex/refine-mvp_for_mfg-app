@@ -155,6 +155,17 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/data-label-context-menu/);
   });
 
+  it('supports text value alignment from the element context menu', () => {
+    expect(tabSrc).toMatch(/Выравнивание значения/);
+    expect(tabSrc).toMatch(/AlignLeftOutlined/);
+    expect(tabSrc).toMatch(/AlignCenterOutlined/);
+    expect(tabSrc).toMatch(/AlignRightOutlined/);
+    expect(tabSrc).toMatch(/setElementTextAlign/);
+    expect(tabSrc).toMatch(/getLabelTextAlign/);
+    expect(tabSrc).toMatch(/textAlign === 'center'/);
+    expect(tabSrc).toMatch(/align=\{textAlign\}/);
+  });
+
   it('strips read-only element ids before create or update payloads', () => {
     expect(tabSrc).toMatch(/toTemplateElementInput\(elements\)/);
     expect(tabSrc).toMatch(/labelTemplateElementId: _labelTemplateElementId/);
