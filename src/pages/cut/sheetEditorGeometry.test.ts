@@ -91,4 +91,49 @@ describe('sheetEditorGeometry round-trip (forward orientedOrigin ↔ inverse svg
     expect(r.x_mm).toBeCloseTo(300, 6);
     expect(r.y_mm).toBeCloseTo(100, 6);
   });
+
+  // Cursor-tracking across a cross-sheet drag with a NON-ZERO grab offset.
+  // handleMove keeps the ORIGINAL svgOffset when the pointer crosses onto a new
+  // sheet, so the piece must stay under the cursor at the same grab point on the
+  // target sheet — it must NOT teleport to its old (source) usable coords.
+  describe('cross-sheet cursor tracking (constant grab offset)', () => {
+    const target = sheet();
+    const pieceH = 300;
+
+    for (const [name, landscape, otl] of [
+      ['portrait', false, false],
+      ['landscape 90° CW', true, false],
+      ['landscape transpose', true, true],
+    ] as const) {
+      it(`${name}: dropped piece sits under the cursor, not at source coords`, () => {
+        // Operator grabbed a piece somewhere off its own corner → non-zero offset.
+        const svgOffsetX = 40;
+        const svgOffsetY = 25;
+        // Pointer released at an arbitrary point on the TARGET sheet's SVG.
+        const pointerSvgX = 1200;
+        const pointerSvgY = 800;
+
+        const coords = svgToUsable(
+          pointerSvgX,
+          pointerSvgY,
+          svgOffsetX,
+          svgOffsetY,
+          pieceH,
+          target,
+          landscape,
+          otl,
+        );
+        // The piece placed at those coords must render with its oriented top-left
+        // exactly at (pointer − offset): the cursor keeps the same grab point.
+        const origin = orientedOrigin(
+          piece(coords.x_mm, coords.y_mm, 600, pieceH),
+          target,
+          landscape,
+          otl,
+        );
+        expect(origin.x).toBeCloseTo(pointerSvgX - svgOffsetX, 6);
+        expect(origin.y).toBeCloseTo(pointerSvgY - svgOffsetY, 6);
+      });
+    }
+  });
 });

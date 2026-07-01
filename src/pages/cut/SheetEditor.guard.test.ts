@@ -35,4 +35,14 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/дет\./);
     expect(src).toMatch(/placements\.pieces\.length/);
   });
+  it('keeps the original grab offset when crossing sheets (no teleport to old coords)', () => {
+    // Regression: crossing to a new sheet must NOT re-anchor the piece to its old
+    // usable coords (d.currentX_mm/d.currentY_mm). Re-anchoring teleported the piece
+    // to its source position (typically the sheet's top-left) instead of following
+    // the cursor, so it dropped in the corner. The svgOffset is in viewBox mm and is
+    // invariant across a group's sheets (shared dimensions, trim and orientation) —
+    // keep it stable.
+    expect(src).not.toMatch(/x_mm:\s*d\.currentX_mm/);
+    expect(src).not.toMatch(/y_mm:\s*d\.currentY_mm/);
+  });
 });

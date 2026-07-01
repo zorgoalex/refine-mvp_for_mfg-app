@@ -299,18 +299,14 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
       // SVG coordinates in the target sheet's viewBox (mm)
       const svgPt = clientToSVG(targetSvgEl, e.clientX, e.clientY);
 
-      // Recompute offset when crossing to a new target sheet
-      let { svgOffsetX, svgOffsetY } = d;
-      if (targetSheetIndex !== d.targetSheetIndex) {
-        const currentOrigin = orientedOrigin(
-          { ...piece, x_mm: d.currentX_mm, y_mm: d.currentY_mm },
-          targetSheet.placements,
-          ls,
-          otl,
-        );
-        svgOffsetX = svgPt.x - currentOrigin.x;
-        svgOffsetY = svgPt.y - currentOrigin.y;
-      }
+      // Keep the ORIGINAL grab offset across a sheet crossing. A cut group's
+      // sheets share dimensions, trim and orientation, so this offset (viewBox mm)
+      // is invariant across them and the piece stays under the cursor at the same
+      // grab point on the new sheet
+      // (and drops exactly where the pointer is released). Re-anchoring it to the
+      // old usable coords here teleported the piece to its source position —
+      // typically the sheet's top-left corner.
+      const { svgOffsetX, svgOffsetY } = d;
 
       // Convert pointer to usable-area coords on the target sheet
       const raw = svgToUsable(
@@ -718,7 +714,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   <g
                     key={pKey(piece.item_id, piece.instance)}
                     data-testid={`piece-${sheetIndex}-${piece.item_id}-${piece.instance}`}
-                    opacity={isDraggingThis ? 0.45 : 1}
+                    opacity={isDraggingThis ? 0.75 : 1}
                     style={{ cursor: drag ? 'grabbing' : 'grab' }}
                     onContextMenu={(e) => {
                       e.preventDefault();
