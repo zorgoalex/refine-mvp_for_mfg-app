@@ -26,6 +26,29 @@ describe('buildPieceLabelLines', () => {
     expect(lines[2]).toBe('300*200');
   });
 
+  it('appends a 4th material line when materialName is a non-blank string', () => {
+    const lines = buildPieceLabelLines({
+      orderName: 'Кухня-42',
+      orderId: 42,
+      detailNumber: 3,
+      instance: 1,
+      qty: 2,
+      widthMm: 300,
+      heightMm: 200,
+      materialName: 'ЛДСП Белый',
+    });
+    expect(lines).toHaveLength(4);
+    expect(lines[2]).toBe('300*200');
+    expect(lines[3]).toBe('ЛДСП Белый');
+  });
+
+  it('omits the material line when materialName is null/undefined/blank', () => {
+    const base = { orderName: 'X', orderId: 1, detailNumber: 1, instance: 1, qty: 1, widthMm: 10, heightMm: 10 };
+    expect(buildPieceLabelLines(base)).toHaveLength(3);
+    expect(buildPieceLabelLines({ ...base, materialName: null })).toHaveLength(3);
+    expect(buildPieceLabelLines({ ...base, materialName: '   ' })).toHaveLength(3);
+  });
+
   it('falls back to "Заказ N" when orderName is null', () => {
     const lines = buildPieceLabelLines({
       orderName: null,

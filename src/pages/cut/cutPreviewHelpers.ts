@@ -137,6 +137,17 @@ export function buildSheetPieceOverlays(
   const sheetW = placements.sheet_width_mm;
   const sheetH = placements.sheet_height_mm;
 
+  // A 4th "material" label line is added ONLY when this sheet mixes materials
+  // (splitByMaterial off). On a single-material sheet the material is redundant
+  // with the group/sheet header, so it is omitted.
+  const distinctMaterials = new Set<string>();
+  for (const piece of placements.pieces) {
+    const detailId = parseCutPieceDetailId(piece.item_id);
+    const mat = (detailId === null ? undefined : itemByDetail.get(detailId))?.detail?.materialName?.trim();
+    if (mat) distinctMaterials.add(mat);
+  }
+  const sheetMixesMaterials = distinctMaterials.size > 1;
+
   return placements.pieces
     .map((piece) => {
       const detailId = parseCutPieceDetailId(piece.item_id);
@@ -174,6 +185,8 @@ export function buildSheetPieceOverlays(
           qty: item.qty ?? null,
           widthMm: piece.width_mm,
           heightMm: piece.height_mm,
+          // 4th line only on mixed-material sheets.
+          materialName: sheetMixesMaterials ? item.detail?.materialName ?? null : null,
         }),
       };
     })

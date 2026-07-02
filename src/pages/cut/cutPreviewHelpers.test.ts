@@ -168,6 +168,32 @@ describe('cutPreviewHelpers', () => {
       });
     });
 
+    it('single-material sheet: no 4th material line (3 label lines)', () => {
+      const overlay = buildSheetPieceOverlays(placements, [item], false)[0];
+      expect(overlay.labelLines).toHaveLength(3);
+    });
+
+    it('mixed-material sheet: appends the material as a 4th label line per piece', () => {
+      const mixedPlacements: SheetPlacements = {
+        ...placements,
+        pieces: [
+          ...placements.pieces,
+          { item_id: 'det-43', instance: 1, x_mm: 700, y_mm: 0, width_mm: 300, height_mm: 300, rotated: false },
+        ],
+      };
+      const item2: CutJobItemDto = {
+        ...item,
+        cutJobItemId: 2,
+        orderDetailId: 43,
+        detail: { ...item.detail!, materialName: 'ЛДСП Белый', sheetMaterialTypeId: 7 },
+      };
+      const overlays = buildSheetPieceOverlays(mixedPlacements, [item, item2], false);
+      const byKey = Object.fromEntries(overlays.map((o) => [o.key, o]));
+      expect(byKey['det-42:1'].labelLines).toHaveLength(4);
+      expect(byKey['det-42:1'].labelLines[3]).toBe('МДФ 16');
+      expect(byKey['det-43:1'].labelLines[3]).toBe('ЛДСП Белый');
+    });
+
     it('transposes overlay percentages for landscape preview (legacy 90° CW, origin top-right)', () => {
       const overlay = buildSheetPieceOverlays(placements, [item], true)[0];
       expect(overlay.leftPct).toBe(((2070 - (15 + 400)) / 2070) * 100);

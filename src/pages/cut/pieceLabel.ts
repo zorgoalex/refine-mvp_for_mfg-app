@@ -15,6 +15,12 @@ export interface PieceLabelInput {
   qty: number | null;
   widthMm: number;
   heightMm: number;
+  /**
+   * Sheet-material name for the 4th label line. Pass a non-blank name ONLY when the
+   * sheet mixes materials (splitByMaterial off) so the operator can tell which
+   * detail is which material; omit/null on single-material sheets (redundant).
+   */
+  materialName?: string | null;
 }
 
 /** Proportional average character width relative to font-size. */
@@ -51,8 +57,10 @@ export function splitDimsLine(line: string): { w: string; h: string } | null {
  * Line 1: order name (large/bold) — `orders.order_name`, or `Заказ {orderId}` fallback.
  * Line 2: `# {detailNumber} · {instance}/{qty}` (base font). `# —` when detailNumber null.
  * Line 3: `{widthMm}*{heightMm}` — asterisk separator; integer dims have no decimal, floats 1 dp.
+ * Line 4 (optional): sheet-material name — appended ONLY when `materialName` is a
+ *   non-blank string (mixed-material sheet). Omitted otherwise.
  *
- * Always returns exactly 3 non-empty strings.
+ * Returns 3 non-empty strings, or 4 when a material line is appended.
  */
 export function buildPieceLabelLines(p: PieceLabelInput): string[] {
   // Line 1: order name or fallback
@@ -69,7 +77,9 @@ export function buildPieceLabelLines(p: PieceLabelInput): string[] {
   // Line 3: rendered dimensions with asterisk separator (not ×)
   const line3 = `${fmtDim(p.widthMm)}*${fmtDim(p.heightMm)}`;
 
-  return [line1, line2, line3];
+  // Line 4 (optional): material — only for mixed-material sheets.
+  const material = p.materialName?.trim();
+  return material ? [line1, line2, line3, material] : [line1, line2, line3];
 }
 
 /**
