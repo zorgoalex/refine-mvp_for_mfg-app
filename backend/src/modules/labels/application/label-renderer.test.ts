@@ -57,6 +57,11 @@ describe('label renderer', () => {
     expect(svg).toContain('data-qr-payload="ORDER-42|60044"');
     expect(svg).toContain('<rect x="30" y="5" width="18" height="18" fill="white"/>');
     expect(svg).toMatch(/<rect x="[^"]+" y="[^"]+" width="[^"]+" height="[^"]+" fill="black"\/>/);
+    const firstBlackModule = svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="[^"]+" fill="black"\/>/);
+    expect(firstBlackModule).toBeTruthy();
+    const firstBlackX = Number(firstBlackModule?.[1]);
+    const moduleSide = Number(firstBlackModule?.[3]);
+    expect(firstBlackX).toBeGreaterThanOrEqual(30 + moduleSide * 4);
   });
 
   it('renders distinct qr payloads for distinct rows', () => {

@@ -112,7 +112,7 @@ function renderQrElement(
   const errorCorrectionLevel = readQrErrorCorrection(element.style);
   const code = QRCode.create(payload, { errorCorrectionLevel });
   const moduleCount = code.modules.size;
-  const quietZoneModules = Math.max(1, Math.ceil(moduleCount * 0.1));
+  const quietZoneModules = 4;
   const totalModules = moduleCount + quietZoneModules * 2;
   const moduleSide = side / totalModules;
   const originX = x + (width - side) / 2;
