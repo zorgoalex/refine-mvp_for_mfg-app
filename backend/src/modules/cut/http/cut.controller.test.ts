@@ -38,6 +38,7 @@ function jobDto(): CutJobDto {
     sheetMaterialTypeId: null,
     combineFilms: false,
     splitByMaterial: true,
+    materialNames: [],
     totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },
     items: [],
     groups: [],

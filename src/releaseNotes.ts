@@ -30,6 +30,26 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-02",
+    title: "Раскрой: материалы деталей в списке заданий",
+    services: ["Cutting", "ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В списке заданий раскроя появилась колонка «Материал деталей» — она показывает уникальные материалы всех деталей, входящих в задание.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-02",
+    title: "Карточка заказа: название раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "При добавлении выбранных деталей заказа в раскрой автоматическое название нового раскроя теперь использует название заказа, а не его внутренний ID.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-01",
     title: "Конфигурация: возврат к последней вкладке",
     services: ["ERP"],

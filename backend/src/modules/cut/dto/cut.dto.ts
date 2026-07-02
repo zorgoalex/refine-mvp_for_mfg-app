@@ -147,6 +147,8 @@ export interface CutJobDto {
    *  the sheet override only fills no-sheet details). false = all details in one
    *  group. */
   splitByMaterial: boolean;
+  /** Unique detail material names in active job items. Uses per-detail sheet/material names, not job sheet override. */
+  materialNames: string[];
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];

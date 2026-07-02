@@ -80,7 +80,7 @@ import type {
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
-import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, type TotalsRow } from './cut-totals';
+import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, MATERIAL_NAMES_BY_JOB_SQL, type TotalsRow } from './cut-totals';
 import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, createOrderFillResolver } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import { buildSheetsPdf } from '../render/sheet-pdf';
@@ -1273,10 +1273,11 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const ids = result.rows.map((row) => toNum(row.cut_job_id));
     const totalsById = await computeTotals(this.database, ids);
+    const materialNamesById = await computeMaterialNames(this.database, ids);
     const jobs: CutJobDto[] = [];
     for (const id of ids) {
       // List only renders item/group counts -> skip the per-item detail joins.
-      jobs.push(await loadJob(this.database, id, false, totalsById.get(id)));
+      jobs.push(await loadJob(this.database, id, false, totalsById.get(id), materialNamesById.get(id) ?? []));
     }
     return jobs;
   }
@@ -2908,11 +2909,26 @@ async function computeTotals(client: DatabaseClient, cutJobIds: number[]): Promi
   return out;
 }
 
+async function computeMaterialNames(client: DatabaseClient, cutJobIds: number[]): Promise<Map<number, string[]>> {
+  const out = new Map<number, string[]>();
+  for (const id of cutJobIds) out.set(id, []);
+  if (cutJobIds.length === 0) return out;
+  const rows = await client.query<{ cut_job_id: string | number; material_names: string[] | null }>(MATERIAL_NAMES_BY_JOB_SQL, [cutJobIds]);
+  for (const row of rows.rows) {
+    const names = Array.isArray(row.material_names)
+      ? row.material_names.filter((name): name is string => typeof name === 'string' && name.trim() !== '')
+      : [];
+    out.set(toNum(row.cut_job_id), names);
+  }
+  return out;
+}
+
 async function loadJob(
   client: DatabaseClient,
   cutJobId: number,
   includeItemDetails = true,
   totals?: CutJobTotals,
+  materialNames?: string[],
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
     `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1`,
@@ -2941,6 +2957,19 @@ async function loadJob(
         [groupIds],
       )
     : { rows: [] as SheetRow[] };
+  const itemDtos = itemsResult.rows.map((row) => ({
+    cutJobItemId: toNum(row.cut_job_item_id),
+    orderDetailId: toNum(row.order_detail_id),
+    orderId: toNum(row.order_id),
+    qty: toNum(row.qty),
+    cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
+    detail: includeItemDetails ? mapItemDetail(row) : null,
+    // orderName is only present on the enriched (single-job) path; undefined on the light/list path.
+    ...(includeItemDetails ? { orderName: row.order_name ?? null } : {}),
+  }));
+  const resolvedMaterialNames = materialNames ?? uniqueSorted(
+    itemDtos.map((item) => item.detail?.materialName ?? null),
+  );
 
   const groups: CutGroupDto[] = groupsResult.rows.map((row) => {
     const cutGroupId = toNum(row.cut_group_id);
@@ -2974,19 +3003,17 @@ async function loadJob(
     sheetMaterialTypeId: jobRow.sheet_material_type_id === null || jobRow.sheet_material_type_id === undefined ? null : toNum(jobRow.sheet_material_type_id),
     combineFilms: jobRow.combine_films === true,
     splitByMaterial: jobRow.split_by_material !== false,
+    materialNames: resolvedMaterialNames,
     totals: resolvedTotals,
-    items: itemsResult.rows.map((row) => ({
-      cutJobItemId: toNum(row.cut_job_item_id),
-      orderDetailId: toNum(row.order_detail_id),
-      orderId: toNum(row.order_id),
-      qty: toNum(row.qty),
-      cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
-      detail: includeItemDetails ? mapItemDetail(row) : null,
-      // orderName is only present on the enriched (single-job) path; undefined on the light/list path.
-      ...(includeItemDetails ? { orderName: row.order_name ?? null } : {}),
-    })),
+    items: itemDtos,
     groups,
   };
+}
+
+function uniqueSorted(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))].sort((a, b) =>
+    a.localeCompare(b, 'ru'),
+  );
 }
 
 async function setSessionUser(tx: TransactionClient, userId: string | number): Promise<void> {

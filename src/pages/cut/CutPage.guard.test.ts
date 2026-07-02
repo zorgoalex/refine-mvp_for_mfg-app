@@ -248,6 +248,8 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain("title: 'Площадь, итого'");
     expect(source).toContain("title: 'Кол-во листов раскроя'");
     expect(source).toContain("title: 'Профиль'");
+    expect(source).toContain("title: 'Материал деталей'");
+    expect(source).toContain('formatJobMaterialNames(row.materialNames)');
     expect(source).not.toContain("title: 'Детали'");
   });
   it('wires the profile selector to setProfile', () => {

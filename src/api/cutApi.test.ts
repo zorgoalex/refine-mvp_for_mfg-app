@@ -187,6 +187,7 @@ function jobDto(overrides: Partial<CutJobDto> = {}): CutJobDto {
     sheetMaterialTypeId: null,
     combineFilms: false,
     splitByMaterial: true,
+    materialNames: [],
     failureCode: null,
     failureReason: null,
     totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },

@@ -174,6 +174,8 @@ export interface CutJobDto {
   /** true (default) = split by material (different materials → separate groups);
    *  false = all details in one group. */
   splitByMaterial: boolean;
+  /** Unique per-detail material names in this job (not the per-job sheet override). */
+  materialNames: string[];
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];

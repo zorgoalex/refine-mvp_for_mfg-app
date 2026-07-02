@@ -64,3 +64,21 @@ export const SHEETS_BY_JOB_SQL = `
   WHERE g.cut_job_id = ANY($1::bigint[])
   GROUP BY g.cut_job_id
 `;
+
+/** Unique source detail material names for each job. This intentionally reads
+ * the detail's own resolved material name and does not collapse to the job-level
+ * sheet override, because the /cut list column answers "what details are inside
+ * this job", not "what override sheet will be used for cutting". */
+export const MATERIAL_NAMES_BY_JOB_SQL = `
+  SELECT i.cut_job_id,
+         ARRAY_AGG(DISTINCT COALESCE(smt.name, m.material_name) ORDER BY COALESCE(smt.name, m.material_name)) AS material_names
+  FROM cut_job_item i
+  LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND od.delete_flag = false
+  LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+  LEFT JOIN materials m ON m.material_id = od.material_id
+  WHERE i.cut_job_id = ANY($1::bigint[])
+    AND i.is_active = true
+    AND COALESCE(smt.name, m.material_name) IS NOT NULL
+    AND btrim(COALESCE(smt.name, m.material_name)) <> ''
+  GROUP BY i.cut_job_id
+`;
