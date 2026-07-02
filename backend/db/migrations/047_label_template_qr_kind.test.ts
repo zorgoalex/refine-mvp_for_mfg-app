@@ -7,6 +7,11 @@ const liveSql = sql
   ?.trim() ?? '';
 
 describe('047 label template qr kind migration', () => {
+  it('wraps the constraint replacement in an explicit transaction', () => {
+    expect(liveSql).toMatch(/BEGIN;[\s\S]*ALTER TABLE label_template_elements\s+DROP CONSTRAINT IF EXISTS chk_label_template_elements_kind;/i);
+    expect(liveSql).toMatch(/ALTER TABLE label_template_elements\s+ADD CONSTRAINT chk_label_template_elements_kind\s+CHECK \(kind IN \('text', 'line', 'rect', 'qr'\)\);[\s\S]*COMMIT;$/i);
+  });
+
   it('drops and re-adds the element kind constraint with qr included', () => {
     expect(liveSql).toMatch(/ALTER TABLE label_template_elements\s+DROP CONSTRAINT IF EXISTS chk_label_template_elements_kind;/i);
     expect(liveSql).toMatch(/ALTER TABLE label_template_elements\s+ADD CONSTRAINT chk_label_template_elements_kind\s+CHECK \(kind IN \('text', 'line', 'rect', 'qr'\)\);/i);

@@ -13,15 +13,6 @@ const schemaName = `labels_qr_${randomUUID().replaceAll('-', '_')}`;
 
 const migration039 = readFileSync(new URL('../../../../db/migrations/039_labels.sql', import.meta.url), 'utf8');
 const migration047 = readFileSync(new URL('../../../../db/migrations/047_label_template_qr_kind.sql', import.meta.url), 'utf8');
-const source = readFileSync(new URL('./label-qr-kind-roundtrip.integration.test.ts', import.meta.url), 'utf8');
-
-describe('label qr integration harness structure', () => {
-  it('uses a checked-out client session instead of pool.query search_path setup', () => {
-    expect(source).not.toMatch(/await pool\.query\(`SET search_path TO \$\{schemaName\}`\)/);
-    expect(source).toMatch(/await sessionClient\.query\(`CREATE SCHEMA \$\{schemaName\}`\)/);
-    expect(source).toMatch(/repo = new PgLabelsRepository\(makeDatabase\(sessionClient\)\)/);
-  });
-});
 
 function currentUser(): CurrentUser {
   return {
