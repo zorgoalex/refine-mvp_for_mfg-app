@@ -43,7 +43,7 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
     setName(
       buildDefaultCutName(
         detailMode
-          ? `Раскрой заказ ${orderLabel} (детали)`
+          ? `Раскрой заказ ${orderLabel}`
           : `Раскрой ${orderLabel}`,
         nameSuffix,
       ),

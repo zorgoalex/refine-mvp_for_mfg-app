@@ -49,4 +49,8 @@ describe('AddToCutModal detail-level mode', () => {
     expect(modalSrc).toContain('formatOrderLabelForCutName');
     expect(modalSrc).not.toContain('Раскрой заказ ${orderIds.join');
   });
+
+  it('does not append the technical "(детали)" suffix to generated cut names', () => {
+    expect(modalSrc).not.toContain('(детали)');
+  });
 });
