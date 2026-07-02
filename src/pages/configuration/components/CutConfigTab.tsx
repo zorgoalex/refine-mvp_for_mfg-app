@@ -38,6 +38,7 @@ import {
   type FreecutQuality,
   type FreecutRetryStrategy,
   type ParamProfileForm,
+  buildProfileCopyName,
   extractEligibilityCodes,
   findSetting,
   formToParams,
@@ -305,12 +306,16 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
   const [isDefault, setIsDefault] = useState(false);
   const [params, setParams] = useState<ParamProfileForm>(DEFAULT_PARAM_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
+  const [copyName, setCopyName] = useState('');
+  const [savingCopy, setSavingCopy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setName(editing?.name ?? '');
     setIsDefault(editing?.isDefault ?? false);
     setParams(editing ? paramsToForm(editing.params) : DEFAULT_PARAM_FORM);
+    setSaveAsOpen(false);
   }, [open, editing]);
 
   const setField = useCallback(<K extends keyof ParamProfileForm>(key: K, value: ParamProfileForm[K]) => {
@@ -339,6 +344,32 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
     }
   }, [editing, name, isDefault, params, onSaved]);
 
+  const openSaveAs = useCallback(() => {
+    setCopyName(buildProfileCopyName(name));
+    setSaveAsOpen(true);
+  }, [name]);
+
+  const submitCopy = useCallback(async () => {
+    const trimmed = copyName.trim();
+    if (!trimmed) {
+      message.error('Укажите название профиля');
+      return;
+    }
+    setSavingCopy(true);
+    try {
+      // Reuse the audited create command with the CURRENT form params under a new
+      // name; the copy never becomes default (avoids the single-default constraint).
+      await cutConfigApi.createParamProfile({ name: trimmed, params: formToParams(params), isDefault: false });
+      message.success('Профиль скопирован');
+      setSaveAsOpen(false);
+      await onSaved();
+    } catch (error) {
+      message.error(error instanceof ApiError ? error.message : 'Не удалось сохранить профиль');
+    } finally {
+      setSavingCopy(false);
+    }
+  }, [copyName, params, onSaved]);
+
   const numberField = (key: NumKey) => {
     const m = NUM_META[key];
     return (
@@ -356,15 +387,25 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
   };
 
   return (
+    <>
     <Modal
       title={editing ? 'Изменить профиль параметров' : 'Новый профиль параметров'}
       open={open}
-      onOk={submit}
-      confirmLoading={saving}
       onCancel={onClose}
-      okText="Сохранить"
-      cancelText="Отмена"
       width={680}
+      footer={[
+        editing ? (
+          <Button key="saveas" disabled={saving} onClick={openSaveAs}>
+            Сохранить как…
+          </Button>
+        ) : null,
+        <Button key="cancel" onClick={onClose}>
+          Отмена
+        </Button>,
+        <Button key="ok" type="primary" loading={saving} onClick={submit}>
+          Сохранить
+        </Button>,
+      ]}
     >
       <Form layout="vertical">
         <Form.Item label="Название" required extra="Понятное имя профиля для выбора при раскрое">
@@ -494,6 +535,34 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
         </Row>
       </Form>
     </Modal>
+
+    <Modal
+      title="Сохранить как новый профиль"
+      open={saveAsOpen}
+      onOk={submitCopy}
+      confirmLoading={savingCopy}
+      onCancel={() => setSaveAsOpen(false)}
+      okText="Создать"
+      cancelText="Отмена"
+      width={480}
+    >
+      <Form layout="vertical">
+        <Form.Item
+          label="Название нового профиля"
+          required
+          extra="Копия создаётся с текущими параметрами формы. По умолчанию — нет."
+        >
+          <Input
+            autoFocus
+            value={copyName}
+            onChange={(e) => setCopyName(e.target.value)}
+            maxLength={200}
+            onPressEnter={submitCopy}
+          />
+        </Form.Item>
+      </Form>
+    </Modal>
+    </>
   );
 };
 

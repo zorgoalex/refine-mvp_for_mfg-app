@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PARAM_FORM,
+  buildProfileCopyName,
   extractEligibilityCodes,
   findSetting,
   formToParams,
@@ -146,6 +147,19 @@ describe('cutConfigHelpers', () => {
     const s = summarizeParams(params);
     expect(s).toContain('Вакуумный стол');
     expect(s).toContain('авто'); // optimal -> авто
+  });
+
+  describe('buildProfileCopyName', () => {
+    it('appends «(копия)» to the source name', () => {
+      expect(buildProfileCopyName('МДФ быстрый')).toBe('МДФ быстрый (копия)');
+    });
+    it('trims surrounding whitespace before appending', () => {
+      expect(buildProfileCopyName('  Профиль  ')).toBe('Профиль (копия)');
+    });
+    it('falls back to a generic name when the source is blank', () => {
+      expect(buildProfileCopyName('')).toBe('Новый профиль (копия)');
+      expect(buildProfileCopyName('   ')).toBe('Новый профиль (копия)');
+    });
   });
 
   describe('resolveRuntimeDefaultProfile', () => {

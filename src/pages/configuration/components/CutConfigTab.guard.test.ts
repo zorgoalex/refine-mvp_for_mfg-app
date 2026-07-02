@@ -74,6 +74,16 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/<Segmented/);
   });
 
+  it('ProfileModal offers «Сохранить как…» to clone a profile via the audited create command', () => {
+    // Button text present (edit-mode clone entry point).
+    expect(tabSrc).toMatch(/Сохранить как/);
+    // A save-as prompt for the new copy name, seeded from buildProfileCopyName.
+    expect(tabSrc).toMatch(/buildProfileCopyName\(/);
+    expect(tabSrc).toMatch(/Сохранить как новый профиль/);
+    // The copy is created (not updated) with isDefault:false via the existing backend command.
+    expect(tabSrc).toMatch(/createParamProfile\(\{[\s\S]*isDefault:\s*false/);
+  });
+
   it('vacuum_table option exists in the ProfileModal layout_mode control', () => {
     expect(tabSrc).toMatch(/vacuum_table/);
     expect(tabSrc).toMatch(/Вакуумный стол/);

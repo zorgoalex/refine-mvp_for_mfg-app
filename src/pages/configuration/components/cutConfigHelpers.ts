@@ -149,6 +149,12 @@ export function resolveRuntimeDefaultProfile<
   return profiles.find((p) => p.isDefault && p.isActive) ?? null;
 }
 
+/** Suggested name for a "save as" copy of a param profile. */
+export function buildProfileCopyName(sourceName: string): string {
+  const base = sourceName.trim();
+  return base ? `${base} (копия)` : 'Новый профиль (копия)';
+}
+
 /** Day-0 onboarding hint shown when no sheet material types are defined yet. */
 export function sheetSpecOnboardingHint(count: number): string | null {
   if (count > 0) return null;
