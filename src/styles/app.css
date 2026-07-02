@@ -629,3 +629,9 @@ html {
 .details-grouped .ant-table-tbody > tr.detail-group-tint-6:hover > td { background-color: var(--app-group-tint-6) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-tint-7:hover > td { background-color: var(--app-group-tint-7) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-separator:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
+
+.cut-jobs-table .ant-table-thead > tr > th {
+  padding: 1px 4px !important;
+  font-size: 70% !important;
+  line-height: 1 !important;
+}

@@ -1270,6 +1270,7 @@ export const CutPage: React.FC = () => {
         }
       >
         <Table<CutJobDto>
+          className="cut-jobs-table"
           size="small"
           rowKey="cutJobId"
           columns={jobColumns}

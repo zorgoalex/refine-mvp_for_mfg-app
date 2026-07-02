@@ -255,6 +255,7 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain('CUT_JOBS_TABLE_SCROLL_Y');
     expect(source).toContain('scroll={{ y: CUT_JOBS_TABLE_SCROLL_Y }}');
     expect(source).toContain('pagination={false}');
+    expect(source).toContain('className="cut-jobs-table"');
     expect(source).not.toContain("title: 'Детали'");
   });
   it('wires the profile selector to setProfile', () => {
