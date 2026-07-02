@@ -1731,11 +1731,22 @@ export class PgCutRepository implements CutRepositoryPort {
       detail_number: string | number | null;
       width: string | number | null;
       height: string | number | null;
+      sheet_material_type_id: string | number | null;
+      material_id: string | number | null;
+      material_name: string | null;
     }>(
+      // material_name = sheet-material name (COALESCE sheet_material_type, legacy
+      // material) for the 4th label line; the id columns give a stable material
+      // IDENTITY for mixed-material detection (two catalog rows can share a name).
+      // Matches the FE preview overlay and the ENRICHED_ITEMS_QUERY resolution.
       `SELECT cji.order_detail_id, cji.order_id,
-              od.detail_number, od.width, od.height
+              od.detail_number, od.width, od.height,
+              od.sheet_material_type_id, od.material_id,
+              COALESCE(smt.name, m.material_name) AS material_name
        FROM cut_job_item cji
        LEFT JOIN order_details od ON od.detail_id = cji.order_detail_id AND od.delete_flag = false
+       LEFT JOIN materials m ON m.material_id = od.material_id
+       LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
        WHERE cji.cut_group_id = $1
        ORDER BY cji.cut_job_item_id`,
       [cutGroupId],
@@ -1745,18 +1756,58 @@ export class PgCutRepository implements CutRepositoryPort {
       detailNumber: number | null;
       widthMm: number | null;
       heightMm: number | null;
+      materialName: string | null;
+      /** Stable material identity for mixed-material detection (id-based, not name). */
+      materialKey: string | null;
     }>();
     for (const row of items.rows) {
+      // Prefer the sheet-material-type id (Variant-B primary ref); fall back to the
+      // legacy material id; else the trimmed name; else null (unknown → ignored).
+      const smtId = numOrNull(row.sheet_material_type_id);
+      const matId = numOrNull(row.material_id);
+      const nm = row.material_name?.trim();
+      const materialKey = smtId !== null ? `s${smtId}` : matId !== null ? `m${matId}` : nm ? `n${nm}` : null;
       detailById.set(toNum(row.order_detail_id), {
         orderId: toNum(row.order_id),
         detailNumber: numOrNull(row.detail_number),
         widthMm: numOrNull(row.width),
         heightMm: numOrNull(row.height),
+        materialName: row.material_name ?? null,
+        materialKey,
       });
     }
     const fillByOrder = createOrderFillResolver(items.rows.map((row) => toNum(row.order_id)));
 
-    const labelFor = (piece: FreecutPlacement): string[] => {
+    // Resolve a piece's sheet-material name (live join; the frozen snapshot has no
+    // material). Blank/unknown → null so no material line is added. Material is read
+    // live like the FE preview overlay (which also pairs frozen placement geometry
+    // with live names), so preview and print stay consistent; a material change
+    // marks the job stale and recalc-gates the PDF before any drift can print.
+    const materialNameForPiece = (piece: FreecutPlacement): string | null => {
+      const detailId = parseFreecutItemId(piece.item_id);
+      const name = (detailId === null ? null : detailById.get(detailId)?.materialName ?? null);
+      const trimmed = name?.trim();
+      return trimmed ? trimmed : null;
+    };
+
+    // Whether a sheet mixes materials (splitByMaterial off → >1 distinct material
+    // among its pieces). Keyed on the material IDENTITY (id-based), not the display
+    // name, so two catalog rows that share a name still count as mixed. The 4th
+    // material label line is added only then.
+    const sheetMixesMaterials = (placements: SheetPlacementsJson): boolean => {
+      const distinct = new Set<string>();
+      for (const piece of placements.pieces) {
+        const detailId = parseFreecutItemId(piece.item_id);
+        const key = detailId === null ? null : detailById.get(detailId)?.materialKey ?? null;
+        if (key) distinct.add(key);
+      }
+      return distinct.size > 1;
+    };
+
+    // Sheet-scoped label builder: appends the material 4th line only when the sheet
+    // mixes materials. `includeMaterial` is fixed per sheet by the caller below.
+    const labelForPiece = (piece: FreecutPlacement, includeMaterial: boolean): string[] => {
+      const materialName = includeMaterial ? materialNameForPiece(piece) : null;
       // Rule 7: use the frozen label snapshot when present (calc persists it).
       // Fall back to the live order_details join ONLY for legacy pre-Task-4 rows
       // whose stored placements have no label field.
@@ -1771,6 +1822,7 @@ export class PgCutRepository implements CutRepositoryPort {
           itemId: piece.item_id,
           instance: piece.instance,
           qty: quantities.get(piece.item_id) ?? 1,
+          materialName,
         });
       }
       // Legacy fallback: live join.
@@ -1786,6 +1838,7 @@ export class PgCutRepository implements CutRepositoryPort {
         itemId: piece.item_id,
         instance: piece.instance,
         qty: quantities.get(piece.item_id) ?? 1,
+        materialName,
       });
     };
 
@@ -1801,11 +1854,15 @@ export class PgCutRepository implements CutRepositoryPort {
     };
 
     return {
-      sheets: rawSheets.map((s) => ({
-        sheetIndex: s.sheetIndex,
-        placements: s.placements,
-        svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft, showLabels }),
-      })),
+      sheets: rawSheets.map((s) => {
+        const includeMaterial = sheetMixesMaterials(s.placements);
+        const labelFor = (piece: FreecutPlacement): string[] => labelForPiece(piece, includeMaterial);
+        return {
+          sheetIndex: s.sheetIndex,
+          placements: s.placements,
+          svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft, showLabels }),
+        };
+      }),
     };
   }
 

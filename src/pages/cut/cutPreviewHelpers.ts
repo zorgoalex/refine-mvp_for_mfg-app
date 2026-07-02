@@ -139,12 +139,24 @@ export function buildSheetPieceOverlays(
 
   // A 4th "material" label line is added ONLY when this sheet mixes materials
   // (splitByMaterial off). On a single-material sheet the material is redundant
-  // with the group/sheet header, so it is omitted.
+  // with the group/sheet header, so it is omitted. Mixing is keyed on the material
+  // IDENTITY (sheet-material-type id, else legacy material id, else name) so two
+  // catalog rows sharing a name still count as mixed — matches the backend render.
   const distinctMaterials = new Set<string>();
   for (const piece of placements.pieces) {
     const detailId = parseCutPieceDetailId(piece.item_id);
-    const mat = (detailId === null ? undefined : itemByDetail.get(detailId))?.detail?.materialName?.trim();
-    if (mat) distinctMaterials.add(mat);
+    const detail = (detailId === null ? undefined : itemByDetail.get(detailId))?.detail;
+    if (!detail) continue;
+    const nm = detail.materialName?.trim();
+    const key =
+      detail.sheetMaterialTypeId !== null && detail.sheetMaterialTypeId !== undefined
+        ? `s${detail.sheetMaterialTypeId}`
+        : detail.materialId !== null && detail.materialId !== undefined
+          ? `m${detail.materialId}`
+          : nm
+            ? `n${nm}`
+            : null;
+    if (key) distinctMaterials.add(key);
   }
   const sheetMixesMaterials = distinctMaterials.size > 1;
 

@@ -194,6 +194,26 @@ describe('cutPreviewHelpers', () => {
       expect(byKey['det-43:1'].labelLines[3]).toBe('ЛДСП Белый');
     });
 
+    it('mixed detection keys on material id: same name, different sheetMaterialTypeId still mixed', () => {
+      const mixedPlacements: SheetPlacements = {
+        ...placements,
+        pieces: [
+          ...placements.pieces,
+          { item_id: 'det-44', instance: 1, x_mm: 700, y_mm: 0, width_mm: 300, height_mm: 300, rotated: false },
+        ],
+      };
+      // Same display name as `item` ('МДФ 16') but a DIFFERENT sheet-material-type id.
+      const item2: CutJobItemDto = {
+        ...item,
+        cutJobItemId: 3,
+        orderDetailId: 44,
+        detail: { ...item.detail!, materialName: 'МДФ 16', sheetMaterialTypeId: 12 },
+      };
+      const overlays = buildSheetPieceOverlays(mixedPlacements, [item, item2], false);
+      // Both get a 4th line because the sheet physically mixes two materials.
+      expect(overlays.every((o) => o.labelLines.length === 4)).toBe(true);
+    });
+
     it('transposes overlay percentages for landscape preview (legacy 90° CW, origin top-right)', () => {
       const overlay = buildSheetPieceOverlays(placements, [item], true)[0];
       expect(overlay.leftPct).toBe(((2070 - (15 + 400)) / 2070) * 100);

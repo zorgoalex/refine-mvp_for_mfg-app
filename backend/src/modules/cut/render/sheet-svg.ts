@@ -35,12 +35,19 @@ export interface PieceLabelInput {
   itemId: string;
   instance: number;
   qty: number;
+  /**
+   * Sheet-material name for the 4th line. Pass a non-blank name ONLY when the
+   * sheet mixes materials (splitByMaterial off); omit/null otherwise. Mirrors the
+   * frontend preview overlay so print/PDF match the on-screen preview.
+   */
+  materialName?: string | null;
 }
 
 /**
  * Piece label lines shown inside every placed detail:
  * 1) order id (without the № prefix), 2) order detail position + instance
- * count, 3) size (width x height). When the
+ * count, 3) size (width x height), 4) material name — appended ONLY when
+ * `materialName` is a non-blank string (mixed-material sheet). When the
  * order can't be resolved we fall back to a single line with the raw item id so
  * the label is never empty.
  */
@@ -49,11 +56,14 @@ export function composePieceLabelLines(input: PieceLabelInput): string[] {
   if (orderId === null || detailId === null) {
     return [formatPieceLabel(itemId, instance, qty)];
   }
-  return [
+  const lines = [
     String(orderId),
     formatPositionLine(detailNumber ?? detailId, instance, qty),
     formatPieceSize(widthMm, heightMm),
   ];
+  const material = input.materialName?.trim();
+  if (material) lines.push(material);
+  return lines;
 }
 
 function formatPositionLine(position: number, instance: number, qty: number): string {

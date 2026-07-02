@@ -62,6 +62,34 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
       composePieceLabelLines({ orderId: null, detailId: null, itemId: 'weird', instance: 1, qty: 1 }),
     ).toEqual(['weird']);
   });
+
+  it('appends a 4th material line when materialName is a non-blank string', () => {
+    expect(
+      composePieceLabelLines({
+        orderId: 12,
+        detailId: 45,
+        detailNumber: 7,
+        widthMm: 600,
+        heightMm: 400,
+        itemId: 'det-45',
+        instance: 1,
+        qty: 1,
+        materialName: 'ЛДСП Белый',
+      }),
+    ).toEqual(['12', 'поз. 7', '600X400', 'ЛДСП Белый']);
+  });
+
+  it('omits the material line when materialName is null/blank', () => {
+    const base = { orderId: 12, detailId: 45, detailNumber: 7, widthMm: 600, heightMm: 400, itemId: 'det-45', instance: 1, qty: 1 };
+    expect(composePieceLabelLines({ ...base, materialName: null })).toEqual(['12', 'поз. 7', '600X400']);
+    expect(composePieceLabelLines({ ...base, materialName: '  ' })).toEqual(['12', 'поз. 7', '600X400']);
+  });
+
+  it('does not add a material line to the unknown-order fallback', () => {
+    expect(
+      composePieceLabelLines({ orderId: null, detailId: null, itemId: 'weird', instance: 1, qty: 1, materialName: 'ЛДСП' }),
+    ).toEqual(['weird']);
+  });
 });
 
 describe('buildSheetSvg multi-line labels', () => {
