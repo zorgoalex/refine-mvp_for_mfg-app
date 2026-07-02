@@ -253,6 +253,7 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain('chunkJobMaterialNames(row.materialNames)');
     expect(source).toContain('names.slice(i, i + 2)');
     expect(source).toContain('CUT_JOBS_TABLE_SCROLL_Y');
+    expect(source).toContain('const CUT_JOBS_TABLE_SCROLL_Y = 264');
     expect(source).toContain('scroll={{ y: CUT_JOBS_TABLE_SCROLL_Y }}');
     expect(source).toContain('pagination={false}');
     expect(source).toContain('className="cut-jobs-table"');

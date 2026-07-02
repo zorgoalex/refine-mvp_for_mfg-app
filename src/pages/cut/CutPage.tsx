@@ -88,7 +88,7 @@ const STATUS_TAG_COLORS: Record<string, string> = {
   archived: 'default',
 };
 
-const CUT_JOBS_TABLE_SCROLL_Y = 220;
+const CUT_JOBS_TABLE_SCROLL_Y = 264;
 
 const sheetPreviewListStyle: React.CSSProperties = {
   display: 'flex',
