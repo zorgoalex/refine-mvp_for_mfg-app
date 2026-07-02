@@ -650,7 +650,7 @@ html {
   font-size: 70% !important;
   line-height: 1 !important;
   text-align: center;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .cut-jobs-table .cut-job-materials-cell {
@@ -665,18 +665,21 @@ html {
 }
 
 .cut-jobs-table .cut-jobs-actions {
+  align-items: center;
+  justify-content: center;
+  font-size: inherit;
   line-height: 1;
 }
 
 .cut-jobs-table .cut-jobs-actions .ant-btn-link {
-  height: auto;
-  min-height: 0;
+  height: auto !important;
+  min-height: 0 !important;
   padding: 0 !important;
-  font-size: inherit;
+  font-size: inherit !important;
   line-height: 1 !important;
 }
 
 .cut-jobs-table .cut-jobs-actions .ant-btn-link * {
-  font-size: inherit;
-  line-height: inherit;
+  font-size: inherit !important;
+  line-height: inherit !important;
 }

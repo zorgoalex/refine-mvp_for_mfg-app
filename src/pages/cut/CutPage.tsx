@@ -962,7 +962,7 @@ export const CutPage: React.FC = () => {
   const jobColumns: ColumnsType<CutJobDto> = useMemo(
     () => [
       { title: '#', dataIndex: 'cutJobId', key: 'id', width: 70 },
-      { title: 'Название', dataIndex: 'name', key: 'name' },
+      { title: 'Название', dataIndex: 'name', key: 'name', width: 360 },
       {
         title: 'Статус',
         key: 'status',
@@ -987,31 +987,31 @@ export const CutPage: React.FC = () => {
       {
         title: 'Позиции',
         key: 'positions',
-        width: 90,
+        width: 63,
         render: (_: unknown, row: CutJobDto) => row.totals.positions,
       },
       {
         title: 'Группы',
         key: 'groups',
-        width: 80,
+        width: 56,
         render: (_: unknown, row: CutJobDto) => cutJobCounts(row).groups,
       },
       {
         title: 'Деталей',
         key: 'details',
-        width: 90,
+        width: 63,
         render: (_: unknown, row: CutJobDto) => row.totals.details,
       },
       {
         title: 'Площадь, итого',
         key: 'area',
-        width: 120,
+        width: 84,
         render: (_: unknown, row: CutJobDto) => formatArea(row.totals.area),
       },
       {
         title: 'Кол-во листов раскроя',
         key: 'sheets',
-        width: 120,
+        width: 84,
         render: (_: unknown, row: CutJobDto) => (row.status === 'ready' ? row.totals.sheets : '—'),
       },
       {
