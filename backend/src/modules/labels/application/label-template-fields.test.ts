@@ -17,7 +17,7 @@ describe('label template field helpers', () => {
   });
 
   it('rejects qr templates that reference fields outside built-in and custom schema fields', () => {
-    expect(() =>
+    expectQrValidationError(() =>
       validateQrTemplateElement(
         {
           elementKey: 'qr-1',
@@ -34,7 +34,12 @@ describe('label template field helpers', () => {
         { 'custom.client': { type: 'string', sourceField: 'order.client_name' } },
         0,
       ),
-    ).toThrow(/LABEL_FIELD_BINDING_INVALID|unknown\.field/);
+    {
+      name: 'ApiError',
+      statusCode: 422,
+      code: 'LABEL_FIELD_BINDING_INVALID',
+      details: { fieldBinding: 'unknown.field' },
+    });
   });
 
   it('rejects qr elements with a missing template', () => {

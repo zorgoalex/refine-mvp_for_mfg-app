@@ -91,9 +91,7 @@ export function validateQrTemplateElement(
 
   for (const fieldId of extractLabelTemplateFieldIds(template)) {
     if (!isSupportedFieldBinding(fieldId, customFieldSchema)) {
-      const error = new LabelFieldBindingError(fieldId);
-      error.message = `${error.code}: ${fieldId}`;
-      throw error;
+      throw new LabelFieldBindingError(fieldId);
     }
   }
 }
