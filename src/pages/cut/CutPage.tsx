@@ -148,15 +148,6 @@ function formatJobMaterialNames(materialNames: string[] | undefined): string {
   return names.length > 0 ? names.join(', ') : '—';
 }
 
-function chunkJobMaterialNames(materialNames: string[] | undefined): string[][] {
-  const names = (materialNames ?? []).map((name) => name.trim()).filter(Boolean);
-  const rows: string[][] = [];
-  for (let i = 0; i < names.length; i += 2) {
-    rows.push(names.slice(i, i + 2));
-  }
-  return rows;
-}
-
 /**
  * Backend-owned /cut page (CLAUDE.md principle 2/3): all reads and commands go
  * through cutApi (`/api/v1/cut-jobs`); the read-layer is never written from here.
@@ -1032,18 +1023,18 @@ export const CutPage: React.FC = () => {
       {
         title: 'Материал деталей',
         key: 'detailMaterials',
-        width: 220,
+        width: '20ch',
         render: (_: unknown, row: CutJobDto) => {
           const label = formatJobMaterialNames(row.materialNames);
-          const materialRows = chunkJobMaterialNames(row.materialNames);
+          const materialNames = (row.materialNames ?? []).map((name) => name.trim()).filter(Boolean);
           return label === '—' ? (
             label
           ) : (
             <Tooltip title={label}>
-              <div style={{ maxWidth: 200 }}>
-                {materialRows.map((materials, index) => (
-                  <Text key={`${row.cutJobId}-materials-${index}`} style={{ display: 'block' }} ellipsis>
-                    {materials.join(', ')}
+              <div className="cut-job-materials-cell">
+                {materialNames.map((material, index) => (
+                  <Text key={`${row.cutJobId}-materials-${index}`} className="cut-job-materials-line">
+                    {material}
                   </Text>
                 ))}
               </div>
