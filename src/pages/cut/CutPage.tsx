@@ -962,7 +962,13 @@ export const CutPage: React.FC = () => {
   const jobColumns: ColumnsType<CutJobDto> = useMemo(
     () => [
       { title: '#', dataIndex: 'cutJobId', key: 'id', width: 70 },
-      { title: 'Название', dataIndex: 'name', key: 'name', width: 360 },
+      {
+        title: 'Название',
+        dataIndex: 'name',
+        key: 'name',
+        width: 360,
+        className: 'cut-jobs-name-cell',
+      },
       {
         title: 'Статус',
         key: 'status',
