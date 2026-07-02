@@ -18,6 +18,7 @@ import {
   pruneEmptySheets,
   restrictDetailIds,
   selectableDetailIds,
+  sheetMaterialFilmNames,
 } from './cutPageHelpers';
 
 describe('parseJobQueryParam', () => {
@@ -255,5 +256,39 @@ describe('pruneEmptySheets', () => {
   it('falls back to the input when every sheet is empty (defensive, should not happen)', () => {
     const input = [s(0, 0), s(1, 0)];
     expect(pruneEmptySheets(input).map((x) => x.sheetIndex)).toEqual([0, 1]);
+  });
+});
+
+describe('sheetMaterialFilmNames', () => {
+  const info = new Map([
+    ['det-1', { materialName: 'ЛДСП Белый', filmName: 'Дуб' }],
+    ['det-2', { materialName: 'ЛДСП Белый', filmName: 'Дуб' }],
+    ['det-3', { materialName: 'МДФ', filmName: 'Орех' }],
+    ['det-4', { materialName: '  ', filmName: null }],
+  ]);
+  const pcs = (...ids: string[]) => ids.map((item_id) => ({ item_id }));
+
+  it('collects distinct materials in first-seen order, films omitted when showFilm=false', () => {
+    const r = sheetMaterialFilmNames(pcs('det-1', 'det-2', 'det-3'), info, false);
+    expect(r.materials).toEqual(['ЛДСП Белый', 'МДФ']);
+    expect(r.films).toEqual([]);
+  });
+
+  it('collects distinct films when showFilm=true', () => {
+    const r = sheetMaterialFilmNames(pcs('det-1', 'det-2', 'det-3'), info, true);
+    expect(r.materials).toEqual(['ЛДСП Белый', 'МДФ']);
+    expect(r.films).toEqual(['Дуб', 'Орех']);
+  });
+
+  it('drops blank/whitespace names and unknown item ids', () => {
+    const r = sheetMaterialFilmNames(pcs('det-4', 'det-x'), info, true);
+    expect(r.materials).toEqual([]);
+    expect(r.films).toEqual([]);
+  });
+
+  it('single film on a film-split sheet', () => {
+    const r = sheetMaterialFilmNames(pcs('det-1', 'det-2'), info, true);
+    expect(r.materials).toEqual(['ЛДСП Белый']);
+    expect(r.films).toEqual(['Дуб']);
   });
 });

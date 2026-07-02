@@ -27,6 +27,7 @@ import {
 import type { ManualViolation } from './cutLayoutGeometry';
 import { orientedOrigin, svgToUsable } from './sheetEditorGeometry';
 import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
+import { sheetMaterialFilmNames } from './cutPageHelpers';
 
 // ── Props contract ─────────────────────────────────────────────────────────
 
@@ -57,6 +58,10 @@ export interface SheetEditorProps {
   groupFilmId: number | null;
   /** item_id ("det-<id>") → its detail's material/film for cross-sheet guard. */
   pieceMetaByItemId: Map<string, { materialTypeId: number | null; filmId: number | null }>;
+  /** item_id ("det-<id>") → sheet-material and film NAMES for the per-sheet header. */
+  pieceSheetInfoByItemId: Map<string, { materialName: string | null; filmName: string | null }>;
+  /** Show per-sheet film name(s) — true when the job splits by film (combineFilms off). */
+  showFilm: boolean;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────
@@ -207,6 +212,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     groupMaterialTypeId,
     groupFilmId,
     pieceMetaByItemId,
+    pieceSheetInfoByItemId,
+    showFilm,
   } = props;
 
   const [selected, setSelected] = useState<SelectedPiece | null>(null);
@@ -580,16 +587,40 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
         return (
           <div key={sheetIndex} data-testid={`sheet-editor-sheet-${sheetIndex}`} style={{ display: 'inline-block', verticalAlign: 'top' }}>
-            <div
-              style={{
-                marginBottom: 4,
-                fontSize: 12,
-                color: '#595959',
-                fontWeight: 600,
-              }}
-            >
-              Лист {sheetPos + 1} · дет. {placements.pieces.length}
-            </div>
+            {(() => {
+              // Per-sheet material (always) and film (only when the job splits by
+              // film) resolved from the pieces actually on this sheet — all on one
+              // line with the sheet number and detail count.
+              const { materials, films } = sheetMaterialFilmNames(
+                placements.pieces,
+                pieceSheetInfoByItemId,
+                showFilm,
+              );
+              return (
+                <div
+                  style={{
+                    marginBottom: 4,
+                    fontSize: 12,
+                    color: '#595959',
+                    fontWeight: 600,
+                  }}
+                >
+                  Лист {sheetPos + 1} · дет. {placements.pieces.length}
+                  {materials.length > 0 && (
+                    <>
+                      {' · '}
+                      {materials.length > 1 ? 'Материалы' : 'Материал'}: <b>{materials.join(', ')}</b>
+                    </>
+                  )}
+                  {films.length > 0 && (
+                    <>
+                      {' · '}
+                      {films.length > 1 ? 'Плёнки' : 'Плёнка'}: <b>{films.join(', ')}</b>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
 
             <svg
               ref={(el) => {

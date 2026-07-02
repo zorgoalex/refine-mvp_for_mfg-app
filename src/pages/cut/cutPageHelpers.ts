@@ -43,6 +43,40 @@ export function pruneEmptySheets<T extends { placements: { pieces: ReadonlyArray
   return pruned.length > 0 ? pruned : [...sheets];
 }
 
+/**
+ * Distinct sheet-material and (optionally) film names for the pieces on one sheet,
+ * for the manual editor's per-sheet header. Materials are always collected; films
+ * only when `showFilm` (the job splits by film, i.e. combineFilms is off — a sheet
+ * then carries a single film). Order of first appearance is preserved; blanks and
+ * duplicates are dropped.
+ */
+export function sheetMaterialFilmNames(
+  pieces: ReadonlyArray<{ item_id: string }>,
+  infoByItemId: ReadonlyMap<string, { materialName: string | null; filmName: string | null }>,
+  showFilm: boolean,
+): { materials: string[]; films: string[] } {
+  const materials: string[] = [];
+  const films: string[] = [];
+  const seenMat = new Set<string>();
+  const seenFilm = new Set<string>();
+  for (const p of pieces) {
+    const info = infoByItemId.get(p.item_id);
+    const mat = info?.materialName?.trim();
+    if (mat && !seenMat.has(mat)) {
+      seenMat.add(mat);
+      materials.push(mat);
+    }
+    if (showFilm) {
+      const film = info?.filmName?.trim();
+      if (film && !seenFilm.has(film)) {
+        seenFilm.add(film);
+        films.push(film);
+      }
+    }
+  }
+  return { materials, films };
+}
+
 /** Parse a `?job=<id>` deep-link param into a positive cut job id, or null. */
 export function parseJobQueryParam(search: string): number | null {
   const raw = new URLSearchParams(search).get('job');

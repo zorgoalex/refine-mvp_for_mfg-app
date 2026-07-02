@@ -141,6 +141,11 @@ const revokeObjectUrls = (map: Record<string, string>): void => {
   Object.values(map).forEach((url) => URL.revokeObjectURL(url));
 };
 
+function formatJobMaterialNames(materialNames: string[] | undefined): string {
+  const names = (materialNames ?? []).map((name) => name.trim()).filter(Boolean);
+  return names.length > 0 ? names.join(', ') : '—';
+}
+
 /**
  * Backend-owned /cut page (CLAUDE.md principle 2/3): all reads and commands go
  * through cutApi (`/api/v1/cut-jobs`); the read-layer is never written from here.
@@ -920,6 +925,20 @@ export const CutPage: React.FC = () => {
     return m;
   }, [job?.items]);
 
+  // Per-piece sheet-material and film NAMES for the editor's per-sheet header.
+  // Keyed by item_id "det-<orderDetailId>" (materialName is the sheet material,
+  // Variant-B sole order-material ref).
+  const pieceSheetInfoByItemId = useMemo(() => {
+    const m = new Map<string, { materialName: string | null; filmName: string | null }>();
+    for (const it of job?.items ?? []) {
+      m.set(`det-${it.orderDetailId}`, {
+        materialName: it.detail?.materialName ?? null,
+        filmName: it.detail?.filmName ?? null,
+      });
+    }
+    return m;
+  }, [job?.items]);
+
   // Memoized label-info map for the active editor: keyed by piece.item_id ("det-N"),
   // provides orderName, orderId, detailNumber and qty for the 3-line piece label.
   const editorLabelInfoByItemId = useMemo(() => {
@@ -998,6 +1017,23 @@ export const CutPage: React.FC = () => {
         key: 'profile',
         width: 180,
         render: (_: unknown, row: CutJobDto) => resolveProfileLabel(row.paramProfileId, profiles, cutSettings),
+      },
+      {
+        title: 'Материал деталей',
+        key: 'detailMaterials',
+        width: 220,
+        render: (_: unknown, row: CutJobDto) => {
+          const label = formatJobMaterialNames(row.materialNames);
+          return label === '—' ? (
+            label
+          ) : (
+            <Tooltip title={label}>
+              <Text style={{ maxWidth: 200 }} ellipsis>
+                {label}
+              </Text>
+            </Tooltip>
+          );
+        },
       },
       {
         title: 'Действия',
@@ -1642,6 +1678,8 @@ export const CutPage: React.FC = () => {
                   groupMaterialTypeId={editingGroup?.sheetMaterialTypeId ?? null}
                   groupFilmId={editingGroup?.filmId ?? null}
                   pieceMetaByItemId={pieceMetaByItemId}
+                  pieceSheetInfoByItemId={pieceSheetInfoByItemId}
+                  showFilm={!job.combineFilms}
                 />
               </div>
             )}

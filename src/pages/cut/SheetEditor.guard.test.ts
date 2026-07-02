@@ -44,6 +44,13 @@ describe('SheetEditor source contract', () => {
     // The piece pointer-down must also preventDefault to stop selection initiation.
     expect(src).toMatch(/native text selection[\s\S]{0,120}e\.preventDefault\(\)/);
   });
+  it('renders per-sheet material (always) and film (gated by showFilm) in the header', () => {
+    expect(src).toMatch(/sheetMaterialFilmNames/);
+    expect(src).toMatch(/pieceSheetInfoByItemId/);
+    expect(src).toMatch(/showFilm/);
+    expect(src).toMatch(/Материал/);
+    expect(src).toMatch(/Плёнк/);
+  });
   it('numbers editor sheets by display position, not the (possibly sparse) sheetIndex', () => {
     // A group's manual layout may omit an emptied sheet, leaving a gap in sheetIndex.
     // The "Лист N" header must use the dense render position so numbering stays 1..N.
