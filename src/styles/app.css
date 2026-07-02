@@ -635,9 +635,13 @@ html {
 }
 
 .cut-jobs-table .ant-table-thead > tr > th {
+  position: sticky !important;
+  top: 0;
+  z-index: 2;
   padding: 0 2px !important;
   font-size: 50% !important;
-  line-height: 0.8 !important;
+  line-height: 1.6 !important;
+  background: var(--app-surface) !important;
 }
 
 .cut-jobs-table .ant-table-tbody > tr > td {
@@ -645,6 +649,7 @@ html {
   padding: 1px 4px !important;
   font-size: 70% !important;
   line-height: 1 !important;
+  text-align: center;
   vertical-align: top;
 }
 
@@ -652,6 +657,8 @@ html {
   display: block;
   width: 20ch;
   max-width: 20ch;
+  margin: 0 auto;
+  font-size: inherit;
   line-height: 1.1;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -667,4 +674,9 @@ html {
   padding: 0 !important;
   font-size: inherit;
   line-height: 1 !important;
+}
+
+.cut-jobs-table .cut-jobs-actions .ant-btn-link * {
+  font-size: inherit;
+  line-height: inherit;
 }
