@@ -8,6 +8,8 @@ import { buildCutAddWarning, formatPlacementsMessage, restrictDetailIds, selecta
 interface AddToCutModalProps {
   open: boolean;
   orderIds: number[];
+  /** Display order names for the default cut name; falls back to ids when absent. */
+  orderNames?: Array<string | null | undefined>;
   /** Detail-level mode: when non-empty, only these chosen details (∩ eligible) are added. */
   detailIds?: number[];
   /** Optional selected group label appended to the auto-generated cut name. */
@@ -22,7 +24,7 @@ interface AddToCutModalProps {
  * an existing draft job or creates a new one; the selected orders' eligible
  * details are resolved on the backend and reserved.
  */
-export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, detailIds, nameSuffix, onClose, onDone }) => {
+export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, orderNames, detailIds, nameSuffix, onClose, onDone }) => {
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [name, setName] = useState('');
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
@@ -37,11 +39,12 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
 
   useEffect(() => {
     if (!open) return;
+    const orderLabel = formatOrderLabelForCutName(orderIds, orderNames);
     setName(
       buildDefaultCutName(
         detailMode
-          ? `Раскрой заказ ${orderIds.join(', ')} (детали)`
-          : `Раскрой ${orderIds.join(', ')}`,
+          ? `Раскрой заказ ${orderLabel} (детали)`
+          : `Раскрой ${orderLabel}`,
         nameSuffix,
       ),
     );
@@ -55,7 +58,7 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, de
       .listPlacements(detailMode ? { detailIds: detailIds ?? [] } : { orderIds })
       .then(setPlacements)
       .catch(() => setPlacements(null));
-  }, [open, orderIds, detailMode, detailIds, nameSuffix]);
+  }, [open, orderIds, orderNames, detailMode, detailIds, nameSuffix]);
 
   const submit = useCallback(async () => {
     if (orderIds.length === 0) return;
@@ -165,4 +168,13 @@ function buildDefaultCutName(baseName: string, suffix?: string | null): string {
   const trimmedSuffix = (suffix ?? '').trim();
   const name = trimmedSuffix ? `${baseName} — ${trimmedSuffix}` : baseName;
   return name.slice(0, 200);
+}
+
+function formatOrderLabelForCutName(orderIds: number[], orderNames?: Array<string | null | undefined>): string {
+  return orderIds
+    .map((orderId, index) => {
+      const orderName = orderNames?.[index]?.trim();
+      return orderName || String(orderId);
+    })
+    .join(', ');
 }

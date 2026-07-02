@@ -39,5 +39,6 @@ describe('edit-form detail grouping', () => {
     expect(tab).toContain('Добавить выбранные в раскрой');
     expect(tab).toContain('cutSelectable');
     expect(tab).toContain('selectedDetailIds');
+    expect(tab).toContain('orderNames={[header.order_name]}');
   });
 });

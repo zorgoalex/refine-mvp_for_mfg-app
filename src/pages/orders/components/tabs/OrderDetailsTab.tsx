@@ -628,6 +628,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           <AddToCutModal
             open={addToCutOpen}
             orderIds={[header.order_id]}
+            orderNames={[header.order_name]}
             detailIds={eligibleCutDetailIds}
             nameSuffix={cutSelectedGroupName}
             onClose={() => setAddToCutOpen(false)}

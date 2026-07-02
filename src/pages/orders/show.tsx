@@ -1311,6 +1311,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             <AddToCutModal
               open={cutModalOpen}
               orderIds={[record.order_id]}
+              orderNames={[record.order_name]}
               detailIds={cutSelectedDetailIds}
               nameSuffix={cutSelectedGroupName}
               onClose={() => setCutModalOpen(false)}

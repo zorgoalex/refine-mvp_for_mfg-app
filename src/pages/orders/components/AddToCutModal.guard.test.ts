@@ -43,4 +43,10 @@ describe('AddToCutModal detail-level mode', () => {
   it('rolls back an empty new draft via archive (no orphan job)', () => {
     expect(modalSrc).toContain('cutApi.archive');
   });
+
+  it('uses order display names, not raw order ids, in the default cut name when names are provided', () => {
+    expect(modalSrc).toContain('orderNames?:');
+    expect(modalSrc).toContain('formatOrderLabelForCutName');
+    expect(modalSrc).not.toContain('Раскрой заказ ${orderIds.join');
+  });
 });

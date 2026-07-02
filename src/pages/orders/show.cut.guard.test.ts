@@ -16,6 +16,7 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain('AddToCutModal');
     expect(source).toContain('Выделить детали для раскроя');
     expect(source).toContain('detailIds=');
+    expect(source).toContain('orderNames={[record.order_name]}');
   });
 
   it('renders a «Раскрой» sub-block listing all cut jobs for the order', () => {
