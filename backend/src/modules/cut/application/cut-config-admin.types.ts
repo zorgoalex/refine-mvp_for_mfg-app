@@ -25,10 +25,19 @@ export interface CutRenderPresetDto {
   version: number;
 }
 
+export interface CutPdfTemplateDto {
+  cutPdfTemplateId: number;
+  code: string;
+  name: string;
+  isActive: boolean;
+  version: number;
+}
+
 export interface CutConfigDto {
   settings: CutSettingRowDto[];
   paramProfiles: CutParamProfileDto[];
   renderPresets: CutRenderPresetDto[];
+  pdfTemplates: CutPdfTemplateDto[];
 }
 
 export interface CutConfigContext {

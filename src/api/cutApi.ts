@@ -159,6 +159,7 @@ export const cutApi = {
     landscape = false,
     renderToken?: string,
     originTopLeft = true,
+    pdfTemplate?: string,
   ): Promise<CutPdfResult> {
     const path = apiRoutes.cutJobs.groupPdf(validateCutJobId(cutJobId), validateCutJobId(groupId));
     const params = new URLSearchParams();
@@ -168,6 +169,7 @@ export const cutApi = {
       params.append('variant', 'active');
       params.append('renderVersion', renderToken);
     }
+    if (pdfTemplate) params.append('template', pdfTemplate);
     const qs = params.toString();
     return downloadPdf(qs ? `${path}?${qs}` : path);
   },

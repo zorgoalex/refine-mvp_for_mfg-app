@@ -27,6 +27,7 @@ import {
   cutConfigApi,
   type CutConfig,
   type CutParamProfile,
+  type CutPdfTemplate,
   type CutRenderPreset,
 } from '../../../api/cutConfigApi';
 import { ApiError } from '../../../api/httpClient';
@@ -193,6 +194,15 @@ export const CutConfigTab: React.FC = () => {
     [canManage, removePreset],
   );
 
+  const pdfTemplateColumns: ColumnsType<CutPdfTemplate> = useMemo(
+    () => [
+      { title: 'Название', dataIndex: 'name', key: 'name' },
+      { title: 'Код', dataIndex: 'code', key: 'code' },
+      { title: 'Активен', key: 'active', render: (_: unknown, r) => (r.isActive ? <Tag color="green">да</Tag> : <Tag>нет</Tag>) },
+    ],
+    [],
+  );
+
   if (!can('cut.view')) {
     return <Alert type="error" showIcon message="Недостаточно прав для конфигурации раскроя" />;
   }
@@ -259,6 +269,16 @@ export const CutConfigTab: React.FC = () => {
           rowKey="cutRenderPresetId"
           columns={presetColumns}
           dataSource={config.renderPresets}
+          pagination={false}
+        />
+      </Card>
+
+      <Card size="small" title="Шаблоны PDF">
+        <Table<CutPdfTemplate>
+          size="small"
+          rowKey="cutPdfTemplateId"
+          columns={pdfTemplateColumns}
+          dataSource={config.pdfTemplates}
           pagination={false}
         />
       </Card>
@@ -702,4 +722,3 @@ const PresetModal: React.FC<PresetModalProps> = ({ open, editing, onClose, onSav
     </Modal>
   );
 };
-

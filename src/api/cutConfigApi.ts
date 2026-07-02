@@ -22,10 +22,18 @@ export interface CutRenderPreset {
   isActive: boolean;
   version: number;
 }
+export interface CutPdfTemplate {
+  cutPdfTemplateId: number;
+  code: string;
+  name: string;
+  isActive: boolean;
+  version: number;
+}
 export interface CutConfig {
   settings: CutSettingRow[];
   paramProfiles: CutParamProfile[];
   renderPresets: CutRenderPreset[];
+  pdfTemplates: CutPdfTemplate[];
 }
 
 export interface CutParamProfileInput {

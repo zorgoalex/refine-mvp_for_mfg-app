@@ -441,6 +441,7 @@ export class CutController {
     const rotate90 = parseOrientation(query.orientation);
     const originTopLeft = parseOriginTopLeft(query.origin);
     const variant = parseVariant(query.variant);
+    const pdfTemplate = parsePdfTemplate(query.template);
     // Task 7 Rule 9: cache key includes the server-owned render token (layout state)
     // so a manual save or active-selector flip busts the in-process cache. FIX 2:
     // the requested `variant` is a SEPARATE key dimension — `auto` and `active` can
@@ -449,8 +450,8 @@ export class CutController {
     // a raw 90° CW render produce different bytes for the same layout+orientation.
     const renderToken = await this.cut.getRenderCacheToken({ cutGroupId });
     const result = this.pdfCache.ensure(
-      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}`,
-      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, originTopLeft, variant, requestId: request.requestId }),
+      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${pdfTemplate}`,
+      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, originTopLeft, variant, pdfTemplate, requestId: request.requestId }),
     );
     this.sendPdf(response, result, `cut-group-${cutGroupId}.pdf`);
   }
@@ -468,12 +469,13 @@ export class CutController {
     const rotate90 = parseOrientation(query.orientation);
     const originTopLeft = parseOriginTopLeft(query.origin);
     const variant = parseVariant(query.variant);
+    const pdfTemplate = parsePdfTemplate(query.template);
     // getJob gives the current version + renderToken (cache discriminator for manual layouts).
     const job = await this.cut.getJob({ currentUser, cutJobId: id, requestId: request.requestId });
     // Task 7 Rule 10: renderToken aggregates job version + all per-group manual tokens;
     // any manual save or active-selector flip changes the token → busts the cache.
     const renderToken = job.renderToken ?? `v${job.version}`;
-    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant, originTopLeft);
+    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant, originTopLeft, pdfTemplate);
     this.sendPdf(response, result, `cut-job-${id}.pdf`);
   }
 
@@ -486,6 +488,7 @@ export class CutController {
     rotate90 = false,
     variant: 'auto' | 'manual' | 'active' = 'auto',
     originTopLeft = false,
+    pdfTemplate = 'standard',
   ) {
     // Task 7: cache key uses renderToken (job version + per-group manual tokens)
     // so a manual save or active-selector flip always busts the in-process cache.
@@ -495,8 +498,8 @@ export class CutController {
     // UI default) — the landscape and raw-origin variants are on-demand and must
     // not write the prewarm state.
     return this.pdfCache.ensure(
-      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}`,
-      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, originTopLeft, variant, requestId }),
+      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${pdfTemplate}`,
+      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, originTopLeft, variant, pdfTemplate, requestId }),
       (state, reason) => {
         if (rotate90 || !originTopLeft) return;
         void this.cut.setPdfPrewarmState({ cutJobId, version, state, reason }).catch(() => undefined);
@@ -638,6 +641,14 @@ export function parseVariant(value: string | undefined): 'auto' | 'manual' | 'ac
   if (v === 'manual') return 'manual';
   if (v === 'active') return 'active';
   return 'auto';
+}
+
+export function parsePdfTemplate(value: string | undefined): string {
+  const template = (value ?? 'standard').trim();
+  if (template.length === 0 || template.length > 64 || !/^[A-Za-z0-9_-]+$/.test(template)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid PDF template', { field: 'template' });
+  }
+  return template;
 }
 
 export function parseCreateCutJobRequest(body: unknown) {

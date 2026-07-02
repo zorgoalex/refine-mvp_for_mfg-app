@@ -53,7 +53,11 @@ describe('cutApi manual-layout', () => {
   it('fetchGroupPdf without renderToken does NOT add variant or renderVersion', async () => {
     const fetchMock = pdfFetch();
     await cutApi.fetchGroupPdf(42, 100);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/groups/100/export.pdf');
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('/api/v1/cut-jobs/42/groups/100/export.pdf');
+    expect(url).toContain('origin=tl');
+    expect(url).not.toContain('variant');
+    expect(url).not.toContain('renderVersion');
   });
 
   it('fetchGroupPdf with landscape + renderToken includes orientation, variant and renderVersion', async () => {
@@ -79,7 +83,7 @@ describe('cutApi manual-layout', () => {
   it('fetchJobPdf without renderToken keeps plain URL', async () => {
     const fetchMock = pdfFetch();
     await cutApi.fetchJobPdf(42);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/export.pdf');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/export.pdf?origin=tl');
   });
 
   it('fetchJobPdf with landscape + renderToken composes params correctly', async () => {
@@ -137,7 +141,7 @@ describe('cutApi manual-layout', () => {
   it('fetchSheetSvg without new params keeps existing call style', async () => {
     const fetchMock = imgFetch('image/svg+xml', '<svg/>');
     await cutApi.fetchSheetSvg(42, 100, 0);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/groups/100/sheets/0.svg');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/groups/100/sheets/0.svg?origin=tl');
   });
 });
 

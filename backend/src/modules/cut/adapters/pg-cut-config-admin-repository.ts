@@ -10,6 +10,7 @@ import {
   type CutConfigContext,
   type CutConfigDto,
   type CutParamProfileDto,
+  type CutPdfTemplateDto,
   type CutRenderPresetDto,
   type CutSettingRowDto,
   type DeleteCatalogRowCommand,
@@ -59,7 +60,7 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
   }
 
   async getConfig(_context: CutConfigContext): Promise<CutConfigDto> {
-    const [settings, profiles, presets] = await Promise.all([
+    const [settings, profiles, presets, pdfTemplates] = await Promise.all([
       this.database.query<{ key: string; value: unknown; version: number }>(
         `SELECT key, value, version FROM cut_settings ORDER BY key`,
       ),
@@ -69,12 +70,16 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
       this.database.query(
         `SELECT cut_render_preset_id, name, target_px, background, is_active, version FROM cut_render_presets ORDER BY target_px`,
       ),
+      this.database.query(
+        `SELECT cut_pdf_template_id, code, name, is_active, version FROM cut_pdf_templates ORDER BY code`,
+      ),
     ]);
 
     return {
       settings: settings.rows.map((r) => ({ key: r.key, value: r.value, version: toNum(r.version) })),
       paramProfiles: profiles.rows.map(mapProfile),
       renderPresets: presets.rows.map(mapPreset),
+      pdfTemplates: pdfTemplates.rows.map(mapPdfTemplate),
     };
   }
 
@@ -334,6 +339,16 @@ function mapPreset(r: Record<string, unknown>): CutRenderPresetDto {
     name: String(r.name),
     targetPx: toNum(r.target_px),
     background: String(r.background),
+    isActive: Boolean(r.is_active),
+    version: toNum(r.version),
+  };
+}
+
+function mapPdfTemplate(r: Record<string, unknown>): CutPdfTemplateDto {
+  return {
+    cutPdfTemplateId: toNum(r.cut_pdf_template_id),
+    code: String(r.code),
+    name: String(r.name),
     isActive: Boolean(r.is_active),
     version: toNum(r.version),
   };

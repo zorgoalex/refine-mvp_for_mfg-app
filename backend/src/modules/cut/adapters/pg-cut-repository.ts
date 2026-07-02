@@ -83,7 +83,7 @@ import type {
 import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, MATERIAL_NAMES_BY_JOB_SQL, type TotalsRow } from './cut-totals';
 import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, createOrderFillResolver } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
-import { buildSheetsPdf } from '../render/sheet-pdf';
+import { buildSheetsPdf, type PdfSheetDetailRow, type PdfSheetInput, type PdfSheetMeta } from '../render/sheet-pdf';
 import {
   CutGroupSheetNotFoundError,
   CutJobItemNotFoundError,
@@ -118,6 +118,29 @@ const MUTABLE_STATUSES = new Set(['draft', 'calculating', 'ready', 'failed']);
  *  but NOT mid-calculation (the running solve already locked its params) and not
  *  on an archived job. */
 const PROFILE_EDITABLE_STATUSES = new Set(['draft', 'ready', 'failed']);
+
+interface RenderDetailInfo {
+  orderId: number;
+  detailNumber: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  materialName: string | null;
+  thicknessMm: number | null;
+  filmName: string | null;
+  orderName: string | null;
+  orderDate: string | null;
+  readyDate: string | null;
+  clientName: string | null;
+  materialKey: string | null;
+}
+
+interface RenderedSheetContext {
+  sheetIndex: number;
+  placements: SheetPlacementsJson;
+  svg: string;
+  pdfMeta: PdfSheetMeta;
+  pdfDetailRows: PdfSheetDetailRow[];
+}
 
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
 interface CalcRelatedDimensions {
@@ -1535,6 +1558,8 @@ export class PgCutRepository implements CutRepositoryPort {
 
   async renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer> {
     const variant = query.variant ?? 'auto';
+    const pdfTemplate = query.pdfTemplate ?? 'standard';
+    await this.assertPdfTemplateActive(pdfTemplate);
     // Rule 6 BEFORE Rule 5: load + assert group↔job ownership first so a wrong
     // cutJobId yields 404 CUT_GROUP_NOT_FOUND, not a 409 recalc block (a missing
     // job makes checkRequiresRecalc conservatively true). This also resolves the
@@ -1557,11 +1582,16 @@ export class PgCutRepository implements CutRepositoryPort {
         svg: s.svg,
         sheetWidthMm: query.rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
         sheetHeightMm: query.rotate90 ? s.placements.sheet_width_mm : s.placements.sheet_height_mm,
+        template: pdfTemplate,
+        meta: s.pdfMeta,
+        detailRows: s.pdfDetailRows,
       })),
     );
   }
 
   async renderJobPdf(query: RenderJobPdfQuery): Promise<Buffer> {
+    const pdfTemplate = query.pdfTemplate ?? 'standard';
+    await this.assertPdfTemplateActive(pdfTemplate);
     // Rule 4: variant=manual is PER-GROUP; the whole-job PDF can't coherently pick one
     // group's manual layout. Reject explicitly instead of silently ignoring it.
     if (query.variant === 'manual') {
@@ -1582,7 +1612,7 @@ export class PgCutRepository implements CutRepositoryPort {
       `SELECT cut_group_id FROM cut_group WHERE cut_job_id = $1 ORDER BY cut_group_id`,
       [query.cutJobId],
     );
-    const pdfSheets: Array<{ svg: string; sheetWidthMm: number; sheetHeightMm: number }> = [];
+    const pdfSheets: PdfSheetInput[] = [];
     for (const groupRow of groups.rows) {
       const cutGroupId = toNum(groupRow.cut_group_id);
       const { sheets } = await this.loadGroupRenderContext(cutGroupId, query.rotate90, query.originTopLeft, variant, query.cutJobId);
@@ -1593,6 +1623,9 @@ export class PgCutRepository implements CutRepositoryPort {
           svg: sheet.svg,
           sheetWidthMm: query.rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
           sheetHeightMm: query.rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
+          template: pdfTemplate,
+          meta: sheet.pdfMeta,
+          detailRows: sheet.pdfDetailRows,
         });
       }
     }
@@ -1600,6 +1633,16 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new CutJobNotFoundError(query.cutJobId);
     }
     return buildSheetsPdf(pdfSheets);
+  }
+
+  private async assertPdfTemplateActive(code: string): Promise<void> {
+    const row = await this.database.query<{ code: string }>(
+      `SELECT code FROM cut_pdf_templates WHERE code = $1 AND is_active = true LIMIT 1`,
+      [code],
+    );
+    if (row.rowCount === 0) {
+      throw new ApiError(422, 'CUT_PDF_TEMPLATE_NOT_FOUND', 'Выбранный шаблон PDF не найден или неактивен', { code });
+    }
   }
 
   async setPdfPrewarmState(query: SetPdfPrewarmStateQuery): Promise<void> {
@@ -1664,7 +1707,7 @@ export class PgCutRepository implements CutRepositoryPort {
     variant: 'auto' | 'manual' | 'active' = 'auto',
     cutJobId?: number,
     showLabels = true,
-  ): Promise<{ sheets: Array<{ sheetIndex: number; placements: SheetPlacementsJson; svg: string }> }> {
+  ): Promise<{ sheets: RenderedSheetContext[] }> {
     // Rule 6: load group metadata + assert job ownership when cutJobId provided.
     const groupRes = await this.database.query<{
       cut_job_id: string | number;
@@ -1734,6 +1777,13 @@ export class PgCutRepository implements CutRepositoryPort {
       sheet_material_type_id: string | number | null;
       material_id: string | number | null;
       material_name: string | null;
+      thickness_mm: string | number | null;
+      film_name: string | null;
+      order_name: string | null;
+      order_date: string | Date | null;
+      completion_date: string | Date | null;
+      planned_completion_date: string | Date | null;
+      client_name: string | null;
     }>(
       // material_name = sheet-material name (COALESCE sheet_material_type, legacy
       // material) for the 4th label line; the id columns give a stable material
@@ -1742,24 +1792,22 @@ export class PgCutRepository implements CutRepositoryPort {
       `SELECT cji.order_detail_id, cji.order_id,
               od.detail_number, od.width, od.height,
               od.sheet_material_type_id, od.material_id,
-              COALESCE(smt.name, m.material_name) AS material_name
+              COALESCE(smt.name, m.material_name) AS material_name,
+              smt.thickness_mm, f.film_name,
+              o.order_name, o.order_date, o.completion_date, o.planned_completion_date,
+              c.client_name
        FROM cut_job_item cji
        LEFT JOIN order_details od ON od.detail_id = cji.order_detail_id AND od.delete_flag = false
        LEFT JOIN materials m ON m.material_id = od.material_id
        LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+       LEFT JOIN films f ON f.film_id = od.film_id
+       LEFT JOIN orders o ON o.order_id = cji.order_id
+       LEFT JOIN clients c ON c.client_id = o.client_id
        WHERE cji.cut_group_id = $1
        ORDER BY cji.cut_job_item_id`,
       [cutGroupId],
     );
-    const detailById = new Map<number, {
-      orderId: number;
-      detailNumber: number | null;
-      widthMm: number | null;
-      heightMm: number | null;
-      materialName: string | null;
-      /** Stable material identity for mixed-material detection (id-based, not name). */
-      materialKey: string | null;
-    }>();
+    const detailById = new Map<number, RenderDetailInfo>();
     for (const row of items.rows) {
       // Prefer the sheet-material-type id (Variant-B primary ref); fall back to the
       // legacy material id; else the trimmed name; else null (unknown → ignored).
@@ -1773,6 +1821,12 @@ export class PgCutRepository implements CutRepositoryPort {
         widthMm: numOrNull(row.width),
         heightMm: numOrNull(row.height),
         materialName: row.material_name ?? null,
+        thicknessMm: numOrNull(row.thickness_mm),
+        filmName: row.film_name ?? null,
+        orderName: row.order_name ?? null,
+        orderDate: dateOnly(row.order_date),
+        readyDate: dateOnly(row.completion_date) ?? dateOnly(row.planned_completion_date),
+        clientName: row.client_name ?? null,
         materialKey,
       });
     }
@@ -1861,6 +1915,8 @@ export class PgCutRepository implements CutRepositoryPort {
           sheetIndex: s.sheetIndex,
           placements: s.placements,
           svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft, showLabels }),
+          pdfMeta: buildPdfSheetMeta(s.placements, detailById),
+          pdfDetailRows: buildPdfDetailRows(s.placements, detailById),
         };
       }),
     };
@@ -2816,6 +2872,71 @@ interface JobRow extends QueryResultRow {
   split_by_material: boolean | null;
 }
 
+function buildPdfSheetMeta(
+  placements: SheetPlacementsJson,
+  detailById: ReadonlyMap<number, RenderDetailInfo>,
+): PdfSheetMeta {
+  const meta: {
+    orders: string[];
+    clients: string[];
+    dates: string[];
+    readyDates: string[];
+    materials: string[];
+    thicknesses: string[];
+    films: string[];
+  } = {
+    orders: [],
+    clients: [],
+    dates: [],
+    readyDates: [],
+    materials: [],
+    thicknesses: [],
+    films: [],
+  };
+  const add = (list: string[], value: string | number | null | undefined) => {
+    if (value === null || value === undefined) return;
+    const text = String(value).trim();
+    if (text && !list.includes(text)) list.push(text);
+  };
+  for (const piece of placements.pieces) {
+    const detailId = parseFreecutItemId(piece.item_id);
+    const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+    if (!detail) continue;
+    add(meta.orders, detail.orderName ?? detail.orderId);
+    add(meta.clients, detail.clientName);
+    add(meta.dates, detail.orderDate);
+    add(meta.readyDates, detail.readyDate);
+    add(meta.materials, detail.materialName);
+    add(meta.thicknesses, detail.thicknessMm);
+    add(meta.films, detail.filmName);
+  }
+  return meta;
+}
+
+function buildPdfDetailRows(
+  placements: SheetPlacementsJson,
+  detailById: ReadonlyMap<number, RenderDetailInfo>,
+): PdfSheetDetailRow[] {
+  const byKey = new Map<string, PdfSheetDetailRow>();
+  for (const piece of placements.pieces) {
+    const detailId = parseFreecutItemId(piece.item_id);
+    const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+    const position = detail?.detailNumber ?? detailId ?? piece.item_id;
+    const width = detail?.widthMm ?? piece.width_mm;
+    const height = detail?.heightMm ?? piece.height_mm;
+    const lengthMm = Math.max(width, height);
+    const widthMm = Math.min(width, height);
+    const key = `${position}:${lengthMm}:${widthMm}`;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.quantity += 1;
+    } else {
+      byKey.set(key, { position, lengthMm, widthMm, quantity: 1 });
+    }
+  }
+  return [...byKey.values()].sort((a, b) => Number(a.position) - Number(b.position));
+}
+
 interface ItemRow extends QueryResultRow {
   cut_job_item_id: string | number;
   order_detail_id: string | number;
@@ -3090,4 +3211,11 @@ function numOrNull(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function dateOnly(value: string | Date | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const text = String(value).trim();
+  return text ? text.slice(0, 10) : null;
 }

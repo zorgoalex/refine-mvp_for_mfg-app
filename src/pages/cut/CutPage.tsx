@@ -20,7 +20,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useNavigation } from '@refinedev/core';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
-import type { CutParamProfile, CutSettingRow } from '../../api/cutConfigApi';
+import type { CutParamProfile, CutPdfTemplate, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
@@ -69,6 +69,11 @@ const DEFAULT_PRESET_OPTIONS = [
   { value: 'thumb', label: 'thumb' },
   { value: 'screen', label: 'screen' },
   { value: 'print', label: 'print' },
+];
+
+const DEFAULT_PDF_TEMPLATE_OPTIONS = [
+  { value: 'standard', label: 'Стандартный' },
+  { value: 'bath_profiles', label: 'Профили ванны' },
 ];
 
 const { Title, Text } = Typography;
@@ -304,6 +309,7 @@ export const CutPage: React.FC = () => {
   );
   const [preset, setPreset] = useState<string>('screen');
   const [presetOptions, setPresetOptions] = useState(DEFAULT_PRESET_OPTIONS);
+  const [pdfTemplateOptions, setPdfTemplateOptions] = useState(DEFAULT_PDF_TEMPLATE_OPTIONS);
   const [profiles, setProfiles] = useState<CutParamProfile[]>([]);
   const [cutSettings, setCutSettings] = useState<CutSettingRow[]>([]);
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
@@ -320,6 +326,7 @@ export const CutPage: React.FC = () => {
   // Per-group alternative-view toggle: true = show manual variant, false = show auto.
   // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
   const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
+  const [pdfTemplateByGroup, setPdfTemplateByGroup] = useState<Record<number, string>>({});
 
   // Render presets and cut profiles are config-driven (/configuration "Раскрой").
   // Load active names from the backend, falling back to the built-ins.
@@ -330,6 +337,10 @@ export const CutPage: React.FC = () => {
         .filter((p) => p.isActive)
         .map((p) => ({ value: p.name, label: p.name }));
       if (options.length > 0) setPresetOptions(options);
+      const pdfOptions = (cfg.pdfTemplates ?? [])
+        .filter((p: CutPdfTemplate) => p.isActive)
+        .map((p) => ({ value: p.code, label: p.name }));
+      if (pdfOptions.length > 0) setPdfTemplateOptions(pdfOptions);
       setProfiles(cfg.paramProfiles); // FULL list (active + inactive)
       setCutSettings(cfg.settings);
     } catch {
@@ -784,7 +795,8 @@ export const CutPage: React.FC = () => {
       setBusy(true);
       try {
         // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
-        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetOriginTopLeft));
+        const pdfTemplate = pdfTemplateByGroup[group.cutGroupId] ?? 'standard';
+        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetOriginTopLeft, pdfTemplate));
         triggerBlobDownload(result.blob, result.fileName ?? `cut-group-${group.cutGroupId}.pdf`);
       } catch (error) {
         handleError(error, 'Не удалось выгрузить PDF группы');
@@ -792,7 +804,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, sheetPortrait, sheetOriginTopLeft, handleError],
+    [job, sheetPortrait, sheetOriginTopLeft, pdfTemplateByGroup, handleError],
   );
 
   const downloadJobPdf = useCallback(async () => {
@@ -1597,6 +1609,17 @@ export const CutPage: React.FC = () => {
                   </Tooltip>
                 )}
                 {/* «Скачать PDF» — disabled while dirty or requiresRecalc */}
+                <Space size={6}>
+                  <Text type="secondary">Шаблон PDF</Text>
+                  <Select
+                    size="small"
+                    value={pdfTemplateByGroup[group.cutGroupId] ?? 'standard'}
+                    onChange={(value) => setPdfTemplateByGroup((prev) => ({ ...prev, [group.cutGroupId]: value }))}
+                    options={pdfTemplateOptions}
+                    style={{ width: 180 }}
+                    disabled={busy}
+                  />
+                </Space>
                 <Tooltip
                   title={
                     isDirtyGroup

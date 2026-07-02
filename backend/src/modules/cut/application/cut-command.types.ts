@@ -131,6 +131,7 @@ export interface RenderGroupPdfQuery {
    *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
   originTopLeft?: boolean;
   variant?: 'auto' | 'manual' | 'active';
+  pdfTemplate?: string;
   requestId?: string;
 }
 
@@ -143,6 +144,7 @@ export interface RenderJobPdfQuery {
    *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
   originTopLeft?: boolean;
   variant?: 'auto' | 'manual' | 'active';
+  pdfTemplate?: string;
   requestId?: string;
 }
 
