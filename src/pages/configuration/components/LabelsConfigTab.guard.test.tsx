@@ -33,6 +33,7 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/addElement\('text'\)/);
     expect(tabSrc).toMatch(/addElement\('line'\)/);
     expect(tabSrc).toMatch(/addElement\('rect'\)/);
+    expect(tabSrc).toMatch(/addElement\('qr'\)/);
     expect(tabSrc).toMatch(/customFieldSchema/);
     expect(tabSrc).toMatch(/Кастомные поля/);
     expect(tabSrc).toMatch(/sourceField/);
@@ -164,6 +165,21 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/getLabelTextAlign/);
     expect(tabSrc).toMatch(/textAlign === 'center'/);
     expect(tabSrc).toMatch(/align=\{textAlign\}/);
+  });
+
+  it('supports QR-code elements with template payloads and automatic layout protection', () => {
+    expect(tabSrc).toMatch(/QR-код/);
+    expect(tabSrc).toMatch(/QrcodeOutlined/);
+    expect(tabSrc).toMatch(/value: 'qr', label: 'QR-код'/);
+    expect(tabSrc).toMatch(/qrTemplate/);
+    expect(tabSrc).toMatch(/qrErrorCorrection/);
+    expect(tabSrc).toMatch(/autoShiftForQr/);
+    expect(tabSrc).toMatch(/applyQrGeometryPatch/);
+    expect(tabSrc).toMatch(/collectQrConflicts/);
+    expect(tabSrc).toMatch(/qrProtectedRect/);
+    expect(tabSrc).toMatch(/data-label-qr-conflict/);
+    expect(tabSrc).toMatch(/kind === 'qr'/);
+    expect(tabSrc).toMatch(/QR_CONFLICT/);
   });
 
   it('strips read-only element ids before create or update payloads', () => {

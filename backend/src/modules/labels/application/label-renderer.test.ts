@@ -33,6 +33,92 @@ describe('label renderer', () => {
     expect(svg).toContain('text-anchor="end"');
   });
 
+  it('renders qr elements with payload metadata and module geometry', () => {
+    const base = template();
+    base.elements.push({
+      labelTemplateElementId: 4,
+      elementKey: 'qr',
+      kind: 'qr',
+      sourceField: null,
+      staticText: null,
+      xMm: 30,
+      yMm: 5,
+      widthMm: 18,
+      heightMm: 18,
+      rotationDeg: 0,
+      zIndex: 3,
+      style: { qrTemplate: '{order.order_name}|{detail.erp_id}', qrErrorCorrection: 'M' },
+      condition: {},
+    });
+
+    const svg = renderSvgPages(base, [row({ 'order.order_name': 'ORDER-42', 'detail.erp_id': '60044' })]).pages[0];
+
+    expect(svg).toContain('data-label-element-kind="qr"');
+    expect(svg).toContain('data-qr-payload="ORDER-42|60044"');
+    expect(svg).toContain('<rect x="30" y="5" width="18" height="18" fill="white"/>');
+    expect(svg).toMatch(/<rect x="[^"]+" y="[^"]+" width="[^"]+" height="[^"]+" fill="black"\/>/);
+    const firstBlackModule = svg.match(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="[^"]+" fill="black"\/>/);
+    expect(firstBlackModule).toBeTruthy();
+    const firstBlackX = Number(firstBlackModule?.[1]);
+    const moduleSide = Number(firstBlackModule?.[3]);
+    expect(firstBlackX).toBeGreaterThanOrEqual(30 + moduleSide * 4);
+  });
+
+  it('renders distinct qr payloads for distinct rows', () => {
+    const base = template();
+    base.elements.push({
+      labelTemplateElementId: 4,
+      elementKey: 'qr',
+      kind: 'qr',
+      sourceField: null,
+      staticText: null,
+      xMm: 30,
+      yMm: 5,
+      widthMm: 18,
+      heightMm: 18,
+      rotationDeg: 0,
+      zIndex: 3,
+      style: { qrTemplate: '{order.order_name}|{detail.erp_id}|{label.counter}', qrErrorCorrection: 'Q' },
+      condition: {},
+    });
+
+    const pages = renderSvgPages(base, [
+      row({ 'order.order_name': 'ORDER-42', 'detail.erp_id': '60044', 'label.counter': '1' }, 1),
+      row({ 'order.order_name': 'ORDER-77', 'detail.erp_id': '60055', 'label.counter': '2' }, 2),
+    ]).pages;
+
+    expect(pages[0]).toContain('data-qr-payload="ORDER-42|60044|1"');
+    expect(pages[1]).toContain('data-qr-payload="ORDER-77|60055|2"');
+  });
+
+  it('keeps rendering labels when a qr template resolves to an empty payload', () => {
+    const base = template();
+    base.elements = [
+      {
+        labelTemplateElementId: 4,
+        elementKey: 'qr',
+        kind: 'qr',
+        sourceField: null,
+        staticText: null,
+        xMm: 30,
+        yMm: 5,
+        widthMm: 18,
+        heightMm: 18,
+        rotationDeg: 0,
+        zIndex: 3,
+        style: { qrTemplate: '{bazis.comment}', qrErrorCorrection: 'M' },
+        condition: {},
+      },
+    ];
+
+    const svg = renderSvgPages(base, [row({ 'bazis.comment': '' })]).pages[0];
+
+    expect(svg).toContain('data-label-element-kind="qr"');
+    expect(svg).toContain('data-qr-payload=""');
+    expect(svg).toContain('<rect x="30" y="5" width="18" height="18" fill="white"/>');
+    expect(svg).not.toContain('fill="black"');
+  });
+
   it('renders content-bearing BMP/PNG and sample-compatible BMP-backed .emf entries in a ZIP', async () => {
     const zip = await renderLabelsZip({
       generationId: 7,
@@ -135,6 +221,6 @@ function template(): LabelTemplateDto {
   };
 }
 
-function row(values: Record<string, string>): LabelRow {
-  return { rowIndex: 1, detailId: 1, orderId: 42, copyIndex: 1, copyCount: 1, values };
+function row(values: Record<string, string>, rowIndex = 1): LabelRow {
+  return { rowIndex, detailId: 1, orderId: 42, copyIndex: 1, copyCount: 1, values };
 }

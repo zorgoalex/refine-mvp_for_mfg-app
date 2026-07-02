@@ -1,5 +1,5 @@
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
-export type LabelElementKind = 'text' | 'line' | 'rect';
+export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr';
 
 export interface LabelFieldCatalogItem {
   id: string;

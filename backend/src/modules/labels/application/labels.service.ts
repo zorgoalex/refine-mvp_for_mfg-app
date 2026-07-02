@@ -4,6 +4,7 @@ import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { isBuiltInLabelFieldId, isSupportedFieldBinding } from './bazis-field-catalog';
 import { LABEL_FIELD_CATALOG, type LabelFieldCatalogItem } from './bazis-field-catalog';
+import { validateQrTemplateElement } from './label-template-fields';
 import type {
   CreateLabelTemplateCommand,
   DeleteLabelTemplateCommand,
@@ -174,6 +175,10 @@ function validateElementFieldBinding(
   customFieldSchema: Record<string, unknown>,
   index: number,
 ): void {
+  if (element.kind === 'qr') {
+    validateQrTemplateElement(element, customFieldSchema, index);
+    return;
+  }
   const binding = element.sourceField?.trim();
   if (!binding) {
     if (element.kind === 'text' && !element.staticText?.trim()) {

@@ -1,6 +1,6 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 
-export type LabelElementKind = 'text' | 'line' | 'rect';
+export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr';
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
 
 export interface LabelTemplateElementDto {

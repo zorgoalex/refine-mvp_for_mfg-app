@@ -79,6 +79,66 @@ describe('LabelsService', () => {
     expect(repo.createTemplate).not.toHaveBeenCalled();
   });
 
+  it('rejects invalid qr placeholders before create template repository writes', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      elements: [
+        {
+          elementKey: 'qr-invalid',
+          kind: 'qr',
+          xMm: 0,
+          yMm: 0,
+          widthMm: 20,
+          heightMm: 20,
+          style: { qrTemplate: '{unknown.field}' },
+        },
+      ],
+    });
+
+    await expect(
+      service.createTemplate({ currentUser: templateManager, requestId: 'req-qr-create', input }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'LABEL_FIELD_BINDING_INVALID',
+      details: { fieldBinding: 'unknown.field' },
+    });
+    expect(repo.createTemplate).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty qr templates before update template repository writes', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      elements: [
+        {
+          elementKey: 'qr-empty',
+          kind: 'qr',
+          xMm: 0,
+          yMm: 0,
+          widthMm: 20,
+          heightMm: 20,
+          style: { qrTemplate: '   ' },
+        },
+      ],
+    });
+
+    await expect(
+      service.updateTemplate({
+        currentUser: templateManager,
+        requestId: 'req-qr-update',
+        id: 7,
+        expectedVersion: 3,
+        input,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'LABEL_QR_TEMPLATE_EMPTY',
+      details: { elementIndex: 0 },
+    });
+    expect(repo.updateTemplate).not.toHaveBeenCalled();
+  });
+
   it('accepts custom schema bindings from the same template input', async () => {
     const repo = fakeRepo();
     const service = new LabelsService({ repo });

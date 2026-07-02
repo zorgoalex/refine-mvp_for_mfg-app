@@ -1,8 +1,10 @@
 import JSZip from 'jszip';
 import { PNG } from 'pngjs';
 import { Resvg } from '@resvg/resvg-js';
+import QRCode from 'qrcode';
 import { existsSync } from 'node:fs';
 import { writeBmp } from './bmp-writer';
+import { readQrErrorCorrection, readQrTemplate, renderLabelTemplateString } from './label-template-fields';
 import type { LabelRow } from './label-row-builder';
 import type { LabelExportFormat, LabelTemplateDto } from './labels.types';
 
@@ -80,6 +82,9 @@ function renderElement(
   if (element.kind === 'rect') {
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="black"/>`;
   }
+  if (element.kind === 'qr') {
+    return renderQrElement(element, values);
+  }
   const value = element.sourceField ? values[element.sourceField] : element.staticText;
   const sizeMm = fontSizeMm(element.style.fontSize);
   const align = labelTextAlign(element.style.textAlign);
@@ -92,6 +97,44 @@ function renderElement(
 
 function renderSvgPage(template: LabelTemplateDto, row: LabelRow): string {
   return renderSvgPages(template, [row]).pages[0] ?? '';
+}
+
+function renderQrElement(
+  element: LabelTemplateDto['elements'][number],
+  values: Record<string, string | number | boolean | null>,
+): string {
+  const x = element.xMm;
+  const y = element.yMm;
+  const width = element.widthMm;
+  const height = element.heightMm;
+  const side = Math.max(1, Math.min(width, height));
+  const payload = renderLabelTemplateString(readQrTemplate(element.style), values);
+  const originX = x + (width - side) / 2;
+  const originY = y + (height - side) / 2;
+  if (!payload) {
+    return `<g data-label-element-kind="qr" data-qr-payload=""><rect x="${originX}" y="${originY}" width="${side}" height="${side}" fill="white"/></g>`;
+  }
+
+  const errorCorrectionLevel = readQrErrorCorrection(element.style);
+  const code = QRCode.create(payload, { errorCorrectionLevel });
+  const moduleCount = code.modules.size;
+  const quietZoneModules = 4;
+  const totalModules = moduleCount + quietZoneModules * 2;
+  const moduleSide = side / totalModules;
+  const modules: string[] = [];
+
+  for (let row = 0; row < moduleCount; row += 1) {
+    for (let col = 0; col < moduleCount; col += 1) {
+      if (code.modules.get(row, col) !== 1) {
+        continue;
+      }
+      modules.push(
+        `<rect x="${originX + (col + quietZoneModules) * moduleSide}" y="${originY + (row + quietZoneModules) * moduleSide}" width="${moduleSide}" height="${moduleSide}" fill="black"/>`,
+      );
+    }
+  }
+
+  return `<g data-label-element-kind="qr" data-qr-payload="${escapeXml(payload)}"><rect x="${originX}" y="${originY}" width="${side}" height="${side}" fill="white"/>${modules.join('')}</g>`;
 }
 
 function renderSvgToPng(svg: string): Buffer {
