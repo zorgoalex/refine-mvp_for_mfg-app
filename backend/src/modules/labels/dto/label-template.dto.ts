@@ -6,7 +6,7 @@ const exportFormatSchema = z.enum(['bmp', 'png', 'emf']);
 export const labelTemplateElementInputSchema = z
   .object({
     elementKey: z.string().trim().min(1).max(100),
-    kind: z.enum(['text', 'line', 'rect']),
+    kind: z.enum(['text', 'line', 'rect', 'qr']),
     sourceField: z.string().trim().min(1).max(200).nullable().optional(),
     staticText: z.string().max(1000).nullable().optional(),
     xMm: z.number().min(0),

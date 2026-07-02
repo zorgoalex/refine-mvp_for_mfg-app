@@ -59,7 +59,7 @@ interface TemplateRow extends QueryResultRow {
 interface ElementRow extends QueryResultRow {
   label_template_element_id: string | number;
   element_key: string;
-  kind: 'text' | 'line' | 'rect';
+  kind: 'text' | 'line' | 'rect' | 'qr';
   source_field: string | null;
   static_text: string | null;
   x_mm: string | number;
