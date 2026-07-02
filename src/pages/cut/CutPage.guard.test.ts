@@ -250,6 +250,11 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain("title: 'Профиль'");
     expect(source).toContain("title: 'Материал деталей'");
     expect(source).toContain('formatJobMaterialNames(row.materialNames)');
+    expect(source).toContain('chunkJobMaterialNames(row.materialNames)');
+    expect(source).toContain('names.slice(i, i + 2)');
+    expect(source).toContain('CUT_JOBS_TABLE_SCROLL_Y');
+    expect(source).toContain('scroll={{ y: CUT_JOBS_TABLE_SCROLL_Y }}');
+    expect(source).toContain('pagination={false}');
     expect(source).not.toContain("title: 'Детали'");
   });
   it('wires the profile selector to setProfile', () => {

@@ -88,6 +88,8 @@ const STATUS_TAG_COLORS: Record<string, string> = {
   archived: 'default',
 };
 
+const CUT_JOBS_TABLE_SCROLL_Y = 220;
+
 const sheetPreviewListStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'row',
@@ -144,6 +146,15 @@ const revokeObjectUrls = (map: Record<string, string>): void => {
 function formatJobMaterialNames(materialNames: string[] | undefined): string {
   const names = (materialNames ?? []).map((name) => name.trim()).filter(Boolean);
   return names.length > 0 ? names.join(', ') : '—';
+}
+
+function chunkJobMaterialNames(materialNames: string[] | undefined): string[][] {
+  const names = (materialNames ?? []).map((name) => name.trim()).filter(Boolean);
+  const rows: string[][] = [];
+  for (let i = 0; i < names.length; i += 2) {
+    rows.push(names.slice(i, i + 2));
+  }
+  return rows;
 }
 
 /**
@@ -1024,13 +1035,18 @@ export const CutPage: React.FC = () => {
         width: 220,
         render: (_: unknown, row: CutJobDto) => {
           const label = formatJobMaterialNames(row.materialNames);
+          const materialRows = chunkJobMaterialNames(row.materialNames);
           return label === '—' ? (
             label
           ) : (
             <Tooltip title={label}>
-              <Text style={{ maxWidth: 200 }} ellipsis>
-                {label}
-              </Text>
+              <div style={{ maxWidth: 200 }}>
+                {materialRows.map((materials, index) => (
+                  <Text key={`${row.cutJobId}-materials-${index}`} style={{ display: 'block' }} ellipsis>
+                    {materials.join(', ')}
+                  </Text>
+                ))}
+              </div>
             </Tooltip>
           );
         },
@@ -1259,7 +1275,8 @@ export const CutPage: React.FC = () => {
           columns={jobColumns}
           dataSource={filteredJobs}
           loading={jobsLoading}
-          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          pagination={false}
+          scroll={{ y: CUT_JOBS_TABLE_SCROLL_Y }}
           locale={{ emptyText: 'Нет раскроев' }}
           rowClassName={(row) => (row.cutJobId === job?.cutJobId ? 'ant-table-row-selected' : '')}
           onRow={(row) => ({
