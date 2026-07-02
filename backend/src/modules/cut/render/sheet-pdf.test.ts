@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PDFDocument from 'pdfkit';
 import { buildSheetsPdf } from './sheet-pdf';
+import { FONT_FAMILY } from './sheet-png';
 
 const SVG = (label: string) =>
   `<svg viewBox="0 0 2800 2070"><rect x="0" y="0" width="2800" height="2070" fill="#fff"/><text x="100" y="100">${label}</text></svg>`;
@@ -34,6 +35,7 @@ describe('buildSheetsPdf', () => {
 
   it('renders bath template header fields with unique per-sheet values', async () => {
     const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    const fontSpy = vi.spyOn(PDFDocument.prototype, 'font');
     await buildSheetsPdf([
       {
         svg: SVG('bath'),
@@ -57,6 +59,7 @@ describe('buildSheetsPdf', () => {
     ]);
 
     const rendered = textSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(fontSpy).toHaveBeenCalledWith(FONT_FAMILY);
     expect(rendered).toContain('Клиент:');
     expect(rendered).toContain('Client A, Client B');
     expect(rendered).toContain('Пленка:');

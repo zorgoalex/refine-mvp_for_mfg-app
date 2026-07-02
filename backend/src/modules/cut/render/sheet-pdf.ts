@@ -55,6 +55,7 @@ export function buildSheetsPdf(sheets: readonly PdfSheetInput[]): Promise<Buffer
     const fontPath = resolveFontPath();
     if (fontPath) {
       doc.registerFont(FONT_FAMILY, fontPath);
+      doc.font(FONT_FAMILY);
     }
     const fontCallback = fontPath ? () => FONT_FAMILY : undefined;
 
