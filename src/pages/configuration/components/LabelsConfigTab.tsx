@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { AlignCenterOutlined, AlignLeftOutlined, AlignRightOutlined, CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import { AlignCenterOutlined, AlignLeftOutlined, AlignRightOutlined, CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, QrcodeOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import type Konva from 'konva';
 import { Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import { labelsApi } from '../../../api/labelsApi';
@@ -13,6 +13,15 @@ import type {
   LabelTemplateInput,
 } from '../../../api/types/labelsApi.types';
 import { can } from '../../../utils/permissions';
+import {
+  autoShiftForQr,
+  collectQrConflicts,
+  extractQrTemplateFieldIds,
+  qrErrorCorrectionOf,
+  qrProtectedRect,
+  qrSideOf,
+  qrTemplateOf,
+} from './labelQrHelpers';
 
 const { Text } = Typography;
 const EXPORT_FORMATS: LabelExportFormat[] = ['bmp', 'png', 'emf'];
@@ -35,6 +44,13 @@ const PREVIEW_FIELD_VALUES: Record<string, string> = {
   'date.today': '24.06.2026',
   'label.counter_text': 'Бир.№    1 / 0',
 };
+const QR_CONFLICT_ERROR = 'QR_CONFLICT';
+const QR_ERROR_CORRECTION_OPTIONS = [
+  { value: 'L', label: 'L' },
+  { value: 'M', label: 'M' },
+  { value: 'Q', label: 'Q' },
+  { value: 'H', label: 'H' },
+];
 
 interface TemplateFormValues {
   name: string;
@@ -80,6 +96,7 @@ export const LabelsConfigTab: React.FC = () => {
   const [draggingField, setDraggingField] = useState<LabelFieldCatalogItem | null>(null);
   const [dragCursor, setDragCursor] = useState<{ x: number; y: number } | null>(null);
   const [visualExpanded, setVisualExpanded] = useState(false);
+  const [qrConflicts, setQrConflicts] = useState<string[]>([]);
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
 
@@ -135,9 +152,25 @@ export const LabelsConfigTab: React.FC = () => {
     [customSchemaRows.rows, fields],
   );
   const usedFieldIds = useMemo(
-    () => new Set(elements.map((element) => element.sourceField).filter((fieldId): fieldId is string => Boolean(fieldId))),
+    () => {
+      const ids = new Set(elements.map((element) => element.sourceField).filter((fieldId): fieldId is string => Boolean(fieldId)));
+      for (const element of elements) {
+        if (element.kind !== 'qr') continue;
+        for (const fieldId of extractQrTemplateFieldIds(qrTemplateOf(element))) {
+          ids.add(fieldId);
+        }
+      }
+      return ids;
+    },
     [elements],
   );
+
+  useEffect(() => {
+    setQrConflicts(collectQrConflicts(elements, {
+      widthMm: Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85),
+      heightMm: Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88),
+    }).map((conflict) => conflict.conflictKey));
+  }, [elements, previewHeightMm, previewWidthMm, selectedTemplate]);
 
   useEffect(() => {
     if (!draggingField) {
@@ -194,6 +227,13 @@ export const LabelsConfigTab: React.FC = () => {
 
   const buildTemplatePayload = (values: TemplateFormValues, name = values.name): LabelTemplateInput => {
     const customFieldSchema = parseCustomSchema(customSchemaText);
+    const conflicts = collectQrConflicts(elements, {
+      widthMm: Number(values.canvasWidthMm ?? 85),
+      heightMm: Number(values.canvasHeightMm ?? 88),
+    });
+    if (conflicts.length > 0) {
+      throw new Error(QR_CONFLICT_ERROR);
+    }
     return {
       name: name.trim(),
       description: values.description?.trim() || null,
@@ -221,8 +261,10 @@ export const LabelsConfigTab: React.FC = () => {
       }
       await load();
       startNew();
-    } catch {
-      message.error('Не удалось сохранить шаблон');
+    } catch (error) {
+      message.error(error instanceof Error && error.message === QR_CONFLICT_ERROR
+        ? 'QR-код пересекается с элементами или выходит за границы бирки'
+        : 'Не удалось сохранить шаблон');
     } finally {
       setSaving(false);
     }
@@ -253,8 +295,10 @@ export const LabelsConfigTab: React.FC = () => {
       setSelectedTemplate(created);
       setElements(created.elements);
       setCustomSchemaText(JSON.stringify(created.customFieldSchema ?? {}, null, 2));
-    } catch {
-      message.error('Не удалось создать копию шаблона');
+    } catch (error) {
+      message.error(error instanceof Error && error.message === QR_CONFLICT_ERROR
+        ? 'QR-код пересекается с элементами или выходит за границы бирки'
+        : 'Не удалось создать копию шаблона');
     } finally {
       setSaving(false);
     }
@@ -262,29 +306,43 @@ export const LabelsConfigTab: React.FC = () => {
 
   const addElement = (kind: LabelElementKind) => {
     const elementKey = `${kind}-${Date.now()}`;
-    setElements((current) => [
-      ...current,
-      {
+    setElements((current) => {
+      const nextElement: LabelTemplateElement = {
         elementKey,
         kind,
         sourceField: kind === 'text' ? 'bazis.name' : null,
         staticText: kind === 'text' ? null : null,
-        xMm: 2,
-        yMm: 2 + current.length * 6,
-        widthMm: kind === 'line' ? 60 : 40,
-        heightMm: kind === 'line' ? 0 : 6,
+        xMm: kind === 'qr' ? 10 : 2,
+        yMm: kind === 'qr' ? 10 : 2 + current.length * 6,
+        widthMm: kind === 'line' ? 60 : kind === 'qr' ? 20 : 40,
+        heightMm: kind === 'line' ? 0 : kind === 'qr' ? 20 : 6,
         rotationDeg: 0,
         zIndex: current.length,
-        style: { fontSize: 12 },
+        style: kind === 'qr'
+          ? { qrTemplate: '{bazis.detail_id}', qrErrorCorrection: 'M' }
+          : { fontSize: 12 },
         condition: {},
-      },
-    ]);
+      };
+      if (kind !== 'qr') return [...current, nextElement];
+      const result = autoShiftForQr({
+        qr: nextElement,
+        elements: current,
+        canvas: currentCanvasBounds(),
+      });
+      setQrConflicts(result.conflicts.map((conflict) => conflict.conflictKey));
+      return result.elements;
+    });
     setSelectedElementKey(elementKey);
   };
 
   const patchElement = (index: number, patch: Partial<LabelTemplateElement>) => {
     setElements((current) => current.map((element, i) => (i === index ? { ...element, ...patch } : element)));
   };
+
+  const currentCanvasBounds = () => ({
+    widthMm: Number(form.getFieldValue('canvasWidthMm') ?? selectedTemplate?.canvasWidthMm ?? 85),
+    heightMm: Number(form.getFieldValue('canvasHeightMm') ?? selectedTemplate?.canvasHeightMm ?? 88),
+  });
 
   const addCustomField = () => {
     const schema = parseEditableCustomSchema(customSchemaText);
@@ -309,6 +367,11 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const moveElement = (elementKey: string, xMm: number, yMm: number) => {
+    const target = elements.find((element) => element.elementKey === elementKey);
+    if (target?.kind === 'qr') {
+      applyQrGeometryPatch(elementKey, { xMm: roundMm(xMm), yMm: roundMm(yMm) });
+      return;
+    }
     setElements((current) =>
       current.map((element) =>
         element.elementKey === elementKey
@@ -319,6 +382,11 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const patchElementByKey = (elementKey: string, patch: Partial<LabelTemplateElement>) => {
+    const target = elements.find((element) => element.elementKey === elementKey);
+    if (target?.kind === 'qr' && (patch.xMm !== undefined || patch.yMm !== undefined || patch.widthMm !== undefined || patch.heightMm !== undefined)) {
+      applyQrGeometryPatch(elementKey, patch);
+      return;
+    }
     setElements((current) =>
       current.map((element) =>
         element.elementKey === elementKey
@@ -326,6 +394,51 @@ export const LabelsConfigTab: React.FC = () => {
           : element,
       ),
     );
+  };
+
+  const applyQrGeometryPatch = (elementKey: string, patch: Partial<LabelTemplateElement>) => {
+    setElements((current) => {
+      const currentQr = current.find((element) => element.elementKey === elementKey);
+      if (!currentQr || currentQr.kind !== 'qr') {
+        return current.map((element) => (element.elementKey === elementKey ? { ...element, ...patch } : element));
+      }
+      const qr = { ...currentQr, ...patch };
+      const result = autoShiftForQr({
+        qr,
+        elements: current,
+        canvas: currentCanvasBounds(),
+      });
+      setQrConflicts(result.conflicts.map((conflict) => conflict.conflictKey));
+      return result.elements;
+    });
+  };
+
+  const patchQrStyle = (index: number, patch: Record<string, unknown>) => {
+    setElements((current) => current.map((element, i) => (
+      i === index
+        ? { ...element, style: { ...(element.style ?? {}), ...patch } }
+        : element
+    )));
+  };
+
+  const changeElementKind = (index: number, kind: LabelElementKind) => {
+    const current = elements[index];
+    if (!current) return;
+    const patch: Partial<LabelTemplateElement> = {
+      kind,
+      sourceField: kind === 'text' ? current.sourceField ?? 'bazis.name' : null,
+      staticText: kind === 'text' ? current.staticText ?? null : null,
+      heightMm: kind === 'line' ? 0 : kind === 'qr' ? qrSideOf(current) : Math.max(6, Number(current.heightMm ?? 6)),
+      widthMm: kind === 'qr' ? qrSideOf(current) : kind === 'line' ? Math.max(10, Number(current.widthMm ?? 60)) : Number(current.widthMm ?? 40),
+      style: kind === 'qr'
+        ? { ...(current.style ?? {}), qrTemplate: qrTemplateOf(current) || '{bazis.detail_id}', qrErrorCorrection: qrErrorCorrectionOf(current) }
+        : { ...(current.style ?? {}), fontSize: Number(current.style?.fontSize ?? 12) },
+    };
+    if (kind === 'qr') {
+      applyQrGeometryPatch(current.elementKey, patch);
+      return;
+    }
+    patchElement(index, patch);
   };
 
   const deleteElementByKey = (elementKey: string) => {
@@ -641,6 +754,9 @@ export const LabelsConfigTab: React.FC = () => {
                 <Tooltip title="Добавляет прямоугольник. Используйте для рамок, блоков и визуального выделения областей бирки.">
                   <Button disabled={!canManage} onClick={() => addElement('rect')}>Прямоугольник</Button>
                 </Tooltip>
+                <Tooltip title="Добавляет QR-код. Данные собираются по шаблону из полей детали, заказа, Bazis и кастомных полей.">
+                  <Button icon={<QrcodeOutlined />} disabled={!canManage} onClick={() => addElement('qr')}>QR-код</Button>
+                </Tooltip>
               </Space>
             )}
             size="small"
@@ -661,11 +777,12 @@ export const LabelsConfigTab: React.FC = () => {
                     value={element.kind}
                     disabled={!canManage}
                     style={{ width: '100%' }}
-                    onChange={(kind) => patchElement(index, { kind })}
+                    onChange={(kind) => changeElementKind(index, kind)}
                     options={[
                       { value: 'text', label: 'Текст' },
                       { value: 'line', label: 'Линия' },
                       { value: 'rect', label: 'Прямоугольник' },
+                      { value: 'qr', label: 'QR-код' },
                     ]}
                   />
                 ),
@@ -696,6 +813,27 @@ export const LabelsConfigTab: React.FC = () => {
                   />
                 ),
               },
+              {
+                title: 'QR шаблон',
+                width: 260,
+                render: (_, element, index) => (
+                  <Space.Compact block>
+                    <Input
+                      value={qrTemplateOf(element)}
+                      placeholder="{bazis.detail_id}|{bazis.name}"
+                      disabled={!canManage || element.kind !== 'qr'}
+                      onChange={(event) => patchQrStyle(index, { qrTemplate: event.target.value })}
+                    />
+                    <Select
+                      value={qrErrorCorrectionOf(element)}
+                      disabled={!canManage || element.kind !== 'qr'}
+                      style={{ width: 72 }}
+                      options={QR_ERROR_CORRECTION_OPTIONS}
+                      onChange={(qrErrorCorrection) => patchQrStyle(index, { qrErrorCorrection })}
+                    />
+                  </Space.Compact>
+                ),
+              },
               ...(['xMm', 'yMm', 'widthMm', 'heightMm'] as const).map((key) => ({
                 title: key,
                 width: 95,
@@ -705,7 +843,11 @@ export const LabelsConfigTab: React.FC = () => {
                     min={0}
                     disabled={!canManage}
                     style={{ width: '100%' }}
-                    onChange={(value) => patchElement(index, { [key]: Number(value ?? 0) })}
+                    onChange={(value) => {
+                      const patch = { [key]: Number(value ?? 0) } as Partial<LabelTemplateElement>;
+                      if (element.kind === 'qr') applyQrGeometryPatch(element.elementKey, patch);
+                      else patchElement(index, patch);
+                    }}
                   />
                 ),
               })),
@@ -767,6 +909,15 @@ export const LabelsConfigTab: React.FC = () => {
                   setDragCursor(null);
                 }}
               />
+              {qrConflicts.length > 0 && (
+                <Alert
+                  data-label-qr-conflict
+                  type="warning"
+                  showIcon
+                  style={{ marginTop: 8 }}
+                  message="QR-код пересекается с элементами или выходит за границы бирки"
+                />
+              )}
             </Card>
           </Col>
         </Row>
@@ -1610,6 +1761,67 @@ function renderKonvaPreviewElement({
       </React.Fragment>
     );
   }
+  if (element.kind === 'qr') {
+    const side = qrSideOf(element);
+    const protectedRect = qrProtectedRect(element);
+    const moduleSide = side / 7;
+    const modules = [
+      [0, 0], [1, 0], [2, 0], [4, 0], [5, 0], [6, 0],
+      [0, 1], [2, 1], [3, 1], [6, 1],
+      [0, 2], [1, 2], [2, 2], [4, 2], [6, 2],
+      [3, 3], [5, 3],
+      [0, 4], [2, 4], [4, 4], [5, 4], [6, 4],
+      [0, 5], [3, 5], [6, 5],
+      [0, 6], [1, 6], [2, 6], [4, 6], [6, 6],
+    ];
+    return (
+      <React.Fragment key={key}>
+        <KonvaRect
+          x={protectedRect.x}
+          y={protectedRect.y}
+          width={protectedRect.width}
+          height={protectedRect.height}
+          stroke="#8c8c8c"
+          strokeWidth={0.25}
+          dash={[1, 1]}
+          listening={false}
+        />
+        <KonvaRect
+          {...common}
+          width={side}
+          height={side}
+          fill="white"
+          stroke="black"
+          strokeWidth={0.35}
+        />
+        {modules.map(([col, row], index) => (
+          <KonvaRect
+            key={`${key}-module-${index}`}
+            x={x + col * moduleSide}
+            y={y + row * moduleSide}
+            width={moduleSide}
+            height={moduleSide}
+            fill="black"
+            listening={false}
+          />
+        ))}
+        <KonvaText
+          x={x}
+          y={y + side / 2 - 2}
+          width={side}
+          height={4}
+          text="QR"
+          fontFamily="Arial"
+          fontSize={Math.max(2, side * 0.18)}
+          fontStyle="bold"
+          fill="#1677ff"
+          align="center"
+          listening={false}
+        />
+        {selectionBox}
+      </React.Fragment>
+    );
+  }
 
   const fontSize = Math.max(1.8, Number(element.style?.fontSize ?? 10) * 0.35);
   const textAlign = getLabelTextAlign(element);
@@ -1642,6 +1854,7 @@ function describeLabelElement(
 ): React.ReactNode {
   if (element.kind === 'rect') return 'Прямоугольник';
   if (element.kind === 'line') return 'Линия';
+  if (element.kind === 'qr') return `QR-код: ${qrTemplateOf(element) || 'шаблон не задан'}`;
   if (element.sourceField) {
     const field = fieldInfo.get(element.sourceField);
     if (field) {
