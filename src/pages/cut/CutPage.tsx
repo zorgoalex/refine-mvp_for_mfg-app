@@ -88,7 +88,7 @@ const STATUS_TAG_COLORS: Record<string, string> = {
   archived: 'default',
 };
 
-const CUT_JOBS_TABLE_SCROLL_Y = 264;
+const CUT_JOBS_TABLE_CONTAINER_HEIGHT = 317;
 
 const sheetPreviewListStyle: React.CSSProperties = {
   display: 'flex',
@@ -1026,18 +1026,11 @@ export const CutPage: React.FC = () => {
         width: '20ch',
         render: (_: unknown, row: CutJobDto) => {
           const label = formatJobMaterialNames(row.materialNames);
-          const materialNames = (row.materialNames ?? []).map((name) => name.trim()).filter(Boolean);
           return label === '—' ? (
             label
           ) : (
             <Tooltip title={label}>
-              <div className="cut-job-materials-cell">
-                {materialNames.map((material, index) => (
-                  <Text key={`${row.cutJobId}-materials-${index}`} className="cut-job-materials-line">
-                    {material}
-                  </Text>
-                ))}
-              </div>
+              <Text className="cut-job-materials-cell">{label}</Text>
             </Tooltip>
           );
         },
@@ -1047,7 +1040,7 @@ export const CutPage: React.FC = () => {
         key: 'actions',
         width: 200,
         render: (_: unknown, row: CutJobDto) => (
-          <Space>
+          <Space className="cut-jobs-actions" size={6}>
             <Button size="small" type="link" onClick={() => openJob(row.cutJobId)} disabled={busy}>
               Открыть
             </Button>
@@ -1260,23 +1253,24 @@ export const CutPage: React.FC = () => {
           </Space>
         }
       >
-        <Table<CutJobDto>
-          className="cut-jobs-table"
-          size="small"
-          rowKey="cutJobId"
-          columns={jobColumns}
-          dataSource={filteredJobs}
-          loading={jobsLoading}
-          pagination={false}
-          scroll={{ y: CUT_JOBS_TABLE_SCROLL_Y }}
-          locale={{ emptyText: 'Нет раскроев' }}
-          rowClassName={(row) => (row.cutJobId === job?.cutJobId ? 'ant-table-row-selected' : '')}
-          onRow={(row) => ({
-            onDoubleClick: () => {
-              if (!busy) void openJob(row.cutJobId);
-            },
-          })}
-        />
+        <div className="cut-jobs-table-container" style={{ maxHeight: CUT_JOBS_TABLE_CONTAINER_HEIGHT }}>
+          <Table<CutJobDto>
+            className="cut-jobs-table"
+            size="small"
+            rowKey="cutJobId"
+            columns={jobColumns}
+            dataSource={filteredJobs}
+            loading={jobsLoading}
+            pagination={false}
+            locale={{ emptyText: 'Нет раскроев' }}
+            rowClassName={(row) => (row.cutJobId === job?.cutJobId ? 'ant-table-row-selected' : '')}
+            onRow={(row) => ({
+              onDoubleClick: () => {
+                if (!busy) void openJob(row.cutJobId);
+              },
+            })}
+          />
+        </div>
       </Card>
 
       {job && (

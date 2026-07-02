@@ -630,6 +630,10 @@ html {
 .details-grouped .ant-table-tbody > tr.detail-group-tint-7:hover > td { background-color: var(--app-group-tint-7) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-separator:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
 
+.cut-jobs-table-container {
+  overflow-y: auto;
+}
+
 .cut-jobs-table .ant-table-thead > tr > th {
   padding: 0 2px !important;
   font-size: 50% !important;
@@ -637,19 +641,30 @@ html {
 }
 
 .cut-jobs-table .ant-table-tbody > tr > td {
+  height: auto !important;
   padding: 1px 4px !important;
   font-size: 70% !important;
   line-height: 1 !important;
+  vertical-align: top;
 }
 
 .cut-jobs-table .cut-job-materials-cell {
+  display: block;
   width: 20ch;
   max-width: 20ch;
-}
-
-.cut-jobs-table .cut-job-materials-line {
-  display: block;
   line-height: 1.1;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.cut-jobs-table .cut-jobs-actions {
+  line-height: 1;
+}
+
+.cut-jobs-table .cut-jobs-actions .ant-btn-link {
+  height: auto;
+  min-height: 0;
+  padding: 0 !important;
+  font-size: inherit;
+  line-height: 1 !important;
 }

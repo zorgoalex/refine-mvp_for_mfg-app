@@ -251,14 +251,14 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain("title: 'Материал деталей'");
     expect(source).toContain('formatJobMaterialNames(row.materialNames)');
     expect(source).toContain("width: '20ch'");
-    expect(source).toContain('materialNames.map((material, index)');
-    expect(source).toContain('CUT_JOBS_TABLE_SCROLL_Y');
-    expect(source).toContain('const CUT_JOBS_TABLE_SCROLL_Y = 264');
-    expect(source).toContain('scroll={{ y: CUT_JOBS_TABLE_SCROLL_Y }}');
+    expect(source).toContain('CUT_JOBS_TABLE_CONTAINER_HEIGHT');
+    expect(source).toContain('const CUT_JOBS_TABLE_CONTAINER_HEIGHT = 317');
+    expect(source).toContain('className="cut-jobs-table-container"');
+    expect(source).toContain('maxHeight: CUT_JOBS_TABLE_CONTAINER_HEIGHT');
+    expect(source).not.toContain('scroll={{ y: CUT_JOBS_TABLE_SCROLL_Y }}');
     expect(source).toContain('pagination={false}');
     expect(source).toContain('className="cut-jobs-table"');
     expect(source).toContain('className="cut-job-materials-cell"');
-    expect(source).toContain('className="cut-job-materials-line"');
     expect(source).not.toContain("title: 'Детали'");
   });
   it('wires the profile selector to setProfile', () => {
