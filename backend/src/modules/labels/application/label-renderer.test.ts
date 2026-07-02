@@ -91,6 +91,34 @@ describe('label renderer', () => {
     expect(pages[1]).toContain('data-qr-payload="ORDER-77|60055|2"');
   });
 
+  it('keeps rendering labels when a qr template resolves to an empty payload', () => {
+    const base = template();
+    base.elements = [
+      {
+        labelTemplateElementId: 4,
+        elementKey: 'qr',
+        kind: 'qr',
+        sourceField: null,
+        staticText: null,
+        xMm: 30,
+        yMm: 5,
+        widthMm: 18,
+        heightMm: 18,
+        rotationDeg: 0,
+        zIndex: 3,
+        style: { qrTemplate: '{bazis.comment}', qrErrorCorrection: 'M' },
+        condition: {},
+      },
+    ];
+
+    const svg = renderSvgPages(base, [row({ 'bazis.comment': '' })]).pages[0];
+
+    expect(svg).toContain('data-label-element-kind="qr"');
+    expect(svg).toContain('data-qr-payload=""');
+    expect(svg).toContain('<rect x="30" y="5" width="18" height="18" fill="white"/>');
+    expect(svg).not.toContain('fill="black"');
+  });
+
   it('renders content-bearing BMP/PNG and sample-compatible BMP-backed .emf entries in a ZIP', async () => {
     const zip = await renderLabelsZip({
       generationId: 7,

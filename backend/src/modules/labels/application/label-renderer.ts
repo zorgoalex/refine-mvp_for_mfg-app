@@ -109,14 +109,18 @@ function renderQrElement(
   const height = element.heightMm;
   const side = Math.max(1, Math.min(width, height));
   const payload = renderLabelTemplateString(readQrTemplate(element.style), values);
+  const originX = x + (width - side) / 2;
+  const originY = y + (height - side) / 2;
+  if (!payload) {
+    return `<g data-label-element-kind="qr" data-qr-payload=""><rect x="${originX}" y="${originY}" width="${side}" height="${side}" fill="white"/></g>`;
+  }
+
   const errorCorrectionLevel = readQrErrorCorrection(element.style);
   const code = QRCode.create(payload, { errorCorrectionLevel });
   const moduleCount = code.modules.size;
   const quietZoneModules = 4;
   const totalModules = moduleCount + quietZoneModules * 2;
   const moduleSide = side / totalModules;
-  const originX = x + (width - side) / 2;
-  const originY = y + (height - side) / 2;
   const modules: string[] = [];
 
   for (let row = 0; row < moduleCount; row += 1) {
