@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Col,
+  Collapse,
   Form,
   Input,
   InputNumber,
@@ -23,7 +25,20 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { BorderOutlined, CopyOutlined, MinusOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
+import {
+  AlignCenterOutlined,
+  AlignLeftOutlined,
+  AlignRightOutlined,
+  BorderOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  MinusOutlined,
+  PlusOutlined,
+  QrcodeOutlined,
+  SaveOutlined,
+} from '@ant-design/icons';
+import type Konva from 'konva';
+import { Group as KonvaGroup, Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import { useList } from '@refinedev/core';
 import {
   cutConfigApi,
@@ -51,6 +66,7 @@ import {
 import { CutDefaultSettingsCard } from './CutDefaultSettingsCard';
 
 const { Title, Text, Paragraph } = Typography;
+const { Panel } = Collapse;
 
 /**
  * /configuration "Раскрой" tab (plan §4a, §5). Backend-owned config CRUD via
@@ -296,7 +312,7 @@ export const CutConfigTab: React.FC = () => {
           },
           {
             key: 'pdf-template-editor',
-            label: 'Редактирование шаблонов PDF',
+            label: 'Редактирование шаблонов карт раскроя PDF',
             children: <PdfTemplateEditor templates={config.pdfTemplates} canManage={canManage} />,
           },
         ]}
@@ -333,23 +349,46 @@ export const CutConfigTab: React.FC = () => {
   );
 };
 
-type PdfTemplateElementType = 'field' | 'line' | 'rect';
+type PdfTemplateElementType = 'text' | 'field' | 'custom' | 'qr' | 'line' | 'rect';
+type PdfTextAlign = 'left' | 'center' | 'right';
+type PdfFieldSource = 'job' | 'group' | 'sheet' | 'detail' | 'order' | 'client' | 'computed' | 'custom';
+
+interface PdfFieldCatalogItem {
+  id: string;
+  source: PdfFieldSource;
+  label: string;
+  category: string;
+  type: 'string' | 'number' | 'date';
+}
+
+interface PdfCustomField {
+  fieldId: string;
+  label: string;
+  type: 'string' | 'number' | 'date';
+  sourceField?: string | null;
+}
 
 interface PdfTemplateElement {
   id: string;
   type: PdfTemplateElementType;
   label: string;
-  source: string;
+  source: string | null;
+  text: string | null;
   x: number;
   y: number;
   w: number;
   h: number;
-  align: 'left' | 'center' | 'right';
+  rotation: number;
+  zIndex: number;
+  align: PdfTextAlign;
+  style: Record<string, unknown>;
 }
 
 interface PdfTemplateDraft {
   code: string;
   name: string;
+  page: { width: number; height: number };
+  customFields: PdfCustomField[];
   elements: PdfTemplateElement[];
 }
 
@@ -358,26 +397,75 @@ interface PdfTemplateEditorProps {
   canManage: boolean;
 }
 
-const PDF_TEMPLATE_DRAFTS_KEY = 'cut-pdf-template-drafts:v1';
-const PDF_FIELD_OPTIONS = [
-  { value: 'order.unique_names', label: 'Заказ' },
-  { value: 'client.unique_names', label: 'Клиент' },
-  { value: 'order.date', label: 'Дата' },
-  { value: 'order.ready_date', label: 'Дата готовности' },
-  { value: 'detail.materials', label: 'Материал' },
-  { value: 'detail.thicknesses', label: 'Толщина' },
-  { value: 'detail.films', label: 'Пленка' },
-  { value: 'sheet.number', label: 'Номер листа' },
-  { value: 'sheet.page_count', label: 'Количество листов' },
-] as const;
-
+const PDF_TEMPLATE_DRAFTS_KEY = 'cut-pdf-template-drafts:v2';
+const PDF_PAGE = { width: 297, height: 210 };
+const PDF_OLD_PAGE = { width: 842, height: 595 };
+const PDF_QR_ERROR_CORRECTION_OPTIONS = [
+  { value: 'L', label: 'L' },
+  { value: 'M', label: 'M' },
+  { value: 'Q', label: 'Q' },
+  { value: 'H', label: 'H' },
+];
+const PDF_CUSTOM_FIELD_TYPE_OPTIONS = [
+  { value: 'string', label: 'Строка' },
+  { value: 'number', label: 'Число' },
+  { value: 'date', label: 'Дата' },
+];
+const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
+  { id: 'job.name', source: 'job', label: 'Название задания', category: 'Задание', type: 'string' },
+  { id: 'job.number', source: 'job', label: 'Номер задания', category: 'Задание', type: 'number' },
+  { id: 'job.pdf_template', source: 'job', label: 'Шаблон PDF', category: 'Задание', type: 'string' },
+  { id: 'group.number', source: 'group', label: 'Номер группы', category: 'Группа', type: 'number' },
+  { id: 'group.material', source: 'group', label: 'Материал группы', category: 'Группа', type: 'string' },
+  { id: 'group.film', source: 'group', label: 'Пленка группы', category: 'Группа', type: 'string' },
+  { id: 'sheet.number', source: 'sheet', label: 'Номер листа', category: 'Лист', type: 'number' },
+  { id: 'sheet.page_count', source: 'sheet', label: 'Количество листов', category: 'Лист', type: 'number' },
+  { id: 'sheet.size', source: 'sheet', label: 'Размер листа', category: 'Лист', type: 'string' },
+  { id: 'sheet.details_count', source: 'sheet', label: 'Количество деталей на листе', category: 'Лист', type: 'number' },
+  { id: 'sheet.area', source: 'sheet', label: 'Площадь деталей', category: 'Лист', type: 'number' },
+  { id: 'order.unique_names', source: 'order', label: 'Заказы на листе', category: 'Заказ', type: 'string' },
+  { id: 'order.date', source: 'order', label: 'Дата заказа', category: 'Заказ', type: 'date' },
+  { id: 'order.ready_date', source: 'order', label: 'Дата готовности', category: 'Заказ', type: 'date' },
+  { id: 'client.unique_names', source: 'client', label: 'Клиенты на листе', category: 'Клиент', type: 'string' },
+  { id: 'detail.materials', source: 'detail', label: 'Материалы деталей', category: 'Детали', type: 'string' },
+  { id: 'detail.films', source: 'detail', label: 'Пленки деталей', category: 'Детали', type: 'string' },
+  { id: 'detail.thicknesses', source: 'detail', label: 'Толщины деталей', category: 'Детали', type: 'string' },
+  { id: 'detail.table', source: 'detail', label: 'Таблица деталей', category: 'Детали', type: 'string' },
+  { id: 'computed.today', source: 'computed', label: 'Текущая дата', category: 'Вычисляемые', type: 'date' },
+  { id: 'computed.page_number', source: 'computed', label: 'Номер страницы', category: 'Вычисляемые', type: 'number' },
+  { id: 'computed.page_count', source: 'computed', label: 'Всего страниц', category: 'Вычисляемые', type: 'number' },
+];
+const PDF_PREVIEW_VALUES: Record<string, string> = {
+  'job.name': 'Раскрой заказ 11380',
+  'job.number': '19',
+  'job.pdf_template': 'Профили ванны',
+  'group.number': '1',
+  'group.material': 'Ванна 2080x1050',
+  'group.film': 'Крем брюле -Декор+',
+  'sheet.number': '1',
+  'sheet.page_count': '3',
+  'sheet.size': '2080x1050',
+  'sheet.details_count': '32',
+  'sheet.area': '5.378 м.кв.',
+  'order.unique_names': '11380',
+  'order.date': '03.07.2026',
+  'order.ready_date': '10.07.2026',
+  'client.unique_names': 'Тестовый клиент',
+  'detail.materials': 'Ванна 2080x1050',
+  'detail.films': 'Крем брюле -Декор+',
+  'detail.thicknesses': '16',
+  'detail.table': '#  Длина  Ширина  Кол-во',
+  'computed.today': '03.07.2026',
+  'computed.page_number': '1',
+  'computed.page_count': '3',
+};
 const DEFAULT_PDF_ELEMENTS: PdfTemplateElement[] = [
-  { id: 'field-order', type: 'field', label: 'Заказ', source: 'order.unique_names', x: 36, y: 34, w: 220, h: 22, align: 'left' },
-  { id: 'field-client', type: 'field', label: 'Клиент', source: 'client.unique_names', x: 306, y: 34, w: 220, h: 22, align: 'left' },
-  { id: 'field-film', type: 'field', label: 'Пленка', source: 'detail.films', x: 36, y: 74, w: 220, h: 22, align: 'left' },
-  { id: 'line-header', type: 'line', label: 'Линия шапки', source: 'shape.line', x: 36, y: 62, w: 770, h: 0, align: 'left' },
-  { id: 'rect-sheet', type: 'rect', label: 'Область листа', source: 'sheet.layout', x: 36, y: 112, w: 560, h: 420, align: 'center' },
-  { id: 'rect-table', type: 'rect', label: 'Таблица деталей', source: 'detail.table', x: 622, y: 112, w: 184, h: 230, align: 'center' },
+  makePdfElement('field', { id: 'field-order', label: 'Заказ', source: 'order.unique_names', x: 12, y: 10, w: 84, h: 8, align: 'left' }),
+  makePdfElement('field', { id: 'field-client', label: 'Клиент', source: 'client.unique_names', x: 108, y: 10, w: 78, h: 8, align: 'left' }),
+  makePdfElement('field', { id: 'field-film', label: 'Пленка', source: 'detail.films', x: 198, y: 10, w: 84, h: 8, align: 'left' }),
+  makePdfElement('line', { id: 'line-header', label: 'Линия шапки', x: 12, y: 22, w: 270, h: 0 }),
+  makePdfElement('rect', { id: 'rect-sheet', label: 'Область листа', source: 'sheet.layout', x: 12, y: 34, w: 202, h: 154 }),
+  makePdfElement('rect', { id: 'rect-table', label: 'Таблица деталей', source: 'detail.table', x: 222, y: 34, w: 60, h: 78 }),
 ];
 
 const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canManage }) => {
@@ -386,7 +474,24 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const [selectedCode, setSelectedCode] = useState(() => templates[0]?.code ?? drafts[0]?.code ?? 'standard');
   const selected = drafts.find((draft) => draft.code === selectedCode) ?? drafts[0];
   const [selectedElementId, setSelectedElementId] = useState<string | null>(selected?.elements[0]?.id ?? null);
+  const [fieldSearch, setFieldSearch] = useState('');
+  const [draggingField, setDraggingField] = useState<PdfFieldCatalogItem | null>(null);
+  const [showAllBounds, setShowAllBounds] = useState(false);
   const selectedElement = selected?.elements.find((element) => element.id === selectedElementId) ?? selected?.elements[0] ?? null;
+  const customFields = selected?.customFields ?? [];
+  const customFieldCatalog = useMemo<PdfFieldCatalogItem[]>(
+    () => customFields.map((field) => ({
+      id: `custom.${field.fieldId}`,
+      source: 'custom',
+      label: field.label || field.fieldId,
+      category: 'Пользовательские',
+      type: field.type,
+    })),
+    [customFields],
+  );
+  const fields = useMemo(() => [...customFieldCatalog, ...PDF_FIELD_CATALOG], [customFieldCatalog]);
+  const usedFieldIds = useMemo(() => new Set((selected?.elements ?? []).map((element) => element.source).filter(Boolean) as string[]), [selected]);
+  const customSchemaText = useMemo(() => JSON.stringify(customFields, null, 2), [customFields]);
 
   useEffect(() => {
     setDrafts((prev) => mergePdfTemplateDrafts(prev, templates));
@@ -401,28 +506,91 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     setDrafts((prev) => prev.map((draft) => (draft.code === next.code ? next : draft)));
   }, []);
 
-  const updateElement = useCallback(
-    (patch: Partial<PdfTemplateElement>) => {
-      if (!selected || !selectedElement) return;
+  const patchElementById = useCallback(
+    (id: string, patch: Partial<PdfTemplateElement>) => {
+      if (!selected) return;
       updateSelected({
         ...selected,
-        elements: selected.elements.map((element) => (element.id === selectedElement.id ? { ...element, ...patch } : element)),
+        elements: selected.elements.map((element) => (element.id === id ? normalizePdfElement({ ...element, ...patch }) : element)),
       });
     },
-    [selected, selectedElement, updateSelected],
+    [selected, updateSelected],
+  );
+
+  const updateElement = useCallback(
+    (patch: Partial<PdfTemplateElement>) => {
+      if (!selectedElement) return;
+      patchElementById(selectedElement.id, patch);
+    },
+    [patchElementById, selectedElement],
   );
 
   const addElement = useCallback(
-    (type: PdfTemplateElementType) => {
+    (type: PdfTemplateElementType, patch: Partial<PdfTemplateElement> = {}) => {
       if (!selected) return;
-      const id = `${type}-${Date.now()}`;
-      const base: PdfTemplateElement = type === 'field'
-        ? { id, type, label: 'Новое поле', source: 'order.unique_names', x: 80, y: 90, w: 180, h: 24, align: 'left' }
-        : type === 'line'
-        ? { id, type, label: 'Новая линия', source: 'shape.line', x: 80, y: 120, w: 220, h: 0, align: 'left' }
-        : { id, type, label: 'Новый прямоугольник', source: 'shape.rect', x: 80, y: 140, w: 180, h: 80, align: 'center' };
-      updateSelected({ ...selected, elements: [...selected.elements, base] });
-      setSelectedElementId(id);
+      const element = makePdfElement(type, {
+        id: `${type}-${Date.now().toString(36)}`,
+        zIndex: selected.elements.length,
+        ...patch,
+      });
+      updateSelected({ ...selected, elements: [...selected.elements, element] });
+      setSelectedElementId(element.id);
+    },
+    [selected, updateSelected],
+  );
+
+  const addFieldElement = useCallback(
+    (field: PdfFieldCatalogItem, x = 24, y = 28) => {
+      addElement(field.source === 'custom' ? 'custom' : 'field', {
+        label: field.label,
+        source: field.id,
+        x,
+        y,
+        w: Math.min(80, Math.max(34, field.label.length * 3.2)),
+        h: 8,
+        align: 'left',
+      });
+    },
+    [addElement],
+  );
+
+  const deleteElement = useCallback(
+    (id: string) => {
+      if (!selected) return;
+      const nextElements = selected.elements.filter((element) => element.id !== id);
+      updateSelected({ ...selected, elements: nextElements });
+      setSelectedElementId(nextElements[0]?.id ?? null);
+    },
+    [selected, updateSelected],
+  );
+
+  const duplicateElement = useCallback(
+    (id: string) => {
+      if (!selected) return;
+      const source = selected.elements.find((element) => element.id === id);
+      if (!source) return;
+      const copy = normalizePdfElement({
+        ...source,
+        id: `${source.type}-${Date.now().toString(36)}`,
+        label: `${source.label} копия`,
+        x: source.x + 4,
+        y: source.y + 4,
+        zIndex: selected.elements.length,
+      });
+      updateSelected({ ...selected, elements: [...selected.elements, copy] });
+      setSelectedElementId(copy.id);
+    },
+    [selected, updateSelected],
+  );
+
+  const moveZ = useCallback(
+    (id: string, direction: 'front' | 'back') => {
+      if (!selected) return;
+      const target = selected.elements.find((element) => element.id === id);
+      if (!target) return;
+      const ordered = selected.elements.filter((element) => element.id !== id).sort((a, b) => a.zIndex - b.zIndex);
+      const next = direction === 'front' ? [...ordered, target] : [target, ...ordered];
+      updateSelected({ ...selected, elements: next.map((element, index) => ({ ...element, zIndex: index })) });
     },
     [selected, updateSelected],
   );
@@ -434,7 +602,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
       ...selected,
       code,
       name: `${selected.name} копия`,
-      elements: selected.elements.map((element) => ({ ...element, id: `${element.id}-copy` })),
+      elements: selected.elements.map((element, index) => ({ ...element, id: `${element.id}-copy-${index}` })),
     };
     setDrafts((prev) => [...prev, copy]);
     setSelectedCode(code);
@@ -444,25 +612,19 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const saveDrafts = useCallback(async () => {
     if (!selected) return;
     const template = templates.find((item) => item.code === selected.code);
+    const layout = pdfDraftToLayout(selected);
     if (!template) {
-      window.localStorage.setItem(PDF_TEMPLATE_DRAFTS_KEY, JSON.stringify(drafts));
+      window.localStorage.setItem(PDF_TEMPLATE_DRAFTS_KEY, JSON.stringify(drafts.map((draft) => pdfDraftToStoredDraft(draft))));
       message.success('Локальная копия шаблона PDF сохранена');
       return;
     }
     setSavingDraft(true);
     try {
-      const updated = template
-        ? await cutConfigApi.updatePdfTemplate(
-            template.cutPdfTemplateId,
-            { name: selected.name, layout: { elements: selected.elements }, isActive: template.isActive },
-            template.version,
-          )
-        : await cutConfigApi.createPdfTemplate({
-            code: selected.code,
-            name: selected.name,
-            layout: { elements: selected.elements },
-            isActive: true,
-          });
+      const updated = await cutConfigApi.updatePdfTemplate(
+        template.cutPdfTemplateId,
+        { name: selected.name, layout, isActive: template.isActive },
+        template.version,
+      );
       setDrafts((prev) => prev.map((draft) => (draft.code === updated.code ? pdfTemplateToDraft(updated) : draft)));
       message.success('Шаблон PDF сохранён');
     } catch (error) {
@@ -472,14 +634,79 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     }
   }, [drafts, selected, templates]);
 
+  const setCustomFieldsFromText = useCallback(
+    (text: string) => {
+      if (!selected) return;
+      try {
+        const parsed = JSON.parse(text) as PdfCustomField[];
+        if (!Array.isArray(parsed)) throw new Error('not-array');
+        updateSelected({
+          ...selected,
+          customFields: parsed
+            .filter((row) => row && typeof row.fieldId === 'string')
+            .map((row) => ({
+              fieldId: row.fieldId.trim(),
+              label: String(row.label ?? row.fieldId).trim(),
+              type: row.type === 'number' || row.type === 'date' ? row.type : 'string',
+              sourceField: typeof row.sourceField === 'string' ? row.sourceField : null,
+            }))
+            .filter((row) => row.fieldId),
+        });
+      } catch {
+        message.error('JSON пользовательских полей некорректен');
+      }
+    },
+    [selected, updateSelected],
+  );
+
+  const addCustomField = useCallback(() => {
+    if (!selected) return;
+    const fieldId = `field_${selected.customFields.length + 1}`;
+    updateSelected({
+      ...selected,
+      customFields: [...selected.customFields, { fieldId, label: 'Новое поле', type: 'string', sourceField: null }],
+    });
+  }, [selected, updateSelected]);
+
+  const patchCustomField = useCallback(
+    (fieldId: string, patch: Partial<PdfCustomField>) => {
+      if (!selected) return;
+      updateSelected({
+        ...selected,
+        customFields: selected.customFields.map((field) => (field.fieldId === fieldId ? { ...field, ...patch } : field)),
+      });
+    },
+    [selected, updateSelected],
+  );
+
+  const removeCustomField = useCallback(
+    (fieldId: string) => {
+      if (!selected) return;
+      updateSelected({ ...selected, customFields: selected.customFields.filter((field) => field.fieldId !== fieldId) });
+    },
+    [selected, updateSelected],
+  );
+
   if (!selected) {
     return <Alert type="warning" showIcon message="Нет активных шаблонов PDF" />;
   }
 
   const elementRows: ColumnsType<PdfTemplateElement> = [
     { title: 'Элемент', dataIndex: 'label', key: 'label' },
-    { title: 'Тип', dataIndex: 'type', key: 'type', width: 90 },
-    { title: 'Данные', dataIndex: 'source', key: 'source', width: 160 },
+    {
+      title: 'Тип',
+      dataIndex: 'type',
+      key: 'type',
+      width: 112,
+      render: (type: PdfTemplateElementType) => pdfElementTypeLabel(type),
+    },
+    {
+      title: 'Данные',
+      dataIndex: 'source',
+      key: 'source',
+      width: 180,
+      render: (source: string | null) => source ? (fields.find((field) => field.id === source)?.label ?? source) : null,
+    },
   ];
 
   return (
@@ -493,7 +720,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
             setSelectedElementId(draft?.elements[0]?.id ?? null);
           }}
           options={drafts.map((draft) => ({ value: draft.code, label: draft.name }))}
-          style={{ width: 260 }}
+          style={{ width: 320 }}
         />
         <Button icon={<SaveOutlined />} type="primary" disabled={!canManage} loading={savingDraft} onClick={() => void saveDrafts()}>
           Сохранить
@@ -504,87 +731,125 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         <Button disabled={!canManage} onClick={copyTemplate}>
           Сохранить как
         </Button>
+        <Button icon={<PlusOutlined />} disabled={!canManage} onClick={() => addElement('text')}>
+          Текст
+        </Button>
         <Button icon={<PlusOutlined />} disabled={!canManage} onClick={() => addElement('field')}>
-          Добавить поле
+          Поле
+        </Button>
+        <Button icon={<QrcodeOutlined />} disabled={!canManage} onClick={() => addElement('qr')}>
+          QR-код
         </Button>
         <Button icon={<MinusOutlined />} disabled={!canManage} onClick={() => addElement('line')}>
-          Добавить линию
+          Линия
         </Button>
         <Button icon={<BorderOutlined />} disabled={!canManage} onClick={() => addElement('rect')}>
-          Добавить прямоугольник
+          Прямоугольник
         </Button>
       </Space>
 
       <Row gutter={16} align="top">
-        <Col xs={24} xl={15}>
-          <div
-            role="img"
-            aria-label="Предпросмотр шаблона PDF"
-            style={{
-              position: 'relative',
-              width: '100%',
-              maxWidth: 842,
-              aspectRatio: '842 / 595',
-              background: '#ffffff',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.08), 0 12px 32px rgba(15,23,42,0.08)',
-              overflow: 'hidden',
-            }}
-          >
-            {selected.elements.map((element) => (
-              <PdfTemplateElementBox
-                key={element.id}
-                element={element}
-                active={element.id === selectedElement?.id}
-                onSelect={() => setSelectedElementId(element.id)}
+        <Col xs={24} xl={6}>
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Card size="small" title="Поля карты раскроя PDF">
+              <PdfFieldPalette
+                fields={fields}
+                usedFieldIds={usedFieldIds}
+                disabled={!canManage}
+                search={fieldSearch}
+                onSearch={setFieldSearch}
+                onBeginDrag={setDraggingField}
+                onAddField={addFieldElement}
               />
-            ))}
-          </div>
+            </Card>
+            <Collapse>
+              <Panel header="Пользовательские поля" key="custom-fields">
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Input.TextArea key={`${selected.code}:${customFields.length}`} defaultValue={customSchemaText} autoSize={{ minRows: 3, maxRows: 7 }} disabled={!canManage} onBlur={(event) => setCustomFieldsFromText(event.target.value)} />
+                  <Button size="small" icon={<PlusOutlined />} disabled={!canManage} onClick={addCustomField}>
+                    Добавить поле
+                  </Button>
+                  <Table<PdfCustomField>
+                    rowKey="fieldId"
+                    size="small"
+                    pagination={false}
+                    dataSource={customFields}
+                    columns={[
+                      { title: 'Ключ', dataIndex: 'fieldId', width: 110 },
+                      {
+                        title: 'Название',
+                        render: (_, row) => <Input size="small" value={row.label} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })} />,
+                      },
+                      {
+                        title: 'Тип',
+                        width: 92,
+                        render: (_, row) => (
+                          <Select
+                            size="small"
+                            value={row.type}
+                            disabled={!canManage}
+                            options={PDF_CUSTOM_FIELD_TYPE_OPTIONS}
+                            onChange={(type) => patchCustomField(row.fieldId, { type })}
+                          />
+                        ),
+                      },
+                      {
+                        title: '',
+                        width: 38,
+                        render: (_, row) => <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={() => removeCustomField(row.fieldId)} />,
+                      },
+                    ]}
+                  />
+                </Space>
+              </Panel>
+            </Collapse>
+          </Space>
         </Col>
-        <Col xs={24} xl={9}>
+        <Col xs={24} xl={12}>
+          <Card
+            size="small"
+            title="Визуал карты раскроя PDF"
+            extra={<Checkbox checked={showAllBounds} onChange={(event) => setShowAllBounds(event.target.checked)}>Границы</Checkbox>}
+          >
+            <PdfTemplateCanvas
+              draft={selected}
+              fields={fields}
+              selectedElementId={selectedElementId}
+              canManage={canManage}
+              showAllBounds={showAllBounds}
+              draggingField={draggingField}
+              onSelect={setSelectedElementId}
+              onPatch={patchElementById}
+              onDelete={deleteElement}
+              onDuplicate={duplicateElement}
+              onMoveZ={moveZ}
+              onDropField={(field, x, y) => {
+                addFieldElement(field, x, y);
+                setDraggingField(null);
+              }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} xl={6}>
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Table<PdfTemplateElement>
               size="small"
               rowKey="id"
               columns={elementRows}
-              dataSource={selected.elements}
+              dataSource={selected.elements.slice().sort((a, b) => a.zIndex - b.zIndex)}
               pagination={false}
+              scroll={{ y: 260 }}
               rowClassName={(row) => (row.id === selectedElement?.id ? 'ant-table-row-selected' : '')}
-              onRow={(row) => ({ onClick: () => setSelectedElementId(row.id) })}
+              onRow={(row) => ({ onClick: () => setSelectedElementId(row.id), style: { cursor: 'pointer' } })}
             />
             {selectedElement && (
-              <Card size="small" title="Свойства элемента">
-                <Form layout="vertical">
-                  <Form.Item label="Название" style={{ marginBottom: 10 }}>
-                    <Input value={selectedElement.label} onChange={(e) => updateElement({ label: e.target.value })} disabled={!canManage} />
-                  </Form.Item>
-                  <Form.Item label="Данные" style={{ marginBottom: 10 }}>
-                    <Select
-                      value={selectedElement.source}
-                      onChange={(source) => updateElement({ source })}
-                      options={PDF_FIELD_OPTIONS}
-                      disabled={!canManage || selectedElement.type !== 'field'}
-                    />
-                  </Form.Item>
-                  <Row gutter={8}>
-                    <Col span={6}><NumberBox label="X" value={selectedElement.x} disabled={!canManage} onChange={(x) => updateElement({ x })} /></Col>
-                    <Col span={6}><NumberBox label="Y" value={selectedElement.y} disabled={!canManage} onChange={(y) => updateElement({ y })} /></Col>
-                    <Col span={6}><NumberBox label="W" value={selectedElement.w} disabled={!canManage} onChange={(w) => updateElement({ w })} /></Col>
-                    <Col span={6}><NumberBox label="H" value={selectedElement.h} disabled={!canManage} onChange={(h) => updateElement({ h })} /></Col>
-                  </Row>
-                  <Form.Item label="Выравнивание" style={{ marginBottom: 0 }}>
-                    <Segmented
-                      value={selectedElement.align}
-                      onChange={(align) => updateElement({ align: align as PdfTemplateElement['align'] })}
-                      options={[
-                        { value: 'left', label: 'Лево' },
-                        { value: 'center', label: 'Центр' },
-                        { value: 'right', label: 'Право' },
-                      ]}
-                      disabled={!canManage || selectedElement.type !== 'field'}
-                    />
-                  </Form.Item>
-                </Form>
-              </Card>
+              <PdfElementProperties
+                element={selectedElement}
+                fields={fields}
+                canManage={canManage}
+                onPatch={updateElement}
+                onDelete={() => deleteElement(selectedElement.id)}
+              />
             )}
           </Space>
         </Col>
@@ -593,62 +858,475 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   );
 };
 
-const PdfTemplateElementBox: React.FC<{ element: PdfTemplateElement; active: boolean; onSelect: () => void }> = ({
-  element,
-  active,
-  onSelect,
-}) => {
-  const commonStyle: React.CSSProperties = {
-    position: 'absolute',
-    left: `${(element.x / 842) * 100}%`,
-    top: `${(element.y / 595) * 100}%`,
-    width: `${(element.w / 842) * 100}%`,
-    height: element.type === 'line' ? 1 : `${(Math.max(element.h, 1) / 595) * 100}%`,
-    cursor: 'pointer',
+const PdfTemplateCanvas: React.FC<{
+  draft: PdfTemplateDraft;
+  fields: PdfFieldCatalogItem[];
+  selectedElementId: string | null;
+  canManage: boolean;
+  showAllBounds: boolean;
+  draggingField: PdfFieldCatalogItem | null;
+  onSelect: (id: string | null) => void;
+  onPatch: (id: string, patch: Partial<PdfTemplateElement>) => void;
+  onDelete: (id: string) => void;
+  onDuplicate: (id: string) => void;
+  onMoveZ: (id: string, direction: 'front' | 'back') => void;
+  onDropField: (field: PdfFieldCatalogItem, x: number, y: number) => void;
+}> = ({ draft, fields, selectedElementId, canManage, showAllBounds, draggingField, onSelect, onPatch, onDelete, onDuplicate, onMoveZ, onDropField }) => {
+  const stageRef = useRef<Konva.Stage | null>(null);
+  const transformerRef = useRef<Konva.Transformer | null>(null);
+  const nodeRefs = useRef(new Map<string, Konva.Node>());
+  const [zoom, setZoom] = useState(1);
+  const [showGrid, setShowGrid] = useState(false);
+  const [snapToGrid, setSnapToGrid] = useState(true);
+  const [contextMenu, setContextMenu] = useState<{ element: PdfTemplateElement; x: number; y: number } | null>(null);
+  const page = draft.page;
+  const previewWidth = Math.round(Math.min(900, Math.max(520, page.width * 3)) * zoom);
+  const previewHeight = previewWidth * (page.height / page.width);
+  const selected = draft.elements.find((element) => element.id === selectedElementId) ?? null;
+  const selectedLocked = Boolean(selected?.style.locked);
+  const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
+  const sorted = draft.elements.slice().sort((a, b) => a.zIndex - b.zIndex);
+
+  useEffect(() => {
+    if (!canManage || !selectedElementId || selectedLocked || draggingField) {
+      transformerRef.current?.nodes([]);
+      transformerRef.current?.getLayer()?.batchDraw();
+      return;
+    }
+    const node = nodeRefs.current.get(selectedElementId);
+    transformerRef.current?.nodes(node ? [node] : []);
+    transformerRef.current?.getLayer()?.batchDraw();
+  }, [canManage, draft.elements, draggingField, selectedElementId, selectedLocked]);
+
+  const pointFromEvent = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
+    const container = stageRef.current?.container();
+    if (!container) return { x: 0, y: 0 };
+    const rect = container.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * page.width,
+      y: ((event.clientY - rect.top) / rect.height) * page.height,
+    };
   };
-  if (element.type === 'line') {
-    return <div onClick={onSelect} style={{ ...commonStyle, background: active ? '#1677ff' : '#111111' }} />;
-  }
-  if (element.type === 'rect') {
-    return (
-      <div
-        onClick={onSelect}
-        style={{
-          ...commonStyle,
-          border: active ? '2px solid #1677ff' : '1px solid #111111',
-          background: 'rgba(22,119,255,0.03)',
-        }}
-      />
-    );
-  }
+  const snap = (value: number, free?: boolean) => (snapToGrid && !free ? Math.round(value) : value);
+  const patchGeometry = (element: PdfTemplateElement, patch: Partial<PdfTemplateElement>, free?: boolean) => {
+    onPatch(element.id, {
+      ...patch,
+      x: patch.x === undefined ? undefined : roundPdfMm(clamp(snap(patch.x, free), 0, page.width)),
+      y: patch.y === undefined ? undefined : roundPdfMm(clamp(snap(patch.y, free), 0, page.height)),
+      w: patch.w === undefined ? undefined : roundPdfMm(Math.max(0.5, snap(patch.w, free))),
+      h: patch.h === undefined ? undefined : roundPdfMm(Math.max(element.type === 'line' ? 0 : 0.5, snap(patch.h, free))),
+      rotation: patch.rotation === undefined ? undefined : roundPdfMm(patch.rotation),
+    });
+  };
+  const moveElement = (element: PdfTemplateElement, x: number, y: number, event?: { altKey?: boolean }) => {
+    if (element.style.locked) return;
+    patchGeometry(element, {
+      x: clamp(x, 0, Math.max(0, page.width - element.w)),
+      y: clamp(y, 0, Math.max(0, page.height - Math.max(element.h, 1))),
+    }, event?.altKey);
+  };
+  const transformEnd = (element: PdfTemplateElement, node: Konva.Node, event: Konva.KonvaEventObject<Event>) => {
+    if (element.style.locked) return;
+    const scaleX = node.scaleX();
+    const scaleY = node.scaleY();
+    node.scaleX(1);
+    node.scaleY(1);
+    const nextW = element.type === 'line' ? element.w * scaleX : Math.max(1, Number(node.width() || element.w) * scaleX);
+    const nextH = element.type === 'line' ? element.h * scaleY : Math.max(1, Number(node.height() || element.h) * scaleY);
+    patchGeometry(element, {
+      x: clamp(node.x(), 0, page.width),
+      y: clamp(node.y(), 0, page.height),
+      w: nextW,
+      h: nextH,
+      rotation: Number(node.rotation() ?? 0),
+    }, (event.evt as MouseEvent | PointerEvent | undefined)?.altKey);
+  };
+  const openContextMenu = (point: { x: number; y: number }) => {
+    if (!canManage) return;
+    const element = findTopPdfElement(sorted, point.x, point.y);
+    if (!element) {
+      setContextMenu(null);
+      return;
+    }
+    onSelect(element.id);
+    setContextMenu({ element, x: (point.x / page.width) * previewWidth, y: (point.y / page.height) * previewHeight });
+  };
+  const keyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!selected || !canManage) return;
+    if ((event.key === 'Delete' || event.key === 'Backspace') && !selected.style.locked) {
+      event.preventDefault();
+      onDelete(selected.id);
+      return;
+    }
+    const map: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    const delta = map[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 5 : 1;
+    moveElement(selected, selected.x + delta[0] * step, selected.y + delta[1] * step, event);
+  };
+
   return (
-    <div
-      onClick={onSelect}
-      style={{
-        ...commonStyle,
-        borderBottom: active ? '2px solid #1677ff' : '1px solid #111111',
-        color: '#111111',
-        fontSize: 12,
-        lineHeight: '20px',
-        textAlign: element.align,
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-      }}
-    >
-      {element.label}: {'{'}{element.source}{'}'}
-    </div>
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Space wrap>
+        <Space size={6}><Text type="secondary">Сетка</Text><Switch size="small" checked={showGrid} onChange={setShowGrid} /></Space>
+        <Space size={6}><Text type="secondary">Привязка</Text><Switch size="small" checked={snapToGrid} onChange={setSnapToGrid} /></Space>
+        <Button size="small" onClick={() => setZoom((value) => clamp(Math.round((value - 0.1) * 10) / 10, 0.5, 2.2))}>-</Button>
+        <Text>{Math.round(zoom * 100)}%</Text>
+        <Button size="small" onClick={() => setZoom((value) => clamp(Math.round((value + 0.1) * 10) / 10, 0.5, 2.2))}>+</Button>
+        <Button size="small" onClick={() => setZoom(1)}>100%</Button>
+      </Space>
+      <div
+        role="img"
+        aria-label="Редактор шаблона карты раскроя PDF"
+        tabIndex={canManage ? 0 : undefined}
+        style={{
+          width: '100%',
+          maxWidth: previewWidth,
+          aspectRatio: `${page.width} / ${page.height}`,
+          background: '#fff',
+          border: '1px solid #d9d9d9',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.08), 0 12px 32px rgba(15,23,42,0.08)',
+          overflow: 'hidden',
+          position: 'relative',
+          outline: 'none',
+        }}
+        onDragOver={(event) => {
+          if (!canManage || !draggingField) return;
+          event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (!canManage || !draggingField) return;
+          event.preventDefault();
+          const point = pointFromEvent(event);
+          onDropField(draggingField, clamp(point.x, 0, page.width - 1), clamp(point.y, 0, page.height - 1));
+        }}
+        onKeyDown={keyDown}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          openContextMenu(pointFromEvent(event));
+        }}
+      >
+        <Stage
+          ref={stageRef}
+          width={previewWidth}
+          height={previewHeight}
+          scaleX={previewWidth / page.width}
+          scaleY={previewHeight / page.height}
+          onMouseDown={(event) => {
+            if (event.target === event.target.getStage()) onSelect(null);
+            if (event.evt.button === 2) {
+              event.evt.preventDefault();
+              const pointer = event.target.getStage()?.getPointerPosition();
+              if (pointer) openContextMenu({ x: (pointer.x / previewWidth) * page.width, y: (pointer.y / previewHeight) * page.height });
+            }
+          }}
+          onWheel={(event) => {
+            if (!event.evt.ctrlKey) return;
+            event.evt.preventDefault();
+            setZoom((value) => clamp(Math.round((value + (event.evt.deltaY > 0 ? -0.1 : 0.1)) * 10) / 10, 0.5, 2.2));
+          }}
+        >
+          <Layer>
+            <KonvaRect x={0} y={0} width={page.width} height={page.height} fill="#fff" listening={false} />
+            {showGrid && renderPdfGrid(page.width, page.height)}
+            {sorted.map((element) => (
+              <PdfKonvaElement
+                key={element.id}
+                element={element}
+                fieldLabels={fieldLabels}
+                selected={element.id === selectedElementId}
+                interactive={canManage && !draggingField}
+                showAllBounds={showAllBounds}
+                nodeRef={(node) => {
+                  if (node) nodeRefs.current.set(element.id, node);
+                  else nodeRefs.current.delete(element.id);
+                }}
+                onSelect={() => onSelect(element.id)}
+                onMove={(x, y, event) => moveElement(element, x, y, event)}
+                onTransformEnd={(node, event) => transformEnd(element, node, event)}
+              />
+            ))}
+            {canManage && !draggingField && (
+              <Transformer
+                ref={transformerRef}
+                rotateEnabled
+                enabledAnchors={selected?.type === 'line' ? ['middle-left', 'middle-right'] : undefined}
+                boundBoxFunc={(oldBox, newBox) => (newBox.width < 2 || newBox.height < 2 ? oldBox : newBox)}
+              />
+            )}
+          </Layer>
+        </Stage>
+        {contextMenu && (
+          <div
+            style={{
+              position: 'absolute',
+              left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 190)),
+              top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 216)),
+              zIndex: 3,
+              minWidth: 180,
+              padding: 4,
+              background: '#fff',
+              border: '1px solid #d9d9d9',
+              borderRadius: 4,
+              boxShadow: '0 6px 16px rgba(0,0,0,0.16)',
+            }}
+            onMouseLeave={() => setContextMenu(null)}
+          >
+            <Button type="text" size="small" block onClick={() => { onPatch(contextMenu.element.id, { style: { ...contextMenu.element.style, locked: !contextMenu.element.style.locked } }); setContextMenu(null); }}>
+              {contextMenu.element.style.locked ? 'Разблокировать' : 'Заблокировать'}
+            </Button>
+            <Button type="text" size="small" block onClick={() => { onDuplicate(contextMenu.element.id); setContextMenu(null); }}>Сделать копию</Button>
+            <Button type="text" size="small" block onClick={() => { onMoveZ(contextMenu.element.id, 'front'); setContextMenu(null); }}>На передний план</Button>
+            <Button type="text" size="small" block onClick={() => { onMoveZ(contextMenu.element.id, 'back'); setContextMenu(null); }}>На задний план</Button>
+            <Button danger type="text" size="small" block onClick={() => { onDelete(contextMenu.element.id); setContextMenu(null); }}>Удалить</Button>
+          </div>
+        )}
+      </div>
+    </Space>
   );
 };
 
-const NumberBox: React.FC<{ label: string; value: number; disabled: boolean; onChange: (value: number) => void }> = ({
-  label,
-  value,
-  disabled,
-  onChange,
-}) => (
+const PdfKonvaElement: React.FC<{
+  element: PdfTemplateElement;
+  fieldLabels: Map<string, string>;
+  selected: boolean;
+  interactive: boolean;
+  showAllBounds: boolean;
+  nodeRef: (node: Konva.Node | null) => void;
+  onSelect: () => void;
+  onMove: (x: number, y: number, event?: { altKey?: boolean }) => void;
+  onTransformEnd: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
+}> = ({ element, fieldLabels, selected, interactive, showAllBounds, nodeRef, onSelect, onMove, onTransformEnd }) => {
+  const common = {
+    ref: nodeRef,
+    x: element.x,
+    y: element.y,
+    rotation: element.rotation,
+    listening: interactive,
+    draggable: interactive && !element.style.locked,
+    onClick: onSelect,
+    onTap: onSelect,
+    onDragStart: onSelect,
+    onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => onMove(event.target.x(), event.target.y(), event.evt),
+    onTransformEnd: (event: Konva.KonvaEventObject<Event>) => onTransformEnd(event.target, event),
+    onMouseEnter: (event: Konva.KonvaEventObject<MouseEvent>) => event.target.getStage()?.container().style.setProperty('cursor', interactive ? 'move' : 'default'),
+    onMouseLeave: (event: Konva.KonvaEventObject<MouseEvent>) => event.target.getStage()?.container().style.setProperty('cursor', 'default'),
+  };
+  const selectedBox = selected ? <KonvaRect x={element.x} y={element.y} width={Math.max(element.w, 1)} height={Math.max(element.h, 1)} stroke="#1677ff" strokeWidth={0.25} dash={[1, 1]} listening={false} /> : null;
+  const boundsBox = showAllBounds ? <KonvaRect x={element.x} y={element.y} width={Math.max(element.w, 1)} height={Math.max(element.h, 1)} stroke="#faad14" strokeWidth={0.2} dash={[1, 1]} listening={false} /> : null;
+  if (element.type === 'line') {
+    return (
+      <React.Fragment>
+        <KonvaLine {...common} points={[0, 0, element.w, element.h]} stroke={String(element.style.color ?? '#111111')} strokeWidth={Number(element.style.strokeWidth ?? 0.35)} hitStrokeWidth={3} />
+        {selectedBox}
+        {boundsBox}
+      </React.Fragment>
+    );
+  }
+  if (element.type === 'rect') {
+    return (
+      <React.Fragment>
+        <KonvaRect {...common} width={Math.max(element.w, 1)} height={Math.max(element.h, 1)} fill={String(element.style.fill ?? 'transparent')} stroke={String(element.style.color ?? '#111111')} strokeWidth={Number(element.style.strokeWidth ?? 0.35)} />
+        {selectedBox}
+        {boundsBox}
+      </React.Fragment>
+    );
+  }
+  if (element.type === 'qr') {
+    const side = Math.max(element.w, element.h, 8);
+    const moduleSide = side / 7;
+    const modules = [[0, 0], [1, 0], [2, 0], [4, 0], [5, 0], [6, 0], [0, 1], [2, 1], [3, 1], [6, 1], [0, 2], [1, 2], [2, 2], [4, 2], [6, 2], [3, 3], [5, 3], [0, 4], [2, 4], [4, 4], [5, 4], [6, 4], [0, 5], [3, 5], [6, 5], [0, 6], [1, 6], [2, 6], [4, 6], [6, 6]];
+    return (
+      <React.Fragment>
+        <KonvaGroup {...common} width={side} height={side}>
+          <KonvaRect x={0} y={0} width={side} height={side} fill="#fff" stroke="#111" strokeWidth={0.25} />
+          {modules.map(([col, row], index) => <KonvaRect key={index} x={col * moduleSide} y={row * moduleSide} width={moduleSide} height={moduleSide} fill="#111" listening={false} />)}
+          <KonvaText x={0} y={side / 2 - 2} width={side} height={4} text="QR" fontFamily="Arial" fontSize={Math.max(2, side * 0.18)} fill="#1677ff" align="center" listening={false} />
+        </KonvaGroup>
+        {selectedBox}
+        {boundsBox}
+      </React.Fragment>
+    );
+  }
+  const fontSize = Math.max(2, Number(element.style.fontSize ?? 10) * 0.35);
+  const value = element.type === 'text'
+    ? element.text ?? ''
+    : element.source
+    ? PDF_PREVIEW_VALUES[element.source] ?? fieldLabels.get(element.source) ?? element.source
+    : '';
+  return (
+    <React.Fragment>
+      <KonvaText
+        {...common}
+        width={Math.max(element.w, 1)}
+        height={Math.max(element.h, fontSize + 1)}
+        text={value}
+        fontFamily="Arial"
+        fontSize={fontSize}
+        fontStyle={element.style.fontWeight === 'bold' ? 'bold' : 'normal'}
+        fill={String(element.style.color ?? '#111111')}
+        align={element.align}
+        wrap="none"
+        ellipsis
+      />
+      {selectedBox}
+      {boundsBox}
+    </React.Fragment>
+  );
+};
+
+const PdfFieldPalette: React.FC<{
+  fields: PdfFieldCatalogItem[];
+  usedFieldIds: Set<string>;
+  disabled: boolean;
+  search: string;
+  onSearch: (value: string) => void;
+  onBeginDrag: (field: PdfFieldCatalogItem) => void;
+  onAddField: (field: PdfFieldCatalogItem) => void;
+}> = ({ fields, usedFieldIds, disabled, search, onSearch, onBeginDrag, onAddField }) => {
+  const normalized = search.trim().toLowerCase();
+  const visible = fields.filter((field) => !normalized || `${field.category} ${field.label} ${field.id}`.toLowerCase().includes(normalized));
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Input.Search value={search} onChange={(event) => onSearch(event.target.value)} allowClear />
+      <div style={{ maxHeight: 420, overflowY: 'auto', paddingRight: 4 }}>
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          {groupPdfFields(visible).map(([category, rows]) => (
+            <div key={category}>
+              <Text type="secondary">{category}</Text>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                {rows.map((field) => {
+                  const used = usedFieldIds.has(field.id);
+                  return (
+                    <Tag
+                      key={field.id}
+                      color={used ? 'processing' : undefined}
+                      draggable={!disabled}
+                      onDragStart={(event) => {
+                        if (disabled) return;
+                        onBeginDrag(field);
+                        event.dataTransfer.setData('application/x-cut-pdf-field', field.id);
+                        event.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      onMouseDown={(event) => {
+                        if (disabled) return;
+                        event.preventDefault();
+                        onBeginDrag(field);
+                      }}
+                      onDoubleClick={() => {
+                        if (!disabled) onAddField(field);
+                      }}
+                      style={{ cursor: disabled ? 'default' : 'grab', userSelect: 'none', fontWeight: used ? 600 : 400 }}
+                    >
+                      {field.label}
+                    </Tag>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </Space>
+      </div>
+    </Space>
+  );
+};
+
+const PdfElementProperties: React.FC<{
+  element: PdfTemplateElement;
+  fields: PdfFieldCatalogItem[];
+  canManage: boolean;
+  onPatch: (patch: Partial<PdfTemplateElement>) => void;
+  onDelete: () => void;
+}> = ({ element, fields, canManage, onPatch, onDelete }) => {
+  const style = element.style;
+  return (
+    <Card size="small" title="Свойства элемента" extra={<Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={onDelete} />}>
+      <Form layout="vertical">
+        <Form.Item label="Название" style={{ marginBottom: 10 }}>
+          <Input value={element.label} onChange={(event) => onPatch({ label: event.target.value })} disabled={!canManage} />
+        </Form.Item>
+        <Form.Item label="Тип" style={{ marginBottom: 10 }}>
+          <Select
+            value={element.type}
+            disabled={!canManage}
+            onChange={(type) => onPatch({ type, ...defaultPatchForType(type) })}
+            options={[
+              { value: 'text', label: 'Текст' },
+              { value: 'field', label: 'Динамическое поле' },
+              { value: 'custom', label: 'Пользовательское поле' },
+              { value: 'qr', label: 'QR-код' },
+              { value: 'line', label: 'Линия' },
+              { value: 'rect', label: 'Прямоугольник' },
+            ]}
+          />
+        </Form.Item>
+        {(element.type === 'field' || element.type === 'custom') && (
+          <Form.Item label="Данные" style={{ marginBottom: 10 }}>
+            <Select
+              showSearch
+              value={element.source ?? undefined}
+              onChange={(source) => onPatch({ source })}
+              options={fields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+              disabled={!canManage}
+            />
+          </Form.Item>
+        )}
+        {element.type === 'text' && (
+          <Form.Item label="Текст" style={{ marginBottom: 10 }}>
+            <Input.TextArea value={element.text ?? ''} onChange={(event) => onPatch({ text: event.target.value })} disabled={!canManage} autoSize={{ minRows: 2, maxRows: 4 }} />
+          </Form.Item>
+        )}
+        {element.type === 'qr' && (
+          <>
+            <Form.Item label="Имя QR" style={{ marginBottom: 10 }}>
+              <Input value={String(style.qrName ?? '')} disabled={!canManage} onChange={(event) => onPatch({ style: { ...style, qrName: event.target.value } })} />
+            </Form.Item>
+            <Form.Item label="QR шаблон" style={{ marginBottom: 10 }}>
+              <Input.TextArea value={String(style.qrTemplate ?? '')} disabled={!canManage} onChange={(event) => onPatch({ style: { ...style, qrTemplate: event.target.value } })} autoSize={{ minRows: 2, maxRows: 4 }} />
+            </Form.Item>
+            <Form.Item label="EC" style={{ marginBottom: 10 }}>
+              <Select value={String(style.qrErrorCorrection ?? 'M')} disabled={!canManage} options={PDF_QR_ERROR_CORRECTION_OPTIONS} onChange={(qrErrorCorrection) => onPatch({ style: { ...style, qrErrorCorrection } })} />
+            </Form.Item>
+          </>
+        )}
+        <Row gutter={8}>
+          <Col span={6}><NumberBox label="X" value={element.x} disabled={!canManage} onChange={(x) => onPatch({ x })} /></Col>
+          <Col span={6}><NumberBox label="Y" value={element.y} disabled={!canManage} onChange={(y) => onPatch({ y })} /></Col>
+          <Col span={6}><NumberBox label="W" value={element.w} disabled={!canManage} onChange={(w) => onPatch({ w })} /></Col>
+          <Col span={6}><NumberBox label="H" value={element.h} disabled={!canManage} onChange={(h) => onPatch({ h })} /></Col>
+        </Row>
+        <Row gutter={8}>
+          <Col span={8}><NumberBox label="Поворот" value={element.rotation} disabled={!canManage} onChange={(rotation) => onPatch({ rotation })} /></Col>
+          <Col span={8}><NumberBox label="Шрифт" value={Number(style.fontSize ?? 10)} disabled={!canManage || !['text', 'field', 'custom'].includes(element.type)} onChange={(fontSize) => onPatch({ style: { ...style, fontSize } })} /></Col>
+          <Col span={8}><NumberBox label="Линия" value={Number(style.strokeWidth ?? 0.35)} disabled={!canManage || !['line', 'rect'].includes(element.type)} onChange={(strokeWidth) => onPatch({ style: { ...style, strokeWidth } })} /></Col>
+        </Row>
+        <Form.Item label="Цвет" style={{ marginBottom: 10 }}>
+          <Input type="color" value={String(style.color ?? '#111111')} disabled={!canManage} onChange={(event) => onPatch({ style: { ...style, color: event.target.value } })} />
+        </Form.Item>
+        <Form.Item label="Выравнивание" style={{ marginBottom: 10 }}>
+          <Segmented
+            value={element.align}
+            onChange={(align) => onPatch({ align: align as PdfTextAlign })}
+            options={[
+              { value: 'left', label: <AlignLeftOutlined /> },
+              { value: 'center', label: <AlignCenterOutlined /> },
+              { value: 'right', label: <AlignRightOutlined /> },
+            ]}
+            disabled={!canManage || !['text', 'field', 'custom'].includes(element.type)}
+          />
+        </Form.Item>
+        <Checkbox checked={Boolean(style.locked)} disabled={!canManage} onChange={(event) => onPatch({ style: { ...style, locked: event.target.checked } })}>
+          Заблокировать
+        </Checkbox>
+      </Form>
+    </Card>
+  );
+};
+
+const NumberBox: React.FC<{ label: string; value: number; disabled: boolean; onChange: (value: number) => void }> = ({ label, value, disabled, onChange }) => (
   <Form.Item label={label} style={{ marginBottom: 10 }}>
-    <InputNumber min={0} value={value} onChange={(next) => onChange(Number(next ?? 0))} disabled={disabled} style={{ width: '100%' }} />
+    <InputNumber value={value} onChange={(next) => onChange(Number(next ?? 0))} disabled={disabled} style={{ width: '100%' }} />
   </Form.Item>
 );
 
@@ -658,7 +1336,7 @@ function loadPdfTemplateDrafts(templates: CutPdfTemplate[]): PdfTemplateDraft[] 
       const saved = window.localStorage.getItem(PDF_TEMPLATE_DRAFTS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as PdfTemplateDraft[];
-        if (Array.isArray(parsed) && parsed.length > 0) return mergePdfTemplateDrafts(parsed, templates);
+        if (Array.isArray(parsed) && parsed.length > 0) return mergePdfTemplateDrafts(parsed.map(normalizePdfDraft), templates);
       }
     } catch {
       // Ignore broken local drafts; config templates remain authoritative.
@@ -668,7 +1346,7 @@ function loadPdfTemplateDrafts(templates: CutPdfTemplate[]): PdfTemplateDraft[] 
 }
 
 function mergePdfTemplateDrafts(drafts: PdfTemplateDraft[], templates: CutPdfTemplate[]): PdfTemplateDraft[] {
-  const byCode = new Map(drafts.map((draft) => [draft.code, draft]));
+  const byCode = new Map(drafts.map((draft) => [draft.code, normalizePdfDraft(draft)]));
   for (const template of templates) {
     if (!template.isActive) continue;
     byCode.set(template.code, pdfTemplateToDraft(template));
@@ -677,10 +1355,181 @@ function mergePdfTemplateDrafts(drafts: PdfTemplateDraft[], templates: CutPdfTem
 }
 
 function pdfTemplateToDraft(template: CutPdfTemplate): PdfTemplateDraft {
-  const elements = Array.isArray((template.layout as { elements?: unknown }).elements)
-    ? ((template.layout as { elements: PdfTemplateElement[] }).elements)
-    : DEFAULT_PDF_ELEMENTS;
-  return { code: template.code, name: template.name, elements };
+  return normalizePdfDraft({
+    code: template.code,
+    name: template.name,
+    ...layoutToPdfDraftShape(template.layout),
+  });
+}
+
+function layoutToPdfDraftShape(layout: Record<string, unknown>): Pick<PdfTemplateDraft, 'page' | 'customFields' | 'elements'> {
+  const page = isRecord(layout.page) ? {
+    width: Number(layout.page.width ?? PDF_PAGE.width),
+    height: Number(layout.page.height ?? PDF_PAGE.height),
+  } : PDF_PAGE;
+  const customFields = Array.isArray(layout.customFields) ? layout.customFields.map(normalizeCustomField) : [];
+  const rawElements = Array.isArray(layout.elements) ? layout.elements : DEFAULT_PDF_ELEMENTS;
+  return { page, customFields, elements: rawElements.map((element, index) => normalizePdfElement(element, index)) };
+}
+
+function pdfDraftToLayout(draft: PdfTemplateDraft): Record<string, unknown> {
+  return {
+    version: 2,
+    page: draft.page,
+    customFields: draft.customFields,
+    elements: draft.elements.map((element, index) => ({ ...normalizePdfElement(element, index), zIndex: index })),
+  };
+}
+
+function pdfDraftToStoredDraft(draft: PdfTemplateDraft): PdfTemplateDraft {
+  return normalizePdfDraft({ ...draft, elements: draft.elements.map((element, index) => normalizePdfElement(element, index)) });
+}
+
+function normalizePdfDraft(raw: Partial<PdfTemplateDraft>): PdfTemplateDraft {
+  return {
+    code: String(raw.code ?? 'standard'),
+    name: String(raw.name ?? 'Стандартный'),
+    page: {
+      width: Number(raw.page?.width ?? PDF_PAGE.width),
+      height: Number(raw.page?.height ?? PDF_PAGE.height),
+    },
+    customFields: Array.isArray(raw.customFields) ? raw.customFields.map(normalizeCustomField) : [],
+    elements: (Array.isArray(raw.elements) && raw.elements.length > 0 ? raw.elements : DEFAULT_PDF_ELEMENTS).map((element, index) => normalizePdfElement(element, index)),
+  };
+}
+
+function normalizeCustomField(raw: unknown): PdfCustomField {
+  const r = isRecord(raw) ? raw : {};
+  const type = r.type === 'number' || r.type === 'date' ? r.type : 'string';
+  return {
+    fieldId: String(r.fieldId ?? r.id ?? 'field').trim(),
+    label: String(r.label ?? r.fieldId ?? r.id ?? 'Поле').trim(),
+    type,
+    sourceField: typeof r.sourceField === 'string' ? r.sourceField : null,
+  };
+}
+
+function normalizePdfElement(raw: unknown, index = 0): PdfTemplateElement {
+  const r = isRecord(raw) ? raw : {};
+  if (typeof r.type === 'string' && (r.type === 'field' || r.type === 'line' || r.type === 'rect') && typeof r.x === 'number' && r.x > PDF_PAGE.width) {
+    return makePdfElement(r.type as PdfTemplateElementType, {
+      id: String(r.id ?? `${r.type}-${index}`),
+      label: String(r.label ?? pdfElementTypeLabel(r.type as PdfTemplateElementType)),
+      source: typeof r.source === 'string' ? r.source : null,
+      x: roundPdfMm((Number(r.x ?? 0) / PDF_OLD_PAGE.width) * PDF_PAGE.width),
+      y: roundPdfMm((Number(r.y ?? 0) / PDF_OLD_PAGE.height) * PDF_PAGE.height),
+      w: roundPdfMm((Number(r.w ?? 24) / PDF_OLD_PAGE.width) * PDF_PAGE.width),
+      h: roundPdfMm((Number(r.h ?? 8) / PDF_OLD_PAGE.height) * PDF_PAGE.height),
+      align: r.align === 'right' || r.align === 'center' ? r.align : 'left',
+      zIndex: Number(r.zIndex ?? index),
+      style: isRecord(r.style) ? r.style : {},
+    });
+  }
+  const type = isPdfElementType(r.type) ? r.type : 'field';
+  return makePdfElement(type, {
+    id: String(r.id ?? `${type}-${index}`),
+    label: String(r.label ?? pdfElementTypeLabel(type)),
+    source: typeof r.source === 'string' ? r.source : null,
+    text: typeof r.text === 'string' ? r.text : null,
+    x: Number(r.x ?? 12),
+    y: Number(r.y ?? 12),
+    w: Number(r.w ?? (type === 'qr' ? 22 : 48)),
+    h: Number(r.h ?? (type === 'line' ? 0 : type === 'qr' ? 22 : 8)),
+    rotation: Number(r.rotation ?? 0),
+    zIndex: Number(r.zIndex ?? index),
+    align: r.align === 'right' || r.align === 'center' ? r.align : 'left',
+    style: isRecord(r.style) ? r.style : {},
+  });
+}
+
+function makePdfElement(type: PdfTemplateElementType, patch: Partial<PdfTemplateElement> = {}): PdfTemplateElement {
+  const base = defaultPatchForType(type);
+  const style = { ...base.style, ...(patch.style ?? {}) };
+  return {
+    id: patch.id ?? `${type}-${Date.now().toString(36)}`,
+    type,
+    label: patch.label ?? base.label,
+    source: patch.source ?? base.source ?? null,
+    text: patch.text ?? base.text ?? null,
+    x: roundPdfMm(Number(patch.x ?? base.x ?? 18)),
+    y: roundPdfMm(Number(patch.y ?? base.y ?? 18)),
+    w: roundPdfMm(Math.max(0.5, Number(patch.w ?? base.w ?? 48))),
+    h: roundPdfMm(Math.max(type === 'line' ? 0 : 0.5, Number(patch.h ?? base.h ?? 8))),
+    rotation: roundPdfMm(Number(patch.rotation ?? base.rotation ?? 0)),
+    zIndex: Number(patch.zIndex ?? base.zIndex ?? 0),
+    align: patch.align ?? base.align ?? 'left',
+    style,
+  };
+}
+
+function defaultPatchForType(type: PdfTemplateElementType): Partial<PdfTemplateElement> {
+  if (type === 'text') return { label: 'Текст', source: null, text: 'Текст', x: 18, y: 18, w: 48, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } };
+  if (type === 'field') return { label: 'Поле', source: 'order.unique_names', text: null, x: 18, y: 18, w: 58, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } };
+  if (type === 'custom') return { label: 'Пользовательское поле', source: null, text: null, x: 18, y: 18, w: 58, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } };
+  if (type === 'qr') return { label: 'QR-код', source: null, text: null, x: 18, y: 18, w: 22, h: 22, align: 'center', style: { qrName: 'QR', qrTemplate: '{order.unique_names}\\n{sheet.number}', qrErrorCorrection: 'M' } };
+  if (type === 'line') return { label: 'Линия', source: null, text: null, x: 18, y: 18, w: 64, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.35 } };
+  return { label: 'Прямоугольник', source: null, text: null, x: 18, y: 18, w: 48, h: 22, align: 'center', style: { color: '#111111', strokeWidth: 0.35, fill: 'transparent' } };
+}
+
+function pdfElementTypeLabel(type: PdfTemplateElementType): string {
+  const labels: Record<PdfTemplateElementType, string> = {
+    text: 'Текст',
+    field: 'Поле',
+    custom: 'Пользовательское',
+    qr: 'QR',
+    line: 'Линия',
+    rect: 'Прямоугольник',
+  };
+  return labels[type];
+}
+
+function isPdfElementType(value: unknown): value is PdfTemplateElementType {
+  return value === 'text' || value === 'field' || value === 'custom' || value === 'qr' || value === 'line' || value === 'rect';
+}
+
+function groupPdfFields(fields: PdfFieldCatalogItem[]): Array<[string, PdfFieldCatalogItem[]]> {
+  const grouped = new Map<string, PdfFieldCatalogItem[]>();
+  for (const field of fields) grouped.set(field.category, [...(grouped.get(field.category) ?? []), field]);
+  const order = ['Пользовательские', 'Задание', 'Группа', 'Лист', 'Заказ', 'Клиент', 'Детали', 'Вычисляемые'];
+  return [...grouped.entries()].sort(([a], [b]) => {
+    const ai = order.indexOf(a);
+    const bi = order.indexOf(b);
+    if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    return a.localeCompare(b, 'ru');
+  });
+}
+
+function renderPdfGrid(width: number, height: number): React.ReactNode[] {
+  const lines: React.ReactNode[] = [];
+  for (let x = 0; x <= width; x += 5) {
+    const major = x % 25 === 0;
+    lines.push(<KonvaLine key={`x-${x}`} points={[x, 0, x, height]} stroke={major ? '#d9d9d9' : '#f0f0f0'} strokeWidth={major ? 0.12 : 0.06} listening={false} />);
+  }
+  for (let y = 0; y <= height; y += 5) {
+    const major = y % 25 === 0;
+    lines.push(<KonvaLine key={`y-${y}`} points={[0, y, width, y]} stroke={major ? '#d9d9d9' : '#f0f0f0'} strokeWidth={major ? 0.12 : 0.06} listening={false} />);
+  }
+  return lines;
+}
+
+function findTopPdfElement(elements: PdfTemplateElement[], x: number, y: number): PdfTemplateElement | null {
+  for (const element of elements.slice().reverse()) {
+    const h = Math.max(element.type === 'line' ? 1 : element.h, 1);
+    if (x >= element.x && x <= element.x + Math.max(element.w, 1) && y >= element.y && y <= element.y + h) return element;
+  }
+  return null;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function roundPdfMm(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 interface ProfileModalProps {

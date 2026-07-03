@@ -101,12 +101,14 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
   });
 
   it('exposes a PDF template editor tab with expected editor commands', () => {
-    expect(tabSrc).toMatch(/Редактирование шаблонов PDF/);
+    expect(tabSrc).toMatch(/Редактирование шаблонов карт раскроя PDF/);
     expect(tabSrc).toMatch(/PdfTemplateEditor/);
     expect(tabSrc).toMatch(/Сохранить как/);
     expect(tabSrc).toMatch(/Создать копию/);
-    expect(tabSrc).toMatch(/Добавить поле/);
-    expect(tabSrc).toMatch(/Добавить линию/);
-    expect(tabSrc).toMatch(/Добавить прямоугольник/);
+    expect(tabSrc).toMatch(/Поля карты раскроя PDF/);
+    expect(tabSrc).toMatch(/QR-код/);
+    expect(tabSrc).toMatch(/Линия/);
+    expect(tabSrc).toMatch(/Прямоугольник/);
+    expect(tabSrc).toMatch(/PdfTemplateCanvas/);
   });
 });
