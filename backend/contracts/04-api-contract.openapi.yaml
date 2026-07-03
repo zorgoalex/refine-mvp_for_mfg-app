@@ -5415,6 +5415,58 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/labels/scan-resolve:
+    post:
+      tags:
+        - Labels
+      operationId: scanResolveLabel
+      summary: Resolve scanned label payload to order details
+      security:
+        - bearerAuth: []
+      x-permission: labels.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - payload
+              properties:
+                payload:
+                  type: string
+                  maxLength: 2000
+                source:
+                  type: string
+                  enum:
+                    - qr
+                    - manual
+      responses:
+        '200':
+          description: Ranked candidate order details for the scanned payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      type: object
+                  parsed:
+                    type: object
+                    nullable: true
+                  templatesTried:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/{orderId}/label-data:
     get:
       tags:
