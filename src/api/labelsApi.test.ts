@@ -131,4 +131,17 @@ describe('labelsApi', () => {
     await labelsApi.deleteQrTemplate(5, 2, 'qr-key-123456');
     expect(del).toHaveBeenCalledWith(apiRoutes.labels.qrTemplate(5), { body: JSON.stringify({ version: 2, idempotencyKey: 'qr-key-123456' }) });
   });
+
+  it('updateQrTemplate PUTs input with version and idempotency', async () => {
+    const put = vi.spyOn(httpClient, 'put').mockResolvedValue({});
+    const input = { name: 'Деталь', contentTemplate: '{bazis.detail_id}', errorCorrection: 'M', defaultSizeMm: 20, idempotencyKey: 'qr-key-123456', version: 1 };
+    await labelsApi.updateQrTemplate(5, input as any);
+    expect(put).toHaveBeenCalledWith(apiRoutes.labels.qrTemplate(5), input);
+  });
+
+  it('listQrTemplates GETs with includeInactive query param', async () => {
+    const get = vi.spyOn(httpClient, 'get').mockResolvedValue([]);
+    await labelsApi.listQrTemplates(true);
+    expect(get).toHaveBeenCalledWith(`${apiRoutes.labels.qrTemplates}?includeInactive=true`);
+  });
 });
