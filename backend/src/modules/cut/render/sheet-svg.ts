@@ -105,6 +105,8 @@ const ORDER_FILL_PALETTE = [
   '#d5e5f2',
   '#f2ddd5',
 ] as const;
+const BATH_ORDER_LABEL_COLOR = '#7f1d1d';
+const BATH_POSITION_LABEL_COLOR = '#14532d';
 
 /** Deterministic, light fill color for a source order. Unknown order keeps the
  * legacy neutral fill so old/partial data remains readable. */
@@ -264,19 +266,14 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         rect.h,
       )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`;
 
-      const resolved = labelFor(piece);
-      const lines = (Array.isArray(resolved) ? resolved : [resolved]).slice(0, 2);
-      const tspans = lines
-        .map((line, i) => {
-          const dy = i === 0 ? `${(-(lines.length - 1) / 2).toFixed(3)}em` : '1em';
-          return `<tspan x="${num(cx)}" dy="${dy}">${escapeXml(line)}</tspan>`;
-        })
-        .join('');
-      const centerText = lines.length > 0
-        ? `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
-            detailFontMm,
-          )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${tspans}</text>`
-        : '';
+      const centerText = renderBathDetailCenterLabel({
+        lines: labelFor(piece),
+        cx,
+        cy,
+        rectW: rect.w,
+        rectH: rect.h,
+        baseFontMm: detailFontMm,
+      });
 
       const sideTexts: string[] = [];
       if (rect.w >= sideFontMm * 2.5) {
@@ -307,4 +304,65 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
     pieces,
     `</svg>`,
   ].join('');
+}
+
+function renderBathDetailCenterLabel(input: {
+  lines: string | string[];
+  cx: number;
+  cy: number;
+  rectW: number;
+  rectH: number;
+  baseFontMm: number;
+}): string {
+  const lines = (Array.isArray(input.lines) ? input.lines : [input.lines]).slice(0, 2).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return '';
+  if (lines.length === 1) {
+    const font = fitBathLabelFont([lines[0]], input.rectW, input.rectH, input.baseFontMm, 1);
+    return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+      font,
+    )}" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${escapeXml(lines[0])}</text>`;
+  }
+
+  const [orderLine, positionLine] = lines;
+  const oneLineText = `${orderLine} ${positionLine}`;
+  const shouldUseOneLine = input.rectH < input.baseFontMm * 1.65;
+  if (shouldUseOneLine) {
+    const font = fitBathLabelFont([oneLineText], input.rectW, input.rectH, input.baseFontMm, 1);
+    return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+      font,
+    )}" text-anchor="middle" dominant-baseline="middle"><tspan fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700">${escapeXml(
+      orderLine,
+    )}</tspan><tspan fill="${BATH_POSITION_LABEL_COLOR}"> ${escapeXml(positionLine)}</tspan></text>`;
+  }
+
+  const font = fitBathLabelFont([orderLine, positionLine], input.rectW, input.rectH, input.baseFontMm, 2);
+  return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+    font,
+  )}" text-anchor="middle" dominant-baseline="middle"><tspan x="${num(input.cx)}" dy="-0.500em" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700">${escapeXml(
+    orderLine,
+  )}</tspan><tspan x="${num(input.cx)}" dy="1em" fill="${BATH_POSITION_LABEL_COLOR}">${escapeXml(positionLine)}</tspan></text>`;
+}
+
+function fitBathLabelFont(lines: readonly string[], rectW: number, rectH: number, baseFontMm: number, lineCount: 1 | 2): number {
+  const widestAtBase = Math.max(...lines.map((line) => estimateTextWidthMm(line, baseFontMm)), 1);
+  const widthScale = (rectW * 0.86) / widestAtBase;
+  const heightScale = lineCount === 1 ? (rectH * 0.72) / baseFontMm : (rectH * 0.56) / baseFontMm;
+  const scale = Math.min(1, widthScale, heightScale);
+  return Math.max(12, baseFontMm * scale);
+}
+
+function estimateTextWidthMm(value: string, fontMm: number): number {
+  let units = 0;
+  for (const char of value) {
+    if (char === ' ') {
+      units += 0.32;
+    } else if (/[0-9]/.test(char)) {
+      units += 0.56;
+    } else if (/[A-Za-zА-Яа-яЁё]/.test(char)) {
+      units += 0.62;
+    } else {
+      units += 0.42;
+    }
+  }
+  return units * fontMm;
 }
