@@ -194,4 +194,27 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/labelsApi\.createTemplate\(buildTemplatePayload\(values, name\)\)/);
     expect(tabSrc).toMatch(/Создать копию/);
   });
+
+  it('renders a collapsible QR-код library block under custom fields', () => {
+    expect(tabSrc).toContain('QR-коды');
+    expect(tabSrc).toMatch(/labelsApi\.listQrTemplates/);
+    expect(tabSrc).toMatch(/labelsApi\.createQrTemplate/);
+    expect(tabSrc).toMatch(/labelsApi\.deleteQrTemplate/);
+  });
+
+  it('loads the QR library through its own soft-fail effect, not the all-or-nothing load() Promise.all', () => {
+    expect(tabSrc).toMatch(/loadQrTemplates/);
+    expect(tabSrc).toMatch(/setQrTemplates\(\[\]\)/);
+    expect(tabSrc).not.toMatch(/Promise\.all\(\[\s*labelsApi\.listTemplates\(true\),\s*labelsApi\.listFields\(\),\s*labelsApi\.listQrTemplates/);
+  });
+
+  it('builds QR templates from field-drop chips and excludes label-scoped custom fields from its palette', () => {
+    expect(tabSrc).toMatch(/chipsToTemplate/);
+    expect(tabSrc).toMatch(/templateToChips/);
+    expect(tabSrc).toMatch(/sanitizeQrText/);
+    expect(tabSrc).toMatch(/qrPaletteFields/);
+    expect(tabSrc).toMatch(/field\.category !== 'Кастомные'/);
+    expect(tabSrc).toMatch(/labelsApi\.updateQrTemplate/);
+    expect(tabSrc).toMatch(/draggingQr/);
+  });
 });
