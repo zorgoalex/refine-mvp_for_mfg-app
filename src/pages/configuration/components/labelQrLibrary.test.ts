@@ -119,6 +119,25 @@ describe('rowsToTemplate / templateToRows', () => {
     const t = '{a}-x|y\n{b}';
     expect(rowsToTemplate(templateToRows(t))).toBe(t);
   });
+
+  it('preserves boundary spaces between fields (single space)', () => {
+    const rows = [[
+      { kind: 'field' as const, fieldId: 'a' },
+      { kind: 'text' as const, text: ' ' },
+      { kind: 'field' as const, fieldId: 'b' },
+    ]];
+    expect(rowsToTemplate(rows)).toBe('{a} {b}');
+  });
+
+  it('preserves padded separator text like " - "', () => {
+    const rows = [[{ kind: 'text' as const, text: ' - ' }]];
+    expect(rowsToTemplate(rows)).toBe(' - ');
+  });
+
+  it('round-trip with boundary spaces survives (field-space-field)', () => {
+    const t = '{a} {b}';
+    expect(rowsToTemplate(templateToRows(t))).toBe(t);
+  });
 });
 
 describe('uniqueQrName', () => {

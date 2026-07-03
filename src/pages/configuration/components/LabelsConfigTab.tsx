@@ -771,7 +771,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const addQrTextChip = (rowIndex: number) => {
-    const text = sanitizeQrText(qrTextDraftsByRow[rowIndex] ?? '').trim();
+    const text = sanitizeQrText(qrTextDraftsByRow[rowIndex] ?? '');
     if (!text) return;
     setQrDraft((current) => {
       const rows = current.rows.map((row, i) => (i === rowIndex ? [...row, { kind: 'text' as const, text }] : row));

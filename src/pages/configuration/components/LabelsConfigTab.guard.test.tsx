@@ -312,4 +312,18 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/Показать границы всех элементов/);
     expect(tabSrc).toMatch(/allBoundsBox/);
   });
+
+  it('preserves boundary spaces in QR text chips by NOT calling .trim() on the sanitized text', () => {
+    // Ensure addQrTextChip does not call .trim() which would strip intentional boundary spaces.
+    // Users must be able to put boundary spaces between fields (e.g. build '{a} {b}' with a space).
+    const addChipBody = tabSrc.slice(
+      tabSrc.indexOf('const addQrTextChip ='),
+      tabSrc.indexOf('const removeQrChip ='),
+    );
+    expect(addChipBody).toMatch(/sanitizeQrText\(qrTextDraftsByRow/);
+    // Confirm .trim() is NOT called on the sanitized text
+    expect(addChipBody).not.toMatch(/sanitizeQrText\([^)]+\)\.trim\(\)/);
+    // Confirm only empty string (not truthy check) skips adding the chip
+    expect(addChipBody).toMatch(/if \(!text\) return;/);
+  });
 });
