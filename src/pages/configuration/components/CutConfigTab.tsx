@@ -382,6 +382,7 @@ const DEFAULT_PDF_ELEMENTS: PdfTemplateElement[] = [
 
 const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canManage }) => {
   const [drafts, setDrafts] = useState<PdfTemplateDraft[]>(() => loadPdfTemplateDrafts(templates));
+  const [savingDraft, setSavingDraft] = useState(false);
   const [selectedCode, setSelectedCode] = useState(() => templates[0]?.code ?? drafts[0]?.code ?? 'standard');
   const selected = drafts.find((draft) => draft.code === selectedCode) ?? drafts[0];
   const [selectedElementId, setSelectedElementId] = useState<string | null>(selected?.elements[0]?.id ?? null);
@@ -440,10 +441,36 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     setSelectedElementId(copy.elements[0]?.id ?? null);
   }, [selected]);
 
-  const saveDrafts = useCallback(() => {
-    window.localStorage.setItem(PDF_TEMPLATE_DRAFTS_KEY, JSON.stringify(drafts));
-    message.success('Черновик шаблона PDF сохранён');
-  }, [drafts]);
+  const saveDrafts = useCallback(async () => {
+    if (!selected) return;
+    const template = templates.find((item) => item.code === selected.code);
+    if (!template) {
+      window.localStorage.setItem(PDF_TEMPLATE_DRAFTS_KEY, JSON.stringify(drafts));
+      message.success('Локальная копия шаблона PDF сохранена');
+      return;
+    }
+    setSavingDraft(true);
+    try {
+      const updated = template
+        ? await cutConfigApi.updatePdfTemplate(
+            template.cutPdfTemplateId,
+            { name: selected.name, layout: { elements: selected.elements }, isActive: template.isActive },
+            template.version,
+          )
+        : await cutConfigApi.createPdfTemplate({
+            code: selected.code,
+            name: selected.name,
+            layout: { elements: selected.elements },
+            isActive: true,
+          });
+      setDrafts((prev) => prev.map((draft) => (draft.code === updated.code ? pdfTemplateToDraft(updated) : draft)));
+      message.success('Шаблон PDF сохранён');
+    } catch (error) {
+      message.error(error instanceof ApiError ? error.message : 'Не удалось сохранить шаблон PDF');
+    } finally {
+      setSavingDraft(false);
+    }
+  }, [drafts, selected, templates]);
 
   if (!selected) {
     return <Alert type="warning" showIcon message="Нет активных шаблонов PDF" />;
@@ -468,7 +495,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
           options={drafts.map((draft) => ({ value: draft.code, label: draft.name }))}
           style={{ width: 260 }}
         />
-        <Button icon={<SaveOutlined />} type="primary" disabled={!canManage} onClick={saveDrafts}>
+        <Button icon={<SaveOutlined />} type="primary" disabled={!canManage} loading={savingDraft} onClick={() => void saveDrafts()}>
           Сохранить
         </Button>
         <Button icon={<CopyOutlined />} disabled={!canManage} onClick={copyTemplate}>
@@ -644,11 +671,16 @@ function mergePdfTemplateDrafts(drafts: PdfTemplateDraft[], templates: CutPdfTem
   const byCode = new Map(drafts.map((draft) => [draft.code, draft]));
   for (const template of templates) {
     if (!template.isActive) continue;
-    if (!byCode.has(template.code)) {
-      byCode.set(template.code, { code: template.code, name: template.name, elements: DEFAULT_PDF_ELEMENTS });
-    }
+    byCode.set(template.code, pdfTemplateToDraft(template));
   }
   return [...byCode.values()];
+}
+
+function pdfTemplateToDraft(template: CutPdfTemplate): PdfTemplateDraft {
+  const elements = Array.isArray((template.layout as { elements?: unknown }).elements)
+    ? ((template.layout as { elements: PdfTemplateElement[] }).elements)
+    : DEFAULT_PDF_ELEMENTS;
+  return { code: template.code, name: template.name, elements };
 }
 
 interface ProfileModalProps {

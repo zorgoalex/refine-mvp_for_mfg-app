@@ -10,12 +10,13 @@ function user(permissions: string[]): CurrentUser {
 function fakePort(): CutConfigAdminPort {
   return {
     recordPermissionDenied: vi.fn(async () => undefined),
-    getConfig: vi.fn(async () => ({ settings: [], paramProfiles: [], renderPresets: [] })),
+    getConfig: vi.fn(async () => ({ settings: [], paramProfiles: [], renderPresets: [], pdfTemplates: [] })),
     updateSetting: vi.fn(async () => ({ key: 'grain.rules', value: {}, version: 1 })),
     upsertParamProfile: vi.fn(async () => ({ cutParamProfileId: 1, name: 'x', params: {}, isDefault: false, isActive: true, version: 0 })),
     deleteParamProfile: vi.fn(async () => undefined),
     upsertRenderPreset: vi.fn(async () => ({ cutRenderPresetId: 1, name: 'x', targetPx: 360, background: '#fff', isActive: true, version: 0 })),
     deleteRenderPreset: vi.fn(async () => undefined),
+    upsertPdfTemplate: vi.fn(async () => ({ cutPdfTemplateId: 1, code: 'x', name: 'x', layout: {}, isActive: true, version: 1 })),
   };
 }
 
@@ -52,5 +53,16 @@ describe('CutConfigAdminService RBAC', () => {
     const viewer = user(['cut.view']);
     await expect(service.updateSetting({ currentUser: viewer, key: 'defaults', value: {}, expectedVersion: 0 })).rejects.toMatchObject({ statusCode: 403 });
     await expect(service.deleteRenderPreset({ currentUser: viewer, id: 1, expectedVersion: 0 })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(service.upsertPdfTemplate({ currentUser: viewer, id: 1, input: { name: 'x', layout: {} }, expectedVersion: 0 })).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('allows updating pdf templates with cut.manage', async () => {
+    const port = fakePort();
+    const service = new CutConfigAdminService({ config: port });
+
+    await expect(
+      service.upsertPdfTemplate({ currentUser: user(['cut.view', 'cut.manage']), id: 1, input: { name: 'Bath', layout: { elements: [] } }, expectedVersion: 0 }),
+    ).resolves.toMatchObject({ cutPdfTemplateId: 1, layout: {} });
+    expect(port.upsertPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({ id: 1, expectedVersion: 0 }));
   });
 });

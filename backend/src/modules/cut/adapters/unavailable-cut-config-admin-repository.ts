@@ -24,6 +24,9 @@ export class UnavailableCutConfigAdminRepository implements CutConfigAdminPort {
   deleteRenderPreset() {
     return Promise.reject(unavailable());
   }
+  upsertPdfTemplate() {
+    return Promise.reject(unavailable());
+  }
 }
 
 function unavailable(): ApiError {

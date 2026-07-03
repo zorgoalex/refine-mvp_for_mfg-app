@@ -7,6 +7,7 @@ import type {
   CutConfigContext,
   DeleteCatalogRowCommand,
   UpdateCutSettingCommand,
+  UpsertCutPdfTemplateCommand,
   UpsertCutParamProfileCommand,
   UpsertCutRenderPresetCommand,
 } from './cut-config-admin.types';
@@ -56,6 +57,11 @@ export class CutConfigAdminService {
   async deleteRenderPreset(command: DeleteCatalogRowCommand) {
     this.require(command.currentUser, 'cut.manage', command.requestId);
     return this.ports.config.deleteRenderPreset(command);
+  }
+
+  async upsertPdfTemplate(command: UpsertCutPdfTemplateCommand) {
+    this.require(command.currentUser, 'cut.manage', command.requestId);
+    return this.ports.config.upsertPdfTemplate(command);
   }
 
   private require(

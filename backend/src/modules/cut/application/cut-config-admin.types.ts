@@ -29,6 +29,7 @@ export interface CutPdfTemplateDto {
   cutPdfTemplateId: number;
   code: string;
   name: string;
+  layout: Record<string, unknown>;
   isActive: boolean;
   version: number;
 }
@@ -82,6 +83,19 @@ export interface UpsertCutRenderPresetCommand extends CutConfigContext {
   input: CutRenderPresetInput;
 }
 
+export interface CutPdfTemplateInput {
+  code?: string;
+  name: string;
+  layout: Record<string, unknown>;
+  isActive?: boolean;
+}
+
+export interface UpsertCutPdfTemplateCommand extends CutConfigContext {
+  id?: number;
+  expectedVersion?: number;
+  input: CutPdfTemplateInput;
+}
+
 export interface CutConfigPermissionDeniedInput {
   currentUser: CurrentUser;
   requiredPermissions: readonly string[];
@@ -96,4 +110,5 @@ export interface CutConfigAdminPort {
   deleteParamProfile(command: DeleteCatalogRowCommand): Promise<void>;
   upsertRenderPreset(command: UpsertCutRenderPresetCommand): Promise<CutRenderPresetDto>;
   deleteRenderPreset(command: DeleteCatalogRowCommand): Promise<void>;
+  upsertPdfTemplate(command: UpsertCutPdfTemplateCommand): Promise<CutPdfTemplateDto>;
 }

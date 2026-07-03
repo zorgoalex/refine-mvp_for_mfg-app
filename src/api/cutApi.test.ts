@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildEligibleQuery, cutApi, validateCutJobId } from './cutApi';
+import { cutConfigApi } from './cutConfigApi';
 import type { CutJobDto } from './types/cutApi.types';
 
 describe('cutApi', () => {
@@ -185,6 +186,26 @@ describe('cutApi', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/3/split-by-material');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ splitByMaterial: false, version: 7 });
+  });
+
+  it('updates PDF template layouts through cut-config API', async () => {
+    const fetchMock = mockFetch({ cutPdfTemplateId: 2, code: 'bath_profiles', name: 'Bath', layout: { elements: [] }, isActive: true, version: 3 });
+
+    await cutConfigApi.updatePdfTemplate(2, { name: 'Bath', layout: { elements: [] }, isActive: true }, 2);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-config/pdf-templates/2');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PUT');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({ name: 'Bath', layout: { elements: [] }, version: 2 });
+  });
+
+  it('creates PDF template layouts through cut-config API', async () => {
+    const fetchMock = mockFetch({ cutPdfTemplateId: 3, code: 'bath_copy', name: 'Bath copy', layout: { elements: [] }, isActive: true, version: 0 });
+
+    await cutConfigApi.createPdfTemplate({ code: 'bath_copy', name: 'Bath copy', layout: { elements: [] }, isActive: true });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-config/pdf-templates');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({ code: 'bath_copy', name: 'Bath copy', layout: { elements: [] } });
   });
 });
 

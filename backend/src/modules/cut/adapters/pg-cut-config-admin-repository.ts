@@ -15,6 +15,7 @@ import {
   type CutSettingRowDto,
   type DeleteCatalogRowCommand,
   type UpdateCutSettingCommand,
+  type UpsertCutPdfTemplateCommand,
   type UpsertCutParamProfileCommand,
   type UpsertCutRenderPresetCommand,
 } from '../application/cut-config-admin.types';
@@ -33,6 +34,7 @@ export const CUT_CONFIG_AUDIT_EVENTS = {
   paramProfileDeleted: 'cut_config.param_profile_deleted',
   renderPresetUpserted: 'cut_config.render_preset_upserted',
   renderPresetDeleted: 'cut_config.render_preset_deleted',
+  pdfTemplateUpdated: 'cut_config.pdf_template_updated',
 } as const;
 
 /**
@@ -71,7 +73,7 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
         `SELECT cut_render_preset_id, name, target_px, background, is_active, version FROM cut_render_presets ORDER BY target_px`,
       ),
       this.database.query(
-        `SELECT cut_pdf_template_id, code, name, is_active, version FROM cut_pdf_templates ORDER BY code`,
+        `SELECT cut_pdf_template_id, code, name, COALESCE(layout, '{}'::jsonb) AS layout, is_active, version FROM cut_pdf_templates ORDER BY code`,
       ),
     ]);
 
@@ -242,6 +244,68 @@ export class PgCutConfigAdminRepository implements CutConfigAdminPort {
     });
   }
 
+  async upsertPdfTemplate(command: UpsertCutPdfTemplateCommand): Promise<CutPdfTemplateDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      if (command.id === undefined) {
+        const code = command.input.code?.trim();
+        if (!code || !/^[A-Za-z0-9_-]+$/.test(code)) {
+          throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid PDF template code', { field: 'code' });
+        }
+        const inserted = await tx.query(
+          `INSERT INTO cut_pdf_templates (code, name, layout, is_active, created_by, edited_by)
+           VALUES ($1, $2, $3::jsonb, COALESCE($4, true), $5, $5)
+           RETURNING cut_pdf_template_id, code, name, COALESCE(layout, '{}'::jsonb) AS layout, is_active, version`,
+          [code, command.input.name, JSON.stringify(command.input.layout), command.input.isActive ?? null, numOrNull(command.currentUser.id)],
+        );
+        const row = mapPdfTemplate(inserted.rows[0]);
+        await this.audit(tx, command.currentUser, {
+          event: CUT_CONFIG_AUDIT_EVENTS.pdfTemplateUpdated,
+          entityType: 'cut_pdf_template',
+          entityId: row.cutPdfTemplateId,
+          before: null,
+          after: pdfTemplateDiffShape(row),
+          requestId: command.requestId,
+        });
+        return row;
+      }
+      const existing = await tx.query(
+        `SELECT cut_pdf_template_id, code, name, COALESCE(layout, '{}'::jsonb) AS layout, is_active, version
+         FROM cut_pdf_templates WHERE cut_pdf_template_id = $1 FOR UPDATE`,
+        [command.id],
+      );
+      if (existing.rowCount === 0) {
+        throw new CutConfigRowNotFoundError('cut_pdf_templates', command.id);
+      }
+      const before = mapPdfTemplate(existing.rows[0]);
+      assertVersion(before.version, command.expectedVersion ?? -1, String(command.id));
+      const updated = await tx.query(
+        `UPDATE cut_pdf_templates
+         SET name = $2, layout = $3::jsonb, is_active = COALESCE($4, is_active),
+             version = version + 1, edited_by = $5, updated_at = now()
+         WHERE cut_pdf_template_id = $1
+         RETURNING cut_pdf_template_id, code, name, COALESCE(layout, '{}'::jsonb) AS layout, is_active, version`,
+        [
+          command.id,
+          command.input.name,
+          JSON.stringify(command.input.layout),
+          command.input.isActive ?? null,
+          numOrNull(command.currentUser.id),
+        ],
+      );
+      const after = mapPdfTemplate(updated.rows[0]);
+      await this.audit(tx, command.currentUser, {
+        event: CUT_CONFIG_AUDIT_EVENTS.pdfTemplateUpdated,
+        entityType: 'cut_pdf_template',
+        entityId: after.cutPdfTemplateId,
+        before: pdfTemplateDiffShape(before),
+        after: pdfTemplateDiffShape(after),
+        requestId: command.requestId,
+      });
+      return after;
+    });
+  }
+
   /** Soft delete = deactivate (is_active=false): catalog rows may be referenced by
    *  existing cut_groups (ON DELETE RESTRICT), so a physical delete is unsafe. */
   private softDeleteCatalog(opts: {
@@ -349,6 +413,7 @@ function mapPdfTemplate(r: Record<string, unknown>): CutPdfTemplateDto {
     cutPdfTemplateId: toNum(r.cut_pdf_template_id),
     code: String(r.code),
     name: String(r.name),
+    layout: asObj(r.layout),
     isActive: Boolean(r.is_active),
     version: toNum(r.version),
   };
@@ -360,6 +425,10 @@ function profileDiffShape(p: CutParamProfileDto): Record<string, unknown> {
 
 function presetDiffShape(p: CutRenderPresetDto): Record<string, unknown> {
   return { name: p.name, targetPx: p.targetPx, background: p.background, isActive: p.isActive };
+}
+
+function pdfTemplateDiffShape(p: CutPdfTemplateDto): Record<string, unknown> {
+  return { code: p.code, name: p.name, layout: p.layout, isActive: p.isActive };
 }
 
 function asObj(value: unknown): Record<string, unknown> {

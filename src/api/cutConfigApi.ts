@@ -26,6 +26,7 @@ export interface CutPdfTemplate {
   cutPdfTemplateId: number;
   code: string;
   name: string;
+  layout: Record<string, unknown>;
   isActive: boolean;
   version: number;
 }
@@ -47,6 +48,13 @@ export interface CutRenderPresetInput {
   name: string;
   targetPx: number;
   background?: string;
+  isActive?: boolean;
+}
+
+export interface CutPdfTemplateInput {
+  code?: string;
+  name: string;
+  layout: Record<string, unknown>;
   isActive?: boolean;
 }
 
@@ -82,6 +90,13 @@ export const cutConfigApi = {
   },
   deleteRenderPreset(id: number, version: number): Promise<void> {
     return deleteWithVersion(apiRoutes.cutConfig.renderPreset(id), version);
+  },
+
+  updatePdfTemplate(id: number, input: CutPdfTemplateInput, version: number): Promise<CutPdfTemplate> {
+    return httpClient.put<CutPdfTemplate>(apiRoutes.cutConfig.pdfTemplate(id), { ...input, version });
+  },
+  createPdfTemplate(input: CutPdfTemplateInput & { code: string }): Promise<CutPdfTemplate> {
+    return httpClient.post<CutPdfTemplate>(apiRoutes.cutConfig.pdfTemplates, input);
   },
 };
 

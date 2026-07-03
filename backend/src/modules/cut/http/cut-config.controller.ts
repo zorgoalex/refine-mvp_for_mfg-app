@@ -7,6 +7,7 @@ import { CutConfigAdminService } from '../application/cut-config-admin.service';
 import type {
   CutConfigDto,
   CutParamProfileDto,
+  CutPdfTemplateDto,
   CutRenderPresetDto,
   CutSettingRowDto,
 } from '../application/cut-config-admin.types';
@@ -31,6 +32,19 @@ const presetInputSchema = z.object({
 });
 const presetCreateSchema = presetInputSchema.strict();
 const presetUpdateSchema = presetInputSchema.extend({ version: z.number().int().min(0) }).strict();
+
+const pdfTemplateUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  layout: z.record(z.string(), z.unknown()),
+  isActive: z.boolean().optional(),
+  version: z.number().int().min(0),
+}).strict();
+const pdfTemplateCreateSchema = z.object({
+  code: z.string().trim().regex(/^[A-Za-z0-9_-]+$/).max(100),
+  name: z.string().trim().min(1).max(200),
+  layout: z.record(z.string(), z.unknown()),
+  isActive: z.boolean().optional(),
+}).strict();
 
 const versionBodySchema = z.object({ version: z.number().int().min(0) }).strict();
 
@@ -110,6 +124,21 @@ export class CutConfigController {
   async deletePreset(@Req() request: RequestWithCurrentUser, @Param('id') id: string, @Body() body: unknown): Promise<void> {
     const currentUser = this.requireMutation(request);
     await this.config.deleteRenderPreset({ currentUser, id: parseId(id), expectedVersion: parseVersion(body), requestId: request.requestId });
+  }
+
+  @ApiOperation({ operationId: 'updateCutPdfTemplate', summary: 'Update a PDF template layout' })
+  @Put('pdf-templates/:id')
+  async updatePdfTemplate(@Req() request: RequestWithCurrentUser, @Param('id') id: string, @Body() body: unknown): Promise<CutPdfTemplateDto> {
+    const currentUser = this.requireMutation(request);
+    const { version, ...input } = parse(pdfTemplateUpdateSchema, body);
+    return this.config.upsertPdfTemplate({ currentUser, id: parseId(id), expectedVersion: version, input, requestId: request.requestId });
+  }
+
+  @ApiOperation({ operationId: 'createCutPdfTemplate', summary: 'Create a PDF template layout' })
+  @Post('pdf-templates')
+  async createPdfTemplate(@Req() request: RequestWithCurrentUser, @Body() body: unknown): Promise<CutPdfTemplateDto> {
+    const currentUser = this.requireMutation(request);
+    return this.config.upsertPdfTemplate({ currentUser, input: parse(pdfTemplateCreateSchema, body), requestId: request.requestId });
   }
 
   private requireRead(request: RequestWithCurrentUser) {

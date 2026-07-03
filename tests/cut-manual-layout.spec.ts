@@ -290,8 +290,8 @@ async function setupMocks(
         renderPresets: [{ name: 'screen', isActive: true }],
         paramProfiles: [],
         pdfTemplates: [
-          { cutPdfTemplateId: 1, code: 'standard', name: 'Стандартный лист', isActive: true, version: 1 },
-          { cutPdfTemplateId: 2, code: 'bath_vacuum', name: 'Ванна: вакуумный стол', isActive: true, version: 1 },
+          { cutPdfTemplateId: 1, code: 'standard', name: 'Стандартный лист', layout: {}, isActive: true, version: 1 },
+          { cutPdfTemplateId: 2, code: 'bath_vacuum', name: 'Ванна: вакуумный стол', layout: {}, isActive: true, version: 1 },
         ],
         settings: [],
       }),
