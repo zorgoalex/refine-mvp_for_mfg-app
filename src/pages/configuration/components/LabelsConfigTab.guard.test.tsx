@@ -167,7 +167,7 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/align=\{textAlign\}/);
   });
 
-  it('supports QR-code elements with template payloads and automatic layout protection', () => {
+  it('supports QR-code elements with template payloads and a non-blocking overlap warning', () => {
     expect(tabSrc).toMatch(/QR-код/);
     expect(tabSrc).toMatch(/QrcodeOutlined/);
     expect(tabSrc).toMatch(/value: 'qr', label: 'QR-код'/);
@@ -179,7 +179,52 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/qrProtectedRect/);
     expect(tabSrc).toMatch(/data-label-qr-conflict/);
     expect(tabSrc).toMatch(/kind === 'qr'/);
-    expect(tabSrc).toMatch(/QR_CONFLICT/);
+  });
+
+  it('never blocks saving on a QR overlap/out-of-bounds conflict (warning-only, option A)', () => {
+    // buildTemplatePayload must not throw for collectQrConflicts results — only
+    // the duplicate-name and empty-name QR checks are allowed to block a save.
+    expect(tabSrc).not.toMatch(/QR_CONFLICT/);
+    expect(tabSrc).not.toMatch(/throw new Error\(QR_CONFLICT_ERROR\)/);
+    const buildPayloadBody = tabSrc.slice(
+      tabSrc.indexOf('const buildTemplatePayload ='),
+      tabSrc.indexOf('const describeSaveError ='),
+    );
+    expect(buildPayloadBody).not.toMatch(/collectQrConflicts/);
+    expect(buildPayloadBody).toMatch(/throw new Error\(`\$\{QR_NAME_DUP_ERROR_PREFIX\}/);
+    expect(buildPayloadBody).toMatch(/throw new Error\(`\$\{QR_NAME_EMPTY_ERROR_PREFIX\}/);
+    expect(buildPayloadBody).toMatch(/collectDuplicateQrNames/);
+    expect(buildPayloadBody).toMatch(/collectEmptyQrNames/);
+    expect(tabSrc).toMatch(/QR_NAME_DUP_ERROR_PREFIX/);
+    expect(tabSrc).toMatch(/QR_NAME_EMPTY_ERROR_PREFIX/);
+  });
+
+  it('does not auto-shift neighbouring elements when a QR is moved/resized manually, only on initial library drop', () => {
+    const applyPatchBody = tabSrc.slice(
+      tabSrc.indexOf('const applyQrGeometryPatch = '),
+      tabSrc.indexOf('const patchQrStyle ='),
+    );
+    expect(applyPatchBody).not.toMatch(/autoShiftForQr\(/);
+    expect(applyPatchBody).toMatch(/collectQrConflicts/);
+    const addElementBody = tabSrc.slice(
+      tabSrc.indexOf('const addElement = '),
+      tabSrc.indexOf('const patchElement = '),
+    );
+    expect(addElementBody).not.toMatch(/autoShiftForQr\(/);
+    const dropBody = tabSrc.slice(
+      tabSrc.indexOf('const onDropDraggingQr = '),
+      tabSrc.indexOf('const handleBazisImportFile ='),
+    );
+    expect(dropBody).toMatch(/autoShiftForQr/);
+  });
+
+  it('lets elements be reordered to the front or back of the draw stack via the context menu', () => {
+    expect(tabSrc).toMatch(/На передний план/);
+    expect(tabSrc).toMatch(/На задний план/);
+    expect(tabSrc).toMatch(/bringElementToFront/);
+    expect(tabSrc).toMatch(/sendElementToBack/);
+    expect(tabSrc).toMatch(/onBringElementToFront\?\.\(contextMenu\.element\.elementKey\)/);
+    expect(tabSrc).toMatch(/onSendElementToBack\?\.\(contextMenu\.element\.elementKey\)/);
   });
 
   it('strips read-only element ids before create or update payloads', () => {
@@ -209,13 +254,21 @@ describe('LabelsConfigTab wiring', () => {
   });
 
   it('builds QR templates from field-drop chips and excludes label-scoped custom fields from its palette', () => {
-    expect(tabSrc).toMatch(/chipsToTemplate/);
-    expect(tabSrc).toMatch(/templateToChips/);
+    expect(tabSrc).toMatch(/rowsToTemplate/);
+    expect(tabSrc).toMatch(/templateToRows/);
     expect(tabSrc).toMatch(/sanitizeQrText/);
     expect(tabSrc).toMatch(/qrPaletteFields/);
     expect(tabSrc).toMatch(/field\.category !== 'Кастомные'/);
     expect(tabSrc).toMatch(/labelsApi\.updateQrTemplate/);
     expect(tabSrc).toMatch(/draggingQr/);
+  });
+
+  it('supports multiple independent QR content rows, each with its own field-drop zone and free-text input', () => {
+    expect(tabSrc).toMatch(/rows: QrRow\[\]/);
+    expect(tabSrc).toMatch(/addQrRow/);
+    expect(tabSrc).toMatch(/removeQrRow/);
+    expect(tabSrc).toMatch(/\+ строка/);
+    expect(tabSrc).toMatch(/qrRowDropRefs/);
   });
 
   it('lets an ad-hoc QR element be promoted into the global library', () => {
@@ -245,5 +298,32 @@ describe('LabelsConfigTab wiring', () => {
   it('distinguishes QR-library name-taken 409s from stale-version 409s', () => {
     expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_TEMPLATE_NAME_TAKEN'/);
     expect(tabSrc).toMatch(/QR-шаблон с таким именем уже существует/);
+  });
+
+  it('shows a floating drag badge for a QR-builder field pick-up, following the cursor', () => {
+    expect(tabSrc).toMatch(/qrFieldDragCursor/);
+    expect(tabSrc).toMatch(/data-label-global-drag-preview-qr-field/);
+    expect(tabSrc).toMatch(/draggingQrField\.label/);
+  });
+
+  it('can toggle bounding-box borders for every label element in the visual preview', () => {
+    expect(tabSrc).toMatch(/showAllBorders/);
+    expect(tabSrc).toMatch(/showAllBounds/);
+    expect(tabSrc).toMatch(/Показать границы всех элементов/);
+    expect(tabSrc).toMatch(/allBoundsBox/);
+  });
+
+  it('preserves boundary spaces in QR text chips by NOT calling .trim() on the sanitized text', () => {
+    // Ensure addQrTextChip does not call .trim() which would strip intentional boundary spaces.
+    // Users must be able to put boundary spaces between fields (e.g. build '{a} {b}' with a space).
+    const addChipBody = tabSrc.slice(
+      tabSrc.indexOf('const addQrTextChip ='),
+      tabSrc.indexOf('const removeQrChip ='),
+    );
+    expect(addChipBody).toMatch(/sanitizeQrText\(qrTextDraftsByRow/);
+    // Confirm .trim() is NOT called on the sanitized text
+    expect(addChipBody).not.toMatch(/sanitizeQrText\([^)]+\)\.trim\(\)/);
+    // Confirm only empty string (not truthy check) skips adding the chip
+    expect(addChipBody).toMatch(/if \(!text\) return;/);
   });
 });

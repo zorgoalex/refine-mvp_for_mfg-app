@@ -1,26 +1,70 @@
 import type { LabelTemplateElement } from '../../../api/types/labelsApi.types';
 
 export type QrChip = { kind: 'field'; fieldId: string } | { kind: 'text'; text: string };
+export type QrRow = QrChip[];
 
-// Static text must not contain the separator or brace chars, otherwise the flat
-// `join('|')` / `split('|')` + `{field}` regex round-trip would silently mutate
-// content on edit/reload. The UI filters input with this; the helper strips defensively.
-export const QR_TEXT_FORBIDDEN = /[|{}]/g;
+// Static text must not contain braces or newlines, otherwise parsing + round-trip
+// would silently mutate content on edit/reload. Pipe (|) is allowed as literal text.
+// The UI filters input with this; the helper strips defensively.
+export const QR_TEXT_FORBIDDEN = /[{}\n]/g;
 export function sanitizeQrText(text: string): string {
   return text.replace(QR_TEXT_FORBIDDEN, '');
 }
 
-export function chipsToTemplate(chips: QrChip[], separator = '|'): string {
-  return chips
-    .map((c) => (c.kind === 'field' ? `{${c.fieldId}}` : sanitizeQrText(c.text)))
-    .join(separator);
+export function rowsToTemplate(rows: QrRow[]): string {
+  // Convert each row to its template string by concatenating chips (no separator).
+  // Field chips become {fieldId}, text chips become sanitizeQrText(text).
+  // Join rows with newline. Drop leading/trailing fully-empty rows (interior
+  // empty rows are kept) so the compiled string never begins/ends with a blank
+  // line — this mirrors the backend's contentTemplate: z.string().trim(),
+  // which would otherwise silently strip a leading/trailing blank row on save.
+  const rowStrings = rows.map((row) => {
+    return row
+      .map((c) => (c.kind === 'field' ? `{${c.fieldId}}` : sanitizeQrText(c.text)))
+      .join('');
+  });
+
+  // Drop trailing empty row strings
+  while (rowStrings.length > 0 && rowStrings[rowStrings.length - 1] === '') {
+    rowStrings.pop();
+  }
+  // Drop leading empty row strings
+  while (rowStrings.length > 0 && rowStrings[0] === '') {
+    rowStrings.shift();
+  }
+
+  return rowStrings.join('\n');
 }
 
-export function templateToChips(template: string, separator = '|'): QrChip[] {
+export function templateToRows(template: string): QrRow[] {
   if (!template) return [];
-  return template.split(separator).map((part): QrChip => {
-    const m = part.match(/^\{([^{}]+)\}$/);
-    return m ? { kind: 'field', fieldId: m[1].trim() } : { kind: 'text', text: part };
+  const lines = template.split('\n');
+  return lines.map((line): QrRow => {
+    if (!line) return [];
+    const chips: QrChip[] = [];
+    let lastIndex = 0;
+
+    // Match all {fieldId} patterns in the line
+    const fieldRegex = /\{([^{}]+)\}/g;
+    let match;
+    while ((match = fieldRegex.exec(line)) !== null) {
+      // Add any literal text before this field
+      if (match.index > lastIndex) {
+        const literalText = line.substring(lastIndex, match.index);
+        chips.push({ kind: 'text', text: literalText });
+      }
+      // Add the field chip
+      chips.push({ kind: 'field', fieldId: match[1].trim() });
+      lastIndex = fieldRegex.lastIndex;
+    }
+
+    // Add any remaining literal text after the last field
+    if (lastIndex < line.length) {
+      const literalText = line.substring(lastIndex);
+      chips.push({ kind: 'text', text: literalText });
+    }
+
+    return chips;
   });
 }
 

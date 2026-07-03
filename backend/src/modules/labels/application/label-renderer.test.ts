@@ -119,6 +119,33 @@ describe('label renderer', () => {
     expect(svg).not.toContain('fill="black"');
   });
 
+  it('renders multi-line qr payloads with newline characters preserved', () => {
+    const base = template();
+    base.elements.push({
+      labelTemplateElementId: 4,
+      elementKey: 'qr',
+      kind: 'qr',
+      sourceField: null,
+      staticText: null,
+      xMm: 30,
+      yMm: 5,
+      widthMm: 18,
+      heightMm: 18,
+      rotationDeg: 0,
+      zIndex: 3,
+      style: { qrTemplate: '{bazis.detail_id}-{bazis.name}\n{bazis.material}', qrErrorCorrection: 'M' },
+      condition: {},
+    });
+
+    const svg = renderSvgPages(base, [row({ 'bazis.detail_id': '12345', 'bazis.name': 'Фасад', 'bazis.material': 'МДФ' })]).pages[0];
+
+    expect(svg).toContain('data-label-element-kind="qr"');
+    // The payload should contain the newline character within the data-qr-payload attribute
+    expect(svg).toContain('data-qr-payload="12345-Фасад\nМДФ"');
+    // Verify that QR code was rendered (contains black modules for non-empty payload)
+    expect(svg).toContain('fill="black"');
+  });
+
   it('renders content-bearing BMP/PNG and sample-compatible BMP-backed .emf entries in a ZIP', async () => {
     const zip = await renderLabelsZip({
       generationId: 7,

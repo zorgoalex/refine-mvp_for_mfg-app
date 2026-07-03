@@ -34,6 +34,20 @@ describe('LabelsService qr templates', () => {
       .rejects.toMatchObject({ statusCode: 422 });
   });
 
+  it('admin create rejects newline-only content', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    await expect(service.createQrTemplate({ ...ctx(admin), input: { ...validInput(), contentTemplate: '\n\n' } }))
+      .rejects.toMatchObject({ statusCode: 422, code: 'LABEL_QR_TEMPLATE_EMPTY' });
+  });
+
+  it('admin create accepts multi-line content with newline separators', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    await service.createQrTemplate({ ...ctx(admin), input: { ...validInput(), contentTemplate: '{bazis.detail_id}\n{bazis.name}' } });
+    expect(repo.createQrTemplate).toHaveBeenCalledOnce();
+  });
+
   it('admin create rejects an unsupported field placeholder', async () => {
     const repo = fakeRepo();
     const service = new LabelsService({ repo });

@@ -12,7 +12,7 @@ const describeIntegration = databaseUrl ? describe : describe.skip;
 const schemaName = `labels_qr_tpl_${randomUUID().replaceAll('-', '_')}`;
 const namePrefix = `Тест QR ${Date.now()}`;
 
-const migration049 = readFileSync(new URL('../../../../db/migrations/049_label_qr_templates.sql', import.meta.url), 'utf8');
+const migrationLabelQrTemplates = readFileSync(new URL('../../../../db/migrations/051_label_qr_templates.sql', import.meta.url), 'utf8');
 
 function currentUser(): CurrentUser {
   return {
@@ -119,7 +119,7 @@ describeIntegration('PgLabelsRepository QR templates (integration)', () => {
     await sessionClient.query(`CREATE SCHEMA ${schemaName}`);
     await sessionClient.query(`SET search_path TO ${schemaName}`);
     await createPrerequisites(sessionClient);
-    await sessionClient.query(migration049);
+    await sessionClient.query(migrationLabelQrTemplates);
     repo = new PgLabelsRepository(makeDatabase(sessionClient));
   });
 
