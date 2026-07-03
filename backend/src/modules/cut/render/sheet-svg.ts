@@ -334,7 +334,8 @@ function renderBathDetailCenterLabel(input: {
     )}" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${escapeXml(lines[0])}</text>`;
   }
 
-  const [orderLine, positionLine] = lines;
+  const [orderLine, rawPositionLine] = lines;
+  const positionLine = formatBathPositionLabel(rawPositionLine);
   const oneLineText = `${orderLine} ${positionLine}`;
   const shouldUseOneLine = input.rectH < input.baseFontMm * 1.65;
   if (shouldUseOneLine) {
@@ -369,6 +370,10 @@ function renderBathDetailCenterLabel(input: {
       font,
     )}" fill="${BATH_POSITION_LABEL_COLOR}" text-anchor="middle" dominant-baseline="middle">${escapeXml(positionLine)}</text>`,
   ].join('');
+}
+
+function formatBathPositionLabel(value: string): string {
+  return value.replace(/^поз\.\s*/i, '# ');
 }
 
 function fitBathLabelFont(lines: readonly string[], rectW: number, rectH: number, baseFontMm: number, lineCount: 1 | 2): number {

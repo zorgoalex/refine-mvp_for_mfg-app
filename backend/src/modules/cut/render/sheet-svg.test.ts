@@ -138,7 +138,8 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
     expect(svg).toMatch(/<text x="310"[^>]*fill="#7f1d1d"[^>]*font-weight="700"[^>]*>11300<\/text>/);
-    expect(svg).toMatch(/<text x="310"[^>]*fill="#14532d"[^>]*>поз\. 5<\/text>/);
+    expect(svg).toMatch(/<text x="310"[^>]*fill="#14532d"[^>]*># 5<\/text>/);
+    expect(svg).not.toContain('>поз. 5</text>');
     expect(svg).not.toContain('600X400');
     expect(svg).toMatch(/<text x="310" y="[^"]*"[^>]*font-size="42"[^>]*>600<\/text>/);
     expect(svg).toMatch(/transform="rotate\(-90 [^"]+\)"[^>]*font-size="42"[^>]*>400<\/text>/);
@@ -159,7 +160,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     const svg = buildBathProfileSheetSvg({ sheet: roomySheet, labelFor: () => ['11300', 'поз. 5', '1000X600'] });
 
     expect(svg).toMatch(/<text x="510"[^>]*font-size="98"[^>]*fill="#7f1d1d"[^>]*font-weight="700"[^>]*>11300<\/text>/);
-    expect(svg).toMatch(/<text x="510"[^>]*font-size="98"[^>]*fill="#14532d"[^>]*>поз\. 5<\/text>/);
+    expect(svg).toMatch(/<text x="510"[^>]*font-size="98"[^>]*fill="#14532d"[^>]*># 5<\/text>/);
   });
 
   it('omits bath PDF center labels for short pieces that cannot hold them', () => {
@@ -180,7 +181,8 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toContain('fill="#7f1d1d" font-weight="700"');
     expect(svg).toContain('>11300</text>');
     expect(svg).toContain('fill="#14532d"');
-    expect(svg).toContain('>поз. 5</text>');
+    expect(svg).toContain('># 5</text>');
+    expect(svg).not.toContain('>поз. 5</text>');
     expect(svg).not.toContain('<tspan fill="#7f1d1d"');
   });
 
