@@ -37,6 +37,9 @@ import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
+import { useIsMobile } from '../../hooks/useDeviceTier';
+import { DetailCardList } from './mobile/DetailCardList';
+import type { DetailCardLookups } from './mobile/detailCardModel';
 import {
   applyOrderDetailColumnSettings,
   OrderDetailColumnSettingsButton,
@@ -75,6 +78,7 @@ const ORDER_DETAIL_SHOW_DEFAULT_ORDER = ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS.map
 
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
 
   const { queryResult } = useShow({
@@ -267,6 +271,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const paymentTypesMap = new Map(
     (paymentTypesData?.data || []).map((item: any) => [item.type_paid_id, item.type_paid_name])
   );
+
+  // Phone-only detail cards (Task 8): thin closures over the SAME lookup maps
+  // used by the desktop details table's «Фрезеровка»/«Материал» columns
+  // (show.tsx:~665/~684) — no duplicated resolve logic.
+  const detailCardLookups: DetailCardLookups = {
+    millingNameOf: (d) => millingTypesMap.get((d as any).milling_type_id) || '—',
+    materialNameOf: (d) => resolveDetailMaterialName(d, resolvedNameByDetailId, materialsMap) || '—',
+  };
 
   // SP3: unique server-resolved display material names for the show header summary.
   const headerMaterialNames = useMemo(() => {
@@ -1131,52 +1143,57 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
                 Детали заказа
               </div>
-              <Space size="small" wrap>
-                <DetailGroupingControls
-                  state={grouping.state}
-                  onFieldChange={grouping.setField}
-                  onToggleSeparation={grouping.setShowSeparation}
-                />
-                {cutEnabled && details.length > 0 && (
-                  <>
-                    <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
-                      {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
-                    </Button>
-                    {cutSelectMode && (
-                      <>
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            setCutSelectedDetailIds(
-                              cutSelectedDetailIds.length === details.length
-                                ? []
-                                : details.map((d: any) => d.detail_id),
-                            )
-                          }
-                        >
-                          {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
-                        </Button>
-                        <Button
-                          size="small"
-                          type="primary"
-                          disabled={cutSelectedDetailIds.length === 0}
-                          onClick={() => setCutModalOpen(true)}
-                        >
-                          Добавить выбранные в раскрой ({cutSelectedDetailIds.length})
-                        </Button>
-                      </>
-                    )}
-                  </>
-                )}
-                <OrderDetailColumnSettingsButton
-                  tableKey="orderShow"
-                  definitions={ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS}
-                  defaultOrder={ORDER_DETAIL_SHOW_DEFAULT_ORDER}
-                  settings={showColumnSettings}
-                  onChange={saveShowColumnSettings}
-                />
-              </Space>
+              {!isMobile && (
+                <Space size="small" wrap>
+                  <DetailGroupingControls
+                    state={grouping.state}
+                    onFieldChange={grouping.setField}
+                    onToggleSeparation={grouping.setShowSeparation}
+                  />
+                  {cutEnabled && details.length > 0 && (
+                    <>
+                      <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
+                        {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+                      </Button>
+                      {cutSelectMode && (
+                        <>
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              setCutSelectedDetailIds(
+                                cutSelectedDetailIds.length === details.length
+                                  ? []
+                                  : details.map((d: any) => d.detail_id),
+                              )
+                            }
+                          >
+                            {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
+                          </Button>
+                          <Button
+                            size="small"
+                            type="primary"
+                            disabled={cutSelectedDetailIds.length === 0}
+                            onClick={() => setCutModalOpen(true)}
+                          >
+                            Добавить выбранные в раскрой ({cutSelectedDetailIds.length})
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  )}
+                  <OrderDetailColumnSettingsButton
+                    tableKey="orderShow"
+                    definitions={ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS}
+                    defaultOrder={ORDER_DETAIL_SHOW_DEFAULT_ORDER}
+                    settings={showColumnSettings}
+                    onChange={saveShowColumnSettings}
+                  />
+                </Space>
+              )}
             </div>
+            {isMobile ? (
+              <DetailCardList rows={details} lookups={detailCardLookups} />
+            ) : (
             <TableTopScroll>
             <Table
               className={groupingActive ? 'details-grouped' : undefined}
@@ -1283,6 +1300,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               }}
             />
             </TableTopScroll>
+            )}
           </div>
 
           {/* Скрытый компонент для печати */}

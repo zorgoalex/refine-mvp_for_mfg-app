@@ -13,4 +13,9 @@ describe('order show header phone stacking', () => {
     const css = read('styles/mobile.css');
     expect(css).toMatch(/\.order-show-header__row[\s\S]*flex-direction:\s*column\s*!important/);
   });
+  it('show.tsx branches details table for phone', () => {
+    const src = read('pages/orders/show.tsx');
+    expect(src).toContain('useIsMobile');
+    expect(src).toContain('DetailCardList');
+  });
 });
