@@ -289,6 +289,10 @@ async function setupMocks(
       body: JSON.stringify({
         renderPresets: [{ name: 'screen', isActive: true }],
         paramProfiles: [],
+        pdfTemplates: [
+          { cutPdfTemplateId: 1, code: 'standard', name: 'Стандартный лист', isActive: true, version: 1 },
+          { cutPdfTemplateId: 2, code: 'bath_vacuum', name: 'Ванна: вакуумный стол', isActive: true, version: 1 },
+        ],
         settings: [],
       }),
     }),
@@ -607,22 +611,44 @@ test.describe('Cut manual layout editor (mocked-local)', () => {
     await openJob(page);
 
     // Before entering the editor: PDF button enabled (not dirty, not requiresRecalc).
-    await expect(page.getByTestId(`download-group-pdf-btn-${GROUP_ID}`)).toBeEnabled();
+    await expect(page.getByTestId(`preview-group-pdf-btn-${GROUP_ID}`)).toBeEnabled();
 
     // Enter editor → isDirtyGroup becomes true (isEditingGroup=true).
     await enterEditor(page);
 
     // «Скачать PDF» must be disabled while editor is open (unsaved changes).
-    await expect(page.getByTestId(`download-group-pdf-btn-${GROUP_ID}`)).toBeDisabled();
+    await expect(page.getByTestId(`preview-group-pdf-btn-${GROUP_ID}`)).toBeDisabled();
 
     // Cancel editing → isDirtyGroup becomes false.
     await page.getByTestId('cancel-edit-btn').click();
     await expect(page.getByTestId('sheet-editor')).not.toBeVisible({ timeout: 5000 });
 
     // «Скачать PDF» re-enabled after cancellation.
-    await expect(page.getByTestId(`download-group-pdf-btn-${GROUP_ID}`)).toBeEnabled({
+    await expect(page.getByTestId(`preview-group-pdf-btn-${GROUP_ID}`)).toBeEnabled({
       timeout: 5000,
     });
+  });
+
+  test('S5b: group PDF opens preview modal and downloads loaded blob', async ({ page }) => {
+    await setupMocks(page);
+    await openJob(page);
+
+    let pdfRequestUrl = '';
+    await page.route(/\/api\/v1\/cut-jobs\/42\/groups\/100\/export\.pdf(\?.*)?$/, (route) => {
+      pdfRequestUrl = route.request().url();
+      return route.fulfill({ status: 200, contentType: 'application/pdf', body: PNG_BYTES });
+    });
+
+    await page.getByTestId(`pdf-template-select-${GROUP_ID}`).click();
+    await page.getByTitle('Ванна: вакуумный стол').click();
+
+    await page.getByTestId(`preview-group-pdf-btn-${GROUP_ID}`).click();
+
+    const modal = page.getByRole('dialog', { name: /Предпросмотр PDF/ });
+    await expect(modal).toBeVisible({ timeout: 10000 });
+    await expect(modal.locator('iframe[title="Предпросмотр PDF"]')).toBeVisible();
+    await expect(modal.getByRole('button', { name: 'Скачать' })).toBeEnabled();
+    expect(pdfRequestUrl).toContain('template=bath_vacuum');
   });
 
   // ── S6: requiresRecalc → "устарел" tag + editor + PDF disabled ─────────────
@@ -639,7 +665,7 @@ test.describe('Cut manual layout editor (mocked-local)', () => {
     await expect(page.getByTestId(`edit-layout-btn-${GROUP_ID}`)).toBeDisabled();
 
     // «Скачать PDF» disabled (requiresRecalc takes priority).
-    await expect(page.getByTestId(`download-group-pdf-btn-${GROUP_ID}`)).toBeDisabled();
+    await expect(page.getByTestId(`preview-group-pdf-btn-${GROUP_ID}`)).toBeDisabled();
   });
 
   // ── SKIPPED: cross-sheet move ─────────────────────────────────────────────

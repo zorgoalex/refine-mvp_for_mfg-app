@@ -16,6 +16,7 @@ export interface PdfSheetInput {
   svg: string;
   sheetWidthMm: number;
   sheetHeightMm: number;
+  sheetNumber?: number;
   template?: string;
   meta?: PdfSheetMeta;
   detailRows?: PdfSheetDetailRow[];
@@ -64,15 +65,26 @@ export function buildSheetsPdf(sheets: readonly PdfSheetInput[]): Promise<Buffer
         if (sheet.template === 'bath_profiles') {
           drawBathProfilePage(doc, sheet, fontCallback);
         } else {
-          const widthPt = sheet.sheetWidthMm * MM_TO_PT;
-          const heightPt = sheet.sheetHeightMm * MM_TO_PT;
-          doc.addPage({ size: [widthPt, heightPt], margin: 0 });
+          const sourceWidthPt = sheet.sheetWidthMm * MM_TO_PT;
+          const sourceHeightPt = sheet.sheetHeightMm * MM_TO_PT;
+          const rotateToLandscape = sourceHeightPt > sourceWidthPt;
+          const pageWidthPt = rotateToLandscape ? sourceHeightPt : sourceWidthPt;
+          const pageHeightPt = rotateToLandscape ? sourceWidthPt : sourceHeightPt;
+          doc.addPage({ size: [pageWidthPt, pageHeightPt], margin: 0 });
+          if (rotateToLandscape) {
+            doc.save();
+            doc.translate(pageWidthPt, 0);
+            doc.rotate(90);
+          }
           SVGtoPDF(doc, sheet.svg, 0, 0, {
-            width: widthPt,
-            height: heightPt,
+            width: sourceWidthPt,
+            height: sourceHeightPt,
             assumePt: false,
             ...(fontCallback ? { fontCallback } : {}),
           });
+          if (rotateToLandscape) {
+            doc.restore();
+          }
         }
       }
       doc.end();
@@ -86,7 +98,7 @@ function drawBathProfilePage(doc: PDFKit.PDFDocument, sheet: PdfSheetInput, font
   const pageW = 842;
   const pageH = 595;
   const margin = 28;
-  const headerH = 42;
+  const headerH = 68;
   const footerH = 34;
   const tableW = 168;
   const gap = 14;
@@ -112,13 +124,15 @@ function drawBathProfilePage(doc: PDFKit.PDFDocument, sheet: PdfSheetInput, font
   });
   doc.rect(drawingX, drawingY, svgW, svgH).strokeColor('#111111').lineWidth(0.75).stroke();
 
-  drawDetailsTable(doc, sheet.detailRows ?? [], tableX, drawingY, tableW);
+  drawDetailsTable(doc, sheet.detailRows ?? [], tableX, drawingY, tableW, sheet.sheetNumber);
   drawFooter(doc, sheet, drawingX, pageH - margin - footerH + 4);
 }
 
 function drawHeader(doc: PDFKit.PDFDocument, meta: PdfSheetMeta, x: number, y: number, width: number): void {
   const colW = width / 3;
-  const rowH = 17;
+  const rowH = 22;
+  const labelW = 82;
+  const fontSize = 10.5;
   const cells = [
     { label: 'Заказ:', value: join(meta.orders), x, y },
     { label: 'Клиент:', value: join(meta.clients), x: x + colW, y },
@@ -130,15 +144,27 @@ function drawHeader(doc: PDFKit.PDFDocument, meta: PdfSheetMeta, x: number, y: n
   ];
   doc.lineWidth(0.7).strokeColor('#111111');
   for (const cell of cells) {
-    doc.fontSize(7).text(cell.label, cell.x, cell.y, { width: 58, continued: true });
-    doc.fontSize(7).text(` ${cell.value}`, { width: colW - 58 });
+    doc.fontSize(fontSize).text(cell.label, cell.x, cell.y, { width: labelW, lineBreak: false });
+    doc.fontSize(fontSize).text(` ${cell.value}`, cell.x + labelW, cell.y, {
+      width: colW - labelW - 4,
+      lineBreak: true,
+    });
   }
   doc.moveTo(x, y + rowH - 3).lineTo(x + width, y + rowH - 3).stroke();
   doc.moveTo(x, y + rowH * 2 - 3).lineTo(x + width, y + rowH * 2 - 3).stroke();
 }
 
-function drawDetailsTable(doc: PDFKit.PDFDocument, rows: readonly PdfSheetDetailRow[], x: number, y: number, w: number): void {
-  doc.fontSize(10).text('Детали', x, y - 13, { width: w, align: 'center' });
+function drawDetailsTable(
+  doc: PDFKit.PDFDocument,
+  rows: readonly PdfSheetDetailRow[],
+  x: number,
+  y: number,
+  w: number,
+  sheetNumber: number | undefined,
+): void {
+  const title = Number.isInteger(sheetNumber) ? `Лист ${sheetNumber}` : 'Лист';
+  doc.fontSize(10).text(title, x, y - 25, { width: w, align: 'center' });
+  doc.fontSize(9).text('Детали', x, y - 13, { width: w, align: 'center' });
   const col = [20, 42, 42, 38, 26];
   const headers = ['#', 'Длина', 'Ширина', 'Кол-во', 'до'];
   let cy = y;

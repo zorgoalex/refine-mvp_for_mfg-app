@@ -7,8 +7,10 @@ import {
   Collapse,
   Form,
   Input,
+  Modal,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
   Tooltip,
@@ -77,6 +79,24 @@ const DEFAULT_PDF_TEMPLATE_OPTIONS = [
 ];
 
 const { Title, Text } = Typography;
+
+type PdfPreviewState = {
+  open: boolean;
+  group: CutGroupDto | null;
+  loading: boolean;
+  url: string | null;
+  blob: Blob | null;
+  fileName: string | null;
+};
+
+const EMPTY_PDF_PREVIEW: PdfPreviewState = {
+  open: false,
+  group: null,
+  loading: false,
+  url: null,
+  blob: null,
+  fileName: null,
+};
 
 const INELIGIBLE_LABELS: Record<string, string> = {
   deleted: 'Удалена',
@@ -327,6 +347,18 @@ export const CutPage: React.FC = () => {
   // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
   const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
   const [pdfTemplateByGroup, setPdfTemplateByGroup] = useState<Record<number, string>>({});
+  const [pdfPreview, setPdfPreview] = useState<PdfPreviewState>(EMPTY_PDF_PREVIEW);
+  const pdfPreviewUrlRef = useRef<string | null>(null);
+  const pdfPreviewRequestSeqRef = useRef(0);
+
+  const revokePdfPreviewUrl = useCallback(() => {
+    if (pdfPreviewUrlRef.current) {
+      URL.revokeObjectURL(pdfPreviewUrlRef.current);
+      pdfPreviewUrlRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => revokePdfPreviewUrl(), [revokePdfPreviewUrl]);
 
   // Render presets and cut profiles are config-driven (/configuration "Раскрой").
   // Load active names from the backend, falling back to the built-ins.
@@ -789,23 +821,51 @@ export const CutPage: React.FC = () => {
     [job, sheetPortrait, sheetOriginTopLeft, handleError],
   );
 
-  const downloadGroupPdf = useCallback(
+  const openGroupPdfPreview = useCallback(
     async (group: CutGroupDto) => {
       if (!job) return;
+      const requestSeq = pdfPreviewRequestSeqRef.current + 1;
+      pdfPreviewRequestSeqRef.current = requestSeq;
       setBusy(true);
+      revokePdfPreviewUrl();
+      setPdfPreview({ ...EMPTY_PDF_PREVIEW, open: true, group, loading: true });
       try {
         // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
         const pdfTemplate = pdfTemplateByGroup[group.cutGroupId] ?? 'standard';
         const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetOriginTopLeft, pdfTemplate));
-        triggerBlobDownload(result.blob, result.fileName ?? `cut-group-${group.cutGroupId}.pdf`);
+        if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
+        const url = URL.createObjectURL(result.blob);
+        pdfPreviewUrlRef.current = url;
+        setPdfPreview({
+          open: true,
+          group,
+          loading: false,
+          url,
+          blob: result.blob,
+          fileName: result.fileName ?? `cut-group-${group.cutGroupId}.pdf`,
+        });
       } catch (error) {
+        if (pdfPreviewRequestSeqRef.current === requestSeq) {
+          setPdfPreview((prev) => ({ ...prev, loading: false }));
+        }
         handleError(error, 'Не удалось выгрузить PDF группы');
       } finally {
         setBusy(false);
       }
     },
-    [job, sheetPortrait, sheetOriginTopLeft, pdfTemplateByGroup, handleError],
+    [job, sheetPortrait, sheetOriginTopLeft, pdfTemplateByGroup, handleError, revokePdfPreviewUrl],
   );
+
+  const closeGroupPdfPreview = useCallback(() => {
+    pdfPreviewRequestSeqRef.current += 1;
+    revokePdfPreviewUrl();
+    setPdfPreview(EMPTY_PDF_PREVIEW);
+  }, [revokePdfPreviewUrl]);
+
+  const downloadPreviewPdf = useCallback(() => {
+    if (!pdfPreview.blob || !pdfPreview.group) return;
+    triggerBlobDownload(pdfPreview.blob, pdfPreview.fileName ?? `cut-group-${pdfPreview.group.cutGroupId}.pdf`);
+  }, [pdfPreview.blob, pdfPreview.fileName, pdfPreview.group]);
 
   const downloadJobPdf = useCallback(async () => {
     if (!job) return;
@@ -1219,8 +1279,9 @@ export const CutPage: React.FC = () => {
   }
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      <Title level={3}>Раскрой</Title>
+    <>
+      <Space direction="vertical" size="large" style={{ width: '100%' }}>
+        <Title level={3}>Раскрой</Title>
 
       <Card title="Критерии выборки" size="small">
         <Form form={form} layout="inline" disabled={busy || !canManage}>
@@ -1618,6 +1679,7 @@ export const CutPage: React.FC = () => {
                     options={pdfTemplateOptions}
                     style={{ width: 180 }}
                     disabled={busy}
+                    data-testid={`pdf-template-select-${group.cutGroupId}`}
                   />
                 </Space>
                 <Tooltip
@@ -1632,12 +1694,12 @@ export const CutPage: React.FC = () => {
                   <Button
                     className="app-hit-area-sm"
                     size="small"
-                    onClick={() => void downloadGroupPdf(group)}
+                    onClick={() => void openGroupPdfPreview(group)}
                     loading={busy}
                     disabled={isDirtyGroup || (job.requiresRecalc ?? false)}
-                    data-testid={`download-group-pdf-btn-${group.cutGroupId}`}
+                    data-testid={`preview-group-pdf-btn-${group.cutGroupId}`}
                   >
-                    Скачать PDF
+                    Предпросмотр PDF
                   </Button>
                 </Tooltip>
               </Space>
@@ -1823,6 +1885,44 @@ export const CutPage: React.FC = () => {
           </Card>
         );
       })}
-    </Space>
+      </Space>
+      <Modal
+        title={pdfPreview.group ? `Предпросмотр PDF · группа #${pdfPreview.group.cutGroupId}` : 'Предпросмотр PDF'}
+        open={pdfPreview.open}
+        onCancel={closeGroupPdfPreview}
+        width={1040}
+        destroyOnHidden
+        footer={[
+          <Button key="close" onClick={closeGroupPdfPreview}>
+            Закрыть
+          </Button>,
+          <Button key="download" type="primary" disabled={!pdfPreview.blob || pdfPreview.loading} onClick={downloadPreviewPdf}>
+            Скачать
+          </Button>,
+        ]}
+      >
+        <div style={{ minHeight: 420 }}>
+          {pdfPreview.loading ? (
+            <div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Spin tip="Готовим PDF" />
+            </div>
+          ) : pdfPreview.url ? (
+            <iframe
+              title="Предпросмотр PDF"
+              src={pdfPreview.url}
+              style={{
+                width: '100%',
+                height: 'min(72vh, 760px)',
+                minHeight: 420,
+                border: '1px solid rgba(0, 0, 0, 0.1)',
+                borderRadius: 6,
+              }}
+            />
+          ) : (
+            <Alert type="warning" showIcon message="PDF не загружен" />
+          )}
+        </div>
+      </Modal>
+    </>
   );
 };

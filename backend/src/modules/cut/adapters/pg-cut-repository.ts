@@ -1578,10 +1578,11 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, 0);
     }
     return buildSheetsPdf(
-      printableSheets.map((s) => ({
+      printableSheets.map((s, index) => ({
         svg: s.svg,
         sheetWidthMm: query.rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
         sheetHeightMm: query.rotate90 ? s.placements.sheet_width_mm : s.placements.sheet_height_mm,
+        sheetNumber: index + 1,
         template: pdfTemplate,
         meta: s.pdfMeta,
         detailRows: s.pdfDetailRows,
@@ -1617,16 +1618,19 @@ export class PgCutRepository implements CutRepositoryPort {
       const cutGroupId = toNum(groupRow.cut_group_id);
       const { sheets } = await this.loadGroupRenderContext(cutGroupId, query.rotate90, query.originTopLeft, variant, query.cutJobId);
       // Rule 8: skip blank sheets in PDF assembly.
+      let sheetNumber = 1;
       for (const sheet of sheets) {
         if (sheet.placements.pieces.length === 0) continue;
         pdfSheets.push({
           svg: sheet.svg,
           sheetWidthMm: query.rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
           sheetHeightMm: query.rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
+          sheetNumber,
           template: pdfTemplate,
           meta: sheet.pdfMeta,
           detailRows: sheet.pdfDetailRows,
         });
+        sheetNumber += 1;
       }
     }
     if (pdfSheets.length === 0) {

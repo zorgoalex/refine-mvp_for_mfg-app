@@ -66,4 +66,63 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('Белая, Матовая');
     expect(rendered).toContain('Детали');
   });
+
+  it('renders bath header values as one field text call instead of continued fragments', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    const fontSizeSpy = vi.spyOn(PDFDocument.prototype, 'fontSize');
+    await buildSheetsPdf([
+      {
+        svg: SVG('bath-nowrap'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        template: 'bath_profiles',
+        meta: {
+          orders: ['2556'],
+          clients: ['Тлек Бакенов'],
+          dates: ['2026-06-15'],
+          readyDates: ['2026-06-20'],
+          materials: ['МДФ 18мм -', 'МДФ 16мм'],
+          thicknesses: ['18', '16'],
+          films: ['Крем брюле -Декор+'],
+        },
+      },
+    ]);
+
+    const continuedCalls = textSpy.mock.calls.filter(
+      (call) =>
+        (call[2] as PDFKit.Mixins.TextOptions | undefined)?.continued ||
+        (call[3] as PDFKit.Mixins.TextOptions | undefined)?.continued,
+    );
+    const clientValueCall = textSpy.mock.calls.find((call) => call[0] === ' Тлек Бакенов');
+
+    expect(continuedCalls).toHaveLength(0);
+    expect(clientValueCall?.[1]).toBeTypeOf('number');
+    expect(clientValueCall?.[2]).toBeTypeOf('number');
+    expect(clientValueCall?.[3]).toMatchObject({ width: expect.any(Number) });
+    expect(fontSizeSpy).toHaveBeenCalledWith(10.5);
+  });
+
+  it('uses landscape pages for portrait standard sheets', async () => {
+    const pdf = await buildSheetsPdf([{ svg: SVG('portrait'), sheetWidthMm: 2070, sheetHeightMm: 2800 }]);
+
+    const mediaBox = /\/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]/.exec(pdf.toString('latin1'));
+    expect(mediaBox).not.toBeNull();
+    expect(Number(mediaBox?.[1])).toBeGreaterThan(Number(mediaBox?.[2]));
+  });
+
+  it('prints the sheet number above the bath details table', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('bath-sheet-no'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        template: 'bath_profiles',
+        sheetNumber: 3,
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(rendered).toContain('Лист 3');
+  });
 });
