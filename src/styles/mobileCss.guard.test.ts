@@ -23,4 +23,13 @@ describe('global mobile.css wiring', () => {
     expect(src).toContain('app-header__theme-toggle');
     expect(src).toContain('app-header__username');
   });
+  it('mobile.css keeps workspace tabs on a single scrollable row on phone', () => {
+    const css = read('styles/mobile.css');
+    expect(css).toContain('.workspace-tabs');
+    expect(css).toMatch(/\.workspace-tabs[\s\S]*overflow-x:\s*auto/);
+    expect(css).toMatch(/max-width:\s*40vw/);
+  });
+  it('AppFooter marks date/session as hideable meta', () => {
+    expect(read('components/AppFooter.tsx')).toContain('app-footer__meta');
+  });
 });

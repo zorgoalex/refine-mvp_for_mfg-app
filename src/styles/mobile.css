@@ -18,6 +18,21 @@
   .app-footer__meta {
     display: none;
   }
+
+  /* Workspace-табы: одна строка, горизонтальный скролл, короткие labels. */
+  .workspace-tabs .ant-tabs-nav-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .workspace-tabs .ant-tabs-nav-list {
+    flex-wrap: nowrap;
+  }
+  .workspace-tabs .ant-tabs-tab .ant-tabs-tab-btn {
+    max-width: 40vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* Touch-цели — по сенсорности, не по ширине (планшет тоже получает). */
