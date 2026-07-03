@@ -20,10 +20,10 @@ export async function startQrScanner(
   const tick = async () => {
     if (stopped) return;
     if (ctx && video.videoWidth > 0) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0);
       try {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
         const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve));
         if (blob) {
           const results = await readBarcodes(blob, { formats: ['QRCode'], maxNumberOfSymbols: 1 });
