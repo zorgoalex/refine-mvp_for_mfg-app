@@ -253,6 +253,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     >
       {/* Row 1: Order name, priority, status | Client | Discounted amount, discount %, payment status */}
       <div
+        className="order-show-header__row"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -324,7 +325,8 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             <>
               <span style={{ margin: '0 16px', color: 'var(--app-border)' }}>|</span>
               <Text style={{ fontSize: 12.8, fontStyle: 'italic', color: 'var(--app-text)' }}>
-                <span style={{ fontVariant: 'small-caps' }}>Тел.:</span> {primaryPhone}
+                <span style={{ fontVariant: 'small-caps' }}>Тел.:</span>{' '}
+                <a href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`}>{primaryPhone}</a>
               </Text>
             </>
           )}
@@ -352,6 +354,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
 
       {/* Row 2: Dates | Production Stages | Notes | Total amount */}
       <div
+        className="order-show-header__row"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -493,6 +496,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
 
       {/* Row 3: ID + Materials + Production metrics */}
       <div
+        className="order-show-header__row"
         style={{
           display: 'flex',
           alignItems: 'center',

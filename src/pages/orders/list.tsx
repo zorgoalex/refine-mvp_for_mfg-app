@@ -51,6 +51,8 @@ import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { ProjectFilter } from "./components/projects/ProjectFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
+import { useIsMobile } from "../../hooks/useDeviceTier";
+import { OrderCardList } from "./mobile/OrderCardList";
 import {
   applyOrderDetailColumnSettings,
   OrderDetailColumnSettingsButton,
@@ -135,6 +137,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   });
 
   const { show } = useNavigation();
+  const isMobile = useIsMobile();
 
   // Синхронизация состояния чекбокса "Мои заказы" с фильтрами из URL при загрузке
   useEffect(() => {
@@ -1323,33 +1326,42 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             </Form>
           </Card>
         )}
-        <Table
-          {...tableProps}
-          rowKey="order_id"
-          sticky
-          rowSelection={
-            useBackendCut
-              ? {
-                  selectedRowKeys: selectedCutOrderIds,
-                  onChange: (keys) => setSelectedCutOrderIds(keys.map(Number)),
-                  preserveSelectedRowKeys: true,
-                }
-              : undefined
-          }
-          className="orders-table"
-          pagination={ordersCompactPagination}
-          scroll={{ x: "max-content", y: 600 }}
-          showSorterTooltip={{ mouseEnterDelay: 1 }}
-          rowClassName={(record) =>
-            record.order_id === highlightedOrderId ? "highlighted-row" : ""
-          }
-          onRow={(record) => ({
-            onDoubleClick: () => {
-              show("orders_view", record.order_id, "push");
-            },
-          })}
-          columns={visibleOrderListColumns}
-        />
+        {isMobile ? (
+          <OrderCardList
+            rows={tableProps.dataSource ?? []}
+            loading={!!tableProps.loading}
+            pagination={tableProps.pagination ?? false}
+            onOpen={(id) => show("orders_view", id, "push")}
+          />
+        ) : (
+          <Table
+            {...tableProps}
+            rowKey="order_id"
+            sticky
+            rowSelection={
+              useBackendCut
+                ? {
+                    selectedRowKeys: selectedCutOrderIds,
+                    onChange: (keys) => setSelectedCutOrderIds(keys.map(Number)),
+                    preserveSelectedRowKeys: true,
+                  }
+                : undefined
+            }
+            className="orders-table"
+            pagination={ordersCompactPagination}
+            scroll={{ x: "max-content", y: 600 }}
+            showSorterTooltip={{ mouseEnterDelay: 1 }}
+            rowClassName={(record) =>
+              record.order_id === highlightedOrderId ? "highlighted-row" : ""
+            }
+            onRow={(record) => ({
+              onDoubleClick: () => {
+                show("orders_view", record.order_id, "push");
+              },
+            })}
+            columns={visibleOrderListColumns}
+          />
+        )}
       </List>
 
       <OrderCreateModal

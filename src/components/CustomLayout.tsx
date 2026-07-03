@@ -4,11 +4,11 @@ import { AppHeader } from "./AppHeader";
 import { AppFooter } from "./AppFooter";
 import { CustomSider } from "./CustomSider";
 import { MobileSiderDrawer } from "./MobileSiderDrawer";
-import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useIsMobile } from "../hooks/useDeviceTier";
 
 export const CustomLayout: React.FC<React.PropsWithChildren> = ({ children }) => {
   const [isSiderOpen, setIsSiderOpen] = useState(false);
-  const isMobile = useMediaQuery("(max-width: 768px)");
+  const isMobile = useIsMobile();
 
   const openSider = () => setIsSiderOpen(true);
   const closeSider = () => setIsSiderOpen(false);

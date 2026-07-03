@@ -72,9 +72,9 @@ export const AppFooter: React.FC = () => {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <Typography.Text type="secondary">Сегодня: {formattedDate}</Typography.Text>
+        <Typography.Text type="secondary" className="app-footer__meta">Сегодня: {formattedDate}</Typography.Text>
         <Space size={12} wrap style={{ marginLeft: "auto" }}>
-          <Typography.Text type="secondary">Сессия: {sessionLabel}</Typography.Text>
+          <Typography.Text type="secondary" className="app-footer__meta">Сессия: {sessionLabel}</Typography.Text>
           <Typography.Text type="secondary">v{APP_VERSION}</Typography.Text>
           <Tooltip title="Журнал изменений">
             <Button

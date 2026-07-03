@@ -1,0 +1,71 @@
+/* src/styles/mobile.css — глобальные мобильные переопределения (загружается из App.tsx). */
+
+@media (max-width: 767px) {
+  /* Компактная шапка: burger · ERP · bell · avatar. */
+  .app-header__brand-break,
+  .app-header__brand-sub {
+    display: none;
+  }
+  .app-header__brand-title {
+    display: inline-block;
+  }
+  .app-header__theme-toggle,
+  .app-header__username {
+    display: none;
+  }
+
+  /* Футер: одна строка — версия + release notes. */
+  .app-footer__meta {
+    display: none;
+  }
+
+  /* Workspace-табы: одна строка, горизонтальный скролл, короткие labels. */
+  .workspace-tabs .ant-tabs-nav-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .workspace-tabs .ant-tabs-nav-list {
+    flex-wrap: nowrap;
+  }
+  .workspace-tabs .ant-tabs-tab .ant-tabs-tab-btn {
+    max-width: 40vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Карточка заказа: строки шапки в столбик, лечит letter-per-line crush.
+     !important — потому что исходные row/дети используют inline flex-стили. */
+  .order-show-header__row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+  .order-show-header__row > div {
+    flex: none !important;
+    width: 100% !important;
+    justify-content: flex-start !important;
+  }
+
+  /* Узкие таблицы: длинные значения переносятся вместо горизонтального
+     распирания/обрезки ячейки. */
+  .ant-table-cell {
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Touch-цели — по сенсорности, не по ширине (планшет тоже получает). */
+@media (pointer: coarse) {
+  .ant-btn:not(.ant-btn-sm),
+  .ant-pagination-item,
+  .ant-pagination-prev,
+  .ant-pagination-next {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .ant-table-tbody > tr > td {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+}

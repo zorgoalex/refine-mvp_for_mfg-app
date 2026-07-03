@@ -91,15 +91,17 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
             {/* Колокольчик уведомлений */}
             <NotificationBell />
 
-            <Tooltip title={mode === "dark" ? "Темная тема" : "Светлая тема"}>
-              <Switch
-                checked={mode === "dark"}
-                checkedChildren={<MoonOutlined />}
-                unCheckedChildren={<SunOutlined />}
-                onChange={(checked) => setMode(checked ? "dark" : "light")}
-                aria-label="Переключить тему"
-              />
-            </Tooltip>
+            <span className="app-header__theme-toggle">
+              <Tooltip title={mode === "dark" ? "Темная тема" : "Светлая тема"}>
+                <Switch
+                  checked={mode === "dark"}
+                  checkedChildren={<MoonOutlined />}
+                  unCheckedChildren={<SunOutlined />}
+                  onChange={(checked) => setMode(checked ? "dark" : "light")}
+                  aria-label="Переключить тему"
+                />
+              </Tooltip>
+            </span>
 
             <Avatar
               style={{ backgroundColor: "#1677ff" }}
@@ -146,7 +148,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
             >
               <Button type="text">
                 <Space>
-                  <Typography.Text strong>{username}</Typography.Text>
+                  <Typography.Text strong className="app-header__username">{username}</Typography.Text>
                   <DownOutlined style={{ fontSize: 10 }} />
                 </Space>
               </Button>

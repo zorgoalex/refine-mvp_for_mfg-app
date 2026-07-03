@@ -4,7 +4,7 @@ import { AppHeader } from '../AppHeader';
 import { AppFooter } from '../AppFooter';
 import { CustomSider } from '../CustomSider';
 import { MobileSiderDrawer } from '../MobileSiderDrawer';
-import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { useIsMobile } from '../../hooks/useDeviceTier';
 import { WorkspaceTabs } from './WorkspaceTabs';
 import { KeepAliveOutlet } from './KeepAliveOutlet';
 import { useTabSync } from '../../hooks/useTabSync';
@@ -12,7 +12,7 @@ import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 
 export const WorkspaceLayout: React.FC = () => {
   const [isSiderOpen, setIsSiderOpen] = React.useState(false);
-  const isMobile = useMediaQuery('(max-width: 768px)');
+  const isMobile = useIsMobile();
 
   useTabSync();
   useGlobalUnloadGuard();

@@ -1,7 +1,7 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -38,6 +38,9 @@ import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
+import { useIsMobile } from '../../hooks/useDeviceTier';
+import { DetailCardList } from './mobile/DetailCardList';
+import type { DetailCardLookups } from './mobile/detailCardModel';
 import {
   applyOrderDetailColumnSettings,
   OrderDetailColumnSettingsButton,
@@ -77,6 +80,7 @@ const ORDER_DETAIL_SHOW_DEFAULT_ORDER = ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS.map
 
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
 
   const { queryResult } = useShow({
@@ -269,6 +273,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const paymentTypesMap = new Map(
     (paymentTypesData?.data || []).map((item: any) => [item.type_paid_id, item.type_paid_name])
   );
+
+  // Phone-only detail cards (Task 8): thin closures over the SAME lookup maps
+  // used by the desktop details table's «Фрезеровка»/«Материал» columns
+  // (show.tsx:~665/~684) — no duplicated resolve logic.
+  const detailCardLookups: DetailCardLookups = {
+    millingNameOf: (d) => millingTypesMap.get((d as any).milling_type_id) || '—',
+    materialNameOf: (d) => resolveDetailMaterialName(d, resolvedNameByDetailId, materialsMap) || '—',
+  };
 
   // SP3: unique server-resolved display material names for the show header summary.
   const headerMaterialNames = useMemo(() => {
@@ -795,69 +807,122 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         </Breadcrumb>
       }
       headerButtons={() => (
-        <>
-          <EditButton>Изменить</EditButton>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={handleRefreshPaymentStatus}
-            loading={isUpdating}
-          >
-            Обновить
-          </Button>
-          <Button
-            type="primary"
-            icon={<PrinterOutlined />}
-            onClick={handlePrint}
-            disabled={!record || details.length === 0}
-          >
-            Печать
-          </Button>
-          <Tooltip title="Экспорт в Excel">
+        isMobile ? (
+          <>
+            <EditButton>Изменить</EditButton>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  {
+                    key: 'refresh',
+                    icon: <ReloadOutlined />,
+                    label: 'Обновить',
+                    disabled: isUpdating,
+                  },
+                  {
+                    key: 'print',
+                    icon: <PrinterOutlined />,
+                    label: 'Печать',
+                    disabled: !record || details.length === 0,
+                  },
+                  {
+                    key: 'excel',
+                    icon: <FileExcelOutlined />,
+                    label: 'Экспорт в Excel',
+                    disabled: !record || details.length === 0 || isClientResolving,
+                  },
+                  {
+                    key: 'json',
+                    icon: <FileTextOutlined />,
+                    label: 'JSON snapshot',
+                    disabled: !record || isSnapshotExporting,
+                  },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'refresh') {
+                    void handleRefreshPaymentStatus();
+                  }
+                  if (key === 'print') {
+                    handlePrint();
+                  }
+                  if (key === 'excel') {
+                    void handleExportExcel();
+                  }
+                  if (key === 'json') {
+                    void handleExportSnapshot();
+                  }
+                },
+              }}
+            >
+              <Button icon={<EllipsisOutlined />} aria-label="Ещё действия" />
+            </Dropdown>
+          </>
+        ) : (
+          <>
+            <EditButton>Изменить</EditButton>
             <Button
-              aria-label="Экспорт в Excel"
-              icon={<FileExcelOutlined />}
-              onClick={handleExportExcel}
-              loading={isExporting}
-              disabled={!record || details.length === 0 || isClientResolving}
-            />
-          </Tooltip>
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: [
-                {
-                  key: 'pdf',
-                  icon: <FilePdfOutlined />,
-                  label: 'Экспорт в PDF',
-                  disabled: !record || details.length === 0,
-                },
-                {
-                  key: 'json',
-                  icon: <FileTextOutlined />,
-                  label: 'JSON snapshot',
-                  disabled: !record || isSnapshotExporting,
-                },
-              ],
-              onClick: ({ key }) => {
-                if (key === 'pdf') {
-                  handlePrint();
-                }
-                if (key === 'json') {
-                  void handleExportSnapshot();
-                }
-              },
-            }}
-          >
-            <Tooltip title="Другие экспорты">
+              icon={<ReloadOutlined />}
+              onClick={handleRefreshPaymentStatus}
+              loading={isUpdating}
+            >
+              Обновить
+            </Button>
+            <Button
+              type="primary"
+              icon={<PrinterOutlined />}
+              onClick={handlePrint}
+              disabled={!record || details.length === 0}
+            >
+              Печать
+            </Button>
+            <Tooltip title="Экспорт в Excel">
               <Button
-                aria-label="Другие экспорты"
-                icon={isSnapshotExporting ? <DownloadOutlined /> : <MoreOutlined />}
-                loading={isSnapshotExporting}
-                disabled={!record}
+                aria-label="Экспорт в Excel"
+                icon={<FileExcelOutlined />}
+                onClick={handleExportExcel}
+                loading={isExporting}
+                disabled={!record || details.length === 0 || isClientResolving}
               />
             </Tooltip>
-          </Dropdown>
-        </>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  {
+                    key: 'pdf',
+                    icon: <FilePdfOutlined />,
+                    label: 'Экспорт в PDF',
+                    disabled: !record || details.length === 0,
+                  },
+                  {
+                    key: 'json',
+                    icon: <FileTextOutlined />,
+                    label: 'JSON snapshot',
+                    disabled: !record || isSnapshotExporting,
+                  },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'pdf') {
+                    handlePrint();
+                  }
+                  if (key === 'json') {
+                    void handleExportSnapshot();
+                  }
+                },
+              }}
+            >
+              <Tooltip title="Другие экспорты">
+                <Button
+                  aria-label="Другие экспорты"
+                  icon={isSnapshotExporting ? <DownloadOutlined /> : <MoreOutlined />}
+                  loading={isSnapshotExporting}
+                  disabled={!record}
+                />
+              </Tooltip>
+            </Dropdown>
+          </>
+        )
       )}
     >
       {record && (
@@ -1141,52 +1206,57 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
                 Детали заказа
               </div>
-              <Space size="small" wrap>
-                <DetailGroupingControls
-                  state={grouping.state}
-                  onFieldChange={grouping.setField}
-                  onToggleSeparation={grouping.setShowSeparation}
-                />
-                {cutEnabled && details.length > 0 && (
-                  <>
-                    <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
-                      {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
-                    </Button>
-                    {cutSelectMode && (
-                      <>
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            setCutSelectedDetailIds(
-                              cutSelectedDetailIds.length === details.length
-                                ? []
-                                : details.map((d: any) => d.detail_id),
-                            )
-                          }
-                        >
-                          {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
-                        </Button>
-                        <Button
-                          size="small"
-                          type="primary"
-                          disabled={cutSelectedDetailIds.length === 0}
-                          onClick={() => setCutModalOpen(true)}
-                        >
-                          Добавить выбранные в раскрой ({cutSelectedDetailIds.length})
-                        </Button>
-                      </>
-                    )}
-                  </>
-                )}
-                <OrderDetailColumnSettingsButton
-                  tableKey="orderShow"
-                  definitions={ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS}
-                  defaultOrder={ORDER_DETAIL_SHOW_DEFAULT_ORDER}
-                  settings={showColumnSettings}
-                  onChange={saveShowColumnSettings}
-                />
-              </Space>
+              {!isMobile && (
+                <Space size="small" wrap>
+                  <DetailGroupingControls
+                    state={grouping.state}
+                    onFieldChange={grouping.setField}
+                    onToggleSeparation={grouping.setShowSeparation}
+                  />
+                  {cutEnabled && details.length > 0 && (
+                    <>
+                      <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
+                        {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+                      </Button>
+                      {cutSelectMode && (
+                        <>
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              setCutSelectedDetailIds(
+                                cutSelectedDetailIds.length === details.length
+                                  ? []
+                                  : details.map((d: any) => d.detail_id),
+                              )
+                            }
+                          >
+                            {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
+                          </Button>
+                          <Button
+                            size="small"
+                            type="primary"
+                            disabled={cutSelectedDetailIds.length === 0}
+                            onClick={() => setCutModalOpen(true)}
+                          >
+                            Добавить выбранные в раскрой ({cutSelectedDetailIds.length})
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  )}
+                  <OrderDetailColumnSettingsButton
+                    tableKey="orderShow"
+                    definitions={ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS}
+                    defaultOrder={ORDER_DETAIL_SHOW_DEFAULT_ORDER}
+                    settings={showColumnSettings}
+                    onChange={saveShowColumnSettings}
+                  />
+                </Space>
+              )}
             </div>
+            {isMobile ? (
+              <DetailCardList rows={details} lookups={detailCardLookups} />
+            ) : (
             <TableTopScroll>
             <Table
               className={groupingActive ? 'details-grouped' : undefined}
@@ -1293,6 +1363,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               }}
             />
             </TableTopScroll>
+            )}
           </div>
 
           {/* Скрытый компонент для печати */}

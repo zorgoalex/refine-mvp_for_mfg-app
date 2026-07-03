@@ -1,0 +1,49 @@
+import React from 'react';
+import { Card, List, Typography } from 'antd';
+import type { TablePaginationConfig } from 'antd';
+import { buildPaymentCardModel, PaymentCardLookups } from './paymentCardModel';
+
+export interface PaymentCardListProps {
+  rows: readonly Record<string, unknown>[];
+  loading?: boolean;
+  pagination: TablePaginationConfig | false;
+  lookups: PaymentCardLookups;
+  onOpen: (id: number) => void;
+}
+
+export const PaymentCardList: React.FC<PaymentCardListProps> = ({ rows, loading, pagination, lookups, onOpen }) => (
+  <List
+    dataSource={rows as Record<string, unknown>[]}
+    loading={loading}
+    pagination={pagination === false ? false : { ...pagination, simple: true, showSizeChanger: false }}
+    rowKey={(r) => String(r.payment_id)}
+    renderItem={(row) => {
+      const m = buildPaymentCardModel(row, lookups);
+      return (
+        <Card
+          size="small"
+          style={{ marginBottom: 8 }}
+          onClick={() => onOpen(m.id)}
+          hoverable
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <Typography.Text strong ellipsis style={{ minWidth: 0 }}>
+              {m.orderLabel}
+            </Typography.Text>
+            <Typography.Text strong>{m.amount}</Typography.Text>
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <Typography.Text type="secondary" style={{ display: 'block' }}>
+              {m.typeLabel} · {m.date}
+            </Typography.Text>
+            {m.notes && (
+              <Typography.Text type="secondary" ellipsis style={{ display: 'block' }}>
+                {m.notes}
+              </Typography.Text>
+            )}
+          </div>
+        </Card>
+      );
+    }}
+  />
+);
