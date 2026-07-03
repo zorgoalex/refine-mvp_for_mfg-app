@@ -139,6 +139,67 @@ describe('LabelsService', () => {
     expect(repo.updateTemplate).not.toHaveBeenCalled();
   });
 
+  it('rejects a placed qr element with an empty name before create template repository writes', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      elements: [
+        {
+          elementKey: 'qr-noname',
+          kind: 'qr',
+          xMm: 0,
+          yMm: 0,
+          widthMm: 20,
+          heightMm: 20,
+          style: { qrTemplate: '{bazis.detail_id}', qrName: '' },
+        },
+      ],
+    });
+
+    await expect(
+      service.createTemplate({ currentUser: templateManager, requestId: 'req-qr-name-required', input }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'LABEL_QR_NAME_REQUIRED',
+    });
+    expect(repo.createTemplate).not.toHaveBeenCalled();
+  });
+
+  it('rejects placed qr elements whose names collide case-insensitively before create template repository writes', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      elements: [
+        {
+          elementKey: 'qr-a',
+          kind: 'qr',
+          xMm: 0,
+          yMm: 0,
+          widthMm: 20,
+          heightMm: 20,
+          style: { qrTemplate: '{bazis.detail_id}', qrName: 'A' },
+        },
+        {
+          elementKey: 'qr-b',
+          kind: 'qr',
+          xMm: 25,
+          yMm: 0,
+          widthMm: 20,
+          heightMm: 20,
+          style: { qrTemplate: '{bazis.detail_id}', qrName: 'a' },
+        },
+      ],
+    });
+
+    await expect(
+      service.createTemplate({ currentUser: templateManager, requestId: 'req-qr-name-duplicate', input }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'LABEL_QR_NAME_DUPLICATE',
+    });
+    expect(repo.createTemplate).not.toHaveBeenCalled();
+  });
+
   it('accepts custom schema bindings from the same template input', async () => {
     const repo = fakeRepo();
     const service = new LabelsService({ repo });
