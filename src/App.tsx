@@ -8,6 +8,7 @@ import { useEffect, Suspense, lazy } from "react";
 import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
 import "./styles/app.css";
+import "./styles/mobile.css";
 import { createNotificationProvider } from "./providers/notificationProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LoginPage } from "./pages/login";

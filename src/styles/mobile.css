@@ -1,0 +1,36 @@
+/* src/styles/mobile.css — глобальные мобильные переопределения (загружается из App.tsx). */
+
+@media (max-width: 767px) {
+  /* Компактная шапка: burger · ERP · bell · avatar. */
+  .app-header__brand-break,
+  .app-header__brand-sub {
+    display: none;
+  }
+  .app-header__brand-title {
+    display: inline-block;
+  }
+  .app-header__theme-toggle,
+  .app-header__username {
+    display: none;
+  }
+
+  /* Футер: одна строка — версия + release notes. */
+  .app-footer__meta {
+    display: none;
+  }
+}
+
+/* Touch-цели — по сенсорности, не по ширине (планшет тоже получает). */
+@media (pointer: coarse) {
+  .ant-btn:not(.ant-btn-sm),
+  .ant-pagination-item,
+  .ant-pagination-prev,
+  .ant-pagination-next {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .ant-table-tbody > tr > td {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+}
