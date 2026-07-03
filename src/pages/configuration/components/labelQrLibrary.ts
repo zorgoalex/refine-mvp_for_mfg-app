@@ -51,6 +51,17 @@ export function collectDuplicateQrNames(elements: LabelTemplateElement[]): strin
   return [...seen.values()].filter((e) => e.count > 1).map((e) => e.name);
 }
 
+export function qrDraftFromElement(element: LabelTemplateElement): { name: string; contentTemplate: string; errorCorrection: 'L' | 'M' | 'Q' | 'H'; defaultSizeMm: number } {
+  const style = (element.style ?? {}) as Record<string, unknown>;
+  const ec = style.qrErrorCorrection;
+  return {
+    name: String(style.qrName ?? '').trim() || 'QR',
+    contentTemplate: String(style.qrTemplate ?? ''),
+    errorCorrection: ec === 'L' || ec === 'Q' || ec === 'H' ? ec : 'M',
+    defaultSizeMm: Math.max(8, Number(element.widthMm ?? element.heightMm ?? 20)),
+  };
+}
+
 export function qrElementFromLibrary(
   src: { name: string; contentTemplate: string; errorCorrection: 'L' | 'M' | 'Q' | 'H'; defaultSizeMm: number; sourceTemplateId?: number },
   xMm: number,

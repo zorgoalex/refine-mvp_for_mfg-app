@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipsToTemplate, templateToChips, uniqueQrName, qrElementFromLibrary, collectDuplicateQrNames } from './labelQrLibrary';
+import { chipsToTemplate, templateToChips, uniqueQrName, qrElementFromLibrary, collectDuplicateQrNames, qrDraftFromElement } from './labelQrLibrary';
 import { autoShiftForQr } from './labelQrHelpers';
 
 describe('chips <-> template', () => {
@@ -49,6 +49,16 @@ describe('qrElementFromLibrary', () => {
     const el = qrElementFromLibrary({ name: 'QR', contentTemplate: '{bazis.detail_id}', errorCorrection: 'M', defaultSizeMm: 20 }, 4, 4, existing);
     const result = autoShiftForQr({ qr: el, elements: [...existing, el], canvas: { widthMm: 85, heightMm: 88 } });
     expect(result.conflicts).toHaveLength(0);
+  });
+});
+
+describe('qrDraftFromElement', () => {
+  it('derives a library draft from a placed qr element', () => {
+    const draft = qrDraftFromElement({
+      kind: 'qr', widthMm: 22, heightMm: 22,
+      style: { qrName: 'Деталь 2', qrTemplate: '{bazis.detail_id}', qrErrorCorrection: 'Q' },
+    } as any);
+    expect(draft).toEqual({ name: 'Деталь 2', contentTemplate: '{bazis.detail_id}', errorCorrection: 'Q', defaultSizeMm: 22 });
   });
 });
 

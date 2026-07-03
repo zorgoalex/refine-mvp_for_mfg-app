@@ -25,7 +25,7 @@ import {
   qrSideOf,
   qrTemplateOf,
 } from './labelQrHelpers';
-import { chipsToTemplate, collectDuplicateQrNames, qrElementFromLibrary, sanitizeQrText, templateToChips, type QrChip } from './labelQrLibrary';
+import { chipsToTemplate, collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, sanitizeQrText, templateToChips, type QrChip } from './labelQrLibrary';
 
 const { Text } = Typography;
 const EXPORT_FORMATS: LabelExportFormat[] = ['bmp', 'png', 'emf'];
@@ -684,31 +684,35 @@ export const LabelsConfigTab: React.FC = () => {
     });
   };
 
-  const saveQrTemplate = async () => {
-    if (!canManage) return;
-    const name = qrDraft.name.trim();
+  const saveQrTemplate = async (
+    override?: { name: string; contentTemplate: string; errorCorrection: 'L' | 'M' | 'Q' | 'H'; defaultSizeMm: number },
+  ): Promise<LabelQrTemplate | null> => {
+    if (!canManage) return null;
+    const name = (override?.name ?? qrDraft.name).trim();
     if (!name) {
       message.error('Введите название QR-шаблона');
-      return;
+      return null;
     }
     setQrSaving(true);
     try {
       const input: LabelQrTemplateInput = {
         name,
-        contentTemplate: chipsToTemplate(qrDraft.chips),
-        errorCorrection: qrDraft.errorCorrection,
-        defaultSizeMm: qrDraft.sizeMm,
+        contentTemplate: override?.contentTemplate ?? chipsToTemplate(qrDraft.chips),
+        errorCorrection: override?.errorCorrection ?? qrDraft.errorCorrection,
+        defaultSizeMm: override?.defaultSizeMm ?? qrDraft.sizeMm,
         idempotencyKey: `label-qr-template-${Date.now()}`,
       };
-      if (qrDraft.id != null) {
-        await labelsApi.updateQrTemplate(qrDraft.id, { ...input, version: qrDraft.version ?? 0 });
+      let saved: LabelQrTemplate;
+      if (!override && qrDraft.id != null) {
+        saved = await labelsApi.updateQrTemplate(qrDraft.id, { ...input, version: qrDraft.version ?? 0 });
         message.success('QR-шаблон обновлён');
       } else {
-        await labelsApi.createQrTemplate(input);
-        message.success('QR-шаблон создан');
+        saved = await labelsApi.createQrTemplate(input);
+        message.success(override ? 'QR-шаблон сохранён в библиотеку' : 'QR-шаблон создан');
       }
       await loadQrTemplates();
       resetQrDraft();
+      return saved;
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         message.error('QR-шаблон изменён в другом месте. Список обновлён, повторите изменения.');
@@ -716,8 +720,19 @@ export const LabelsConfigTab: React.FC = () => {
       } else {
         message.error('Не удалось сохранить QR-шаблон');
       }
+      return null;
     } finally {
       setQrSaving(false);
+    }
+  };
+
+  const promoteAdHocQrToLibrary = async (element: LabelTemplateElement, index: number) => {
+    if (!canManage) return;
+    const draft = qrDraftFromElement(element);
+    setQrDraft({ id: null, version: null, name: draft.name, chips: templateToChips(draft.contentTemplate), errorCorrection: draft.errorCorrection, sizeMm: draft.defaultSizeMm });
+    const created = await saveQrTemplate(draft);
+    if (created) {
+      patchQrStyle(index, { qrSourceTemplateId: created.labelQrTemplateId });
     }
   };
 
@@ -1280,6 +1295,27 @@ export const LabelsConfigTab: React.FC = () => {
                     />
                   </Space.Compact>
                 ),
+              },
+              {
+                title: 'Библиотека',
+                width: 150,
+                render: (_, element, index) => {
+                  if (element.kind !== 'qr') return null;
+                  const hasSourceTemplate = (element.style as Record<string, unknown> | undefined)?.qrSourceTemplateId != null;
+                  if (hasSourceTemplate) return <Tag color="processing">В библиотеке</Tag>;
+                  return (
+                    <Tooltip title="Сохраняет этот QR-код как переиспользуемый шаблон в глобальной библиотеке QR-кодов.">
+                      <Button
+                        size="small"
+                        disabled={!canManage}
+                        loading={qrSaving}
+                        onClick={() => void promoteAdHocQrToLibrary(element, index)}
+                      >
+                        Сохранить в библиотеку
+                      </Button>
+                    </Tooltip>
+                  );
+                },
               },
               ...(['xMm', 'yMm', 'widthMm', 'heightMm'] as const).map((key) => ({
                 title: key,

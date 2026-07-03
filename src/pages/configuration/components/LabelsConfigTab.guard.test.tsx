@@ -218,6 +218,13 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/draggingQr/);
   });
 
+  it('lets an ad-hoc QR element be promoted into the global library', () => {
+    expect(tabSrc).toContain('Сохранить в библиотеку');
+    expect(tabSrc).toMatch(/qrDraftFromElement/);
+    expect(tabSrc).toMatch(/promoteAdHocQrToLibrary/);
+    expect(tabSrc).toMatch(/qrSourceTemplateId/);
+  });
+
   it('drops a dragged library QR onto the canvas at the pointer position with auto-shift', () => {
     expect(tabSrc).toMatch(/qrElementFromLibrary/);
     expect(tabSrc).toMatch(/onDropDraggingQr/);
