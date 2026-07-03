@@ -1,0 +1,45 @@
+import { describe, expect, it } from 'vitest';
+import { chipsToTemplate, templateToChips, uniqueQrName, qrElementFromLibrary } from './labelQrLibrary';
+
+describe('chips <-> template', () => {
+  it('compiles chips to a {field}|text string', () => {
+    expect(chipsToTemplate([{ kind: 'field', fieldId: 'bazis.detail_id' }, { kind: 'text', text: '-' }, { kind: 'field', fieldId: 'bazis.name' }], '|'))
+      .toBe('{bazis.detail_id}|-|{bazis.name}');
+  });
+  it('round-trips', () => {
+    const t = '{bazis.detail_id}|-|{bazis.name}';
+    expect(chipsToTemplate(templateToChips(t), '|')).toBe(t);
+  });
+  it('strips separator/brace chars from static text so round-trip is safe', () => {
+    expect(chipsToTemplate([{ kind: 'text', text: 'a|b{c}' }], '|')).toBe('abc');
+  });
+});
+
+describe('uniqueQrName', () => {
+  it('returns base when free', () => {
+    expect(uniqueQrName('QR', [])).toBe('QR');
+  });
+  it('suffixes on collision', () => {
+    expect(uniqueQrName('QR', ['QR'])).toBe('QR 2');
+    expect(uniqueQrName('QR', ['QR', 'QR 2'])).toBe('QR 3');
+  });
+  it('collides case-insensitively (matches backend)', () => {
+    expect(uniqueQrName('qr', ['QR'])).toBe('qr 2');
+  });
+});
+
+describe('qrElementFromLibrary', () => {
+  it('builds a qr element with snapshot style + unique name at drop point', () => {
+    const el = qrElementFromLibrary(
+      { name: 'Деталь', contentTemplate: '{bazis.detail_id}', errorCorrection: 'Q', defaultSizeMm: 18, sourceTemplateId: 7 },
+      10, 12,
+      [{ elementKey: 'e1', kind: 'qr', style: { qrName: 'Деталь' } } as any],
+    );
+    expect(el.kind).toBe('qr');
+    expect(el.xMm).toBe(10);
+    expect(el.yMm).toBe(12);
+    expect(el.widthMm).toBe(18);
+    expect(el.heightMm).toBe(18);
+    expect(el.style).toMatchObject({ qrName: 'Деталь 2', qrTemplate: '{bazis.detail_id}', qrErrorCorrection: 'Q', qrSourceTemplateId: 7 });
+  });
+});
