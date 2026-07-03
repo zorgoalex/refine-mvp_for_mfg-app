@@ -49,7 +49,6 @@ const PREVIEW_FIELD_VALUES: Record<string, string> = {
   'date.today': '24.06.2026',
   'label.counter_text': 'Бир.№    1 / 0',
 };
-const QR_CONFLICT_ERROR = 'QR_CONFLICT';
 const QR_NAME_DUP_ERROR_PREFIX = 'QR_NAME_DUP:';
 const QR_NAME_EMPTY_ERROR_PREFIX = 'QR_NAME_EMPTY:';
 const QR_ERROR_CORRECTION_OPTIONS = [
@@ -354,13 +353,10 @@ export const LabelsConfigTab: React.FC = () => {
 
   const buildTemplatePayload = (values: TemplateFormValues, name = values.name): LabelTemplateInput => {
     const customFieldSchema = parseCustomSchema(customSchemaText);
-    const conflicts = collectQrConflicts(elements, {
-      widthMm: Number(values.canvasWidthMm ?? 85),
-      heightMm: Number(values.canvasHeightMm ?? 88),
-    });
-    if (conflicts.length > 0) {
-      throw new Error(QR_CONFLICT_ERROR);
-    }
+    // QR overlap/out-of-bounds is intentionally non-blocking: it only drives the
+    // `qrConflicts` warning banner (kept in sync by the effect that watches
+    // elements/canvas size). A user may deliberately overlap a QR with another
+    // element (e.g. z-index layering), so saving must not be refused for it.
     const dupes = collectDuplicateQrNames(elements);
     if (dupes.length > 0) {
       throw new Error(`${QR_NAME_DUP_ERROR_PREFIX}${dupes.join(', ')}`);
@@ -392,9 +388,6 @@ export const LabelsConfigTab: React.FC = () => {
       }
     }
     if (error instanceof Error) {
-      if (error.message === QR_CONFLICT_ERROR) {
-        return 'QR-код пересекается с элементами или выходит за границы бирки';
-      }
       if (error.message.startsWith(QR_NAME_DUP_ERROR_PREFIX)) {
         const dupes = error.message.slice(QR_NAME_DUP_ERROR_PREFIX.length);
         return `Имена QR-кодов должны быть уникальны: ${dupes}`;
@@ -480,13 +473,13 @@ export const LabelsConfigTab: React.FC = () => {
         condition: {},
       };
       if (kind !== 'qr') return [...current, nextElement];
-      const result = autoShiftForQr({
-        qr: nextElement,
-        elements: current,
-        canvas: currentCanvasBounds(),
-      });
-      setQrConflicts(result.conflicts.map((conflict) => conflict.conflictKey));
-      return result.elements;
+      // A newly added QR is placed at its default spot without pushing any other
+      // element out of the way (overlap is a warning, not a blocker — see
+      // applyQrGeometryPatch below); the conflicts banner is recomputed so the
+      // user is informed if the default position collides with something.
+      const updated = [...current, nextElement];
+      setQrConflicts(collectQrConflicts(updated, currentCanvasBounds()).map((conflict) => conflict.conflictKey));
+      return updated;
     });
     setSelectedElementKey(elementKey);
   };
@@ -552,20 +545,41 @@ export const LabelsConfigTab: React.FC = () => {
     );
   };
 
+  // Applies a QR move/resize/geometry patch WITHOUT pushing neighbouring elements
+  // out of the way (option A: overlap is non-blocking, so an intentional overlap
+  // sticks). It still recomputes `qrConflicts` from the resulting layout so the
+  // warning banner stays accurate. Auto-shift (autoShiftForQr) is kept only for
+  // the initial library drop (onDropDraggingQr), where nudging a freshly-dropped
+  // QR out of an accidental overlap is a placement convenience, not a correction
+  // of an intentional user action.
   const applyQrGeometryPatch = (elementKey: string, patch: Partial<LabelTemplateElement>) => {
     setElements((current) => {
       const currentQr = current.find((element) => element.elementKey === elementKey);
       if (!currentQr || currentQr.kind !== 'qr') {
         return current.map((element) => (element.elementKey === elementKey ? { ...element, ...patch } : element));
       }
-      const qr = { ...currentQr, ...patch };
-      const result = autoShiftForQr({
-        qr,
-        elements: current,
-        canvas: currentCanvasBounds(),
+      const updated = current.map((element) => {
+        if (element.elementKey !== elementKey) return element;
+        // Mirrors autoShiftForQr's normalizeQrElement: a QR stays square (side =
+        // max of width/height, floor MIN_QR_SIDE_MM via qrSideOf) and keeps its
+        // error-correction level defaulted, independent of neighbour-pushing.
+        const merged = { ...element, ...patch };
+        const side = qrSideOf(merged);
+        return {
+          ...merged,
+          kind: 'qr' as const,
+          sourceField: null,
+          staticText: null,
+          widthMm: side,
+          heightMm: side,
+          style: {
+            ...(merged.style ?? {}),
+            qrErrorCorrection: qrErrorCorrectionOf(merged),
+          },
+        };
       });
-      setQrConflicts(result.conflicts.map((conflict) => conflict.conflictKey));
-      return result.elements;
+      setQrConflicts(collectQrConflicts(updated, currentCanvasBounds()).map((conflict) => conflict.conflictKey));
+      return updated;
     });
   };
 
@@ -600,6 +614,32 @@ export const LabelsConfigTab: React.FC = () => {
   const deleteElementByKey = (elementKey: string) => {
     setElements((current) => current.filter((element) => element.elementKey !== elementKey));
     setSelectedElementKey((current) => (current === elementKey ? null : current));
+  };
+
+  // Both the Konva preview (`sorted` in LabelTemplatePreview) and the server SVG
+  // renderer (label-renderer.ts) draw elements ordered by ascending `zIndex`, so
+  // reordering must reassign zIndex across the whole array (not just move the
+  // element within `elements`) for a visible draw-order change. The array order
+  // is kept in sync with the new zIndex order too, since it doubles as a stable
+  // tie-breaker / display order elsewhere.
+  const bringElementToFront = (elementKey: string) => {
+    setElements((current) => {
+      const index = current.findIndex((element) => element.elementKey === elementKey);
+      if (index === -1) return current;
+      const target = current[index];
+      const rest = [...current.slice(0, index), ...current.slice(index + 1)];
+      return [...rest, target].map((element, i) => ({ ...element, zIndex: i }));
+    });
+  };
+
+  const sendElementToBack = (elementKey: string) => {
+    setElements((current) => {
+      const index = current.findIndex((element) => element.elementKey === elementKey);
+      if (index === -1) return current;
+      const target = current[index];
+      const rest = [...current.slice(0, index), ...current.slice(index + 1)];
+      return [target, ...rest].map((element, i) => ({ ...element, zIndex: i }));
+    });
   };
 
   const duplicateElementByKey = (elementKey: string) => {
@@ -1269,6 +1309,8 @@ export const LabelsConfigTab: React.FC = () => {
                 onChangeElement={patchElementByKey}
                 onDeleteElement={deleteElementByKey}
                 onDuplicateElement={duplicateElementByKey}
+                onBringElementToFront={bringElementToFront}
+                onSendElementToBack={sendElementToBack}
                 onDropField={addFieldElement}
                 draggingField={draggingField}
                 onDropDraggingField={(field, xMm, yMm) => {
@@ -1635,6 +1677,8 @@ function LabelTemplatePreview({
   onChangeElement,
   onDeleteElement,
   onDuplicateElement,
+  onBringElementToFront,
+  onSendElementToBack,
   onDropField,
   draggingField,
   onDropDraggingField,
@@ -1654,6 +1698,8 @@ function LabelTemplatePreview({
   onChangeElement?: (elementKey: string, patch: Partial<LabelTemplateElement>) => void;
   onDeleteElement?: (elementKey: string) => void;
   onDuplicateElement?: (elementKey: string) => void;
+  onBringElementToFront?: (elementKey: string) => void;
+  onSendElementToBack?: (elementKey: string) => void;
   onDropField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
   draggingField?: LabelFieldCatalogItem | null;
   onDropDraggingField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
@@ -2206,6 +2252,28 @@ function LabelTemplatePreview({
               }}
             >
               Сделать копию
+            </Button>
+            <Button
+              type="text"
+              size="small"
+              block
+              onClick={() => {
+                onBringElementToFront?.(contextMenu.element.elementKey);
+                setContextMenu(null);
+              }}
+            >
+              На передний план
+            </Button>
+            <Button
+              type="text"
+              size="small"
+              block
+              onClick={() => {
+                onSendElementToBack?.(contextMenu.element.elementKey);
+                setContextMenu(null);
+              }}
+            >
+              На задний план
             </Button>
             <Button
               danger

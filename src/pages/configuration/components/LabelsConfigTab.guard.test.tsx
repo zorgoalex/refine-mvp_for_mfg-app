@@ -167,7 +167,7 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/align=\{textAlign\}/);
   });
 
-  it('supports QR-code elements with template payloads and automatic layout protection', () => {
+  it('supports QR-code elements with template payloads and a non-blocking overlap warning', () => {
     expect(tabSrc).toMatch(/QR-код/);
     expect(tabSrc).toMatch(/QrcodeOutlined/);
     expect(tabSrc).toMatch(/value: 'qr', label: 'QR-код'/);
@@ -179,7 +179,52 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/qrProtectedRect/);
     expect(tabSrc).toMatch(/data-label-qr-conflict/);
     expect(tabSrc).toMatch(/kind === 'qr'/);
-    expect(tabSrc).toMatch(/QR_CONFLICT/);
+  });
+
+  it('never blocks saving on a QR overlap/out-of-bounds conflict (warning-only, option A)', () => {
+    // buildTemplatePayload must not throw for collectQrConflicts results — only
+    // the duplicate-name and empty-name QR checks are allowed to block a save.
+    expect(tabSrc).not.toMatch(/QR_CONFLICT/);
+    expect(tabSrc).not.toMatch(/throw new Error\(QR_CONFLICT_ERROR\)/);
+    const buildPayloadBody = tabSrc.slice(
+      tabSrc.indexOf('const buildTemplatePayload ='),
+      tabSrc.indexOf('const describeSaveError ='),
+    );
+    expect(buildPayloadBody).not.toMatch(/collectQrConflicts/);
+    expect(buildPayloadBody).toMatch(/throw new Error\(`\$\{QR_NAME_DUP_ERROR_PREFIX\}/);
+    expect(buildPayloadBody).toMatch(/throw new Error\(`\$\{QR_NAME_EMPTY_ERROR_PREFIX\}/);
+    expect(buildPayloadBody).toMatch(/collectDuplicateQrNames/);
+    expect(buildPayloadBody).toMatch(/collectEmptyQrNames/);
+    expect(tabSrc).toMatch(/QR_NAME_DUP_ERROR_PREFIX/);
+    expect(tabSrc).toMatch(/QR_NAME_EMPTY_ERROR_PREFIX/);
+  });
+
+  it('does not auto-shift neighbouring elements when a QR is moved/resized manually, only on initial library drop', () => {
+    const applyPatchBody = tabSrc.slice(
+      tabSrc.indexOf('const applyQrGeometryPatch = '),
+      tabSrc.indexOf('const patchQrStyle ='),
+    );
+    expect(applyPatchBody).not.toMatch(/autoShiftForQr\(/);
+    expect(applyPatchBody).toMatch(/collectQrConflicts/);
+    const addElementBody = tabSrc.slice(
+      tabSrc.indexOf('const addElement = '),
+      tabSrc.indexOf('const patchElement = '),
+    );
+    expect(addElementBody).not.toMatch(/autoShiftForQr\(/);
+    const dropBody = tabSrc.slice(
+      tabSrc.indexOf('const onDropDraggingQr = '),
+      tabSrc.indexOf('const handleBazisImportFile ='),
+    );
+    expect(dropBody).toMatch(/autoShiftForQr/);
+  });
+
+  it('lets elements be reordered to the front or back of the draw stack via the context menu', () => {
+    expect(tabSrc).toMatch(/На передний план/);
+    expect(tabSrc).toMatch(/На задний план/);
+    expect(tabSrc).toMatch(/bringElementToFront/);
+    expect(tabSrc).toMatch(/sendElementToBack/);
+    expect(tabSrc).toMatch(/onBringElementToFront\?\.\(contextMenu\.element\.elementKey\)/);
+    expect(tabSrc).toMatch(/onSendElementToBack\?\.\(contextMenu\.element\.elementKey\)/);
   });
 
   it('strips read-only element ids before create or update payloads', () => {
