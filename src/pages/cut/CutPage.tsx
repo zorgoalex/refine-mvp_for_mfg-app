@@ -332,6 +332,7 @@ export const CutPage: React.FC = () => {
   const [preset, setPreset] = useState<string>('screen');
   const [presetOptions, setPresetOptions] = useState(DEFAULT_PRESET_OPTIONS);
   const [pdfTemplateOptions, setPdfTemplateOptions] = useState(DEFAULT_PDF_TEMPLATE_OPTIONS);
+  const [pdfTemplateForJob, setPdfTemplateForJob] = useState('standard');
   const [profiles, setProfiles] = useState<CutParamProfile[]>([]);
   const [cutSettings, setCutSettings] = useState<CutSettingRow[]>([]);
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
@@ -885,7 +886,7 @@ export const CutPage: React.FC = () => {
     });
     try {
       // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
-      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetOriginTopLeft));
+      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetOriginTopLeft, pdfTemplateForJob));
       if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
       const url = URL.createObjectURL(result.blob);
       pdfPreviewUrlRef.current = url;
@@ -906,7 +907,7 @@ export const CutPage: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [job, sheetPortrait, sheetOriginTopLeft, handleError, revokePdfPreviewUrl]);
+  }, [job, sheetPortrait, sheetOriginTopLeft, pdfTemplateForJob, handleError, revokePdfPreviewUrl]);
 
   // ── Manual layout editor callbacks ─────────────────────────────────────────
 
@@ -1518,24 +1519,38 @@ export const CutPage: React.FC = () => {
               style={{ width: 140 }}
             />
             {job.groups.length > 0 && (
-              <Tooltip
-                title={
-                  anyGroupDirty
-                    ? 'несохранённые изменения'
-                    : (job.requiresRecalc ?? false)
-                    ? 'требуется пересчёт'
-                    : undefined
-                }
-              >
-                <Button
-                  onClick={() => void openJobPdfPreview()}
-                  loading={busy}
-                  disabled={anyGroupDirty || (job.requiresRecalc ?? false)}
-                  data-testid="preview-job-pdf-btn"
+              <>
+                <Space size={6}>
+                  <Text type="secondary">Шаблон PDF</Text>
+                  <Select
+                    size="small"
+                    value={pdfTemplateForJob}
+                    onChange={setPdfTemplateForJob}
+                    options={pdfTemplateOptions}
+                    style={{ width: 180 }}
+                    disabled={busy}
+                    data-testid="pdf-template-select-job"
+                  />
+                </Space>
+                <Tooltip
+                  title={
+                    anyGroupDirty
+                      ? 'несохранённые изменения'
+                      : (job.requiresRecalc ?? false)
+                      ? 'требуется пересчёт'
+                      : undefined
+                  }
                 >
-                  Предпросмотр PDF (весь раскрой)
-                </Button>
-              </Tooltip>
+                  <Button
+                    onClick={() => void openJobPdfPreview()}
+                    loading={busy}
+                    disabled={anyGroupDirty || (job.requiresRecalc ?? false)}
+                    data-testid="preview-job-pdf-btn"
+                  >
+                    Предпросмотр PDF (весь раскрой)
+                  </Button>
+                </Tooltip>
+              </>
             )}
           </Space>
         </Card>

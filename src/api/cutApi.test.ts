@@ -121,6 +121,18 @@ describe('cutApi', () => {
     expect(url).toContain('template=bath_profiles');
   });
 
+  it('passes the selected PDF template to whole-job PDF export', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('%PDF-1', { status: 200, headers: { 'Content-Type': 'application/pdf' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.fetchJobPdf(42, false, undefined, true, 'bath_profiles');
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('/api/v1/cut-jobs/42/export.pdf');
+    expect(url).toContain('template=bath_profiles');
+  });
+
   it('validates cut job ids before fetch', async () => {
     const fetchMock = mockFetch(jobDto());
     expect(() => validateCutJobId(0)).toThrow('Invalid cutJobId');

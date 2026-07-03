@@ -99,4 +99,14 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
       /params\.layout_mode\s*===\s*['"]vacuum_table['"]\s*&&\s*\((?:(?!\)\}).)*setField\('vacuum',\s*\{/s,
     );
   });
+
+  it('exposes a PDF template editor tab with expected editor commands', () => {
+    expect(tabSrc).toMatch(/Редактирование шаблонов PDF/);
+    expect(tabSrc).toMatch(/PdfTemplateEditor/);
+    expect(tabSrc).toMatch(/Сохранить как/);
+    expect(tabSrc).toMatch(/Создать копию/);
+    expect(tabSrc).toMatch(/Добавить поле/);
+    expect(tabSrc).toMatch(/Добавить линию/);
+    expect(tabSrc).toMatch(/Добавить прямоугольник/);
+  });
 });

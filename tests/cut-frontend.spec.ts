@@ -123,9 +123,11 @@ test.describe('Cut page (mocked-local)', () => {
     await page.route(/\/api\/v1\/cut-jobs\/42\/groups\/100\/sheets\/0\.png(\?.*)?$/, (route) =>
       route.fulfill({ status: 200, contentType: 'image/png', body: PNG_BYTES }),
     );
-    await page.route(/\/api\/v1\/cut-jobs\/42\/export\.pdf(\?.*)?$/, (route) =>
-      route.fulfill({ status: 200, contentType: 'application/pdf', body: PNG_BYTES }),
-    );
+    let jobPdfRequestUrl = '';
+    await page.route(/\/api\/v1\/cut-jobs\/42\/export\.pdf(\?.*)?$/, (route) => {
+      jobPdfRequestUrl = route.request().url();
+      return route.fulfill({ status: 200, contentType: 'application/pdf', body: PNG_BYTES });
+    });
 
     await page.goto('/cut');
 
@@ -145,10 +147,13 @@ test.describe('Cut page (mocked-local)', () => {
     await page.getByRole('button', { name: 'Развернуть' }).click();
     await expect(page.locator('img[alt="Лист 1"]')).toBeVisible();
 
+    await page.getByTestId('pdf-template-select-job').click();
+    await page.getByTitle('Профили ванны').click();
     await page.getByTestId('preview-job-pdf-btn').click();
     const pdfModal = page.getByRole('dialog', { name: /Предпросмотр PDF/ });
     await expect(pdfModal).toBeVisible({ timeout: 10000 });
     await expect(pdfModal.locator('iframe[title="Предпросмотр PDF"]')).toBeVisible();
+    expect(jobPdfRequestUrl).toContain('template=bath_profiles');
     await pdfModal.getByRole('button', { name: 'Закрыть' }).click();
   });
 });

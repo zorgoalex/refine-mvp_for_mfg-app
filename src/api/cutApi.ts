@@ -179,7 +179,7 @@ export const cutApi = {
    * When `renderToken` is given, appends `variant=active&renderVersion=<token>`
    * so the browser fetches the active layout and busts the render cache.
    */
-  fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true): Promise<CutPdfResult> {
+  fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true, pdfTemplate?: string): Promise<CutPdfResult> {
     const path = apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId));
     const params = new URLSearchParams();
     if (landscape) params.append('orientation', 'landscape');
@@ -188,6 +188,7 @@ export const cutApi = {
       params.append('variant', 'active');
       params.append('renderVersion', renderToken);
     }
+    if (pdfTemplate) params.append('template', pdfTemplate);
     const qs = params.toString();
     return downloadPdf(qs ? `${path}?${qs}` : path);
   },

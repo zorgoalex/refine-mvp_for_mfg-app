@@ -17,11 +17,13 @@ import {
   Spin,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { BorderOutlined, CopyOutlined, MinusOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import {
   cutConfigApi,
@@ -214,74 +216,91 @@ export const CutConfigTab: React.FC = () => {
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Title level={4}>Раскрой</Title>
 
-      <CutDefaultSettingsCard config={config} canManage={canManage} onSaved={reload} />
+      <Tabs
+        items={[
+          {
+            key: 'cut-settings',
+            label: 'Настройки раскроя',
+            children: (
+              <Space direction="vertical" size="large" style={{ width: '100%' }}>
+                <CutDefaultSettingsCard config={config} canManage={canManage} onSaved={reload} />
 
-      <Card size="small" title="Статусы готовности к раскрою (eligibility.statuses)">
-        <Paragraph type="secondary">
-          Коды производственных статусов, при которых деталь считается готовой к раскрою.
-        </Paragraph>
-        <Space align="start">
-          <Select
-            mode="multiple"
-            value={eligibilityCodes}
-            onChange={setEligibilityCodes}
-            options={statusOptions}
-            optionFilterProp="label"
-            placeholder="Выберите производственные статусы"
-            style={{ minWidth: 360 }}
-            disabled={!canManage}
-          />
-          <Button type="primary" disabled={!canManage} loading={busy} onClick={saveEligibility}>
-            Сохранить
-          </Button>
-        </Space>
-      </Card>
+                <Card size="small" title="Статусы готовности к раскрою (eligibility.statuses)">
+                  <Paragraph type="secondary">
+                    Коды производственных статусов, при которых деталь считается готовой к раскрою.
+                  </Paragraph>
+                  <Space align="start">
+                    <Select
+                      mode="multiple"
+                      value={eligibilityCodes}
+                      onChange={setEligibilityCodes}
+                      options={statusOptions}
+                      optionFilterProp="label"
+                      placeholder="Выберите производственные статусы"
+                      style={{ minWidth: 360 }}
+                      disabled={!canManage}
+                    />
+                    <Button type="primary" disabled={!canManage} loading={busy} onClick={saveEligibility}>
+                      Сохранить
+                    </Button>
+                  </Space>
+                </Card>
 
-      <Card
-        size="small"
-        title="Профили параметров (доп.)"
-        extra={
-          <Button type="primary" disabled={!canManage} onClick={() => setProfileCreate(true)}>
-            Добавить профиль
-          </Button>
-        }
-      >
-        <Table<CutParamProfile>
-          size="small"
-          rowKey="cutParamProfileId"
-          columns={profileColumns}
-          dataSource={config.paramProfiles}
-          pagination={false}
-        />
-      </Card>
+                <Card
+                  size="small"
+                  title="Профили параметров (доп.)"
+                  extra={
+                    <Button type="primary" disabled={!canManage} onClick={() => setProfileCreate(true)}>
+                      Добавить профиль
+                    </Button>
+                  }
+                >
+                  <Table<CutParamProfile>
+                    size="small"
+                    rowKey="cutParamProfileId"
+                    columns={profileColumns}
+                    dataSource={config.paramProfiles}
+                    pagination={false}
+                  />
+                </Card>
 
-      <Card
-        size="small"
-        title="Пресеты рендера (PNG)"
-        extra={
-          <Button type="primary" disabled={!canManage} onClick={() => setPresetCreate(true)}>
-            Добавить пресет
-          </Button>
-        }
-      >
-        <Table<CutRenderPreset>
-          size="small"
-          rowKey="cutRenderPresetId"
-          columns={presetColumns}
-          dataSource={config.renderPresets}
-          pagination={false}
-        />
-      </Card>
+                <Card
+                  size="small"
+                  title="Пресеты рендера (PNG)"
+                  extra={
+                    <Button type="primary" disabled={!canManage} onClick={() => setPresetCreate(true)}>
+                      Добавить пресет
+                    </Button>
+                  }
+                >
+                  <Table<CutRenderPreset>
+                    size="small"
+                    rowKey="cutRenderPresetId"
+                    columns={presetColumns}
+                    dataSource={config.renderPresets}
+                    pagination={false}
+                  />
+                </Card>
 
-      <Card size="small" title="Шаблоны PDF">
-        <Table<CutPdfTemplate>
-          size="small"
-          rowKey="cutPdfTemplateId"
-          columns={pdfTemplateColumns}
-          dataSource={config.pdfTemplates}
-          pagination={false}
-        />
-      </Card>
+                <Card size="small" title="Шаблоны PDF">
+                  <Table<CutPdfTemplate>
+                    size="small"
+                    rowKey="cutPdfTemplateId"
+                    columns={pdfTemplateColumns}
+                    dataSource={config.pdfTemplates}
+                    pagination={false}
+                  />
+                </Card>
+              </Space>
+            ),
+          },
+          {
+            key: 'pdf-template-editor',
+            label: 'Редактирование шаблонов PDF',
+            children: <PdfTemplateEditor templates={config.pdfTemplates} canManage={canManage} />,
+          },
+        ]}
+      />
 
       <ProfileModal
         open={profileCreate || profileEdit !== null}
@@ -313,6 +332,324 @@ export const CutConfigTab: React.FC = () => {
     </Space>
   );
 };
+
+type PdfTemplateElementType = 'field' | 'line' | 'rect';
+
+interface PdfTemplateElement {
+  id: string;
+  type: PdfTemplateElementType;
+  label: string;
+  source: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  align: 'left' | 'center' | 'right';
+}
+
+interface PdfTemplateDraft {
+  code: string;
+  name: string;
+  elements: PdfTemplateElement[];
+}
+
+interface PdfTemplateEditorProps {
+  templates: CutPdfTemplate[];
+  canManage: boolean;
+}
+
+const PDF_TEMPLATE_DRAFTS_KEY = 'cut-pdf-template-drafts:v1';
+const PDF_FIELD_OPTIONS = [
+  { value: 'order.unique_names', label: 'Заказ' },
+  { value: 'client.unique_names', label: 'Клиент' },
+  { value: 'order.date', label: 'Дата' },
+  { value: 'order.ready_date', label: 'Дата готовности' },
+  { value: 'detail.materials', label: 'Материал' },
+  { value: 'detail.thicknesses', label: 'Толщина' },
+  { value: 'detail.films', label: 'Пленка' },
+  { value: 'sheet.number', label: 'Номер листа' },
+  { value: 'sheet.page_count', label: 'Количество листов' },
+] as const;
+
+const DEFAULT_PDF_ELEMENTS: PdfTemplateElement[] = [
+  { id: 'field-order', type: 'field', label: 'Заказ', source: 'order.unique_names', x: 36, y: 34, w: 220, h: 22, align: 'left' },
+  { id: 'field-client', type: 'field', label: 'Клиент', source: 'client.unique_names', x: 306, y: 34, w: 220, h: 22, align: 'left' },
+  { id: 'field-film', type: 'field', label: 'Пленка', source: 'detail.films', x: 36, y: 74, w: 220, h: 22, align: 'left' },
+  { id: 'line-header', type: 'line', label: 'Линия шапки', source: 'shape.line', x: 36, y: 62, w: 770, h: 0, align: 'left' },
+  { id: 'rect-sheet', type: 'rect', label: 'Область листа', source: 'sheet.layout', x: 36, y: 112, w: 560, h: 420, align: 'center' },
+  { id: 'rect-table', type: 'rect', label: 'Таблица деталей', source: 'detail.table', x: 622, y: 112, w: 184, h: 230, align: 'center' },
+];
+
+const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canManage }) => {
+  const [drafts, setDrafts] = useState<PdfTemplateDraft[]>(() => loadPdfTemplateDrafts(templates));
+  const [selectedCode, setSelectedCode] = useState(() => templates[0]?.code ?? drafts[0]?.code ?? 'standard');
+  const selected = drafts.find((draft) => draft.code === selectedCode) ?? drafts[0];
+  const [selectedElementId, setSelectedElementId] = useState<string | null>(selected?.elements[0]?.id ?? null);
+  const selectedElement = selected?.elements.find((element) => element.id === selectedElementId) ?? selected?.elements[0] ?? null;
+
+  useEffect(() => {
+    setDrafts((prev) => mergePdfTemplateDrafts(prev, templates));
+  }, [templates]);
+
+  useEffect(() => {
+    if (!selected || selected.code === selectedCode) return;
+    setSelectedCode(selected.code);
+  }, [selected, selectedCode]);
+
+  const updateSelected = useCallback((next: PdfTemplateDraft) => {
+    setDrafts((prev) => prev.map((draft) => (draft.code === next.code ? next : draft)));
+  }, []);
+
+  const updateElement = useCallback(
+    (patch: Partial<PdfTemplateElement>) => {
+      if (!selected || !selectedElement) return;
+      updateSelected({
+        ...selected,
+        elements: selected.elements.map((element) => (element.id === selectedElement.id ? { ...element, ...patch } : element)),
+      });
+    },
+    [selected, selectedElement, updateSelected],
+  );
+
+  const addElement = useCallback(
+    (type: PdfTemplateElementType) => {
+      if (!selected) return;
+      const id = `${type}-${Date.now()}`;
+      const base: PdfTemplateElement = type === 'field'
+        ? { id, type, label: 'Новое поле', source: 'order.unique_names', x: 80, y: 90, w: 180, h: 24, align: 'left' }
+        : type === 'line'
+        ? { id, type, label: 'Новая линия', source: 'shape.line', x: 80, y: 120, w: 220, h: 0, align: 'left' }
+        : { id, type, label: 'Новый прямоугольник', source: 'shape.rect', x: 80, y: 140, w: 180, h: 80, align: 'center' };
+      updateSelected({ ...selected, elements: [...selected.elements, base] });
+      setSelectedElementId(id);
+    },
+    [selected, updateSelected],
+  );
+
+  const copyTemplate = useCallback(() => {
+    if (!selected) return;
+    const code = `${selected.code}_copy_${Date.now().toString(36)}`;
+    const copy = {
+      ...selected,
+      code,
+      name: `${selected.name} копия`,
+      elements: selected.elements.map((element) => ({ ...element, id: `${element.id}-copy` })),
+    };
+    setDrafts((prev) => [...prev, copy]);
+    setSelectedCode(code);
+    setSelectedElementId(copy.elements[0]?.id ?? null);
+  }, [selected]);
+
+  const saveDrafts = useCallback(() => {
+    window.localStorage.setItem(PDF_TEMPLATE_DRAFTS_KEY, JSON.stringify(drafts));
+    message.success('Черновик шаблона PDF сохранён');
+  }, [drafts]);
+
+  if (!selected) {
+    return <Alert type="warning" showIcon message="Нет активных шаблонов PDF" />;
+  }
+
+  const elementRows: ColumnsType<PdfTemplateElement> = [
+    { title: 'Элемент', dataIndex: 'label', key: 'label' },
+    { title: 'Тип', dataIndex: 'type', key: 'type', width: 90 },
+    { title: 'Данные', dataIndex: 'source', key: 'source', width: 160 },
+  ];
+
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space wrap align="center">
+        <Select
+          value={selectedCode}
+          onChange={(code) => {
+            const draft = drafts.find((item) => item.code === code);
+            setSelectedCode(code);
+            setSelectedElementId(draft?.elements[0]?.id ?? null);
+          }}
+          options={drafts.map((draft) => ({ value: draft.code, label: draft.name }))}
+          style={{ width: 260 }}
+        />
+        <Button icon={<SaveOutlined />} type="primary" disabled={!canManage} onClick={saveDrafts}>
+          Сохранить
+        </Button>
+        <Button icon={<CopyOutlined />} disabled={!canManage} onClick={copyTemplate}>
+          Создать копию
+        </Button>
+        <Button disabled={!canManage} onClick={copyTemplate}>
+          Сохранить как
+        </Button>
+        <Button icon={<PlusOutlined />} disabled={!canManage} onClick={() => addElement('field')}>
+          Добавить поле
+        </Button>
+        <Button icon={<MinusOutlined />} disabled={!canManage} onClick={() => addElement('line')}>
+          Добавить линию
+        </Button>
+        <Button icon={<BorderOutlined />} disabled={!canManage} onClick={() => addElement('rect')}>
+          Добавить прямоугольник
+        </Button>
+      </Space>
+
+      <Row gutter={16} align="top">
+        <Col xs={24} xl={15}>
+          <div
+            role="img"
+            aria-label="Предпросмотр шаблона PDF"
+            style={{
+              position: 'relative',
+              width: '100%',
+              maxWidth: 842,
+              aspectRatio: '842 / 595',
+              background: '#ffffff',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.08), 0 12px 32px rgba(15,23,42,0.08)',
+              overflow: 'hidden',
+            }}
+          >
+            {selected.elements.map((element) => (
+              <PdfTemplateElementBox
+                key={element.id}
+                element={element}
+                active={element.id === selectedElement?.id}
+                onSelect={() => setSelectedElementId(element.id)}
+              />
+            ))}
+          </div>
+        </Col>
+        <Col xs={24} xl={9}>
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Table<PdfTemplateElement>
+              size="small"
+              rowKey="id"
+              columns={elementRows}
+              dataSource={selected.elements}
+              pagination={false}
+              rowClassName={(row) => (row.id === selectedElement?.id ? 'ant-table-row-selected' : '')}
+              onRow={(row) => ({ onClick: () => setSelectedElementId(row.id) })}
+            />
+            {selectedElement && (
+              <Card size="small" title="Свойства элемента">
+                <Form layout="vertical">
+                  <Form.Item label="Название" style={{ marginBottom: 10 }}>
+                    <Input value={selectedElement.label} onChange={(e) => updateElement({ label: e.target.value })} disabled={!canManage} />
+                  </Form.Item>
+                  <Form.Item label="Данные" style={{ marginBottom: 10 }}>
+                    <Select
+                      value={selectedElement.source}
+                      onChange={(source) => updateElement({ source })}
+                      options={PDF_FIELD_OPTIONS}
+                      disabled={!canManage || selectedElement.type !== 'field'}
+                    />
+                  </Form.Item>
+                  <Row gutter={8}>
+                    <Col span={6}><NumberBox label="X" value={selectedElement.x} disabled={!canManage} onChange={(x) => updateElement({ x })} /></Col>
+                    <Col span={6}><NumberBox label="Y" value={selectedElement.y} disabled={!canManage} onChange={(y) => updateElement({ y })} /></Col>
+                    <Col span={6}><NumberBox label="W" value={selectedElement.w} disabled={!canManage} onChange={(w) => updateElement({ w })} /></Col>
+                    <Col span={6}><NumberBox label="H" value={selectedElement.h} disabled={!canManage} onChange={(h) => updateElement({ h })} /></Col>
+                  </Row>
+                  <Form.Item label="Выравнивание" style={{ marginBottom: 0 }}>
+                    <Segmented
+                      value={selectedElement.align}
+                      onChange={(align) => updateElement({ align: align as PdfTemplateElement['align'] })}
+                      options={[
+                        { value: 'left', label: 'Лево' },
+                        { value: 'center', label: 'Центр' },
+                        { value: 'right', label: 'Право' },
+                      ]}
+                      disabled={!canManage || selectedElement.type !== 'field'}
+                    />
+                  </Form.Item>
+                </Form>
+              </Card>
+            )}
+          </Space>
+        </Col>
+      </Row>
+    </Space>
+  );
+};
+
+const PdfTemplateElementBox: React.FC<{ element: PdfTemplateElement; active: boolean; onSelect: () => void }> = ({
+  element,
+  active,
+  onSelect,
+}) => {
+  const commonStyle: React.CSSProperties = {
+    position: 'absolute',
+    left: `${(element.x / 842) * 100}%`,
+    top: `${(element.y / 595) * 100}%`,
+    width: `${(element.w / 842) * 100}%`,
+    height: element.type === 'line' ? 1 : `${(Math.max(element.h, 1) / 595) * 100}%`,
+    cursor: 'pointer',
+  };
+  if (element.type === 'line') {
+    return <div onClick={onSelect} style={{ ...commonStyle, background: active ? '#1677ff' : '#111111' }} />;
+  }
+  if (element.type === 'rect') {
+    return (
+      <div
+        onClick={onSelect}
+        style={{
+          ...commonStyle,
+          border: active ? '2px solid #1677ff' : '1px solid #111111',
+          background: 'rgba(22,119,255,0.03)',
+        }}
+      />
+    );
+  }
+  return (
+    <div
+      onClick={onSelect}
+      style={{
+        ...commonStyle,
+        borderBottom: active ? '2px solid #1677ff' : '1px solid #111111',
+        color: '#111111',
+        fontSize: 12,
+        lineHeight: '20px',
+        textAlign: element.align,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      {element.label}: {'{'}{element.source}{'}'}
+    </div>
+  );
+};
+
+const NumberBox: React.FC<{ label: string; value: number; disabled: boolean; onChange: (value: number) => void }> = ({
+  label,
+  value,
+  disabled,
+  onChange,
+}) => (
+  <Form.Item label={label} style={{ marginBottom: 10 }}>
+    <InputNumber min={0} value={value} onChange={(next) => onChange(Number(next ?? 0))} disabled={disabled} style={{ width: '100%' }} />
+  </Form.Item>
+);
+
+function loadPdfTemplateDrafts(templates: CutPdfTemplate[]): PdfTemplateDraft[] {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = window.localStorage.getItem(PDF_TEMPLATE_DRAFTS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as PdfTemplateDraft[];
+        if (Array.isArray(parsed) && parsed.length > 0) return mergePdfTemplateDrafts(parsed, templates);
+      }
+    } catch {
+      // Ignore broken local drafts; config templates remain authoritative.
+    }
+  }
+  return mergePdfTemplateDrafts([], templates);
+}
+
+function mergePdfTemplateDrafts(drafts: PdfTemplateDraft[], templates: CutPdfTemplate[]): PdfTemplateDraft[] {
+  const byCode = new Map(drafts.map((draft) => [draft.code, draft]));
+  for (const template of templates) {
+    if (!template.isActive) continue;
+    if (!byCode.has(template.code)) {
+      byCode.set(template.code, { code: template.code, name: template.name, elements: DEFAULT_PDF_ELEMENTS });
+    }
+  }
+  return [...byCode.values()];
+}
 
 interface ProfileModalProps {
   open: boolean;

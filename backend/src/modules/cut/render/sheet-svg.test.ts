@@ -150,6 +150,27 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toContain('600X400');
     expect(svg).not.toContain('rotate(-90');
   });
+
+  it('doubles bath PDF detail font when the piece has enough space', () => {
+    const roomySheet: SheetPlacementsJson = {
+      ...sheet,
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 1000, height_mm: 600, rotated: false }],
+    };
+    const svg = buildBathProfileSheetSvg({ sheet: roomySheet, labelFor: () => ['11300', 'поз. 5', '1000X600'] });
+
+    expect(svg).toMatch(/font-size="98"[^>]*><tspan x="510"/);
+  });
+
+  it('keeps bath PDF detail font within short piece height', () => {
+    const shortSheet: SheetPlacementsJson = {
+      ...sheet,
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 1000, height_mm: 80, rotated: false }],
+    };
+    const svg = buildBathProfileSheetSvg({ sheet: shortSheet, labelFor: () => ['11300', 'поз. 5', '1000X80'] });
+
+    expect(svg).not.toMatch(/font-size="98"[^>]*><tspan/);
+    expect(svg).toMatch(/font-size="25"[^>]*><tspan x="510"/);
+  });
 });
 
 describe('buildSheetSvg rotate90 (landscape, upright labels)', () => {

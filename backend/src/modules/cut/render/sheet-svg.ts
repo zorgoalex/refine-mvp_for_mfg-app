@@ -248,7 +248,6 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 42));
-  const sideFontMm = Math.max(18, Math.round(fontMm * 0.85));
   const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
   const pieces = sheet.pieces
@@ -265,6 +264,8 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
 
       const resolved = labelFor(piece);
       const lines = (Array.isArray(resolved) ? resolved : [resolved]).slice(0, 2);
+      const pieceFontMm = bathPieceFontMm(lines, rect, fontMm);
+      const pieceSideFontMm = Math.max(12, Math.round(pieceFontMm * 0.85));
       const tspans = lines
         .map((line, i) => {
           const dy = i === 0 ? `${(-(lines.length - 1) / 2).toFixed(3)}em` : '1em';
@@ -273,25 +274,25 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         .join('');
       const centerText = lines.length > 0
         ? `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
-            fontMm,
+            pieceFontMm,
           )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${tspans}</text>`
         : '';
 
       const sideTexts: string[] = [];
-      if (rect.w >= sideFontMm * 2.5) {
+      if (rect.w >= pieceSideFontMm * 2.5) {
         sideTexts.push(
-          `<text x="${num(cx)}" y="${num(rect.y + sideFontMm * 0.9)}" font-family="Liberation Sans, sans-serif" font-size="${num(
-            sideFontMm,
+          `<text x="${num(cx)}" y="${num(rect.y + pieceSideFontMm * 0.9)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+            pieceSideFontMm,
           )}" fill="#111111" text-anchor="middle" dominant-baseline="middle">${escapeXml(formatDimension(rect.w))}</text>`,
         );
       }
-      if (rect.h >= sideFontMm * 2.5) {
-        const tx = rect.x + sideFontMm * 0.75;
+      if (rect.h >= pieceSideFontMm * 2.5) {
+        const tx = rect.x + pieceSideFontMm * 0.75;
         sideTexts.push(
           `<text x="${num(tx)}" y="${num(cy)}" transform="rotate(-90 ${num(tx)} ${num(
             cy,
           )})" font-family="Liberation Sans, sans-serif" font-size="${num(
-            sideFontMm,
+            pieceSideFontMm,
           )}" fill="#111111" text-anchor="middle" dominant-baseline="middle">${escapeXml(formatDimension(rect.h))}</text>`,
         );
       }
@@ -306,4 +307,13 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
     pieces,
     `</svg>`,
   ].join('');
+}
+
+function bathPieceFontMm(lines: readonly string[], rect: { w: number; h: number }, baseFontMm: number): number {
+  if (lines.length === 0) return baseFontMm;
+  const desired = baseFontMm * 2;
+  const longest = Math.max(...lines.map((line) => Math.max(1, line.length)));
+  const maxByWidth = (rect.w * 0.9) / (longest * 0.62);
+  const maxByHeight = (rect.h * 0.75) / (lines.length * 1.2);
+  return Math.max(12, Math.floor(Math.min(desired, maxByWidth, maxByHeight)));
 }
