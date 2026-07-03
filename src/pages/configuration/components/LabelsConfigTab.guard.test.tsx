@@ -107,7 +107,7 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/<Text strong>Поля бирки<\/Text>/);
     expect(tabSrc).toMatch(/title="Параметры шаблона"/);
     expect(tabSrc).toMatch(/title="Визуал бирки"/);
-    expect(tabSrc).toMatch(/<Text strong>Пользовательские поля<\/Text>/);
+    expect(tabSrc).toMatch(/<Panel header="Пользовательские поля" key="custom-fields">/);
   });
 
   it('keeps template dimensions, resolution and formats on one settings row', () => {
