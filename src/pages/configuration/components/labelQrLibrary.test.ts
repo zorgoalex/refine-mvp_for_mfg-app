@@ -52,6 +52,23 @@ describe('rowsToTemplate / templateToRows', () => {
     expect(rowsToTemplate(rows)).toBe('{a}\n\n{b}');
   });
 
+  it('leading empty rows are dropped (symmetric with trailing, matches backend .trim())', () => {
+    const rows = [
+      [],
+      [{ kind: 'field' as const, fieldId: 'a' }],
+    ];
+    expect(rowsToTemplate(rows)).toBe('{a}');
+  });
+
+  it('round-trip is stable for rows with no leading/trailing empties', () => {
+    const rows = [
+      [{ kind: 'field' as const, fieldId: 'a' }],
+      [],
+      [{ kind: 'field' as const, fieldId: 'b' }],
+    ];
+    expect(templateToRows(rowsToTemplate(rows))).toEqual(rows);
+  });
+
   it('templateToRows: single row field-text-field', () => {
     expect(templateToRows('{a}-{b}')).toEqual([
       [

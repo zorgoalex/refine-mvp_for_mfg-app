@@ -124,6 +124,12 @@ export const LabelsConfigTab: React.FC = () => {
   const [draggingQr, setDraggingQr] = useState<LabelQrTemplate | null>(null);
   const [qrDragCursor, setQrDragCursor] = useState<{ x: number; y: number } | null>(null);
   const qrRowDropRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  // Shared guard so ONE field drag from the QR builder's own palette resolves
+  // exactly once. Both the per-row native onDrop (HTML5 drag'n'drop) and the
+  // window pointerup/mouseup fallback below can fire on the same release,
+  // which would otherwise add the same field chip twice (same bug class as
+  // qrDropResolvedRef's canvas double-drop).
+  const qrFieldChipResolvedRef = useRef(false);
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
 
@@ -246,14 +252,22 @@ export const LabelsConfigTab: React.FC = () => {
   // above, but resolved per-row since the builder now has multiple independent rows).
   useEffect(() => {
     if (!draggingQrField) return;
+    qrFieldChipResolvedRef.current = false;
     const handleEnd = (event: PointerEvent | MouseEvent) => {
+      if (qrFieldChipResolvedRef.current) {
+        setDraggingQrField(null);
+        return;
+      }
       let targetRow: number | null = null;
       qrRowDropRefs.current.forEach((el, rowIndex) => {
         const rect = el.getBoundingClientRect();
         const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
         if (inside) targetRow = rowIndex;
       });
-      if (targetRow != null) addQrFieldChip(targetRow, draggingQrField);
+      if (targetRow != null) {
+        qrFieldChipResolvedRef.current = true;
+        addQrFieldChip(targetRow, draggingQrField);
+      }
       setDraggingQrField(null);
     };
     window.addEventListener('pointerup', handleEnd);
@@ -1353,9 +1367,13 @@ export const LabelsConfigTab: React.FC = () => {
                                         onDrop={(event) => {
                                           if (!canManage) return;
                                           event.preventDefault();
+                                          if (qrFieldChipResolvedRef.current) return;
                                           const fieldId = event.dataTransfer.getData('application/x-label-field') || event.dataTransfer.getData('text/plain');
                                           const field = qrPaletteFields.find((item) => item.id === fieldId);
-                                          if (field) addQrFieldChip(rowIndex, field);
+                                          if (field) {
+                                            qrFieldChipResolvedRef.current = true;
+                                            addQrFieldChip(rowIndex, field);
+                                          }
                                         }}
                                       >
                                         {row.length === 0 && (

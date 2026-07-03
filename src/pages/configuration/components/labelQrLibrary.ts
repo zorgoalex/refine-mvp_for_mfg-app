@@ -14,7 +14,10 @@ export function sanitizeQrText(text: string): string {
 export function rowsToTemplate(rows: QrRow[]): string {
   // Convert each row to its template string by concatenating chips (no separator).
   // Field chips become {fieldId}, text chips become sanitizeQrText(text).
-  // Join rows with newline. Drop trailing fully-empty rows.
+  // Join rows with newline. Drop leading/trailing fully-empty rows (interior
+  // empty rows are kept) so the compiled string never begins/ends with a blank
+  // line — this mirrors the backend's contentTemplate: z.string().trim(),
+  // which would otherwise silently strip a leading/trailing blank row on save.
   const rowStrings = rows.map((row) => {
     return row
       .map((c) => (c.kind === 'field' ? `{${c.fieldId}}` : sanitizeQrText(c.text)))
@@ -24,6 +27,10 @@ export function rowsToTemplate(rows: QrRow[]): string {
   // Drop trailing empty row strings
   while (rowStrings.length > 0 && rowStrings[rowStrings.length - 1] === '') {
     rowStrings.pop();
+  }
+  // Drop leading empty row strings
+  while (rowStrings.length > 0 && rowStrings[0] === '') {
+    rowStrings.shift();
   }
 
   return rowStrings.join('\n');
