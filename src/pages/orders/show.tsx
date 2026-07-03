@@ -32,6 +32,7 @@ import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.ty
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
+import { CutPage } from "../cut/CutPage";
 import { buildGroupedRows, GROUP_TINT_COUNT, selectedGroupLabelForCut } from './detailGrouping';
 import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
@@ -44,12 +45,13 @@ import {
   type OrderDetailColumnDefinition,
 } from "./components/tables/OrderDetailColumnSettings";
 
-type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'additional';
+type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'cut' | 'additional';
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
   { key: 'projects', label: 'Проекты', color: '#722ed1' },
   { key: 'deadlines', label: 'Дедлайны', color: '#1677ff' },
   { key: 'finance', label: 'Финансы', color: '#faad14' },
+  { key: 'cut', label: 'Раскрой', color: '#13c2c2' },
   { key: 'additional', label: 'Дополнительная информация', color: 'var(--app-text-muted)' },
 ];
 
@@ -939,7 +941,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 style={{
                   border: '1px solid var(--app-border)',
                   borderTop: 'none',
-                  padding: activeInfoPanel === 'additional' ? 8 : 12,
+                  padding: activeInfoPanel === 'additional' || activeInfoPanel === 'cut' ? 8 : 12,
                   background: 'var(--app-surface)',
                 }}
               >
@@ -970,6 +972,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   >
                     <OrderFinanceBlock record={record} payments={payments} />
                   </div>
+                )}
+
+                {activeInfoPanel === 'cut' && (
+                  cutColumnEnabled ? (
+                    <CutPage embeddedOrderId={record.order_id} />
+                  ) : (
+                    <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>Раскрой недоступен</span>
+                  )
                 )}
 
                 {activeInfoPanel === 'additional' && (
