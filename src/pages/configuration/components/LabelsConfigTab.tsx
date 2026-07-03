@@ -1544,6 +1544,13 @@ function LabelTemplatePreview({
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodeRefs = useRef(new Map<string, Konva.Node>());
+  // Shared guard so ONE QR-library release resolves the drop exactly once. Both
+  // the capture-phase window listener (handleGlobalDrop) and the bubble-phase
+  // wrapper onMouseUp used to fire on the same release, dropping TWO QR elements
+  // at the same point — the second stayed behind as a phantom (its dashed
+  // quiet-zone frame) and kept tripping the overlap/out-of-bounds error even
+  // after the first was moved.
+  const qrDropResolvedRef = useRef(false);
   const [zoom, setZoom] = useState(initialZoom);
   const [showGrid, setShowGrid] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
@@ -1626,9 +1633,9 @@ function LabelTemplatePreview({
   // bubble-phase listener clears draggingQr.
   useEffect(() => {
     if (!draggingQr || !onDropDraggingQr) return;
-    let dropped = false;
+    qrDropResolvedRef.current = false;
     const handleGlobalDrop = (event: MouseEvent | PointerEvent) => {
-      if (dropped) return;
+      if (qrDropResolvedRef.current) return;
       const container = stageRef.current?.container();
       if (!container) return;
       const rect = container.getBoundingClientRect();
@@ -1638,7 +1645,7 @@ function LabelTemplatePreview({
         event.clientY >= rect.top &&
         event.clientY <= rect.bottom;
       if (!inside) return;
-      dropped = true;
+      qrDropResolvedRef.current = true;
       onDropDraggingQr(
         draggingQr,
         clamp(((event.clientX - rect.left) / rect.width) * safeWidth, 0, safeWidth - 1),
@@ -1793,6 +1800,8 @@ function LabelTemplatePreview({
     if (draggingQr && onDropDraggingQr) {
       event.preventDefault();
       event.stopPropagation();
+      if (qrDropResolvedRef.current) return;
+      qrDropResolvedRef.current = true;
       const point = pointFromEvent(event);
       onDropDraggingQr(draggingQr, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
     }
