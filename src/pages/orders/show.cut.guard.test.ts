@@ -26,4 +26,11 @@ describe('OrderShow cut detail-picker guards', () => {
     // Each job is a deep-link into /cut?job=<id>.
     expect(source).toContain('cutJobDeepLink(j.cutJobId)');
   });
+
+  it('renders embedded cut screen as a top order info tab', () => {
+    expect(source).toContain("key: 'cut', label: 'Раскрой'");
+    expect(source).toContain('import { CutPage }');
+    expect(source).toContain('<CutPage embeddedOrderId={record.order_id} />');
+    expect(source).toContain("activeInfoPanel === 'cut'");
+  });
 });

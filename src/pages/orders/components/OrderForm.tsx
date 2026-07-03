@@ -41,6 +41,7 @@ import { OrderLabelDataEditor } from './labels/OrderLabelDataEditor';
 // Tabs
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
 import { OrderPaymentsTab, OrderPaymentsTabRef } from './tabs/OrderPaymentsTab';
+import { CutPage } from '../../cut/CutPage';
 
 interface OrderFormProps {
   mode: OrderFormMode;
@@ -112,6 +113,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const [backendOrderLoading, setBackendOrderLoading] = useState(false);
   const useBackendOrderRead = featureFlags.useBackendOrdersRead;
   const labelsEnabled = featureFlags.labels && can('labels.view');
+  const cutTabEnabled = featureFlags.useBackendCut && can('cut.view');
 
   // React to deep-link/sub-tab jumps into an already-open order tab.
   useEffect(() => {
@@ -972,6 +974,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           </Space>
         ),
       },
+      ...(cutTabEnabled
+        ? [
+            {
+              key: 'cut',
+              label: 'Раскрой',
+              children: header.order_id ? <CutPage embeddedOrderId={header.order_id} /> : null,
+              disabled: mode === 'create' && !header.order_id,
+            },
+          ]
+        : []),
       {
         key: 'services',
         label: 'Услуги/работы',
@@ -1004,7 +1016,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         ),
       },
     ],
-    [mode, header.order_id, orderId, labelsEnabled, isDirty]
+    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled]
   );
 
   const enabledTabKeys = useMemo(

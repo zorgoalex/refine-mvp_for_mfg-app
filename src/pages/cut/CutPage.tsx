@@ -200,8 +200,13 @@ function formatJobMaterialNames(materialNames: string[] | undefined): string {
  * Flow: criteria -> draft job -> eligible details (no_sheet_spec surfaced) ->
  * basket -> calculate -> per-sheet PNG.
  */
-export const CutPage: React.FC = () => {
+interface CutPageProps {
+  embeddedOrderId?: number;
+}
+
+export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const canManage = can('cut.manage');
+  const isEmbeddedOrder = Number.isInteger(embeddedOrderId) && (embeddedOrderId ?? 0) > 0;
   // Theme-aware bg for the sticky group header (app uses AntD dark/default
   // algorithm, no CSS vars — read the token directly).
   const { token } = theme.useToken();
@@ -355,6 +360,7 @@ export const CutPage: React.FC = () => {
   const [profiles, setProfiles] = useState<CutParamProfile[]>([]);
   const [cutSettings, setCutSettings] = useState<CutSettingRow[]>([]);
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
+  const [embeddedJobIds, setEmbeddedJobIds] = useState<Set<number> | null>(null);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
 
@@ -432,11 +438,11 @@ export const CutPage: React.FC = () => {
         ? values.sheetMaterialTypeIds
         : undefined;
     return {
-      orderIds: parseIdCsv(values.orderIds ?? ''),
+      orderIds: isEmbeddedOrder ? [embeddedOrderId!] : parseIdCsv(values.orderIds ?? ''),
       sheetMaterialTypeIds,
       filmIds: parseIdCsv(values.filmIds ?? ''),
     };
-  }, [form]);
+  }, [embeddedOrderId, form, isEmbeddedOrder]);
 
   const handleError = useCallback((error: unknown, fallback: string) => {
     const text = error instanceof ApiError ? error.message : fallback;
@@ -446,13 +452,23 @@ export const CutPage: React.FC = () => {
   const loadJobs = useCallback(async () => {
     setJobsLoading(true);
     try {
-      setJobs(await cutApi.list());
+      const [nextJobs, placements] = await Promise.all([
+        cutApi.list(),
+        isEmbeddedOrder ? cutApi.listPlacements({ orderIds: [embeddedOrderId!] }) : Promise.resolve(null),
+      ]);
+      setJobs(nextJobs);
+      setEmbeddedJobIds(placements ? new Set(placements.jobs.map((ref) => ref.cutJobId)) : null);
     } catch (error) {
       handleError(error, 'Не удалось загрузить список раскроев');
     } finally {
       setJobsLoading(false);
     }
-  }, [handleError]);
+  }, [embeddedOrderId, handleError, isEmbeddedOrder]);
+
+  useEffect(() => {
+    if (!isEmbeddedOrder) return;
+    form.setFieldsValue({ orderIds: String(embeddedOrderId) });
+  }, [embeddedOrderId, form, isEmbeddedOrder]);
 
   const cutTabPath = useTabStore((s) => s.tabs.find((t) => t.key === '/cut')?.path);
   const lastListRefreshPathRef = useRef<string | undefined>(undefined);
@@ -612,7 +628,7 @@ export const CutPage: React.FC = () => {
         // from (the reserved items' orders) so "Загрузить подходящие детали" is
         // scoped to those orders instead of scanning everything. Material/film
         // filters are cleared to avoid stale criteria leaking from a prior job.
-        const orderIds = distinctOrderIdsFromItems(fresh.items);
+        const orderIds = isEmbeddedOrder ? [embeddedOrderId!] : distinctOrderIdsFromItems(fresh.items);
         form.setFieldsValue({
           name: fresh.name,
           orderIds: orderIds.length > 0 ? orderIds.join(',') : undefined,
@@ -630,7 +646,7 @@ export const CutPage: React.FC = () => {
         if (openSeqRef.current === seq) setBusy(false);
       }
     },
-    [applyPdfTemplateState, form, handleError, loadJobs, resetSheetViews],
+    [embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, resetSheetViews],
   );
 
   // Deep-link: /cut?job=<id> opens that job (e.g. from the order show page
@@ -1071,7 +1087,14 @@ export const CutPage: React.FC = () => {
     [applyPdfTemplateState, job, workingSheets, loadJobs, handleError, resetSheetViews],
   );
 
-  const filteredJobs = useMemo(() => filterJobsByStatus(jobs, statusFilter), [jobs, statusFilter]);
+  const filteredJobs = useMemo(() => {
+    const statusFiltered = filterJobsByStatus(jobs, statusFilter);
+    if (!isEmbeddedOrder) return statusFiltered;
+    return statusFiltered.filter((candidate) =>
+      embeddedJobIds?.has(candidate.cutJobId) ||
+      candidate.items?.some((item) => item.orderId === embeddedOrderId),
+    );
+  }, [embeddedJobIds, embeddedOrderId, isEmbeddedOrder, jobs, statusFilter]);
 
   // Memoized film-texture map for the active editor — avoids rebuilding a new Map
   // on every render in edit mode (the SheetEditor prop would otherwise change ref).
@@ -1381,16 +1404,22 @@ export const CutPage: React.FC = () => {
   return (
     <>
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Title level={3}>Раскрой</Title>
+        {!isEmbeddedOrder && <Title level={3}>Раскрой</Title>}
 
       <Card title="Критерии выборки" size="small">
         <Form form={form} layout="inline" disabled={busy || !canManage}>
           <Form.Item name="name" rules={[{ required: true, message: 'Укажите название' }]}>
             <Input placeholder="Название раскроя" />
           </Form.Item>
-          <Form.Item name="orderIds">
-            <Input placeholder="Заказы (9,10)" />
-          </Form.Item>
+          {isEmbeddedOrder ? (
+            <Form.Item name="orderIds" hidden>
+              <Input />
+            </Form.Item>
+          ) : (
+            <Form.Item name="orderIds">
+              <Input placeholder="Заказы (9,10)" />
+            </Form.Item>
+          )}
           {sheetFilterEnabled && (
             <Form.Item name="sheetMaterialTypeIds">
               <Select<number[]>

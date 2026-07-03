@@ -116,6 +116,16 @@ describe('CutPage source guards', () => {
     expect(source).toContain('form.setFieldsValue');
   });
 
+  it('supports embedded order mode: hard-scopes criteria and job list to one order', () => {
+    expect(source).toContain('embeddedOrderId');
+    expect(source).toContain('isEmbeddedOrder ? [embeddedOrderId!] : parseIdCsv(values.orderIds');
+    expect(source).toContain("cutApi.listPlacements({ orderIds: [embeddedOrderId!] })");
+    expect(source).toContain('embeddedJobIds?.has(candidate.cutJobId)');
+    expect(source).toContain('candidate.items?.some((item) => item.orderId === embeddedOrderId)');
+    expect(source).toContain('<Form.Item name="orderIds" hidden>');
+    expect(source).toContain('{!isEmbeddedOrder && <Title level={3}>Раскрой</Title>}');
+  });
+
   it('refreshes the job list when the kept-alive /cut tab path changes or deep-link opens a job', () => {
     // A cut job can be created from an order while /cut is mounted but hidden.
     // When the user opens /cut later, the list must refetch; otherwise the new
