@@ -5,6 +5,8 @@ import type {
   GenerateDetailLabelsInput,
   DetailLabelsPreview,
   LabelFieldCatalogItem,
+  LabelQrTemplate,
+  LabelQrTemplateInput,
   LabelTemplate,
   LabelTemplateInput,
   OrderLabelData,
@@ -13,6 +15,7 @@ import type {
   PreviewDetailLabelsInput,
   LatestOrderLabelsPreview,
   PreviewOrderLabelsInput,
+  UpdateLabelQrTemplateInput,
   UpdateLabelTemplateInput,
   UpdateOrderLabelDataInput,
 } from './types/labelsApi.types';
@@ -92,6 +95,25 @@ export const labelsApi = {
       apiRoutes.labels.detailGenerationExport(validateId(generationId, 'generationId')),
     );
     return { blob, fileName };
+  },
+
+  listQrTemplates(includeInactive = false): Promise<LabelQrTemplate[]> {
+    const query = includeInactive ? '?includeInactive=true' : '';
+    return httpClient.get<LabelQrTemplate[]>(`${apiRoutes.labels.qrTemplates}${query}`);
+  },
+
+  createQrTemplate(input: LabelQrTemplateInput): Promise<LabelQrTemplate> {
+    return httpClient.post<LabelQrTemplate>(apiRoutes.labels.qrTemplates, input);
+  },
+
+  updateQrTemplate(id: number, input: UpdateLabelQrTemplateInput): Promise<LabelQrTemplate> {
+    return httpClient.put<LabelQrTemplate>(apiRoutes.labels.qrTemplate(validateId(id, 'qrTemplateId')), input);
+  },
+
+  deleteQrTemplate(id: number, version: number, idempotencyKey: string): Promise<void> {
+    return httpClient.delete<void>(apiRoutes.labels.qrTemplate(validateId(id, 'qrTemplateId')), {
+      body: JSON.stringify({ version, idempotencyKey }),
+    });
   },
 };
 
