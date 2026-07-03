@@ -63,4 +63,10 @@ export class UnavailableLabelsRepository implements LabelsPort {
   async recordPermissionDenied() {
     /* no-op: cannot audit without a DB */
   }
+  async listActiveQrTemplateStrings() {
+    return unavailable();
+  }
+  async findScanCandidates() {
+    return unavailable();
+  }
 }
