@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { AlignCenterOutlined, AlignLeftOutlined, AlignRightOutlined, CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, QrcodeOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import type Konva from 'konva';
-import { Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
+import { Group as KonvaGroup, Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import { labelsApi } from '../../../api/labelsApi';
 import { ApiError } from '../../../api/apiError';
 import type {
@@ -623,10 +623,16 @@ export const LabelsConfigTab: React.FC = () => {
       elements,
     );
     el.elementKey = `qr-${Date.now()}`;
+    const bounds = currentCanvasBounds();
+    // Clamp by the QR's own size so it can never land partly outside the canvas
+    // (a top-left-only clamp let the right/bottom edge spill out → permanent
+    // out-of-bounds conflict that blocked saving).
+    el.xMm = roundMm(Math.min(Math.max(el.xMm, 0), Math.max(0, bounds.widthMm - el.widthMm)));
+    el.yMm = roundMm(Math.min(Math.max(el.yMm, 0), Math.max(0, bounds.heightMm - el.heightMm)));
     const result = autoShiftForQr({
       qr: el,
       elements: [...elements, el],
-      canvas: currentCanvasBounds(),
+      canvas: bounds,
     });
     setQrConflicts(result.conflicts.map((conflict) => conflict.conflictKey));
     setElements(result.elements);
@@ -910,11 +916,13 @@ export const LabelsConfigTab: React.FC = () => {
                     search={fieldSearch}
                     onSearch={setFieldSearch}
                     onBeginDrag={setDraggingField}
+                    maxHeight={140}
                   />
                 </div>
               </div>
               <div style={{ marginBottom: 16 }}>
-                <Text strong>Пользовательские поля</Text>
+                <Collapse defaultActiveKey={[]}>
+                  <Panel header="Пользовательские поля" key="custom-fields">
                 <div style={{ marginTop: 8 }}>
                   <Form.Item label="Пользовательские поля JSON">
                     <Input.TextArea value={customSchemaText} onChange={(event) => setCustomSchemaText(event.target.value)} autoSize={{ minRows: 3, maxRows: 6 }} />
@@ -984,211 +992,6 @@ export const LabelsConfigTab: React.FC = () => {
                     ]}
                   />
                 </div>
-              </div>
-              <div style={{ marginBottom: 16 }}>
-                <Collapse defaultActiveKey={[]}>
-                  <Panel header="QR-коды" key="qr-library">
-                        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                          <Table
-                            rowKey="labelQrTemplateId"
-                            size="small"
-                            pagination={false}
-                            dataSource={qrTemplates}
-                            columns={[
-                              { title: 'Название', dataIndex: 'name' },
-                              {
-                                title: 'EC',
-                                dataIndex: 'errorCorrection',
-                                width: 60,
-                                render: (value: string) => <Tag>{value}</Tag>,
-                              },
-                              { title: 'Размер, мм', dataIndex: 'defaultSizeMm', width: 110 },
-                              {
-                                title: '',
-                                width: 150,
-                                render: (_, template) => (
-                                  <Space size={4}>
-                                    <QrcodeOutlined
-                                      data-qr-template-drag={template.labelQrTemplateId}
-                                      draggable={canManage}
-                                      style={{ cursor: canManage ? 'grab' : 'default', fontSize: 16, userSelect: 'none' }}
-                                      onDragStart={(event) => {
-                                        if (!canManage) return;
-                                        setDraggingQr(template);
-                                        event.dataTransfer.setData('application/x-label-qr-template', String(template.labelQrTemplateId));
-                                        event.dataTransfer.effectAllowed = 'copy';
-                                      }}
-                                      onDragEnd={() => setDraggingQr(null)}
-                                      onMouseDown={(event) => {
-                                        if (!canManage) return;
-                                        event.preventDefault();
-                                        setDraggingQr(template);
-                                      }}
-                                      onMouseDownCapture={(event) => {
-                                        if (!canManage) return;
-                                        event.preventDefault();
-                                        setDraggingQr(template);
-                                      }}
-                                      onPointerDown={(event) => {
-                                        if (!canManage) return;
-                                        event.preventDefault();
-                                        setDraggingQr(template);
-                                      }}
-                                      onPointerDownCapture={(event) => {
-                                        if (!canManage) return;
-                                        event.preventDefault();
-                                        setDraggingQr(template);
-                                      }}
-                                    />
-                                    <Button size="small" icon={<EditOutlined />} disabled={!canManage} onClick={() => editQrTemplateRow(template)} />
-                                    <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={() => void deleteQrTemplateRow(template)} />
-                                  </Space>
-                                ),
-                              },
-                            ]}
-                          />
-                          <Card size="small" title={qrDraft.id != null ? 'Редактирование QR-шаблона' : 'Новый QR-шаблон'}>
-                            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                              <Input
-                                placeholder="Название QR-шаблона"
-                                value={qrDraft.name}
-                                disabled={!canManage}
-                                onChange={(event) => setQrDraft((current) => ({ ...current, name: event.target.value }))}
-                              />
-                              <div>
-                                <Text type="secondary">Содержимое QR (перетащите поля из палитры ниже)</Text>
-                                <div
-                                  ref={qrDropZoneRef}
-                                  data-qr-chip-dropzone
-                                  style={{
-                                    minHeight: 40,
-                                    marginTop: 4,
-                                    padding: 8,
-                                    border: '1px dashed #d9d9d9',
-                                    borderRadius: 4,
-                                    display: 'flex',
-                                    flexWrap: 'wrap',
-                                    gap: 6,
-                                  }}
-                                  onDragOver={(event) => {
-                                    if (canManage) event.preventDefault();
-                                  }}
-                                  onDrop={(event) => {
-                                    if (!canManage) return;
-                                    event.preventDefault();
-                                    const fieldId = event.dataTransfer.getData('application/x-label-field') || event.dataTransfer.getData('text/plain');
-                                    const field = qrPaletteFields.find((item) => item.id === fieldId);
-                                    if (field) addQrFieldChip(field);
-                                  }}
-                                >
-                                  {qrDraft.chips.length === 0 && (
-                                    <Text type="secondary">Нет полей — перетащите поле или добавьте текст</Text>
-                                  )}
-                                  {qrDraft.chips.map((chip, index) => (
-                                    <Tag key={`${chip.kind}-${index}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                      <span>
-                                        {chip.kind === 'field'
-                                          ? (qrPaletteFields.find((field) => field.id === chip.fieldId)?.label ?? chip.fieldId)
-                                          : chip.text}
-                                      </span>
-                                      {canManage && (
-                                        <>
-                                          <Button
-                                            type="text"
-                                            size="small"
-                                            style={{ padding: '0 2px' }}
-                                            disabled={index === 0}
-                                            onClick={() => moveQrChip(index, -1)}
-                                          >
-                                            ←
-                                          </Button>
-                                          <Button
-                                            type="text"
-                                            size="small"
-                                            style={{ padding: '0 2px' }}
-                                            disabled={index === qrDraft.chips.length - 1}
-                                            onClick={() => moveQrChip(index, 1)}
-                                          >
-                                            →
-                                          </Button>
-                                          <Button
-                                            type="text"
-                                            size="small"
-                                            style={{ padding: '0 2px' }}
-                                            onClick={() => removeQrChip(index)}
-                                          >
-                                            ✕
-                                          </Button>
-                                        </>
-                                      )}
-                                    </Tag>
-                                  ))}
-                                </div>
-                              </div>
-                              <Space.Compact style={{ width: '100%' }}>
-                                <Input
-                                  placeholder="Статический текст"
-                                  value={qrTextDraft}
-                                  disabled={!canManage}
-                                  onChange={(event) => setQrTextDraft(sanitizeQrText(event.target.value))}
-                                  onPressEnter={addQrTextChip}
-                                />
-                                <Button disabled={!canManage} onClick={addQrTextChip}>Добавить текст</Button>
-                              </Space.Compact>
-                              <div>
-                                <Text type="secondary">Поля для перетаскивания</Text>
-                                <div style={{ marginTop: 4 }}>
-                                  <FieldPalette
-                                    fields={qrPaletteFields}
-                                    disabled={!canManage}
-                                    search={qrFieldSearch}
-                                    onSearch={setQrFieldSearch}
-                                    onBeginDrag={setDraggingQrField}
-                                  />
-                                </div>
-                              </div>
-                              <Row gutter={8} align="bottom">
-                                <Col flex="90px">
-                                  <Form.Item label="EC" style={{ marginBottom: 0 }}>
-                                    <Select
-                                      value={qrDraft.errorCorrection}
-                                      disabled={!canManage}
-                                      options={QR_ERROR_CORRECTION_OPTIONS}
-                                      onChange={(value) => setQrDraft((current) => ({ ...current, errorCorrection: value as QrDraft['errorCorrection'] }))}
-                                    />
-                                  </Form.Item>
-                                </Col>
-                                <Col flex="130px">
-                                  <Form.Item label="Размер, мм" style={{ marginBottom: 0 }}>
-                                    <InputNumber
-                                      min={8}
-                                      value={qrDraft.sizeMm}
-                                      disabled={!canManage}
-                                      style={{ width: '100%' }}
-                                      onChange={(value) => setQrDraft((current) => ({ ...current, sizeMm: Number(value ?? 20) }))}
-                                    />
-                                  </Form.Item>
-                                </Col>
-                                <Col flex="auto">
-                                  <Space>
-                                    <Button
-                                      type="primary"
-                                      icon={<SaveOutlined />}
-                                      loading={qrSaving}
-                                      disabled={!canManage}
-                                      onClick={() => void saveQrTemplate()}
-                                    >
-                                      Сохранить QR-шаблон
-                                    </Button>
-                                    {qrDraft.id != null && (
-                                      <Button disabled={!canManage} onClick={resetQrDraft}>Отмена</Button>
-                                    )}
-                                  </Space>
-                                </Col>
-                              </Row>
-                            </Space>
-                          </Card>
-                        </Space>
                   </Panel>
                 </Collapse>
               </div>
@@ -1419,6 +1222,213 @@ export const LabelsConfigTab: React.FC = () => {
                 />
               )}
             </Card>
+              <div style={{ marginBottom: 16 }}>
+                <Collapse defaultActiveKey={[]}>
+                  <Panel header="QR-коды" key="qr-library">
+                        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                          <Table
+                            rowKey="labelQrTemplateId"
+                            size="small"
+                            pagination={false}
+                            dataSource={qrTemplates}
+                            columns={[
+                              { title: 'Название', dataIndex: 'name' },
+                              {
+                                title: 'EC',
+                                dataIndex: 'errorCorrection',
+                                width: 60,
+                                render: (value: string) => <Tag>{value}</Tag>,
+                              },
+                              { title: 'Размер, мм', dataIndex: 'defaultSizeMm', width: 110 },
+                              {
+                                title: '',
+                                width: 150,
+                                render: (_, template) => (
+                                  <Space size={4}>
+                                    <QrcodeOutlined
+                                      data-qr-template-drag={template.labelQrTemplateId}
+                                      draggable={canManage}
+                                      style={{ cursor: canManage ? 'grab' : 'default', fontSize: 16, userSelect: 'none' }}
+                                      onDragStart={(event) => {
+                                        if (!canManage) return;
+                                        setDraggingQr(template);
+                                        event.dataTransfer.setData('application/x-label-qr-template', String(template.labelQrTemplateId));
+                                        event.dataTransfer.effectAllowed = 'copy';
+                                      }}
+                                      onDragEnd={() => setDraggingQr(null)}
+                                      onMouseDown={(event) => {
+                                        if (!canManage) return;
+                                        event.preventDefault();
+                                        setDraggingQr(template);
+                                      }}
+                                      onMouseDownCapture={(event) => {
+                                        if (!canManage) return;
+                                        event.preventDefault();
+                                        setDraggingQr(template);
+                                      }}
+                                      onPointerDown={(event) => {
+                                        if (!canManage) return;
+                                        event.preventDefault();
+                                        setDraggingQr(template);
+                                      }}
+                                      onPointerDownCapture={(event) => {
+                                        if (!canManage) return;
+                                        event.preventDefault();
+                                        setDraggingQr(template);
+                                      }}
+                                    />
+                                    <Button size="small" icon={<EditOutlined />} disabled={!canManage} onClick={() => editQrTemplateRow(template)} />
+                                    <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={() => void deleteQrTemplateRow(template)} />
+                                  </Space>
+                                ),
+                              },
+                            ]}
+                          />
+                          <Card size="small" title={qrDraft.id != null ? 'Редактирование QR-шаблона' : 'Новый QR-шаблон'}>
+                            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                              <Input
+                                placeholder="Название QR-шаблона"
+                                value={qrDraft.name}
+                                disabled={!canManage}
+                                onChange={(event) => setQrDraft((current) => ({ ...current, name: event.target.value }))}
+                              />
+                              <div>
+                                <Text type="secondary">Содержимое QR (перетащите поля из палитры ниже)</Text>
+                                <div
+                                  ref={qrDropZoneRef}
+                                  data-qr-chip-dropzone
+                                  style={{
+                                    minHeight: 40,
+                                    marginTop: 4,
+                                    padding: 8,
+                                    border: '1px dashed #d9d9d9',
+                                    borderRadius: 4,
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    gap: 6,
+                                  }}
+                                  onDragOver={(event) => {
+                                    if (canManage) event.preventDefault();
+                                  }}
+                                  onDrop={(event) => {
+                                    if (!canManage) return;
+                                    event.preventDefault();
+                                    const fieldId = event.dataTransfer.getData('application/x-label-field') || event.dataTransfer.getData('text/plain');
+                                    const field = qrPaletteFields.find((item) => item.id === fieldId);
+                                    if (field) addQrFieldChip(field);
+                                  }}
+                                >
+                                  {qrDraft.chips.length === 0 && (
+                                    <Text type="secondary">Нет полей — перетащите поле или добавьте текст</Text>
+                                  )}
+                                  {qrDraft.chips.map((chip, index) => (
+                                    <Tag key={`${chip.kind}-${index}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                      <span>
+                                        {chip.kind === 'field'
+                                          ? (qrPaletteFields.find((field) => field.id === chip.fieldId)?.label ?? chip.fieldId)
+                                          : chip.text}
+                                      </span>
+                                      {canManage && (
+                                        <>
+                                          <Button
+                                            type="text"
+                                            size="small"
+                                            style={{ padding: '0 2px' }}
+                                            disabled={index === 0}
+                                            onClick={() => moveQrChip(index, -1)}
+                                          >
+                                            ←
+                                          </Button>
+                                          <Button
+                                            type="text"
+                                            size="small"
+                                            style={{ padding: '0 2px' }}
+                                            disabled={index === qrDraft.chips.length - 1}
+                                            onClick={() => moveQrChip(index, 1)}
+                                          >
+                                            →
+                                          </Button>
+                                          <Button
+                                            type="text"
+                                            size="small"
+                                            style={{ padding: '0 2px' }}
+                                            onClick={() => removeQrChip(index)}
+                                          >
+                                            ✕
+                                          </Button>
+                                        </>
+                                      )}
+                                    </Tag>
+                                  ))}
+                                </div>
+                              </div>
+                              <Space.Compact style={{ width: '100%' }}>
+                                <Input
+                                  placeholder="Статический текст"
+                                  value={qrTextDraft}
+                                  disabled={!canManage}
+                                  onChange={(event) => setQrTextDraft(sanitizeQrText(event.target.value))}
+                                  onPressEnter={addQrTextChip}
+                                />
+                                <Button disabled={!canManage} onClick={addQrTextChip}>Добавить текст</Button>
+                              </Space.Compact>
+                              <div>
+                                <Text type="secondary">Поля для перетаскивания</Text>
+                                <div style={{ marginTop: 4 }}>
+                                  <FieldPalette
+                                    fields={qrPaletteFields}
+                                    disabled={!canManage}
+                                    search={qrFieldSearch}
+                                    onSearch={setQrFieldSearch}
+                                    onBeginDrag={setDraggingQrField}
+                                  />
+                                </div>
+                              </div>
+                              <Row gutter={8} align="bottom">
+                                <Col flex="90px">
+                                  <Form.Item label="EC" style={{ marginBottom: 0 }}>
+                                    <Select
+                                      value={qrDraft.errorCorrection}
+                                      disabled={!canManage}
+                                      options={QR_ERROR_CORRECTION_OPTIONS}
+                                      onChange={(value) => setQrDraft((current) => ({ ...current, errorCorrection: value as QrDraft['errorCorrection'] }))}
+                                    />
+                                  </Form.Item>
+                                </Col>
+                                <Col flex="130px">
+                                  <Form.Item label="Размер, мм" style={{ marginBottom: 0 }}>
+                                    <InputNumber
+                                      min={8}
+                                      value={qrDraft.sizeMm}
+                                      disabled={!canManage}
+                                      style={{ width: '100%' }}
+                                      onChange={(value) => setQrDraft((current) => ({ ...current, sizeMm: Number(value ?? 20) }))}
+                                    />
+                                  </Form.Item>
+                                </Col>
+                                <Col flex="auto">
+                                  <Space>
+                                    <Button
+                                      type="primary"
+                                      icon={<SaveOutlined />}
+                                      loading={qrSaving}
+                                      disabled={!canManage}
+                                      onClick={() => void saveQrTemplate()}
+                                    >
+                                      Сохранить QR-шаблон
+                                    </Button>
+                                    {qrDraft.id != null && (
+                                      <Button disabled={!canManage} onClick={resetQrDraft}>Отмена</Button>
+                                    )}
+                                  </Space>
+                                </Col>
+                              </Row>
+                            </Space>
+                          </Card>
+                        </Space>
+                  </Panel>
+                </Collapse>
+              </div>
           </Col>
         </Row>
       </Form>
@@ -2112,6 +2122,7 @@ function FieldPalette({
   search,
   onSearch,
   onBeginDrag,
+  maxHeight,
 }: {
   fields: LabelFieldCatalogItem[];
   usedFieldIds?: Set<string>;
@@ -2119,6 +2130,7 @@ function FieldPalette({
   search: string;
   onSearch: (value: string) => void;
   onBeginDrag?: (field: LabelFieldCatalogItem) => void;
+  maxHeight?: number;
 }) {
   const normalizedSearch = search.trim().toLowerCase();
   const visibleFields = fields.filter((field) => {
@@ -2129,7 +2141,7 @@ function FieldPalette({
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Input.Search value={search} onChange={(event) => onSearch(event.target.value)} allowClear />
-      <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
+      <div style={{ maxHeight: maxHeight ?? 280, overflowY: 'auto', paddingRight: 4 }}>
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           {grouped.map(([category, categoryFields]) => (
             <div key={category}>
@@ -2358,38 +2370,47 @@ function renderKonvaPreviewElement({
           dash={[1, 1]}
           listening={false}
         />
-        <KonvaRect
-          {...common}
-          width={side}
-          height={side}
-          fill="white"
-          stroke="black"
-          strokeWidth={0.35}
-        />
-        {modules.map(([col, row], index) => (
+        {/* The QR frame + modules + label are ONE draggable Konva group so the
+            whole QR image moves/resizes together. Previously the frame was the
+            only draggable node and the modules were absolutely-positioned
+            siblings, so a drag left the image behind and only the frame moved.
+            width/height are set on the group so the resize Transformer
+            (normalizeTransformedNode → node.width()) keeps working. */}
+        <KonvaGroup {...common} width={side} height={side}>
           <KonvaRect
-            key={`${key}-module-${index}`}
-            x={x + col * moduleSide}
-            y={y + row * moduleSide}
-            width={moduleSide}
-            height={moduleSide}
-            fill="black"
+            x={0}
+            y={0}
+            width={side}
+            height={side}
+            fill="white"
+            stroke="black"
+            strokeWidth={0.35}
+          />
+          {modules.map(([col, row], index) => (
+            <KonvaRect
+              key={`${key}-module-${index}`}
+              x={col * moduleSide}
+              y={row * moduleSide}
+              width={moduleSide}
+              height={moduleSide}
+              fill="black"
+              listening={false}
+            />
+          ))}
+          <KonvaText
+            x={0}
+            y={side / 2 - 2}
+            width={side}
+            height={4}
+            text="QR"
+            fontFamily="Arial"
+            fontSize={Math.max(2, side * 0.18)}
+            fontStyle="bold"
+            fill="#1677ff"
+            align="center"
             listening={false}
           />
-        ))}
-        <KonvaText
-          x={x}
-          y={y + side / 2 - 2}
-          width={side}
-          height={4}
-          text="QR"
-          fontFamily="Arial"
-          fontSize={Math.max(2, side * 0.18)}
-          fontStyle="bold"
-          fill="#1677ff"
-          align="center"
-          listening={false}
-        />
+        </KonvaGroup>
         {selectionBox}
       </React.Fragment>
     );
