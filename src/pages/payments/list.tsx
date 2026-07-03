@@ -8,6 +8,8 @@ import { formatDate } from "../../utils/dateFormat";
 import { formatNumber } from "../../utils/numberFormat";
 import { authStorage } from "../../utils/auth";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
+import { useIsMobile } from "../../hooks/useDeviceTier";
+import { PaymentCardList } from "./mobile/PaymentCardList";
 import dayjs from "dayjs";
 import "./list.css";
 
@@ -28,6 +30,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   });
   const { highlightProps } = useHighlightRow("payment_id", tableProps.dataSource);
   const { show } = useNavigation();
+  const isMobile = useIsMobile();
 
   const orderIds = useMemo(
     () => Array.from(new Set(((tableProps?.dataSource as any[]) || []).map((i) => i?.order_id).filter((v) => v != null))),
@@ -52,6 +55,14 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
     (typesData?.data || []).forEach((t: any) => (map[t.type_paid_id] = t.type_paid_name));
     return map;
   }, [typesData]);
+
+  const paymentCardLookups = useMemo(
+    () => ({
+      orderLabelOf: (oid: unknown) => orderMap[oid as any] ?? String(oid ?? "—"),
+      typeLabelOf: (tid: unknown) => typeMap[tid as any] ?? String(tid ?? "—"),
+    }),
+    [orderMap, typeMap]
+  );
 
   // useSelect для справочников в фильтрах
   const { selectProps: orderSelectProps } = useSelect({
@@ -248,51 +259,61 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           </Form>
         </Card>
       )}
-      <Table
-        {...tableProps}
-        {...highlightProps}
-        rowKey="payment_id"
-        onRow={(record: any) => ({
-          onDoubleClick: () => {
-            show("payments", record.payment_id);
-          },
-        })}
-      >
-        <Table.Column dataIndex="payment_id" title="id" sorter />
-        <Table.Column
-          dataIndex="order_id"
-          title="Заказ"
-          render={(_, r: any) => orderMap[r?.order_id] ?? r?.order_id}
+      {isMobile ? (
+        <PaymentCardList
+          rows={tableProps.dataSource ?? []}
+          loading={!!tableProps.loading}
+          pagination={tableProps.pagination ?? false}
+          lookups={paymentCardLookups}
+          onOpen={(id) => show("payments", id)}
         />
-        <Table.Column
-          dataIndex="type_paid_id"
-          title="Тип оплаты"
-          render={(_, r: any) => typeMap[r?.type_paid_id] ?? r?.type_paid_id}
-        />
-        <Table.Column
-          dataIndex="amount"
-          title="Сумма"
-          sorter
-          render={(value) => formatNumber(value as number, 0)}
-        />
-        <Table.Column
-          dataIndex="payment_date"
-          title="Дата платежа"
-          sorter
-          render={(value) => formatDate(value)}
-        />
-        <Table.Column dataIndex="notes" title="Примечание" />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
-        <Table.Column
-          title="Действия"
-          render={(_, record: any) => (
-            <Space>
-              <ShowButton hideText size="small" recordItemId={record.payment_id} />
-              <EditButton hideText size="small" recordItemId={record.payment_id} />
-            </Space>
-          )}
-        />
-      </Table>
+      ) : (
+        <Table
+          {...tableProps}
+          {...highlightProps}
+          rowKey="payment_id"
+          onRow={(record: any) => ({
+            onDoubleClick: () => {
+              show("payments", record.payment_id);
+            },
+          })}
+        >
+          <Table.Column dataIndex="payment_id" title="id" sorter />
+          <Table.Column
+            dataIndex="order_id"
+            title="Заказ"
+            render={(_, r: any) => orderMap[r?.order_id] ?? r?.order_id}
+          />
+          <Table.Column
+            dataIndex="type_paid_id"
+            title="Тип оплаты"
+            render={(_, r: any) => typeMap[r?.type_paid_id] ?? r?.type_paid_id}
+          />
+          <Table.Column
+            dataIndex="amount"
+            title="Сумма"
+            sorter
+            render={(value) => formatNumber(value as number, 0)}
+          />
+          <Table.Column
+            dataIndex="payment_date"
+            title="Дата платежа"
+            sorter
+            render={(value) => formatDate(value)}
+          />
+          <Table.Column dataIndex="notes" title="Примечание" />
+          <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+          <Table.Column
+            title="Действия"
+            render={(_, record: any) => (
+              <Space>
+                <ShowButton hideText size="small" recordItemId={record.payment_id} />
+                <EditButton hideText size="small" recordItemId={record.payment_id} />
+              </Space>
+            )}
+          />
+        </Table>
+      )}
     </List>
   );
 };
