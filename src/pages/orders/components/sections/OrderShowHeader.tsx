@@ -325,7 +325,8 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             <>
               <span style={{ margin: '0 16px', color: 'var(--app-border)' }}>|</span>
               <Text style={{ fontSize: 12.8, fontStyle: 'italic', color: 'var(--app-text)' }}>
-                <span style={{ fontVariant: 'small-caps' }}>Тел.:</span> {primaryPhone}
+                <span style={{ fontVariant: 'small-caps' }}>Тел.:</span>{' '}
+                <a href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`}>{primaryPhone}</a>
               </Text>
             </>
           )}

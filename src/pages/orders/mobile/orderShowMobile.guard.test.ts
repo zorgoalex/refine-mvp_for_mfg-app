@@ -18,4 +18,16 @@ describe('order show header phone stacking', () => {
     expect(src).toContain('useIsMobile');
     expect(src).toContain('DetailCardList');
   });
+  it('edit header summary reuses stacking class', () => {
+    const src = read('pages/orders/components/sections/OrderHeaderSummary.tsx');
+    expect(src).toContain('order-show-header__row');
+  });
+  it('client phone is a tel link', () => {
+    const src = read('pages/orders/components/sections/OrderShowHeader.tsx');
+    expect(src).toContain('tel:');
+  });
+  it('show header actions collapse into dropdown on phone', () => {
+    const src = read('pages/orders/show.tsx');
+    expect(src).toMatch(/isMobile[\s\S]*Dropdown|Dropdown[\s\S]*isMobile/);
+  });
 });
