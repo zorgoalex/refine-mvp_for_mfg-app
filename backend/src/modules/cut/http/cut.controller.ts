@@ -76,6 +76,12 @@ const setSplitByMaterialBodySchema = z
   })
   .strict();
 
+const setPdfTemplateBodySchema = z
+  .object({
+    pdfTemplate: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+  })
+  .strict();
+
 const manualMoveSchema = z
   .object({
     itemId: z.string().min(1),
@@ -341,6 +347,42 @@ export class CutController {
       cutJobId: parseCutJobId(cutJobId),
       splitByMaterial,
       version,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'setCutJobPdfTemplate', summary: 'Set the PDF template for a whole cut job export' })
+  @Patch(':cutJobId/pdf-template')
+  async setJobPdfTemplate(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { pdfTemplate } = parseSetPdfTemplateBody(body);
+    return this.cut.setJobPdfTemplate({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      pdfTemplate,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'setCutGroupPdfTemplate', summary: 'Set the PDF template for a cut group export' })
+  @Patch(':cutJobId/groups/:groupId/pdf-template')
+  async setGroupPdfTemplate(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('groupId') groupId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { pdfTemplate } = parseSetPdfTemplateBody(body);
+    return this.cut.setGroupPdfTemplate({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      cutGroupId: parseCutJobId(groupId),
+      pdfTemplate,
       requestId: request.requestId,
     });
   }
@@ -677,6 +719,10 @@ export function parseSetCombineFilmsBody(body: unknown): { combineFilms: boolean
 
 export function parseSetSplitByMaterialBody(body: unknown): { splitByMaterial: boolean; version: number } {
   return parse(setSplitByMaterialBodySchema, body);
+}
+
+export function parseSetPdfTemplateBody(body: unknown): { pdfTemplate: string } {
+  return parse(setPdfTemplateBodySchema, body);
 }
 
 export function parseSaveManualLayoutBody(body: unknown): { jobVersion: number; active: boolean; placements: ManualMove[] } {

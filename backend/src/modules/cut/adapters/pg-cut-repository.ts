@@ -63,7 +63,9 @@ import type {
   SetCutJobProfileCommand,
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
+  SetCutJobPdfTemplateCommand,
   SetCutJobSplitByMaterialCommand,
+  SetCutGroupPdfTemplateCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
 import type {
@@ -167,6 +169,7 @@ interface CutJobLockRow extends QueryResultRow {
   params: Record<string, unknown> | null;
   param_profile_id: string | number | null;
   sheet_material_type_id: string | number | null;
+  pdf_template_code: string | null;
   combine_films: boolean | null;
   split_by_material: boolean | null;
 }
@@ -1642,8 +1645,8 @@ export class PgCutRepository implements CutRepositoryPort {
     return buildSheetsPdf(pdfSheets);
   }
 
-  private async assertPdfTemplateActive(code: string): Promise<void> {
-    const row = await this.database.query<{ code: string }>(
+  private async assertPdfTemplateActive(code: string, client: DatabaseClient | TransactionClient = this.database): Promise<void> {
+    const row = await client.query<{ code: string }>(
       `SELECT code FROM cut_pdf_templates WHERE code = $1 AND is_active = true LIMIT 1`,
       [code],
     );
@@ -2388,6 +2391,40 @@ export class PgCutRepository implements CutRepositoryPort {
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
+  async setJobPdfTemplate(command: SetCutJobPdfTemplateCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      await this.assertPdfTemplateActive(command.pdfTemplate, tx);
+      const updated = await tx.query(
+        `UPDATE cut_job
+            SET pdf_template_code = $2, updated_at = now()
+          WHERE cut_job_id = $1
+          RETURNING cut_job_id`,
+        [command.cutJobId, command.pdfTemplate],
+      );
+      if (updated.rows.length === 0) throw new CutJobNotFoundError(command.cutJobId);
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
+  async setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      await this.assertPdfTemplateActive(command.pdfTemplate, tx);
+      const updated = await tx.query(
+        `UPDATE cut_group
+            SET pdf_template_code = $3, updated_at = now()
+          WHERE cut_group_id = $2 AND cut_job_id = $1
+          RETURNING cut_group_id`,
+        [command.cutJobId, command.cutGroupId, command.pdfTemplate],
+      );
+      if (updated.rows.length === 0) {
+        throw new ApiError(404, 'CUT_GROUP_NOT_FOUND', `cut_group ${command.cutGroupId} не принадлежит заданию ${command.cutJobId}`);
+      }
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
   /**
    * Task 5: Persist a manual sheet-placement override for one cut_group.
    *
@@ -2876,6 +2913,7 @@ interface JobRow extends QueryResultRow {
   failure_reason: string | null;
   param_profile_id: string | number | null;
   sheet_material_type_id: string | number | null;
+  pdf_template_code: string | null;
   combine_films: boolean | null;
   split_by_material: boolean | null;
 }
@@ -3064,6 +3102,7 @@ interface GroupRow extends QueryResultRow {
   sheet_material_type_id: string | number | null;
   film_id: string | number | null;
   status: string;
+  pdf_template_code: string | null;
   summary: Record<string, unknown> | null;
 }
 
@@ -3118,7 +3157,9 @@ async function loadJob(
   materialNames?: string[],
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason,
+            param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material
+       FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
@@ -3134,7 +3175,7 @@ async function loadJob(
     [cutJobId],
   );
   const groupsResult = await client.query<GroupRow>(
-    `SELECT cut_group_id, sheet_material_type_id, film_id, status, summary FROM cut_group WHERE cut_job_id = $1 ORDER BY cut_group_id`,
+    `SELECT cut_group_id, sheet_material_type_id, film_id, status, pdf_template_code, summary FROM cut_group WHERE cut_job_id = $1 ORDER BY cut_group_id`,
     [cutJobId],
   );
   const groupIds = groupsResult.rows.map((row) => toNum(row.cut_group_id));
@@ -3165,6 +3206,7 @@ async function loadJob(
       sheetMaterialTypeId: row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id),
       filmId: row.film_id === null ? null : toNum(row.film_id),
       status: row.status,
+      pdfTemplate: row.pdf_template_code ?? 'standard',
       summary: row.summary,
       sheets: sheetsResult.rows
         .filter((sheet) => toNum(sheet.cut_group_id) === cutGroupId)
@@ -3188,6 +3230,7 @@ async function loadJob(
     failureReason: jobRow.failure_reason,
     paramProfileId: jobRow.param_profile_id === null || jobRow.param_profile_id === undefined ? null : toNum(jobRow.param_profile_id),
     sheetMaterialTypeId: jobRow.sheet_material_type_id === null || jobRow.sheet_material_type_id === undefined ? null : toNum(jobRow.sheet_material_type_id),
+    pdfTemplate: jobRow.pdf_template_code ?? 'standard',
     combineFilms: jobRow.combine_films === true,
     splitByMaterial: jobRow.split_by_material !== false,
     materialNames: resolvedMaterialNames,

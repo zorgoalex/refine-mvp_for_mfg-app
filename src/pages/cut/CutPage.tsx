@@ -126,6 +126,25 @@ const sheetPreviewListStyle: React.CSSProperties = {
   marginTop: 8,
 };
 
+const cutActionToolbarStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: 8,
+};
+
+const pdfTemplatePickerStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  flex: '0 0 auto',
+  minWidth: 260,
+};
+
+const pdfTemplateLabelStyle: React.CSSProperties = {
+  whiteSpace: 'nowrap',
+};
+
 function sheetPreviewRotate90(widthMm: number, heightMm: number, portrait: boolean): boolean {
   if (widthMm === heightMm) return false;
   return portrait ? widthMm > heightMm : widthMm < heightMm;
@@ -363,6 +382,11 @@ export const CutPage: React.FC = () => {
 
   useEffect(() => () => revokePdfPreviewUrl(), [revokePdfPreviewUrl]);
 
+  const applyPdfTemplateState = useCallback((nextJob: CutJobDto) => {
+    setPdfTemplateForJob(nextJob.pdfTemplate ?? 'standard');
+    setPdfTemplateByGroup(Object.fromEntries(nextJob.groups.map((group) => [group.cutGroupId, group.pdfTemplate ?? 'standard'])));
+  }, []);
+
   // Render presets and cut profiles are config-driven (/configuration "Раскрой").
   // Load active names from the backend, falling back to the built-ins.
   const loadCutConfig = useCallback(async () => {
@@ -451,6 +475,7 @@ export const CutPage: React.FC = () => {
       try {
         const updated = await cutApi.setProfile(job.cutJobId, paramProfileId, job.version);
         setJob(updated);
+        applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
         handleError(error, 'Не удалось изменить профиль раскроя');
@@ -458,7 +483,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, loadJobs, handleError],
+    [applyPdfTemplateState, job, loadJobs, handleError],
   );
 
   const setJobSheetMaterial = useCallback(
@@ -468,6 +493,7 @@ export const CutPage: React.FC = () => {
       try {
         const updated = await cutApi.setSheetMaterial(job.cutJobId, sheetMaterialTypeId, job.version);
         setJob(updated);
+        applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
         handleError(error, 'Не удалось изменить лист раскроя');
@@ -475,7 +501,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, handleError, loadJobs],
+    [applyPdfTemplateState, job, handleError, loadJobs],
   );
 
   const setJobCombineFilms = useCallback(
@@ -485,6 +511,7 @@ export const CutPage: React.FC = () => {
       try {
         const updated = await cutApi.setCombineFilms(job.cutJobId, combineFilms, job.version);
         setJob(updated);
+        applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
         handleError(error, 'Не удалось изменить объединение плёнок');
@@ -492,7 +519,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, handleError, loadJobs],
+    [applyPdfTemplateState, job, handleError, loadJobs],
   );
 
   const setJobSplitByMaterial = useCallback(
@@ -502,6 +529,7 @@ export const CutPage: React.FC = () => {
       try {
         const updated = await cutApi.setSplitByMaterial(job.cutJobId, splitByMaterial, job.version);
         setJob(updated);
+        applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
         handleError(error, 'Не удалось изменить разделение по материалу');
@@ -509,7 +537,43 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, handleError, loadJobs],
+    [applyPdfTemplateState, job, handleError, loadJobs],
+  );
+
+  const setJobPdfTemplate = useCallback(
+    async (pdfTemplate: string) => {
+      if (!job) return;
+      const previous = pdfTemplateForJob;
+      setPdfTemplateForJob(pdfTemplate);
+      try {
+        const updated = await cutApi.setJobPdfTemplate(job.cutJobId, pdfTemplate);
+        setJob(updated);
+        applyPdfTemplateState(updated);
+        void loadJobs();
+      } catch (error) {
+        setPdfTemplateForJob(previous);
+        handleError(error, 'Не удалось сохранить шаблон PDF раскроя');
+      }
+    },
+    [applyPdfTemplateState, job, pdfTemplateForJob, handleError, loadJobs],
+  );
+
+  const setGroupPdfTemplate = useCallback(
+    async (group: CutGroupDto, pdfTemplate: string) => {
+      if (!job) return;
+      const previous = pdfTemplateByGroup[group.cutGroupId] ?? group.pdfTemplate ?? 'standard';
+      setPdfTemplateByGroup((prev) => ({ ...prev, [group.cutGroupId]: pdfTemplate }));
+      try {
+        const updated = await cutApi.setGroupPdfTemplate(job.cutJobId, group.cutGroupId, pdfTemplate);
+        setJob(updated);
+        applyPdfTemplateState(updated);
+        void loadJobs();
+      } catch (error) {
+        setPdfTemplateByGroup((prev) => ({ ...prev, [group.cutGroupId]: previous }));
+        handleError(error, 'Не удалось сохранить шаблон PDF группы');
+      }
+    },
+    [applyPdfTemplateState, job, pdfTemplateByGroup, handleError, loadJobs],
   );
 
   // Load the existing (non-archived) jobs on mount so an operator can reopen a
@@ -532,6 +596,7 @@ export const CutPage: React.FC = () => {
         const fresh = await cutApi.get(cutJobId);
         if (openSeqRef.current !== seq) return; // superseded by a newer openJob
         setJob(fresh);
+        applyPdfTemplateState(fresh);
         // Initialise per-group alternative-view toggle from persisted isActive so
         // the checkbox position matches the last saved manual-layout state.
         const initAlt: Record<number, boolean> = {};
@@ -565,7 +630,7 @@ export const CutPage: React.FC = () => {
         if (openSeqRef.current === seq) setBusy(false);
       }
     },
-    [form, handleError, loadJobs, resetSheetViews],
+    [applyPdfTemplateState, form, handleError, loadJobs, resetSheetViews],
   );
 
   // Deep-link: /cut?job=<id> opens that job (e.g. from the order show page
@@ -631,6 +696,7 @@ export const CutPage: React.FC = () => {
       const values = await form.validateFields();
       const created = await cutApi.create({ name: values.name, criteria: criteriaFromForm() });
       setJob(created);
+      applyPdfTemplateState(created);
       setEligible(null);
       setSelected([]);
       resetSheetViews(); // new job context: drop any previewed prior job's blobs
@@ -642,7 +708,7 @@ export const CutPage: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [form, criteriaFromForm, loadJobs, handleError, resetSheetViews]);
+  }, [applyPdfTemplateState, form, criteriaFromForm, loadJobs, handleError, resetSheetViews]);
 
   const loadEligible = useCallback(async () => {
     if (!job) return;
@@ -665,6 +731,7 @@ export const CutPage: React.FC = () => {
     try {
       const updated = await cutApi.addItems(job.cutJobId, { detailIds: selected, version: job.version });
       setJob(updated);
+      applyPdfTemplateState(updated);
       message.success('Детали добавлены в раскрой');
       await loadJobs();
     } catch (error) {
@@ -672,7 +739,7 @@ export const CutPage: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [job, selected, loadJobs, handleError]);
+  }, [applyPdfTemplateState, job, selected, loadJobs, handleError]);
 
   const removeJobItem = useCallback(
     async (cutJobItemId: number) => {
@@ -681,6 +748,7 @@ export const CutPage: React.FC = () => {
       try {
         const updated = await cutApi.removeItem(job.cutJobId, cutJobItemId, job.version);
         setJob(updated);
+        applyPdfTemplateState(updated);
         message.success('Деталь убрана из раскроя');
         await loadJobs();
       } catch (error) {
@@ -689,7 +757,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, loadJobs, handleError],
+    [applyPdfTemplateState, job, loadJobs, handleError],
   );
 
   const calculate = useCallback(async () => {
@@ -698,6 +766,7 @@ export const CutPage: React.FC = () => {
     try {
       const calculated = await cutApi.calculate(job.cutJobId, job.version);
       setJob(calculated);
+      applyPdfTemplateState(calculated);
       resetSheetViews();
       message.success('Раскрой рассчитан');
       await loadJobs();
@@ -707,7 +776,9 @@ export const CutPage: React.FC = () => {
       // fresh version for an immediate retry — the failure bumped the version
       // server-side, so the stale in-memory job would otherwise 409 on retry.
       try {
-        setJob(await cutApi.get(job.cutJobId));
+        const fresh = await cutApi.get(job.cutJobId);
+        setJob(fresh);
+        applyPdfTemplateState(fresh);
         await loadJobs();
       } catch {
         // best-effort refresh; the toast already explained the failure
@@ -715,7 +786,7 @@ export const CutPage: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [job, loadJobs, handleError, resetSheetViews]);
+  }, [applyPdfTemplateState, job, loadJobs, handleError, resetSheetViews]);
 
   const loadSheet = useCallback(
     async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
@@ -983,6 +1054,7 @@ export const CutPage: React.FC = () => {
           placements: moves,
         });
         setJob(updated);
+        applyPdfTemplateState(updated);
         setShowAlternativeByGroup((prev) => ({ ...prev, [group.cutGroupId]: true }));
         void loadJobs();
         resetSheetViews();
@@ -996,7 +1068,7 @@ export const CutPage: React.FC = () => {
         setBusy(false);
       }
     },
-    [job, workingSheets, loadJobs, handleError, resetSheetViews],
+    [applyPdfTemplateState, job, workingSheets, loadJobs, handleError, resetSheetViews],
   );
 
   const filteredJobs = useMemo(() => filterJobsByStatus(jobs, statusFilter), [jobs, statusFilter]);
@@ -1502,7 +1574,7 @@ export const CutPage: React.FC = () => {
               </>
             );
           })()}
-          <Space>
+          <div style={cutActionToolbarStyle}>
             <Button onClick={loadEligible} loading={busy}>
               Загрузить подходящие детали
             </Button>
@@ -1520,18 +1592,18 @@ export const CutPage: React.FC = () => {
             />
             {job.groups.length > 0 && (
               <>
-                <Space size={6}>
-                  <Text type="secondary">Шаблон PDF</Text>
+                <div style={pdfTemplatePickerStyle}>
+                  <Text type="secondary" style={pdfTemplateLabelStyle}>Шаблон PDF</Text>
                   <Select
                     size="small"
                     value={pdfTemplateForJob}
-                    onChange={setPdfTemplateForJob}
+                    onChange={setJobPdfTemplate}
                     options={pdfTemplateOptions}
-                    style={{ width: 180 }}
+                    style={{ width: 180, flex: '0 0 180px' }}
                     disabled={busy}
                     data-testid="pdf-template-select-job"
                   />
-                </Space>
+                </div>
                 <Tooltip
                   title={
                     anyGroupDirty
@@ -1552,7 +1624,7 @@ export const CutPage: React.FC = () => {
                 </Tooltip>
               </>
             )}
-          </Space>
+          </div>
         </Card>
       )}
 
@@ -1670,7 +1742,7 @@ export const CutPage: React.FC = () => {
               </Space>
             }
             extra={
-              <Space>
+              <div style={cutActionToolbarStyle}>
                 {/* «Показать альтернативный раскрой» — only shown when a manual layout exists.
                     Disabled (with tooltip) when the layout is stale: variant=manual would 409. */}
                 {group.manualLayout && (
@@ -1713,18 +1785,18 @@ export const CutPage: React.FC = () => {
                   </Tooltip>
                 )}
                 {/* «Скачать PDF» — disabled while dirty or requiresRecalc */}
-                <Space size={6}>
-                  <Text type="secondary">Шаблон PDF</Text>
+                <div style={pdfTemplatePickerStyle}>
+                  <Text type="secondary" style={pdfTemplateLabelStyle}>Шаблон PDF</Text>
                   <Select
                     size="small"
-                    value={pdfTemplateByGroup[group.cutGroupId] ?? 'standard'}
-                    onChange={(value) => setPdfTemplateByGroup((prev) => ({ ...prev, [group.cutGroupId]: value }))}
+                    value={pdfTemplateByGroup[group.cutGroupId] ?? group.pdfTemplate ?? 'standard'}
+                    onChange={(value) => setGroupPdfTemplate(group, value)}
                     options={pdfTemplateOptions}
-                    style={{ width: 180 }}
+                    style={{ width: 180, flex: '0 0 180px' }}
                     disabled={busy}
                     data-testid={`pdf-template-select-${group.cutGroupId}`}
                   />
-                </Space>
+                </div>
                 <Tooltip
                   title={
                     isDirtyGroup
@@ -1745,7 +1817,7 @@ export const CutPage: React.FC = () => {
                     Предпросмотр PDF
                   </Button>
                 </Tooltip>
-              </Space>
+              </div>
             }
           >
             <Text type="secondary">{formatGroupSummary(group.summary)}</Text>

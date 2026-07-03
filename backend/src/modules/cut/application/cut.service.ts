@@ -24,7 +24,9 @@ import type {
   SetCutJobProfileCommand,
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
+  SetCutJobPdfTemplateCommand,
   SetCutJobSplitByMaterialCommand,
+  SetCutGroupPdfTemplateCommand,
   SetPdfPrewarmStateQuery,
   GetRenderCacheTokenArgs,
 } from './cut-command.types';
@@ -149,6 +151,16 @@ export class CutService {
   async setSplitByMaterial(command: SetCutJobSplitByMaterialCommand) {
     this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
     return this.ports.cut.setSplitByMaterial(command);
+  }
+
+  async setJobPdfTemplate(command: SetCutJobPdfTemplateCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.setJobPdfTemplate(command);
+  }
+
+  async setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, cutGroupId: command.cutGroupId, requestId: command.requestId });
+    return this.ports.cut.setGroupPdfTemplate(command);
   }
 
   /**

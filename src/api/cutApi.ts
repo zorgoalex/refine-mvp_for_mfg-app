@@ -236,6 +236,19 @@ export const cutApi = {
       version,
     });
   },
+
+  async setJobPdfTemplate(cutJobId: number, pdfTemplate: string): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.jobPdfTemplate(validateCutJobId(cutJobId)), {
+      pdfTemplate,
+    });
+  },
+
+  async setGroupPdfTemplate(cutJobId: number, cutGroupId: number, pdfTemplate: string): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(
+      apiRoutes.cutJobs.groupPdfTemplate(validateCutJobId(cutJobId), validateCutJobId(cutGroupId)),
+      { pdfTemplate },
+    );
+  },
 };
 
 export type CutPdfResult = { pending: true } | { pending: false; blob: Blob; fileName: string | null };

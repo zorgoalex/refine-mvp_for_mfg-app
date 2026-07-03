@@ -188,6 +188,28 @@ describe('cutApi', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ splitByMaterial: false, version: 7 });
   });
 
+  it('persists the selected whole-job PDF template', async () => {
+    const job = jobDto({ pdfTemplate: 'bath_profiles' });
+    const fetchMock = mockFetch(job);
+
+    await cutApi.setJobPdfTemplate(3, 'bath_profiles');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/3/pdf-template');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ pdfTemplate: 'bath_profiles' });
+  });
+
+  it('persists the selected group PDF template', async () => {
+    const job = jobDto({ groups: [{ cutGroupId: 9, sheetMaterialTypeId: null, filmId: null, status: 'ready', summary: null, sheets: [], pdfTemplate: 'bath_profiles' }] });
+    const fetchMock = mockFetch(job);
+
+    await cutApi.setGroupPdfTemplate(3, 9, 'bath_profiles');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/3/groups/9/pdf-template');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ pdfTemplate: 'bath_profiles' });
+  });
+
   it('updates PDF template layouts through cut-config API', async () => {
     const fetchMock = mockFetch({ cutPdfTemplateId: 2, code: 'bath_profiles', name: 'Bath', layout: { elements: [] }, isActive: true, version: 3 });
 
@@ -230,6 +252,7 @@ function jobDto(overrides: Partial<CutJobDto> = {}): CutJobDto {
     pdfPrewarmState: 'pending',
     paramProfileId: null,
     sheetMaterialTypeId: null,
+    pdfTemplate: 'standard',
     combineFilms: false,
     splitByMaterial: true,
     materialNames: [],

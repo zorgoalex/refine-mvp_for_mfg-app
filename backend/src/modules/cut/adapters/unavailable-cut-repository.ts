@@ -88,6 +88,14 @@ export class UnavailableCutRepository implements CutRepositoryPort {
     return Promise.reject(unavailable());
   }
 
+  setJobPdfTemplate() {
+    return Promise.reject(unavailable());
+  }
+
+  setGroupPdfTemplate() {
+    return Promise.reject(unavailable());
+  }
+
   getManualLayoutByKey() {
     return Promise.reject(unavailable());
   }

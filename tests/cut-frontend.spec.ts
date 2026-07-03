@@ -28,6 +28,7 @@ function jobBase() {
     source: 'manual',
     version: 0,
     pdfPrewarmState: 'pending',
+    pdfTemplate: 'standard',
     totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },
     items: [],
     groups: [],
@@ -105,6 +106,39 @@ test.describe('Cut page (mocked-local)', () => {
               sheetMaterialTypeId: 7,
               filmId: null,
               status: 'ready',
+              pdfTemplate: 'standard',
+              summary: { used_stock_count: 1, waste_percent: 12 },
+              sheets: [
+                {
+                  cutGroupSheetId: 1,
+                  sheetIndex: 0,
+                  pngCacheKey: null,
+                  placements: { trim_mm: { left: 10, right: 10, top: 10, bottom: 10 }, sheet_width_mm: 2800, sheet_height_mm: 2070, pieces: [] },
+                },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+
+    await page.route(/\/api\/v1\/cut-jobs\/42\/pdf-template$/, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ...jobBase(),
+          status: 'ready',
+          version: 2,
+          pdfTemplate: 'bath_profiles',
+          items: [{ cutJobItemId: 1, orderDetailId: 1, orderId: 9, qty: 2, cutGroupId: 100 }],
+          groups: [
+            {
+              cutGroupId: 100,
+              sheetMaterialTypeId: 7,
+              filmId: null,
+              status: 'ready',
+              pdfTemplate: 'standard',
               summary: { used_stock_count: 1, waste_percent: 12 },
               sheets: [
                 {

@@ -242,6 +242,21 @@ export interface SetCutJobSplitByMaterialCommand {
   requestId?: string;
 }
 
+export interface SetCutJobPdfTemplateCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  pdfTemplate: string;
+  requestId?: string;
+}
+
+export interface SetCutGroupPdfTemplateCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  cutGroupId: number;
+  pdfTemplate: string;
+  requestId?: string;
+}
+
 export interface GetRenderCacheTokenArgs {
   cutJobId?: number;
   cutGroupId?: number;
@@ -263,6 +278,8 @@ export interface CutRepositoryPort {
   setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto>;
   setCombineFilms(command: SetCutJobCombineFilmsCommand): Promise<CutJobDto>;
   setSplitByMaterial(command: SetCutJobSplitByMaterialCommand): Promise<CutJobDto>;
+  setJobPdfTemplate(command: SetCutJobPdfTemplateCommand): Promise<CutJobDto>;
+  setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand): Promise<CutJobDto>;
   getJob(query: GetCutJobQuery): Promise<CutJobDto>;
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;

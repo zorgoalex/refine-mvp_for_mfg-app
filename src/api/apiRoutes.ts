@@ -76,6 +76,9 @@ export const apiRoutes = {
     groupPdf: (cutJobId: number, groupId: number) =>
       backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/export.pdf`),
     jobPdf: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/export.pdf`),
+    jobPdfTemplate: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/pdf-template`),
+    groupPdfTemplate: (cutJobId: number, groupId: number) =>
+      backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/pdf-template`),
     profile: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/profile`),
     sheetMaterial: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/sheet-material`),
     combineFilms: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/combine-films`),

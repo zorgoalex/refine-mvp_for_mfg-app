@@ -99,6 +99,8 @@ export interface CutGroupDto {
   sheetMaterialTypeId: number | null;
   filmId: number | null;
   status: string;
+  /** Selected PDF template code for this group export. */
+  pdfTemplate: string;
   summary: Record<string, unknown> | null;
   sheets: CutGroupSheetDto[];
   /** Stable group identity key (e.g. "m:5|f:3"). Populated only on single-job getJob; absent on list. */
@@ -140,6 +142,8 @@ export interface CutJobDto {
   paramProfileId: number | null;
   /** null = no per-job override (per-detail sheet). Non-null = chosen sheet. */
   sheetMaterialTypeId: number | null;
+  /** Selected PDF template code for whole-job export. */
+  pdfTemplate: string;
   /** true = calculate groups details by sheet material only (films of the same
    *  material share sheets). false (default) = group by (material, film). */
   combineFilms: boolean;

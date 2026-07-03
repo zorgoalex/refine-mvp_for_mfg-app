@@ -12,6 +12,7 @@ import {
   parseSetProfileBody,
   parseSetSheetMaterialBody,
   parseSetCombineFilmsBody,
+  parseSetPdfTemplateBody,
   parseSetSplitByMaterialBody,
   parseSaveManualLayoutBody,
   parseVariant,
@@ -36,6 +37,7 @@ function jobDto(): CutJobDto {
     failureReason: null,
     paramProfileId: null,
     sheetMaterialTypeId: null,
+    pdfTemplate: 'standard',
     combineFilms: false,
     splitByMaterial: true,
     materialNames: [],
@@ -562,6 +564,44 @@ it('PATCH setSplitByMaterial delegates parsed args to CutService.setSplitByMater
   const dto = await controller.setSplitByMaterial(request, '42', { splitByMaterial: false, version: 3 });
   expect(service.setSplitByMaterial).toHaveBeenCalledWith(expect.objectContaining({
     cutJobId: 42, splitByMaterial: false, version: 3, requestId: 'req-split',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+describe('parseSetPdfTemplateBody', () => {
+  it('accepts a safe PDF template code', () => {
+    expect(parseSetPdfTemplateBody({ pdfTemplate: 'bath_profiles' })).toEqual({ pdfTemplate: 'bath_profiles' });
+  });
+  it('rejects unsafe or unknown fields', () => {
+    expect(() => parseSetPdfTemplateBody({ pdfTemplate: '../bad' })).toThrow();
+    expect(() => parseSetPdfTemplateBody({ pdfTemplate: 'bath_profiles', version: 1 })).toThrow();
+  });
+});
+
+it('PATCH setJobPdfTemplate delegates parsed args to CutService.setJobPdfTemplate', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setJobPdfTemplate: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-job-template' } as never;
+  const dto = await controller.setJobPdfTemplate(request, '42', { pdfTemplate: 'bath_profiles' });
+  expect(service.setJobPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, pdfTemplate: 'bath_profiles', requestId: 'req-job-template',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+it('PATCH setGroupPdfTemplate delegates parsed args to CutService.setGroupPdfTemplate', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setGroupPdfTemplate: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-group-template' } as never;
+  const dto = await controller.setGroupPdfTemplate(request, '42', '100', { pdfTemplate: 'bath_profiles' });
+  expect(service.setGroupPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, cutGroupId: 100, pdfTemplate: 'bath_profiles', requestId: 'req-group-template',
   }));
   expect(dto).toBe(serviceReturn);
 });
