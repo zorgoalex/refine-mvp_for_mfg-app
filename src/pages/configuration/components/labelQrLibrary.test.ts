@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipsToTemplate, templateToChips, uniqueQrName, qrElementFromLibrary } from './labelQrLibrary';
+import { chipsToTemplate, templateToChips, uniqueQrName, qrElementFromLibrary, collectDuplicateQrNames } from './labelQrLibrary';
 import { autoShiftForQr } from './labelQrHelpers';
 
 describe('chips <-> template', () => {
@@ -49,5 +49,17 @@ describe('qrElementFromLibrary', () => {
     const el = qrElementFromLibrary({ name: 'QR', contentTemplate: '{bazis.detail_id}', errorCorrection: 'M', defaultSizeMm: 20 }, 4, 4, existing);
     const result = autoShiftForQr({ qr: el, elements: [...existing, el], canvas: { widthMm: 85, heightMm: 88 } });
     expect(result.conflicts).toHaveLength(0);
+  });
+});
+
+describe('collectDuplicateQrNames', () => {
+  it('detects duplicate qr names within a label (case-insensitive)', () => {
+    const els = [
+      { kind: 'qr', style: { qrName: 'A' } },
+      { kind: 'qr', style: { qrName: 'a' } },
+      { kind: 'qr', style: { qrName: 'B' } },
+      { kind: 'text', style: {} },
+    ] as any;
+    expect(collectDuplicateQrNames(els)).toEqual(['A']);
   });
 });

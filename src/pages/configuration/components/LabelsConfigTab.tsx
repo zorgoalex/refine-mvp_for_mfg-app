@@ -25,7 +25,7 @@ import {
   qrSideOf,
   qrTemplateOf,
 } from './labelQrHelpers';
-import { chipsToTemplate, qrElementFromLibrary, sanitizeQrText, templateToChips, type QrChip } from './labelQrLibrary';
+import { chipsToTemplate, collectDuplicateQrNames, qrElementFromLibrary, sanitizeQrText, templateToChips, type QrChip } from './labelQrLibrary';
 
 const { Text } = Typography;
 const EXPORT_FORMATS: LabelExportFormat[] = ['bmp', 'png', 'emf'];
@@ -49,6 +49,7 @@ const PREVIEW_FIELD_VALUES: Record<string, string> = {
   'label.counter_text': 'Бир.№    1 / 0',
 };
 const QR_CONFLICT_ERROR = 'QR_CONFLICT';
+const QR_NAME_DUP_ERROR_PREFIX = 'QR_NAME_DUP:';
 const QR_ERROR_CORRECTION_OPTIONS = [
   { value: 'L', label: 'L' },
   { value: 'M', label: 'M' },
@@ -324,6 +325,10 @@ export const LabelsConfigTab: React.FC = () => {
     if (conflicts.length > 0) {
       throw new Error(QR_CONFLICT_ERROR);
     }
+    const dupes = collectDuplicateQrNames(elements);
+    if (dupes.length > 0) {
+      throw new Error(`${QR_NAME_DUP_ERROR_PREFIX}${dupes.join(', ')}`);
+    }
     return {
       name: name.trim(),
       description: values.description?.trim() || null,
@@ -335,6 +340,19 @@ export const LabelsConfigTab: React.FC = () => {
       elements: toTemplateElementInput(elements),
       idempotencyKey: `label-template-${Date.now()}`,
     };
+  };
+
+  const describeSaveError = (error: unknown, fallback: string): string => {
+    if (error instanceof Error) {
+      if (error.message === QR_CONFLICT_ERROR) {
+        return 'QR-код пересекается с элементами или выходит за границы бирки';
+      }
+      if (error.message.startsWith(QR_NAME_DUP_ERROR_PREFIX)) {
+        const dupes = error.message.slice(QR_NAME_DUP_ERROR_PREFIX.length);
+        return `Имена QR-кодов должны быть уникальны: ${dupes}`;
+      }
+    }
+    return fallback;
   };
 
   const saveTemplate = async (values: TemplateFormValues) => {
@@ -352,9 +370,7 @@ export const LabelsConfigTab: React.FC = () => {
       await load();
       startNew();
     } catch (error) {
-      message.error(error instanceof Error && error.message === QR_CONFLICT_ERROR
-        ? 'QR-код пересекается с элементами или выходит за границы бирки'
-        : 'Не удалось сохранить шаблон');
+      message.error(describeSaveError(error, 'Не удалось сохранить шаблон'));
     } finally {
       setSaving(false);
     }
@@ -386,9 +402,7 @@ export const LabelsConfigTab: React.FC = () => {
       setElements(created.elements);
       setCustomSchemaText(JSON.stringify(created.customFieldSchema ?? {}, null, 2));
     } catch (error) {
-      message.error(error instanceof Error && error.message === QR_CONFLICT_ERROR
-        ? 'QR-код пересекается с элементами или выходит за границы бирки'
-        : 'Не удалось создать копию шаблона');
+      message.error(describeSaveError(error, 'Не удалось создать копию шаблона'));
     } finally {
       setSaving(false);
     }
@@ -1231,6 +1245,18 @@ export const LabelsConfigTab: React.FC = () => {
                     value={element.staticText ?? ''}
                     disabled={!canManage || element.kind !== 'text'}
                     onChange={(event) => patchElement(index, { staticText: event.target.value || null })}
+                  />
+                ),
+              },
+              {
+                title: 'Имя QR',
+                width: 140,
+                render: (_, element, index) => (
+                  <Input
+                    value={String((element.style as Record<string, unknown> | undefined)?.qrName ?? '')}
+                    disabled={!canManage || element.kind !== 'qr'}
+                    onChange={(event) => patchQrStyle(index, { qrName: event.target.value })}
+                    onBlur={(event) => patchQrStyle(index, { qrName: event.target.value.trim() })}
                   />
                 ),
               },

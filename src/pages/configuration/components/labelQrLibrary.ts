@@ -36,6 +36,21 @@ export function uniqueQrName(base: string, existingNames: string[]): string {
   }
 }
 
+export function collectDuplicateQrNames(elements: LabelTemplateElement[]): string[] {
+  // Case-insensitive to match the backend validateQrElementNames contract.
+  const seen = new Map<string, { name: string; count: number }>();
+  for (const el of elements) {
+    if (el.kind !== 'qr') continue;
+    const raw = String((el.style as Record<string, unknown> | undefined)?.qrName ?? '').trim();
+    if (!raw) continue;
+    const key = raw.toLowerCase();
+    const entry = seen.get(key) ?? { name: raw, count: 0 };
+    entry.count += 1;
+    seen.set(key, entry);
+  }
+  return [...seen.values()].filter((e) => e.count > 1).map((e) => e.name);
+}
+
 export function qrElementFromLibrary(
   src: { name: string; contentTemplate: string; errorCorrection: 'L' | 'M' | 'Q' | 'H'; defaultSizeMm: number; sourceTemplateId?: number },
   xMm: number,
