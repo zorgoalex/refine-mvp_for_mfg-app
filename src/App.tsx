@@ -22,6 +22,7 @@ const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/sho
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
+const ScanPage = lazy(async () => ({ default: (await import("./pages/scan/ScanPage")).ScanPage }));
 const ProjectsPage = lazy(async () => ({ default: (await import("./pages/projects/ProjectsPage")).ProjectsPage }));
 const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/doweling_orders/edit")).DowelOrderEdit }));
 const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
@@ -257,6 +258,17 @@ const ThemedApp = () => {
                         list: "/cut",
                         meta: {
                           label: "Раскрой",
+                        },
+                      },
+                    ]
+                  : []),
+                ...(featureFlags.labels
+                  ? [
+                      {
+                        name: "scan",
+                        list: "/scan",
+                        meta: {
+                          label: "Сканер бирок",
                         },
                       },
                     ]
@@ -588,6 +600,11 @@ const ThemedApp = () => {
                   {featureFlags.useBackendCut && (
                     <Route path="/cut">
                       <Route index element={<CutPage />} />
+                    </Route>
+                  )}
+                  {featureFlags.labels && (
+                    <Route path="/scan">
+                      <Route index element={<ScanPage />} />
                     </Route>
                   )}
                   <Route path="/doweling-orders" >

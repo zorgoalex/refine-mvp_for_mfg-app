@@ -171,3 +171,24 @@ export interface LabelQrTemplateInput {
 }
 
 export type UpdateLabelQrTemplateInput = LabelQrTemplateInput & { version: number };
+
+export interface ScanCandidate {
+  detailId: number;
+  orderId: number;
+  orderName: string;
+  detailNumber: number | null;
+  width: number | null;
+  height: number | null;
+  quantity: number | null;
+  materialName: string | null;
+  productionStatusName: string | null;
+  matchedFields: string[];
+  matchedBy: string;
+  score: number;
+}
+
+export interface ScanResolveResult {
+  candidates: ScanCandidate[];
+  parsed: Record<string, string> | null;
+  templatesTried: number;
+}

@@ -6,6 +6,7 @@ import { UnavailableLabelsRepository } from './adapters/unavailable-labels-repos
 import { LabelsService } from './application/labels.service';
 import { LabelFieldsController } from './http/label-fields.controller';
 import { LabelQrTemplatesController } from './http/label-qr-templates.controller';
+import { LabelScanController } from './http/label-scan.controller';
 import { LabelTemplatesController } from './http/label-templates.controller';
 import { DetailLabelActionsController, OrderLabelActionsController, OrderLabelsController } from './http/order-labels.controller';
 import { LabelsRuntimeConfigService } from './http/labels-runtime-config.service';
@@ -16,6 +17,7 @@ import { LabelsRuntimeConfigService } from './http/labels-runtime-config.service
     LabelFieldsController,
     LabelTemplatesController,
     LabelQrTemplatesController,
+    LabelScanController,
     OrderLabelsController,
     OrderLabelActionsController,
     DetailLabelActionsController,

@@ -5,6 +5,8 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import { isBuiltInLabelFieldId, isSupportedFieldBinding } from './bazis-field-catalog';
 import { LABEL_FIELD_CATALOG, type LabelFieldCatalogItem } from './bazis-field-catalog';
 import { validateQrTemplateElement, extractLabelTemplateFieldIds } from './label-template-fields';
+import { compileQrTemplate, parseQrPayload, parseQrPayloadRight } from './scan/qr-template-parser';
+import { scoreCandidate, rankCandidates } from './scan/scan-ranking';
 import type {
   CreateLabelTemplateCommand,
   DeleteLabelTemplateCommand,
@@ -35,6 +37,10 @@ import type {
   CreateLabelQrTemplateCommand,
   UpdateLabelQrTemplateCommand,
   DeleteLabelQrTemplateCommand,
+  ScanResolveCommand,
+  ScanResolveResult,
+  ScanSearchInput,
+  ScanCandidateRow,
 } from './labels.types';
 import { LabelFieldBindingError } from '../errors/labels.errors';
 
@@ -50,6 +56,20 @@ const GENERATE: PermissionName = 'labels.generate';
 export class LabelsService {
   private readonly repo: LabelsPort;
   private readonly permissions: PermissionsService;
+  private qrTemplateCache: { at: number; templates: string[] } | null = null;
+  private static readonly QR_TEMPLATE_CACHE_MS = 45_000;
+
+  // Маппинг field id (semantic id из bazis-field-catalog) -> ключ ScanSearchInput.
+  private static readonly SCAN_FIELD_TO_INPUT: Record<string, keyof ScanSearchInput> = {
+    'detail.detail_id': 'detailId',
+    'detail.order_id': 'orderId',
+    'order.order_id': 'orderId',
+    'order.order_name': 'orderName',
+    'bazis.order_number': 'orderName',
+    'detail.detail_number': 'detailNumber',
+    'bazis.position_in_product': 'detailNumber',
+    'bazis.position': 'detailNumber',
+  };
 
   constructor(ports: LabelsServicePorts) {
     this.repo = ports.repo;
@@ -153,6 +173,108 @@ export class LabelsService {
   async deleteQrTemplate(command: DeleteLabelQrTemplateCommand): Promise<void> {
     await this.require(command, [MANAGE_TEMPLATES], command.id, 'label_qr_template');
     return this.repo.deleteQrTemplate(command);
+  }
+
+  async scanResolve(cmd: ScanResolveCommand): Promise<ScanResolveResult> {
+    await this.require(cmd, [VIEW]);
+    const payload = (cmd.payload ?? '').trim();
+    if (!payload) {
+      throw new ApiError(422, 'LABEL_SCAN_PAYLOAD_EMPTY', 'Пустая строка сканирования', {});
+    }
+
+    // Пробуем ВСЕ шаблоны (не первый совпавший) + ВСЕГДА добавляем fallback-
+    // интерпретацию целой строки. Причина: значение поля может содержать
+    // разделитель (имя заказа с «|») — единственный «успешный» парс тогда ложный;
+    // слияние интерпретаций с ранжированием защищает от уверенно-неверного роутинга.
+    const templates = await this.getActiveQrTemplates();
+    const interpretations: Array<{ input: ScanSearchInput; parsed: Record<string, string> | null; matchedBy: string }> = [];
+
+    for (const tpl of templates) {
+      const compiled = compileQrTemplate(tpl);
+      if (!compiled) continue;
+      // ДВЕ интерпретации на шаблон: лево- и право-якорная (право-якорная
+      // восстанавливает имя заказа, содержащее разделитель — Codex R2).
+      const attempts = [parseQrPayload(payload, compiled), parseQrPayloadRight(payload, compiled)];
+      const seen = new Set<string>();
+      for (const attempt of attempts) {
+        if (!attempt || Object.keys(attempt).length === 0) continue;
+        const dedupeKey = JSON.stringify(attempt);
+        if (seen.has(dedupeKey)) continue; // на чистых строках парсы совпадают
+        seen.add(dedupeKey);
+        const input: ScanSearchInput = {};
+        const bazisFields: Record<string, string> = {};
+        for (const [fieldId, value] of Object.entries(attempt)) {
+          const key = LabelsService.SCAN_FIELD_TO_INPUT[fieldId];
+          if (key === 'orderName') {
+            input.orderName = value;
+          } else if (key === 'detailId' || key === 'orderId' || key === 'detailNumber') {
+            const num = Number(value);
+            if (Number.isFinite(num)) input[key] = num;
+          }
+          if (fieldId.startsWith('bazis.')) {
+            // ключ снапшота: см. toSnapshotKey — normalизация в одном месте.
+            bazisFields[this.toSnapshotKey(fieldId)] = value;
+          }
+        }
+        if (Object.keys(bazisFields).length > 0) input.bazisFields = bazisFields;
+        if (input.detailId != null || input.orderId != null || input.orderName || input.bazisFields) {
+          interpretations.push({ input, parsed: attempt, matchedBy: `qr-template:${tpl}` });
+        }
+      }
+    }
+
+    // Fallback всегда: целое число = ID заказа, иначе имя заказа целиком.
+    const asNumber = Number(payload);
+    const fallbackInput: ScanSearchInput =
+      Number.isInteger(asNumber) && asNumber > 0 ? { orderId: asNumber } : { orderName: payload };
+    interpretations.push({ input: fallbackInput, parsed: null, matchedBy: 'fallback-fields' });
+
+    // Слияние по detailId: максимум score; каждая запись помнит СВОЮ интерпретацию
+    // (matchedBy + parsed) — `parsed` в ответе обязан быть парсом интерпретации,
+    // породившей ПОБЕДИВШЕГО кандидата, а не первым попавшимся (Codex R3:
+    // для 'A|B|60084|1' победит право-якорная → parsed.orderName='A|B', не 'A').
+    type Merged = ScanCandidateRow & { score: number; matchedBy: string; parsed: Record<string, string> | null };
+    const byDetail = new Map<number, Merged>();
+    for (const it of interpretations) {
+      const rows = await this.repo.findScanCandidates(it.input);
+      for (const row of rows) {
+        const score = scoreCandidate(row.matchedFields);
+        const existing = byDetail.get(row.detailId);
+        if (!existing || score > existing.score) {
+          byDetail.set(row.detailId, { ...row, score, matchedBy: it.matchedBy, parsed: it.parsed });
+        }
+      }
+    }
+    const ranked = rankCandidates([...byDetail.values()]);
+    const parsed = ranked[0]?.parsed ?? interpretations.find((i) => i.parsed)?.parsed ?? null;
+    const candidates = ranked.map(({ parsed: _drop, ...candidate }) => candidate);
+    return { candidates, parsed, templatesTried: templates.length };
+  }
+
+  private async getActiveQrTemplates(): Promise<string[]> {
+    const now = Date.now();
+    if (this.qrTemplateCache && now - this.qrTemplateCache.at < LabelsService.QR_TEMPLATE_CACHE_MS) {
+      return this.qrTemplateCache.templates;
+    }
+    const templates = await this.repo.listActiveQrTemplateStrings();
+    this.qrTemplateCache = { at: now, templates };
+    return templates;
+  }
+
+  private toSnapshotKey(fieldId: string): string {
+    // Формат ключей bazis_fields ВЕРИФИЦИРОВАН по write-path:
+    // backend/src/modules/labels/adapters/pg-labels-repository.ts:615
+    // (`{ ...(before?.bazis_fields ?? {}), ...(row.bazisFields ?? {}) }` — merge
+    // без трансформации ключей) + :1484 (`bazisFields: row.bazis_fields ?? {}`
+    // на чтении — тоже без трансформации) + FE
+    // src/pages/orders/components/labels/OrderLabelDataEditor.tsx (спреды
+    // detail.bazisFields как есть, точечно правит только 'bazis.comment') +
+    // backend/src/modules/labels/application/label-row-builder.ts:76-92
+    // (canonical ключи вида 'bazis.order_number', 'bazis.comment', ...).
+    // Вывод: ключи order_label_detail_data.bazis_fields ВСЕГДА несут namespace
+    // 'bazis.' — идентичный формату fieldId из qr-template-parser. Никакой
+    // трансформации не требуется.
+    return fieldId;
   }
 
   private async require(

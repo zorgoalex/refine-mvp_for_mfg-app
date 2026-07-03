@@ -15,6 +15,7 @@ import type {
   PreviewDetailLabelsInput,
   LatestOrderLabelsPreview,
   PreviewOrderLabelsInput,
+  ScanResolveResult,
   UpdateLabelQrTemplateInput,
   UpdateLabelTemplateInput,
   UpdateOrderLabelDataInput,
@@ -114,6 +115,10 @@ export const labelsApi = {
     return httpClient.delete<void>(apiRoutes.labels.qrTemplate(validateId(id, 'qrTemplateId')), {
       body: JSON.stringify({ version, idempotencyKey }),
     });
+  },
+
+  scanResolve(payload: string, source: 'qr' | 'manual'): Promise<ScanResolveResult> {
+    return httpClient.post<ScanResolveResult>(apiRoutes.labels.scanResolve(), { payload, source });
   },
 };
 

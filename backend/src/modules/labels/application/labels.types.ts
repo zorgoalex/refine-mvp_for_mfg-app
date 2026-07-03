@@ -272,6 +272,47 @@ export interface ExportDetailLabelsQuery extends LabelsContext {
   generationId: number;
 }
 
+export interface ScanSearchInput {
+  detailId?: number;
+  orderId?: number;
+  orderName?: string;
+  detailNumber?: number;
+  /** Распарсенные bazis.*-поля QR для верификации/поиска по снапшоту печати.
+   *  Ключи — в формате хранения order_label_detail_data.bazis_fields
+   *  (формат СВЕРИТЬ с write-path: pg-labels-repository upsert ~:595 и
+   *  mapOrderLabelDetail; нормализация ключей — на стороне сервиса). */
+  bazisFields?: Record<string, string>;
+}
+
+export interface ScanCandidateRow {
+  detailId: number;
+  orderId: number;
+  orderName: string;
+  detailNumber: number | null;
+  width: number | null;
+  height: number | null;
+  quantity: number | null;
+  materialName: string | null;
+  productionStatusName: string | null;
+  matchedFields: string[];
+}
+
+export interface ScanResolveCommand extends LabelsContext {
+  payload: string;
+  source: 'qr' | 'manual';
+}
+
+export interface ScanResolveCandidate extends ScanCandidateRow {
+  score: number;
+  matchedBy: string;
+}
+
+export interface ScanResolveResult {
+  candidates: ScanResolveCandidate[];
+  parsed: Record<string, string> | null;
+  templatesTried: number;
+}
+
 export interface LabelsPermissionDeniedInput {
   currentUser: CurrentUser;
   requiredPermissions: string[];
@@ -300,4 +341,6 @@ export interface LabelsPort {
   createQrTemplate(command: CreateLabelQrTemplateCommand): Promise<LabelQrTemplateDto>;
   updateQrTemplate(command: UpdateLabelQrTemplateCommand): Promise<LabelQrTemplateDto>;
   deleteQrTemplate(command: DeleteLabelQrTemplateCommand): Promise<void>;
+  listActiveQrTemplateStrings(): Promise<string[]>;
+  findScanCandidates(input: ScanSearchInput): Promise<ScanCandidateRow[]>;
 }
