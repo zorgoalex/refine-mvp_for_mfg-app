@@ -107,6 +107,29 @@ describe('buildSheetsPdf', () => {
     expect(fontSizeSpy).toHaveBeenCalledWith(10.5);
   });
 
+  it('renders bath film values across the full header row before wrapping', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('bath-film-wide'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        template: 'bath_profiles',
+        meta: {
+          films: ['Крем брюле -Декор+', 'Белый глянец', 'Олива софт -МС групп'],
+        },
+      },
+    ]);
+
+    const filmValueCall = textSpy.mock.calls.find((call) =>
+      String(call[0]).includes('Крем брюле -Декор+, Белый глянец, Олива софт -МС групп'),
+    );
+
+    expect(filmValueCall?.[0]).toBe(' Крем брюле -Декор+, Белый глянец, Олива софт -МС групп');
+    expect((filmValueCall?.[3] as PDFKit.Mixins.TextOptions | undefined)?.width).toBeGreaterThan(600);
+    expect((filmValueCall?.[3] as PDFKit.Mixins.TextOptions | undefined)?.lineBreak).toBe(true);
+  });
+
   it('uses landscape pages for portrait standard sheets', async () => {
     const pdf = await buildSheetsPdf([{ svg: SVG('portrait'), sheetWidthMm: 2070, sheetHeightMm: 2800 }]);
 

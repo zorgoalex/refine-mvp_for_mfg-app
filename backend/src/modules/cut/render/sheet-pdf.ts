@@ -136,19 +136,19 @@ function drawHeader(doc: PDFKit.PDFDocument, meta: PdfSheetMeta, x: number, y: n
   const labelW = 82;
   const fontSize = 10.5;
   const cells = [
-    { label: 'Заказ:', value: join(meta.orders), x, y },
-    { label: 'Клиент:', value: join(meta.clients), x: x + colW, y },
-    { label: 'Дата:', value: join(meta.dates), x: x + colW * 2, y },
-    { label: 'Дата готовности:', value: join(meta.readyDates), x, y: y + rowH },
-    { label: 'Материал:', value: join(meta.materials), x: x + colW, y: y + rowH },
-    { label: 'Толщина:', value: join(meta.thicknesses), x: x + colW * 2, y: y + rowH },
-    { label: 'Пленка:', value: join(meta.films), x, y: y + rowH * 2 },
+    { label: 'Заказ:', value: join(meta.orders), x, y, valueW: colW - labelW - 4 },
+    { label: 'Клиент:', value: join(meta.clients), x: x + colW, y, valueW: colW - labelW - 4 },
+    { label: 'Дата:', value: join(meta.dates), x: x + colW * 2, y, valueW: colW - labelW - 4 },
+    { label: 'Дата готовности:', value: join(meta.readyDates), x, y: y + rowH, valueW: colW - labelW - 4 },
+    { label: 'Материал:', value: join(meta.materials), x: x + colW, y: y + rowH, valueW: colW - labelW - 4 },
+    { label: 'Толщина:', value: join(meta.thicknesses), x: x + colW * 2, y: y + rowH, valueW: colW - labelW - 4 },
+    { label: 'Пленка:', value: join(meta.films), x, y: y + rowH * 2, valueW: width - labelW - 4 },
   ];
   doc.lineWidth(0.7).strokeColor('#111111');
   for (const cell of cells) {
     doc.fontSize(fontSize).text(cell.label, cell.x, cell.y, { width: labelW, lineBreak: false });
     doc.fontSize(fontSize).text(` ${cell.value}`, cell.x + labelW, cell.y, {
-      width: colW - labelW - 4,
+      width: cell.valueW,
       lineBreak: true,
     });
   }
