@@ -297,6 +297,22 @@ export interface ScanCandidateRow {
   matchedFields: string[];
 }
 
+export interface ScanResolveCommand extends LabelsContext {
+  payload: string;
+  source: 'qr' | 'manual';
+}
+
+export interface ScanResolveCandidate extends ScanCandidateRow {
+  score: number;
+  matchedBy: string;
+}
+
+export interface ScanResolveResult {
+  candidates: ScanResolveCandidate[];
+  parsed: Record<string, string> | null;
+  templatesTried: number;
+}
+
 export interface LabelsPermissionDeniedInput {
   currentUser: CurrentUser;
   requiredPermissions: string[];
