@@ -54,3 +54,18 @@ export class LabelCustomFieldSchemaStaleError extends ApiError {
     });
   }
 }
+
+export class LabelQrTemplateNotFoundError extends ApiError {
+  constructor(id: number) {
+    super(404, 'LABEL_QR_TEMPLATE_NOT_FOUND', 'QR template not found', { id });
+  }
+}
+
+export class LabelQrTemplateStaleVersionError extends ApiError {
+  constructor(expectedVersion: number, currentVersion: number) {
+    super(409, 'LABEL_QR_TEMPLATE_VERSION_STALE', 'QR template version is stale', {
+      expectedVersion,
+      currentVersion,
+    });
+  }
+}

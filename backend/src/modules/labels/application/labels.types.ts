@@ -277,7 +277,7 @@ export interface LabelsPermissionDeniedInput {
   requiredPermissions: string[];
   requestId: string;
   targetId?: number;
-  targetEntityType?: 'label_template' | 'order';
+  targetEntityType?: 'label_template' | 'order' | 'label_qr_template';
 }
 
 export interface LabelsPort {
