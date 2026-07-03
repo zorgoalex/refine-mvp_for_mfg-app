@@ -121,8 +121,10 @@ export const LabelsConfigTab: React.FC = () => {
   const [qrSaving, setQrSaving] = useState(false);
   const [qrFieldSearch, setQrFieldSearch] = useState('');
   const [draggingQrField, setDraggingQrField] = useState<LabelFieldCatalogItem | null>(null);
+  const [qrFieldDragCursor, setQrFieldDragCursor] = useState<{ x: number; y: number } | null>(null);
   const [draggingQr, setDraggingQr] = useState<LabelQrTemplate | null>(null);
   const [qrDragCursor, setQrDragCursor] = useState<{ x: number; y: number } | null>(null);
+  const [showAllBorders, setShowAllBorders] = useState(false);
   const qrRowDropRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   // Shared guard so ONE field drag from the QR builder's own palette resolves
   // exactly once. Both the per-row native onDrop (HTML5 drag'n'drop) and the
@@ -250,12 +252,22 @@ export const LabelsConfigTab: React.FC = () => {
   // Fallback drag: a field dragged from the QR builder's own palette is appended as a
   // chip to whichever row's drop zone the pointer is released over (mirrors draggingField
   // above, but resolved per-row since the builder now has multiple independent rows).
+  // Also tracks the cursor position (mirrors the draggingField/draggingQr cursor effects)
+  // so a floating ghost badge with the field's label can follow the pointer while it's
+  // "picked up" — previously this drag had no visual feedback at all.
   useEffect(() => {
-    if (!draggingQrField) return;
+    if (!draggingQrField) {
+      setQrFieldDragCursor(null);
+      return;
+    }
     qrFieldChipResolvedRef.current = false;
+    const handleMove = (event: PointerEvent | MouseEvent) => {
+      setQrFieldDragCursor({ x: event.clientX, y: event.clientY });
+    };
     const handleEnd = (event: PointerEvent | MouseEvent) => {
       if (qrFieldChipResolvedRef.current) {
         setDraggingQrField(null);
+        setQrFieldDragCursor(null);
         return;
       }
       let targetRow: number | null = null;
@@ -269,10 +281,15 @@ export const LabelsConfigTab: React.FC = () => {
         addQrFieldChip(targetRow, draggingQrField);
       }
       setDraggingQrField(null);
+      setQrFieldDragCursor(null);
     };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('mousemove', handleMove);
     window.addEventListener('pointerup', handleEnd);
     window.addEventListener('mouseup', handleEnd);
     return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('pointerup', handleEnd);
       window.removeEventListener('mouseup', handleEnd);
     };
@@ -1230,7 +1247,12 @@ export const LabelsConfigTab: React.FC = () => {
             <Card
               size="small"
               title="Визуал бирки"
-              extra={<Checkbox checked={visualExpanded} onChange={(event) => setVisualExpanded(event.target.checked)}>Увеличить визуал</Checkbox>}
+              extra={(
+                <Space size={12}>
+                  <Checkbox checked={visualExpanded} onChange={(event) => setVisualExpanded(event.target.checked)}>Увеличить визуал</Checkbox>
+                  <Checkbox checked={showAllBorders} onChange={(event) => setShowAllBorders(event.target.checked)}>Показать границы всех элементов</Checkbox>
+                </Space>
+              )}
               style={{ marginBottom: 16 }}
             >
               <LabelTemplatePreview
@@ -1241,6 +1263,7 @@ export const LabelsConfigTab: React.FC = () => {
                 selectedElementKey={selectedElementKey}
                 canDrag={canManage}
                 initialZoom={visualExpanded ? 1.3 : 0.6}
+                showAllBounds={showAllBorders}
                 onSelectElement={setSelectedElementKey}
                 onMoveElement={moveElement}
                 onChangeElement={patchElementByKey}
@@ -1556,6 +1579,29 @@ export const LabelsConfigTab: React.FC = () => {
         </div>
       )}
 
+      {draggingQrField && qrFieldDragCursor && (
+        <div
+          data-label-global-drag-preview-qr-field
+          style={{
+            position: 'fixed',
+            left: qrFieldDragCursor.x + 12,
+            top: qrFieldDragCursor.y + 12,
+            zIndex: 3000,
+            padding: '4px 8px',
+            color: '#1677ff',
+            background: '#e6f4ff',
+            border: '1px dashed #1677ff',
+            borderRadius: 4,
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            pointerEvents: 'none',
+            fontSize: 12,
+            lineHeight: 1.3,
+          }}
+        >
+          {draggingQrField.label}
+        </div>
+      )}
+
       <Modal
         title="Сохранить шаблон как"
         open={saveAsOpen}
@@ -1595,6 +1641,7 @@ function LabelTemplatePreview({
   draggingQr,
   onDropDraggingQr,
   initialZoom = 1,
+  showAllBounds = false,
 }: {
   widthMm: number;
   heightMm: number;
@@ -1613,6 +1660,7 @@ function LabelTemplatePreview({
   draggingQr?: LabelQrTemplate | null;
   onDropDraggingQr?: (payload: LabelQrTemplate, xMm: number, yMm: number) => void;
   initialZoom?: number;
+  showAllBounds?: boolean;
 }) {
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
@@ -2015,6 +2063,7 @@ function LabelTemplatePreview({
                 selected: !externalDragActive && selectedElementKey === element.elementKey,
                 interactive: Boolean(canDrag && !externalDragActive),
                 draggable: Boolean(canDrag && !externalDragActive && !isLabelElementLocked(element)),
+                showAllBounds,
                 safeWidth,
                 safeHeight,
                 onSelectElement: externalDragActive ? undefined : onSelectElement,
@@ -2315,6 +2364,7 @@ function renderKonvaPreviewElement({
   selected,
   interactive,
   draggable,
+  showAllBounds,
   safeWidth,
   safeHeight,
   onSelectElement,
@@ -2331,6 +2381,7 @@ function renderKonvaPreviewElement({
   selected: boolean;
   interactive: boolean;
   draggable: boolean;
+  showAllBounds?: boolean;
   safeWidth: number;
   safeHeight: number;
   onSelectElement?: (elementKey: string) => void;
@@ -2397,6 +2448,22 @@ function renderKonvaPreviewElement({
       listening={false}
     />
   ) : null;
+  // Non-interactive bounds outline drawn for EVERY element when the "show all element
+  // borders" toggle is on, so overlaps/extents can be inspected without selecting each
+  // element one at a time. Purely visual — never affects selection/drag/hit-testing.
+  const allBoundsBox = showAllBounds ? (
+    <KonvaRect
+      key={`${key}-all-bounds`}
+      x={x}
+      y={y}
+      width={Math.max(w, 2)}
+      height={Math.max(h, 2)}
+      stroke="#faad14"
+      strokeWidth={0.3}
+      dash={[1, 1]}
+      listening={false}
+    />
+  ) : null;
 
   if (element.kind === 'line') {
     return (
@@ -2409,6 +2476,7 @@ function renderKonvaPreviewElement({
           hitStrokeWidth={4}
         />
         {selectionBox}
+        {allBoundsBox}
       </React.Fragment>
     );
   }
@@ -2424,6 +2492,7 @@ function renderKonvaPreviewElement({
           strokeWidth={Number(element.style?.strokeWidth ?? 0.45)}
         />
         {selectionBox}
+        {allBoundsBox}
       </React.Fragment>
     );
   }
@@ -2494,6 +2563,7 @@ function renderKonvaPreviewElement({
           />
         </KonvaGroup>
         {selectionBox}
+        {allBoundsBox}
       </React.Fragment>
     );
   }
@@ -2519,6 +2589,7 @@ function renderKonvaPreviewElement({
         ellipsis={false}
       />
       {selectionBox}
+      {allBoundsBox}
     </React.Fragment>
   );
 }

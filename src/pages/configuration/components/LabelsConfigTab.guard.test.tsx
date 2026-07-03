@@ -254,4 +254,17 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_TEMPLATE_NAME_TAKEN'/);
     expect(tabSrc).toMatch(/QR-шаблон с таким именем уже существует/);
   });
+
+  it('shows a floating drag badge for a QR-builder field pick-up, following the cursor', () => {
+    expect(tabSrc).toMatch(/qrFieldDragCursor/);
+    expect(tabSrc).toMatch(/data-label-global-drag-preview-qr-field/);
+    expect(tabSrc).toMatch(/draggingQrField\.label/);
+  });
+
+  it('can toggle bounding-box borders for every label element in the visual preview', () => {
+    expect(tabSrc).toMatch(/showAllBorders/);
+    expect(tabSrc).toMatch(/showAllBounds/);
+    expect(tabSrc).toMatch(/Показать границы всех элементов/);
+    expect(tabSrc).toMatch(/allBoundsBox/);
+  });
 });
