@@ -62,7 +62,7 @@ describe('LabelsConfigTab wiring', () => {
   it('keeps the template list full-width with scroll and supports visual drag editing', () => {
     expect(tabSrc).toMatch(/title="Шаблоны"/);
     expect(tabSrc).toMatch(/scroll=\{\{ y: 430 \}\}/);
-    expect(tabSrc).toMatch(/label: 'Просмотр текущего шаблона'/);
+    expect(tabSrc).toMatch(/header="Просмотр текущего шаблона"/);
     expect(tabSrc).toMatch(/defaultActiveKey=\{\['current-template-preview'\]\}/);
     expect(tabSrc).toMatch(/Collapse/);
     expect(tabSrc).toMatch(/onMoveElement/);
@@ -140,7 +140,7 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/data-label-global-drag-preview/);
     expect(tabSrc).toMatch(/updateDragPreview/);
     expect(tabSrc).toMatch(/text=\{dragPreview\.field\.label\}/);
-    expect(tabSrc).toMatch(/interactive: Boolean\(canDrag && !draggingField\)/);
+    expect(tabSrc).toMatch(/interactive: Boolean\(canDrag && !externalDragActive\)/);
     expect(tabSrc).toMatch(/window\.addEventListener\('pointerup', handleGlobalDrop, true\)/);
   });
 
@@ -193,5 +193,57 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/saveTemplateAs/);
     expect(tabSrc).toMatch(/labelsApi\.createTemplate\(buildTemplatePayload\(values, name\)\)/);
     expect(tabSrc).toMatch(/Создать копию/);
+  });
+
+  it('renders a collapsible QR-код library block under custom fields', () => {
+    expect(tabSrc).toContain('QR-коды');
+    expect(tabSrc).toMatch(/labelsApi\.listQrTemplates/);
+    expect(tabSrc).toMatch(/labelsApi\.createQrTemplate/);
+    expect(tabSrc).toMatch(/labelsApi\.deleteQrTemplate/);
+  });
+
+  it('loads the QR library through its own soft-fail effect, not the all-or-nothing load() Promise.all', () => {
+    expect(tabSrc).toMatch(/loadQrTemplates/);
+    expect(tabSrc).toMatch(/setQrTemplates\(\[\]\)/);
+    expect(tabSrc).not.toMatch(/Promise\.all\(\[\s*labelsApi\.listTemplates\(true\),\s*labelsApi\.listFields\(\),\s*labelsApi\.listQrTemplates/);
+  });
+
+  it('builds QR templates from field-drop chips and excludes label-scoped custom fields from its palette', () => {
+    expect(tabSrc).toMatch(/chipsToTemplate/);
+    expect(tabSrc).toMatch(/templateToChips/);
+    expect(tabSrc).toMatch(/sanitizeQrText/);
+    expect(tabSrc).toMatch(/qrPaletteFields/);
+    expect(tabSrc).toMatch(/field\.category !== 'Кастомные'/);
+    expect(tabSrc).toMatch(/labelsApi\.updateQrTemplate/);
+    expect(tabSrc).toMatch(/draggingQr/);
+  });
+
+  it('lets an ad-hoc QR element be promoted into the global library', () => {
+    expect(tabSrc).toContain('Сохранить в библиотеку');
+    expect(tabSrc).toMatch(/qrDraftFromElement/);
+    expect(tabSrc).toMatch(/promoteAdHocQrToLibrary/);
+    expect(tabSrc).toMatch(/qrSourceTemplateId/);
+  });
+
+  it('drops a dragged library QR onto the canvas at the pointer position with auto-shift', () => {
+    expect(tabSrc).toMatch(/qrElementFromLibrary/);
+    expect(tabSrc).toMatch(/onDropDraggingQr/);
+    expect(tabSrc).toMatch(/sourceTemplateId: payload\.labelQrTemplateId/);
+    expect(tabSrc).toMatch(/el\.elementKey = `qr-\$\{Date\.now\(\)\}`/);
+    expect(tabSrc).toMatch(/externalDragActive = Boolean\(draggingField \|\| draggingQr\)/);
+    expect(tabSrc).toMatch(/data-label-global-drag-preview-qr/);
+    expect(tabSrc).toMatch(/qrDragCursor/);
+  });
+
+  it('maps backend LABEL_QR_NAME_REQUIRED/DUPLICATE save errors and pre-checks empty qr names before saving', () => {
+    expect(tabSrc).toMatch(/collectEmptyQrNames/);
+    expect(tabSrc).toMatch(/QR_NAME_EMPTY_ERROR_PREFIX/);
+    expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_NAME_REQUIRED'/);
+    expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_NAME_DUPLICATE'/);
+  });
+
+  it('distinguishes QR-library name-taken 409s from stale-version 409s', () => {
+    expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_TEMPLATE_NAME_TAKEN'/);
+    expect(tabSrc).toMatch(/QR-шаблон с таким именем уже существует/);
   });
 });

@@ -197,6 +197,44 @@ export interface DeleteLabelTemplateCommand extends LabelsContext {
   idempotencyKey: string;
 }
 
+export interface LabelQrTemplateDto {
+  labelQrTemplateId: number;
+  name: string;
+  contentTemplate: string;
+  errorCorrection: 'L' | 'M' | 'Q' | 'H';
+  defaultSizeMm: number;
+  isActive: boolean;
+  version: number;
+}
+
+export interface LabelQrTemplateInput {
+  name: string;
+  contentTemplate: string;
+  errorCorrection: 'L' | 'M' | 'Q' | 'H';
+  defaultSizeMm: number;
+  idempotencyKey: string;
+}
+
+export interface ListLabelQrTemplatesQuery extends LabelsContext {
+  includeInactive?: boolean;
+}
+
+export interface CreateLabelQrTemplateCommand extends LabelsContext {
+  input: LabelQrTemplateInput;
+}
+
+export interface UpdateLabelQrTemplateCommand extends LabelsContext {
+  id: number;
+  expectedVersion: number;
+  input: LabelQrTemplateInput;
+}
+
+export interface DeleteLabelQrTemplateCommand extends LabelsContext {
+  id: number;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
 export interface GetOrderLabelDataQuery extends LabelsContext {
   orderId: number;
   templateId: number;
@@ -239,7 +277,7 @@ export interface LabelsPermissionDeniedInput {
   requiredPermissions: string[];
   requestId: string;
   targetId?: number;
-  targetEntityType?: 'label_template' | 'order';
+  targetEntityType?: 'label_template' | 'order' | 'label_qr_template';
 }
 
 export interface LabelsPort {
@@ -258,4 +296,8 @@ export interface LabelsPort {
   exportOrderLabels(query: ExportOrderLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }>;
   exportDetailLabels(query: ExportDetailLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }>;
   recordPermissionDenied(input: LabelsPermissionDeniedInput): Promise<void>;
+  listQrTemplates(query: ListLabelQrTemplatesQuery): Promise<LabelQrTemplateDto[]>;
+  createQrTemplate(command: CreateLabelQrTemplateCommand): Promise<LabelQrTemplateDto>;
+  updateQrTemplate(command: UpdateLabelQrTemplateCommand): Promise<LabelQrTemplateDto>;
+  deleteQrTemplate(command: DeleteLabelQrTemplateCommand): Promise<void>;
 }

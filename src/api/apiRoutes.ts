@@ -112,6 +112,8 @@ export const apiRoutes = {
     detailGenerate: backendApiPath('/labels/generate'),
     detailGenerationExport: (generationId: number) =>
       backendApiPath(`/labels/generations/${generationId}/export`),
+    qrTemplates: backendApiPath('/label-qr-templates'),
+    qrTemplate: (id: number) => backendApiPath(`/label-qr-templates/${id}`),
   },
   clientPhones: {
     list: backendApiPath('/client-phones'),

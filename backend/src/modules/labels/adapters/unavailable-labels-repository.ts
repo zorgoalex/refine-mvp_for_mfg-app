@@ -21,6 +21,18 @@ export class UnavailableLabelsRepository implements LabelsPort {
   async deleteTemplate() {
     return unavailable();
   }
+  async listQrTemplates() {
+    return unavailable();
+  }
+  async createQrTemplate() {
+    return unavailable();
+  }
+  async updateQrTemplate() {
+    return unavailable();
+  }
+  async deleteQrTemplate() {
+    return unavailable();
+  }
   async getOrderLabelData() {
     return unavailable();
   }

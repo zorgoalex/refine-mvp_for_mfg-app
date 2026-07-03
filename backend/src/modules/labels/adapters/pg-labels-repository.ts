@@ -8,7 +8,9 @@ import { actorId } from '../application/labels.service';
 import { buildLabelRows, hashLabelRows, type LabelRow } from '../application/label-row-builder';
 import { renderLabelsZip, renderSvgPages } from '../application/label-renderer';
 import type {
+  CreateLabelQrTemplateCommand,
   CreateLabelTemplateCommand,
+  DeleteLabelQrTemplateCommand,
   DeleteLabelTemplateCommand,
   ExportOrderLabelsQuery,
   ExportDetailLabelsQuery,
@@ -17,6 +19,7 @@ import type {
   GetOrderLabelDataQuery,
   GetLabelTemplateQuery,
   LabelExportFormat,
+  LabelQrTemplateDto,
   LabelTemplateDto,
   LabelTemplateElementDto,
   LabelTemplateElementInput,
@@ -24,6 +27,7 @@ import type {
   LabelsPort,
   DetailLabelsPreviewDto,
   LatestOrderLabelsPreviewDto,
+  ListLabelQrTemplatesQuery,
   ListLabelTemplatesQuery,
   OrderLabelDataDetailDto,
   OrderLabelDataDto,
@@ -31,11 +35,14 @@ import type {
   OrderLabelsPreviewDto,
   PreviewDetailLabelsCommand,
   PreviewOrderLabelsCommand,
+  UpdateLabelQrTemplateCommand,
   UpdateOrderLabelDataCommand,
   UpdateLabelTemplateCommand,
 } from '../application/labels.types';
 import {
   LabelCustomFieldSchemaStaleError,
+  LabelQrTemplateNotFoundError,
+  LabelQrTemplateStaleVersionError,
   LabelTemplateNotFoundError,
   LabelTemplateStaleVersionError,
   OrderLabelDataNotFoundError,
@@ -109,6 +116,41 @@ interface GenerationRow extends QueryResultRow {
 
 const TEMPLATE_COLUMNS = `label_template_id, name, description, version, is_active,
   canvas_width_mm, canvas_height_mm, dpi, default_export_formats, custom_field_schema`;
+
+const QR_TEMPLATE_COLUMNS = `label_qr_template_id, name, content_template, error_correction,
+  default_size_mm, is_active, version`;
+
+interface QrTemplateRow extends QueryResultRow {
+  label_qr_template_id: string | number;
+  name: string;
+  content_template: string;
+  error_correction: string;
+  default_size_mm: string | number;
+  is_active: boolean;
+  version: string | number;
+}
+
+function mapQrTemplateRow(row: QrTemplateRow): LabelQrTemplateDto {
+  return {
+    labelQrTemplateId: toNumber(row.label_qr_template_id),
+    name: row.name,
+    contentTemplate: row.content_template,
+    errorCorrection: (row.error_correction as 'L' | 'M' | 'Q' | 'H') ?? 'M',
+    defaultSizeMm: toNumber(row.default_size_mm),
+    isActive: row.is_active,
+    version: toNumber(row.version),
+  };
+}
+
+function qrAuditShape(dto: LabelQrTemplateDto): Record<string, unknown> {
+  return {
+    name: dto.name,
+    contentTemplate: dto.contentTemplate,
+    errorCorrection: dto.errorCorrection,
+    defaultSizeMm: dto.defaultSizeMm,
+    isActive: dto.isActive,
+  };
+}
 
 export class PgLabelsRepository implements LabelsPort {
   constructor(private readonly database: DatabaseService) {}
@@ -305,6 +347,182 @@ export class PgLabelsRepository implements LabelsPort {
         diff: { isActive: false },
         metadata: { idempotencyKey: command.idempotencyKey },
         relatedEntities: [{ entityType: 'label_template', entityId: command.id }],
+      });
+      await completeIdempotency(tx, command.idempotencyKey, { deleted: true });
+    });
+  }
+
+  async listQrTemplates(query: ListLabelQrTemplatesQuery): Promise<LabelQrTemplateDto[]> {
+    const result = await this.database.query<QrTemplateRow>(
+      `SELECT ${QR_TEMPLATE_COLUMNS} FROM label_qr_templates
+       WHERE ($1::boolean IS TRUE OR is_active = true)
+       ORDER BY lower(name), label_qr_template_id`,
+      [query.includeInactive ?? false],
+    );
+    return result.rows.map(mapQrTemplateRow);
+  }
+
+  async createQrTemplate(command: CreateLabelQrTemplateCommand): Promise<LabelQrTemplateDto> {
+    return this.database.transaction(async (tx) => {
+      const input = command.input;
+      const requestHash = hashRequest({ command: 'label_qr_template.create', input });
+      const existing = await claimIdempotency<LabelQrTemplateDto>(
+        tx, input.idempotencyKey, 'label_qr_template.create',
+        actorId(command.currentUser), 'label_qr_template', 'pending', requestHash,
+      );
+      if (existing) return existing;
+      let inserted;
+      try {
+        inserted = await tx.query<QrTemplateRow>(
+          `INSERT INTO label_qr_templates
+            (name, content_template, error_correction, default_size_mm, created_by, updated_by)
+           VALUES ($1,$2,$3,$4,$5,$5)
+           RETURNING ${QR_TEMPLATE_COLUMNS}`,
+          [input.name, input.contentTemplate, input.errorCorrection, input.defaultSizeMm,
+           actorId(command.currentUser)],
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === '23505') {
+          throw new ApiError(409, 'LABEL_QR_TEMPLATE_NAME_TAKEN', 'QR template name already exists', { field: 'name' });
+        }
+        throw error;
+      }
+      const dto = mapQrTemplateRow(inserted.rows[0]);
+      await auditService.record(tx, {
+        event: 'label_qr_template.created',
+        entityType: 'label_qr_template',
+        entityId: dto.labelQrTemplateId,
+        actorUserId: actorId(command.currentUser),
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId: command.requestId,
+        source: 'backend.labels',
+        before: null,
+        after: qrAuditShape(dto),
+        diff: qrAuditShape(dto),
+        metadata: { idempotencyKey: input.idempotencyKey },
+        relatedEntities: [{ entityType: 'label_qr_template', entityId: dto.labelQrTemplateId }],
+      });
+      await completeIdempotency(tx, input.idempotencyKey, dto);
+      return dto;
+    });
+  }
+
+  async updateQrTemplate(command: UpdateLabelQrTemplateCommand): Promise<LabelQrTemplateDto> {
+    return this.database.transaction(async (tx) => {
+      const requestHash = hashRequest({
+        command: 'label_qr_template.update',
+        id: command.id,
+        expectedVersion: command.expectedVersion,
+        input: command.input,
+      });
+      const existing = await claimIdempotency<LabelQrTemplateDto>(
+        tx,
+        command.input.idempotencyKey,
+        'label_qr_template.update',
+        actorId(command.currentUser),
+        'label_qr_template',
+        String(command.id),
+        requestHash,
+      );
+      if (existing) {
+        return existing;
+      }
+      const before = await this.readQrTemplate(tx, command.id, true);
+      if (before.version !== command.expectedVersion) {
+        throw new LabelQrTemplateStaleVersionError(command.expectedVersion, before.version);
+      }
+      const input = command.input;
+      let updated;
+      try {
+        updated = await tx.query<QrTemplateRow>(
+          `UPDATE label_qr_templates SET
+             name=$2, content_template=$3, error_correction=$4, default_size_mm=$5,
+             version=version+1, updated_by=$6, updated_at=now()
+           WHERE label_qr_template_id=$1
+           RETURNING ${QR_TEMPLATE_COLUMNS}`,
+          [
+            command.id,
+            input.name,
+            input.contentTemplate,
+            input.errorCorrection,
+            input.defaultSizeMm,
+            actorId(command.currentUser),
+          ],
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === '23505') {
+          throw new ApiError(409, 'LABEL_QR_TEMPLATE_NAME_TAKEN', 'QR template name already exists', { field: 'name' });
+        }
+        throw error;
+      }
+      if (updated.rowCount === 0) {
+        throw new LabelQrTemplateNotFoundError(command.id);
+      }
+      const dto = mapQrTemplateRow(updated.rows[0]);
+      await auditService.record(tx, {
+        event: 'label_qr_template.updated',
+        entityType: 'label_qr_template',
+        entityId: command.id,
+        actorUserId: actorId(command.currentUser),
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId: command.requestId,
+        source: 'backend.labels',
+        before: qrAuditShape(before),
+        after: qrAuditShape(dto),
+        diff: qrAuditShape(dto),
+        metadata: { idempotencyKey: input.idempotencyKey },
+        relatedEntities: [{ entityType: 'label_qr_template', entityId: command.id }],
+      });
+      await completeIdempotency(tx, input.idempotencyKey, dto);
+      return dto;
+    });
+  }
+
+  async deleteQrTemplate(command: DeleteLabelQrTemplateCommand): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const requestHash = hashRequest({
+        command: 'label_qr_template.delete',
+        id: command.id,
+        expectedVersion: command.expectedVersion,
+      });
+      const existing = await claimIdempotency<{ deleted: true }>(
+        tx,
+        command.idempotencyKey,
+        'label_qr_template.delete',
+        actorId(command.currentUser),
+        'label_qr_template',
+        String(command.id),
+        requestHash,
+      );
+      if (existing) {
+        return;
+      }
+      const before = await this.readQrTemplate(tx, command.id, true);
+      if (before.version !== command.expectedVersion) {
+        throw new LabelQrTemplateStaleVersionError(command.expectedVersion, before.version);
+      }
+      await tx.query(
+        `UPDATE label_qr_templates
+         SET is_active=false, version=version+1, updated_by=$2, updated_at=now()
+         WHERE label_qr_template_id=$1`,
+        [command.id, actorId(command.currentUser)],
+      );
+      await auditService.record(tx, {
+        event: 'label_qr_template.deleted',
+        entityType: 'label_qr_template',
+        entityId: command.id,
+        actorUserId: actorId(command.currentUser),
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId: command.requestId,
+        source: 'backend.labels',
+        before: qrAuditShape(before),
+        after: { isActive: false },
+        diff: { isActive: false },
+        metadata: { idempotencyKey: command.idempotencyKey },
+        relatedEntities: [{ entityType: 'label_qr_template', entityId: command.id }],
       });
       await completeIdempotency(tx, command.idempotencyKey, { deleted: true });
     });
@@ -753,8 +971,14 @@ export class PgLabelsRepository implements LabelsPort {
 
   async recordPermissionDenied(input: LabelsPermissionDeniedInput): Promise<void> {
     const entityType = input.targetEntityType ?? 'label_template';
+    const event =
+      entityType === 'order'
+        ? 'order_labels.permission_denied'
+        : entityType === 'label_qr_template'
+          ? 'label_qr_template.permission_denied'
+          : 'label_template.permission_denied';
     await auditService.recordDenied(this.database, {
-      event: entityType === 'order' ? 'order_labels.permission_denied' : 'label_template.permission_denied',
+      event,
       entityType,
       entityId: input.targetId ?? 'catalog',
       actorUserId: actorId(input.currentUser),
@@ -786,6 +1010,24 @@ export class PgLabelsRepository implements LabelsPort {
     const template = mapTemplateRow(result.rows[0]);
     const elements = await loadElements(client, template.labelTemplateId);
     return { ...template, elements };
+  }
+
+  private async readQrTemplate(
+    client: DatabaseClient,
+    id: number,
+    lock = false,
+  ): Promise<LabelQrTemplateDto> {
+    const result = await client.query<QrTemplateRow>(
+      `SELECT ${QR_TEMPLATE_COLUMNS}
+       FROM label_qr_templates
+       WHERE label_qr_template_id = $1
+       ${lock ? 'FOR UPDATE' : ''}`,
+      [id],
+    );
+    if (result.rowCount === 0) {
+      throw new LabelQrTemplateNotFoundError(id);
+    }
+    return mapQrTemplateRow(result.rows[0]);
   }
 
   private async loadElementsByTemplateIds(

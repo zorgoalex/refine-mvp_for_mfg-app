@@ -4,7 +4,7 @@ import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { isBuiltInLabelFieldId, isSupportedFieldBinding } from './bazis-field-catalog';
 import { LABEL_FIELD_CATALOG, type LabelFieldCatalogItem } from './bazis-field-catalog';
-import { validateQrTemplateElement } from './label-template-fields';
+import { validateQrTemplateElement, extractLabelTemplateFieldIds } from './label-template-fields';
 import type {
   CreateLabelTemplateCommand,
   DeleteLabelTemplateCommand,
@@ -29,6 +29,12 @@ import type {
   PreviewOrderLabelsCommand,
   UpdateOrderLabelDataCommand,
   UpdateLabelTemplateCommand,
+  LabelQrTemplateDto,
+  LabelQrTemplateInput,
+  ListLabelQrTemplatesQuery,
+  CreateLabelQrTemplateCommand,
+  UpdateLabelQrTemplateCommand,
+  DeleteLabelQrTemplateCommand,
 } from './labels.types';
 import { LabelFieldBindingError } from '../errors/labels.errors';
 
@@ -127,11 +133,33 @@ export class LabelsService {
     return this.repo.exportDetailLabels(query);
   }
 
+  async listQrTemplates(query: ListLabelQrTemplatesQuery): Promise<LabelQrTemplateDto[]> {
+    await this.require(query, [VIEW], undefined, 'label_qr_template');
+    return this.repo.listQrTemplates(query);
+  }
+
+  async createQrTemplate(command: CreateLabelQrTemplateCommand): Promise<LabelQrTemplateDto> {
+    await this.require(command, [MANAGE_TEMPLATES], undefined, 'label_qr_template');
+    validateQrTemplateInput(command.input);
+    return this.repo.createQrTemplate(command);
+  }
+
+  async updateQrTemplate(command: UpdateLabelQrTemplateCommand): Promise<LabelQrTemplateDto> {
+    await this.require(command, [MANAGE_TEMPLATES], command.id, 'label_qr_template');
+    validateQrTemplateInput(command.input);
+    return this.repo.updateQrTemplate(command);
+  }
+
+  async deleteQrTemplate(command: DeleteLabelQrTemplateCommand): Promise<void> {
+    await this.require(command, [MANAGE_TEMPLATES], command.id, 'label_qr_template');
+    return this.repo.deleteQrTemplate(command);
+  }
+
   private async require(
     ctx: LabelsContext,
     permissions: PermissionName[],
     targetId?: number,
-    targetEntityType: 'label_template' | 'order' = 'label_template',
+    targetEntityType: 'label_template' | 'order' | 'label_qr_template' = 'label_template',
   ): Promise<void> {
     if (this.permissions.canUserAny(ctx.currentUser, permissions)) {
       return;
@@ -156,6 +184,33 @@ export function validateTemplateInput(input: LabelTemplateInput): void {
   validateCustomFieldMappings(customFieldSchema);
   for (const [index, element] of input.elements.entries()) {
     validateElementFieldBinding(element, customFieldSchema, index);
+  }
+  validateQrElementNames(input.elements);
+}
+
+export function validateQrTemplateInput(input: LabelQrTemplateInput): void {
+  if (!input.contentTemplate.trim()) {
+    throw new ApiError(422, 'LABEL_QR_TEMPLATE_EMPTY', 'QR template content is required', {});
+  }
+  for (const fieldId of extractLabelTemplateFieldIds(input.contentTemplate)) {
+    if (!isSupportedFieldBinding(fieldId, {})) {
+      throw new LabelFieldBindingError(fieldId); // maps to 422 LABEL_FIELD_BINDING_INVALID
+    }
+  }
+}
+
+export function validateQrElementNames(elements: LabelTemplateElementInput[]): void {
+  const seen = new Set<string>();
+  for (const [index, element] of elements.entries()) {
+    if (element.kind !== 'qr') continue;
+    const name = String((element.style as Record<string, unknown> | undefined)?.qrName ?? '').trim();
+    if (!name) {
+      throw new ApiError(422, 'LABEL_QR_NAME_REQUIRED', 'QR element requires a name', { elementIndex: index });
+    }
+    if (seen.has(name.toLowerCase())) {
+      throw new ApiError(422, 'LABEL_QR_NAME_DUPLICATE', 'QR names must be unique within a label', { elementIndex: index, name });
+    }
+    seen.add(name.toLowerCase());
   }
 }
 

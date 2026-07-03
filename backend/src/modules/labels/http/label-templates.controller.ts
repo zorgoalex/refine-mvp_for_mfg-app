@@ -91,7 +91,7 @@ export function parseId(value: string): number {
   return id;
 }
 
-function parse<T>(schema: z.ZodType<T>, body: unknown): T {
+export function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Label payload validation failed', {

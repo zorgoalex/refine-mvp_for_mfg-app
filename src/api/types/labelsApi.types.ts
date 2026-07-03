@@ -151,3 +151,23 @@ export interface OrderLabelGeneration {
 export interface LatestOrderLabelsPreview extends OrderLabelGeneration {
   svgPages: string[];
 }
+
+export interface LabelQrTemplate {
+  labelQrTemplateId: number;
+  name: string;
+  contentTemplate: string;
+  errorCorrection: 'L' | 'M' | 'Q' | 'H';
+  defaultSizeMm: number;
+  isActive: boolean;
+  version: number;
+}
+
+export interface LabelQrTemplateInput {
+  name: string;
+  contentTemplate: string;
+  errorCorrection: 'L' | 'M' | 'Q' | 'H';
+  defaultSizeMm: number;
+  idempotencyKey: string;
+}
+
+export type UpdateLabelQrTemplateInput = LabelQrTemplateInput & { version: number };
