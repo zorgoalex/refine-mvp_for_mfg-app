@@ -100,6 +100,15 @@ const MAX_SVG_WIDTH_PX = 700;
 /** Snap threshold (px): snap engages when the nearest candidate is within this many screen pixels. */
 const SNAP_THRESHOLD_PX = 10;
 
+/** Edge band that starts scrolling while dragging a piece across a tall sheet group. */
+const DRAG_SCROLL_ZONE_PX = 96;
+
+/** Max autoscroll speed while dragging near an edge. */
+const DRAG_SCROLL_MAX_PX_PER_FRAME = 18;
+
+/** SVG labels must fit actual oriented piece bounds; allow stronger shrink than preview HTML. */
+const SVG_LABEL_MIN_SCALE = 0.05;
+
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
 function pKey(item_id: string, instance: number): string {
@@ -131,6 +140,66 @@ function clientToSVG(
     x: ((clientX - rect.left) / rect.width) * vb.width,
     y: ((clientY - rect.top) / rect.height) * vb.height,
   };
+}
+
+function clipIdForPiece(sheetIndex: number, itemId: string, instance: number): string {
+  return `cut-piece-label-clip-${sheetIndex}-${itemId.replace(/[^a-zA-Z0-9_-]/g, '-')}-${instance}`;
+}
+
+function scrollBounds(el: Element): { top: number; bottom: number; canUp: boolean; canDown: boolean; scrollBy: (dy: number) => void } {
+  const scrollingElement = document.scrollingElement;
+  if (el === scrollingElement) {
+    const top = 0;
+    const bottom = window.innerHeight;
+    const maxScroll = Math.max(0, scrollingElement.scrollHeight - window.innerHeight);
+    return {
+      top,
+      bottom,
+      canUp: window.scrollY > 0,
+      canDown: window.scrollY < maxScroll,
+      scrollBy: (dy) => window.scrollBy(0, dy),
+    };
+  }
+  const htmlEl = el as HTMLElement;
+  const rect = htmlEl.getBoundingClientRect();
+  return {
+    top: rect.top,
+    bottom: rect.bottom,
+    canUp: htmlEl.scrollTop > 0,
+    canDown: htmlEl.scrollTop + htmlEl.clientHeight < htmlEl.scrollHeight - 1,
+    scrollBy: (dy) => { htmlEl.scrollTop += dy; },
+  };
+}
+
+function isScrollableY(el: Element): boolean {
+  if (el === document.scrollingElement) return true;
+  const htmlEl = el as HTMLElement;
+  if (htmlEl.scrollHeight <= htmlEl.clientHeight + 1) return false;
+  const overflowY = window.getComputedStyle(htmlEl).overflowY;
+  return overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay';
+}
+
+function scrollableParents(el: HTMLElement | null): Element[] {
+  const out: Element[] = [];
+  let current: HTMLElement | null = el;
+  while (current) {
+    if (isScrollableY(current)) out.push(current);
+    current = current.parentElement;
+  }
+  if (document.scrollingElement) out.push(document.scrollingElement);
+  return out;
+}
+
+function edgeScrollDelta(clientY: number, bounds: { top: number; bottom: number; canUp: boolean; canDown: boolean }): number {
+  if (clientY <= bounds.top + DRAG_SCROLL_ZONE_PX && bounds.canUp) {
+    const distance = Math.max(0, clientY - bounds.top);
+    return -DRAG_SCROLL_MAX_PX_PER_FRAME * (1 - Math.min(distance, DRAG_SCROLL_ZONE_PX) / DRAG_SCROLL_ZONE_PX);
+  }
+  if (clientY >= bounds.bottom - DRAG_SCROLL_ZONE_PX && bounds.canDown) {
+    const distance = Math.max(0, bounds.bottom - clientY);
+    return DRAG_SCROLL_MAX_PX_PER_FRAME * (1 - Math.min(distance, DRAG_SCROLL_ZONE_PX) / DRAG_SCROLL_ZONE_PX);
+  }
+  return 0;
 }
 
 /** Clamp piece origin so the piece stays within the usable area. */
@@ -226,6 +295,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     instance: number;
   } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  const editorRootRef = useRef<HTMLDivElement | null>(null);
 
   // ── Stable refs for window-level event handlers (avoid re-subscription on every state change) ──
   const dragRef = useRef<DragState | null>(null);
@@ -244,6 +314,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   onChangeRef.current = onChange;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const lastPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  const autoScrollFrameRef = useRef<number | null>(null);
 
   // Guard ref: keeps cross-sheet move policy current for the window-level handleUp handler.
   const guardRef = useRef({ splitByMaterial, combineFilms, groupMaterialTypeId, groupFilmId, pieceMetaByItemId });
@@ -263,7 +335,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
   // ── Window-level pointer handlers (registered once; state accessed via refs) ──
   useEffect(() => {
-    const handleMove = (e: PointerEvent) => {
+    const updateDragFromClient = (clientX: number, clientY: number) => {
       const d = dragRef.current;
       if (!d) return;
 
@@ -288,10 +360,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
       for (const [si, svgEl] of svgRefsMap.current) {
         const rect = svgEl.getBoundingClientRect();
         if (
-          e.clientX >= rect.left &&
-          e.clientX <= rect.right &&
-          e.clientY >= rect.top &&
-          e.clientY <= rect.bottom
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
         ) {
           targetSheetIndex = si;
           targetSvgEl = svgEl;
@@ -304,7 +376,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         currentSheets.find((s) => s.sheetIndex === targetSheetIndex) ?? sourceSheet;
 
       // SVG coordinates in the target sheet's viewBox (mm)
-      const svgPt = clientToSVG(targetSvgEl, e.clientX, e.clientY);
+      const svgPt = clientToSVG(targetSvgEl, clientX, clientY);
 
       // Keep the ORIGINAL grab offset across a sheet crossing. A cut group's
       // sheets share dimensions, trim and orientation, so this offset (viewBox mm)
@@ -377,9 +449,51 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
       setDrag(next);
     };
 
+    const performDragAutoScroll = () => {
+      const pointer = lastPointerRef.current;
+      if (!dragRef.current || !pointer) {
+        autoScrollFrameRef.current = null;
+        return;
+      }
+
+      for (const target of scrollableParents(editorRootRef.current)) {
+        const bounds = scrollBounds(target);
+        const dy = edgeScrollDelta(pointer.clientY, bounds);
+        if (dy !== 0) {
+          bounds.scrollBy(dy);
+          updateDragFromClient(pointer.clientX, pointer.clientY);
+          break;
+        }
+      }
+      autoScrollFrameRef.current = window.requestAnimationFrame(performDragAutoScroll);
+    };
+
+    const ensureAutoScroll = () => {
+      if (autoScrollFrameRef.current === null) {
+        autoScrollFrameRef.current = window.requestAnimationFrame(performDragAutoScroll);
+      }
+    };
+
+    const stopAutoScroll = () => {
+      if (autoScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(autoScrollFrameRef.current);
+        autoScrollFrameRef.current = null;
+      }
+      lastPointerRef.current = null;
+    };
+
+    const handleMove = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY };
+      updateDragFromClient(e.clientX, e.clientY);
+      ensureAutoScroll();
+    };
+
     const handleUp = () => {
       const d = dragRef.current;
       if (!d) return;
+      stopAutoScroll();
 
       const currentSheets = sheetsRef.current;
       const { sourceSheetIndex, targetSheetIndex, item_id, instance, currentX_mm, currentY_mm } = d;
@@ -456,6 +570,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     return () => {
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', handleUp);
+      stopAutoScroll();
     };
   }, []); // Empty deps intentional: all mutable state is accessed through refs above
 
@@ -547,6 +662,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div
+      ref={editorRootRef}
       data-testid="sheet-editor"
       // Disable native text selection / drag-image. Grabbing a piece must not let
       // the browser start a text selection over the SVG <text> labels — that
@@ -752,7 +868,17 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 // Base font capped to fit the piece; auto-shrink further if needed.
                 // line1Scale accounts for the order-name line being LINE1_SCALE× larger.
                 const baseFont = Math.max(4, Math.min(r.w, r.h) * 0.25);
-                const labelScale = fitLabelScale({ lines: labelLines, boxW: r.w, boxH: r.h, baseFont, line1Scale: LINE1_SCALE });
+                const labelPad = Math.max(mmPerPx * 2, Math.min(r.w, r.h) * 0.03);
+                const labelBoxW = Math.max(1, r.w - labelPad * 2);
+                const labelBoxH = Math.max(1, r.h - labelPad * 2);
+                const labelScale = fitLabelScale({
+                  lines: labelLines,
+                  boxW: labelBoxW,
+                  boxH: labelBoxH,
+                  baseFont,
+                  minScale: SVG_LABEL_MIN_SCALE,
+                  line1Scale: LINE1_SCALE,
+                });
                 const fontSize = baseFont * labelScale;
                 // Vertical positions: block of (L0_tall, L1, L2) centered at cy.
                 // L0 height = fontSize * LINE1_SCALE * 1.2; L1/L2 height = fontSize * 1.2.
@@ -821,6 +947,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                     {(() => {
                       const cx = r.x + r.w / 2;
                       const cy = r.y + r.h / 2;
+                      const labelClipId = clipIdForPiece(sheetIndex, piece.item_id, piece.instance);
                       const textFill = isViolating ? '#cf1322' : '#1d3557';
                       // Block height = (LINE1_SCALE + 1 + 1) * lineH.
                       // Vertical centers derived from block being centered at cy:
@@ -840,24 +967,29 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       const dimsLine = splitDimsLine(labelLines[2]);
                       return (
                         <>
+                          <clipPath id={labelClipId} clipPathUnits="userSpaceOnUse">
+                            <rect x={r.x + labelPad} y={r.y + labelPad} width={labelBoxW} height={labelBoxH} />
+                          </clipPath>
                           {/* L0: order name — large + bold */}
-                          <text {...sharedProps} x={cx} y={y0} fontSize={font0} fontWeight={600}>
-                            {labelLines[0]}
-                          </text>
-                          {/* L1: # position · instance/qty */}
-                          <text {...sharedProps} x={cx} y={y1} fontSize={fontSize}>
-                            {labelLines[1]}
-                          </text>
-                          {/* L2: dimensions with half-size '*' separator */}
-                          <text {...sharedProps} x={cx} y={y2} fontSize={fontSize}>
-                            {dimsLine ? (
-                              <>
-                                <tspan>{dimsLine.w}</tspan>
-                                <tspan fontSize={fontSize * 0.5}>*</tspan>
-                                <tspan>{dimsLine.h}</tspan>
-                              </>
-                            ) : labelLines[2]}
-                          </text>
+                          <g clipPath={`url(#${labelClipId})`}>
+                            <text {...sharedProps} x={cx} y={y0} fontSize={font0} fontWeight={600}>
+                              {labelLines[0]}
+                            </text>
+                            {/* L1: # position · instance/qty */}
+                            <text {...sharedProps} x={cx} y={y1} fontSize={fontSize}>
+                              {labelLines[1]}
+                            </text>
+                            {/* L2: dimensions with half-size '*' separator */}
+                            <text {...sharedProps} x={cx} y={y2} fontSize={fontSize}>
+                              {dimsLine ? (
+                                <>
+                                  <tspan>{dimsLine.w}</tspan>
+                                  <tspan fontSize={fontSize * 0.5}>*</tspan>
+                                  <tspan>{dimsLine.h}</tspan>
+                                </>
+                              ) : labelLines[2]}
+                            </text>
+                          </g>
                         </>
                       );
                     })()}

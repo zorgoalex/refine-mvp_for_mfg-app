@@ -66,4 +66,20 @@ describe('SheetEditor source contract', () => {
     expect(src).not.toMatch(/x_mm:\s*d\.currentX_mm/);
     expect(src).not.toMatch(/y_mm:\s*d\.currentY_mm/);
   });
+  it('auto-scrolls the editor/page while dragging near a vertical edge', () => {
+    expect(src).toMatch(/DRAG_SCROLL_ZONE_PX/);
+    expect(src).toMatch(/DRAG_SCROLL_MAX_PX_PER_FRAME/);
+    expect(src).toMatch(/lastPointerRef/);
+    expect(src).toMatch(/performDragAutoScroll/);
+    expect(src).toMatch(/scrollableParents\(editorRootRef\.current\)/);
+    expect(src).toMatch(/updateDragFromClient\(pointer\.clientX,\s*pointer\.clientY\)/);
+  });
+  it('clips SVG labels to the oriented piece rect and allows strong shrink for long order names', () => {
+    expect(src).toMatch(/SVG_LABEL_MIN_SCALE\s*=\s*0\.05/);
+    expect(src).toMatch(/clipPathUnits="userSpaceOnUse"/);
+    expect(src).toMatch(/clipPath=\{`url\(#\$\{labelClipId\}\)`\}/);
+    expect(src).toMatch(/boxW:\s*labelBoxW/);
+    expect(src).toMatch(/boxH:\s*labelBoxH/);
+    expect(src).toMatch(/minScale:\s*SVG_LABEL_MIN_SCALE/);
+  });
 });

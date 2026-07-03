@@ -282,6 +282,19 @@ describe('fitLabelScale', () => {
     expect(scale).toBe(0.5);
   });
 
+  it('can shrink below the old 0.3 floor for long names on narrow rotated pieces', () => {
+    const scale = fitLabelScale({
+      lines: ['Тест SP3 листовой МДФ18', '# 45 · 1/1', '666*560'],
+      boxW: 520,
+      boxH: 640,
+      baseFont: 140,
+      minScale: 0.05,
+      line1Scale: LINE1_SCALE,
+    });
+    expect(scale).toBeGreaterThan(0.05);
+    expect(scale).toBeLessThan(0.3);
+  });
+
   it('returns minScale for degenerate zero-width box', () => {
     const scale = fitLabelScale({
       lines: ['A'],
