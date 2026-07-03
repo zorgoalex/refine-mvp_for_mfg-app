@@ -242,3 +242,68 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     `</svg>`,
   ].join('');
 }
+
+export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
+  const { sheet, labelFor, fillFor, rotate90 = false, originTopLeft = false } = input;
+  const w = sheet.sheet_width_mm;
+  const h = sheet.sheet_height_mm;
+  const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 42));
+  const sideFontMm = Math.max(18, Math.round(fontMm * 0.85));
+  const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
+
+  const pieces = sheet.pieces
+    .map((piece) => {
+      const x = sheet.trim_mm.left + piece.x_mm;
+      const y = sheet.trim_mm.top + piece.y_mm;
+      const rect = orientPieceRect({ x, y, w: piece.width_mm, h: piece.height_mm }, w, h, rotate90, originTopLeft);
+      const cx = rect.x + rect.w / 2;
+      const cy = rect.y + rect.h / 2;
+      const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;
+      const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
+        rect.h,
+      )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`;
+
+      const resolved = labelFor(piece);
+      const lines = (Array.isArray(resolved) ? resolved : [resolved]).slice(0, 2);
+      const tspans = lines
+        .map((line, i) => {
+          const dy = i === 0 ? `${(-(lines.length - 1) / 2).toFixed(3)}em` : '1em';
+          return `<tspan x="${num(cx)}" dy="${dy}">${escapeXml(line)}</tspan>`;
+        })
+        .join('');
+      const centerText = lines.length > 0
+        ? `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+            fontMm,
+          )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${tspans}</text>`
+        : '';
+
+      const sideTexts: string[] = [];
+      if (rect.w >= sideFontMm * 2.5) {
+        sideTexts.push(
+          `<text x="${num(cx)}" y="${num(rect.y + sideFontMm * 0.9)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+            sideFontMm,
+          )}" fill="#111111" text-anchor="middle" dominant-baseline="middle">${escapeXml(formatDimension(rect.w))}</text>`,
+        );
+      }
+      if (rect.h >= sideFontMm * 2.5) {
+        const tx = rect.x + sideFontMm * 0.75;
+        sideTexts.push(
+          `<text x="${num(tx)}" y="${num(cy)}" transform="rotate(-90 ${num(tx)} ${num(
+            cy,
+          )})" font-family="Liberation Sans, sans-serif" font-size="${num(
+            sideFontMm,
+          )}" fill="#111111" text-anchor="middle" dominant-baseline="middle">${escapeXml(formatDimension(rect.h))}</text>`,
+        );
+      }
+
+      return [rectEl, ...sideTexts, centerText].join('');
+    })
+    .join('');
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(vbW)} ${num(vbH)}">`,
+    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
+    pieces,
+    `</svg>`,
+  ].join('');
+}

@@ -52,8 +52,8 @@ describe('buildSheetsPdf', () => {
           films: ['Белая', 'Матовая'],
         },
         detailRows: [
-          { position: 1, lengthMm: 898, widthMm: 548, quantity: 2 },
-          { position: 2, lengthMm: 378, widthMm: 598, quantity: 1 },
+          { order: '1001', position: 1, lengthMm: 898, widthMm: 548, quantity: 2 },
+          { order: '1002', position: 2, lengthMm: 378, widthMm: 598, quantity: 1 },
         ],
       },
     ]);
@@ -65,6 +65,9 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('Пленка:');
     expect(rendered).toContain('Белая, Матовая');
     expect(rendered).toContain('Детали');
+    expect(rendered).toContain('Заказ');
+    expect(rendered).toContain('Поз.');
+    expect(rendered).toContain('1001');
   });
 
   it('renders bath header values as one field text call instead of continued fragments', async () => {

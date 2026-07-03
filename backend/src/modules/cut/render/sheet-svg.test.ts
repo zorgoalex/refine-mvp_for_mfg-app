@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildBathProfileSheetSvg,
   buildSheetSvg,
   composePieceLabelLines,
   computeGroupItemQuantities,
@@ -129,6 +130,25 @@ describe('buildSheetSvg multi-line labels', () => {
   it('keeps the legacy piece fill when no order color is resolved', () => {
     const svg = buildSheetSvg({ sheet, labelFor: () => 'X', fillFor: () => null });
     expect(svg).toContain('fill="#eef3f8"');
+  });
+});
+
+describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
+  it('puts dimensions along sides and keeps only order/position in the centre', () => {
+    const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
+
+    expect(svg).toMatch(/<tspan x="310"[^>]*>11300<\/tspan>/);
+    expect(svg).toMatch(/<tspan x="310"[^>]*>поз\. 5<\/tspan>/);
+    expect(svg).not.toContain('600X400');
+    expect(svg).toMatch(/<text x="310" y="[^"]*"[^>]*>600<\/text>/);
+    expect(svg).toMatch(/transform="rotate\(-90 [^"]+\)"[^>]*>400<\/text>/);
+  });
+
+  it('does not change the standard SVG renderer output', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
+
+    expect(svg).toContain('600X400');
+    expect(svg).not.toContain('rotate(-90');
   });
 });
 

@@ -14,6 +14,7 @@ const MM_TO_PT = 2.834645669; // 1 mm in PDF points (1/72 inch)
 
 export interface PdfSheetInput {
   svg: string;
+  bathSvg?: string;
   sheetWidthMm: number;
   sheetHeightMm: number;
   sheetNumber?: number;
@@ -33,6 +34,7 @@ export interface PdfSheetMeta {
 }
 
 export interface PdfSheetDetailRow {
+  order: string;
   position: number | string;
   lengthMm: number | null;
   widthMm: number | null;
@@ -116,7 +118,7 @@ function drawBathProfilePage(doc: PDFKit.PDFDocument, sheet: PdfSheetInput, font
   const scale = Math.min(drawingW / Math.max(sheet.sheetWidthMm, 1), drawingH / Math.max(sheet.sheetHeightMm, 1));
   const svgW = sheet.sheetWidthMm * scale;
   const svgH = sheet.sheetHeightMm * scale;
-  SVGtoPDF(doc, sheet.svg, drawingX, drawingY, {
+  SVGtoPDF(doc, sheet.bathSvg ?? sheet.svg, drawingX, drawingY, {
     width: svgW,
     height: svgH,
     assumePt: false,
@@ -165,8 +167,8 @@ function drawDetailsTable(
   const title = Number.isInteger(sheetNumber) ? `Лист ${sheetNumber}` : 'Лист';
   doc.fontSize(10).text(title, x, y - 25, { width: w, align: 'center' });
   doc.fontSize(9).text('Детали', x, y - 13, { width: w, align: 'center' });
-  const col = [20, 42, 42, 38, 26];
-  const headers = ['#', 'Длина', 'Ширина', 'Кол-во', 'до'];
+  const col = [34, 28, 36, 36, 34];
+  const headers = ['Заказ', 'Поз.', 'Длина', 'Ширина', 'Кол-во'];
   let cy = y;
   drawTableRow(doc, headers, x, cy, col, true);
   cy += 16;
@@ -174,11 +176,11 @@ function drawDetailsTable(
     drawTableRow(
       doc,
       [
+        row.order,
         String(row.position),
         formatMm(row.lengthMm),
         formatMm(row.widthMm),
         String(row.quantity),
-        row.due ?? '',
       ],
       x,
       cy,

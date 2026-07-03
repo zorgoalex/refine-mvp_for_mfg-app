@@ -81,7 +81,7 @@ import type {
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
 import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, MATERIAL_NAMES_BY_JOB_SQL, type TotalsRow } from './cut-totals';
-import { buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, createOrderFillResolver } from '../render/sheet-svg';
+import { buildBathProfileSheetSvg, buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, createOrderFillResolver } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import { buildSheetsPdf, type PdfSheetDetailRow, type PdfSheetInput, type PdfSheetMeta } from '../render/sheet-pdf';
 import {
@@ -138,6 +138,7 @@ interface RenderedSheetContext {
   sheetIndex: number;
   placements: SheetPlacementsJson;
   svg: string;
+  bathSvg: string;
   pdfMeta: PdfSheetMeta;
   pdfDetailRows: PdfSheetDetailRow[];
 }
@@ -1580,6 +1581,7 @@ export class PgCutRepository implements CutRepositoryPort {
     return buildSheetsPdf(
       printableSheets.map((s, index) => ({
         svg: s.svg,
+        bathSvg: s.bathSvg,
         sheetWidthMm: query.rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
         sheetHeightMm: query.rotate90 ? s.placements.sheet_width_mm : s.placements.sheet_height_mm,
         sheetNumber: index + 1,
@@ -1623,6 +1625,7 @@ export class PgCutRepository implements CutRepositoryPort {
         if (sheet.placements.pieces.length === 0) continue;
         pdfSheets.push({
           svg: sheet.svg,
+          bathSvg: sheet.bathSvg,
           sheetWidthMm: query.rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
           sheetHeightMm: query.rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
           sheetNumber,
@@ -1919,6 +1922,7 @@ export class PgCutRepository implements CutRepositoryPort {
           sheetIndex: s.sheetIndex,
           placements: s.placements,
           svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft, showLabels }),
+          bathSvg: buildBathProfileSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft }),
           pdfMeta: buildPdfSheetMeta(s.placements, detailById),
           pdfDetailRows: buildPdfDetailRows(s.placements, detailById),
         };
@@ -2925,17 +2929,18 @@ function buildPdfDetailRows(
   for (const piece of placements.pieces) {
     const detailId = parseFreecutItemId(piece.item_id);
     const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+    const order = String(detail?.orderName ?? detail?.orderId ?? '-');
     const position = detail?.detailNumber ?? detailId ?? piece.item_id;
     const width = detail?.widthMm ?? piece.width_mm;
     const height = detail?.heightMm ?? piece.height_mm;
     const lengthMm = Math.max(width, height);
     const widthMm = Math.min(width, height);
-    const key = `${position}:${lengthMm}:${widthMm}`;
+    const key = `${order}:${position}:${lengthMm}:${widthMm}`;
     const existing = byKey.get(key);
     if (existing) {
       existing.quantity += 1;
     } else {
-      byKey.set(key, { position, lengthMm, widthMm, quantity: 1 });
+      byKey.set(key, { order, position, lengthMm, widthMm, quantity: 1 });
     }
   }
   return [...byKey.values()].sort((a, b) => Number(a.position) - Number(b.position));
