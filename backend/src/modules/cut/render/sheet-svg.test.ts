@@ -140,8 +140,8 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toMatch(/<text x="310"[^>]*fill="#7f1d1d"[^>]*font-weight="700"[^>]*>11300<\/text>/);
     expect(svg).toMatch(/<text x="310"[^>]*fill="#14532d"[^>]*>поз\. 5<\/text>/);
     expect(svg).not.toContain('600X400');
-    expect(svg).toMatch(/<text x="310" y="[^"]*"[^>]*font-size="84"[^>]*>600<\/text>/);
-    expect(svg).toMatch(/transform="rotate\(-90 [^"]+\)"[^>]*font-size="84"[^>]*>400<\/text>/);
+    expect(svg).toMatch(/<text x="310" y="[^"]*"[^>]*font-size="42"[^>]*>600<\/text>/);
+    expect(svg).toMatch(/transform="rotate\(-90 [^"]+\)"[^>]*font-size="42"[^>]*>400<\/text>/);
   });
 
   it('does not change the standard SVG renderer output', () => {
@@ -162,15 +162,16 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toMatch(/<text x="510"[^>]*font-size="98"[^>]*fill="#14532d"[^>]*>поз\. 5<\/text>/);
   });
 
-  it('doubles bath PDF detail font even for short pieces', () => {
+  it('omits bath PDF center labels for short pieces that cannot hold them', () => {
     const shortSheet: SheetPlacementsJson = {
       ...sheet,
       pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 1000, height_mm: 80, rotated: false }],
     };
     const svg = buildBathProfileSheetSvg({ sheet: shortSheet, labelFor: () => ['11300', 'поз. 5', '1000X80'] });
 
-    expect(svg).toMatch(/font-size="[^"]+"[^>]*fill="#7f1d1d"[^>]*font-weight="700"[^>]*>11300<\/text><text x="[^"]+" y="[^"]+"[^>]*fill="#14532d"[^>]*>поз\. 5<\/text>/);
-    expect(svg).toMatch(/font-size="84"[^>]*>1000<\/text>/);
+    expect(svg).not.toContain('>11300</text>');
+    expect(svg).not.toContain('>поз. 5</text>');
+    expect(svg).toMatch(/font-size="28"[^>]*>1000<\/text>/);
   });
 
   it('styles bath PDF center detail labels by semantic part', () => {
@@ -183,17 +184,18 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).not.toContain('<tspan fill="#7f1d1d"');
   });
 
-  it('uses one-line bath PDF labels for low narrow-height details and shrinks when needed', () => {
+  it('shrinks side dimensions and omits center labels for narrow strip details', () => {
     const lowSheet: SheetPlacementsJson = {
       ...sheet,
-      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 320, height_mm: 55, rotated: false }],
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 2702, height_mm: 40, rotated: false }],
     };
-    const svg = buildBathProfileSheetSvg({ sheet: lowSheet, labelFor: () => ['113001', 'поз. 33', '320X55'] });
+    const svg = buildBathProfileSheetSvg({ sheet: lowSheet, labelFor: () => ['113001', 'поз. 33', '2702X40'] });
 
-    expect(svg).toMatch(/fill="#7f1d1d"[^>]*font-weight="700"[^>]*>113001<\/text><text x="[^"]+" y="[^"]+"[^>]*fill="#14532d"[^>]*>поз\. 33<\/text>/);
-    const match = /font-size="([0-9.]+)"[^>]*fill="#7f1d1d"[^>]*font-weight="700"[^>]*>113001/.exec(svg);
+    expect(svg).not.toContain('>113001</text>');
+    expect(svg).not.toContain('>поз. 33</text>');
+    const match = /font-size="([0-9.]+)"[^>]*>2702<\/text>/.exec(svg);
     expect(match).not.toBeNull();
-    expect(Number(match?.[1])).toBeLessThan(98);
+    expect(Number(match?.[1])).toBeLessThan(18);
   });
 });
 

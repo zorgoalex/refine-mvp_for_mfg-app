@@ -128,4 +128,20 @@ describe('buildSheetsPdf', () => {
     const rendered = textSpy.mock.calls.map((call) => String(call[0])).join('\n');
     expect(rendered).toContain('Лист 3');
   });
+
+  it('keeps bath detail table cells on one line with fitted font', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('bath-table-nowrap'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        template: 'bath_profiles',
+        detailRows: [{ order: 'импорт 68', position: 30, lengthMm: 2702, widthMm: 52, quantity: 1 }],
+      },
+    ]);
+
+    const orderCall = textSpy.mock.calls.find((call) => call[0] === 'импорт 68');
+    expect(orderCall?.[3]).toMatchObject({ lineBreak: false, align: 'center' });
+  });
 });

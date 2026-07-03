@@ -167,7 +167,7 @@ function drawDetailsTable(
   const title = Number.isInteger(sheetNumber) ? `Лист ${sheetNumber}` : 'Лист';
   doc.fontSize(10).text(title, x, y - 25, { width: w, align: 'center' });
   doc.fontSize(9).text('Детали', x, y - 13, { width: w, align: 'center' });
-  const col = [34, 28, 36, 36, 34];
+  const col = [44, 24, 34, 34, 32];
   const headers = ['Заказ', 'Поз.', 'Длина', 'Ширина', 'Кол-во'];
   let cy = y;
   drawTableRow(doc, headers, x, cy, col, true);
@@ -194,12 +194,21 @@ function drawDetailsTable(
 function drawTableRow(doc: PDFKit.PDFDocument, values: readonly string[], x: number, y: number, widths: readonly number[], header: boolean): void {
   let cx = x;
   const h = 16;
-  doc.lineWidth(0.5).strokeColor('#111111').fontSize(header ? 6 : 7);
+  const baseFont = header ? 6 : 7;
+  doc.lineWidth(0.5).strokeColor('#111111').fontSize(baseFont);
   for (let i = 0; i < widths.length; i += 1) {
     doc.rect(cx, y, widths[i], h).stroke();
-    doc.text(values[i] ?? '', cx + 2, y + 4, { width: widths[i] - 4, align: 'center' });
+    const value = values[i] ?? '';
+    doc.fontSize(fitTableCellFont(value, widths[i] - 4, baseFont));
+    doc.text(value, cx + 2, y + 4, { width: widths[i] - 4, align: 'center', lineBreak: false });
     cx += widths[i];
   }
+}
+
+function fitTableCellFont(value: string, widthPt: number, baseFontPt: number): number {
+  const estimated = estimatePdfTextWidthPt(value, baseFontPt);
+  if (estimated <= widthPt) return baseFontPt;
+  return Math.max(4.5, baseFontPt * (widthPt / Math.max(estimated, 1)));
 }
 
 function drawFooter(doc: PDFKit.PDFDocument, sheet: PdfSheetInput, x: number, y: number): void {
@@ -223,4 +232,15 @@ function join(values: readonly string[] | undefined): string {
 function formatMm(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '';
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1)));
+}
+
+function estimatePdfTextWidthPt(value: string, fontPt: number): number {
+  let units = 0;
+  for (const char of value) {
+    if (char === ' ') units += 0.28;
+    else if (/[0-9]/.test(char)) units += 0.52;
+    else if (/[A-Za-zА-Яа-яЁё]/.test(char)) units += 0.58;
+    else units += 0.4;
+  }
+  return units * fontPt;
 }

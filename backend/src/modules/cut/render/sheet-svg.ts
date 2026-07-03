@@ -251,7 +251,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 42));
   const detailFontMm = fontMm * 2;
-  const sideFontMm = Math.max(18, Math.round(fontMm * 0.85)) * 2;
+  const sideFontMm = Math.max(18, Math.round(fontMm * 0.85));
   const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
   const pieces = sheet.pieces
@@ -266,31 +266,37 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         rect.h,
       )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`;
 
-      const centerText = renderBathDetailCenterLabel({
-        lines: labelFor(piece),
-        cx,
-        cy,
-        rectW: rect.w,
-        rectH: rect.h,
-        baseFontMm: detailFontMm,
-      });
+      const centerText = shouldRenderBathCenterLabel(rect.w, rect.h, detailFontMm)
+        ? renderBathDetailCenterLabel({
+            lines: labelFor(piece),
+            cx,
+            cy,
+            rectW: rect.w,
+            rectH: rect.h,
+            baseFontMm: detailFontMm,
+          })
+        : '';
 
       const sideTexts: string[] = [];
-      if (rect.w >= sideFontMm * 2.5) {
+      const widthLabel = formatDimension(rect.w);
+      const widthFont = fitBathSideFont(widthLabel, rect.w, rect.h, sideFontMm, 'horizontal');
+      if (widthFont !== null) {
         sideTexts.push(
-          `<text x="${num(cx)}" y="${num(rect.y + sideFontMm * 0.9)}" font-family="Liberation Sans, sans-serif" font-size="${num(
-            sideFontMm,
-          )}" fill="#111111" text-anchor="middle" dominant-baseline="middle">${escapeXml(formatDimension(rect.w))}</text>`,
+          `<text x="${num(cx)}" y="${num(rect.y + widthFont * 0.9)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+            widthFont,
+          )}" fill="#111111" text-anchor="middle" dominant-baseline="middle">${escapeXml(widthLabel)}</text>`,
         );
       }
-      if (rect.h >= sideFontMm * 2.5) {
-        const tx = rect.x + sideFontMm * 0.75;
+      const heightLabel = formatDimension(rect.h);
+      const heightFont = fitBathSideFont(heightLabel, rect.h, rect.w, sideFontMm, 'vertical');
+      if (heightFont !== null) {
+        const tx = rect.x + heightFont * 0.75;
         sideTexts.push(
           `<text x="${num(tx)}" y="${num(cy)}" transform="rotate(-90 ${num(tx)} ${num(
             cy,
           )})" font-family="Liberation Sans, sans-serif" font-size="${num(
-            sideFontMm,
-          )}" fill="#111111" text-anchor="middle" dominant-baseline="middle">${escapeXml(formatDimension(rect.h))}</text>`,
+            heightFont,
+          )}" fill="#111111" text-anchor="middle" dominant-baseline="middle">${escapeXml(heightLabel)}</text>`,
         );
       }
 
@@ -304,6 +310,11 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
     pieces,
     `</svg>`,
   ].join('');
+}
+
+function shouldRenderBathCenterLabel(rectW: number, rectH: number, baseFontMm: number): boolean {
+  const minSide = Math.max(110, baseFontMm * 1.12);
+  return rectW >= minSide && rectH >= minSide;
 }
 
 function renderBathDetailCenterLabel(input: {
@@ -365,7 +376,22 @@ function fitBathLabelFont(lines: readonly string[], rectW: number, rectH: number
   const widthScale = (rectW * 0.86) / widestAtBase;
   const heightScale = lineCount === 1 ? (rectH * 0.72) / baseFontMm : (rectH * 0.56) / baseFontMm;
   const scale = Math.min(1, widthScale, heightScale);
-  return Math.max(12, baseFontMm * scale);
+  return Math.max(6, baseFontMm * scale);
+}
+
+function fitBathSideFont(
+  label: string,
+  lengthMm: number,
+  thicknessMm: number,
+  baseFontMm: number,
+  orientation: 'horizontal' | 'vertical',
+): number | null {
+  const textAtBase = Math.max(estimateTextWidthMm(label, baseFontMm), 1);
+  const widthScale = (lengthMm * 0.82) / textAtBase;
+  const thicknessLimit = orientation === 'horizontal' ? 0.35 : 0.42;
+  const thicknessScale = (thicknessMm * thicknessLimit) / baseFontMm;
+  const font = Math.min(baseFontMm, baseFontMm * widthScale, baseFontMm * thicknessScale);
+  return font >= 7 ? font : null;
 }
 
 function estimateTextWidthMm(value: string, fontMm: number): number {
