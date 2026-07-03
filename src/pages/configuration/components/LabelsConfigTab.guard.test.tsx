@@ -167,55 +167,52 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/align=\{textAlign\}/);
   });
 
-  it('supports QR-code elements with template payloads and a non-blocking overlap warning', () => {
+  it('treats QR as a first-class free-overlap element (no conflict system at all)', () => {
     expect(tabSrc).toMatch(/QR-код/);
     expect(tabSrc).toMatch(/QrcodeOutlined/);
     expect(tabSrc).toMatch(/value: 'qr', label: 'QR-код'/);
     expect(tabSrc).toMatch(/qrTemplate/);
     expect(tabSrc).toMatch(/qrErrorCorrection/);
-    expect(tabSrc).toMatch(/autoShiftForQr/);
     expect(tabSrc).toMatch(/applyQrGeometryPatch/);
-    expect(tabSrc).toMatch(/collectQrConflicts/);
     expect(tabSrc).toMatch(/qrProtectedRect/);
-    expect(tabSrc).toMatch(/data-label-qr-conflict/);
     expect(tabSrc).toMatch(/kind === 'qr'/);
+    // QR overlap/out-of-bounds is no longer a concept: no auto-shift, no conflict
+    // collection, no conflict state, no conflict banner. QR may freely overlap.
+    expect(tabSrc).not.toMatch(/autoShiftForQr/);
+    expect(tabSrc).not.toMatch(/collectQrConflicts/);
+    expect(tabSrc).not.toMatch(/qrConflicts/);
+    expect(tabSrc).not.toMatch(/data-label-qr-conflict/);
+    expect(tabSrc).not.toMatch(/пересекается/);
   });
 
-  it('never blocks saving on a QR overlap/out-of-bounds conflict (warning-only, option A)', () => {
-    // buildTemplatePayload must not throw for collectQrConflicts results — only
-    // the duplicate-name and empty-name QR checks are allowed to block a save.
+  it('never blocks saving on a QR overlap/out-of-bounds or a missing QR name (auto-filled)', () => {
     expect(tabSrc).not.toMatch(/QR_CONFLICT/);
-    expect(tabSrc).not.toMatch(/throw new Error\(QR_CONFLICT_ERROR\)/);
     const buildPayloadBody = tabSrc.slice(
       tabSrc.indexOf('const buildTemplatePayload ='),
       tabSrc.indexOf('const describeSaveError ='),
     );
+    // no overlap conflict, and an empty QR name is AUTO-FILLED (uniqueQrName), not thrown
     expect(buildPayloadBody).not.toMatch(/collectQrConflicts/);
+    expect(buildPayloadBody).not.toMatch(/QR_NAME_EMPTY_ERROR_PREFIX/);
+    expect(buildPayloadBody).toMatch(/uniqueQrName/);
     expect(buildPayloadBody).toMatch(/throw new Error\(`\$\{QR_NAME_DUP_ERROR_PREFIX\}/);
-    expect(buildPayloadBody).toMatch(/throw new Error\(`\$\{QR_NAME_EMPTY_ERROR_PREFIX\}/);
     expect(buildPayloadBody).toMatch(/collectDuplicateQrNames/);
-    expect(buildPayloadBody).toMatch(/collectEmptyQrNames/);
-    expect(tabSrc).toMatch(/QR_NAME_DUP_ERROR_PREFIX/);
-    expect(tabSrc).toMatch(/QR_NAME_EMPTY_ERROR_PREFIX/);
   });
 
-  it('does not auto-shift neighbouring elements when a QR is moved/resized manually, only on initial library drop', () => {
-    const applyPatchBody = tabSrc.slice(
-      tabSrc.indexOf('const applyQrGeometryPatch = '),
-      tabSrc.indexOf('const patchQrStyle ='),
-    );
-    expect(applyPatchBody).not.toMatch(/autoShiftForQr\(/);
-    expect(applyPatchBody).toMatch(/collectQrConflicts/);
+  it('auto-names a newly added QR and never auto-shifts / never places a conflict', () => {
     const addElementBody = tabSrc.slice(
       tabSrc.indexOf('const addElement = '),
       tabSrc.indexOf('const patchElement = '),
     );
-    expect(addElementBody).not.toMatch(/autoShiftForQr\(/);
+    // toolbar-added QR gets a default unique name so the save-time name contract
+    // is never tripped for a freshly-added QR (this was the real save-blocker).
+    expect(addElementBody).toMatch(/uniqueQrName/);
+    expect(addElementBody).toMatch(/qrName/);
     const dropBody = tabSrc.slice(
       tabSrc.indexOf('const onDropDraggingQr = '),
       tabSrc.indexOf('const handleBazisImportFile ='),
     );
-    expect(dropBody).toMatch(/autoShiftForQr/);
+    expect(dropBody).not.toMatch(/autoShiftForQr/);
   });
 
   it('lets elements be reordered to the front or back of the draw stack via the context menu', () => {
@@ -228,7 +225,7 @@ describe('LabelsConfigTab wiring', () => {
   });
 
   it('strips read-only element ids before create or update payloads', () => {
-    expect(tabSrc).toMatch(/toTemplateElementInput\(elements\)/);
+    expect(tabSrc).toMatch(/toTemplateElementInput\(namedElements\)/);
     expect(tabSrc).toMatch(/labelTemplateElementId: _labelTemplateElementId/);
   });
 
@@ -288,9 +285,7 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/qrDragCursor/);
   });
 
-  it('maps backend LABEL_QR_NAME_REQUIRED/DUPLICATE save errors and pre-checks empty qr names before saving', () => {
-    expect(tabSrc).toMatch(/collectEmptyQrNames/);
-    expect(tabSrc).toMatch(/QR_NAME_EMPTY_ERROR_PREFIX/);
+  it('still maps backend LABEL_QR_NAME_REQUIRED/DUPLICATE save errors (defensive)', () => {
     expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_NAME_REQUIRED'/);
     expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_NAME_DUPLICATE'/);
   });
