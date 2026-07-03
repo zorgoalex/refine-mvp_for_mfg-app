@@ -266,21 +266,13 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         rect.h,
       )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`;
 
-      const centerText = shouldRenderBathCenterLabel(rect.w, rect.h, detailFontMm)
-        ? renderBathDetailCenterLabel({
-            lines: labelFor(piece),
-            cx,
-            cy,
-            rectW: rect.w,
-            rectH: rect.h,
-            baseFontMm: detailFontMm,
-          })
-        : '';
-
       const sideTexts: string[] = [];
+      let reservedTop = 0;
+      let reservedLeft = 0;
       const widthLabel = formatDimension(rect.w);
       const widthFont = fitBathSideFont(widthLabel, rect.w, rect.h, sideFontMm, 'horizontal');
       if (widthFont !== null) {
+        reservedTop = widthFont * 1.55;
         sideTexts.push(
           `<text x="${num(cx)}" y="${num(rect.y + widthFont * 0.9)}" font-family="Liberation Sans, sans-serif" font-size="${num(
             widthFont,
@@ -290,6 +282,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       const heightLabel = formatDimension(rect.h);
       const heightFont = fitBathSideFont(heightLabel, rect.h, rect.w, sideFontMm, 'vertical');
       if (heightFont !== null) {
+        reservedLeft = heightFont * 1.45;
         const tx = rect.x + heightFont * 0.75;
         sideTexts.push(
           `<text x="${num(tx)}" y="${num(cy)}" transform="rotate(-90 ${num(tx)} ${num(
@@ -299,6 +292,16 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
           )}" fill="#111111" text-anchor="middle" dominant-baseline="middle">${escapeXml(heightLabel)}</text>`,
         );
       }
+      const labelBox = bathCenterLabelBox(rect, reservedTop, reservedLeft);
+      const centerText = renderBathDetailCenterLabel({
+        lines: labelFor(piece),
+        cx: labelBox.cx,
+        cy: labelBox.cy,
+        rectW: labelBox.w,
+        rectH: labelBox.h,
+        baseFontMm: detailFontMm,
+        compact: !shouldRenderBathCenterLabel(labelBox.w, labelBox.h, detailFontMm),
+      });
 
       return [rectEl, ...sideTexts, centerText].join('');
     })
@@ -310,6 +313,22 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
     pieces,
     `</svg>`,
   ].join('');
+}
+
+function bathCenterLabelBox(rect: { x: number; y: number; w: number; h: number }, reservedTop: number, reservedLeft: number) {
+  const pad = Math.max(4, Math.min(rect.w, rect.h) * 0.04);
+  const x = rect.x + reservedLeft + pad;
+  const y = rect.y + reservedTop + pad;
+  const w = Math.max(0, rect.w - reservedLeft - pad * 2);
+  const h = Math.max(0, rect.h - reservedTop - pad * 2);
+  return {
+    x,
+    y,
+    w,
+    h,
+    cx: x + w / 2,
+    cy: y + h / 2,
+  };
 }
 
 function shouldRenderBathCenterLabel(rectW: number, rectH: number, baseFontMm: number): boolean {
@@ -324,6 +343,7 @@ function renderBathDetailCenterLabel(input: {
   rectW: number;
   rectH: number;
   baseFontMm: number;
+  compact?: boolean;
 }): string {
   const lines = (Array.isArray(input.lines) ? input.lines : [input.lines]).slice(0, 2).map((line) => line.trim()).filter(Boolean);
   if (lines.length === 0) return '';
@@ -336,13 +356,25 @@ function renderBathDetailCenterLabel(input: {
 
   const [orderLine, rawPositionLine] = lines;
   const positionLine = formatBathPositionLabel(rawPositionLine);
+  if (input.compact) {
+    return renderBathPositionLabel({
+      label: positionLine,
+      cx: input.cx,
+      cy: input.cy,
+      maxW: input.rectW,
+      maxH: input.rectH,
+      baseFontMm: input.baseFontMm * 0.8,
+      rotate: input.rectW < input.rectH,
+    });
+  }
   const oneLineText = `${orderLine} ${positionLine}`;
   const shouldUseOneLine = input.rectH < input.baseFontMm * 1.65;
   if (shouldUseOneLine) {
     const font = fitBathLabelFont([oneLineText], input.rectW, input.rectH, input.baseFontMm, 1);
+    const positionFont = font * 0.8;
     const orderW = estimateTextWidthMm(orderLine, font);
     const gapW = estimateTextWidthMm(' ', font);
-    const positionW = estimateTextWidthMm(positionLine, font);
+    const positionW = estimateBathPositionWidth(positionLine, positionFont);
     const totalW = orderW + gapW + positionW;
     const left = input.cx - totalW / 2;
     return [
@@ -351,29 +383,90 @@ function renderBathDetailCenterLabel(input: {
       )}" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${escapeXml(
         orderLine,
       )}</text>`,
-      `<text x="${num(left + orderW + gapW + positionW / 2)}" y="${num(
-        input.cy,
-      )}" font-family="Liberation Sans, sans-serif" font-size="${num(
-        font,
-      )}" fill="${BATH_POSITION_LABEL_COLOR}" text-anchor="middle" dominant-baseline="middle">${escapeXml(positionLine)}</text>`,
+      renderBathPositionLabel({
+        label: positionLine,
+        cx: left + orderW + gapW + positionW / 2,
+        cy: input.cy,
+        maxW: positionW,
+        maxH: input.rectH,
+        baseFontMm: positionFont,
+      }),
     ].join('');
   }
 
   const font = fitBathLabelFont([orderLine, positionLine], input.rectW, input.rectH, input.baseFontMm, 2);
+  const positionFont = font * 0.8;
   return [
     `<text x="${num(input.cx)}" y="${num(input.cy - font * 0.55)}" font-family="Liberation Sans, sans-serif" font-size="${num(
       font,
     )}" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${escapeXml(
       orderLine,
     )}</text>`,
-    `<text x="${num(input.cx)}" y="${num(input.cy + font * 0.55)}" font-family="Liberation Sans, sans-serif" font-size="${num(
-      font,
-    )}" fill="${BATH_POSITION_LABEL_COLOR}" text-anchor="middle" dominant-baseline="middle">${escapeXml(positionLine)}</text>`,
+    renderBathPositionLabel({
+      label: positionLine,
+      cx: input.cx,
+      cy: input.cy + font * 0.55,
+      maxW: input.rectW,
+      maxH: input.rectH / 2,
+      baseFontMm: positionFont,
+    }),
   ].join('');
 }
 
 function formatBathPositionLabel(value: string): string {
   return value.replace(/^поз\.\s*/i, '# ');
+}
+
+function renderBathPositionLabel(input: {
+  label: string;
+  cx: number;
+  cy: number;
+  maxW: number;
+  maxH: number;
+  baseFontMm: number;
+  rotate?: boolean;
+}): string {
+  const match = /^#\s*(.+)$/.exec(input.label);
+  const marker = match ? '#' : '';
+  const value = match ? ` ${match[1]}` : input.label;
+  const availableW = input.rotate ? input.maxH : input.maxW;
+  const availableH = input.rotate ? input.maxW : input.maxH;
+  const font = fitBathPositionFont(marker, value, availableW, availableH, input.baseFontMm);
+  if (font === null) return '';
+  const hashFont = font * 0.5;
+  const markerW = marker ? estimateTextWidthMm(marker, hashFont) : 0;
+  const valueW = estimateTextWidthMm(value, font);
+  const left = input.cx - (markerW + valueW) / 2;
+  const body = [
+    marker
+      ? `<text x="${num(left + markerW / 2)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+          hashFont,
+        )}" fill="${BATH_POSITION_LABEL_COLOR}" text-anchor="middle" dominant-baseline="middle">${escapeXml(marker)}</text>`
+      : '',
+    `<text x="${num(left + markerW + valueW / 2)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+      font,
+    )}" fill="${BATH_POSITION_LABEL_COLOR}" text-anchor="middle" dominant-baseline="middle">${escapeXml(value)}</text>`,
+  ].join('');
+  return input.rotate ? `<g transform="rotate(-90 ${num(input.cx)} ${num(input.cy)})">${body}</g>` : body;
+}
+
+function estimateBathPositionWidth(label: string, fontMm: number): number {
+  const match = /^#\s*(.+)$/.exec(label);
+  if (!match) return estimateTextWidthMm(label, fontMm);
+  return estimateTextWidthMm('#', fontMm * 0.5) + estimateTextWidthMm(` ${match[1]}`, fontMm);
+}
+
+function fitBathPositionFont(
+  marker: string,
+  value: string,
+  maxW: number,
+  maxH: number,
+  baseFontMm: number,
+): number | null {
+  const width = (marker ? estimateTextWidthMm(marker, baseFontMm * 0.5) : 0) + estimateTextWidthMm(value, baseFontMm);
+  const scale = Math.min(1, (maxW * 0.82) / Math.max(width, 1), (maxH * 0.62) / baseFontMm);
+  const font = baseFontMm * scale;
+  return font >= 5 ? font : null;
 }
 
 function fitBathLabelFont(lines: readonly string[], rectW: number, rectH: number, baseFontMm: number, lineCount: 1 | 2): number {

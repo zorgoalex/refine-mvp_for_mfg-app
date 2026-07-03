@@ -167,15 +167,17 @@ function drawDetailsTable(
   const title = Number.isInteger(sheetNumber) ? `Лист ${sheetNumber}` : 'Лист';
   doc.fontSize(10).text(title, x, y - 25, { width: w, align: 'center' });
   doc.fontSize(9).text('Детали', x, y - 13, { width: w, align: 'center' });
-  const col = [44, 24, 34, 34, 32];
-  const headers = ['Заказ', 'Поз.', 'Длина', 'Ширина', 'Кол-во'];
+  const col = [14, 40, 22, 32, 32, 28];
+  const headers = ['#', 'Заказ', 'Поз.', 'Длина', 'Ширина', 'Кол-во'];
   let cy = y;
   drawTableRow(doc, headers, x, cy, col, true);
   cy += 16;
-  for (const row of rows.slice(0, 28)) {
+  const visibleRows = rows.slice(0, 27);
+  for (const [index, row] of visibleRows.entries()) {
     drawTableRow(
       doc,
       [
+        String(index + 1),
         row.order,
         String(row.position),
         formatMm(row.lengthMm),
@@ -189,6 +191,7 @@ function drawDetailsTable(
     );
     cy += 16;
   }
+  drawTableTotalRow(doc, totalDetailQuantity(rows), x, cy, w);
 }
 
 function drawTableRow(doc: PDFKit.PDFDocument, values: readonly string[], x: number, y: number, widths: readonly number[], header: boolean): void {
@@ -203,6 +206,12 @@ function drawTableRow(doc: PDFKit.PDFDocument, values: readonly string[], x: num
     doc.text(value, cx + 2, y + 4, { width: widths[i] - 4, align: 'center', lineBreak: false });
     cx += widths[i];
   }
+}
+
+function drawTableTotalRow(doc: PDFKit.PDFDocument, total: number, x: number, y: number, w: number): void {
+  doc.lineWidth(0.5).strokeColor('#111111').fontSize(7);
+  doc.rect(x, y, w, 16).stroke();
+  doc.text(`Итого: ${total}`, x + 4, y + 4, { width: w - 8, align: 'right', lineBreak: false });
 }
 
 function fitTableCellFont(value: string, widthPt: number, baseFontPt: number): number {
@@ -232,6 +241,10 @@ function join(values: readonly string[] | undefined): string {
 function formatMm(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '';
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1)));
+}
+
+function totalDetailQuantity(rows: readonly PdfSheetDetailRow[]): number {
+  return rows.reduce((sum, row) => sum + row.quantity, 0);
 }
 
 function estimatePdfTextWidthPt(value: string, fontPt: number): number {

@@ -65,9 +65,11 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('Пленка:');
     expect(rendered).toContain('Белая, Матовая');
     expect(rendered).toContain('Детали');
+    expect(rendered).toContain('#');
     expect(rendered).toContain('Заказ');
     expect(rendered).toContain('Поз.');
     expect(rendered).toContain('1001');
+    expect(rendered).toContain('Итого: 3');
   });
 
   it('renders bath header values as one field text call instead of continued fragments', async () => {
@@ -113,6 +115,16 @@ describe('buildSheetsPdf', () => {
     expect(Number(mediaBox?.[1])).toBeGreaterThan(Number(mediaBox?.[2]));
   });
 
+  it('uses landscape pages for bath profile sheets', async () => {
+    const pdf = await buildSheetsPdf([
+      { svg: SVG('bath-landscape'), sheetWidthMm: 2070, sheetHeightMm: 2800, template: 'bath_profiles' },
+    ]);
+
+    const mediaBox = /\/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]/.exec(pdf.toString('latin1'));
+    expect(mediaBox).not.toBeNull();
+    expect(Number(mediaBox?.[1])).toBeGreaterThan(Number(mediaBox?.[2]));
+  });
+
   it('prints the sheet number above the bath details table', async () => {
     const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
     await buildSheetsPdf([
@@ -143,5 +155,27 @@ describe('buildSheetsPdf', () => {
 
     const orderCall = textSpy.mock.calls.find((call) => call[0] === 'импорт 68');
     expect(orderCall?.[3]).toMatchObject({ lineBreak: false, align: 'center' });
+  });
+
+  it('numbers bath detail table rows and prints total detail quantity', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('bath-table-numbers'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        template: 'bath_profiles',
+        detailRows: [
+          { order: '1001', position: 1, lengthMm: 898, widthMm: 548, quantity: 2 },
+          { order: '1002', position: 2, lengthMm: 378, widthMm: 598, quantity: 3 },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('#');
+    expect(rendered).toContain('1');
+    expect(rendered).toContain('2');
+    expect(rendered).toContain('Итого: 5');
   });
 });

@@ -1568,7 +1568,7 @@ export class PgCutRepository implements CutRepositoryPort {
     // cutJobId yields 404 CUT_GROUP_NOT_FOUND, not a 409 recalc block (a missing
     // job makes checkRequiresRecalc conservatively true). This also resolves the
     // variant (manual-unavailable → 409) on the validated group.
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, variant, query.cutJobId);
+    const { sheets, rotate90 } = await this.loadGroupPdfLandscapeRenderContext(query.cutGroupId, variant, query.cutJobId);
     // Rule 5: group PDF is blocked while the job requires recalculation.
     // PNG/SVG are NOT blocked; only PDF/print surfaces enforce this.
     if (query.cutJobId !== undefined) {
@@ -1585,8 +1585,8 @@ export class PgCutRepository implements CutRepositoryPort {
       printableSheets.map((s, index) => ({
         svg: s.svg,
         bathSvg: s.bathSvg,
-        sheetWidthMm: query.rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
-        sheetHeightMm: query.rotate90 ? s.placements.sheet_width_mm : s.placements.sheet_height_mm,
+        sheetWidthMm: rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
+        sheetHeightMm: rotate90 ? s.placements.sheet_width_mm : s.placements.sheet_height_mm,
         sheetNumber: index + 1,
         template: pdfTemplate,
         meta: s.pdfMeta,
@@ -1621,7 +1621,7 @@ export class PgCutRepository implements CutRepositoryPort {
     const pdfSheets: PdfSheetInput[] = [];
     for (const groupRow of groups.rows) {
       const cutGroupId = toNum(groupRow.cut_group_id);
-      const { sheets } = await this.loadGroupRenderContext(cutGroupId, query.rotate90, query.originTopLeft, variant, query.cutJobId);
+      const { sheets, rotate90 } = await this.loadGroupPdfLandscapeRenderContext(cutGroupId, variant, query.cutJobId);
       // Rule 8: skip blank sheets in PDF assembly.
       let sheetNumber = 1;
       for (const sheet of sheets) {
@@ -1629,8 +1629,8 @@ export class PgCutRepository implements CutRepositoryPort {
         pdfSheets.push({
           svg: sheet.svg,
           bathSvg: sheet.bathSvg,
-          sheetWidthMm: query.rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
-          sheetHeightMm: query.rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
+          sheetWidthMm: rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
+          sheetHeightMm: rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
           sheetNumber,
           template: pdfTemplate,
           meta: sheet.pdfMeta,
@@ -1643,6 +1643,19 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new CutJobNotFoundError(query.cutJobId);
     }
     return buildSheetsPdf(pdfSheets);
+  }
+
+  private async loadGroupPdfLandscapeRenderContext(
+    cutGroupId: number,
+    variant: 'auto' | 'manual' | 'active',
+    cutJobId: number | undefined,
+  ): Promise<{ sheets: RenderedSheetContext[]; rotate90: boolean }> {
+    const raw = await this.loadGroupRenderContext(cutGroupId, false, true, variant, cutJobId);
+    const firstSheet = raw.sheets[0]?.placements;
+    const rotate90 = firstSheet !== undefined && firstSheet.sheet_height_mm > firstSheet.sheet_width_mm;
+    if (!rotate90) return { sheets: raw.sheets, rotate90: false };
+    const rotated = await this.loadGroupRenderContext(cutGroupId, true, true, variant, cutJobId);
+    return { sheets: rotated.sheets, rotate90: true };
   }
 
   private async assertPdfTemplateActive(code: string, client: DatabaseClient | TransactionClient = this.database): Promise<void> {
