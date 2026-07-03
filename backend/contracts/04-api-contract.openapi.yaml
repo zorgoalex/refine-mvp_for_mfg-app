@@ -5275,6 +5275,146 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/label-qr-templates:
+    get:
+      tags:
+        - Labels
+      operationId: listLabelQrTemplates
+      summary: List label QR templates
+      security:
+        - bearerAuth: []
+      x-permission: labels.view
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Label QR templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Labels
+      operationId: createLabelQrTemplate
+      summary: Create label QR template
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Created QR template
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/label-qr-templates/{id}:
+    put:
+      tags:
+        - Labels
+      operationId: updateLabelQrTemplate
+      summary: Update label QR template
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated QR template
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Labels
+      operationId: deleteLabelQrTemplate
+      summary: Soft-delete label QR template
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - version
+                - idempotencyKey
+              properties:
+                version:
+                  type: integer
+                idempotencyKey:
+                  type: string
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/{orderId}/label-data:
     get:
       tags:
