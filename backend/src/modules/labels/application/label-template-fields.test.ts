@@ -128,6 +128,59 @@ describe('label template field helpers', () => {
       ),
     ).not.toThrow();
   });
+
+  it('accepts multi-line qr templates with newline separators', () => {
+    expect(() =>
+      validateQrTemplateElement(
+        {
+          elementKey: 'qr-multiline',
+          kind: 'qr',
+          xMm: 1,
+          yMm: 1,
+          widthMm: 12,
+          heightMm: 12,
+          style: {
+            qrTemplate: '{bazis.detail_id}\n{bazis.name}',
+            qrErrorCorrection: 'M',
+          },
+        },
+        {},
+        0,
+      ),
+    ).not.toThrow();
+  });
+
+  it('renders multi-line templates with newlines in row values', () => {
+    expect(renderLabelTemplateString('{bazis.detail_id}\n{bazis.name}', {
+      'bazis.detail_id': '12345',
+      'bazis.name': 'Фасад',
+    })).toBe('12345\nФасад');
+  });
+
+  it('rejects qr templates that are only whitespace or newlines', () => {
+    expectQrValidationError(() =>
+      validateQrTemplateElement(
+        {
+          elementKey: 'qr-whitespace',
+          kind: 'qr',
+          xMm: 1,
+          yMm: 1,
+          widthMm: 12,
+          heightMm: 12,
+          style: {
+            qrTemplate: '\n\n',
+            qrErrorCorrection: 'M',
+          },
+        },
+        {},
+        3,
+      ),
+    {
+      statusCode: 422,
+      code: 'LABEL_QR_TEMPLATE_EMPTY',
+      details: { elementIndex: 3 },
+    });
+  });
 });
 
 function expectQrValidationError(action: () => void, expected: Record<string, unknown>): void {
