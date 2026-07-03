@@ -729,7 +729,6 @@ export const LabelsConfigTab: React.FC = () => {
   const promoteAdHocQrToLibrary = async (element: LabelTemplateElement, index: number) => {
     if (!canManage) return;
     const draft = qrDraftFromElement(element);
-    setQrDraft({ id: null, version: null, name: draft.name, chips: templateToChips(draft.contentTemplate), errorCorrection: draft.errorCorrection, sizeMm: draft.defaultSizeMm });
     const created = await saveQrTemplate(draft);
     if (created) {
       patchQrStyle(index, { qrSourceTemplateId: created.labelQrTemplateId });
