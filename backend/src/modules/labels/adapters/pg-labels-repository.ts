@@ -1082,6 +1082,8 @@ export class PgLabelsRepository implements LabelsPort {
          FROM label_template_elements lte
          JOIN label_templates lt ON lt.label_template_id = lte.label_template_id
         WHERE lte.kind = 'qr'
+          AND lt.deleted_at IS NULL
+          AND lt.is_active = true
           AND COALESCE(lte.style_json->>'qrTemplate', '') <> ''`,
     );
     return result.rows.map((row) => row.tpl).filter((tpl): tpl is string => Boolean(tpl));
