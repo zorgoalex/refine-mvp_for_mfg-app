@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipsToTemplate, templateToChips, uniqueQrName, qrElementFromLibrary, collectDuplicateQrNames, collectEmptyQrNames, qrDraftFromElement } from './labelQrLibrary';
+import { chipsToTemplate, templateToChips, rowsToTemplate, templateToRows, sanitizeQrText, uniqueQrName, qrElementFromLibrary, collectDuplicateQrNames, collectEmptyQrNames, qrDraftFromElement } from './labelQrLibrary';
 import { autoShiftForQr } from './labelQrHelpers';
 
 describe('chips <-> template', () => {
@@ -11,8 +11,110 @@ describe('chips <-> template', () => {
     const t = '{bazis.detail_id}|-|{bazis.name}';
     expect(chipsToTemplate(templateToChips(t), '|')).toBe(t);
   });
-  it('strips separator/brace chars from static text so round-trip is safe', () => {
-    expect(chipsToTemplate([{ kind: 'text', text: 'a|b{c}' }], '|')).toBe('abc');
+  it('strips brace chars from static text, keeps pipe', () => {
+    expect(chipsToTemplate([{ kind: 'text', text: 'a|b{c}' }], '|')).toBe('a|bc');
+  });
+});
+
+describe('sanitizeQrText', () => {
+  it('strips braces and newlines but keeps pipe', () => {
+    expect(sanitizeQrText('a|b{c}\nd')).toBe('a|bcd');
+  });
+  it('keeps pipe as literal text', () => {
+    expect(sanitizeQrText('x|y')).toBe('x|y');
+  });
+});
+
+describe('rowsToTemplate / templateToRows', () => {
+  it('single row: field-text-field converts to template', () => {
+    const rows = [[
+      { kind: 'field' as const, fieldId: 'a' },
+      { kind: 'text' as const, text: '-' },
+      { kind: 'field' as const, fieldId: 'b' },
+    ]];
+    expect(rowsToTemplate(rows)).toBe('{a}-{b}');
+  });
+
+  it('multi-row: concatenates with newline', () => {
+    const rows = [
+      [{ kind: 'field' as const, fieldId: 'a' }],
+      [{ kind: 'field' as const, fieldId: 'b' }],
+    ];
+    expect(rowsToTemplate(rows)).toBe('{a}\n{b}');
+  });
+
+  it('text with pipe is preserved in template', () => {
+    const rows = [[{ kind: 'text' as const, text: 'x|y' }]];
+    expect(rowsToTemplate(rows)).toBe('x|y');
+  });
+
+  it('trailing empty rows are dropped', () => {
+    const rows = [
+      [{ kind: 'field' as const, fieldId: 'a' }],
+      [],
+      [],
+    ];
+    expect(rowsToTemplate(rows)).toBe('{a}');
+  });
+
+  it('interior empty rows are kept', () => {
+    const rows = [
+      [{ kind: 'field' as const, fieldId: 'a' }],
+      [],
+      [{ kind: 'field' as const, fieldId: 'b' }],
+    ];
+    expect(rowsToTemplate(rows)).toBe('{a}\n\n{b}');
+  });
+
+  it('templateToRows: single row field-text-field', () => {
+    expect(templateToRows('{a}-{b}')).toEqual([
+      [
+        { kind: 'field', fieldId: 'a' },
+        { kind: 'text', text: '-' },
+        { kind: 'field', fieldId: 'b' },
+      ],
+    ]);
+  });
+
+  it('templateToRows: multi-row', () => {
+    expect(templateToRows('{a}\n{b}')).toEqual([
+      [{ kind: 'field', fieldId: 'a' }],
+      [{ kind: 'field', fieldId: 'b' }],
+    ]);
+  });
+
+  it('templateToRows: text with pipe kept', () => {
+    expect(templateToRows('x|y')).toEqual([
+      [{ kind: 'text', text: 'x|y' }],
+    ]);
+  });
+
+  it('templateToRows: empty lines become empty rows', () => {
+    expect(templateToRows('a\n\nb')).toEqual([
+      [{ kind: 'text', text: 'a' }],
+      [],
+      [{ kind: 'text', text: 'b' }],
+    ]);
+  });
+
+  it('round-trip: single row', () => {
+    const t = '{a}-{b}';
+    expect(rowsToTemplate(templateToRows(t))).toBe(t);
+  });
+
+  it('round-trip: multi-row', () => {
+    const t = '{a}\n{b}';
+    expect(rowsToTemplate(templateToRows(t))).toBe(t);
+  });
+
+  it('round-trip: text with pipe', () => {
+    const t = 'x|y';
+    expect(rowsToTemplate(templateToRows(t))).toBe(t);
+  });
+
+  it('round-trip: mixed content', () => {
+    const t = '{a}-x|y\n{b}';
+    expect(rowsToTemplate(templateToRows(t))).toBe(t);
   });
 });
 
