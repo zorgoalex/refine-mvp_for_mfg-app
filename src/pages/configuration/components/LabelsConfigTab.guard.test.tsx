@@ -62,7 +62,7 @@ describe('LabelsConfigTab wiring', () => {
   it('keeps the template list full-width with scroll and supports visual drag editing', () => {
     expect(tabSrc).toMatch(/title="Шаблоны"/);
     expect(tabSrc).toMatch(/scroll=\{\{ y: 430 \}\}/);
-    expect(tabSrc).toMatch(/label: 'Просмотр текущего шаблона'/);
+    expect(tabSrc).toMatch(/header="Просмотр текущего шаблона"/);
     expect(tabSrc).toMatch(/defaultActiveKey=\{\['current-template-preview'\]\}/);
     expect(tabSrc).toMatch(/Collapse/);
     expect(tabSrc).toMatch(/onMoveElement/);

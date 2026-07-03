@@ -28,6 +28,7 @@ import {
 import { chipsToTemplate, collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, sanitizeQrText, templateToChips, type QrChip } from './labelQrLibrary';
 
 const { Text } = Typography;
+const { Panel } = Collapse;
 const EXPORT_FORMATS: LabelExportFormat[] = ['bmp', 'png', 'emf'];
 const CUSTOM_FIELD_TYPE_OPTIONS = [
   { value: 'string', label: 'Строка' },
@@ -854,25 +855,18 @@ export const LabelsConfigTab: React.FC = () => {
         />
       </Card>
 
-      <Collapse
-        defaultActiveKey={['current-template-preview']}
-        items={[
-          {
-            key: 'current-template-preview',
-            label: 'Просмотр текущего шаблона',
-            children: (
-              <LabelTemplatePreview
-                widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
-                heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
-                elements={elements}
-                fields={sourceFields}
-                selectedElementKey={selectedElementKey}
-                canDrag={false}
-              />
-            ),
-          },
-        ]}
-      />
+      <Collapse defaultActiveKey={['current-template-preview']}>
+        <Panel header="Просмотр текущего шаблона" key="current-template-preview">
+          <LabelTemplatePreview
+            widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
+            heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
+            elements={elements}
+            fields={sourceFields}
+            selectedElementKey={selectedElementKey}
+            canDrag={false}
+          />
+        </Panel>
+      </Collapse>
 
       <Form form={form} layout="vertical" onFinish={saveTemplate} disabled={!canManage || saving}>
         <Row gutter={16} align="top">
@@ -967,13 +961,8 @@ export const LabelsConfigTab: React.FC = () => {
                 </div>
               </div>
               <div style={{ marginBottom: 16 }}>
-                <Collapse
-                  defaultActiveKey={[]}
-                  items={[
-                    {
-                      key: 'qr-library',
-                      label: 'QR-коды',
-                      children: (
+                <Collapse defaultActiveKey={[]}>
+                  <Panel header="QR-коды" key="qr-library">
                         <Space direction="vertical" size={12} style={{ width: '100%' }}>
                           <Table
                             rowKey="labelQrTemplateId"
@@ -1175,10 +1164,8 @@ export const LabelsConfigTab: React.FC = () => {
                             </Space>
                           </Card>
                         </Space>
-                      ),
-                    },
-                  ]}
-                />
+                  </Panel>
+                </Collapse>
               </div>
               <Space wrap>
                 <Button htmlType="submit" type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage}>
