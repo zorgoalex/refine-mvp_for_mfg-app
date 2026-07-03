@@ -1,20 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { chipsToTemplate, templateToChips, rowsToTemplate, templateToRows, sanitizeQrText, uniqueQrName, qrElementFromLibrary, collectDuplicateQrNames, collectEmptyQrNames, qrDraftFromElement } from './labelQrLibrary';
+import { rowsToTemplate, templateToRows, sanitizeQrText, uniqueQrName, qrElementFromLibrary, collectDuplicateQrNames, collectEmptyQrNames, qrDraftFromElement } from './labelQrLibrary';
 import { autoShiftForQr } from './labelQrHelpers';
-
-describe('chips <-> template', () => {
-  it('compiles chips to a {field}|text string', () => {
-    expect(chipsToTemplate([{ kind: 'field', fieldId: 'bazis.detail_id' }, { kind: 'text', text: '-' }, { kind: 'field', fieldId: 'bazis.name' }], '|'))
-      .toBe('{bazis.detail_id}|-|{bazis.name}');
-  });
-  it('round-trips', () => {
-    const t = '{bazis.detail_id}|-|{bazis.name}';
-    expect(chipsToTemplate(templateToChips(t), '|')).toBe(t);
-  });
-  it('strips brace chars from static text, keeps pipe', () => {
-    expect(chipsToTemplate([{ kind: 'text', text: 'a|b{c}' }], '|')).toBe('a|bc');
-  });
-});
 
 describe('sanitizeQrText', () => {
   it('strips braces and newlines but keeps pipe', () => {

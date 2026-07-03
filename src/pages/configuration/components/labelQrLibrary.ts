@@ -11,20 +11,6 @@ export function sanitizeQrText(text: string): string {
   return text.replace(QR_TEXT_FORBIDDEN, '');
 }
 
-export function chipsToTemplate(chips: QrChip[], separator = '|'): string {
-  return chips
-    .map((c) => (c.kind === 'field' ? `{${c.fieldId}}` : sanitizeQrText(c.text)))
-    .join(separator);
-}
-
-export function templateToChips(template: string, separator = '|'): QrChip[] {
-  if (!template) return [];
-  return template.split(separator).map((part): QrChip => {
-    const m = part.match(/^\{([^{}]+)\}$/);
-    return m ? { kind: 'field', fieldId: m[1].trim() } : { kind: 'text', text: part };
-  });
-}
-
 export function rowsToTemplate(rows: QrRow[]): string {
   // Convert each row to its template string by concatenating chips (no separator).
   // Field chips become {fieldId}, text chips become sanitizeQrText(text).

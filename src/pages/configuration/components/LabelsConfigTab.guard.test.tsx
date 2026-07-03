@@ -209,13 +209,21 @@ describe('LabelsConfigTab wiring', () => {
   });
 
   it('builds QR templates from field-drop chips and excludes label-scoped custom fields from its palette', () => {
-    expect(tabSrc).toMatch(/chipsToTemplate/);
-    expect(tabSrc).toMatch(/templateToChips/);
+    expect(tabSrc).toMatch(/rowsToTemplate/);
+    expect(tabSrc).toMatch(/templateToRows/);
     expect(tabSrc).toMatch(/sanitizeQrText/);
     expect(tabSrc).toMatch(/qrPaletteFields/);
     expect(tabSrc).toMatch(/field\.category !== 'Кастомные'/);
     expect(tabSrc).toMatch(/labelsApi\.updateQrTemplate/);
     expect(tabSrc).toMatch(/draggingQr/);
+  });
+
+  it('supports multiple independent QR content rows, each with its own field-drop zone and free-text input', () => {
+    expect(tabSrc).toMatch(/rows: QrRow\[\]/);
+    expect(tabSrc).toMatch(/addQrRow/);
+    expect(tabSrc).toMatch(/removeQrRow/);
+    expect(tabSrc).toMatch(/\+ строка/);
+    expect(tabSrc).toMatch(/qrRowDropRefs/);
   });
 
   it('lets an ad-hoc QR element be promoted into the global library', () => {
