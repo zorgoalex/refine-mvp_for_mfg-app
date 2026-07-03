@@ -253,6 +253,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     >
       {/* Row 1: Order name, priority, status | Client | Discounted amount, discount %, payment status */}
       <div
+        className="order-show-header__row"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -352,6 +353,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
 
       {/* Row 2: Dates | Production Stages | Notes | Total amount */}
       <div
+        className="order-show-header__row"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -493,6 +495,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
 
       {/* Row 3: ID + Materials + Production metrics */}
       <div
+        className="order-show-header__row"
         style={{
           display: 'flex',
           alignItems: 'center',

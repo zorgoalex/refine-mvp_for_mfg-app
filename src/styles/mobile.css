@@ -33,6 +33,19 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  /* Карточка заказа: строки шапки в столбик, лечит letter-per-line crush.
+     !important — потому что исходные row/дети используют inline flex-стили. */
+  .order-show-header__row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+  .order-show-header__row > div {
+    flex: none !important;
+    width: 100% !important;
+    justify-content: flex-start !important;
+  }
 }
 
 /* Touch-цели — по сенсорности, не по ширине (планшет тоже получает). */
