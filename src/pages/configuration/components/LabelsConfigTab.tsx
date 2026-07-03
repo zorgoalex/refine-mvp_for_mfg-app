@@ -17,15 +17,13 @@ import type {
 } from '../../../api/types/labelsApi.types';
 import { can } from '../../../utils/permissions';
 import {
-  autoShiftForQr,
-  collectQrConflicts,
   extractQrTemplateFieldIds,
   qrErrorCorrectionOf,
   qrProtectedRect,
   qrSideOf,
   qrTemplateOf,
 } from './labelQrHelpers';
-import { collectDuplicateQrNames, collectEmptyQrNames, qrDraftFromElement, qrElementFromLibrary, rowsToTemplate, sanitizeQrText, templateToRows, type QrRow } from './labelQrLibrary';
+import { collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, rowsToTemplate, sanitizeQrText, templateToRows, uniqueQrName, type QrRow } from './labelQrLibrary';
 
 const { Text } = Typography;
 const { Panel } = Collapse;
@@ -113,7 +111,6 @@ export const LabelsConfigTab: React.FC = () => {
   const [draggingField, setDraggingField] = useState<LabelFieldCatalogItem | null>(null);
   const [dragCursor, setDragCursor] = useState<{ x: number; y: number } | null>(null);
   const [visualExpanded, setVisualExpanded] = useState(false);
-  const [qrConflicts, setQrConflicts] = useState<string[]>([]);
   const [qrTemplates, setQrTemplates] = useState<LabelQrTemplate[]>([]);
   const [qrDraft, setQrDraft] = useState<QrDraft>(EMPTY_QR_DRAFT);
   const [qrTextDraftsByRow, setQrTextDraftsByRow] = useState<string[]>(['']);
@@ -216,13 +213,6 @@ export const LabelsConfigTab: React.FC = () => {
     },
     [elements],
   );
-
-  useEffect(() => {
-    setQrConflicts(collectQrConflicts(elements, {
-      widthMm: Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85),
-      heightMm: Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88),
-    }).map((conflict) => conflict.conflictKey));
-  }, [elements, previewHeightMm, previewWidthMm, selectedTemplate]);
 
   useEffect(() => {
     if (!draggingField) {
@@ -353,17 +343,32 @@ export const LabelsConfigTab: React.FC = () => {
 
   const buildTemplatePayload = (values: TemplateFormValues, name = values.name): LabelTemplateInput => {
     const customFieldSchema = parseCustomSchema(customSchemaText);
-    // QR overlap/out-of-bounds is intentionally non-blocking: it only drives the
-    // `qrConflicts` warning banner (kept in sync by the effect that watches
-    // elements/canvas size). A user may deliberately overlap a QR with another
-    // element (e.g. z-index layering), so saving must not be refused for it.
-    const dupes = collectDuplicateQrNames(elements);
+    // QR is a first-class element: it may freely overlap other elements and sit
+    // anywhere on the canvas (use z-index layering). Overlap/out-of-bounds is NOT
+    // a conflict and never blocks saving.
+    //
+    // A placed QR must carry a non-empty, per-label-unique name (backend contract).
+    // Rather than REFUSE a save on a missing name, AUTO-FILL every empty QR name
+    // with a unique default — this covers an unnamed QR from the toolbar button or
+    // an older template — so saving never blocks on a missing name. Only a genuine
+    // duplicate of two user-typed names is still surfaced (rare, actionable).
+    const usedQrNames = new Set(
+      elements
+        .filter((element) => element.kind === 'qr')
+        .map((element) => String((element.style as Record<string, unknown> | undefined)?.qrName ?? '').trim())
+        .filter(Boolean),
+    );
+    const namedElements = elements.map((element) => {
+      if (element.kind !== 'qr') return element;
+      const raw = String((element.style as Record<string, unknown> | undefined)?.qrName ?? '').trim();
+      if (raw) return element;
+      const filled = uniqueQrName('QR', [...usedQrNames]);
+      usedQrNames.add(filled);
+      return { ...element, style: { ...((element.style as Record<string, unknown>) ?? {}), qrName: filled } };
+    });
+    const dupes = collectDuplicateQrNames(namedElements);
     if (dupes.length > 0) {
       throw new Error(`${QR_NAME_DUP_ERROR_PREFIX}${dupes.join(', ')}`);
-    }
-    const emptyNames = collectEmptyQrNames(elements);
-    if (emptyNames.length > 0) {
-      throw new Error(`${QR_NAME_EMPTY_ERROR_PREFIX}${emptyNames.length}`);
     }
     return {
       name: name.trim(),
@@ -373,7 +378,7 @@ export const LabelsConfigTab: React.FC = () => {
       dpi: values.dpi,
       defaultExportFormats: values.defaultExportFormats,
       customFieldSchema,
-      elements: toTemplateElementInput(elements),
+      elements: toTemplateElementInput(namedElements),
       idempotencyKey: `label-template-${Date.now()}`,
     };
   };
@@ -468,18 +473,24 @@ export const LabelsConfigTab: React.FC = () => {
         rotationDeg: 0,
         zIndex: current.length,
         style: kind === 'qr'
-          ? { qrTemplate: '{bazis.detail_id}', qrErrorCorrection: 'M' }
+          ? {
+              qrName: uniqueQrName(
+                'QR',
+                current
+                  .filter((element) => element.kind === 'qr')
+                  .map((element) => String((element.style as Record<string, unknown> | undefined)?.qrName ?? '')),
+              ),
+              qrTemplate: '{bazis.detail_id}',
+              qrErrorCorrection: 'M',
+            }
           : { fontSize: 12 },
         condition: {},
       };
-      if (kind !== 'qr') return [...current, nextElement];
-      // A newly added QR is placed at its default spot without pushing any other
-      // element out of the way (overlap is a warning, not a blocker — see
-      // applyQrGeometryPatch below); the conflicts banner is recomputed so the
-      // user is informed if the default position collides with something.
-      const updated = [...current, nextElement];
-      setQrConflicts(collectQrConflicts(updated, currentCanvasBounds()).map((conflict) => conflict.conflictKey));
-      return updated;
+      // QR is a first-class element: it may freely overlap others and sit anywhere
+      // on the canvas (no auto-shift, no overlap/out-of-bounds conflict). A default
+      // unique qrName is assigned so the save-time name contract is never tripped
+      // for a freshly-added QR.
+      return [...current, nextElement];
     });
     setSelectedElementKey(elementKey);
   };
@@ -545,13 +556,9 @@ export const LabelsConfigTab: React.FC = () => {
     );
   };
 
-  // Applies a QR move/resize/geometry patch WITHOUT pushing neighbouring elements
-  // out of the way (option A: overlap is non-blocking, so an intentional overlap
-  // sticks). It still recomputes `qrConflicts` from the resulting layout so the
-  // warning banner stays accurate. Auto-shift (autoShiftForQr) is kept only for
-  // the initial library drop (onDropDraggingQr), where nudging a freshly-dropped
-  // QR out of an accidental overlap is a placement convenience, not a correction
-  // of an intentional user action.
+  // Applies a QR move/resize/geometry patch. QR is a free-overlap element, so
+  // nothing is pushed and there is no conflict tracking — the patch simply lands
+  // and the QR is kept square (side = max of width/height via qrSideOf).
   const applyQrGeometryPatch = (elementKey: string, patch: Partial<LabelTemplateElement>) => {
     setElements((current) => {
       const currentQr = current.find((element) => element.elementKey === elementKey);
@@ -560,9 +567,8 @@ export const LabelsConfigTab: React.FC = () => {
       }
       const updated = current.map((element) => {
         if (element.elementKey !== elementKey) return element;
-        // Mirrors autoShiftForQr's normalizeQrElement: a QR stays square (side =
-        // max of width/height, floor MIN_QR_SIDE_MM via qrSideOf) and keeps its
-        // error-correction level defaulted, independent of neighbour-pushing.
+        // A QR stays square (side = max of width/height, floor MIN_QR_SIDE_MM via
+        // qrSideOf) and keeps its error-correction level defaulted.
         const merged = { ...element, ...patch };
         const side = qrSideOf(merged);
         return {
@@ -578,7 +584,6 @@ export const LabelsConfigTab: React.FC = () => {
           },
         };
       });
-      setQrConflicts(collectQrConflicts(updated, currentCanvasBounds()).map((conflict) => conflict.conflictKey));
       return updated;
     });
   };
@@ -703,13 +708,10 @@ export const LabelsConfigTab: React.FC = () => {
     // out-of-bounds conflict that blocked saving).
     el.xMm = roundMm(Math.min(Math.max(el.xMm, 0), Math.max(0, bounds.widthMm - el.widthMm)));
     el.yMm = roundMm(Math.min(Math.max(el.yMm, 0), Math.max(0, bounds.heightMm - el.heightMm)));
-    const result = autoShiftForQr({
-      qr: el,
-      elements: [...elements, el],
-      canvas: bounds,
-    });
-    setQrConflicts(result.conflicts.map((conflict) => conflict.conflictKey));
-    setElements(result.elements);
+    // QR drops exactly where placed (clamped inside the canvas). It may freely
+    // overlap other elements — overlap is allowed (use z-index layering), so
+    // nothing is pushed and there is no conflict.
+    setElements([...elements, el]);
     setSelectedElementKey(el.elementKey);
   };
 
@@ -1325,15 +1327,6 @@ export const LabelsConfigTab: React.FC = () => {
                   setQrDragCursor(null);
                 }}
               />
-              {qrConflicts.length > 0 && (
-                <Alert
-                  data-label-qr-conflict
-                  type="warning"
-                  showIcon
-                  style={{ marginTop: 8 }}
-                  message="QR-код пересекается с элементами или выходит за границы бирки"
-                />
-              )}
             </Card>
               <div style={{ marginBottom: 16 }}>
                 <Collapse defaultActiveKey={[]}>
