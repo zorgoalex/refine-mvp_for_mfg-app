@@ -173,9 +173,17 @@ describeIntegration('LabelsService.scanResolve (integration, erp_test)', () => {
     if (!pool) return;
     try {
       if (orderId != null) {
+        // Scenario 2's real updateOrderLabelData path also writes audit_log
+        // (+ audit_log_related_entity, which cascades via its FK on audit_id) —
+        // no FK cascade from orders, so delete explicitly. related_order_id =
+        // our orderId is exclusive to this run (the order is created fresh above).
+        await pool.query('DELETE FROM audit_log WHERE related_order_id = $1', [orderId]);
         // Cascades to order_details + order_label_detail_data.
         await pool.query('DELETE FROM orders WHERE order_id = $1', [orderId]);
       }
+      // command_idempotency_keys has no cascade either; PK = the exact key
+      // scenario 2 passed to updateOrderLabelData.
+      await pool.query('DELETE FROM command_idempotency_keys WHERE idempotency_key = $1', [`${namePrefix}-snapshot-seed`]);
       if (qrTemplateCreatedByUs && qrTemplateId != null) {
         await pool.query('DELETE FROM label_qr_templates WHERE label_qr_template_id = $1', [qrTemplateId]);
       }
