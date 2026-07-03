@@ -140,7 +140,7 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/data-label-global-drag-preview/);
     expect(tabSrc).toMatch(/updateDragPreview/);
     expect(tabSrc).toMatch(/text=\{dragPreview\.field\.label\}/);
-    expect(tabSrc).toMatch(/interactive: Boolean\(canDrag && !draggingField\)/);
+    expect(tabSrc).toMatch(/interactive: Boolean\(canDrag && !externalDragActive\)/);
     expect(tabSrc).toMatch(/window\.addEventListener\('pointerup', handleGlobalDrop, true\)/);
   });
 
@@ -216,5 +216,15 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/field\.category !== 'Кастомные'/);
     expect(tabSrc).toMatch(/labelsApi\.updateQrTemplate/);
     expect(tabSrc).toMatch(/draggingQr/);
+  });
+
+  it('drops a dragged library QR onto the canvas at the pointer position with auto-shift', () => {
+    expect(tabSrc).toMatch(/qrElementFromLibrary/);
+    expect(tabSrc).toMatch(/onDropDraggingQr/);
+    expect(tabSrc).toMatch(/sourceTemplateId: payload\.labelQrTemplateId/);
+    expect(tabSrc).toMatch(/el\.elementKey = `qr-\$\{Date\.now\(\)\}`/);
+    expect(tabSrc).toMatch(/externalDragActive = Boolean\(draggingField \|\| draggingQr\)/);
+    expect(tabSrc).toMatch(/data-label-global-drag-preview-qr/);
+    expect(tabSrc).toMatch(/qrDragCursor/);
   });
 });

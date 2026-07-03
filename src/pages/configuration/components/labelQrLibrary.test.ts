@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chipsToTemplate, templateToChips, uniqueQrName, qrElementFromLibrary } from './labelQrLibrary';
+import { autoShiftForQr } from './labelQrHelpers';
 
 describe('chips <-> template', () => {
   it('compiles chips to a {field}|text string', () => {
@@ -41,5 +42,12 @@ describe('qrElementFromLibrary', () => {
     expect(el.widthMm).toBe(18);
     expect(el.heightMm).toBe(18);
     expect(el.style).toMatchObject({ qrName: 'Деталь 2', qrTemplate: '{bazis.detail_id}', qrErrorCorrection: 'Q', qrSourceTemplateId: 7 });
+  });
+
+  it('dropping a library qr yields an element that autoShift keeps conflict-free', () => {
+    const existing = [{ elementKey: 't1', kind: 'text', xMm: 5, yMm: 5, widthMm: 20, heightMm: 6, style: {} } as any];
+    const el = qrElementFromLibrary({ name: 'QR', contentTemplate: '{bazis.detail_id}', errorCorrection: 'M', defaultSizeMm: 20 }, 4, 4, existing);
+    const result = autoShiftForQr({ qr: el, elements: [...existing, el], canvas: { widthMm: 85, heightMm: 88 } });
+    expect(result.conflicts).toHaveLength(0);
   });
 });

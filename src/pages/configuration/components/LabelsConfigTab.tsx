@@ -25,7 +25,7 @@ import {
   qrSideOf,
   qrTemplateOf,
 } from './labelQrHelpers';
-import { chipsToTemplate, sanitizeQrText, templateToChips, type QrChip } from './labelQrLibrary';
+import { chipsToTemplate, qrElementFromLibrary, sanitizeQrText, templateToChips, type QrChip } from './labelQrLibrary';
 
 const { Text } = Typography;
 const EXPORT_FORMATS: LabelExportFormat[] = ['bmp', 'png', 'emf'];
@@ -119,6 +119,7 @@ export const LabelsConfigTab: React.FC = () => {
   const [qrFieldSearch, setQrFieldSearch] = useState('');
   const [draggingQrField, setDraggingQrField] = useState<LabelFieldCatalogItem | null>(null);
   const [draggingQr, setDraggingQr] = useState<LabelQrTemplate | null>(null);
+  const [qrDragCursor, setQrDragCursor] = useState<{ x: number; y: number } | null>(null);
   const qrDropZoneRef = useRef<HTMLDivElement | null>(null);
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
@@ -257,14 +258,29 @@ export const LabelsConfigTab: React.FC = () => {
     };
   }, [draggingQrField]);
 
-  // The draggable QR-library icon (Task 10 consumes draggingQr to place it on the canvas);
-  // this task only introduces the payload + clears it if no drop target claims it.
+  // The draggable QR-library icon: tracks cursor position for the floating drag badge and
+  // clears the drag state on release (mirrors the draggingField effect above). The actual
+  // drop-onto-canvas resolution happens in LabelTemplatePreview's own capture-phase listener,
+  // which runs before this bubble-phase listener clears draggingQr.
   useEffect(() => {
-    if (!draggingQr) return;
-    const handleEnd = () => setDraggingQr(null);
+    if (!draggingQr) {
+      setQrDragCursor(null);
+      return;
+    }
+    const handleMove = (event: PointerEvent | MouseEvent) => {
+      setQrDragCursor({ x: event.clientX, y: event.clientY });
+    };
+    const handleEnd = () => {
+      setDraggingQr(null);
+      setQrDragCursor(null);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('mousemove', handleMove);
     window.addEventListener('pointerup', handleEnd);
     window.addEventListener('mouseup', handleEnd);
     return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('pointerup', handleEnd);
       window.removeEventListener('mouseup', handleEnd);
     };
@@ -558,6 +574,31 @@ export const LabelsConfigTab: React.FC = () => {
     };
     setElements((current) => [...current, element]);
     setSelectedElementKey(elementKey);
+  };
+
+  const onDropDraggingQr = (payload: LabelQrTemplate, xMm: number, yMm: number) => {
+    if (!canManage) return;
+    const el = qrElementFromLibrary(
+      {
+        name: payload.name,
+        contentTemplate: payload.contentTemplate,
+        errorCorrection: payload.errorCorrection,
+        defaultSizeMm: payload.defaultSizeMm,
+        sourceTemplateId: payload.labelQrTemplateId,
+      },
+      xMm,
+      yMm,
+      elements,
+    );
+    el.elementKey = `qr-${Date.now()}`;
+    const result = autoShiftForQr({
+      qr: el,
+      elements: [...elements, el],
+      canvas: currentCanvasBounds(),
+    });
+    setQrConflicts(result.conflicts.map((conflict) => conflict.conflictKey));
+    setElements(result.elements);
+    setSelectedElementKey(el.elementKey);
   };
 
   const handleBazisImportFile = async (file: File | null) => {
@@ -928,14 +969,30 @@ export const LabelsConfigTab: React.FC = () => {
                                     <QrcodeOutlined
                                       data-qr-template-drag={template.labelQrTemplateId}
                                       draggable={canManage}
-                                      style={{ cursor: canManage ? 'grab' : 'default', fontSize: 16 }}
+                                      style={{ cursor: canManage ? 'grab' : 'default', fontSize: 16, userSelect: 'none' }}
                                       onDragStart={(event) => {
+                                        if (!canManage) return;
                                         setDraggingQr(template);
                                         event.dataTransfer.setData('application/x-label-qr-template', String(template.labelQrTemplateId));
                                         event.dataTransfer.effectAllowed = 'copy';
                                       }}
                                       onDragEnd={() => setDraggingQr(null)}
+                                      onMouseDown={(event) => {
+                                        if (!canManage) return;
+                                        event.preventDefault();
+                                        setDraggingQr(template);
+                                      }}
+                                      onMouseDownCapture={(event) => {
+                                        if (!canManage) return;
+                                        event.preventDefault();
+                                        setDraggingQr(template);
+                                      }}
                                       onPointerDown={(event) => {
+                                        if (!canManage) return;
+                                        event.preventDefault();
+                                        setDraggingQr(template);
+                                      }}
+                                      onPointerDownCapture={(event) => {
                                         if (!canManage) return;
                                         event.preventDefault();
                                         setDraggingQr(template);
@@ -1272,6 +1329,12 @@ export const LabelsConfigTab: React.FC = () => {
                   setDraggingField(null);
                   setDragCursor(null);
                 }}
+                draggingQr={draggingQr}
+                onDropDraggingQr={(payload, xMm, yMm) => {
+                  onDropDraggingQr(payload, xMm, yMm);
+                  setDraggingQr(null);
+                  setQrDragCursor(null);
+                }}
               />
               {qrConflicts.length > 0 && (
                 <Alert
@@ -1314,6 +1377,29 @@ export const LabelsConfigTab: React.FC = () => {
         </div>
       )}
 
+      {draggingQr && qrDragCursor && (
+        <div
+          data-label-global-drag-preview-qr
+          style={{
+            position: 'fixed',
+            left: qrDragCursor.x + 12,
+            top: qrDragCursor.y + 12,
+            zIndex: 3000,
+            padding: '4px 8px',
+            color: '#1677ff',
+            background: '#e6f4ff',
+            border: '1px dashed #1677ff',
+            borderRadius: 4,
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            pointerEvents: 'none',
+            fontSize: 12,
+            lineHeight: 1.3,
+          }}
+        >
+          {draggingQr.name}
+        </div>
+      )}
+
       <Modal
         title="Сохранить шаблон как"
         open={saveAsOpen}
@@ -1350,6 +1436,8 @@ function LabelTemplatePreview({
   onDropField,
   draggingField,
   onDropDraggingField,
+  draggingQr,
+  onDropDraggingQr,
   initialZoom = 1,
 }: {
   widthMm: number;
@@ -1366,6 +1454,8 @@ function LabelTemplatePreview({
   onDropField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
   draggingField?: LabelFieldCatalogItem | null;
   onDropDraggingField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
+  draggingQr?: LabelQrTemplate | null;
+  onDropDraggingQr?: (payload: LabelQrTemplate, xMm: number, yMm: number) => void;
   initialZoom?: number;
 }) {
   const stageRef = useRef<Konva.Stage | null>(null);
@@ -1379,6 +1469,10 @@ function LabelTemplatePreview({
   const [contextMenu, setContextMenu] = useState<{ element: LabelTemplateElement; x: number; y: number } | null>(null);
   const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 85;
   const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 88;
+  // True while an external drag (field or QR icon) is in flight over the canvas; used to
+  // suspend normal element selection/dragging/context-menu so the drop target doesn't fight
+  // with in-canvas interactions.
+  const externalDragActive = Boolean(draggingField || draggingQr);
   const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
   const fieldInfo = useMemo(() => new Map(fields.map((field) => [field.id, field])), [fields]);
   const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
@@ -1401,7 +1495,7 @@ function LabelTemplatePreview({
   }, [initialZoom]);
 
   useEffect(() => {
-    if (!canDrag || !selectedElementKey || selectedElementLocked || draggingField) {
+    if (!canDrag || !selectedElementKey || selectedElementLocked || externalDragActive) {
       transformerRef.current?.nodes([]);
       transformerRef.current?.getLayer()?.batchDraw();
       return;
@@ -1409,7 +1503,7 @@ function LabelTemplatePreview({
     const node = nodeRefs.current.get(selectedElementKey);
     transformerRef.current?.nodes(node ? [node] : []);
     transformerRef.current?.getLayer()?.batchDraw();
-  }, [canDrag, draggingField, elements, selectedElementKey, selectedElementLocked]);
+  }, [canDrag, externalDragActive, elements, selectedElementKey, selectedElementLocked]);
 
   useEffect(() => {
     if (!draggingField || !onDropDraggingField) return;
@@ -1443,6 +1537,38 @@ function LabelTemplatePreview({
       window.removeEventListener('mouseup', handleGlobalDrop, true);
     };
   }, [draggingField, onDropDraggingField, previewHeight, previewWidth, safeHeight, safeWidth]);
+
+  // Mirrors the draggingField global-drop effect above: a capture-phase window listener
+  // resolves the drop (if released over the canvas container) before the outer component's
+  // bubble-phase listener clears draggingQr.
+  useEffect(() => {
+    if (!draggingQr || !onDropDraggingQr) return;
+    let dropped = false;
+    const handleGlobalDrop = (event: MouseEvent | PointerEvent) => {
+      if (dropped) return;
+      const container = stageRef.current?.container();
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const inside =
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom;
+      if (!inside) return;
+      dropped = true;
+      onDropDraggingQr(
+        draggingQr,
+        clamp(((event.clientX - rect.left) / rect.width) * safeWidth, 0, safeWidth - 1),
+        clamp(((event.clientY - rect.top) / rect.height) * safeHeight, 0, safeHeight - 1),
+      );
+    };
+    window.addEventListener('pointerup', handleGlobalDrop, true);
+    window.addEventListener('mouseup', handleGlobalDrop, true);
+    return () => {
+      window.removeEventListener('pointerup', handleGlobalDrop, true);
+      window.removeEventListener('mouseup', handleGlobalDrop, true);
+    };
+  }, [draggingQr, onDropDraggingQr, previewHeight, previewWidth, safeHeight, safeWidth]);
 
   const applySnap = (value: number, event?: { altKey?: boolean }) => (
     snapToGrid && !event?.altKey ? Math.round(value) : value
@@ -1573,12 +1699,20 @@ function LabelTemplatePreview({
     onDropField(field, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
   };
   const handleWrapperMouseUp = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!draggingField || !onDropDraggingField) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const point = pointFromEvent(event);
-    setDragPreview(null);
-    onDropDraggingField(draggingField, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
+    if (draggingField && onDropDraggingField) {
+      event.preventDefault();
+      event.stopPropagation();
+      const point = pointFromEvent(event);
+      setDragPreview(null);
+      onDropDraggingField(draggingField, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
+      return;
+    }
+    if (draggingQr && onDropDraggingQr) {
+      event.preventDefault();
+      event.stopPropagation();
+      const point = pointFromEvent(event);
+      onDropDraggingQr(draggingQr, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
+    }
   };
   const updateDragPreview = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
     if (!draggingField) return;
@@ -1639,6 +1773,7 @@ function LabelTemplatePreview({
       )}
       <div
         data-label-dragging-field={draggingField?.id}
+        data-label-dragging-qr={draggingQr?.labelQrTemplateId}
         tabIndex={canDrag ? 0 : undefined}
         style={{
           width: '100%',
@@ -1712,12 +1847,12 @@ function LabelTemplatePreview({
               renderKonvaPreviewElement({
                 element,
                 fieldLabels,
-                selected: !draggingField && selectedElementKey === element.elementKey,
-                interactive: Boolean(canDrag && !draggingField),
-                draggable: Boolean(canDrag && !draggingField && !isLabelElementLocked(element)),
+                selected: !externalDragActive && selectedElementKey === element.elementKey,
+                interactive: Boolean(canDrag && !externalDragActive),
+                draggable: Boolean(canDrag && !externalDragActive && !isLabelElementLocked(element)),
                 safeWidth,
                 safeHeight,
-                onSelectElement: draggingField ? undefined : onSelectElement,
+                onSelectElement: externalDragActive ? undefined : onSelectElement,
                 onMoveElement: handleMoveElement,
                 nodeRef: (node) => {
                   if (node) nodeRefs.current.set(element.elementKey, node);
@@ -1734,7 +1869,7 @@ function LabelTemplatePreview({
                   });
                 },
                 onLeaveElement: () => setHoveredElement(null),
-                onContextMenu: draggingField ? undefined : (menuElement, event) => {
+                onContextMenu: externalDragActive ? undefined : (menuElement, event) => {
                   if (!canDrag) return;
                   event.evt.preventDefault();
                   const pointer = event.target.getStage()?.getPointerPosition();
@@ -1774,7 +1909,7 @@ function LabelTemplatePreview({
                 />
               </>
             )}
-            {canDrag && !draggingField && (
+            {canDrag && !externalDragActive && (
               <Transformer
                 ref={transformerRef}
                 rotateEnabled
