@@ -62,7 +62,7 @@ describe('AuthController HTTP shell', () => {
       }),
     ).resolves.toEqual(createAuthResponse());
 
-    expect(context.calls).toEqual(['rate-limit', 'login: manager :secret']);
+    expect(context.calls).toEqual(['rate-limit', 'rate-limit', 'login: manager :secret']);
     expect(context.cookies).toEqual([
       {
         name: REFRESH_COOKIE_NAME,
@@ -219,8 +219,9 @@ function createController(options: {
       calls.push(`refresh:${command.refreshToken}`);
       return createLoginResult({ accessToken: 'access_refreshed' });
     },
-    async logout(command: LogoutCommand): Promise<void> {
+    async logout(command: LogoutCommand): Promise<{ ok: true }> {
       calls.push(`logout:${command.refreshToken}:${command.currentUser?.id ?? 'anonymous'}`);
+      return { ok: true };
     },
   } as AuthSessionHttpPort;
   const runtimeConfig = {
@@ -242,7 +243,7 @@ function createController(options: {
   } as RateLimitService;
 
   return {
-    controller: new AuthController(auth, sessions, runtimeConfig, rateLimits),
+    controller: new AuthController(auth, sessions, runtimeConfig, rateLimits, null),
     response: response as never,
     calls,
     cookies,

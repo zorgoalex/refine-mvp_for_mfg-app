@@ -9,12 +9,17 @@ export interface LoginCommand {
   requestId?: string;
 }
 
+export type LoginPolicy = 'local' | 'external' | 'both';
+
+export type AuthSource = 'backend' | 'workos';
+
 export interface AuthUserRecord {
   id: string;
   username: string;
   roleId: number;
   passwordHash: string;
   isActive: boolean;
+  loginPolicy: LoginPolicy;
 }
 
 export interface AuthSessionRecord {
@@ -32,21 +37,37 @@ export interface PasswordVerifierPort {
   verify(password: string, passwordHash: string): Promise<boolean>;
 }
 
-export interface SessionManagerPort {
-  createLoginSession(
-    user: AuthUserRecord,
-    context: Pick<LoginCommand, 'userAgent' | 'ipAddress' | 'requestId'>,
-  ): Promise<AuthSessionRecord>;
+export interface LoginSessionContext extends Pick<LoginCommand, 'userAgent' | 'ipAddress' | 'requestId'> {
+  /** Written to the first-class audit_log.source column ('backend' when absent). */
+  authSource?: AuthSource;
+  /** External provider session id, persisted for provider-side logout. */
+  providerSessionId?: string;
 }
+
+export interface SessionManagerPort {
+  createLoginSession(user: AuthUserRecord, context: LoginSessionContext): Promise<AuthSessionRecord>;
+}
+
+export type LoginFailedReason =
+  | 'unknown_user'
+  | 'invalid_password'
+  | 'inactive_user'
+  | 'login_method_not_allowed'
+  | 'email_not_verified'
+  | 'identity_not_linked'
+  | 'provider_error'
+  | 'state_mismatch';
 
 export interface AuthAuditPort {
   writeLoginFailed(input: {
     username: string;
     user?: Pick<AuthUserRecord, 'id' | 'username' | 'roleId' | 'isActive'>;
-    reason: 'unknown_user' | 'invalid_password' | 'inactive_user';
+    reason: LoginFailedReason;
     requestId?: string;
     userAgent?: string;
     ipAddress?: string;
+    authSource?: AuthSource;
+    metadata?: Record<string, unknown>;
   }): Promise<void>;
 }
 

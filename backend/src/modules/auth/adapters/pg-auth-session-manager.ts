@@ -12,9 +12,10 @@ import type {
   IssuedAccessToken,
   LoginCommand,
   LoginResult,
+  LoginSessionContext,
   SessionManagerPort,
 } from '../auth.types';
-import type { AuthSessionHttpPort, LogoutCommand, RefreshCommand } from '../http/auth-session-http.port';
+import type { AuthSessionHttpPort, LogoutCommand, LogoutResult, RefreshCommand } from '../http/auth-session-http.port';
 import { TokenService } from '../token.service';
 import { JwtAccessTokenIssuer } from './jwt-access-token-issuer';
 
@@ -50,6 +51,8 @@ interface AuthAuditInput {
   requestId?: string;
   userAgent?: string;
   ipAddress?: string;
+  /** First-class audit_log.source column value; 'backend' when absent. */
+  authSource?: 'backend' | 'workos';
   metadata?: Record<string, unknown>;
 }
 
@@ -58,6 +61,12 @@ const DEFAULT_REQUEST_ID = 'auth-command';
 export interface PgAuthSessionManagerOptions {
   refreshTokenPepper: string;
   refreshTokenTtlDays: number;
+  /**
+   * auth_sessions.provider_session_id exists only after migration 052; the
+   * column is written/read only when the WorkOS flag is enabled so the
+   * backend stays deployable against a pre-052 database.
+   */
+  supportsProviderSessions?: boolean;
 }
 
 export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttpPort {
@@ -68,23 +77,30 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     private readonly options: PgAuthSessionManagerOptions,
   ) {}
 
-  async createLoginSession(
-    user: AuthUserRecord,
-    context: Pick<LoginCommand, 'userAgent' | 'ipAddress' | 'requestId'>,
-  ): Promise<AuthSessionRecord> {
+  async createLoginSession(user: AuthUserRecord, context: LoginSessionContext): Promise<AuthSessionRecord> {
     const refreshToken = this.tokenService.generateRefreshToken();
     const tokenHash = this.hashRefreshToken(refreshToken);
     const expiresAt = this.refreshTokenExpiresAt();
+    const withProviderSession = this.options.supportsProviderSessions && context.providerSessionId;
 
     return this.database.transaction(async (tx) => {
-      const session = await tx.query<CreatedSessionRow>(
-        `
-        INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent)
-        VALUES ($1, $2, $3, $4)
-        RETURNING session_id::text, token_family_id::text
-        `,
-        [user.id, expiresAt, context.ipAddress ?? null, context.userAgent ?? null],
-      );
+      const session = withProviderSession
+        ? await tx.query<CreatedSessionRow>(
+            `
+            INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent, provider_session_id)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING session_id::text, token_family_id::text
+            `,
+            [user.id, expiresAt, context.ipAddress ?? null, context.userAgent ?? null, context.providerSessionId],
+          )
+        : await tx.query<CreatedSessionRow>(
+            `
+            INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent)
+            VALUES ($1, $2, $3, $4)
+            RETURNING session_id::text, token_family_id::text
+            `,
+            [user.id, expiresAt, context.ipAddress ?? null, context.userAgent ?? null],
+          );
       const sessionRow = session.rows[0];
 
       await tx.query(
@@ -122,6 +138,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         requestId: context.requestId,
         userAgent: context.userAgent,
         ipAddress: context.ipAddress,
+        authSource: context.authSource,
         metadata: {
           outcome: 'success',
         },
@@ -248,14 +265,15 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     });
   }
 
-  async logout(command: LogoutCommand): Promise<void> {
+  async logout(command: LogoutCommand): Promise<LogoutResult> {
     if (!command.refreshToken) {
       if (command.currentUser?.sessionId) {
         const currentUser = {
           ...command.currentUser,
           sessionId: command.currentUser.sessionId,
         };
-        await this.database.transaction(async (tx) => {
+        return this.database.transaction(async (tx) => {
+          const providerSessionId = await this.readProviderSessionId(tx, currentUser.sessionId);
           await tx.query(
             `
             UPDATE auth_sessions
@@ -265,20 +283,22 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
             [currentUser.sessionId],
           );
           await this.writeCurrentUserLogoutAudit(tx, { ...command, currentUser });
+          return providerSessionId ? { ok: true as const, providerSessionId } : { ok: true as const };
         });
       }
-      return;
+      return { ok: true };
     }
 
     const tokenHash = this.hashRefreshToken(command.refreshToken);
 
-    await this.database.transaction(async (tx) => {
+    return this.database.transaction(async (tx) => {
       const current = await this.lockRefreshToken(tx, tokenHash);
 
       if (!current) {
-        return;
+        return { ok: true as const };
       }
 
+      const providerSessionId = await this.readProviderSessionId(tx, current.session_id);
       await this.revokeTokenFamily(tx, current, 'logout');
       await this.writeAudit(tx, {
         event: 'auth.logout',
@@ -295,7 +315,20 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
           refreshTokenPresent: true,
         },
       });
+      return providerSessionId ? { ok: true as const, providerSessionId } : { ok: true as const };
     });
+  }
+
+  private async readProviderSessionId(tx: TransactionClient, sessionId: string): Promise<string | null> {
+    if (!this.options.supportsProviderSessions) {
+      return null;
+    }
+
+    const result = await tx.query<{ provider_session_id: string | null } & QueryResultRow>(
+      'SELECT provider_session_id FROM auth_sessions WHERE session_id = $1',
+      [sessionId],
+    );
+    return result.rows[0]?.provider_session_id ?? null;
   }
 
   private async lockRefreshToken(
@@ -427,7 +460,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         event, entity_type, entity_id, user_id, username, role_code, role,
         request_id, ip_address, user_agent, source, metadata_json
       )
-      VALUES ($1, 'auth_session', $2, $3, $4, $5, $5, $6, $7::inet, $8, 'backend', $9::jsonb)
+      VALUES ($1, 'auth_session', $2, $3, $4, $5, $5, $6, $7::inet, $8, $9, $10::jsonb)
       `,
       [
         input.event,
@@ -438,6 +471,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         input.requestId ?? DEFAULT_REQUEST_ID,
         input.ipAddress ?? null,
         input.userAgent ?? null,
+        input.authSource ?? 'backend',
         JSON.stringify({
           sessionId: input.sessionId,
           tokenFamilyId: input.tokenFamilyId,

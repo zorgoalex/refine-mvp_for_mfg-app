@@ -44,7 +44,7 @@ describe('PgAuthSessionManager', () => {
       'INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent) VALUES ($1, $2, $3, $4) RETURNING session_id::text, token_family_id::text',
       'INSERT INTO refresh_tokens ( user_id, session_id, token_hash, token_family_id, expires_at, user_agent, ip_address ) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       'UPDATE users SET last_login_at = now() WHERE user_id = $1',
-      "INSERT INTO audit_log ( event, entity_type, entity_id, user_id, username, role_code, role, request_id, ip_address, user_agent, source, metadata_json ) VALUES ($1, 'auth_session', $2, $3, $4, $5, $5, $6, $7::inet, $8, 'backend', $9::jsonb)",
+      "INSERT INTO audit_log ( event, entity_type, entity_id, user_id, username, role_code, role, request_id, ip_address, user_agent, source, metadata_json ) VALUES ($1, 'auth_session', $2, $3, $4, $5, $5, $6, $7::inet, $8, $9, $10::jsonb)",
     ]);
     const audit = findAudit(database.queries, 'auth.login.success');
     expect(audit?.params).toEqual([
@@ -56,6 +56,7 @@ describe('PgAuthSessionManager', () => {
       'auth-command',
       '127.0.0.1',
       'agent',
+      'backend',
       JSON.stringify({
         sessionId: 'session-1',
         tokenFamilyId: 'family-1',
@@ -117,6 +118,7 @@ describe('PgAuthSessionManager', () => {
       'auth-command',
       '127.0.0.1',
       'agent',
+      'backend',
       JSON.stringify({
         sessionId: 'session-1',
         tokenFamilyId: 'family-1',
@@ -162,6 +164,7 @@ describe('PgAuthSessionManager', () => {
       'auth-command',
       null,
       null,
+      'backend',
       JSON.stringify({
         sessionId: 'session-1',
         tokenFamilyId: 'family-1',
@@ -206,6 +209,7 @@ describe('PgAuthSessionManager', () => {
       'req-logout',
       '127.0.0.1',
       'agent',
+      'backend',
       JSON.stringify({
         sessionId: 'session-1',
         tokenFamilyId: 'family-1',

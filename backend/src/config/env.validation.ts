@@ -100,6 +100,11 @@ export const envSchema = z
     REFRESH_COOKIE_SECURE: optionalBooleanFromEnv,
     REFRESH_COOKIE_SAME_SITE: sameSiteFromEnv,
     BACKEND_ENABLE_AUTH: booleanFromEnv.default(false),
+    BACKEND_ENABLE_WORKOS_AUTH: booleanFromEnv.default(false),
+    WORKOS_API_KEY: z.string().trim().min(1).optional(),
+    WORKOS_CLIENT_ID: z.string().trim().min(1).optional(),
+    WORKOS_REDIRECT_URI: z.string().trim().url().optional(),
+    WORKOS_API_BASE: z.string().trim().url().default('https://api.workos.com'),
     BACKEND_ENABLE_ORDERS: booleanFromEnv.default(false),
     BACKEND_ENABLE_PAYMENTS: booleanFromEnv.default(false),
     BACKEND_ENABLE_CLIENT_PHONES: booleanFromEnv.default(false),
@@ -257,6 +262,26 @@ export const envSchema = z
         message: 'DATABASE_POOL_MIN cannot be greater than DATABASE_POOL_MAX',
         path: ['DATABASE_POOL_MIN'],
       });
+    }
+
+    if (env.BACKEND_ENABLE_WORKOS_AUTH) {
+      if (!env.BACKEND_ENABLE_AUTH) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'BACKEND_ENABLE_AUTH is required when BACKEND_ENABLE_WORKOS_AUTH is true',
+          path: ['BACKEND_ENABLE_AUTH'],
+        });
+      }
+
+      for (const key of ['WORKOS_API_KEY', 'WORKOS_CLIENT_ID', 'WORKOS_REDIRECT_URI'] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `${key} is required when BACKEND_ENABLE_WORKOS_AUTH is true`,
+            path: [key],
+          });
+        }
+      }
     }
 
     if (env.BACKEND_ENABLE_AUTH) {

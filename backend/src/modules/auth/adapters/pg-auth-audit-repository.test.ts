@@ -30,6 +30,7 @@ describe('PgAuthAuditRepository', () => {
       'req-login-failed',
       '127.0.0.1',
       'vitest-agent',
+      'backend',
       JSON.stringify({
         attemptedUsername: 'manager',
         reason: 'invalid_password',
@@ -62,6 +63,7 @@ describe('PgAuthAuditRepository', () => {
       'auth-command',
       null,
       null,
+      'backend',
       JSON.stringify({
         attemptedUsername: 'missing',
         reason: 'unknown_user',

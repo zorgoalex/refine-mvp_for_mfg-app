@@ -22,6 +22,7 @@ describe('PgAuthUserRepository', () => {
       roleId: 10,
       passwordHash: 'bcrypt-hash',
       isActive: true,
+      loginPolicy: 'both',
     });
   });
 

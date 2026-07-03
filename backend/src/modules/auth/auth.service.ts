@@ -1,6 +1,11 @@
 import { getPermissionsForRole, mapRoleIdToRole } from '../../permissions/permissions';
 import type { CurrentUser } from '../../permissions/current-user';
-import { InvalidCredentialsError, UnknownRoleError, UserInactiveError } from './auth.errors';
+import {
+  InvalidCredentialsError,
+  LoginMethodNotAllowedError,
+  UnknownRoleError,
+  UserInactiveError,
+} from './auth.errors';
 import type {
   AccessTokenIssuerPort,
   AuthResponse,
@@ -45,6 +50,11 @@ export class AuthService {
       throw new UserInactiveError();
     }
 
+    if (user.loginPolicy === 'external') {
+      await this.writeLoginFailed(command, username, 'login_method_not_allowed', user);
+      throw new LoginMethodNotAllowedError();
+    }
+
     const session = await this.ports.sessions.createLoginSession(user, {
       userAgent: command.userAgent,
       ipAddress: command.ipAddress,
@@ -80,7 +90,7 @@ export class AuthService {
   private async writeLoginFailed(
     command: LoginCommand,
     username: string,
-    reason: 'unknown_user' | 'invalid_password' | 'inactive_user',
+    reason: 'unknown_user' | 'invalid_password' | 'inactive_user' | 'login_method_not_allowed',
     user?: AuthUserRecord,
   ): Promise<void> {
     await this.ports.audit.writeLoginFailed({

@@ -17,6 +17,8 @@ import type { AuthResponse, LoginCommand } from '../auth.types';
 import { createClearRefreshCookie, createRefreshCookie, REFRESH_COOKIE_NAME } from '../refresh-cookie';
 import { AUTH_SESSION_HTTP_PORT, type AuthSessionHttpPort } from './auth-session-http.port';
 import { AuthRuntimeConfigService } from './auth-runtime-config.service';
+import { WORKOS_AUTH_SERVICE } from '../workos/workos-auth.controller';
+import type { WorkosAuthService } from '../workos/workos-auth.service';
 
 type AuthRequest = Request & RequestWithCurrentUser;
 type RequestWithRequestId = Request & { requestId?: string };
@@ -25,6 +27,8 @@ const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
 export interface LogoutResponse {
   ok: true;
+  /** Hosted provider logout URL; present when the session came from SSO. */
+  providerLogoutUrl?: string;
 }
 
 export interface MeResponse {
@@ -67,6 +71,7 @@ const logoutResponseSwaggerSchema = {
   required: ['ok'],
   properties: {
     ok: { type: 'boolean', enum: [true] },
+    providerLogoutUrl: { type: 'string' },
   },
 } as const;
 
@@ -90,6 +95,8 @@ export class AuthController {
     private readonly runtimeConfig: AuthRuntimeConfigService,
     @Inject(RateLimitService)
     private readonly rateLimits: RateLimitService,
+    @Inject(WORKOS_AUTH_SERVICE)
+    private readonly workosAuth: WorkosAuthService | null,
   ) {}
 
   @ApiBody({ schema: swaggerSchema(loginRequestSwaggerSchema) })
@@ -117,6 +124,19 @@ export class AuthController {
       subject: {
         route: 'auth/login',
         ipAddress: request.ip,
+        username: body.username,
+      },
+    });
+    // Per-account window WITHOUT the ip component: a distributed attack that
+    // rotates source addresses still shares this counter for one username.
+    await this.rateLimits.assertAllowed({
+      rule: {
+        feature: 'auth_login_account',
+        maxRequests: 20,
+        windowMs: 3_600_000,
+      },
+      subject: {
+        route: 'auth/login',
         username: body.username,
       },
     });
@@ -188,7 +208,7 @@ export class AuthController {
   ): Promise<LogoutResponse> {
     this.assertAuthEnabled();
 
-    await this.sessions.logout({
+    const result = await this.sessions.logout({
       refreshToken: readCookie(request.headers.cookie, REFRESH_COOKIE_NAME) ?? undefined,
       currentUser: request.user,
       userAgent: request.get('user-agent') ?? undefined,
@@ -196,6 +216,10 @@ export class AuthController {
       requestId: request.requestId,
     });
     this.clearRefreshCookie(response);
+
+    if (result.providerSessionId && this.workosAuth) {
+      return { ok: true, providerLogoutUrl: this.workosAuth.buildProviderLogoutUrl(result.providerSessionId) };
+    }
 
     return { ok: true };
   }
