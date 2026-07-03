@@ -83,6 +83,7 @@ const { Title, Text } = Typography;
 type PdfPreviewState = {
   open: boolean;
   group: CutGroupDto | null;
+  title: string;
   loading: boolean;
   url: string | null;
   blob: Blob | null;
@@ -92,6 +93,7 @@ type PdfPreviewState = {
 const EMPTY_PDF_PREVIEW: PdfPreviewState = {
   open: false,
   group: null,
+  title: 'Предпросмотр PDF',
   loading: false,
   url: null,
   blob: null,
@@ -828,7 +830,7 @@ export const CutPage: React.FC = () => {
       pdfPreviewRequestSeqRef.current = requestSeq;
       setBusy(true);
       revokePdfPreviewUrl();
-      setPdfPreview({ ...EMPTY_PDF_PREVIEW, open: true, group, loading: true });
+      setPdfPreview({ ...EMPTY_PDF_PREVIEW, open: true, group, title: `Предпросмотр PDF · группа #${group.cutGroupId}`, loading: true });
       try {
         // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
         const pdfTemplate = pdfTemplateByGroup[group.cutGroupId] ?? 'standard';
@@ -839,6 +841,7 @@ export const CutPage: React.FC = () => {
         setPdfPreview({
           open: true,
           group,
+          title: `Предпросмотр PDF · группа #${group.cutGroupId}`,
           loading: false,
           url,
           blob: result.blob,
@@ -863,23 +866,47 @@ export const CutPage: React.FC = () => {
   }, [revokePdfPreviewUrl]);
 
   const downloadPreviewPdf = useCallback(() => {
-    if (!pdfPreview.blob || !pdfPreview.group) return;
-    triggerBlobDownload(pdfPreview.blob, pdfPreview.fileName ?? `cut-group-${pdfPreview.group.cutGroupId}.pdf`);
-  }, [pdfPreview.blob, pdfPreview.fileName, pdfPreview.group]);
+    if (!pdfPreview.blob || !pdfPreview.fileName) return;
+    triggerBlobDownload(pdfPreview.blob, pdfPreview.fileName);
+  }, [pdfPreview.blob, pdfPreview.fileName]);
 
-  const downloadJobPdf = useCallback(async () => {
+  const openJobPdfPreview = useCallback(async () => {
     if (!job) return;
+    const requestSeq = pdfPreviewRequestSeqRef.current + 1;
+    pdfPreviewRequestSeqRef.current = requestSeq;
     setBusy(true);
+    revokePdfPreviewUrl();
+    setPdfPreview({
+      ...EMPTY_PDF_PREVIEW,
+      open: true,
+      title: `Предпросмотр PDF · раскрой #${job.cutJobId}`,
+      loading: true,
+      fileName: `cut-job-${job.cutJobId}.pdf`,
+    });
     try {
       // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
       const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetOriginTopLeft));
-      triggerBlobDownload(result.blob, result.fileName ?? `cut-job-${job.cutJobId}.pdf`);
+      if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
+      const url = URL.createObjectURL(result.blob);
+      pdfPreviewUrlRef.current = url;
+      setPdfPreview({
+        open: true,
+        group: null,
+        title: `Предпросмотр PDF · раскрой #${job.cutJobId}`,
+        loading: false,
+        url,
+        blob: result.blob,
+        fileName: result.fileName ?? `cut-job-${job.cutJobId}.pdf`,
+      });
     } catch (error) {
+      if (pdfPreviewRequestSeqRef.current === requestSeq) {
+        setPdfPreview((prev) => ({ ...prev, loading: false }));
+      }
       handleError(error, 'Не удалось выгрузить PDF раскроя');
     } finally {
       setBusy(false);
     }
-  }, [job, sheetPortrait, sheetOriginTopLeft, handleError]);
+  }, [job, sheetPortrait, sheetOriginTopLeft, handleError, revokePdfPreviewUrl]);
 
   // ── Manual layout editor callbacks ─────────────────────────────────────────
 
@@ -1501,11 +1528,12 @@ export const CutPage: React.FC = () => {
                 }
               >
                 <Button
-                  onClick={downloadJobPdf}
+                  onClick={() => void openJobPdfPreview()}
                   loading={busy}
                   disabled={anyGroupDirty || (job.requiresRecalc ?? false)}
+                  data-testid="preview-job-pdf-btn"
                 >
-                  Скачать PDF (весь раскрой)
+                  Предпросмотр PDF (весь раскрой)
                 </Button>
               </Tooltip>
             )}
@@ -1887,7 +1915,7 @@ export const CutPage: React.FC = () => {
       })}
       </Space>
       <Modal
-        title={pdfPreview.group ? `Предпросмотр PDF · группа #${pdfPreview.group.cutGroupId}` : 'Предпросмотр PDF'}
+        title={pdfPreview.title}
         open={pdfPreview.open}
         onCancel={closeGroupPdfPreview}
         width={1040}
