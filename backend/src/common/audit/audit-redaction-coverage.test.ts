@@ -7,6 +7,9 @@ const ALLOWLIST: Record<string, number> = {
   // Auth special-case: persists ip_address/user_agent absent from the central insert.
   'src/modules/auth/adapters/pg-auth-audit-repository.ts': 1,
   'src/modules/auth/adapters/pg-auth-session-manager.ts': 2,
+  // WorkOS identity events share the identity insert/delete transaction and
+  // persist ip_address/user_agent like the other auth writers.
+  'src/modules/auth/workos/pg-user-identity-repository.ts': 3,
   // DEFERRED Variant-B; remove each when its module is migrated.
   'src/modules/orders/adapters/pg-order-project-link-repository.ts': 1,
   'src/modules/orders/adapters/pg-order-transaction-manager.ts': 1,
