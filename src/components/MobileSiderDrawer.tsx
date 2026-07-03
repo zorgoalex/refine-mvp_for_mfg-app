@@ -60,6 +60,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   materials: "Материалы",
   configuration: "Конфигурация",
   sheet_material_types: "Листовые материалы",
+  scan: "Сканер бирок",
 };
 
 export interface MobileSiderDrawerProps {

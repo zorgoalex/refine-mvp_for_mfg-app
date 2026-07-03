@@ -12,3 +12,13 @@ describe('qr scanner module', () => {
     expect(src).not.toMatch(/^import .*zxing/m); // нет статического импорта wasm
   });
 });
+
+describe('ScanPage', () => {
+  it('ScanPage lazy-starts camera and wires manual input to scanResolve', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('startQrScanner');
+    expect(src).toContain('scanResolve');
+    expect(src).toContain('NotAllowedError');
+    expect(src).toContain('highlightDetail');
+  });
+});

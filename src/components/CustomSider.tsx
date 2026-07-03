@@ -36,6 +36,7 @@ import {
   ProjectOutlined,
   AuditOutlined,
   ContactsOutlined,
+  QrcodeOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -82,6 +83,7 @@ const CATEGORY_ORDER = [
 const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
   calendar: <CalendarOutlined />,
+  scan: <QrcodeOutlined />,
   projects: <ProjectOutlined />,
   clients: <UserOutlined />,
   clients_analytics_view: <BarChartOutlined />,

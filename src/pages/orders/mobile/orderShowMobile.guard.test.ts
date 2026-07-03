@@ -30,4 +30,8 @@ describe('order show header phone stacking', () => {
     const src = read('pages/orders/show.tsx');
     expect(src).toMatch(/isMobile[\s\S]*Dropdown|Dropdown[\s\S]*isMobile/);
   });
+  it('show.tsx honors highlightDetail query param', () => {
+    const src = read('pages/orders/show.tsx');
+    expect(src).toContain('highlightDetail');
+  });
 });

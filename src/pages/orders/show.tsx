@@ -5,7 +5,7 @@ import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, Downl
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from "../../utils/materialDisplayName";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
@@ -81,6 +81,8 @@ const ORDER_DETAIL_SHOW_DEFAULT_ORDER = ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS.map
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const [searchParams] = useSearchParams();
+  const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
   const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
 
   const { queryResult } = useShow({
@@ -1255,7 +1257,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               )}
             </div>
             {isMobile ? (
-              <DetailCardList rows={details} lookups={detailCardLookups} />
+              <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail} />
             ) : (
             <TableTopScroll>
             <Table
@@ -1290,10 +1292,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               tableLayout="fixed"
               style={{ fontSize: 12 }}
               rowClassName={(row: any, index) => {
-                if (row?.kind === 'separator') return 'detail-group-separator';
-                if (!groupingActive) return index % 2 === 0 ? 'table-row-light' : 'table-row-dark';
+                const detailRow = row?.kind === 'detail' ? row.detail : row;
+                const isHighlighted = highlightDetail != null && detailRow?.detail_id === highlightDetail;
+                const highlightClass = isHighlighted ? ' highlighted-row' : '';
+                if (row?.kind === 'separator') return `detail-group-separator${highlightClass}`;
+                if (!groupingActive) return `${index % 2 === 0 ? 'table-row-light' : 'table-row-dark'}${highlightClass}`;
                 const groupIndex = row?.kind === 'detail' ? row.groupIndex : index;
-                return `detail-group-tint-${groupIndex % GROUP_TINT_COUNT}`;
+                return `detail-group-tint-${groupIndex % GROUP_TINT_COUNT}${highlightClass}`;
               }}
               onRow={(row: any) => ({
                 onDoubleClick: () => {

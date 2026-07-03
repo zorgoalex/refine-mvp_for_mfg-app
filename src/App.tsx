@@ -22,6 +22,7 @@ const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/sho
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
+const ScanPage = lazy(async () => ({ default: (await import("./pages/scan/ScanPage")).ScanPage }));
 const ProjectsPage = lazy(async () => ({ default: (await import("./pages/projects/ProjectsPage")).ProjectsPage }));
 const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/doweling_orders/edit")).DowelOrderEdit }));
 const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
@@ -261,6 +262,13 @@ const ThemedApp = () => {
                       },
                     ]
                   : []),
+                {
+                  name: "scan",
+                  list: "/scan",
+                  meta: {
+                    label: "Сканер бирок",
+                  },
+                },
                 {
                   name: "materials",
                   list: "/materials",
@@ -590,6 +598,9 @@ const ThemedApp = () => {
                       <Route index element={<CutPage />} />
                     </Route>
                   )}
+                  <Route path="/scan">
+                    <Route index element={<ScanPage />} />
+                  </Route>
                   <Route path="/doweling-orders" >
                     <Route index element={<DowelOrderList />} />
                     <Route path="edit/:id" element={<DowelOrderEdit />} />

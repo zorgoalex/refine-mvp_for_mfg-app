@@ -8,6 +8,7 @@ import {
   MoonOutlined,
   SunOutlined,
   SettingOutlined,
+  QrcodeOutlined,
 } from "@ant-design/icons";
 import { useGetIdentity, useLogout } from "@refinedev/core";
 import { useNavigate } from "react-router-dom";
@@ -88,6 +89,13 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
       <Space size="middle" align="center">
         {identity && (
           <>
+            <Button
+              type="text"
+              icon={<QrcodeOutlined style={{ fontSize: 18 }} />}
+              onClick={() => navigate("/scan")}
+              aria-label="Сканер бирок"
+            />
+
             {/* Колокольчик уведомлений */}
             <NotificationBell />
 
