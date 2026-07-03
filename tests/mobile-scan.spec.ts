@@ -65,7 +65,9 @@ test('manual resolve → single candidate → action modal → "Открыть �
     page,
 }) => {
     const db = createWorkflowMockDb();
-    await setupWorkflowMockApi(page, db);
+    // The /scan route + resource are gated behind featureFlags.labels, so the
+    // mocked runtime-config must enable it for the page to exist at all.
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
     await mockScanResolve(page, oneCandidateBody());
 
     await page.goto('/scan', { waitUntil: 'domcontentloaded' });
@@ -93,7 +95,9 @@ test('second visit with a pre-seeded action pref → manual resolve navigates wi
     page,
 }) => {
     const db = createWorkflowMockDb();
-    await setupWorkflowMockApi(page, db);
+    // The /scan route + resource are gated behind featureFlags.labels, so the
+    // mocked runtime-config must enable it for the page to exist at all.
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
     await mockScanResolve(page, oneCandidateBody());
 
     // setupWorkflowMockApi registers an addInitScript that calls
@@ -125,7 +129,9 @@ test('second visit with a pre-seeded action pref → manual resolve navigates wi
 
 test('manual resolve → zero candidates → Empty "Не найдено" with the raw search string', async ({ page }) => {
     const db = createWorkflowMockDb();
-    await setupWorkflowMockApi(page, db);
+    // The /scan route + resource are gated behind featureFlags.labels, so the
+    // mocked runtime-config must enable it for the page to exist at all.
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
     await mockScanResolve(page, zeroCandidateBody());
 
     await page.goto('/scan', { waitUntil: 'domcontentloaded' });
@@ -145,7 +151,9 @@ test('headless has no camera: page stays usable (camera-error Alert or video ele
     page,
 }) => {
     const db = createWorkflowMockDb();
-    await setupWorkflowMockApi(page, db);
+    // The /scan route + resource are gated behind featureFlags.labels, so the
+    // mocked runtime-config must enable it for the page to exist at all.
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
     await mockScanResolve(page, zeroCandidateBody());
 
     await page.goto('/scan', { waitUntil: 'domcontentloaded' });

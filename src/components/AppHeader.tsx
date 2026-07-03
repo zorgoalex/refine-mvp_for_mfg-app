@@ -15,6 +15,10 @@ import { useNavigate } from "react-router-dom";
 import type { UserIdentity } from "../types/auth";
 import { NotificationBell } from "./NotificationBell";
 import { useAppTheme } from "../theme/ThemeProvider";
+import { authStorage } from "../utils/auth";
+import { authSession } from "../api/authSession";
+import { featureFlags } from "../config/featureFlags";
+import { canViewNavigationResource } from "../utils/navigationPermissions";
 // import { NotificationTestButton } from "./NotificationTestButton"; // DEV ONLY - закомментирован
 
 export interface AppHeaderProps {
@@ -41,6 +45,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
   };
 
   const roleName = roleNames[role] || role;
+
+  // Scanner entry is part of the labels feature surface: hide the button when
+  // the flag is off or the user lacks the scan permission (same visibility
+  // source as CustomSider's menu gating).
+  const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
+  const canScan =
+    featureFlags.labels &&
+    canViewNavigationResource('scan', currentUser, featureFlags.useBackendPermissions);
 
   return (
     <Layout.Header
@@ -89,12 +101,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
       <Space size="middle" align="center">
         {identity && (
           <>
-            <Button
-              type="text"
-              icon={<QrcodeOutlined style={{ fontSize: 18 }} />}
-              onClick={() => navigate("/scan")}
-              aria-label="Сканер бирок"
-            />
+            {canScan && (
+              <Button
+                type="text"
+                icon={<QrcodeOutlined style={{ fontSize: 18 }} />}
+                onClick={() => navigate("/scan")}
+                aria-label="Сканер бирок"
+              />
+            )}
 
             {/* Колокольчик уведомлений */}
             <NotificationBell />

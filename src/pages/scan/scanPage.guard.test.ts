@@ -21,4 +21,35 @@ describe('ScanPage', () => {
     expect(src).toContain('NotAllowedError');
     expect(src).toContain('highlightDetail');
   });
+
+  it('applies saved action on ANY candidate select (single and multi) via shared handler', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('handleCandidateSelect');
+    // multi-candidate list taps must route through the shared handler,
+    // not open the chooser modal unconditionally
+    expect(src).toMatch(/onClick=\{\(\) => handleCandidateSelect\(candidate\)\}/);
+  });
+
+  it('distinguishes request failures (403/network) from empty results', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('scanError');
+    expect(src).toContain('403');
+    expect(src).toContain('ApiError');
+  });
+});
+
+describe('scan surface gating', () => {
+  const readSrc = (p: string) => readFileSync(join(__dirname, '..', '..', p), 'utf8');
+
+  it('App.tsx gates the /scan route and scan resource behind featureFlags.labels', () => {
+    const app = readSrc('App.tsx');
+    expect(app).toMatch(/featureFlags\.labels[\s\S]{0,200}path="\/scan"/);
+    expect(app).toMatch(/featureFlags\.labels[\s\S]{0,200}name: "scan"/);
+  });
+
+  it('AppHeader QR icon is gated by labels flag + scan navigation permission', () => {
+    const header = readSrc('components/AppHeader.tsx');
+    expect(header).toContain('featureFlags.labels');
+    expect(header).toContain("canViewNavigationResource('scan'");
+  });
 });

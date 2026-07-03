@@ -6,6 +6,7 @@ import { startQrScanner } from './qrScanner';
 import { getScanAction, setScanAction } from './scanPrefs';
 import type { ScanAction } from './scanPrefs';
 import { labelsApi } from '../../api/labelsApi';
+import { ApiError } from '../../api/httpClient';
 import type { ScanCandidate, ScanResolveResult } from '../../api/types/labelsApi.types';
 import { authSession } from '../../api/authSession';
 
@@ -37,6 +38,9 @@ export const ScanPage: React.FC = () => {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [manualValue, setManualValue] = useState('');
   const [resolving, setResolving] = useState(false);
+  // scanError = the REQUEST failed (403/5xx/network) — distinct from an empty
+  // result (request succeeded, nothing matched), which renders <Empty>.
+  const [scanError, setScanError] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResolveResult | null>(null);
   const [rawPayload, setRawPayload] = useState('');
   const [actionCandidate, setActionCandidate] = useState<ScanCandidate | null>(null);
@@ -54,32 +58,53 @@ export const ScanPage: React.FC = () => {
     [navigate],
   );
 
-  const handleResolved = useCallback(
-    (payload: string, res: ScanResolveResult) => {
-      setRawPayload(payload);
-      setResult(res);
-      if (res.candidates.length === 1) {
-        const candidate = res.candidates[0];
-        const prefAction = getScanAction(userId);
-        if (prefAction) {
-          applyAction(candidate, prefAction);
-        } else {
-          setActionCandidate(candidate);
-        }
+  // Shared candidate-selection path for BOTH the single-candidate auto-flow
+  // and taps on multi-candidate list cards: apply the saved default action if
+  // the user already chose one; only ask via the chooser modal on first use.
+  const handleCandidateSelect = useCallback(
+    (candidate: ScanCandidate) => {
+      const prefAction = getScanAction(userId);
+      if (prefAction) {
+        applyAction(candidate, prefAction);
+      } else {
+        setActionCandidate(candidate);
       }
     },
     [applyAction, userId],
   );
 
+  const handleResolved = useCallback(
+    (payload: string, res: ScanResolveResult) => {
+      setRawPayload(payload);
+      setResult(res);
+      if (res.candidates.length === 1) {
+        handleCandidateSelect(res.candidates[0]);
+      }
+    },
+    [handleCandidateSelect],
+  );
+
   const resolvePayload = useCallback(
     async (payload: string, source: 'qr' | 'manual') => {
       setResolving(true);
+      setScanError(null);
       try {
         const res = await labelsApi.scanResolve(payload, source);
         handleResolved(payload, res);
-      } catch {
+      } catch (err) {
+        // A failed request is NOT "nothing found" — surface an honest error
+        // instead of a misleading Empty state.
         setRawPayload(payload);
-        setResult({ candidates: [], parsed: null, templatesTried: 0 });
+        setResult(null);
+        if (err instanceof ApiError) {
+          if (err.status === 403 || err.status === 401) {
+            setScanError('Нет доступа к сканеру бирок. Обратитесь к администратору.');
+          } else {
+            setScanError('Сервис сканера временно недоступен. Попробуйте позже.');
+          }
+        } else {
+          setScanError('Ошибка сети. Проверьте подключение и попробуйте ещё раз.');
+        }
       } finally {
         setResolving(false);
       }
@@ -182,6 +207,8 @@ export const ScanPage: React.FC = () => {
 
       {cameraError && <Alert type="warning" showIcon message={cameraError} style={{ marginBottom: 16 }} />}
 
+      {scanError && <Alert type="error" showIcon message={scanError} style={{ marginBottom: 16 }} />}
+
       <Input.Search
         placeholder="Строка QR / № или имя заказа"
         enterButton="Найти"
@@ -198,7 +225,7 @@ export const ScanPage: React.FC = () => {
           renderItem={(candidate) => (
             <List.Item
               key={`${candidate.detailId}`}
-              onClick={() => setActionCandidate(candidate)}
+              onClick={() => handleCandidateSelect(candidate)}
               style={{ cursor: 'pointer' }}
             >
               <Card size="small" style={{ width: '100%' }}>

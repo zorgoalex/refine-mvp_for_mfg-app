@@ -262,13 +262,17 @@ const ThemedApp = () => {
                       },
                     ]
                   : []),
-                {
-                  name: "scan",
-                  list: "/scan",
-                  meta: {
-                    label: "Сканер бирок",
-                  },
-                },
+                ...(featureFlags.labels
+                  ? [
+                      {
+                        name: "scan",
+                        list: "/scan",
+                        meta: {
+                          label: "Сканер бирок",
+                        },
+                      },
+                    ]
+                  : []),
                 {
                   name: "materials",
                   list: "/materials",
@@ -598,9 +602,11 @@ const ThemedApp = () => {
                       <Route index element={<CutPage />} />
                     </Route>
                   )}
-                  <Route path="/scan">
-                    <Route index element={<ScanPage />} />
-                  </Route>
+                  {featureFlags.labels && (
+                    <Route path="/scan">
+                      <Route index element={<ScanPage />} />
+                    </Route>
+                  )}
                   <Route path="/doweling-orders" >
                     <Route index element={<DowelOrderList />} />
                     <Route path="edit/:id" element={<DowelOrderEdit />} />
