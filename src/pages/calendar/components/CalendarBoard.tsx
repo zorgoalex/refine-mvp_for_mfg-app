@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Spin, Alert, Button, Space, Segmented, Tooltip, message } from 'antd';
-import { LeftOutlined, RightOutlined, CalendarOutlined, ZoomInOutlined, ZoomOutOutlined, UndoOutlined } from '@ant-design/icons';
+import { LeftOutlined, RightOutlined, CalendarOutlined, ZoomInOutlined, ZoomOutOutlined, UndoOutlined, ReloadOutlined } from '@ant-design/icons';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { TouchBackend } from 'react-dnd-touch-backend';
@@ -455,6 +455,7 @@ const CalendarBoard: React.FC = () => {
                 className={`calendar-navigation__flex-btn${isNarrow ? ' calendar-navigation__flex-btn--icon-only' : ''}`}
               />
               <Button
+                icon={<ReloadOutlined />}
                 onClick={() => refetch()}
                 loading={isLoading || isMoving}
                 title="Обновить"
