@@ -188,12 +188,14 @@ describe('CutController', () => {
     await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, cold.res as never);
     expect(cold.state.status).toBe(202);
     expect(cold.headers['Retry-After']).toBe('2');
+    expect(cold.headers['Cache-Control']).toBe('private, no-store, max-age=0');
 
     await pdfCache.whenIdle();
 
     const warm = fakeResponse();
     await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, warm.res as never);
     expect(warm.headers['Content-Type']).toBe('application/pdf');
+    expect(warm.headers['Cache-Control']).toBe('private, no-store, max-age=0');
     expect(warm.state.sent).toBe(pdf);
     expect(renderGroupPdf).toHaveBeenCalledTimes(1);
   });

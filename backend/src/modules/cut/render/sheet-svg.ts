@@ -328,19 +328,36 @@ function renderBathDetailCenterLabel(input: {
   const shouldUseOneLine = input.rectH < input.baseFontMm * 1.65;
   if (shouldUseOneLine) {
     const font = fitBathLabelFont([oneLineText], input.rectW, input.rectH, input.baseFontMm, 1);
-    return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
-      font,
-    )}" text-anchor="middle" dominant-baseline="middle"><tspan fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700">${escapeXml(
-      orderLine,
-    )}</tspan><tspan fill="${BATH_POSITION_LABEL_COLOR}"> ${escapeXml(positionLine)}</tspan></text>`;
+    const orderW = estimateTextWidthMm(orderLine, font);
+    const gapW = estimateTextWidthMm(' ', font);
+    const positionW = estimateTextWidthMm(positionLine, font);
+    const totalW = orderW + gapW + positionW;
+    const left = input.cx - totalW / 2;
+    return [
+      `<text x="${num(left + orderW / 2)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+        font,
+      )}" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${escapeXml(
+        orderLine,
+      )}</text>`,
+      `<text x="${num(left + orderW + gapW + positionW / 2)}" y="${num(
+        input.cy,
+      )}" font-family="Liberation Sans, sans-serif" font-size="${num(
+        font,
+      )}" fill="${BATH_POSITION_LABEL_COLOR}" text-anchor="middle" dominant-baseline="middle">${escapeXml(positionLine)}</text>`,
+    ].join('');
   }
 
   const font = fitBathLabelFont([orderLine, positionLine], input.rectW, input.rectH, input.baseFontMm, 2);
-  return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
-    font,
-  )}" text-anchor="middle" dominant-baseline="middle"><tspan x="${num(input.cx)}" dy="-0.500em" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700">${escapeXml(
-    orderLine,
-  )}</tspan><tspan x="${num(input.cx)}" dy="1em" fill="${BATH_POSITION_LABEL_COLOR}">${escapeXml(positionLine)}</tspan></text>`;
+  return [
+    `<text x="${num(input.cx)}" y="${num(input.cy - font * 0.55)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+      font,
+    )}" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${escapeXml(
+      orderLine,
+    )}</text>`,
+    `<text x="${num(input.cx)}" y="${num(input.cy + font * 0.55)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+      font,
+    )}" fill="${BATH_POSITION_LABEL_COLOR}" text-anchor="middle" dominant-baseline="middle">${escapeXml(positionLine)}</text>`,
+  ].join('');
 }
 
 function fitBathLabelFont(lines: readonly string[], rectW: number, rectH: number, baseFontMm: number, lineCount: 1 | 2): number {

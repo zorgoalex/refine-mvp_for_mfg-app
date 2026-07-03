@@ -581,10 +581,10 @@ export class CutController {
   }
 
   private sendPdf(response: Response, result: PdfEnsureResult, filename: string): void {
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
     if (result.status === 'ready') {
       response.setHeader('Content-Type', 'application/pdf');
       response.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-      response.setHeader('Cache-Control', 'private, max-age=60');
       response.send(result.buffer);
       return;
     }
