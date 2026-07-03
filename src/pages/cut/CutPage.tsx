@@ -1693,12 +1693,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       )}
 
       {job && job.groups.length > 0 && (
-        <Space direction="vertical" size={4}>
+        <Space size={16} wrap>
           <Checkbox checked={sheetPortrait} onChange={(e) => toggleSheetPortrait(e.target.checked)}>
             Книжная ориентация листа (вертикально) — снимите для альбомной
           </Checkbox>
           <Checkbox checked={sheetOriginTopLeft} onChange={(e) => toggleSheetOriginTopLeft(e.target.checked)}>
-            Точка отсчёта — верхний левый угол (как загружается лист) — снимите для старого варианта
+            Точка отчета - верхний левый угол
           </Checkbox>
         </Space>
       )}
