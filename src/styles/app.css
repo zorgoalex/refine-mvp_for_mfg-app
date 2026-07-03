@@ -150,6 +150,12 @@ html {
   min-height: 40px;
 }
 
+.cut-sheet-preview-header--portrait {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
 .cut-sheet-preview-title {
   min-width: 0;
   color: var(--app-text-muted);
@@ -163,8 +169,21 @@ html {
   font-weight: 600;
 }
 
+.cut-sheet-preview-header--portrait .cut-sheet-preview-title {
+  width: 100%;
+}
+
+.cut-sheet-preview-header--portrait .cut-sheet-preview-title span {
+  display: block;
+}
+
 .cut-sheet-preview-actions {
   flex-shrink: 0;
+}
+
+.cut-sheet-preview-header--portrait .cut-sheet-preview-actions {
+  width: 100%;
+  flex-wrap: wrap;
 }
 
 /* Fixed sidebar with independent scrolling for content area */

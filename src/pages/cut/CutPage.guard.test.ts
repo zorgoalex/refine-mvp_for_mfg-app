@@ -152,6 +152,12 @@ describe('CutPage source guards', () => {
     expect(sheetLabelSource).toContain('EXPORT_FORMAT_OPTIONS');
   });
 
+  it('stacks portrait sheet preview title and actions into full-width blocks', () => {
+    expect(source).toContain('isPortraitPreview');
+    expect(source).toContain('cut-sheet-preview-header--portrait');
+    expect(source).toContain('displayHeightMm > displayWidthMm');
+  });
+
   it('resets previews on recalculate and revokes blob URLs (no stale preview, no leak)', () => {
     // Recalculate must clear thumbs+ref via the shared reset (otherwise a stale
     // preview survives the dedupe), and blob URLs must be revoked on reset,

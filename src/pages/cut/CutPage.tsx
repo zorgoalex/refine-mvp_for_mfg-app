@@ -1918,6 +1918,9 @@ export const CutPage: React.FC = () => {
                   const widthMm = sheet.placements.sheet_width_mm;
                   const heightMm = sheet.placements.sheet_height_mm;
                   const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
+                  const displayWidthMm = rotate90 ? heightMm : widthMm;
+                  const displayHeightMm = rotate90 ? widthMm : heightMm;
+                  const isPortraitPreview = displayHeightMm > displayWidthMm;
                   const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, sheetOriginTopLeft);
                   const sheetDetailIds = detailIdsForSheet(sheet);
                   return (
@@ -1932,14 +1935,25 @@ export const CutPage: React.FC = () => {
                           : sheetPreviewItemStyle(widthMm, heightMm, rotate90)
                       }
                     >
-                      <div className="cut-sheet-preview-header">
+                      <div className={`cut-sheet-preview-header${isPortraitPreview ? ' cut-sheet-preview-header--portrait' : ''}`}>
                         <div className="cut-sheet-preview-title app-tabular">
-                          <strong>Лист {sheetNo}</strong>
-                          {' · '}
-                          {matName ?? 'материал не задан'}
-                          {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
-                          {' · '}
-                          кол-во деталей - {sheet.placements.pieces.length}
+                          {isPortraitPreview ? (
+                            <>
+                              <strong>Лист {sheetNo}</strong>
+                              <span>{matName ?? 'материал не задан'}</span>
+                              {filmText && <span>{filmLabel}: {filmText}</span>}
+                              <span>кол-во деталей - {sheet.placements.pieces.length}</span>
+                            </>
+                          ) : (
+                            <>
+                              <strong>Лист {sheetNo}</strong>
+                              {' · '}
+                              {matName ?? 'материал не задан'}
+                              {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
+                              {' · '}
+                              кол-во деталей - {sheet.placements.pieces.length}
+                            </>
+                          )}
                         </div>
                         <Space className="cut-sheet-preview-actions" size={8}>
                           <Button
