@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipsToTemplate, templateToChips, uniqueQrName, qrElementFromLibrary, collectDuplicateQrNames, qrDraftFromElement } from './labelQrLibrary';
+import { chipsToTemplate, templateToChips, uniqueQrName, qrElementFromLibrary, collectDuplicateQrNames, collectEmptyQrNames, qrDraftFromElement } from './labelQrLibrary';
 import { autoShiftForQr } from './labelQrHelpers';
 
 describe('chips <-> template', () => {
@@ -71,5 +71,30 @@ describe('collectDuplicateQrNames', () => {
       { kind: 'text', style: {} },
     ] as any;
     expect(collectDuplicateQrNames(els)).toEqual(['A']);
+  });
+});
+
+describe('collectEmptyQrNames', () => {
+  it('detects qr elements with an empty or whitespace-only qrName (1-based position among qr elements)', () => {
+    const els = [
+      { kind: 'qr', style: { qrName: '' } },
+      { kind: 'qr', style: { qrName: 'A' } },
+      { kind: 'qr', style: { qrName: '   ' } },
+      { kind: 'text', style: {} },
+    ] as any;
+    expect(collectEmptyQrNames(els)).toEqual([1, 3]);
+  });
+
+  it('returns an empty array when every qr element is named', () => {
+    const els = [
+      { kind: 'qr', style: { qrName: 'A' } },
+      { kind: 'qr', style: { qrName: 'B' } },
+    ] as any;
+    expect(collectEmptyQrNames(els)).toEqual([]);
+  });
+
+  it('treats a missing style/qrName as empty (pre-existing qr elements with no qrName column)', () => {
+    const els = [{ kind: 'qr' }] as any;
+    expect(collectEmptyQrNames(els)).toEqual([1]);
   });
 });

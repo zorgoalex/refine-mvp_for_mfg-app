@@ -51,6 +51,23 @@ export function collectDuplicateQrNames(elements: LabelTemplateElement[]): strin
   return [...seen.values()].filter((e) => e.count > 1).map((e) => e.name);
 }
 
+// Pre-existing qr elements (saved before qrName existed) have no name; the
+// backend's validateQrElementNames now 422s LABEL_QR_NAME_REQUIRED on save.
+// Surface this client-side before hitting the server. Returned positions are
+// 1-based, counted among qr elements only (matches how the save-error message
+// references "QR without a name").
+export function collectEmptyQrNames(elements: LabelTemplateElement[]): number[] {
+  const positions: number[] = [];
+  let qrIndex = 0;
+  for (const el of elements) {
+    if (el.kind !== 'qr') continue;
+    qrIndex += 1;
+    const raw = String((el.style as Record<string, unknown> | undefined)?.qrName ?? '').trim();
+    if (!raw) positions.push(qrIndex);
+  }
+  return positions;
+}
+
 export function qrDraftFromElement(element: LabelTemplateElement): { name: string; contentTemplate: string; errorCorrection: 'L' | 'M' | 'Q' | 'H'; defaultSizeMm: number } {
   const style = (element.style ?? {}) as Record<string, unknown>;
   const ec = style.qrErrorCorrection;

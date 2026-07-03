@@ -25,7 +25,7 @@ import {
   qrSideOf,
   qrTemplateOf,
 } from './labelQrHelpers';
-import { chipsToTemplate, collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, sanitizeQrText, templateToChips, type QrChip } from './labelQrLibrary';
+import { chipsToTemplate, collectDuplicateQrNames, collectEmptyQrNames, qrDraftFromElement, qrElementFromLibrary, sanitizeQrText, templateToChips, type QrChip } from './labelQrLibrary';
 
 const { Text } = Typography;
 const { Panel } = Collapse;
@@ -51,6 +51,7 @@ const PREVIEW_FIELD_VALUES: Record<string, string> = {
 };
 const QR_CONFLICT_ERROR = 'QR_CONFLICT';
 const QR_NAME_DUP_ERROR_PREFIX = 'QR_NAME_DUP:';
+const QR_NAME_EMPTY_ERROR_PREFIX = 'QR_NAME_EMPTY:';
 const QR_ERROR_CORRECTION_OPTIONS = [
   { value: 'L', label: 'L' },
   { value: 'M', label: 'M' },
@@ -330,6 +331,10 @@ export const LabelsConfigTab: React.FC = () => {
     if (dupes.length > 0) {
       throw new Error(`${QR_NAME_DUP_ERROR_PREFIX}${dupes.join(', ')}`);
     }
+    const emptyNames = collectEmptyQrNames(elements);
+    if (emptyNames.length > 0) {
+      throw new Error(`${QR_NAME_EMPTY_ERROR_PREFIX}${emptyNames.length}`);
+    }
     return {
       name: name.trim(),
       description: values.description?.trim() || null,
@@ -344,6 +349,14 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const describeSaveError = (error: unknown, fallback: string): string => {
+    if (error instanceof ApiError) {
+      if (error.code === 'LABEL_QR_NAME_REQUIRED') {
+        return 'У каждого QR-кода должно быть имя (заполните «Имя QR»).';
+      }
+      if (error.code === 'LABEL_QR_NAME_DUPLICATE') {
+        return 'Имена QR-кодов должны быть уникальны: имя уже используется в этом шаблоне.';
+      }
+    }
     if (error instanceof Error) {
       if (error.message === QR_CONFLICT_ERROR) {
         return 'QR-код пересекается с элементами или выходит за границы бирки';
@@ -351,6 +364,10 @@ export const LabelsConfigTab: React.FC = () => {
       if (error.message.startsWith(QR_NAME_DUP_ERROR_PREFIX)) {
         const dupes = error.message.slice(QR_NAME_DUP_ERROR_PREFIX.length);
         return `Имена QR-кодов должны быть уникальны: ${dupes}`;
+      }
+      if (error.message.startsWith(QR_NAME_EMPTY_ERROR_PREFIX)) {
+        const count = error.message.slice(QR_NAME_EMPTY_ERROR_PREFIX.length);
+        return `Заполните имя для каждого QR-кода (QR без имени: ${count}).`;
       }
     }
     return fallback;
@@ -716,7 +733,11 @@ export const LabelsConfigTab: React.FC = () => {
       return saved;
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        message.error('QR-шаблон изменён в другом месте. Список обновлён, повторите изменения.');
+        if (error.code === 'LABEL_QR_TEMPLATE_NAME_TAKEN') {
+          message.error('QR-шаблон с таким именем уже существует.');
+        } else {
+          message.error('QR-шаблон изменён в другом месте. Список обновлён, повторите изменения.');
+        }
         await loadQrTemplates();
       } else {
         message.error('Не удалось сохранить QR-шаблон');
@@ -745,7 +766,11 @@ export const LabelsConfigTab: React.FC = () => {
       await loadQrTemplates();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        message.error('QR-шаблон изменён в другом месте. Список обновлён.');
+        if (error.code === 'LABEL_QR_TEMPLATE_NAME_TAKEN') {
+          message.error('QR-шаблон с таким именем уже существует.');
+        } else {
+          message.error('QR-шаблон изменён в другом месте. Список обновлён.');
+        }
         await loadQrTemplates();
       } else {
         message.error('Не удалось удалить QR-шаблон');

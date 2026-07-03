@@ -234,4 +234,16 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/data-label-global-drag-preview-qr/);
     expect(tabSrc).toMatch(/qrDragCursor/);
   });
+
+  it('maps backend LABEL_QR_NAME_REQUIRED/DUPLICATE save errors and pre-checks empty qr names before saving', () => {
+    expect(tabSrc).toMatch(/collectEmptyQrNames/);
+    expect(tabSrc).toMatch(/QR_NAME_EMPTY_ERROR_PREFIX/);
+    expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_NAME_REQUIRED'/);
+    expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_NAME_DUPLICATE'/);
+  });
+
+  it('distinguishes QR-library name-taken 409s from stale-version 409s', () => {
+    expect(tabSrc).toMatch(/error\.code === 'LABEL_QR_TEMPLATE_NAME_TAKEN'/);
+    expect(tabSrc).toMatch(/QR-шаблон с таким именем уже существует/);
+  });
 });
