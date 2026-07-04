@@ -251,7 +251,9 @@ export const ScanPage: React.FC = () => {
         style={{
           position: 'relative',
           width: '100%',
-          aspectRatio: '1 / 1',
+          // −15% по высоте против квадрата: результат/текст под сканером
+          // виден без скролла даже с плашкой «Не найдено».
+          aspectRatio: '1 / 0.85',
           borderRadius: 12,
           overflow: 'hidden',
           background: '#000',
@@ -331,8 +333,16 @@ export const ScanPage: React.FC = () => {
       )}
 
       {result && result.candidates.length === 0 && (
-        <Empty description="Не найдено">
-          <Text type="secondary">{rawPayload}</Text>
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          style={{ margin: '8px 0' }}
+          description="Не найдено"
+        >
+          {/* Сырые данные неизвестного QR: длина произвольная — переносим,
+              не даём распирать вёрстку. */}
+          <Text type="secondary" style={{ display: 'block', wordBreak: 'break-word', textAlign: 'left' }}>
+            {rawPayload}
+          </Text>
         </Empty>
       )}
 
