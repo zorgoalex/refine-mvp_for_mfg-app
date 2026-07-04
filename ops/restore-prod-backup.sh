@@ -151,7 +151,7 @@ BEGIN
            pg_get_serial_sequence(format('%I.%I', n.nspname, c.relname), a.attname) AS seq
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
     WHERE n.nspname = 'public' AND c.relkind = 'r'
       AND pg_get_serial_sequence(format('%I.%I', n.nspname, c.relname), a.attname) IS NOT NULL
   LOOP

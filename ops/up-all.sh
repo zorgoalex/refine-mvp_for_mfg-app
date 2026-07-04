@@ -161,7 +161,7 @@ case "$cmd" in
         *) die "unknown provision flag '$1'" ;;
       esac
     done
-    case "$MIGRATE" in apply|baseline|skip) ;; *) die "invalid --migrate '$MIGRATE' (apply|baseline|skip)" ;; esac
+    case "$MIGRATE" in apply|baseline|auto|skip) ;; *) die "invalid --migrate '$MIGRATE' (apply|baseline|auto|skip)" ;; esac
     case "$HASURA" in bundled|track|skip|apply:*) ;; *) die "invalid --hasura '$HASURA' (bundled|track|apply:PATH|skip)" ;; esac
     echo "provision plan (project $PROJECT, root $ROOT):"
     echo "  1. ensure-build-repos (freecut + svgdxf)"
@@ -185,12 +185,13 @@ case "$cmd" in
     compose up -d --build
 
     case "$MIGRATE" in
-      apply|baseline) bash "$SCRIPT_PATH/apply-migrations.sh" "$MIGRATE" --yes ;;
+      apply|baseline|auto) bash "$SCRIPT_PATH/apply-migrations.sh" "$MIGRATE" --yes ;;
       skip) echo "provision: migrations NOT applied. Review + run:"; \
             bash "$SCRIPT_PATH/apply-migrations.sh" dry-run || true; \
             echo "  -> repo_erp/ops/apply-migrations.sh apply --yes   (fresh DB)"; \
-            echo "  -> repo_erp/ops/apply-migrations.sh baseline --yes (restored DB)" ;;
-      *) die "invalid --migrate '$MIGRATE' (apply|baseline|skip)" ;;
+            echo "  -> repo_erp/ops/apply-migrations.sh auto --yes    (restored prod dump, any level)"; \
+            echo "  -> repo_erp/ops/apply-migrations.sh baseline --yes (restored DB already at repo level)" ;;
+      *) die "invalid --migrate '$MIGRATE' (apply|baseline|auto|skip)" ;;
     esac
 
     case "$HASURA" in

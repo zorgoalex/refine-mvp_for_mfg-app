@@ -157,6 +157,48 @@ extend the conversion map. Selection excludes the manual Variant-B side files
 (`*_preflight/_verify/_rollback.sql`) and `*.test.ts`. Override the target with
 `--container`, `--user`, `--db`, `--dir`.
 
+### auto — one command for a freshly restored prod dump
+
+`auto` replaces the whole manual "path 1b" chain (detect dump level →
+mark-applied → delta → Variant B coverage/preflight/verify → view-drift DROP →
+sequence realign) with a single fail-closed, idempotent run:
+
+```bash
+ops/apply-migrations.sh auto --detect-only   # read-only: per-file PRESENT/PENDING report
+ops/apply-migrations.sh auto --yes           # bring the restored dump to the current head
+ops/apply-migrations.sh auto --yes --auto-map  # + heuristic conversion-map fill (Variant B)
+```
+
+What it does per run:
+
+1. Refuses an empty DB (greenfield → `apply`); an empty-but-restored `orders`
+   needs the explicit `--assume-restored`.
+2. Probes the EFFECT of every migration file in the dump (per-file probes —
+   mid-history holes like the 036/047 incidents are detected honestly) and
+   `mark-applied`s what is already there. `003` is never executed on the
+   restore path (034 rebuilds `orders_view` canonically).
+3. Applies the pending delta in order. `CREATE OR REPLACE VIEW` column-drift
+   errors are auto-healed (allowlisted ERP views, dependency check, one retry).
+4. Variant B gate before 034: uncovered legacy materials abort with a
+   ready-to-review `conversion-map-candidates.sql` artifact; `--auto-map`
+   applies those heuristic rows itself (sheet-name → cuttable+thickness,
+   header-only → non-cuttable) and records a `zz_automap_*` ledger provenance
+   row. Then `034_preflight.sql` is machine-checked, 034 applied, and
+   `034_verify.sql` asserted — the 034 ledger entry is written ONLY after
+   verify passes; a verify failure writes a persistent `zz_hard_stop_*`
+   sentinel that blocks ALL mutating modes until `auto --clear-hard-stop`.
+5. The 041 Bazis-layout reset is decided at its slot: fresh label
+   infrastructure → runs; pre-existing or case-drifted live templates →
+   operator decision (`--skip-041` keep layouts / `--run-041-reset`).
+6. Realigns identity sequences (post-restore dup-PK guard) and requires
+   `pending: 0` to exit 0. Artifacts (detection report, candidates, preflight/
+   verify output) land in `--artifacts DIR` (default
+   `<project>/backups/migration-auto-<UTC>/`).
+
+`up-all.sh provision --migrate auto` wires it into the one-command provision.
+Rehearsal suite: `npx vitest run --config vitest.migration-auto-integration.config.ts`
+(scratch DB in the erp_test postgres container).
+
 ## One Script Flow
 
 Use one command on the VPS:
