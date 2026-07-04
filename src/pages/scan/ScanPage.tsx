@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Drawer, Empty, Input, List, Modal, Space, Tag, Typography } from 'antd';
-import { SettingOutlined } from '@ant-design/icons';
+import { PictureOutlined, SettingOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { startQrScanner } from './qrScanner';
+import { decodeQrFromFile, startQrScanner } from './qrScanner';
 import { getScanAction, setScanAction } from './scanPrefs';
 import type { ScanAction } from './scanPrefs';
 import { labelsApi } from '../../api/labelsApi';
@@ -33,6 +33,7 @@ export const ScanPage: React.FC = () => {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stopScannerRef = useRef<(() => void) | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const userId = authSession.getUser()?.id ?? 'anon';
 
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -152,6 +153,26 @@ export const ScanPage: React.FC = () => {
     void resolvePayload(trimmed, 'manual');
   };
 
+  // Скан из фото-файла: декод QR локально (без камеры и сети), дальше тот же
+  // resolve-путь, что и у live-скана.
+  const handlePhotoFile = async (file: File | null) => {
+    if (!file) return;
+    setResolving(true);
+    setScanError(null);
+    try {
+      const text = await decodeQrFromFile(file);
+      if (text) {
+        await resolvePayload(text, 'qr');
+      } else {
+        setResult(null);
+        setScanError('QR-код на фото не распознан. Попробуйте другое фото или введите данные вручную.');
+      }
+    } finally {
+      setResolving(false);
+      if (fileInputRef.current) fileInputRef.current.value = ''; // повторный выбор того же файла
+    }
+  };
+
   const handleChooseAction = (action: ScanAction) => {
     setScanAction(userId, action);
     if (actionCandidate) {
@@ -216,8 +237,26 @@ export const ScanPage: React.FC = () => {
         onChange={(e) => setManualValue(e.target.value)}
         onSearch={handleManualSearch}
         loading={resolving}
-        style={{ marginBottom: 16 }}
+        style={{ marginBottom: 8 }}
       />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        data-testid="scan-photo-input"
+        onChange={(e) => void handlePhotoFile(e.target.files?.[0] ?? null)}
+      />
+      <Button
+        block
+        icon={<PictureOutlined />}
+        loading={resolving}
+        onClick={() => fileInputRef.current?.click()}
+        style={{ marginBottom: 16 }}
+      >
+        Скан из фото
+      </Button>
 
       {result && result.candidates.length > 1 && (
         <List

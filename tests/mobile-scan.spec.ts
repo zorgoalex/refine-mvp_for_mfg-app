@@ -181,3 +181,47 @@ test('headless has no camera: page stays usable (camera-error Alert or video ele
     await input.press('Enter');
     await expect(page.getByText('Не найдено')).toBeVisible({ timeout: 10000 });
 });
+
+test('photo-file scan: uploaded QR image decodes in-browser and resolves to the order', async ({ page }) => {
+    const db = createWorkflowMockDb();
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
+    await mockScanResolve(page, oneCandidateBody());
+    // Pref pre-seeded → decode should navigate straight away, no chooser modal.
+    await page.addInitScript(() => {
+        localStorage.setItem('scanDefaultAction:1', 'open-order');
+    });
+
+    await page.goto('/scan', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: 'Скан из фото' })).toBeVisible({ timeout: 30000 });
+
+    // Real zxing-wasm decode of a real QR PNG (payload "импорт 68|60084|1")
+    // generated from the same template the backend parses — this exercises the
+    // genuine file→decode→resolve path, not a mocked decode.
+    await page.setInputFiles('[data-testid="scan-photo-input"]', 'tests/fixtures/scan-qr-sample.png');
+
+    await expect(page).toHaveURL(new RegExp(`/orders/show/${ORDER_ID}\\?highlightDetail=${DETAIL_ID}`), {
+        timeout: 15000,
+    });
+});
+
+test('photo-file scan: image without a QR shows the not-recognized error, not «Не найдено»', async ({ page }) => {
+    const db = createWorkflowMockDb();
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
+
+    await page.goto('/scan', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: 'Скан из фото' })).toBeVisible({ timeout: 30000 });
+
+    // 1×1 PNG без QR — декодер обязан вернуть null.
+    const blankPng = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+    );
+    await page.setInputFiles('[data-testid="scan-photo-input"]', {
+        name: 'blank.png',
+        mimeType: 'image/png',
+        buffer: blankPng,
+    });
+
+    await expect(page.getByText('QR-код на фото не распознан', { exact: false })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Не найдено')).toBeHidden();
+});

@@ -47,3 +47,15 @@ export async function startQrScanner(
     video.srcObject = null;
   };
 }
+
+// Декод QR из файла-изображения (фото из галереи/камеры). Камера не нужна:
+// zxing принимает Blob напрямую. null = QR на фото не найден/не распознан.
+export async function decodeQrFromFile(file: Blob): Promise<string | null> {
+  const { readBarcodes } = await import('zxing-wasm/reader');
+  try {
+    const results = await readBarcodes(file, { formats: ['QRCode'], maxNumberOfSymbols: 1 });
+    return results[0]?.text?.trim() || null;
+  } catch {
+    return null;
+  }
+}

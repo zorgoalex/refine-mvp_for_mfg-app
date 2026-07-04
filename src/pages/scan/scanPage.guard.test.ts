@@ -11,6 +11,13 @@ describe('qr scanner module', () => {
     expect(src).toContain('facingMode');
     expect(src).not.toMatch(/^import .*zxing/m); // нет статического импорта wasm
   });
+
+  it('decodes QR from an image file without touching the camera', () => {
+    const src = read('qrScanner.ts');
+    expect(src).toContain('export async function decodeQrFromFile');
+    // файл-декод не должен дёргать getUserMedia
+    expect(src.split('decodeQrFromFile')[1]).not.toContain('getUserMedia');
+  });
 });
 
 describe('ScanPage', () => {
@@ -35,6 +42,14 @@ describe('ScanPage', () => {
     expect(src).toContain('scanError');
     expect(src).toContain('403');
     expect(src).toContain('ApiError');
+  });
+
+  it('offers photo-file scanning wired to the same resolve flow', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('Скан из фото');
+    expect(src).toContain('accept="image/*"');
+    expect(src).toContain('decodeQrFromFile');
+    expect(src).toContain('QR-код на фото не распознан');
   });
 });
 
