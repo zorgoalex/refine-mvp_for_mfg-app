@@ -20,8 +20,10 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     sessionId: 'session-1',
   };
 
-  it('guards the insert in SQL (live session + active user + ON CONFLICT) and audits in the same tx', async () => {
+  it('locks session and user FOR UPDATE before the insert and audits in the same tx', async () => {
     const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] }, // session lock
+      { rows: [{ '?column?': 1 }] }, // user lock
       { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
     ]);
     const repository = new PgUserIdentityRepository(database.service);
@@ -29,48 +31,51 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     const outcome = await repository.insertLinkWithAudit(input);
 
     expect(outcome.status).toBe('linked');
-    const insertSql = database.queries[0].text;
-    expect(insertSql).toContain("s.status = 'active'");
-    expect(insertSql).toContain('s.expires_at > now()');
-    expect(insertSql).toContain('u.is_active');
-    expect(insertSql).toContain('ON CONFLICT (provider, provider_user_id) DO NOTHING');
-    expect(database.queries[1].text).toContain('auth.identity.linked');
+    // Snapshot EXISTS guards are NOT enough under READ COMMITTED — the
+    // liveness proofs must be lock-based in the same transaction.
+    expect(database.queries[0].text).toContain("status = 'active'");
+    expect(database.queries[0].text).toContain('expires_at > now()');
+    expect(database.queries[0].text).toContain('FOR UPDATE');
+    expect(database.queries[1].text).toContain('is_active');
+    expect(database.queries[1].text).toContain('FOR UPDATE');
+    expect(database.queries[2].text).toContain('ON CONFLICT (provider, provider_user_id) DO NOTHING');
+    expect(database.queries[3].text).toContain('auth.identity.linked');
     // Query-ready audit dimension (plan §4.8): the affected user.
-    expect(database.queries[1].text).toContain('related_user_id');
-    expect(database.queries[1].params[4]).toBe(42);
+    expect(database.queries[3].text).toContain('related_user_id');
+    expect(database.queries[3].params[4]).toBe(42);
   });
 
-  it('classifies a zero-row insert as session_inactive when the session died mid-flight', async () => {
+  it('denies as session_inactive under lock when the session died mid-flight — no insert happens', async () => {
     const database = createTransactionalDatabase([
-      { rows: [] }, // guarded insert
-      { rows: [] }, // session check
+      { rows: [] }, // session lock finds no live row
     ]);
     const repository = new PgUserIdentityRepository(database.service);
 
     await expect(repository.insertLinkWithAudit(input)).resolves.toEqual({
       status: 'session_inactive',
     });
+    expect(database.queries.filter((query) => query.text.includes('INSERT INTO user_identities'))).toHaveLength(0);
     expect(database.queries.filter((query) => query.text.includes('audit_log'))).toHaveLength(0);
   });
 
-  it('classifies a zero-row insert as user_inactive when the user was deactivated mid-flight', async () => {
+  it('denies as user_inactive under lock when the user was deactivated mid-flight', async () => {
     const database = createTransactionalDatabase([
-      { rows: [] }, // guarded insert
       { rows: [{ '?column?': 1 }] }, // session ok
-      { rows: [] }, // user inactive
+      { rows: [] }, // user lock finds no active row
     ]);
     const repository = new PgUserIdentityRepository(database.service);
 
     await expect(repository.insertLinkWithAudit(input)).resolves.toEqual({
       status: 'user_inactive',
     });
+    expect(database.queries.filter((query) => query.text.includes('INSERT INTO user_identities'))).toHaveLength(0);
   });
 
   it('resolves a concurrent conflict deterministically: same user → already_linked, other user → conflict', async () => {
     const sameUser = createTransactionalDatabase([
-      { rows: [] },
-      { rows: [{ '?column?': 1 }] },
-      { rows: [{ '?column?': 1 }] },
+      { rows: [{ '?column?': 1 }] }, // session lock
+      { rows: [{ '?column?': 1 }] }, // user lock
+      { rows: [] }, // conflicting insert
       { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
     ]);
     await expect(
@@ -78,9 +83,9 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     ).resolves.toMatchObject({ status: 'already_linked' });
 
     const otherUser = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ '?column?': 1 }] },
       { rows: [] },
-      { rows: [{ '?column?': 1 }] },
-      { rows: [{ '?column?': 1 }] },
       { rows: [{ identity_id: '1', user_id: '99', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
     ]);
     await expect(
@@ -88,8 +93,9 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     ).resolves.toEqual({ status: 'conflict', conflictUserId: '99' });
   });
 
-  it('skips the session guard for admin_bulk provisioning without a session', async () => {
+  it('skips the session lock for admin_bulk provisioning without a session', async () => {
     const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] }, // user lock only
       { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
     ]);
     const repository = new PgUserIdentityRepository(database.service);
@@ -97,13 +103,16 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     await expect(
       repository.insertLinkWithAudit({ ...input, sessionId: undefined, mode: 'admin_bulk' }),
     ).resolves.toMatchObject({ status: 'linked' });
-    expect(database.queries[0].params[5]).toBeNull();
+    expect(database.queries[0].text).not.toContain('auth_sessions');
+    expect(database.queries[0].text).toContain('is_active');
   });
 });
 
 describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
-  it('writes one auth.identity.unlinked audit row PER deleted identity in one transaction', async () => {
+  it('re-proves the live session under lock in the delete tx and audits PER deleted identity', async () => {
     const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] }, // session lock
+      { rows: [{ '?column?': 1 }] }, // user lock
       {
         rows: [
           { identity_id: '1', provider_user_id: 'sub-a', email_at_link: 'a@example.com' },
@@ -114,9 +123,11 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
     const repository = new PgUserIdentityRepository(database.service);
 
     await expect(
-      repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos' }),
-    ).resolves.toBe(true);
+      repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos', sessionId: 'session-1' }),
+    ).resolves.toBe('unlinked');
 
+    expect(database.queries[0].text).toContain('FOR UPDATE');
+    expect(database.queries[0].text).toContain("status = 'active'");
     const auditInserts = database.queries.filter((query) =>
       query.text.includes('auth.identity.unlinked'),
     );
@@ -129,13 +140,30 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
     }
   });
 
-  it('returns false and writes no audit when nothing was linked', async () => {
-    const database = createTransactionalDatabase([{ rows: [] }]);
+  it('refuses to unlink when the session died between the pre-check and the delete', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [] }, // session lock finds no live row
+    ]);
     const repository = new PgUserIdentityRepository(database.service);
 
     await expect(
-      repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos' }),
-    ).resolves.toBe(false);
+      repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos', sessionId: 'session-1' }),
+    ).resolves.toBe('session_inactive');
+    expect(database.queries.filter((query) => query.text.includes('DELETE FROM user_identities'))).toHaveLength(0);
+    expect(database.queries.filter((query) => query.text.includes('audit_log'))).toHaveLength(0);
+  });
+
+  it('returns not_linked and writes no audit when nothing was linked', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] }, // session lock
+      { rows: [{ '?column?': 1 }] }, // user lock
+      { rows: [] }, // delete found nothing
+    ]);
+    const repository = new PgUserIdentityRepository(database.service);
+
+    await expect(
+      repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos', sessionId: 'session-1' }),
+    ).resolves.toBe('not_linked');
     expect(database.queries.filter((query) => query.text.includes('audit_log'))).toHaveLength(0);
   });
 });

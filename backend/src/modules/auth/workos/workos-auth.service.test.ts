@@ -77,7 +77,7 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
         emailAtLink: IDENTITY.email,
       },
     })),
-    deleteLink: vi.fn(async () => true),
+    deleteLink: vi.fn(async () => 'unlinked' as const),
     passwordValid: true,
     sessionActive: true,
     ...overrides,
@@ -380,6 +380,17 @@ describe('WorkosAuthService.unlink', () => {
 
     await expect(harness.service.unlink(command)).rejects.toMatchObject({ code: 'SESSION_INACTIVE' });
     expect(harness.ports.deleteLink).not.toHaveBeenCalled();
+  });
+
+  it('refuses unlink when the delete tx sees the session died after the pre-check (race)', async () => {
+    // Pre-check passed, but the session was revoked during bcrypt: the
+    // locked re-check inside the delete transaction is the authority.
+    const harness = createHarness({ deleteLink: vi.fn(async () => 'session_inactive' as const) });
+
+    await expect(harness.service.unlink(command)).rejects.toMatchObject({ code: 'SESSION_INACTIVE' });
+    expect(harness.ports.deleteLink).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1' }),
+    );
   });
 
   it('refuses unlink when login policy is external-only', async () => {

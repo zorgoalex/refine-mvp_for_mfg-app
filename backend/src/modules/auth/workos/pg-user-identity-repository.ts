@@ -28,6 +28,8 @@ export type LinkInsertOutcome =
   | { status: 'session_inactive' }
   | { status: 'user_inactive' };
 
+export type UnlinkDeleteOutcome = 'unlinked' | 'not_linked' | 'session_inactive' | 'user_inactive';
+
 export interface IdentityActor {
   userId: string;
   username: string;
@@ -79,11 +81,13 @@ export class PgUserIdentityRepository {
   /**
    * Inserts the identity link and its audit event in one transaction.
    *
-   * The INSERT itself is the authority (service-level pre-checks are only a
-   * fast-fail UX): a single guarded statement revalidates the live session
-   * and the active user at commit time (closes the TOCTOU window across the
-   * WorkOS round-trip), and ON CONFLICT makes a concurrent same-sub callback
-   * deterministic instead of a raw 23505.
+   * The transaction is the authority (service-level pre-checks are only a
+   * fast-fail UX): the session and user rows are LOCKED (FOR UPDATE) before
+   * the insert, so a concurrent logout/deactivate either commits first (and
+   * the locked re-read sees it) or blocks until this link commits — plain
+   * snapshot EXISTS guards are not enough under READ COMMITTED. ON CONFLICT
+   * keeps a concurrent same-sub callback deterministic instead of a raw
+   * 23505.
    */
   async insertLinkWithAudit(input: {
     actor: IdentityActor;
@@ -96,15 +100,16 @@ export class PgUserIdentityRepository {
     sessionId?: string;
   }): Promise<LinkInsertOutcome> {
     return this.database.transaction(async (tx) => {
+      const liveness = await this.lockLiveSessionAndUser(tx, input.actor.userId, input.sessionId);
+
+      if (liveness) {
+        return liveness;
+      }
+
       const inserted = await tx.query<UserIdentityRow>(
         `
         INSERT INTO user_identities (user_id, provider, provider_user_id, email_at_link, email_verified_at_link)
-        SELECT $1, $2, $3, $4, $5
-        WHERE ($6::uuid IS NULL OR EXISTS (
-                SELECT 1 FROM auth_sessions s
-                WHERE s.session_id = $6::uuid AND s.status = 'active' AND s.expires_at > now()
-              ))
-          AND EXISTS (SELECT 1 FROM users u WHERE u.user_id = $1 AND u.is_active)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (provider, provider_user_id) DO NOTHING
         RETURNING identity_id, user_id, provider, provider_user_id, email_at_link
         `,
@@ -114,13 +119,12 @@ export class PgUserIdentityRepository {
           input.providerUserId,
           input.emailAtLink,
           input.emailVerified,
-          input.sessionId ?? null,
         ],
       );
       const record = toRecord(inserted.rows[0]);
 
       if (!record) {
-        return this.classifyFailedInsert(tx, input);
+        return this.classifyConflict(tx, input);
       }
 
       await tx.query(
@@ -154,19 +158,25 @@ export class PgUserIdentityRepository {
     });
   }
 
-  /** Zero-row guarded insert: figure out WHICH guard (or conflict) stopped it. */
-  private async classifyFailedInsert(
+  /**
+   * Locks the session (when given) and user rows FOR UPDATE and verifies
+   * liveness under the lock. A concurrent logout/deactivate either committed
+   * first (the locked re-read fails the WHERE) or waits for this tx.
+   * Returns a deny outcome, or null when both proofs hold.
+   */
+  private async lockLiveSessionAndUser(
     tx: { query: DatabaseService['query'] },
-    input: { actor: IdentityActor; provider: string; providerUserId: string; sessionId?: string },
-  ): Promise<LinkInsertOutcome> {
-    if (input.sessionId) {
+    userId: string,
+    sessionId?: string,
+  ): Promise<Extract<LinkInsertOutcome, { status: 'session_inactive' | 'user_inactive' }> | null> {
+    if (sessionId) {
       const session = await tx.query(
         `
         SELECT 1 FROM auth_sessions
         WHERE session_id = $1 AND status = 'active' AND expires_at > now()
-        LIMIT 1
+        FOR UPDATE
         `,
-        [input.sessionId],
+        [sessionId],
       );
 
       if (session.rows.length === 0) {
@@ -174,14 +184,23 @@ export class PgUserIdentityRepository {
       }
     }
 
-    const user = await tx.query('SELECT 1 FROM users WHERE user_id = $1 AND is_active LIMIT 1', [
-      input.actor.userId,
-    ]);
+    const user = await tx.query(
+      'SELECT 1 FROM users WHERE user_id = $1 AND is_active FOR UPDATE',
+      [userId],
+    );
 
     if (user.rows.length === 0) {
       return { status: 'user_inactive' };
     }
 
+    return null;
+  }
+
+  /** Zero-row conflict insert (liveness already proven under lock). */
+  private async classifyConflict(
+    tx: { query: DatabaseService['query'] },
+    input: { actor: IdentityActor; provider: string; providerUserId: string },
+  ): Promise<LinkInsertOutcome> {
     const existing = await tx.query<UserIdentityRow>(
       `
       SELECT identity_id, user_id, provider, provider_user_id, email_at_link
@@ -199,16 +218,29 @@ export class PgUserIdentityRepository {
         : { status: 'conflict', conflictUserId: record.userId };
     }
 
-    throw new Error('user_identities guarded insert returned no row and no cause');
+    throw new Error('user_identities conflict insert returned no row and no existing identity');
   }
 
   /**
    * Removes ALL identity links of the provider for the user and writes one
    * audit event PER removed identity in the same transaction (the plan
-   * explicitly supports several provider subs per user).
+   * explicitly supports several provider subs per user). The session and
+   * user rows are locked and re-verified in the SAME transaction as the
+   * delete — a session revoked after the service pre-check cannot unlink.
    */
-  async deleteLinkWithAudit(input: { actor: IdentityActor; provider: string }): Promise<boolean> {
+  async deleteLinkWithAudit(input: {
+    actor: IdentityActor;
+    provider: string;
+    /** Live-session proof re-checked under lock in the delete transaction. */
+    sessionId?: string;
+  }): Promise<UnlinkDeleteOutcome> {
     return this.database.transaction(async (tx) => {
+      const liveness = await this.lockLiveSessionAndUser(tx, input.actor.userId, input.sessionId);
+
+      if (liveness) {
+        return liveness.status;
+      }
+
       const deleted = await tx.query<UserIdentityRow>(
         `
         DELETE FROM user_identities
@@ -219,7 +251,7 @@ export class PgUserIdentityRepository {
       );
 
       if (deleted.rows.length === 0) {
-        return false;
+        return 'not_linked';
       }
 
       for (const row of deleted.rows) {
@@ -249,7 +281,7 @@ export class PgUserIdentityRepository {
         );
       }
 
-      return true;
+      return 'unlinked';
     });
   }
 

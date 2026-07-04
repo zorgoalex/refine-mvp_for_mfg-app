@@ -281,12 +281,25 @@ export class WorkosAuthService {
       throw new InvalidCredentialsError();
     }
 
-    const unlinked = await this.ports.identities.deleteLinkWithAudit({
+    // The delete transaction re-proves the live session/user UNDER LOCK: a
+    // session revoked between the pre-checks above (or during bcrypt) and
+    // the delete cannot unlink.
+    const outcome = await this.ports.identities.deleteLinkWithAudit({
       actor: this.toActor(command),
       provider: WORKOS_PROVIDER,
+      sessionId,
     });
 
-    return { unlinked };
+    switch (outcome) {
+      case 'unlinked':
+        return { unlinked: true };
+      case 'not_linked':
+        return { unlinked: false };
+      case 'session_inactive':
+        throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+      case 'user_inactive':
+        throw new UserInactiveError();
+    }
   }
 
   buildAuthorizeUrl(state: string): string {
