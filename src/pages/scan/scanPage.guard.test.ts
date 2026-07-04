@@ -52,6 +52,13 @@ describe('ScanPage', () => {
     expect(src).toContain('ApiError');
   });
 
+  it('renders a human match label, never the raw matchedBy template string', () => {
+    const src = read('ScanPage.tsx');
+    // сырой matchedBy содержит весь QR-шаблон и разрывал вёрстку карточек
+    expect(src).not.toMatch(/\{candidate\.matchedBy\}/);
+    expect(src).toContain('matchedByLabel');
+  });
+
   it('offers photo-file scanning wired to the same resolve flow', () => {
     const src = read('ScanPage.tsx');
     expect(src).toContain('Скан из фото');

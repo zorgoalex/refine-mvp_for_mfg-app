@@ -23,6 +23,11 @@ function candidateSize(c: ScanCandidate): string {
   return '—';
 }
 
+// Сырой matchedBy несёт весь текст QR-шаблона — в UI только короткая метка.
+function matchedByLabel(c: ScanCandidate): string {
+  return c.matchedBy.startsWith('qr-template') ? 'QR' : 'Поиск по строке';
+}
+
 /**
  * Camera-first QR scanner for label lookup. Starts the camera on mount and
  * stops it on unmount/navigation (see the startQrScanner effect below). A
@@ -267,11 +272,12 @@ export const ScanPage: React.FC = () => {
               onClick={() => handleCandidateSelect(candidate)}
               style={{ cursor: 'pointer' }}
             >
-              <Card size="small" style={{ width: '100%' }}>
-                <Text strong style={{ display: 'block' }}>{candidateTitle(candidate)}</Text>
+              <Card size="small" style={{ width: '100%', overflow: 'hidden' }}>
+                <Text strong ellipsis style={{ display: 'block' }}>{candidateTitle(candidate)}</Text>
                 <Text style={{ display: 'block' }}>{candidateSize(candidate)}</Text>
-                <Text type="secondary" style={{ display: 'block' }}>{candidate.materialName ?? '—'}</Text>
-                <Tag>{candidate.matchedBy} · {candidate.score}</Tag>
+                <Text type="secondary" ellipsis style={{ display: 'block' }}>{candidate.materialName ?? '—'}</Text>
+                <Tag style={{ marginTop: 4 }}>{matchedByLabel(candidate)}</Tag>
+                {candidate.productionStatusName && <Tag style={{ marginTop: 4 }}>{candidate.productionStatusName}</Tag>}
               </Card>
             </List.Item>
           )}
