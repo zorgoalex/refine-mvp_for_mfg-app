@@ -237,8 +237,16 @@ probe_file() {
   local f="$1"
   case "$f" in
     001_*) probe_all "$(q_tbl auth_sessions)" "$(q_col refresh_tokens token_family_id)" ;;
-    002_*) probe_all "$(q_tbl deadline_policies)" "$(q_tbl deadline_instances)" ;;
-    004_*) probe_all "$(q_tbl command_idempotency_keys)" "$(q_col audit_log related_order_id)" ;;
+    002_*) # incl. the late idempotency hardening (real-VPS drift 2026-07-04:
+           # a dump carried the deadline tables but NOT the ALTER'ed column)
+           probe_all "$(q_tbl deadline_policies)" "$(q_tbl deadline_instances)" \
+                     "$(q_tbl deadline_events)" "$(q_tbl outbox_events)" "$(q_tbl notifications)" \
+                     "$(q_col deadline_events idempotency_key)" \
+                     "$(q_idx uq_deadline_events_idempotency_key)" ;;
+    004_*) probe_all "$(q_tbl command_idempotency_keys)" \
+                     "$(q_col audit_log related_order_id)" "$(q_col audit_log related_client_id)" \
+                     "$(q_col audit_log related_production_event_id)" "$(q_col audit_log source)" \
+                     "$(q_col audit_log status_code)" "$(q_col audit_log stage_code)" ;;
     005_*) probe_all "$(q_tbl order_import_runs)" "$(q_tbl order_import_entity_map)" ;;
     006_*) probe_all "$(q_col notifications idempotency_key)" ;;
     007_*) probe_all "$(q_col deadline_instances idempotency_key)" ;;
