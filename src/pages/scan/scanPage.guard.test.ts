@@ -52,4 +52,11 @@ describe('scan surface gating', () => {
     expect(header).toContain('featureFlags.labels');
     expect(header).toContain("canViewNavigationResource('scan'");
   });
+
+  it('vercel.json Permissions-Policy allows self camera (scanner needs getUserMedia)', () => {
+    // camera=() глушит getUserMedia на проде БЕЗ промпта — сканер бирок мёртв.
+    const vercel = readFileSync(join(__dirname, '..', '..', '..', 'vercel.json'), 'utf8');
+    expect(vercel).toContain('camera=(self)');
+    expect(vercel).not.toContain('camera=()');
+  });
 });
