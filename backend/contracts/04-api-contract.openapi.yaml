@@ -255,6 +255,212 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/auth/workos/authorize:
+    get:
+      tags:
+        - Auth
+      operationId: authWorkosAuthorize
+      summary: Получить hosted SSO login URL (WorkOS AuthKit)
+      description: |
+        Выдаёт authorize URL hosted-провайдера и выставляет одноразовый
+        HMAC-подписанный state в HttpOnly cookie (mode=login). Доступен только
+        при включённом BACKEND_ENABLE_WORKOS_AUTH, иначе 503.
+      x-rate-limit: auth_workos_authorize
+      responses:
+        '200':
+          description: AuthKit authorize URL
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosAuthorizeResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/callback:
+    post:
+      tags:
+        - Auth
+      operationId: authWorkosCallback
+      summary: Обменять SSO code на ERP-сессию
+      description: |
+        Проверяет state против HttpOnly cookie (mode=login), обменивает
+        одноразовый code у WorkOS и выдаёт обычную ERP-сессию (access token +
+        refresh cookie). Логин возможен только для уже слинкованной identity;
+        авто-создания юзеров и auto-link по email нет.
+      x-rate-limit: auth_workos_callback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkosCallbackRequest'
+      responses:
+        '200':
+          description: Успешный SSO-логин
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/link/start:
+    post:
+      tags:
+        - Auth
+      operationId: authWorkosLinkStart
+      summary: Начать привязку текущего юзера к SSO
+      description: |
+        Из живой сессии (bearer) выдаёт authorize URL с state mode=link,
+        привязанным к текущей sessionId. Callback перепроверяет живую сессию.
+      security:
+        - bearerAuth: []
+      x-rate-limit: auth_workos_link_start
+      responses:
+        '200':
+          description: AuthKit link URL
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosAuthorizeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/link/callback:
+    post:
+      tags:
+        - Auth
+      operationId: authWorkosLinkCallback
+      summary: Завершить привязку текущего юзера к SSO
+      description: |
+        Требует живой bearer-сессии, совпадения state.sessionId с текущей
+        сессией и verified email у identity. Identity прикрепляется к юзеру
+        текущей сессии (не по email). Sub, занятый другим юзером → 409.
+      security:
+        - bearerAuth: []
+      x-rate-limit: auth_workos_callback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkosCallbackRequest'
+      responses:
+        '200':
+          description: Identity привязана
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosLinkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/link:
+    get:
+      tags:
+        - Auth
+      operationId: authWorkosLinkStatus
+      summary: Статус привязки текущего юзера к SSO
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Статус привязки
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosLinkStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Auth
+      operationId: authWorkosUnlink
+      summary: Отвязать текущего юзера от SSO
+      description: |
+        Требует подтверждения паролем (после unlink остаётся только парольный
+        вход). При login_policy='external' отвязка запрещена (409) — юзер
+        не может запереть себя.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkosUnlinkRequest'
+      responses:
+        '200':
+          description: Identity отвязана
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosUnlinkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/me:
     get:
       tags:
@@ -7403,6 +7609,73 @@ components:
         success:
           type: boolean
           example: true
+        providerLogoutUrl:
+          type: string
+          description: |
+            Hosted-провайдерский logout URL (WorkOS). Присутствует только когда
+            завершаемая сессия была создана через SSO; фронт делает redirect,
+            чтобы погасить и сессию провайдера (best-effort).
+
+    WorkosAuthorizeResponse:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          description: Hosted AuthKit authorize URL для redirect.
+
+    WorkosCallbackRequest:
+      type: object
+      required:
+        - code
+        - state
+      properties:
+        code:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Одноразовый authorization code от WorkOS.
+        state:
+          type: string
+          minLength: 1
+          description: Значение state, обязано совпасть с HttpOnly state-cookie.
+
+    WorkosLinkResponse:
+      type: object
+      required:
+        - linked
+      properties:
+        linked:
+          type: boolean
+          enum: [true]
+
+    WorkosLinkStatusResponse:
+      type: object
+      required:
+        - linked
+      properties:
+        linked:
+          type: boolean
+
+    WorkosUnlinkRequest:
+      type: object
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Подтверждение паролем — после отвязки остаётся только парольный вход.
+
+    WorkosUnlinkResponse:
+      type: object
+      required:
+        - unlinked
+      properties:
+        unlinked:
+          type: boolean
 
     CreateProjectRequest:
       type: object

@@ -134,6 +134,7 @@ VITE_USE_BACKEND_PROJECTS=false
 VITE_USE_BACKEND_REFERENCES=false
 VITE_SHEET_MATERIALS_READS=false
 VITE_ENABLE_LEGACY_HASURA=true
+VITE_WORKOS_AUTH=false
 VITE_RUNTIME_CONFIG_URL=/runtime-config.json
 ```
 
@@ -163,6 +164,40 @@ AUTH0_M2M_AUDIENCE=...
 Backend cutover mode за `VITE_USE_BACKEND_AUTH=true` использует `/api/v1/auth/login`,
 `/api/v1/auth/refresh`, `/api/v1/auth/logout` и `/api/v1/me`; refresh token остаётся в
 HttpOnly cookie и не хранится в JS/localStorage.
+
+### Вход через SSO (WorkOS AuthKit)
+
+Опциональный гибридный вход через hosted WorkOS AuthKit (email+пароль, Google,
+MFA TOTP). WorkOS выступает только верификатором личности: сессию, роли и
+permissions по-прежнему выдаёт наш backend из PostgreSQL; авто-создания
+пользователей нет — SSO-вход работает только для заранее привязанных учётных
+записей.
+
+- Кнопка «Войти через SSO» на странице логина появляется за флагом
+  `VITE_WORKOS_AUTH=true` (runtime-config ключ `workosAuth`); флаг требует
+  включённого backend-auth режима (`backendAuth`), иначе кнопка скрыта.
+- Привязка/отвязка SSO — в профиле пользователя. Привязка выполняется из живой
+  сессии; отвязка требует подтверждения паролем и запрещена для учётных
+  записей, которым разрешён только внешний вход.
+- Выход из ERP по возможности завершает и сессию провайдера (redirect на
+  logout URL провайдера).
+- Каким способом можно входить конкретному пользователю, задаёт колонка
+  `users.login_policy` (`local` / `external` / `both`, по умолчанию `both`).
+
+Backend-переменные (VPS `.env`, см. `ops/templates/env.vps.example`):
+
+```env
+BACKEND_ENABLE_WORKOS_AUTH=false
+WORKOS_API_KEY=...
+WORKOS_CLIENT_ID=...
+WORKOS_REDIRECT_URI=https://<frontend-domain>/auth/workos/callback
+```
+
+Redirect URI должен быть зарегистрирован в WorkOS dashboard. Роуты:
+`GET /api/v1/auth/workos/authorize`, `POST /api/v1/auth/workos/callback`,
+`POST /api/v1/auth/workos/link/start`, `POST /api/v1/auth/workos/link/callback`,
+`GET|DELETE /api/v1/auth/workos/link`. Все выключены (503), пока
+`BACKEND_ENABLE_WORKOS_AUTH=false`; вход паролем при этом не затрагивается.
 
 Backend orders cutover mode за `VITE_USE_BACKEND_ORDERS_READ=true` и
 `VITE_USE_BACKEND_ORDERS_WRITE=true` использует versioned `/api/v1/orders` для list/show/edit
@@ -634,6 +669,28 @@ npx playwright test \
   tests/production-actions-stage-canary.spec.ts \
   tests/production-actions-mode-stage-canary.spec.ts \
   --project=chromium
+'
+```
+
+WorkOS SSO canary (`tests/workos-stage-canary.spec.ts`) запускается отдельно и
+только после включения SSO-флагов на stage. Он выполняет реальный hosted
+AuthKit password-вход durable e2e-пользователем, проверяет audit-строку входа
+(`source='workos'`) в stage-БД и logout-семантику провайдера:
+
+```bash
+bash -lc '
+set -a
+. /path/to/project/.env
+set +a
+
+export WORKOS_STAGE_CANARY=true
+export WORKOS_E2E_PASSWORD=<authkit-password-of-e2e-user>
+# Опционально при MFA-challenge: export WORKOS_E2E_TOTP_SECRET=<base32>
+# Overrides: WORKOS_STAGE_FRONTEND_URL, WORKOS_STAGE_POSTGRES_CONTAINER,
+#            WORKOS_E2E_EMAIL, WORKOS_E2E_USERNAME
+
+export PLAYWRIGHT_SKIP_WEB_SERVER=true
+npx playwright test tests/workos-stage-canary.spec.ts --project=chromium
 '
 ```
 
