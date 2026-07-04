@@ -52,6 +52,23 @@ def test_rejects_oversize_by_content_length_before_reading():
     assert r.status_code == 413
 
 
+def test_rejects_image_bomb_dimensions_before_decode():
+    # Image bomb: маленький PNG-файл, объявляющий 30000x30000 в IHDR.
+    # Отказ ДО cv2.imdecode — тело после заголовка может быть мусорным.
+    bomb = (
+        b"\x89PNG\r\n\x1a\n"          # сигнатура PNG
+        + (13).to_bytes(4, "big")     # длина IHDR-чанка
+        + b"IHDR"
+        + (30000).to_bytes(4, "big")  # width
+        + (30000).to_bytes(4, "big")  # height
+        + b"\x08\x02\x00\x00\x00"     # bit depth / color type / ...
+        + b"\x00" * 64                # мусорное тело — до декода не дойдёт
+    )
+    r = client.post("/ocr", content=bomb, headers={"Content-Type": "application/octet-stream"})
+    assert r.status_code == 400
+    assert "dimensions" in r.json()["detail"]
+
+
 def test_busy_returns_429(monkeypatch):
     # Переполнение очереди семафора → 429 (правило backpressure)
     from app import main as m

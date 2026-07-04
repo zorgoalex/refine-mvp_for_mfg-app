@@ -76,8 +76,9 @@ async def ocr(request: Request):
         raise HTTPException(status_code=400, detail="empty body")
     try:
         return await run_ocr_queued(data)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="unreadable image")
+    except ValueError as exc:
+        # 'unreadable image' | 'image dimensions too large' (image-bomb guard)
+        raise HTTPException(status_code=400, detail=str(exc) or "unreadable image")
 
 
 @app.on_event("startup")
