@@ -52,7 +52,9 @@ describe('workos callback helpers contract', () => {
   });
 
   it('guards the single-use code against StrictMode double-mount', () => {
-    expect(callbackSource).toContain('const consumedCodes = new Set<string>()');
+    expect(callbackSource).toContain('const consumedCodes = new Map<string, "pending" | "settled">()');
+    // A revisit of a burned code shows an explicit error, never a dead spinner.
+    expect(callbackSource).toContain('Ссылка входа уже использована');
     // Pre-exchange failures (e.g. link-mode refresh) have not burned the
     // code — the same callback URL may retry in place.
     expect(callbackSource).toContain('consumedCodes.delete(code)');

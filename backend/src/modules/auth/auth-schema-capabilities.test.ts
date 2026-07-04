@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import type { BackendEnv } from '../../config/env.validation';
 import type { DatabaseService } from '../../database/database.service';
-import { resolveAuthSchemaCapabilities } from './auth.module';
+import { isWorkosSchemaReady, resolveAuthSchemaCapabilities } from './auth.module';
 
 /**
  * Migration-052 columns are gated by SCHEMA capability, not the WorkOS flag:
@@ -15,22 +15,22 @@ describe('resolveAuthSchemaCapabilities', () => {
     const capabilities = await resolveAuthSchemaCapabilities(
       createConfig({ BACKEND_ENABLE_WORKOS_AUTH: false }),
       createDatabase([
-        { has_login_policy: true, has_provider_session_id: true, has_auth_source: true },
+        { has_login_policy: true, has_provider_session_id: true, has_auth_source: true, has_user_identities: true },
       ]),
     );
 
-    expect(capabilities).toEqual({ loginPolicy: true, providerSessions: true });
+    expect(capabilities).toEqual({ loginPolicy: true, providerSessions: true, userIdentities: true });
   });
 
   it('stays deployable against a pre-052 database even with the flag ON', async () => {
     const capabilities = await resolveAuthSchemaCapabilities(
       createConfig({ BACKEND_ENABLE_WORKOS_AUTH: true }),
       createDatabase([
-        { has_login_policy: false, has_provider_session_id: false, has_auth_source: false },
+        { has_login_policy: false, has_provider_session_id: false, has_auth_source: false, has_user_identities: false },
       ]),
     );
 
-    expect(capabilities).toEqual({ loginPolicy: false, providerSessions: false });
+    expect(capabilities).toEqual({ loginPolicy: false, providerSessions: false, userIdentities: false });
   });
 
   it('falls back to the flag when the probe fails so boot never breaks', async () => {
@@ -38,10 +38,10 @@ describe('resolveAuthSchemaCapabilities', () => {
 
     await expect(
       resolveAuthSchemaCapabilities(createConfig({ BACKEND_ENABLE_WORKOS_AUTH: true }), failing),
-    ).resolves.toEqual({ loginPolicy: true, providerSessions: true });
+    ).resolves.toEqual({ loginPolicy: true, providerSessions: true, userIdentities: true });
     await expect(
       resolveAuthSchemaCapabilities(createConfig({ BACKEND_ENABLE_WORKOS_AUTH: false }), failing),
-    ).resolves.toEqual({ loginPolicy: false, providerSessions: false });
+    ).resolves.toEqual({ loginPolicy: false, providerSessions: false, userIdentities: false });
   });
 
   it('reports no capabilities without a configured database', async () => {
@@ -49,7 +49,24 @@ describe('resolveAuthSchemaCapabilities', () => {
 
     await expect(
       resolveAuthSchemaCapabilities(createConfig({ BACKEND_ENABLE_WORKOS_AUTH: true }), database),
-    ).resolves.toEqual({ loginPolicy: false, providerSessions: false });
+    ).resolves.toEqual({ loginPolicy: false, providerSessions: false, userIdentities: false });
+  });
+});
+
+describe('isWorkosSchemaReady', () => {
+  it('gates the WorkOS entrypoints fail-closed on a pre-052 database even with the flag ON', () => {
+    // Missing ANY 052 object (e.g. user_identities on a lagging replica)
+    // must keep the workos providers null → controller answers 503 instead
+    // of dying on runtime SQL.
+    expect(
+      isWorkosSchemaReady({ loginPolicy: true, providerSessions: true, userIdentities: false }),
+    ).toBe(false);
+    expect(
+      isWorkosSchemaReady({ loginPolicy: false, providerSessions: true, userIdentities: true }),
+    ).toBe(false);
+    expect(
+      isWorkosSchemaReady({ loginPolicy: true, providerSessions: true, userIdentities: true }),
+    ).toBe(true);
   });
 });
 

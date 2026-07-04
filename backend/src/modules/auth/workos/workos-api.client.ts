@@ -90,7 +90,16 @@ export class WorkosApiClient {
       throw new ApiError(502, 'WORKOS_UPSTREAM_ERROR', 'SSO-провайдер вернул ошибку');
     }
 
-    const payload = (await response.json()) as WorkosAuthenticateResponse;
+    let payload: WorkosAuthenticateResponse;
+
+    try {
+      payload = (await response.json()) as WorkosAuthenticateResponse;
+    } catch {
+      // A 200 with a malformed body (CDN error page etc.) is an upstream
+      // failure, not an internal 500.
+      throw new ApiError(502, 'WORKOS_UPSTREAM_ERROR', 'SSO-провайдер вернул некорректный ответ');
+    }
+
     const user = payload.user;
 
     if (!user?.id || !user.email) {

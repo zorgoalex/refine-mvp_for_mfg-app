@@ -6,7 +6,10 @@ import { ApiError } from "../../api/httpClient";
 
 // Module-level guard: the AuthKit code is single-use, and React StrictMode in
 // dev double-mounts this page, so a ref inside the component is not enough.
-const consumedCodes = new Set<string>();
+// 'pending' — an exchange is in flight (StrictMode re-run stays silent);
+// 'settled' — the code is burned (SPA back/revisit shows an explicit error
+// instead of a dead spinner).
+const consumedCodes = new Map<string, "pending" | "settled">();
 
 const LINK_INTENT_KEY = "erp_workos_link_intent";
 
@@ -39,10 +42,16 @@ export const WorkosCallbackPage: React.FC = () => {
       setError("Не получены параметры от провайдера входа");
       return;
     }
-    if (consumedCodes.has(code)) {
+    const consumed = consumedCodes.get(code);
+    if (consumed === "pending") {
+      // StrictMode double-run while the first exchange is in flight.
       return;
     }
-    consumedCodes.add(code);
+    if (consumed === "settled") {
+      setError("Ссылка входа уже использована. Войдите заново.");
+      return;
+    }
+    consumedCodes.set(code, "pending");
 
     // Link mode only when the stored intent matches THIS flow's state; a
     // stale flag from an aborted link attempt is discarded, not trusted.
@@ -62,6 +71,7 @@ export const WorkosCallbackPage: React.FC = () => {
       if (isLink) {
         await authApi.refresh();
         exchangeStarted = true;
+        consumedCodes.set(code, "settled");
         sessionStorage.removeItem(LINK_INTENT_KEY);
         await authApi.workosLinkCallback(code, state);
         navigate("/profile?sso=linked", { replace: true });
@@ -73,6 +83,7 @@ export const WorkosCallbackPage: React.FC = () => {
       // /auth/refresh round-trip (POC race #5). me() rehydrates the user
       // before entering the app.
       exchangeStarted = true;
+      consumedCodes.set(code, "settled");
       await authApi.workosCallback(code, state);
       await authApi.me().catch(() => undefined);
       navigate("/", { replace: true });

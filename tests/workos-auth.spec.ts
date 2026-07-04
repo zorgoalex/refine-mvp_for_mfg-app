@@ -65,7 +65,17 @@ test.describe('WorkOS hybrid auth (mocked)', () => {
         let meCalls = 0;
         await page.route(/\/api\/v1\/auth\/workos\/callback$/, async (route) => {
             callbackBodies.push(JSON.parse(route.request().postData() || '{}'));
-            await fulfillJson(route, LOGIN_RESPONSE);
+            // Single-use semantics: the first exchange succeeds, any replay of
+            // the same burned code gets invalid_grant.
+            if (callbackBodies.length === 1) {
+                await fulfillJson(route, LOGIN_RESPONSE);
+                return;
+            }
+            await fulfillJson(
+                route,
+                { error: { code: 'WORKOS_CODE_INVALID', message: 'code already used' } },
+                401,
+            );
         });
 
         // App boot may probe /auth/refresh on its own; the regression this
@@ -104,6 +114,13 @@ test.describe('WorkOS hybrid auth (mocked)', () => {
         );
         expect(navigationUrls).toHaveLength(1);
         expect(navigationUrls[0]).toContain('/auth/workos/callback');
+
+        // Revisiting the burned-code URL (reload/back/history) shows an
+        // explicit error and a way back — never a dead spinner.
+        await page.goto('/auth/workos/callback?code=e2e-mock-code&state=e2e-mock-state');
+        await expect(page.getByText('Ошибка входа через SSO')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText(/Сессия входа устарела/)).toBeVisible();
+        await expect(page.getByRole('link', { name: 'Вернуться на страницу входа' })).toBeVisible();
     });
 
     test('401 from callback shows the error and never replays the single-use code', async ({ page }) => {

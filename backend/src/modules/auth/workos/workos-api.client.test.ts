@@ -82,6 +82,16 @@ describe('WorkosApiClient', () => {
     });
   });
 
+  it('maps a 200 with a malformed body to 502 instead of a raw SyntaxError', async () => {
+    const client = new WorkosApiClient(OPTIONS, (async () =>
+      new Response('<html>cdn error page</html>', { status: 200 })) as typeof fetch);
+
+    await expect(client.authenticateWithCode('code')).rejects.toMatchObject({
+      statusCode: 502,
+      code: 'WORKOS_UPSTREAM_ERROR',
+    });
+  });
+
   it('tolerates a missing or malformed access token (no sid)', async () => {
     const client = createClient({
       status: 200,

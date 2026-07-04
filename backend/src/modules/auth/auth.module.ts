@@ -83,9 +83,15 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
     },
     {
       provide: WORKOS_IDENTITY_REPOSITORY,
-      useFactory: (config: ConfigService<BackendEnv, true>, database: DatabaseService) =>
-        isWorkosEnabled(config) && database.isConfigured ? new PgUserIdentityRepository(database) : null,
-      inject: [ConfigService, DatabaseService],
+      useFactory: (
+        config: ConfigService<BackendEnv, true>,
+        database: DatabaseService,
+        capabilities: AuthSchemaCapabilities,
+      ) =>
+        isWorkosEnabled(config) && database.isConfigured && isWorkosSchemaReady(capabilities)
+          ? new PgUserIdentityRepository(database)
+          : null,
+      inject: [ConfigService, DatabaseService, AUTH_SCHEMA_CAPABILITIES],
     },
     {
       provide: WORKOS_AUTH_SERVICE,
@@ -98,7 +104,10 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
         const sessionManager = createPgSessionManager(config, database, tokenService, capabilities);
         const workosClient = createWorkosClient(config);
 
-        if (!workosClient || !sessionManager) {
+        // Fail closed (controller answers 503) until the FULL 052 schema is
+        // present — a lagging replica/partial rollout must not surface
+        // /auth/workos/* that dies on runtime SQL.
+        if (!workosClient || !sessionManager || !isWorkosSchemaReady(capabilities)) {
           return null;
         }
 
@@ -123,7 +132,9 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
               login_policy?: string;
             }>(
               `
-              SELECT user_id, username, email, role_id, password_hash, is_active, login_policy
+              SELECT user_id, username, email, role_id, password_hash, is_active${
+                capabilities.loginPolicy ? ', login_policy' : ''
+              }
               FROM users
               WHERE user_id = $1
               LIMIT 1
@@ -168,6 +179,16 @@ export interface AuthSchemaCapabilities {
   loginPolicy: boolean;
   /** auth_sessions.provider_session_id + auth_source exist (migration 052). */
   providerSessions: boolean;
+  /** user_identities table exists (migration 052). */
+  userIdentities: boolean;
+}
+
+/**
+ * The WorkOS entrypoints may come up ONLY when the full 052 schema is
+ * present; otherwise they must fail closed as 503, not die on runtime SQL.
+ */
+export function isWorkosSchemaReady(capabilities: AuthSchemaCapabilities): boolean {
+  return capabilities.loginPolicy && capabilities.providerSessions && capabilities.userIdentities;
 }
 
 /**
@@ -183,7 +204,7 @@ export async function resolveAuthSchemaCapabilities(
   database: DatabaseService,
 ): Promise<AuthSchemaCapabilities> {
   if (!database.isConfigured) {
-    return { loginPolicy: false, providerSessions: false };
+    return { loginPolicy: false, providerSessions: false, userIdentities: false };
   }
 
   try {
@@ -191,6 +212,7 @@ export async function resolveAuthSchemaCapabilities(
       has_login_policy: boolean;
       has_provider_session_id: boolean;
       has_auth_source: boolean;
+      has_user_identities: boolean;
     }>(
       `
       SELECT
@@ -199,7 +221,9 @@ export async function resolveAuthSchemaCapabilities(
         EXISTS (SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'auth_sessions' AND column_name = 'provider_session_id') AS has_provider_session_id,
         EXISTS (SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'auth_sessions' AND column_name = 'auth_source') AS has_auth_source
+                WHERE table_name = 'auth_sessions' AND column_name = 'auth_source') AS has_auth_source,
+        EXISTS (SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'user_identities') AS has_user_identities
       `,
     );
     const row = result.rows[0];
@@ -207,10 +231,11 @@ export async function resolveAuthSchemaCapabilities(
     return {
       loginPolicy: row?.has_login_policy === true,
       providerSessions: row?.has_provider_session_id === true && row?.has_auth_source === true,
+      userIdentities: row?.has_user_identities === true,
     };
   } catch {
     const enabled = isWorkosEnabled(config);
-    return { loginPolicy: enabled, providerSessions: enabled };
+    return { loginPolicy: enabled, providerSessions: enabled, userIdentities: enabled };
   }
 }
 
