@@ -248,9 +248,11 @@ async function loginWithBackend(credentials: LoginCredentials) {
 
 async function logoutFromBackend() {
   const user = authSession.getUser();
+  let providerLogoutUrl: string | undefined;
 
   try {
-    await authApi.logout();
+    const response = await authApi.logout();
+    providerLogoutUrl = response.providerLogoutUrl;
   } catch (error) {
     logAuthError(error, 'Выход из системы');
   } finally {
@@ -261,6 +263,14 @@ async function logoutFromBackend() {
       const { deleteAll } = useNotificationStore.getState();
       deleteAll(user.id);
     }
+  }
+
+  // SSO sessions are also terminated at the provider; WorkOS redirects back
+  // to its configured logout URI. Without this, "выход" would leave the
+  // provider session alive and the next SSO click would re-enter silently.
+  if (providerLogoutUrl) {
+    window.location.assign(providerLogoutUrl);
+    return { success: true };
   }
 
   return {

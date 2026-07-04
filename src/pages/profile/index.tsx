@@ -3,6 +3,8 @@ import { Card, Checkbox, Descriptions, Space, Typography } from "antd";
 import { useGetIdentity } from "@refinedev/core";
 import type { UserIdentity } from "../../types/auth";
 import { useAppTheme } from "../../theme/ThemeProvider";
+import { featureFlags } from "../../config/featureFlags";
+import { WorkosLinkCard } from "./WorkosLinkCard";
 
 const roleNames: Record<string, string> = {
   admin: "Администратор",
@@ -31,6 +33,7 @@ export const ProfilePage: React.FC = () => {
           <Descriptions.Item label="Роль">{roleName}</Descriptions.Item>
         </Descriptions>
       </Card>
+      {featureFlags.workosAuth && <WorkosLinkCard />}
       <Card title="Настройки интерфейса">
         <Checkbox
           checked={mode === "dark"}

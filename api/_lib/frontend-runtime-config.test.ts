@@ -22,6 +22,7 @@ describe('frontend runtime config delivery', () => {
         backendCut: false,
         labels: false,
         enableLegacyHasura: true,
+        workosAuth: false,
       },
     });
   });
@@ -65,6 +66,7 @@ describe('frontend runtime config delivery', () => {
         backendCut: false,
         labels: false,
         enableLegacyHasura: false,
+        workosAuth: false,
       },
     });
   });

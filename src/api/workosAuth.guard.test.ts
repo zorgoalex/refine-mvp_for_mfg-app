@@ -1,0 +1,71 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { getFeatureFlags, mergeRuntimeFeatureFlags } from '../config/featureFlags';
+
+const authApiSource = readFileSync(new URL('./authApi.ts', import.meta.url), 'utf8');
+const callbackSource = readFileSync(
+  new URL('../pages/login/WorkosCallback.tsx', import.meta.url),
+  'utf8',
+);
+const loginPageSource = readFileSync(new URL('../pages/login/index.tsx', import.meta.url), 'utf8');
+const profileSource = readFileSync(new URL('../pages/profile/index.tsx', import.meta.url), 'utf8');
+
+describe('workosAuth feature flag', () => {
+  it('is off by default and readable from env and runtime config', () => {
+    expect(getFeatureFlags({}).workosAuth).toBe(false);
+    expect(
+      getFeatureFlags({ VITE_WORKOS_AUTH: 'true', VITE_USE_BACKEND_AUTH: 'true' }).workosAuth,
+    ).toBe(true);
+    expect(
+      mergeRuntimeFeatureFlags(getFeatureFlags({ VITE_USE_BACKEND_AUTH: 'true' }), {
+        workosAuth: 'true',
+      }).workosAuth,
+    ).toBe(true);
+  });
+
+  it('requires backend-auth mode (POC gotcha: legacy check() cannot see the cookie session)', () => {
+    expect(getFeatureFlags({ VITE_WORKOS_AUTH: 'true' }).workosAuth).toBe(false);
+    expect(
+      mergeRuntimeFeatureFlags(getFeatureFlags({}), { workosAuth: 'true', backendAuth: 'false' })
+        .workosAuth,
+    ).toBe(false);
+  });
+});
+
+describe('workos callback helpers contract', () => {
+  it('never auto-refresh-retries the single-use code exchange (skipAuthRefresh)', () => {
+    const callbackHelpers = authApiSource
+      .split('async workos')
+      .filter((chunk) => chunk.startsWith('Callback') || chunk.startsWith('LinkCallback'));
+
+    expect(callbackHelpers).toHaveLength(2);
+    for (const helper of callbackHelpers) {
+      expect(helper).toContain('skipAuthRefresh: true');
+    }
+  });
+
+  it('passes state alongside code to both callback endpoints', () => {
+    expect(authApiSource).toContain('workosCallback(code: string, state: string)');
+    expect(authApiSource).toContain('workosLinkCallback(code: string, state: string)');
+    expect(callbackSource).toContain('searchParams.get("state")');
+  });
+
+  it('guards the single-use code against StrictMode double-mount', () => {
+    expect(callbackSource).toContain('const consumedCodes = new Set<string>()');
+  });
+
+  it('restores the session from the refresh cookie before finishing a link', () => {
+    const linkBranch = callbackSource.split('if (isLink)')[1] ?? '';
+    expect(linkBranch).toContain('await authApi.refresh()');
+    expect(linkBranch.indexOf('authApi.refresh()')).toBeLessThan(
+      linkBranch.indexOf('workosLinkCallback'),
+    );
+  });
+});
+
+describe('workos UI gating', () => {
+  it('login SSO button and profile link card render only behind the flag', () => {
+    expect(loginPageSource).toContain('featureFlags.workosAuth && <WorkosSsoButton />');
+    expect(profileSource).toContain('featureFlags.workosAuth && <WorkosLinkCard />');
+  });
+});

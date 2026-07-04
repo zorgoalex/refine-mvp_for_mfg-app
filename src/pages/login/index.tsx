@@ -1,7 +1,8 @@
 import React from "react";
 import { Form, Input, Button, Card, Typography } from "antd";
-import { UserOutlined, LockOutlined } from "@ant-design/icons";
+import { UserOutlined, LockOutlined, LoginOutlined } from "@ant-design/icons";
 import { useLogin } from "@refinedev/core";
+import { featureFlags } from "../../config/featureFlags";
 
 const { Title, Text } = Typography;
 
@@ -95,7 +96,47 @@ export const LoginPage: React.FC = () => {
             </Button>
           </Form.Item>
         </Form>
+
+        {featureFlags.workosAuth && <WorkosSsoButton />}
       </Card>
+    </div>
+  );
+};
+
+/** Вход через hosted SSO (WorkOS AuthKit); виден только за флагом workosAuth. */
+const WorkosSsoButton: React.FC = () => {
+  const [redirecting, setRedirecting] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const startSso = async () => {
+    setRedirecting(true);
+    setError(null);
+    try {
+      const { authApi } = await import("../../api/authApi");
+      const url = await authApi.workosAuthorizeUrl();
+      window.location.assign(url);
+    } catch {
+      setError("SSO недоступен, войдите по паролю");
+      setRedirecting(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <Button
+        block
+        icon={<LoginOutlined />}
+        loading={redirecting}
+        onClick={startSso}
+        style={{ height: 40 }}
+      >
+        Войти через SSO
+      </Button>
+      {error && (
+        <Text type="danger" style={{ display: "block", marginTop: 8, textAlign: "center" }}>
+          {error}
+        </Text>
+      )}
     </div>
   );
 };

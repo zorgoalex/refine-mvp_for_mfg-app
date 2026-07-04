@@ -12,6 +12,7 @@ import "./styles/mobile.css";
 import { createNotificationProvider } from "./providers/notificationProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LoginPage } from "./pages/login";
+import { WorkosCallbackPage } from "./pages/login/WorkosCallback";
 import { dataProvider } from "./utils/dataProvider";
 import { authProvider } from "./authProvider";
 import { i18nProvider } from "./utils/i18nProvider";
@@ -775,6 +776,7 @@ const ThemedApp = () => {
                   element={<Outlet />}
                 >
                   <Route path="/login" element={<LoginPage />} />
+                  <Route path="/auth/workos/callback" element={<WorkosCallbackPage />} />
                 </Route>
                 </Routes>
               </Suspense>

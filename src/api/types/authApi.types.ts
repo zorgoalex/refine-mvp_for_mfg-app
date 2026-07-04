@@ -71,6 +71,8 @@ export interface RefreshResponse {
 
 export interface LogoutResponse {
   ok: true;
+  /** Hosted provider logout URL; present when the session came from SSO. */
+  providerLogoutUrl?: string;
 }
 
 export interface MeResponse {

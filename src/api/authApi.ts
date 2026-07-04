@@ -41,6 +41,51 @@ export const authApi = {
     authSession.setUser(response.user);
     return response;
   },
+
+  // Hybrid SSO (WorkOS AuthKit). Both callback helpers MUST keep
+  // skipAuthRefresh: true — the httpClient otherwise refreshes on 401 and
+  // replays the request, which burns the single-use authorization code and
+  // turns meaningful 401s into a false invalid_grant.
+  async workosAuthorizeUrl(): Promise<string> {
+    const response = await httpClient.get<{ url: string }>(apiRoutes.auth.workosAuthorize, {
+      skipAuthRefresh: true,
+    });
+    return response.url;
+  },
+
+  async workosCallback(code: string, state: string): Promise<LoginResponse> {
+    const response = await httpClient.post<LoginResponse>(
+      apiRoutes.auth.workosCallback,
+      { code, state },
+      { skipAuthRefresh: true },
+    );
+    setSessionFromAuthResponse(response);
+    return response;
+  },
+
+  async workosLinkStartUrl(): Promise<string> {
+    const response = await httpClient.post<{ url: string }>(apiRoutes.auth.workosLinkStart, undefined);
+    return response.url;
+  },
+
+  async workosLinkCallback(code: string, state: string): Promise<{ linked: true }> {
+    return httpClient.post<{ linked: true }>(
+      apiRoutes.auth.workosLinkCallback,
+      { code, state },
+      { skipAuthRefresh: true },
+    );
+  },
+
+  async workosLinkStatus(): Promise<{ linked: boolean }> {
+    return httpClient.get<{ linked: boolean }>(apiRoutes.auth.workosLink);
+  },
+
+  async workosUnlink(password: string): Promise<{ unlinked: boolean }> {
+    return httpClient.delete<{ unlinked: boolean }>(apiRoutes.auth.workosLink, {
+      body: JSON.stringify({ password }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  },
 };
 
 function setSessionFromAuthResponse(response: LoginResponse | RefreshResponse): void {

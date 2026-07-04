@@ -14,6 +14,7 @@
     "backendVlm": true,
     "backendReferences": false,
     "labels": false,
-    "enableLegacyHasura": true
+    "enableLegacyHasura": true,
+    "workosAuth": false
   }
 }

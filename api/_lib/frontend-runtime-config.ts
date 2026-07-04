@@ -17,6 +17,7 @@ export interface FrontendRuntimeConfigResponse {
     backendCut: boolean;
     labels: boolean;
     enableLegacyHasura: boolean;
+    workosAuth: boolean;
   };
 }
 
@@ -56,6 +57,7 @@ export function buildFrontendRuntimeConfig(
       backendCut: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_CUT, false),
       labels: readBooleanEnv(env.RUNTIME_CONFIG_LABELS, false),
       enableLegacyHasura: readBooleanEnv(env.RUNTIME_CONFIG_ENABLE_LEGACY_HASURA, true),
+      workosAuth: readBooleanEnv(env.RUNTIME_CONFIG_WORKOS_AUTH, false),
     },
   };
 }
