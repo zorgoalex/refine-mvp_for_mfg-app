@@ -39,6 +39,8 @@ interface RefreshSessionRow extends QueryResultRow {
   username: string;
   role_id: string | number;
   is_active: boolean;
+  /** Present only when supportsProviderSessions selects it (post-052). */
+  auth_source?: string | null;
 }
 
 interface AuthAuditInput {
@@ -258,6 +260,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         requestId: command.requestId,
         userAgent: command.userAgent,
         ipAddress: command.ipAddress,
+        authSource: sessionAuthSource(current),
         metadata: {
           outcome: 'success',
           rotated: true,
@@ -292,7 +295,11 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
             `,
             [currentUser.sessionId],
           );
-          await this.writeCurrentUserLogoutAudit(tx, { ...command, currentUser });
+          await this.writeCurrentUserLogoutAudit(
+            tx,
+            { ...command, currentUser },
+            providerSession.authSource === 'workos' ? 'workos' : 'backend',
+          );
           return { ok: true as const, ...providerSession };
         });
       }
@@ -320,6 +327,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         requestId: command.requestId,
         userAgent: command.userAgent,
         ipAddress: command.ipAddress,
+        authSource: providerSession.authSource === 'workos' ? 'workos' : undefined,
         metadata: {
           reason: 'logout',
           refreshTokenPresent: true,
@@ -369,7 +377,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         s.status AS session_status,
         u.username,
         u.role_id,
-        u.is_active
+        u.is_active${this.options.supportsProviderSessions ? ',\n        s.auth_source' : ''}
       FROM refresh_tokens rt
       JOIN auth_sessions s ON s.session_id = rt.session_id
       JOIN users u ON u.user_id = rt.user_id
@@ -415,6 +423,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       requestId: context?.requestId,
       userAgent: context?.userAgent,
       ipAddress: context?.ipAddress,
+      authSource: sessionAuthSource(current),
       metadata: {
         outcome: 'rejected',
         reason: 'reuse_detected',
@@ -506,6 +515,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
   private async writeCurrentUserLogoutAudit(
     tx: TransactionClient,
     command: LogoutCommand & { currentUser: CurrentUser & { sessionId: string } },
+    authSource: 'backend' | 'workos',
   ): Promise<void> {
     await tx.query(
       `
@@ -513,7 +523,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         event, entity_type, entity_id, user_id, username, role_code, role,
         request_id, ip_address, user_agent, source, metadata_json
       )
-      VALUES ('auth.logout', 'auth_session', $1, $2, $3, $4, $4, $5, $6::inet, $7, 'backend', $8::jsonb)
+      VALUES ('auth.logout', 'auth_session', $1, $2, $3, $4, $4, $5, $6::inet, $7, $8, $9::jsonb)
       `,
       [
         command.currentUser.sessionId,
@@ -523,6 +533,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         command.requestId ?? DEFAULT_REQUEST_ID,
         command.ipAddress ?? null,
         command.userAgent ?? null,
+        authSource,
         JSON.stringify({
           sessionId: command.currentUser.sessionId,
           reason: 'logout',
@@ -565,6 +576,11 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       },
     };
   }
+}
+
+/** The persisted issuing path of the session ('backend' when absent/legacy). */
+function sessionAuthSource(row: RefreshSessionRow): 'workos' | undefined {
+  return row.auth_source === 'workos' ? 'workos' : undefined;
 }
 
 function toNullableUserId(userId: string | number): number | null {

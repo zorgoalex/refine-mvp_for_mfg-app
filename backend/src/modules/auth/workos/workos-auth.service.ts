@@ -194,27 +194,10 @@ export class WorkosAuthService {
       throw new UserInactiveError();
     }
 
-    const existing = await this.ports.identities.findByProviderSub(WORKOS_PROVIDER, identity.sub);
-
-    if (existing && existing.userId !== user.id) {
-      await this.ports.identities.writeLinkFailed({
-        actor,
-        reason: 'identity_conflict',
-        provider: WORKOS_PROVIDER,
-        providerUserId: identity.sub,
-        emailAtIdentity: identity.email,
-        conflictUserId: existing.userId,
-      });
-      throw new ApiError(409, 'IDENTITY_CONFLICT', 'Этот внешний аккаунт уже привязан к другому пользователю');
-    }
-
-    if (existing) {
-      return { linked: true };
-    }
-
-    // The pre-checks above are only a fast-fail UX; the guarded insert is the
-    // authority — it revalidates session/user in the same transaction and
-    // resolves concurrent same-sub callbacks deterministically.
+    // NO pre-insert findByProviderSub fast-path: every outcome (including
+    // the idempotent already-linked one) must pass the guarded insert, which
+    // revalidates session/user in the same transaction — a session revoked
+    // during the provider round-trip cannot get a 200 on any path.
     const outcome = await this.ports.identities.insertLinkWithAudit({
       actor,
       provider: WORKOS_PROVIDER,

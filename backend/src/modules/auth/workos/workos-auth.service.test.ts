@@ -273,28 +273,26 @@ describe('WorkosAuthService.linkWithCode', () => {
     );
   });
 
-  it('is idempotent when the same identity is already linked to the same user', async () => {
-    const harness = createHarness();
-    await expect(harness.service.linkWithCode(command)).resolves.toEqual({ linked: true });
-    expect(harness.ports.insertLink).not.toHaveBeenCalled();
-  });
-
-  it('denies identity linked to another user with identity_conflict audit', async () => {
+  it('routes the idempotent already-linked case through the guarded insert (no fast-path)', async () => {
+    // The guarded insert is the ONLY authority: even an already-linked
+    // identity must pass the in-transaction session/user revalidation, so a
+    // session revoked during the provider round-trip can never 200.
     const harness = createHarness({
-      linkRecord: {
-        identityId: 'ident-9',
-        userId: '99',
-        provider: 'workos',
-        providerUserId: IDENTITY.sub,
-        emailAtLink: IDENTITY.email,
-      },
+      insertLink: vi.fn(async () => ({
+        status: 'already_linked' as const,
+        record: {
+          identityId: 'ident-1',
+          userId: '42',
+          provider: 'workos',
+          providerUserId: IDENTITY.sub,
+          emailAtLink: IDENTITY.email,
+        },
+      })),
     });
 
-    await expect(harness.service.linkWithCode(command)).rejects.toMatchObject({
-      code: 'IDENTITY_CONFLICT',
-    });
-    expect(harness.ports.linkFailed).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: 'identity_conflict', conflictUserId: '99' }),
+    await expect(harness.service.linkWithCode(command)).resolves.toEqual({ linked: true });
+    expect(harness.ports.insertLink).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1' }),
     );
   });
 

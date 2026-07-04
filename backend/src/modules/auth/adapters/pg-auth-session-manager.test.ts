@@ -276,6 +276,40 @@ describe('PgAuthSessionManager', () => {
     ).resolves.toEqual({ ok: true, providerSessionId: 'sid-1', authSource: 'workos' });
   });
 
+  it('keeps workos provenance in refresh and logout audits (source survives the whole session)', async () => {
+    const workosRefreshRow = {
+      token_id: 'token-old',
+      user_id: '42',
+      session_id: 'session-1',
+      token_family_id: 'family-1',
+      expires_at: new Date('2100-01-01T00:00:00.000Z'),
+      revoked_at: null,
+      session_status: 'active',
+      username: 'manager',
+      role_id: 10,
+      is_active: true,
+      auth_source: 'workos',
+    };
+
+    const refreshDb = createDatabase({ refreshRow: workosRefreshRow });
+    await createManager(refreshDb.service, { supportsProviderSessions: true }).refresh({
+      refreshToken: 'refresh-login',
+    });
+    const refreshAudit = findAudit(refreshDb.queries, 'auth.refresh');
+    expect(refreshAudit?.params[8]).toBe('workos');
+
+    const logoutDb = createDatabase({
+      refreshRow: workosRefreshRow,
+      providerSessionId: 'sid-1',
+      authSource: 'workos',
+    });
+    await createManager(logoutDb.service, { supportsProviderSessions: true }).logout({
+      refreshToken: 'refresh-login',
+    });
+    const logoutAudit = findAudit(logoutDb.queries, 'auth.logout');
+    expect(logoutAudit?.params[8]).toBe('workos');
+  });
+
   it('persists auth_source even when the provider returned no sid, and logout surfaces it', async () => {
     const database = createDatabase();
     const manager = createManager(database.service, { supportsProviderSessions: true });
