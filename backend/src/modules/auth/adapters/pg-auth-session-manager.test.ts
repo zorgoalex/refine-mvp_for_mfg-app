@@ -68,6 +68,33 @@ describe('PgAuthSessionManager', () => {
     vi.useRealTimers();
   });
 
+  it('merges caller auditMetadata (e.g. SSO email drift) into the success audit row', async () => {
+    const database = createDatabase();
+    const manager = createManager(database.service);
+
+    await manager.createLoginSession(
+      { id: '42', username: 'manager', roleId: 10, passwordHash: 'hash', isActive: true },
+      {
+        authSource: 'workos',
+        auditMetadata: {
+          emailDrift: true,
+          providerEmail: 'new@example.com',
+          emailAtLink: 'old@example.com',
+        },
+      },
+    );
+
+    const audit = findAudit(database.queries, 'auth.login.success');
+    const metadata = JSON.parse(String(audit?.params[9])) as Record<string, unknown>;
+    expect(metadata).toMatchObject({
+      outcome: 'success',
+      emailDrift: true,
+      providerEmail: 'new@example.com',
+      emailAtLink: 'old@example.com',
+    });
+    expect(audit?.params[8]).toBe('workos');
+  });
+
   it('rotates refresh token atomically', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-01T12:00:00.000Z'));

@@ -20,6 +20,8 @@ export interface AuthUserRecord {
   passwordHash: string;
   isActive: boolean;
   loginPolicy: LoginPolicy;
+  /** Present when the loader selects it (used for SSO email-drift auditing). */
+  email?: string | null;
 }
 
 export interface AuthSessionRecord {
@@ -42,6 +44,8 @@ export interface LoginSessionContext extends Pick<LoginCommand, 'userAgent' | 'i
   authSource?: AuthSource;
   /** External provider session id, persisted for provider-side logout. */
   providerSessionId?: string;
+  /** Extra queryable fields merged into the auth.login.success audit metadata. */
+  auditMetadata?: Record<string, unknown>;
 }
 
 export interface SessionManagerPort {

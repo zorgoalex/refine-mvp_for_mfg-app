@@ -54,6 +54,16 @@ describe('workos callback helpers contract', () => {
     expect(callbackSource).toContain('const consumedCodes = new Set<string>()');
   });
 
+  it('keeps the happy path in the SPA and rehydrates before navigating (no full reload)', () => {
+    // A full reload would discard the in-memory access token and force an
+    // extra /auth/refresh round-trip (POC race #5).
+    expect(callbackSource).not.toContain('window.location.replace');
+    expect(callbackSource).toContain('await authApi.me()');
+    expect(callbackSource.indexOf('authApi.me()')).toBeLessThan(
+      callbackSource.indexOf('navigate("/", { replace: true })'),
+    );
+  });
+
   it('restores the session from the refresh cookie before finishing a link', () => {
     const linkBranch = callbackSource.split('if (isLink)')[1] ?? '';
     expect(linkBranch).toContain('await authApi.refresh()');

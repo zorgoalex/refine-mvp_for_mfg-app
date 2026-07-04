@@ -119,6 +119,9 @@ export class WorkosAuthService {
       requestId: command.requestId,
       authSource: 'workos',
       providerSessionId: identity.providerSessionId ?? undefined,
+      // Plan §4.3: email drift never blocks (sub is the anchor) but must be
+      // queryable in the auth.login.success audit metadata, not console-only.
+      auditMetadata: this.emailDriftMetadata(identity, user, link),
     });
     void this.ports.identities.touchLastLogin(link.identityId).catch(() => undefined);
 
@@ -335,6 +338,29 @@ export class WorkosAuthService {
       requestId: command.requestId,
       userAgent: command.userAgent,
       ipAddress: command.ipAddress,
+    };
+  }
+
+  /** Drift of the provider email vs users.email / email_at_link (plan §4.3). */
+  private emailDriftMetadata(
+    identity: WorkosIdentity,
+    user: AuthUserRecord,
+    link: UserIdentityRecord,
+  ): Record<string, unknown> | undefined {
+    const providerEmail = identity.email.toLowerCase();
+    const userEmail = typeof user.email === 'string' ? user.email.toLowerCase() : null;
+    const driftFromUser = userEmail !== null && providerEmail !== userEmail;
+    const driftFromLink = providerEmail !== link.emailAtLink.toLowerCase();
+
+    if (!driftFromUser && !driftFromLink) {
+      return undefined;
+    }
+
+    return {
+      emailDrift: true,
+      providerEmail: identity.email,
+      userEmail: user.email ?? null,
+      emailAtLink: link.emailAtLink,
     };
   }
 

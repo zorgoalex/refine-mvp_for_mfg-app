@@ -100,13 +100,14 @@ import { WorkosAuthService } from './workos/workos-auth.service';
             const result = await database.query<{
               user_id: string | number;
               username: string;
+              email: string | null;
               role_id: string | number;
               password_hash: string;
               is_active: boolean;
               login_policy?: string;
             }>(
               `
-              SELECT user_id, username, role_id, password_hash, is_active, login_policy
+              SELECT user_id, username, email, role_id, password_hash, is_active, login_policy
               FROM users
               WHERE user_id = $1
               LIMIT 1
@@ -122,6 +123,7 @@ import { WorkosAuthService } from './workos/workos-auth.service';
             return {
               id: String(row.user_id),
               username: row.username,
+              email: row.email,
               roleId: Number(row.role_id),
               passwordHash: row.password_hash,
               isActive: row.is_active,

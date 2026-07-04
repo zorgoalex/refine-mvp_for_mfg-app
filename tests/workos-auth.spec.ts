@@ -58,22 +58,25 @@ test.describe('WorkOS hybrid auth (mocked)', () => {
         await expect(page.getByRole('button', { name: 'Войти через SSO' })).toHaveCount(0);
     });
 
-    test('callback page exchanges code+state once and redirects into the app', async ({ page }) => {
+    test('callback page exchanges code+state once and enters the app without an extra refresh', async ({ page }) => {
         await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true });
 
         const callbackBodies: unknown[] = [];
+        let meCalls = 0;
         await page.route(/\/api\/v1\/auth\/workos\/callback$/, async (route) => {
             callbackBodies.push(JSON.parse(route.request().postData() || '{}'));
             await fulfillJson(route, LOGIN_RESPONSE);
         });
 
-        // The callback page redirects via window.location.replace('/'), a full
-        // reload: the in-memory token is gone and the app re-authenticates from
-        // the refresh cookie. Mock refresh/me as an authenticated session.
+        // App boot may probe /auth/refresh on its own; the regression this
+        // test guards is a FULL RELOAD after the exchange (which would drop
+        // the in-memory token). Keep the session logged out so a reload
+        // would bounce to /login instead of landing on '/'.
         await page.route(/\/api\/v1\/auth\/refresh$/, async (route) => {
-            await fulfillJson(route, LOGIN_RESPONSE);
+            await fulfillJson(route, { error: { code: 'AUTH_REQUIRED', message: 'Unauthenticated' } }, 401);
         });
         await page.route(/\/api\/v1\/me$/, async (route) => {
+            meCalls += 1;
             await fulfillJson(route, { user: MOCK_USER });
         });
         await page.route(/\/api\/v1\/me\/preferences$/, async (route) => {
@@ -91,6 +94,16 @@ test.describe('WorkOS hybrid auth (mocked)', () => {
         // Single exchange with both params (StrictMode double-mount is guarded).
         expect(callbackBodies).toHaveLength(1);
         expect(callbackBodies[0]).toEqual({ code: 'e2e-mock-code', state: 'e2e-mock-state' });
+
+        // The user was rehydrated via me() and the document was NEVER
+        // reloaded: the only navigation entry is still the callback URL, so
+        // the in-memory token survived (SPA navigate, POC race #5).
+        expect(meCalls).toBeGreaterThan(0);
+        const navigationUrls = await page.evaluate(() =>
+            performance.getEntriesByType('navigation').map((entry) => entry.name),
+        );
+        expect(navigationUrls).toHaveLength(1);
+        expect(navigationUrls[0]).toContain('/auth/workos/callback');
     });
 
     test('401 from callback shows the error and never replays the single-use code', async ({ page }) => {

@@ -141,6 +141,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         authSource: context.authSource,
         metadata: {
           outcome: 'success',
+          ...context.auditMetadata,
         },
       });
 

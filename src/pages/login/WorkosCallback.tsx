@@ -1,6 +1,6 @@
 import React from "react";
 import { Card, Spin, Typography } from "antd";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { authApi } from "../../api/authApi";
 import { ApiError } from "../../api/httpClient";
 
@@ -23,6 +23,7 @@ export function markWorkosLinkIntent(): void {
  */
 export const WorkosCallbackPage: React.FC = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -45,18 +46,23 @@ export const WorkosCallbackPage: React.FC = () => {
       if (isLink) {
         await authApi.refresh();
         await authApi.workosLinkCallback(code, state);
-        window.location.replace("/profile?sso=linked");
+        navigate("/profile?sso=linked", { replace: true });
         return;
       }
 
+      // SPA navigation, no full reload: the exchanged access token lives
+      // in-memory only and a reload would discard it, forcing an extra
+      // /auth/refresh round-trip (POC race #5). me() rehydrates the user
+      // before entering the app.
       await authApi.workosCallback(code, state);
-      window.location.replace("/");
+      await authApi.me().catch(() => undefined);
+      navigate("/", { replace: true });
     };
 
     run().catch((exchangeError: unknown) => {
       setError(describeError(exchangeError));
     });
-  }, [searchParams]);
+  }, [searchParams, navigate]);
 
   return (
     <div

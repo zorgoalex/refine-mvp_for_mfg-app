@@ -152,6 +152,33 @@ describe('WorkosAuthService.loginWithCode', () => {
     );
   });
 
+  it('writes email drift into the success-audit metadata when the provider email diverges', async () => {
+    const harness = createHarness({ userById: { ...USER, email: 'other@example.com' } });
+    await harness.service.loginWithCode({ code: 'c' });
+
+    expect(harness.ports.sessions).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        auditMetadata: expect.objectContaining({
+          emailDrift: true,
+          providerEmail: IDENTITY.email,
+          userEmail: 'other@example.com',
+          emailAtLink: IDENTITY.email,
+        }),
+      }),
+    );
+  });
+
+  it('omits drift metadata when the provider email matches user and link', async () => {
+    const harness = createHarness({ userById: { ...USER, email: IDENTITY.email } });
+    await harness.service.loginWithCode({ code: 'c' });
+
+    expect(harness.ports.sessions).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ auditMetadata: undefined }),
+    );
+  });
+
   it('audits provider_error as auth.login.failed when the code exchange fails', async () => {
     const harness = createHarness({ identityError: new Error('workos down') });
 
