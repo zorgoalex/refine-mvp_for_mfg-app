@@ -127,15 +127,16 @@ export class PgUserIdentityRepository {
         `
         INSERT INTO audit_log (
           event, entity_type, entity_id, user_id, username, role_code, role,
-          request_id, ip_address, user_agent, source, metadata_json
+          related_user_id, request_id, ip_address, user_agent, source, metadata_json
         )
-        VALUES ('auth.identity.linked', 'user', $1, $2, $3, $4, $4, $5, $6::inet, $7, 'workos', $8::jsonb)
+        VALUES ('auth.identity.linked', 'user', $1, $2, $3, $4, $4, $5, $6, $7::inet, $8, 'workos', $9::jsonb)
         `,
         [
           input.actor.userId,
           toNullableUserId(input.actor.userId),
           input.actor.username,
           mapRoleIdToRole(input.actor.roleId),
+          toNullableUserId(input.actor.userId),
           input.actor.requestId ?? DEFAULT_REQUEST_ID,
           input.actor.ipAddress ?? null,
           input.actor.userAgent ?? null,
@@ -226,15 +227,16 @@ export class PgUserIdentityRepository {
           `
           INSERT INTO audit_log (
             event, entity_type, entity_id, user_id, username, role_code, role,
-            request_id, ip_address, user_agent, source, metadata_json
+            related_user_id, request_id, ip_address, user_agent, source, metadata_json
           )
-          VALUES ('auth.identity.unlinked', 'user', $1, $2, $3, $4, $4, $5, $6::inet, $7, 'workos', $8::jsonb)
+          VALUES ('auth.identity.unlinked', 'user', $1, $2, $3, $4, $4, $5, $6, $7::inet, $8, 'workos', $9::jsonb)
           `,
           [
             input.actor.userId,
             toNullableUserId(input.actor.userId),
             input.actor.username,
             mapRoleIdToRole(input.actor.roleId),
+            toNullableUserId(input.actor.userId),
             input.actor.requestId ?? DEFAULT_REQUEST_ID,
             input.actor.ipAddress ?? null,
             input.actor.userAgent ?? null,
@@ -278,15 +280,16 @@ export class PgUserIdentityRepository {
       `
       INSERT INTO audit_log (
         event, entity_type, entity_id, user_id, username, role_code, role,
-        request_id, ip_address, user_agent, source, metadata_json
+        related_user_id, request_id, ip_address, user_agent, source, metadata_json
       )
-      VALUES ('auth.identity.link_failed', 'user', $1, $2, $3, $4, $4, $5, $6::inet, $7, 'workos', $8::jsonb)
+      VALUES ('auth.identity.link_failed', 'user', $1, $2, $3, $4, $4, $5, $6, $7::inet, $8, 'workos', $9::jsonb)
       `,
       [
         input.actor.userId,
         toNullableUserId(input.actor.userId),
         input.actor.username,
         mapRoleIdToRole(input.actor.roleId),
+        toNullableUserId(input.actor.userId),
         input.actor.requestId ?? DEFAULT_REQUEST_ID,
         input.actor.ipAddress ?? null,
         input.actor.userAgent ?? null,

@@ -35,6 +35,9 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     expect(insertSql).toContain('u.is_active');
     expect(insertSql).toContain('ON CONFLICT (provider, provider_user_id) DO NOTHING');
     expect(database.queries[1].text).toContain('auth.identity.linked');
+    // Query-ready audit dimension (plan §4.8): the affected user.
+    expect(database.queries[1].text).toContain('related_user_id');
+    expect(database.queries[1].params[4]).toBe(42);
   });
 
   it('classifies a zero-row insert as session_inactive when the session died mid-flight', async () => {
@@ -120,6 +123,10 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
     expect(auditInserts).toHaveLength(2);
     expect(JSON.stringify(auditInserts[0].params)).toContain('sub-a');
     expect(JSON.stringify(auditInserts[1].params)).toContain('sub-b');
+    for (const insert of auditInserts) {
+      expect(insert.text).toContain('related_user_id');
+      expect(insert.params[4]).toBe(42);
+    }
   });
 
   it('returns false and writes no audit when nothing was linked', async () => {
@@ -130,6 +137,28 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
       repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos' }),
     ).resolves.toBe(false);
     expect(database.queries.filter((query) => query.text.includes('audit_log'))).toHaveLength(0);
+  });
+});
+
+describe('PgUserIdentityRepository.writeLinkFailed', () => {
+  it('writes the affected user into related_user_id (query-ready, plan §4.8)', async () => {
+    const database = createTransactionalDatabase([{ rows: [] }]);
+    const repository = new PgUserIdentityRepository(database.service);
+
+    await repository.writeLinkFailed({
+      actor: ACTOR,
+      reason: 'identity_conflict',
+      provider: 'workos',
+      providerUserId: 'sub-a',
+      conflictUserId: '99',
+    });
+
+    const insert = database.queries[0];
+    expect(insert.text).toContain('auth.identity.link_failed');
+    expect(insert.text).toContain('related_user_id');
+    expect(insert.params[4]).toBe(42);
+    const metadata = JSON.parse(String(insert.params[8])) as Record<string, unknown>;
+    expect(metadata).toMatchObject({ reason: 'identity_conflict', conflictUserId: '99' });
   });
 });
 

@@ -22,11 +22,13 @@ describe('PgAuthAuditRepository', () => {
     });
 
     expect(normalizeSql(database.queries[0].text)).toContain('INSERT INTO audit_log');
+    expect(normalizeSql(database.queries[0].text)).toContain('related_user_id');
     expect(database.queries[0].params).toEqual([
       '42',
       42,
       'manager',
       'manager',
+      42,
       'req-login-failed',
       '127.0.0.1',
       'vitest-agent',
@@ -59,6 +61,7 @@ describe('PgAuthAuditRepository', () => {
       'missing',
       null,
       'missing',
+      null,
       null,
       'auth-command',
       null,

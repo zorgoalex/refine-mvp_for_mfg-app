@@ -23,11 +23,11 @@ export class PgAuthAuditRepository implements AuthAuditPort {
       `
       INSERT INTO audit_log (
         event, entity_type, entity_id, user_id, username, role_code, role,
-        request_id, ip_address, user_agent, source, metadata_json
+        related_user_id, request_id, ip_address, user_agent, source, metadata_json
       )
       VALUES (
         'auth.login.failed', 'auth', $1, $2, $3, $4, $4,
-        $5, $6::inet, $7, $8, $9::jsonb
+        $5, $6, $7::inet, $8, $9, $10::jsonb
       )
       `,
       [
@@ -35,6 +35,8 @@ export class PgAuthAuditRepository implements AuthAuditPort {
         toNullableUserId(input.user?.id),
         input.user?.username ?? input.username,
         role,
+        // Query-ready dimension (plan §4.8): the resolved account, when known.
+        toNullableUserId(input.user?.id),
         input.requestId ?? DEFAULT_REQUEST_ID,
         input.ipAddress ?? null,
         input.userAgent ?? null,
