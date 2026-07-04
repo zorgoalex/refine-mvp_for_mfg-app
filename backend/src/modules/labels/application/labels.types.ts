@@ -321,6 +321,21 @@ export interface LabelsPermissionDeniedInput {
   targetEntityType?: 'label_template' | 'order' | 'label_qr_template';
 }
 
+/** One recognized text line from ocr-service (recognition box intentionally dropped — backend has no use for it). */
+export interface OcrLine {
+  text: string;
+  score: number;
+}
+
+/**
+ * Port to the standalone ocr-service (T1: POST /ocr, raw image bytes → {lines,durationMs}).
+ * Implementations: HttpOcrClient (adapters/http-ocr-client.ts) when OCR_SERVICE_BASE_URL is
+ * configured, UnavailableOcrClient otherwise. Not yet wired into LabelsService (see T4).
+ */
+export interface OcrPort {
+  recognize(image: Buffer, contentType: string): Promise<{ lines: OcrLine[]; durationMs: number }>;
+}
+
 export interface LabelsPort {
   listTemplates(query: ListLabelTemplatesQuery): Promise<LabelTemplateDto[]>;
   getTemplateById(query: GetLabelTemplateQuery): Promise<LabelTemplateDto>;
