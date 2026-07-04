@@ -75,9 +75,12 @@ export class WorkosApiClient {
       const parsed = parseJson(body);
       const errorCode = typeof parsed?.error === 'string' ? parsed.error : undefined;
 
+      // Only the status and the parsed stable error code are logged: the raw
+      // upstream body is untrusted and could echo the one-time code or other
+      // sensitive request fields.
       // eslint-disable-next-line no-console
       console.error(
-        `[workos] authenticate failed status=${response.status} error=${errorCode ?? 'unknown'} body=${body.slice(0, 300)}`,
+        `[workos] authenticate failed status=${response.status} error=${errorCode ?? 'unknown'}`,
       );
 
       if (response.status === 400 && errorCode === 'invalid_grant') {

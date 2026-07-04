@@ -21,6 +21,13 @@ export type IdentityLinkFailedReason =
   | 'provider_error'
   | 'session_inactive';
 
+export type LinkInsertOutcome =
+  | { status: 'linked'; record: UserIdentityRecord }
+  | { status: 'already_linked'; record: UserIdentityRecord }
+  | { status: 'conflict'; conflictUserId: string }
+  | { status: 'session_inactive' }
+  | { status: 'user_inactive' };
+
 export interface IdentityActor {
   userId: string;
   username: string;
@@ -69,7 +76,15 @@ export class PgUserIdentityRepository {
     return toRecord(result.rows[0]);
   }
 
-  /** Inserts the identity link and its audit event in one transaction. */
+  /**
+   * Inserts the identity link and its audit event in one transaction.
+   *
+   * The INSERT itself is the authority (service-level pre-checks are only a
+   * fast-fail UX): a single guarded statement revalidates the live session
+   * and the active user at commit time (closes the TOCTOU window across the
+   * WorkOS round-trip), and ON CONFLICT makes a concurrent same-sub callback
+   * deterministic instead of a raw 23505.
+   */
   async insertLinkWithAudit(input: {
     actor: IdentityActor;
     provider: string;
@@ -77,16 +92,36 @@ export class PgUserIdentityRepository {
     emailAtLink: string;
     emailVerified: boolean;
     mode: IdentityLinkMode;
-  }): Promise<UserIdentityRecord> {
+    /** Required for self_serve; admin_bulk provisioning has no live session. */
+    sessionId?: string;
+  }): Promise<LinkInsertOutcome> {
     return this.database.transaction(async (tx) => {
       const inserted = await tx.query<UserIdentityRow>(
         `
         INSERT INTO user_identities (user_id, provider, provider_user_id, email_at_link, email_verified_at_link)
-        VALUES ($1, $2, $3, $4, $5)
+        SELECT $1, $2, $3, $4, $5
+        WHERE ($6::uuid IS NULL OR EXISTS (
+                SELECT 1 FROM auth_sessions s
+                WHERE s.session_id = $6::uuid AND s.status = 'active' AND s.expires_at > now()
+              ))
+          AND EXISTS (SELECT 1 FROM users u WHERE u.user_id = $1 AND u.is_active)
+        ON CONFLICT (provider, provider_user_id) DO NOTHING
         RETURNING identity_id, user_id, provider, provider_user_id, email_at_link
         `,
-        [input.actor.userId, input.provider, input.providerUserId, input.emailAtLink, input.emailVerified],
+        [
+          input.actor.userId,
+          input.provider,
+          input.providerUserId,
+          input.emailAtLink,
+          input.emailVerified,
+          input.sessionId ?? null,
+        ],
       );
+      const record = toRecord(inserted.rows[0]);
+
+      if (!record) {
+        return this.classifyFailedInsert(tx, input);
+      }
 
       await tx.query(
         `
@@ -114,14 +149,56 @@ export class PgUserIdentityRepository {
         ],
       );
 
-      const record = toRecord(inserted.rows[0]);
-
-      if (!record) {
-        throw new Error('user_identities insert returned no row');
-      }
-
-      return record;
+      return { status: 'linked', record };
     });
+  }
+
+  /** Zero-row guarded insert: figure out WHICH guard (or conflict) stopped it. */
+  private async classifyFailedInsert(
+    tx: { query: DatabaseService['query'] },
+    input: { actor: IdentityActor; provider: string; providerUserId: string; sessionId?: string },
+  ): Promise<LinkInsertOutcome> {
+    if (input.sessionId) {
+      const session = await tx.query(
+        `
+        SELECT 1 FROM auth_sessions
+        WHERE session_id = $1 AND status = 'active' AND expires_at > now()
+        LIMIT 1
+        `,
+        [input.sessionId],
+      );
+
+      if (session.rows.length === 0) {
+        return { status: 'session_inactive' };
+      }
+    }
+
+    const user = await tx.query('SELECT 1 FROM users WHERE user_id = $1 AND is_active LIMIT 1', [
+      input.actor.userId,
+    ]);
+
+    if (user.rows.length === 0) {
+      return { status: 'user_inactive' };
+    }
+
+    const existing = await tx.query<UserIdentityRow>(
+      `
+      SELECT identity_id, user_id, provider, provider_user_id, email_at_link
+      FROM user_identities
+      WHERE provider = $1 AND provider_user_id = $2
+      LIMIT 1
+      `,
+      [input.provider, input.providerUserId],
+    );
+    const record = toRecord(existing.rows[0]);
+
+    if (record) {
+      return record.userId === input.actor.userId
+        ? { status: 'already_linked', record }
+        : { status: 'conflict', conflictUserId: record.userId };
+    }
+
+    throw new Error('user_identities guarded insert returned no row and no cause');
   }
 
   /**

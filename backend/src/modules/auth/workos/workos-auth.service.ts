@@ -209,16 +209,50 @@ export class WorkosAuthService {
       return { linked: true };
     }
 
-    await this.ports.identities.insertLinkWithAudit({
+    // The pre-checks above are only a fast-fail UX; the guarded insert is the
+    // authority — it revalidates session/user in the same transaction and
+    // resolves concurrent same-sub callbacks deterministically.
+    const outcome = await this.ports.identities.insertLinkWithAudit({
       actor,
       provider: WORKOS_PROVIDER,
       providerUserId: identity.sub,
       emailAtLink: identity.email,
       emailVerified: identity.emailVerified,
       mode: 'self_serve',
+      sessionId,
     });
 
-    return { linked: true };
+    switch (outcome.status) {
+      case 'linked':
+      case 'already_linked':
+        return { linked: true };
+      case 'conflict':
+        await this.ports.identities.writeLinkFailed({
+          actor,
+          reason: 'identity_conflict',
+          provider: WORKOS_PROVIDER,
+          providerUserId: identity.sub,
+          emailAtIdentity: identity.email,
+          conflictUserId: outcome.conflictUserId,
+        });
+        throw new ApiError(409, 'IDENTITY_CONFLICT', 'Этот внешний аккаунт уже привязан к другому пользователю');
+      case 'session_inactive':
+        await this.ports.identities.writeLinkFailed({
+          actor,
+          reason: 'session_inactive',
+          provider: WORKOS_PROVIDER,
+          providerUserId: identity.sub,
+        });
+        throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново и повторите привязку');
+      case 'user_inactive':
+        await this.ports.identities.writeLinkFailed({
+          actor,
+          reason: 'session_inactive',
+          provider: WORKOS_PROVIDER,
+          providerUserId: identity.sub,
+        });
+        throw new UserInactiveError();
+    }
   }
 
   /** Unlink requires password confirmation: after unlink only the password remains. */

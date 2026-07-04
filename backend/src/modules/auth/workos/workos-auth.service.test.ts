@@ -68,11 +68,14 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     loginFailed: vi.fn(async () => undefined),
     linkFailed: vi.fn(async () => undefined),
     insertLink: vi.fn(async () => ({
-      identityId: 'ident-new',
-      userId: '42',
-      provider: 'workos',
-      providerUserId: IDENTITY.sub,
-      emailAtLink: IDENTITY.email,
+      status: 'linked' as const,
+      record: {
+        identityId: 'ident-new',
+        userId: '42',
+        provider: 'workos',
+        providerUserId: IDENTITY.sub,
+        emailAtLink: IDENTITY.email,
+      },
     })),
     deleteLink: vi.fn(async () => true),
     passwordValid: true,
@@ -190,8 +193,56 @@ describe('WorkosAuthService.linkWithCode', () => {
         providerUserId: IDENTITY.sub,
         emailAtLink: IDENTITY.email,
         mode: 'self_serve',
+        sessionId: 'session-1',
         actor: expect.objectContaining({ userId: '42', requestId: 'req-2' }),
       }),
+    );
+  });
+
+  it('treats a concurrent same-user insert race as idempotent success', async () => {
+    const harness = createHarness({
+      linkRecord: null,
+      insertLink: vi.fn(async () => ({
+        status: 'already_linked' as const,
+        record: {
+          identityId: 'ident-1',
+          userId: '42',
+          provider: 'workos',
+          providerUserId: IDENTITY.sub,
+          emailAtLink: IDENTITY.email,
+        },
+      })),
+    });
+
+    await expect(harness.service.linkWithCode(command)).resolves.toEqual({ linked: true });
+    expect(harness.ports.linkFailed).not.toHaveBeenCalled();
+  });
+
+  it('maps a concurrent other-user insert race to identity_conflict with audit', async () => {
+    const harness = createHarness({
+      linkRecord: null,
+      insertLink: vi.fn(async () => ({ status: 'conflict' as const, conflictUserId: '99' })),
+    });
+
+    await expect(harness.service.linkWithCode(command)).rejects.toMatchObject({
+      code: 'IDENTITY_CONFLICT',
+    });
+    expect(harness.ports.linkFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'identity_conflict', conflictUserId: '99' }),
+    );
+  });
+
+  it('denies when the guarded insert sees the session died during the WorkOS round-trip', async () => {
+    const harness = createHarness({
+      linkRecord: null,
+      insertLink: vi.fn(async () => ({ status: 'session_inactive' as const })),
+    });
+
+    await expect(harness.service.linkWithCode(command)).rejects.toMatchObject({
+      code: 'SESSION_INACTIVE',
+    });
+    expect(harness.ports.linkFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'session_inactive' }),
     );
   });
 

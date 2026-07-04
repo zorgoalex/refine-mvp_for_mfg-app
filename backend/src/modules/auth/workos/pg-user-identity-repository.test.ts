@@ -9,6 +9,95 @@ const ACTOR: IdentityActor = {
   requestId: 'req-1',
 };
 
+describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
+  const input = {
+    actor: ACTOR,
+    provider: 'workos',
+    providerUserId: 'sub-a',
+    emailAtLink: 'a@example.com',
+    emailVerified: true,
+    mode: 'self_serve' as const,
+    sessionId: 'session-1',
+  };
+
+  it('guards the insert in SQL (live session + active user + ON CONFLICT) and audits in the same tx', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service);
+
+    const outcome = await repository.insertLinkWithAudit(input);
+
+    expect(outcome.status).toBe('linked');
+    const insertSql = database.queries[0].text;
+    expect(insertSql).toContain("s.status = 'active'");
+    expect(insertSql).toContain('s.expires_at > now()');
+    expect(insertSql).toContain('u.is_active');
+    expect(insertSql).toContain('ON CONFLICT (provider, provider_user_id) DO NOTHING');
+    expect(database.queries[1].text).toContain('auth.identity.linked');
+  });
+
+  it('classifies a zero-row insert as session_inactive when the session died mid-flight', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [] }, // guarded insert
+      { rows: [] }, // session check
+    ]);
+    const repository = new PgUserIdentityRepository(database.service);
+
+    await expect(repository.insertLinkWithAudit(input)).resolves.toEqual({
+      status: 'session_inactive',
+    });
+    expect(database.queries.filter((query) => query.text.includes('audit_log'))).toHaveLength(0);
+  });
+
+  it('classifies a zero-row insert as user_inactive when the user was deactivated mid-flight', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [] }, // guarded insert
+      { rows: [{ '?column?': 1 }] }, // session ok
+      { rows: [] }, // user inactive
+    ]);
+    const repository = new PgUserIdentityRepository(database.service);
+
+    await expect(repository.insertLinkWithAudit(input)).resolves.toEqual({
+      status: 'user_inactive',
+    });
+  });
+
+  it('resolves a concurrent conflict deterministically: same user → already_linked, other user → conflict', async () => {
+    const sameUser = createTransactionalDatabase([
+      { rows: [] },
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
+    ]);
+    await expect(
+      new PgUserIdentityRepository(sameUser.service).insertLinkWithAudit(input),
+    ).resolves.toMatchObject({ status: 'already_linked' });
+
+    const otherUser = createTransactionalDatabase([
+      { rows: [] },
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ identity_id: '1', user_id: '99', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
+    ]);
+    await expect(
+      new PgUserIdentityRepository(otherUser.service).insertLinkWithAudit(input),
+    ).resolves.toEqual({ status: 'conflict', conflictUserId: '99' });
+  });
+
+  it('skips the session guard for admin_bulk provisioning without a session', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service);
+
+    await expect(
+      repository.insertLinkWithAudit({ ...input, sessionId: undefined, mode: 'admin_bulk' }),
+    ).resolves.toMatchObject({ status: 'linked' });
+    expect(database.queries[0].params[5]).toBeNull();
+  });
+});
+
 describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
   it('writes one auth.identity.unlinked audit row PER deleted identity in one transaction', async () => {
     const database = createTransactionalDatabase([
