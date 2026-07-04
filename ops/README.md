@@ -181,9 +181,12 @@ What it does per run:
    errors are auto-healed (allowlisted ERP views, dependency check, one retry).
 4. Variant B gate before 034: uncovered legacy materials abort with a
    ready-to-review `conversion-map-candidates.sql` artifact; `--auto-map`
-   applies those heuristic rows itself (sheet-name → cuttable+thickness,
-   header-only → non-cuttable) and records a `zz_automap_*` ledger provenance
-   row. Then `034_preflight.sql` is machine-checked, 034 applied, and
+   applies those heuristic rows itself and records a `zz_automap_*` ledger
+   provenance row. Placement decides cuttability: a material used on order
+   DETAILS is always mapped cuttable (known sheet names get real dims;
+   unknown names get SENTINEL 1×1×1 dims — list them later via
+   `SELECT * FROM sheet_material_types WHERE width_mm = 1` and fill real
+   sizes in the SP1 UI); header-only materials stay non-cuttable. Then `034_preflight.sql` is machine-checked, 034 applied, and
    `034_verify.sql` asserted — the 034 ledger entry is written ONLY after
    verify passes; a verify failure writes a persistent `zz_hard_stop_*`
    sentinel that blocks ALL mutating modes until `auto --clear-hard-stop`.

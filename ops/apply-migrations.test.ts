@@ -111,10 +111,18 @@ describe('apply-migrations.sh classify-material-name (auto-map heuristic)', () =
     expect(classify('ФАНЕРА')).toBe('cuttable|16|3'); // no thickness -> default 16
   });
 
-  it('non-sheet names are non-cuttable placeholders', () => {
-    expect(classify('краска')).toBe('non-cuttable|1|3');
-    expect(classify('Стекло 4мм')).toBe('non-cuttable|1|3');
-    expect(classify('')).toBe('non-cuttable|1|3');
+  it('non-sheet names are UNKNOWN (placement decides the final row)', () => {
+    // On a detail an unknown name becomes a cuttable SENTINEL (1×1×1 dims);
+    // header-only stays non-cuttable — asserted in the integration rehearsal.
+    expect(classify('краска')).toBe('unknown|1|3');
+    expect(classify('Стекло 4мм')).toBe('unknown|1|3');
+    expect(classify('')).toBe('unknown|1|3');
+  });
+
+  it('sentinel row shape for unknown detail materials is pinned in the script', () => {
+    // ALL required sheet fields are 1 so the operator can find these later
+    // (WHERE width_mm = 1) — user-directed behavior 2026-07-04.
+    expect(scriptText).toMatch(/true, 1, 1, 1, 1, 1\) ON CONFLICT DO NOTHING;\s+-- SENTINEL/);
   });
 });
 

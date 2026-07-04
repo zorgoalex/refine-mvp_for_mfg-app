@@ -106,14 +106,18 @@ d('apply-migrations.sh auto — restored-dump rehearsal (scratch DB)', () => {
       SELECT set_session_user((SELECT min(user_id) FROM users));
       INSERT INTO clients (client_name) VALUES ('Тест-клиент');
       INSERT INTO materials (material_name, unit_id, material_type_id) VALUES ('Тест-МДФ 19мм', 1, 1);
-      INSERT INTO orders (order_name, client_id, order_status_id, payment_status_id, created_by)
-        SELECT 'Тест-заказ-1', c.client_id, min(os.order_status_id), min(ps.payment_status_id), min(u.user_id)
+      INSERT INTO materials (material_name, unit_id, material_type_id) VALUES ('Тест-Стекло 4мм', 1, 3);
+      INSERT INTO materials (material_name, unit_id, material_type_id) VALUES ('Тест-краска', 1, 3);
+      INSERT INTO orders (order_name, client_id, order_status_id, payment_status_id, created_by, material_id)
+        SELECT 'Тест-заказ-1', c.client_id, min(os.order_status_id), min(ps.payment_status_id), min(u.user_id),
+               (SELECT material_id FROM materials WHERE material_name = 'Тест-краска')
         FROM clients c, order_statuses os, payment_statuses ps, users u GROUP BY c.client_id;
       INSERT INTO order_details (order_id, detail_number, height, width, area, material_id, milling_type_id, edge_type_id, created_by, quantity)
-        SELECT o.order_id, 1, 100, 200, 0.02, m.material_id, 1, 1, u.user_id, 1
-        FROM orders o, materials m, users u LIMIT 1;
+        SELECT o.order_id, m.material_id, 100, 200, 0.02, m.material_id, 1, 1, u.user_id, 1
+        FROM orders o, materials m, users u
+        WHERE m.material_name IN ('Тест-МДФ 19мм', 'Тест-Стекло 4мм');
     `);
-    expect(psql('SELECT count(*) FROM order_details;')).toBe('1');
+    expect(psql('SELECT count(*) FROM order_details;')).toBe('2');
   });
 
   it('aborts at the Variant B gate with a candidates artifact (no --auto-map)', () => {
@@ -123,17 +127,48 @@ d('apply-migrations.sh auto — restored-dump rehearsal (scratch DB)', () => {
     const cand = readFileSync(join(artifacts, 'conversion-map-candidates.sql'), 'utf8');
     expect(cand).toContain('Тест-МДФ 19мм');
     expect(cand).toMatch(/AUTO_MAT_\d+.*true, 1, 1, 2800, 2070, 19/);
+    // unknown detail material -> cuttable SENTINEL row, never a stop
+    expect(cand).toContain('Тест-Стекло 4мм');
+    expect(cand).toMatch(/Тест-Стекло 4мм', true, 1, 1, 1, 1, 1\)/);
+    // header-only material -> non-cuttable placeholder
+    expect(cand).toMatch(/Тест-краска', false, 1, 3, 1, 1, 1\)/);
     // delta below 033 already applied and ledgered
     expect(psql(`SELECT count(*) FROM schema_migrations WHERE filename LIKE '033%';`)).toBe('1');
   });
 
   it('completes to head with --auto-map and converts the legacy material', () => {
+    // Simulate the state left by the OLD auto-map behavior (non-cuttable map
+    // row for a detail-used material) PLUS a pre-existing non-cuttable target
+    // type (the crash-window between the map flip and the type sync): the
+    // self-heal must repair BOTH instead of dying at 034_preflight
+    // (real-VPS incident 2026-07-04).
+    psql(`
+      INSERT INTO sheet_material_conversion_map
+        (legacy_material_id, target_key, target_sheet_name, is_cuttable, target_unit_id, target_material_type_id, target_width_mm, target_height_mm, target_thickness_mm)
+      SELECT m.material_id, 'AUTO_MAT_' || m.material_id, m.material_name, false, 1, 3, 1, 1, 1
+      FROM materials m WHERE m.material_name = 'Тест-Стекло 4мм';
+      INSERT INTO sheet_material_types (name, unit_id, material_type_id, width_mm, height_mm, thickness_mm, is_active, is_cuttable, conversion_key)
+      SELECT m.material_name, 1, 3, 1, 1, 1, true, false, 'AUTO_MAT_' || m.material_id
+      FROM materials m WHERE m.material_name = 'Тест-Стекло 4мм';
+    `);
     const r = runAuto(['--yes', '--auto-map'], artifacts);
     expect(r.ok, r.out).toBe(true);
+    expect(r.out).toMatch(/flipped earlier non-cuttable AUTO_MAT rows/);
+    // accepted trade-off is LOUD: the final summary lists sentinel materials
+    expect(r.out).toMatch(/SENTINEL materials converted with placeholder/);
+    expect(r.out).toMatch(/Тест-Стекло 4мм/);
+    expect(psql(`SELECT cm.is_cuttable FROM sheet_material_conversion_map cm WHERE cm.target_sheet_name = 'Тест-Стекло 4мм';`)).toBe('t');
     expect(r.out).toMatch(/pending: 0/);
     expect(r.out).toMatch(/auto: DONE/);
-    expect(psql('SELECT sheet_material_type_id IS NOT NULL, material_id IS NULL FROM order_details;')).toBe('t|t');
-    expect(psql(`SELECT is_cuttable, thickness_mm::int FROM sheet_material_types WHERE conversion_key LIKE 'AUTO_MAT_%';`)).toBe('t|19');
+    expect(psql('SELECT bool_and(sheet_material_type_id IS NOT NULL), bool_and(material_id IS NULL) FROM order_details;')).toBe('t|t');
+    expect(psql(`SELECT s.is_cuttable, s.thickness_mm::int FROM sheet_material_types s JOIN sheet_material_conversion_map cm ON cm.target_key = s.conversion_key WHERE cm.legacy_material_name IS NULL AND cm.target_sheet_name = 'Тест-МДФ 19мм';`)).toBe('t|19');
+    // sentinel: unknown detail material converted CUTTABLE with all-ones dims,
+    // findable later via width_mm = 1 (the pre-existing stale non-cuttable
+    // type was reconciled by the unconditional sync)
+    expect(psql(`SELECT s.is_cuttable, s.width_mm::int, s.height_mm::int, s.thickness_mm::int FROM sheet_material_types s WHERE s.name = 'Тест-Стекло 4мм';`)).toBe('t|1|1|1');
+    // header-only material: order header converted, target stays non-cuttable
+    expect(psql(`SELECT bool_and(material_id IS NULL), bool_and(sheet_material_type_id IS NOT NULL) FROM orders WHERE delete_flag = false;`)).toBe('t|t');
+    expect(psql(`SELECT s.is_cuttable FROM sheet_material_types s WHERE s.name = 'Тест-краска';`)).toBe('f');
     expect(psql(`SELECT count(*) FROM schema_migrations WHERE filename LIKE 'zz_automap%';`)).toBe('1');
     // 003 was never executed on the restore path; 034 rebuilt orders_view with the guard
     expect(psql(`SELECT pg_get_viewdef('orders_view') LIKE '%2147483647%';`)).toBe('t');

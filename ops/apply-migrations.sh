@@ -37,8 +37,12 @@
 #                     an idempotent re-run continues from that point.
 #   classify-material-name <name>
 #                     (internal) print the --auto-map heuristic verdict for one
-#                     legacy material name: "cuttable|<mm>|<mtype>" or
-#                     "non-cuttable|1|3". Used by unit tests.
+#                     legacy material name: "cuttable|<mm>|<mtype>" for known
+#                     sheet-material names, "unknown|1|3" otherwise. Used by
+#                     unit tests. Placement decides the final row: a material
+#                     used on order details is ALWAYS mapped cuttable (unknown
+#                     names get sentinel 1×1×1 dims so the operator can find
+#                     and fix them later); header-only stays non-cuttable.
 #
 # Selection: backend/db/migrations/[0-9]*.sql, sorted by version, EXCLUDING the
 # manual Variant-B side files *_preflight.sql / *_verify.sql / *_rollback.sql and
@@ -119,7 +123,7 @@ case "${1:-}" in
       printf '%s' "$name" | grep -qiE 'МДФ' && mtype=1
       echo "cuttable|$th|$mtype"
     else
-      echo "non-cuttable|1|3"
+      echo "unknown|1|3"
     fi
     exit 0
     ;;
@@ -417,8 +421,13 @@ SELECT 'header', o.material_id, m.material_name, count(*)
  GROUP BY 1,2,3
 ORDER BY 1,2;"
 
-# Emit candidate INSERT rows for every uncovered legacy material. A material
-# seen ONLY as an order header (never on details) is always non-cuttable.
+# Emit candidate INSERT rows for every uncovered legacy material.
+# Placement decides cuttability (operator decision 2026-07-04):
+#  - used on order details  -> ALWAYS cuttable (034 forbids non-cuttable on a
+#    detail). Known sheet names get real dims; unknown names get SENTINEL
+#    1×1×1 dims + unit/mtype = 1 so the operator can list and fix them later
+#    (e.g. WHERE width_mm = 1) instead of the run stopping for manual work.
+#  - seen ONLY on order headers -> non-cuttable placeholder (unchanged).
 build_map_candidates() {   # stdin: src|mid|name|n rows; stdout: SQL
   local line src mid name n verdict th mtype cut
   declare -A on_detail=()
@@ -433,18 +442,20 @@ build_map_candidates() {   # stdin: src|mid|name|n rows; stdout: SQL
   local k
   for k in "${!names[@]}"; do
     name="${names[$k]}"
-    if [ -n "${on_detail[$k]+x}" ]; then
-      verdict="$(bash "$0" classify-material-name "$name")"
-    else
-      verdict="non-cuttable|1|3"
-    fi
-    IFS='|' read -r cut th mtype <<<"$verdict"
     local esc_name="${name//\'/\'\'}"
     # Deterministic immutable key by legacy id (name mangling of Cyrillic is
     # multibyte-unsafe in tr/sed); one target type per uncovered material.
     local key="AUTO_MAT_$k"
-    if [ "$cut" = "cuttable" ]; then
-      echo "INSERT INTO sheet_material_conversion_map (legacy_material_id, target_key, target_sheet_name, is_cuttable, target_unit_id, target_material_type_id, target_width_mm, target_height_mm, target_thickness_mm) VALUES ($k, '$key', '$esc_name', true, 1, $mtype, 2800, 2070, $th) ON CONFLICT DO NOTHING;"
+    if [ -n "${on_detail[$k]+x}" ]; then
+      verdict="$(bash "$0" classify-material-name "$name")"
+      IFS='|' read -r cut th mtype <<<"$verdict"
+      if [ "$cut" = "cuttable" ]; then
+        echo "INSERT INTO sheet_material_conversion_map (legacy_material_id, target_key, target_sheet_name, is_cuttable, target_unit_id, target_material_type_id, target_width_mm, target_height_mm, target_thickness_mm) VALUES ($k, '$key', '$esc_name', true, 1, $mtype, 2800, 2070, $th) ON CONFLICT DO NOTHING;"
+      else
+        # unknown detail material -> cuttable SENTINEL row (all required sheet
+        # fields = 1); operator finds these later via width_mm = 1.
+        echo "INSERT INTO sheet_material_conversion_map (legacy_material_id, target_key, target_sheet_name, is_cuttable, target_unit_id, target_material_type_id, target_width_mm, target_height_mm, target_thickness_mm) VALUES ($k, '$key', '$esc_name', true, 1, 1, 1, 1, 1) ON CONFLICT DO NOTHING;  -- SENTINEL: проверить и заполнить реальные размеры"
+      fi
     else
       echo "INSERT INTO sheet_material_conversion_map (legacy_material_id, target_key, target_sheet_name, is_cuttable, target_unit_id, target_material_type_id, target_width_mm, target_height_mm, target_thickness_mm) VALUES ($k, '$key', '$esc_name', false, 1, 3, 1, 1, 1) ON CONFLICT DO NOTHING;"
     fi
@@ -695,6 +706,35 @@ auto is for a RESTORED dump. For greenfield use: schema v14 + '$0 apply --yes'."
             pg_query "UPDATE schema_migrations SET checksum='$(checksum_of "$F033")', applied_at=now()
                       WHERE filename='$F033';" >/dev/null
           fi
+          # Self-heal OUR earlier auto-map rows (AUTO_MAT_% only — committed
+          # manifest rows are operator-reviewed and never touched): a previous
+          # run may have classified a detail-used material non-cuttable; 034
+          # forbids that, so flip such rows to the cuttable SENTINEL shape.
+          if [ "$AUTO_MAP" -eq 1 ]; then
+            FLIPPED="$(pg_query "UPDATE sheet_material_conversion_map cm
+              SET is_cuttable = true, target_unit_id = 1, target_material_type_id = 1,
+                  target_width_mm = 1, target_height_mm = 1, target_thickness_mm = 1
+              WHERE cm.target_key LIKE 'AUTO_MAT_%' AND cm.is_cuttable = false
+                AND EXISTS (SELECT 1 FROM order_details od
+                            WHERE od.material_id = cm.legacy_material_id
+                              AND od.sheet_material_type_id IS NULL)
+              RETURNING cm.legacy_material_id;")"
+            if [ -n "$FLIPPED" ]; then
+              echo "auto-map: flipped earlier non-cuttable AUTO_MAT rows to cuttable SENTINEL (1×1×1) for detail-used materials: $(printf '%s' "$FLIPPED" | tr '\n' ' ')"
+            fi
+            # Type reconcile runs UNCONDITIONALLY (not only when rows were
+            # flipped this run): if a previous run died between the map flip
+            # and this sync, FLIPPED is empty on rerun but a stale
+            # non-cuttable type would make 034's structural check abort
+            # forever. Attrs come from the map row (matches 034 §0.0b2).
+            pg_query "UPDATE sheet_material_types s
+              SET is_cuttable = true, unit_id = cm.target_unit_id,
+                  material_type_id = cm.target_material_type_id
+              FROM sheet_material_conversion_map cm
+              WHERE s.conversion_key = cm.target_key
+                AND cm.target_key LIKE 'AUTO_MAT_%' AND cm.is_cuttable = true
+                AND s.is_cuttable = false;" >/dev/null
+          fi
           COV="$(pg_query "$COVERAGE_SQL")"
           if [ -n "$COV" ]; then
             CAND="$ARTIFACTS_DIR/conversion-map-candidates.sql"
@@ -831,6 +871,18 @@ END \$\$;" >/dev/null
     print_plan
     [ "${PENDING_COUNT:-0}" -eq 0 ] || die "auto: ${PENDING_COUNT} migration(s) still pending — see above."
     echo
+    # Loud visibility for the accepted --auto-map trade-off: unknown detail
+    # materials were converted as cuttable SENTINELS (all-ones dims) instead
+    # of stopping the run — list them so the operator fixes real sizes later.
+    SENTINELS="$(pg_query "SELECT cm.legacy_material_id || ': ' || cm.target_sheet_name
+      FROM sheet_material_conversion_map cm
+      WHERE cm.target_key LIKE 'AUTO_MAT_%' AND cm.is_cuttable AND cm.target_width_mm = 1;" 2>/dev/null || true)"
+    if [ -n "$SENTINELS" ]; then
+      echo "⚠ SENTINEL materials converted with placeholder 1×1×1 dims — set real sheet sizes in the UI (Листовые материалы):"
+      printf '%s\n' "$SENTINELS" | sed 's/^/    /'
+      echo "    (list anytime: SELECT * FROM sheet_material_types WHERE width_mm = 1;)"
+      echo
+    fi
     echo "auto: DONE. Next steps:"
     echo "  1. Hasura metadata:  ops/apply-hasura-metadata.sh --metadata ops/hasura/metadata.json --env-file <.env>"
     echo "     (or up-all.sh provision --hasura bundled)"
