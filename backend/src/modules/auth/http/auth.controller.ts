@@ -216,14 +216,18 @@ export class AuthController {
     });
     this.clearRefreshCookie(response);
 
+    // The persisted auth_source is the source of truth (R8/R10): a stray
+    // provider_session_id on a backend-issued session must not bounce the
+    // client to the provider.
+    if (result.authSource !== 'workos') {
+      return { ok: true, providerLogoutStatus: 'not_applicable' };
+    }
+
     if (!result.providerSessionId) {
       // An SSO-issued session with no usable provider sid (upstream returned
       // none, or the value was dirty) must still surface the warning — the
       // provider session may be alive even though we cannot end it.
-      return {
-        ok: true,
-        providerLogoutStatus: result.authSource === 'workos' ? 'unavailable' : 'not_applicable',
-      };
+      return { ok: true, providerLogoutStatus: 'unavailable' };
     }
 
     // SSO-issued session: never collapse a failed provider-logout into the

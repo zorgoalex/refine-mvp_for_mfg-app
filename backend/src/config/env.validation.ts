@@ -104,7 +104,25 @@ export const envSchema = z
     WORKOS_API_KEY: z.string().trim().min(1).optional(),
     WORKOS_CLIENT_ID: z.string().trim().min(1).optional(),
     WORKOS_REDIRECT_URI: z.string().trim().url().optional(),
-    WORKOS_API_BASE: z.string().trim().url().default('https://api.workos.com'),
+    // Browser redirects (authorize/logout) AND the server-side code exchange
+    // (client secret in the body) go to this host — a loose value is an open
+    // redirect plus a secret exfiltration channel. Pin to WorkOS over https;
+    // plain-http localhost is allowed only for local mocks.
+    WORKOS_API_BASE: z
+      .string()
+      .trim()
+      .url()
+      .refine((value) => {
+        const url = new URL(value);
+        if (url.protocol === 'https:') {
+          return url.hostname === 'api.workos.com' || url.hostname.endsWith('.workos.com');
+        }
+        return (
+          url.protocol === 'http:' &&
+          (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+        );
+      }, 'WORKOS_API_BASE must be an https://*.workos.com URL (or http://localhost for local mocks)')
+      .default('https://api.workos.com'),
     BACKEND_ENABLE_ORDERS: booleanFromEnv.default(false),
     BACKEND_ENABLE_PAYMENTS: booleanFromEnv.default(false),
     BACKEND_ENABLE_CLIENT_PHONES: booleanFromEnv.default(false),

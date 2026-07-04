@@ -182,6 +182,7 @@ describe('AuthController HTTP shell', () => {
     const context = createController({
       authEnabled: true,
       providerSessionId: 'sid-1',
+      logoutAuthSource: 'workos',
       workosLogoutUrl: 'https://sso.example/logout?session_id=sid-1',
     });
 
@@ -211,11 +212,28 @@ describe('AuthController HTTP shell', () => {
   it('marks provider logout unavailable instead of faking a clean local logout', async () => {
     // SSO session, but the workos adapter is not wired (flag off / misconfig):
     // the UI must be able to warn that the provider session may still live.
-    const context = createController({ authEnabled: true, providerSessionId: 'sid-1' });
+    const context = createController({
+      authEnabled: true,
+      providerSessionId: 'sid-1',
+      logoutAuthSource: 'workos',
+    });
 
     await expect(
       context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
     ).resolves.toEqual({ ok: true, providerLogoutStatus: 'unavailable' });
+  });
+
+  it('ignores a stray provider_session_id on a backend-issued session (auth_source is the truth)', async () => {
+    const context = createController({
+      authEnabled: true,
+      providerSessionId: 'sid-legacy-garbage',
+      logoutAuthSource: 'backend',
+      workosLogoutUrl: 'https://sso.example/logout',
+    });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({ ok: true, providerLogoutStatus: 'not_applicable' });
   });
 
   it('requires current user for /api/v1/me and returns permissions without tokens', () => {

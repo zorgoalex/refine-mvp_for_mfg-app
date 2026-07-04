@@ -217,13 +217,19 @@ export async function resolveAuthSchemaCapabilities(
       `
       SELECT
         EXISTS (SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'users' AND column_name = 'login_policy') AS has_login_policy,
+                WHERE table_schema = current_schema()
+                  AND table_name = 'users' AND column_name = 'login_policy') AS has_login_policy,
         EXISTS (SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'auth_sessions' AND column_name = 'provider_session_id') AS has_provider_session_id,
+                WHERE table_schema = current_schema()
+                  AND table_name = 'auth_sessions' AND column_name = 'provider_session_id') AS has_provider_session_id,
         EXISTS (SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'auth_sessions' AND column_name = 'auth_source') AS has_auth_source,
-        EXISTS (SELECT 1 FROM information_schema.tables
-                WHERE table_name = 'user_identities') AS has_user_identities
+                WHERE table_schema = current_schema()
+                  AND table_name = 'auth_sessions' AND column_name = 'auth_source') AS has_auth_source,
+        (SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'user_identities'
+           AND column_name IN ('identity_id', 'user_id', 'provider', 'provider_user_id',
+                               'email_at_link', 'email_verified_at_link')) = 6 AS has_user_identities
       `,
     );
     const row = result.rows[0];
