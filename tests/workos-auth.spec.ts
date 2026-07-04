@@ -144,6 +144,67 @@ test.describe('WorkOS hybrid auth (mocked)', () => {
     });
 });
 
+test.describe('WorkOS link retry (mocked, own storage lifecycle)', () => {
+    test('link retry after a failed pre-exchange refresh still routes as a link', async ({ page, context }) => {
+        await context.clearCookies();
+        await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true });
+
+        // Simulate a started link flow: seed the state-bound intent exactly
+        // ONCE (window.name survives reloads) — the reload below must see
+        // whatever the APP left in sessionStorage, not a re-seeded value.
+        await page.addInitScript(() => {
+            if (!window.name.includes('e2e-intent-seeded')) {
+                window.name += 'e2e-intent-seeded';
+                localStorage.clear();
+                sessionStorage.clear();
+                sessionStorage.setItem('erp_workos_link_intent', 'e2e-link-state');
+            }
+        });
+
+        let linkCallbackCalls = 0;
+        let refreshShouldFail = true;
+        await page.route(/\/api\/v1\/auth\/refresh$/, async (route) => {
+            if (refreshShouldFail) {
+                await fulfillJson(route, { error: { code: 'AUTH_REQUIRED', message: 'x' } }, 401);
+                return;
+            }
+            await fulfillJson(route, LOGIN_RESPONSE);
+        });
+        await page.route(/\/api\/v1\/auth\/workos\/link\/callback$/, async (route) => {
+            linkCallbackCalls += 1;
+            await fulfillJson(route, { linked: true });
+        });
+        await page.route(/\/api\/v1\/me$/, async (route) => {
+            await fulfillJson(route, { user: MOCK_USER });
+        });
+        await page.route(/\/api\/v1\/me\/preferences$/, async (route) => {
+            await fulfillJson(route, { preferences: { themeMode: 'light' } });
+        });
+        await page.route(/\/api\/v1\/auth\/workos\/link$/, async (route) => {
+            await fulfillJson(route, { linked: true });
+        });
+        await page.route(/\/v1\/graphql$/, async (route) => {
+            await fulfillJson(route, { data: {} });
+        });
+
+        // First attempt: the pre-exchange refresh fails — the single-use code
+        // was NOT burned, the link intent must survive for the retry.
+        await page.goto('/auth/workos/callback?code=e2e-link-code&state=e2e-link-state');
+        await expect(page.getByText('Ошибка входа через SSO')).toBeVisible({ timeout: 15000 });
+        expect(linkCallbackCalls).toBe(0);
+        expect(
+            await page.evaluate(() => sessionStorage.getItem('erp_workos_link_intent')),
+        ).toBe('e2e-link-state');
+
+        // Retry the SAME callback URL with a working session: it must still
+        // route into the LINK callback, not the login exchange.
+        refreshShouldFail = false;
+        await page.reload();
+        await expect(page).toHaveURL(/\/profile\?sso=linked/, { timeout: 15000 });
+        expect(linkCallbackCalls).toBe(1);
+    });
+});
+
 /**
  * Loads /login and reloads once after the app is up. On a cold Vite dev server
  * the first page load spends longer transforming modules than the 1.5s

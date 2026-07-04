@@ -59,6 +59,18 @@ describe('workos callback helpers contract', () => {
     expect(callbackSource).toContain('exchangeStarted');
   });
 
+  it('keeps the matched link intent until the exchange starts (pre-exchange retry stays a link)', () => {
+    const linkBranch = callbackSource.split('if (isLink)')[1]?.split('// SPA navigation')[0] ?? '';
+    // refresh (pre-exchange) comes BEFORE the intent removal: a failed
+    // refresh leaves the intent in place so the retried callback routes as
+    // a link again.
+    expect(linkBranch).toContain('await authApi.refresh()');
+    expect(linkBranch).toContain('sessionStorage.removeItem(LINK_INTENT_KEY)');
+    expect(linkBranch.indexOf('authApi.refresh()')).toBeLessThan(
+      linkBranch.indexOf('sessionStorage.removeItem(LINK_INTENT_KEY)'),
+    );
+  });
+
   it('binds the link intent to the exact flow state, never a stale boolean', () => {
     const linkCardSource = readFileSync(
       new URL('../pages/profile/WorkosLinkCard.tsx', import.meta.url),

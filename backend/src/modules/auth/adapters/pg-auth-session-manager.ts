@@ -81,17 +81,26 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     const refreshToken = this.tokenService.generateRefreshToken();
     const tokenHash = this.hashRefreshToken(refreshToken);
     const expiresAt = this.refreshTokenExpiresAt();
-    const withProviderSession = this.options.supportsProviderSessions && context.providerSessionId;
-
     return this.database.transaction(async (tx) => {
-      const session = withProviderSession
+      // With the WorkOS flag on (migration 052 columns exist), the auth
+      // source is ALWAYS persisted — an SSO session whose provider returned
+      // no usable sid must stay distinguishable at logout ('unavailable',
+      // not 'not_applicable'). Pre-052 databases keep the legacy insert.
+      const session = this.options.supportsProviderSessions
         ? await tx.query<CreatedSessionRow>(
             `
-            INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent, provider_session_id)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent, provider_session_id, auth_source)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING session_id::text, token_family_id::text
             `,
-            [user.id, expiresAt, context.ipAddress ?? null, context.userAgent ?? null, context.providerSessionId],
+            [
+              user.id,
+              expiresAt,
+              context.ipAddress ?? null,
+              context.userAgent ?? null,
+              context.providerSessionId ?? null,
+              context.authSource ?? 'backend',
+            ],
           )
         : await tx.query<CreatedSessionRow>(
             `
@@ -274,7 +283,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
           sessionId: command.currentUser.sessionId,
         };
         return this.database.transaction(async (tx) => {
-          const providerSessionId = await this.readProviderSessionId(tx, currentUser.sessionId);
+          const providerSession = await this.readProviderSession(tx, currentUser.sessionId);
           await tx.query(
             `
             UPDATE auth_sessions
@@ -284,7 +293,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
             [currentUser.sessionId],
           );
           await this.writeCurrentUserLogoutAudit(tx, { ...command, currentUser });
-          return providerSessionId ? { ok: true as const, providerSessionId } : { ok: true as const };
+          return { ok: true as const, ...providerSession };
         });
       }
       return { ok: true };
@@ -299,7 +308,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         return { ok: true as const };
       }
 
-      const providerSessionId = await this.readProviderSessionId(tx, current.session_id);
+      const providerSession = await this.readProviderSession(tx, current.session_id);
       await this.revokeTokenFamily(tx, current, 'logout');
       await this.writeAudit(tx, {
         event: 'auth.logout',
@@ -316,25 +325,32 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
           refreshTokenPresent: true,
         },
       });
-      return providerSessionId ? { ok: true as const, providerSessionId } : { ok: true as const };
+      return { ok: true as const, ...providerSession };
     });
   }
 
-  private async readProviderSessionId(tx: TransactionClient, sessionId: string): Promise<string | null> {
+  private async readProviderSession(
+    tx: TransactionClient,
+    sessionId: string,
+  ): Promise<{ providerSessionId?: string; authSource?: string }> {
     if (!this.options.supportsProviderSessions) {
-      return null;
+      return {};
     }
 
-    const result = await tx.query<{ provider_session_id: string | null } & QueryResultRow>(
-      'SELECT provider_session_id FROM auth_sessions WHERE session_id = $1',
-      [sessionId],
-    );
+    const result = await tx.query<
+      { provider_session_id: string | null; auth_source: string | null } & QueryResultRow
+    >('SELECT provider_session_id, auth_source FROM auth_sessions WHERE session_id = $1', [sessionId]);
     // Normalize at the read boundary: legacy/dirty whitespace-only values
     // must degrade to "no provider session", not leak into a logout redirect
     // with a garbage session_id.
     const raw = result.rows[0]?.provider_session_id;
     const normalized = typeof raw === 'string' ? raw.trim() : null;
-    return normalized || null;
+    const authSource = result.rows[0]?.auth_source ?? undefined;
+
+    return {
+      ...(normalized ? { providerSessionId: normalized } : {}),
+      ...(authSource ? { authSource } : {}),
+    };
   }
 
   private async lockRefreshToken(

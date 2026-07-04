@@ -30,4 +30,8 @@ describe('052_workos_auth_identities migration', () => {
     expect(sql).toMatch(/ALTER TABLE auth_sessions/i);
     expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS provider_session_id TEXT/i);
   });
+
+  it('adds auth_source to auth_sessions so sid-less SSO sessions stay distinguishable at logout', () => {
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS auth_source TEXT/i);
+  });
 });

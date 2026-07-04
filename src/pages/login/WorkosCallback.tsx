@@ -47,17 +47,22 @@ export const WorkosCallbackPage: React.FC = () => {
     // Link mode only when the stored intent matches THIS flow's state; a
     // stale flag from an aborted link attempt is discarded, not trusted.
     const isLink = sessionStorage.getItem(LINK_INTENT_KEY) === state;
-    sessionStorage.removeItem(LINK_INTENT_KEY);
+    if (!isLink) {
+      // Mismatched (dead) intent from some earlier aborted flow.
+      sessionStorage.removeItem(LINK_INTENT_KEY);
+    }
 
     // Set once the single-use code has actually been sent to the backend:
     // failures BEFORE that (e.g. the link-mode refresh) have not burned the
-    // code, so the same callback URL may retry in place.
+    // code, so the same callback URL may retry in place — and must retry as
+    // a LINK again, so the matched intent is kept until the exchange starts.
     let exchangeStarted = false;
 
     const run = async () => {
       if (isLink) {
         await authApi.refresh();
         exchangeStarted = true;
+        sessionStorage.removeItem(LINK_INTENT_KEY);
         await authApi.workosLinkCallback(code, state);
         navigate("/profile?sso=linked", { replace: true });
         return;

@@ -217,7 +217,13 @@ export class AuthController {
     this.clearRefreshCookie(response);
 
     if (!result.providerSessionId) {
-      return { ok: true, providerLogoutStatus: 'not_applicable' };
+      // An SSO-issued session with no usable provider sid (upstream returned
+      // none, or the value was dirty) must still surface the warning — the
+      // provider session may be alive even though we cannot end it.
+      return {
+        ok: true,
+        providerLogoutStatus: result.authSource === 'workos' ? 'unavailable' : 'not_applicable',
+      };
     }
 
     // SSO-issued session: never collapse a failed provider-logout into the

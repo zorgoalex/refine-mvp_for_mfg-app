@@ -268,12 +268,46 @@ describe('PgAuthSessionManager', () => {
       }),
     ).resolves.toEqual({ ok: true });
 
-    const clean = createDatabase({ refreshRow, providerSessionId: 'sid-1' });
+    const clean = createDatabase({ refreshRow, providerSessionId: 'sid-1', authSource: 'workos' });
     await expect(
       createManager(clean.service, { supportsProviderSessions: true }).logout({
         refreshToken: 'refresh-login',
       }),
-    ).resolves.toEqual({ ok: true, providerSessionId: 'sid-1' });
+    ).resolves.toEqual({ ok: true, providerSessionId: 'sid-1', authSource: 'workos' });
+  });
+
+  it('persists auth_source even when the provider returned no sid, and logout surfaces it', async () => {
+    const database = createDatabase();
+    const manager = createManager(database.service, { supportsProviderSessions: true });
+
+    await manager.createLoginSession(
+      { id: '42', username: 'manager', roleId: 10, passwordHash: 'hash', isActive: true },
+      { authSource: 'workos' },
+    );
+
+    const insert = database.queries.find((query) => query.text.includes('INSERT INTO auth_sessions'));
+    expect(insert?.text).toContain('provider_session_id, auth_source');
+    expect(insert?.params[4]).toBeNull();
+    expect(insert?.params[5]).toBe('workos');
+
+    const refreshRow = {
+      token_id: 'token-old',
+      user_id: '42',
+      session_id: 'session-1',
+      token_family_id: 'family-1',
+      expires_at: new Date('2026-05-02T12:00:00.000Z'),
+      revoked_at: null,
+      session_status: 'active',
+      username: 'manager',
+      role_id: 10,
+      is_active: true,
+    };
+    const sidless = createDatabase({ refreshRow, providerSessionId: null, authSource: 'workos' });
+    await expect(
+      createManager(sidless.service, { supportsProviderSessions: true }).logout({
+        refreshToken: 'refresh-login',
+      }),
+    ).resolves.toEqual({ ok: true, authSource: 'workos' });
   });
 });
 
@@ -298,7 +332,11 @@ function createManager(
 }
 
 function createDatabase(
-  options: { refreshRow?: Record<string, unknown>; providerSessionId?: string | null } = {},
+  options: {
+    refreshRow?: Record<string, unknown>;
+    providerSessionId?: string | null;
+    authSource?: string | null;
+  } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const tx = {
@@ -317,12 +355,17 @@ function createDatabase(
         return { rows: options.refreshRow ? [options.refreshRow] : [] };
       }
 
-      if (text.includes('SELECT provider_session_id FROM auth_sessions')) {
+      if (text.includes('SELECT provider_session_id, auth_source FROM auth_sessions')) {
         return {
           rows:
-            options.providerSessionId === undefined
+            options.providerSessionId === undefined && options.authSource === undefined
               ? []
-              : [{ provider_session_id: options.providerSessionId }],
+              : [
+                  {
+                    provider_session_id: options.providerSessionId ?? null,
+                    auth_source: options.authSource ?? null,
+                  },
+                ],
         };
       }
 

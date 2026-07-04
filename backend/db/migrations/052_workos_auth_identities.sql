@@ -29,4 +29,10 @@ ALTER TABLE users
 ALTER TABLE auth_sessions
   ADD COLUMN IF NOT EXISTS provider_session_id TEXT;
 
+-- Which path issued the session ('backend' | 'workos'). Needed by logout:
+-- an SSO session WITHOUT a usable provider_session_id must be reported as
+-- provider-logout-unavailable, never as a plain local session.
+ALTER TABLE auth_sessions
+  ADD COLUMN IF NOT EXISTS auth_source TEXT;
+
 COMMIT;

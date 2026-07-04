@@ -22,6 +22,8 @@ export interface LogoutResult {
   ok: true;
   /** Present when the revoked session was issued via an external provider. */
   providerSessionId?: string;
+  /** Which path issued the session ('backend' | 'workos'), when recorded. */
+  authSource?: string;
 }
 
 export interface AuthSessionHttpPort {

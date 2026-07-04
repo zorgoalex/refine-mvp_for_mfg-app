@@ -194,6 +194,20 @@ describe('AuthController HTTP shell', () => {
     });
   });
 
+  it('marks a sid-less SSO session unavailable — never a plain local logout', async () => {
+    // The provider returned no usable sid at login; the session is still
+    // SSO-issued and its provider session may be alive.
+    const context = createController({
+      authEnabled: true,
+      logoutAuthSource: 'workos',
+      workosLogoutUrl: 'https://sso.example/logout',
+    });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({ ok: true, providerLogoutStatus: 'unavailable' });
+  });
+
   it('marks provider logout unavailable instead of faking a clean local logout', async () => {
     // SSO session, but the workos adapter is not wired (flag off / misconfig):
     // the UI must be able to warn that the provider session may still live.
@@ -234,6 +248,7 @@ function createController(options: {
   refreshCookieSameSite?: 'lax' | 'strict' | 'none';
   loginError?: Error;
   providerSessionId?: string;
+  logoutAuthSource?: string;
   workosLogoutUrl?: string;
 }) {
   const calls: string[] = [];
@@ -257,9 +272,9 @@ function createController(options: {
       calls.push(`refresh:${command.refreshToken}`);
       return createLoginResult({ accessToken: 'access_refreshed' });
     },
-    async logout(command: LogoutCommand): Promise<{ ok: true; providerSessionId?: string }> {
+    async logout(command: LogoutCommand): Promise<{ ok: true; providerSessionId?: string; authSource?: string }> {
       calls.push(`logout:${command.refreshToken}:${command.currentUser?.id ?? 'anonymous'}`);
-      return { ok: true, providerSessionId: options.providerSessionId };
+      return { ok: true, providerSessionId: options.providerSessionId, authSource: options.logoutAuthSource };
     },
   } as AuthSessionHttpPort;
   const runtimeConfig = {
