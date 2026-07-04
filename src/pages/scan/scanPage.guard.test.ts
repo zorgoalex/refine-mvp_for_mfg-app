@@ -52,6 +52,19 @@ describe('ScanPage', () => {
     expect(src).toContain('ApiError');
   });
 
+  it('auto-selects a confident leader instead of dumping the whole order as a list', () => {
+    // Неточный QR (имя заказа без ID) даёт все детали заказа; если top-score
+    // строго выше остальных — ведём себя как с единственным кандидатом.
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('confidentLeader');
+  });
+
+  it('restores the last scan result when returning to the page (back navigation)', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('sessionStorage');
+    expect(src).toContain('scanLastResult');
+  });
+
   it('renders a human match label, never the raw matchedBy template string', () => {
     const src = read('ScanPage.tsx');
     // сырой matchedBy содержит весь QR-шаблон и разрывал вёрстку карточек

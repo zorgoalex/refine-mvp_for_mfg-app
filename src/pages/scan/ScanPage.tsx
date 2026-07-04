@@ -28,6 +28,39 @@ function matchedByLabel(c: ScanCandidate): string {
   return c.matchedBy.startsWith('qr-template') ? 'QR' : 'Поиск по строке';
 }
 
+// Неточный QR (без ID детали) матчит ВСЕ детали заказа. Если верхний кандидат
+// строго обгоняет остальных по score (совпал ещё и номер позиции) — это и есть
+// «та самая» деталь: действуем сразу, список показываем только при ничьей.
+function confidentLeader(res: ScanResolveResult): ScanCandidate | null {
+  if (res.candidates.length === 0) return null;
+  if (res.candidates.length === 1) return res.candidates[0];
+  return res.candidates[0].score > res.candidates[1].score ? res.candidates[0] : null;
+}
+
+// Последний результат скана переживает уход в заказ и возврат назад —
+// per-вкладка (sessionStorage), per-пользователь.
+const lastResultKey = (userId: number | string) => `scanLastResult:${userId}`;
+
+function saveLastResult(userId: number | string, payload: string, result: ScanResolveResult): void {
+  try {
+    sessionStorage.setItem(lastResultKey(userId), JSON.stringify({ payload, result }));
+  } catch {
+    /* приватный режим/квота */
+  }
+}
+
+function loadLastResult(userId: number | string): { payload: string; result: ScanResolveResult } | null {
+  try {
+    const raw = sessionStorage.getItem(lastResultKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { payload?: unknown; result?: { candidates?: unknown } };
+    if (typeof parsed.payload !== 'string' || !Array.isArray(parsed.result?.candidates)) return null;
+    return parsed as { payload: string; result: ScanResolveResult };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Camera-first QR scanner for label lookup. Starts the camera on mount and
  * stops it on unmount/navigation (see the startQrScanner effect below). A
@@ -83,12 +116,25 @@ export const ScanPage: React.FC = () => {
     (payload: string, res: ScanResolveResult) => {
       setRawPayload(payload);
       setResult(res);
-      if (res.candidates.length === 1) {
-        handleCandidateSelect(res.candidates[0]);
+      saveLastResult(userId, payload, res);
+      const leader = confidentLeader(res);
+      if (leader) {
+        handleCandidateSelect(leader);
       }
     },
-    [handleCandidateSelect],
+    [handleCandidateSelect, userId],
   );
+
+  // Возврат со страницы заказа (или reload вкладки): восстановить последний
+  // результат скана — только отображение, без повторного авто-действия.
+  useEffect(() => {
+    const saved = loadLastResult(userId);
+    if (saved) {
+      setRawPayload(saved.payload);
+      setResult(saved.result);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const resolvePayload = useCallback(
     async (payload: string, source: 'qr' | 'manual') => {

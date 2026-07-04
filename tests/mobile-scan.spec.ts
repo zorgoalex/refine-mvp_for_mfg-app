@@ -229,3 +229,81 @@ test('photo-file scan: image without a QR shows the not-recognized error, not «
     await expect(page.getByText('QR-код на фото не распознан', { exact: false })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText('Не найдено')).toBeHidden();
 });
+
+function candidate(detailId: number, detailNumber: number, score: number) {
+    return {
+        detailId,
+        orderId: ORDER_ID,
+        orderName: 'E2E Тест Импорт 68',
+        detailNumber,
+        width: 600,
+        height: 400,
+        quantity: 1,
+        materialName: 'ЛДСП белый',
+        productionStatusName: 'В работе',
+        matchedFields: ['order_name'],
+        matchedBy: 'qr-template:{order.order_name}',
+        score,
+    };
+}
+
+test('confident leader among many candidates acts like a single hit (no list dump)', async ({ page }) => {
+    const db = createWorkflowMockDb();
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
+    // Лидер (score 8) строго выше остальных (5) — ровно кейс «неточный QR
+    // вернул все детали заказа»: ведём себя как с единственным кандидатом.
+    await mockScanResolve(
+        page,
+        JSON.stringify({
+            candidates: [candidate(DETAIL_ID, 1, 8), candidate(70001, 2, 5), candidate(70002, 3, 5)],
+            parsed: null,
+            templatesTried: 1,
+        }),
+    );
+    await page.addInitScript(() => {
+        localStorage.setItem('scanDefaultAction:1', 'open-order');
+    });
+
+    await page.goto('/scan', { waitUntil: 'domcontentloaded' });
+    const input = page.getByPlaceholder(MANUAL_PLACEHOLDER);
+    await expect(input).toBeVisible({ timeout: 30000 });
+    await input.fill('импорт 68');
+    await input.press('Enter');
+
+    await expect(page).toHaveURL(new RegExp(`/orders/show/${ORDER_ID}\\?highlightDetail=${DETAIL_ID}`));
+});
+
+test('tied candidates show the list; after opening an order, back returns to the same result', async ({ page }) => {
+    const db = createWorkflowMockDb();
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
+    // Ничья по score → честный список, авто-действия нет.
+    await mockScanResolve(
+        page,
+        JSON.stringify({
+            candidates: [candidate(DETAIL_ID, 1, 5), candidate(70001, 2, 5)],
+            parsed: null,
+            templatesTried: 1,
+        }),
+    );
+    await page.addInitScript(() => {
+        localStorage.setItem('scanDefaultAction:1', 'open-order');
+    });
+
+    await page.goto('/scan', { waitUntil: 'domcontentloaded' });
+    const input = page.getByPlaceholder(MANUAL_PLACEHOLDER);
+    await expect(input).toBeVisible({ timeout: 30000 });
+    await input.fill('импорт 68');
+    await input.press('Enter');
+
+    const items = page.locator('.ant-list-item');
+    await expect(items).toHaveCount(2, { timeout: 10000 });
+
+    // Тап по карточке → сохранённое действие → заказ.
+    await items.first().click();
+    await expect(page).toHaveURL(new RegExp(`/orders/show/${ORDER_ID}\\?highlightDetail=${DETAIL_ID}`));
+
+    // Назад → последний результат скана восстановлен (sessionStorage).
+    await page.goBack();
+    await expect(page.getByPlaceholder(MANUAL_PLACEHOLDER)).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('.ant-list-item')).toHaveCount(2, { timeout: 10000 });
+});
