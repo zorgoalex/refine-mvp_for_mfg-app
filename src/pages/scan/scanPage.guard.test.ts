@@ -75,7 +75,7 @@ describe('ScanPage', () => {
   it('offers photo-file scanning wired to the same resolve flow', () => {
     const src = read('ScanPage.tsx');
     expect(src).toContain('Скан из фото');
-    expect(src).toContain('accept="image/*"');
+    expect(src).toContain('accept="image/*,.emf,.bmp"'); // .emf от Базиса = часто растр
     expect(src).toContain('decodeQrFromFile');
     expect(src).toContain('QR-код на фото не распознан');
   });

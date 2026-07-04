@@ -307,3 +307,23 @@ test('tied candidates show the list; after opening an order, back returns to the
     await expect(page.getByPlaceholder(MANUAL_PLACEHOLDER)).toBeVisible({ timeout: 30000 });
     await expect(page.locator('.ant-list-item')).toHaveCount(2, { timeout: 10000 });
 });
+
+test('photo-file scan accepts a .emf file that is really a BMP (Базис export)', async ({ page }) => {
+    const db = createWorkflowMockDb();
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
+    await mockScanResolve(page, oneCandidateBody());
+    await page.addInitScript(() => {
+        localStorage.setItem('scanDefaultAction:1', 'open-order');
+    });
+
+    await page.goto('/scan', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: 'Скан из фото' })).toBeVisible({ timeout: 30000 });
+
+    // Реальный BMP-растр с QR под расширением .emf — сниффер обязан пропустить
+    // его в декод по содержимому, а не по расширению/мимо-типу.
+    await page.setInputFiles('[data-testid="scan-photo-input"]', 'tests/fixtures/scan-qr-sample-bmp.emf');
+
+    await expect(page).toHaveURL(new RegExp(`/orders/show/${ORDER_ID}\\?highlightDetail=${DETAIL_ID}`), {
+        timeout: 15000,
+    });
+});

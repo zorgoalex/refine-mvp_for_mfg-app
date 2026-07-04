@@ -294,7 +294,7 @@ export const ScanPage: React.FC = () => {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.emf,.bmp"
         style={{ display: 'none' }}
         data-testid="scan-photo-input"
         onChange={(e) => void handlePhotoFile(e.target.files?.[0] ?? null)}

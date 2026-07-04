@@ -1,3 +1,5 @@
+import { detectImageKind } from './imageFileKind';
+import { extractBmpFromEmf } from './emfRaster';
 // Ленивая обёртка над zxing-wasm: камера запрашивается ТОЛЬКО при старте
 // сканера (не при загрузке приложения). Возвращает stop().
 
@@ -66,12 +68,27 @@ export async function startQrScanner(
   };
 }
 
+// Нормализация файла перед декодом: расширению не доверяем. .emf от Базиса
+// часто содержит обычный растр — BM-файлы пропускаем как BMP, из настоящего
+// EMF вытаскиваем встроенный DIB; векторный EMF без растра декоду не подлежит.
+async function normalizeImageBlob(file: Blob): Promise<Blob> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const kind = detectImageKind(bytes);
+  if (kind === 'bmp') return new Blob([bytes], { type: 'image/bmp' });
+  if (kind === 'emf') {
+    const bmp = extractBmpFromEmf(bytes);
+    if (bmp) return new Blob([bmp], { type: 'image/bmp' });
+  }
+  return file;
+}
+
 // Декод QR из файла-изображения (фото из галереи/камеры). Камера не нужна:
 // zxing принимает Blob напрямую. null = QR на фото не найден/не распознан.
 export async function decodeQrFromFile(file: Blob): Promise<string | null> {
   const { readBarcodes } = await loadReader();
   try {
-    const results = await readBarcodes(file, { formats: ['QRCode'], maxNumberOfSymbols: 1 });
+    const normalized = await normalizeImageBlob(file);
+    const results = await readBarcodes(normalized, { formats: ['QRCode'], maxNumberOfSymbols: 1 });
     return results[0]?.text?.trim() || null;
   } catch (err) {
     // Диагностика битых/неподдержанных изображений — не глотать молча.
