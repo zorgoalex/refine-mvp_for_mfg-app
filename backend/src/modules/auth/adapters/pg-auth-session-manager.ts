@@ -4,7 +4,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, mapRoleIdToRole } from '../../../permissions/permissions';
-import { UserInactiveError } from '../auth.errors';
+import { LoginMethodNotAllowedError, UserInactiveError } from '../auth.errors';
 import type {
   AuthResponse,
   AuthSessionRecord,
@@ -65,10 +65,15 @@ export interface PgAuthSessionManagerOptions {
   refreshTokenTtlDays: number;
   /**
    * auth_sessions.provider_session_id exists only after migration 052; the
-   * column is written/read only when the WorkOS flag is enabled so the
-   * backend stays deployable against a pre-052 database.
+   * column is written/read only when the schema capability says it exists so
+   * the backend stays deployable against a pre-052 database.
    */
   supportsProviderSessions?: boolean;
+  /**
+   * users.login_policy exists (migration 052): the session transaction
+   * re-checks the policy under a row lock right before issuing the session.
+   */
+  enforceLoginPolicy?: boolean;
 }
 
 export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttpPort {
@@ -84,10 +89,34 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     const tokenHash = this.hashRefreshToken(refreshToken);
     const expiresAt = this.refreshTokenExpiresAt();
     return this.database.transaction(async (tx) => {
-      // With the WorkOS flag on (migration 052 columns exist), the auth
-      // source is ALWAYS persisted — an SSO session whose provider returned
-      // no usable sid must stay distinguishable at logout ('unavailable',
-      // not 'not_applicable'). Pre-052 databases keep the legacy insert.
+      // TOCTOU guard: the service checked is_active/login_policy on a stale
+      // snapshot BEFORE bcrypt; re-prove both under a row lock in the same
+      // transaction that issues the session, so an account tightened to
+      // external-only (or deactivated) mid-login cannot get one more session.
+      const guard = await tx.query<{ is_active: boolean; login_policy?: string | null } & QueryResultRow>(
+        `SELECT is_active${this.options.enforceLoginPolicy ? ', login_policy' : ''}
+         FROM users WHERE user_id = $1 FOR UPDATE`,
+        [user.id],
+      );
+      const guardRow = guard.rows[0];
+
+      if (!guardRow?.is_active) {
+        throw new UserInactiveError();
+      }
+
+      if (this.options.enforceLoginPolicy) {
+        const policy = guardRow.login_policy;
+        const source = context.authSource ?? 'backend';
+
+        if ((source === 'backend' && policy === 'external') || (source === 'workos' && policy === 'local')) {
+          throw new LoginMethodNotAllowedError();
+        }
+      }
+
+      // With the 052 columns present, the auth source is ALWAYS persisted —
+      // an SSO session whose provider returned no usable sid must stay
+      // distinguishable at logout ('unavailable', not 'not_applicable').
+      // Pre-052 databases keep the legacy insert.
       const session = this.options.supportsProviderSessions
         ? await tx.query<CreatedSessionRow>(
             `

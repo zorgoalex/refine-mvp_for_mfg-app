@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidCredentialsError, UserInactiveError } from './auth.errors';
+import { InvalidCredentialsError, LoginMethodNotAllowedError, UserInactiveError } from './auth.errors';
 import { AuthService } from './auth.service';
 import type { AuthServicePorts } from './auth.service';
 import type { AuthUserRecord } from './auth.types';
@@ -171,6 +171,23 @@ describe('AuthService login contract', () => {
       }),
     ).rejects.toBeInstanceOf(InvalidCredentialsError);
     expect(unknownCalls).toEqual(['consume:auth_login_account:name=missing']);
+  });
+
+  it('audits an in-transaction guard denial from the session insert (policy flip during bcrypt)', async () => {
+    const auditWrites: unknown[] = [];
+    const ports = createPorts(activeUser, true, auditWrites);
+    ports.sessions = {
+      async createLoginSession() {
+        throw new LoginMethodNotAllowedError();
+      },
+    };
+
+    await expect(
+      new AuthService(ports).login({ username: 'superadmin', password: 'password' }),
+    ).rejects.toMatchObject({ code: 'LOGIN_METHOD_NOT_ALLOWED' });
+    expect(auditWrites).toEqual([
+      expect.objectContaining({ reason: 'login_method_not_allowed', username: 'superadmin' }),
+    ]);
   });
 
   it('rejects inactive users', async () => {

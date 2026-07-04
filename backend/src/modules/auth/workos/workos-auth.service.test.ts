@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { LoginMethodNotAllowedError } from '../auth.errors';
 import type { AuthUserRecord } from '../auth.types';
 import type { WorkosIdentity } from './workos-api.client';
 import { WorkosAuthService, type WorkosAuthServicePorts } from './workos-auth.service';
@@ -390,6 +391,29 @@ describe('WorkosAuthService.unlink', () => {
     await expect(harness.service.unlink(command)).rejects.toMatchObject({ code: 'SESSION_INACTIVE' });
     expect(harness.ports.deleteLink).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'session-1' }),
+    );
+  });
+
+  it('maps the locked-delete external_policy race outcome to 409', async () => {
+    const harness = createHarness({ deleteLink: vi.fn(async () => 'external_policy' as const) });
+
+    await expect(harness.service.unlink(command)).rejects.toMatchObject({
+      code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
+    });
+  });
+
+  it('audits an in-transaction guard denial during the session insert (policy flip mid-exchange)', async () => {
+    const harness = createHarness({
+      sessions: vi.fn(async () => {
+        throw new LoginMethodNotAllowedError();
+      }),
+    });
+
+    await expect(harness.service.loginWithCode({ code: 'c' })).rejects.toMatchObject({
+      code: 'LOGIN_METHOD_NOT_ALLOWED',
+    });
+    expect(harness.ports.loginFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'login_method_not_allowed', authSource: 'workos' }),
     );
   });
 

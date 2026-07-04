@@ -115,16 +115,29 @@ export class WorkosAuthService {
       throw new LoginMethodNotAllowedError();
     }
 
-    const session = await this.ports.sessions.createLoginSession(user, {
-      userAgent: command.userAgent,
-      ipAddress: command.ipAddress,
-      requestId: command.requestId,
-      authSource: 'workos',
-      providerSessionId: identity.providerSessionId ?? undefined,
-      // Plan §4.3: email drift never blocks (sub is the anchor) but must be
-      // queryable in the auth.login.success audit metadata, not console-only.
-      auditMetadata: this.emailDriftMetadata(identity, user, link),
-    });
+    let session;
+
+    try {
+      session = await this.ports.sessions.createLoginSession(user, {
+        userAgent: command.userAgent,
+        ipAddress: command.ipAddress,
+        requestId: command.requestId,
+        authSource: 'workos',
+        providerSessionId: identity.providerSessionId ?? undefined,
+        // Plan §4.3: email drift never blocks (sub is the anchor) but must be
+        // queryable in the auth.login.success audit metadata, not console-only.
+        auditMetadata: this.emailDriftMetadata(identity, user, link),
+      });
+    } catch (error) {
+      // In-transaction guard denial (deactivated / policy flipped to
+      // local-only mid-exchange) — keep the audit contract.
+      if (error instanceof UserInactiveError) {
+        await this.writeLoginFailed(command, identity, 'inactive_user', user);
+      } else if (error instanceof LoginMethodNotAllowedError) {
+        await this.writeLoginFailed(command, identity, 'login_method_not_allowed', user);
+      }
+      throw error;
+    }
     void this.ports.identities.touchLastLogin(link.identityId).catch(() => undefined);
 
     const currentUser = this.toCurrentUser(user, session.sessionId, identity, link);
@@ -299,6 +312,12 @@ export class WorkosAuthService {
         throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
       case 'user_inactive':
         throw new UserInactiveError();
+      case 'external_policy':
+        throw new ApiError(
+          409,
+          'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
+          'Нельзя отвязать SSO: вход по паролю для пользователя отключён',
+        );
     }
   }
 

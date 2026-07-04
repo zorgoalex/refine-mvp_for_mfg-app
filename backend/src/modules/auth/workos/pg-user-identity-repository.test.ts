@@ -153,6 +153,19 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
     expect(database.queries.filter((query) => query.text.includes('audit_log'))).toHaveLength(0);
   });
 
+  it('refuses to unlink when the policy flipped to external-only during bcrypt (locked re-check)', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] }, // session lock
+      { rows: [{ login_policy: 'external' }] }, // user lock sees the flip
+    ]);
+    const repository = new PgUserIdentityRepository(database.service);
+
+    await expect(
+      repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos', sessionId: 'session-1' }),
+    ).resolves.toBe('external_policy');
+    expect(database.queries.filter((query) => query.text.includes('DELETE FROM user_identities'))).toHaveLength(0);
+  });
+
   it('returns not_linked and writes no audit when nothing was linked', async () => {
     const database = createTransactionalDatabase([
       { rows: [{ '?column?': 1 }] }, // session lock

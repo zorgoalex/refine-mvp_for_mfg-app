@@ -28,7 +28,12 @@ export type LinkInsertOutcome =
   | { status: 'session_inactive' }
   | { status: 'user_inactive' };
 
-export type UnlinkDeleteOutcome = 'unlinked' | 'not_linked' | 'session_inactive' | 'user_inactive';
+export type UnlinkDeleteOutcome =
+  | 'unlinked'
+  | 'not_linked'
+  | 'session_inactive'
+  | 'user_inactive'
+  | 'external_policy';
 
 export interface IdentityActor {
   userId: string;
@@ -102,8 +107,8 @@ export class PgUserIdentityRepository {
     return this.database.transaction(async (tx) => {
       const liveness = await this.lockLiveSessionAndUser(tx, input.actor.userId, input.sessionId);
 
-      if (liveness) {
-        return liveness;
+      if (liveness.deny) {
+        return liveness.deny;
       }
 
       const inserted = await tx.query<UserIdentityRow>(
@@ -168,7 +173,10 @@ export class PgUserIdentityRepository {
     tx: { query: DatabaseService['query'] },
     userId: string,
     sessionId?: string,
-  ): Promise<Extract<LinkInsertOutcome, { status: 'session_inactive' | 'user_inactive' }> | null> {
+  ): Promise<
+    | { deny: Extract<LinkInsertOutcome, { status: 'session_inactive' | 'user_inactive' }>; loginPolicy: null }
+    | { deny: null; loginPolicy: string | null }
+  > {
     if (sessionId) {
       const session = await tx.query(
         `
@@ -180,20 +188,21 @@ export class PgUserIdentityRepository {
       );
 
       if (session.rows.length === 0) {
-        return { status: 'session_inactive' };
+        return { deny: { status: 'session_inactive' }, loginPolicy: null };
       }
     }
 
-    const user = await tx.query(
-      'SELECT 1 FROM users WHERE user_id = $1 AND is_active FOR UPDATE',
+    const user = await tx.query<{ login_policy: string | null } & QueryResultRow>(
+      'SELECT login_policy FROM users WHERE user_id = $1 AND is_active FOR UPDATE',
       [userId],
     );
+    const row = user.rows[0];
 
-    if (user.rows.length === 0) {
-      return { status: 'user_inactive' };
+    if (!row) {
+      return { deny: { status: 'user_inactive' }, loginPolicy: null };
     }
 
-    return null;
+    return { deny: null, loginPolicy: row.login_policy ?? null };
   }
 
   /** Zero-row conflict insert (liveness already proven under lock). */
@@ -237,8 +246,15 @@ export class PgUserIdentityRepository {
     return this.database.transaction(async (tx) => {
       const liveness = await this.lockLiveSessionAndUser(tx, input.actor.userId, input.sessionId);
 
-      if (liveness) {
-        return liveness.status;
+      if (liveness.deny) {
+        return liveness.deny.status;
+      }
+
+      // Policy re-check UNDER the user lock: an ops flip to external-only
+      // during bcrypt must not let the user delete their last SSO identity
+      // and lock themselves out.
+      if (liveness.loginPolicy === 'external') {
+        return 'external_policy';
       }
 
       const deleted = await tx.query<UserIdentityRow>(

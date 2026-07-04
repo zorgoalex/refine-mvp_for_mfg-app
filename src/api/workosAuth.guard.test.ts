@@ -31,6 +31,20 @@ describe('workosAuth feature flag', () => {
         .workosAuth,
     ).toBe(false);
   });
+
+  it('warns ops when workosAuth is coerced off by a missing backendAuth (plan §5)', async () => {
+    const { vi } = await import('vitest');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      mergeRuntimeFeatureFlags(getFeatureFlags({}), { workosAuth: 'true', backendAuth: 'false' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('workosAuth requires backendAuth'),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 describe('workos callback helpers contract', () => {

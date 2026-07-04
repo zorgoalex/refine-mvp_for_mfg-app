@@ -77,11 +77,25 @@ export class AuthService {
       throw new LoginMethodNotAllowedError();
     }
 
-    const session = await this.ports.sessions.createLoginSession(user, {
-      userAgent: command.userAgent,
-      ipAddress: command.ipAddress,
-      requestId: command.requestId,
-    });
+    let session;
+
+    try {
+      session = await this.ports.sessions.createLoginSession(user, {
+        userAgent: command.userAgent,
+        ipAddress: command.ipAddress,
+        requestId: command.requestId,
+      });
+    } catch (error) {
+      // The in-transaction guard denied at the last moment (account
+      // deactivated / tightened to external-only during bcrypt) — keep the
+      // audit contract for these denials too.
+      if (error instanceof UserInactiveError) {
+        await this.writeLoginFailed(command, username, 'inactive_user', user);
+      } else if (error instanceof LoginMethodNotAllowedError) {
+        await this.writeLoginFailed(command, username, 'login_method_not_allowed', user);
+      }
+      throw error;
+    }
     await this.ports.rateLimits.refund(accountLimit);
     const currentUser = this.toCurrentUser(user, session.sessionId);
     const accessToken = await this.ports.tokens.issueAccessToken(currentUser);

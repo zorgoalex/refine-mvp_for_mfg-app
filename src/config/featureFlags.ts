@@ -144,14 +144,21 @@ export function mergeRuntimeFeatureFlags(
 }
 
 function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): FrontendFeatureFlags {
+  // SSO login exchanges the provider code for a backend session; without
+  // backend-auth mode the app cannot consume that session (POC gotcha #7).
+  // The coercion must stay VISIBLE to ops — a silently vanished SSO button
+  // reads as a frontend bug instead of a runtime-config mistake.
+  if (flags.workosAuth && !flags.useBackendAuth) {
+    // eslint-disable-next-line no-console
+    console.warn('[featureFlags] workosAuth requires backendAuth; SSO login is disabled');
+  }
+
   return {
     ...flags,
     useBackendClientPhones:
       flags.useBackendClientPhones && flags.useBackendProductionActions,
     useBackendDeadlines:
       flags.useBackendDeadlines && flags.useBackendAuth && flags.useBackendOrdersRead,
-    // SSO login exchanges the provider code for a backend session; without
-    // backend-auth mode the app cannot consume that session (POC gotcha #7).
     workosAuth: flags.workosAuth && flags.useBackendAuth,
   };
 }

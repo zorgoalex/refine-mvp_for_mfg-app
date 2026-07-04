@@ -41,6 +41,7 @@ describe('PgAuthSessionManager', () => {
     });
 
     expect(database.queries.map((query) => normalizeSql(query.text))).toEqual([
+      'SELECT is_active FROM users WHERE user_id = $1 FOR UPDATE',
       'INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent) VALUES ($1, $2, $3, $4) RETURNING session_id::text, token_family_id::text',
       'INSERT INTO refresh_tokens ( user_id, session_id, token_hash, token_family_id, expires_at, user_agent, ip_address ) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       'UPDATE users SET last_login_at = now() WHERE user_id = $1',
@@ -66,6 +67,39 @@ describe('PgAuthSessionManager', () => {
     expect(JSON.stringify(audit?.params)).not.toContain('refresh-login');
     expect(JSON.stringify(audit?.params)).not.toContain('pepper');
     vi.useRealTimers();
+  });
+
+  it('re-proves is_active and login_policy under lock inside the session transaction (TOCTOU)', async () => {
+    const user = { id: '42', username: 'manager', roleId: 10, passwordHash: 'hash', isActive: true };
+
+    // Account tightened to external-only during bcrypt: no more local session.
+    const flipped = createDatabase({ guardLoginPolicy: 'external' });
+    await expect(
+      createManager(flipped.service, { enforceLoginPolicy: true }).createLoginSession(user, {}),
+    ).rejects.toMatchObject({ code: 'LOGIN_METHOD_NOT_ALLOWED' });
+    expect(flipped.queries.some((query) => query.text.includes('INSERT INTO auth_sessions'))).toBe(false);
+
+    // Local-only account cannot get a WorkOS session either.
+    const localOnly = createDatabase({ guardLoginPolicy: 'local' });
+    await expect(
+      createManager(localOnly.service, { enforceLoginPolicy: true }).createLoginSession(user, {
+        authSource: 'workos',
+      }),
+    ).rejects.toMatchObject({ code: 'LOGIN_METHOD_NOT_ALLOWED' });
+
+    // external-only + workos source is fine.
+    const externalWorkos = createDatabase({ guardLoginPolicy: 'external' });
+    await expect(
+      createManager(externalWorkos.service, { enforceLoginPolicy: true }).createLoginSession(user, {
+        authSource: 'workos',
+      }),
+    ).resolves.toMatchObject({ sessionId: 'session-1' });
+
+    // Deactivated mid-login: denied regardless of policy support.
+    const deactivated = createDatabase({ guardIsActive: false });
+    await expect(
+      createManager(deactivated.service).createLoginSession(user, {}),
+    ).rejects.toMatchObject({ code: 'USER_INACTIVE' });
   });
 
   it('merges caller auditMetadata (e.g. SSO email drift) into the success audit row', async () => {
@@ -387,7 +421,7 @@ describe('PgAuthSessionManager', () => {
 
 function createManager(
   database: DatabaseService,
-  extraOptions: { supportsProviderSessions?: boolean } = {},
+  extraOptions: { supportsProviderSessions?: boolean; enforceLoginPolicy?: boolean } = {},
 ): PgAuthSessionManager {
   return new PgAuthSessionManager(
     database,
@@ -410,12 +444,25 @@ function createDatabase(
     refreshRow?: Record<string, unknown>;
     providerSessionId?: string | null;
     authSource?: string | null;
+    guardIsActive?: boolean;
+    guardLoginPolicy?: string | null;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const tx = {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
+
+      if (text.includes('FROM users WHERE user_id = $1 FOR UPDATE')) {
+        return {
+          rows: [
+            {
+              is_active: options.guardIsActive ?? true,
+              login_policy: options.guardLoginPolicy ?? 'both',
+            },
+          ],
+        };
+      }
 
       if (text.includes('INSERT INTO auth_sessions')) {
         return { rows: [{ session_id: 'session-1', token_family_id: 'family-1' }] };

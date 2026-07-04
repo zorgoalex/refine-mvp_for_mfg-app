@@ -302,5 +302,6 @@ function createPgSessionManager(
     // sessions keep their provenance (audit source, sid-less 'unavailable'
     // logout) even while the SSO entrypoints are rolled back.
     supportsProviderSessions: capabilities.providerSessions,
+    enforceLoginPolicy: capabilities.loginPolicy,
   });
 }
