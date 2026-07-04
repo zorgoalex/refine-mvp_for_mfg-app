@@ -123,10 +123,10 @@ export class AuthController {
   ): Promise<AuthResponse> {
     this.assertAuthEnabled();
     validateLoginBody(body);
-    // Key limiters on the SAME normalization the auth lookup uses (trim),
-    // otherwise padded usernames resolve to one account but land in
-    // different buckets.
-    const limiterUsername = body.username.trim();
+    // Key the ip+identifier limiter on the SAME normalization the auth
+    // lookup uses (trim). The per-account fail budget lives in
+    // AuthService.login, keyed on the CANONICAL account (user_id), so
+    // username/email aliases share one bucket.
     await this.rateLimits.assertAllowed({
       rule: {
         feature: 'auth_login',
@@ -136,26 +136,9 @@ export class AuthController {
       subject: {
         route: 'auth/login',
         ipAddress: request.ip,
-        username: limiterUsername,
+        username: body.username.trim(),
       },
     });
-    // Per-account window WITHOUT the ip component: a distributed attack that
-    // rotates source addresses still shares this counter for one username.
-    // The budget is 20 FAILS/hour: the attempt is consumed up-front (so the
-    // 21st attempt is blocked before the password check) and refunded on
-    // success, so legitimate logins never eat the budget.
-    const accountLimit = {
-      rule: {
-        feature: 'auth_login_account',
-        maxRequests: 20,
-        windowMs: 3_600_000,
-      },
-      subject: {
-        route: 'auth/login',
-        username: limiterUsername,
-      },
-    };
-    await this.rateLimits.assertAllowed(accountLimit);
 
     const result = await this.auth.login({
       username: body.username,
@@ -164,7 +147,6 @@ export class AuthController {
       ipAddress: request.ip,
       requestId: request.requestId,
     });
-    await this.rateLimits.refund(accountLimit);
     this.setRefreshCookie(response, result.refreshToken);
 
     return result.response;

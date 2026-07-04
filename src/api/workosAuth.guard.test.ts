@@ -53,6 +53,21 @@ describe('workos callback helpers contract', () => {
 
   it('guards the single-use code against StrictMode double-mount', () => {
     expect(callbackSource).toContain('const consumedCodes = new Set<string>()');
+    // Pre-exchange failures (e.g. link-mode refresh) have not burned the
+    // code — the same callback URL may retry in place.
+    expect(callbackSource).toContain('consumedCodes.delete(code)');
+    expect(callbackSource).toContain('exchangeStarted');
+  });
+
+  it('binds the link intent to the exact flow state, never a stale boolean', () => {
+    const linkCardSource = readFileSync(
+      new URL('../pages/profile/WorkosLinkCard.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(callbackSource).toContain('sessionStorage.getItem(LINK_INTENT_KEY) === state');
+    expect(callbackSource).not.toContain('=== "1"');
+    expect(linkCardSource).toContain('searchParams.get("state")');
+    expect(linkCardSource).toContain('markWorkosLinkIntent(state)');
   });
 
   it('keeps the happy path in the SPA and rehydrates before navigating (no full reload)', () => {

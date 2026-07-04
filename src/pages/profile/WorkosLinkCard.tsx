@@ -32,7 +32,10 @@ export const WorkosLinkCard: React.FC = () => {
     setError(null);
     try {
       const url = await authApi.workosLinkStartUrl();
-      markWorkosLinkIntent();
+      // Bind the intent to this flow's exact state (from the authorize URL):
+      // a stale intent must not misroute a later normal SSO login.
+      const state = new URL(url).searchParams.get("state") ?? "";
+      markWorkosLinkIntent(state);
       window.location.assign(url);
     } catch (linkError) {
       setError(describeError(linkError));

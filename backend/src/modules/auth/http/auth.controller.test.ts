@@ -62,14 +62,12 @@ describe('AuthController HTTP shell', () => {
       }),
     ).resolves.toEqual(createAuthResponse());
 
-    // Limiter buckets are keyed on the TRIMMED username (same normalization
-    // as the auth lookup) and the per-account fail budget is refunded on
-    // success, so successful logins never consume it.
+    // The ip+identifier limiter is keyed on the TRIMMED username (same
+    // normalization as the auth lookup); the per-account fail budget lives
+    // in AuthService keyed on the canonical user id.
     expect(context.calls).toEqual([
       'rate-limit:auth_login:manager',
-      'rate-limit:auth_login_account:manager',
       'login: manager :secret',
-      'refund:auth_login_account:manager',
     ]);
     expect(context.cookies).toEqual([
       {
@@ -90,23 +88,6 @@ describe('AuthController HTTP shell', () => {
         password: 'secret',
       }),
     ).resolves.not.toHaveProperty('refreshToken');
-  });
-
-  it('keeps the per-account fail budget consumed when login fails', async () => {
-    const context = createController({ authEnabled: true, loginError: new ApiError(401, 'INVALID_CREDENTIALS', 'invalid') });
-
-    await expect(
-      context.controller.login(createRequest(), context.response, {
-        username: 'manager',
-        password: 'wrong',
-      }),
-    ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
-
-    expect(context.calls).toEqual([
-      'rate-limit:auth_login:manager',
-      'rate-limit:auth_login_account:manager',
-    ]);
-    expect(context.calls).not.toContain('refund:auth_login_account:manager');
   });
 
   it('requires refresh cookie for refresh endpoint', async () => {

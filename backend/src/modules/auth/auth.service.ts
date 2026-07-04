@@ -17,6 +17,14 @@ import type {
   PasswordVerifierPort,
   SessionManagerPort,
 } from './auth.types';
+import type { RateLimitConsumeInput } from '../../rate-limit/rate-limit.types';
+
+export interface LoginRateLimitPort {
+  /** Throws 429 when the budget is spent. */
+  assertAllowed(input: RateLimitConsumeInput): Promise<void>;
+  /** Best-effort return of one consumed attempt. */
+  refund(input: RateLimitConsumeInput): Promise<void>;
+}
 
 export interface AuthServicePorts {
   users: AuthUserRepositoryPort;
@@ -24,6 +32,7 @@ export interface AuthServicePorts {
   sessions: SessionManagerPort;
   tokens: AccessTokenIssuerPort;
   audit: AuthAuditPort;
+  rateLimits: LoginRateLimitPort;
 }
 
 export class AuthService {
@@ -32,6 +41,19 @@ export class AuthService {
   async login(command: LoginCommand): Promise<LoginResult> {
     const username = command.username.trim();
     const user = await this.ports.users.findByUsername(username);
+
+    // Per-account fail budget on the CANONICAL account key: the lookup
+    // accepts username OR email, so both aliases of one account must share
+    // one bucket (user_id); unknown identifiers bucket on the submitted
+    // value. Consumed before the password check, refunded on success — only
+    // failures accumulate (20 fails/hour).
+    const accountLimit: RateLimitConsumeInput = {
+      rule: { feature: 'auth_login_account', maxRequests: 20, windowMs: 3_600_000 },
+      subject: user
+        ? { route: 'auth/login', userId: user.id }
+        : { route: 'auth/login', username: username.toLowerCase() },
+    };
+    await this.ports.rateLimits.assertAllowed(accountLimit);
 
     if (!user) {
       await this.writeLoginFailed(command, username, 'unknown_user');
@@ -60,6 +82,7 @@ export class AuthService {
       ipAddress: command.ipAddress,
       requestId: command.requestId,
     });
+    await this.ports.rateLimits.refund(accountLimit);
     const currentUser = this.toCurrentUser(user, session.sessionId);
     const accessToken = await this.ports.tokens.issueAccessToken(currentUser);
 

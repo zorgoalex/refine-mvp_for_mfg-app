@@ -17,6 +17,7 @@ import { AccessTokenMiddleware } from './http/access-token.middleware';
 import { AuthController } from './http/auth.controller';
 import { AUTH_SESSION_HTTP_PORT } from './http/auth-session-http.port';
 import { AuthRuntimeConfigService } from './http/auth-runtime-config.service';
+import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { TokenService } from './token.service';
 import { PgUserIdentityRepository } from './workos/pg-user-identity-repository';
 import { WorkosApiClient } from './workos/workos-api.client';
@@ -40,6 +41,7 @@ import { WorkosAuthService } from './workos/workos-auth.service';
         config: ConfigService<BackendEnv, true>,
         database: DatabaseService,
         tokenService: TokenService,
+        rateLimits: RateLimitService,
       ) => {
         const sessionManager = createPgSessionManager(config, database, tokenService);
 
@@ -53,9 +55,10 @@ import { WorkosAuthService } from './workos/workos-auth.service';
           sessions: sessionManager,
           tokens: createAccessTokenIssuer(config),
           audit: new PgAuthAuditRepository(database),
+          rateLimits,
         });
       },
-      inject: [ConfigService, DatabaseService, TokenService],
+      inject: [ConfigService, DatabaseService, TokenService, RateLimitService],
     },
     {
       provide: AUTH_SESSION_HTTP_PORT,

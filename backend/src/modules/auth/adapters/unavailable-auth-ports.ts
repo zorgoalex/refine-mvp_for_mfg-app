@@ -35,6 +35,14 @@ export function createUnavailableAuthService(): AuthService {
         return unavailable();
       },
     },
+    rateLimits: {
+      async assertAllowed() {
+        return unavailable();
+      },
+      async refund() {
+        return unavailable();
+      },
+    },
   };
 
   return new AuthService(ports);
