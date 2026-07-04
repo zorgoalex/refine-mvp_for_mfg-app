@@ -1,4 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { LabelTextFields } from './scan/label-text-extraction';
 
 export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr';
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
@@ -311,6 +312,21 @@ export interface ScanResolveResult {
   candidates: ScanResolveCandidate[];
   parsed: Record<string, string> | null;
   templatesTried: number;
+}
+
+/** scanResolveFields (T4): OCR-extracted text fields -> ScanSearchInput -> ranked candidates. */
+export interface ScanResolveFieldsCommand extends LabelsContext {
+  fields: LabelTextFields;
+}
+
+/** scanResolveImage (T4): raw uploaded image bytes -> OcrPort.recognize -> extractLabelFields -> scanResolveFields. */
+export interface ScanResolveImageCommand extends LabelsContext {
+  image: Buffer;
+  contentType: string;
+}
+
+export interface ScanResolveImageResult extends ScanResolveResult {
+  ocr: { lineCount: number; durationMs: number };
 }
 
 export interface LabelsPermissionDeniedInput {

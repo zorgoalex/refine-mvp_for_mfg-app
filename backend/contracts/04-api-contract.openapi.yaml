@@ -5467,6 +5467,65 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/labels/scan-resolve-image:
+    post:
+      tags:
+        - Labels
+      operationId: scanResolveLabelImage
+      summary: Resolve a photographed label (no QR) to order details via OCR
+      security:
+        - bearerAuth: []
+      x-permission: labels.view
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Photo of a printed label (no QR code).
+      responses:
+        '200':
+          description: Ranked candidate order details recognized from the label photo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      type: object
+                  parsed:
+                    type: object
+                    nullable: true
+                  templatesTried:
+                    type: integer
+                  ocr:
+                    type: object
+                    properties:
+                      lineCount:
+                        type: integer
+                      durationMs:
+                        type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/{orderId}/label-data:
     get:
       tags:
