@@ -1090,70 +1090,114 @@ export class PgLabelsRepository implements LabelsPort {
   }
 
   async findScanCandidates(input: ScanSearchInput): Promise<ScanCandidateRow[]> {
-    // narrow-then-verify. Read-surface = order_details_view (тот же, что остальные
-    // label-read пути этого файла: см. readOrderLabelDetails ~:1295) + явный guard
-    // orders.delete_flag=false (паттерн ~:1261). Снапшот печати НЕ «существование
-    // строки», а РЕАЛЬНОЕ containment-совпадение распарсенных bazis-полей.
+    // narrow-then-verify. Read-surface = order_details_view + явный guard
+    // orders.delete_flag=false (паттерн ~:1261). Снапшот печати — containment
+    // bazis_fields @>. ВАЖНО (перф): exact-поля и снапшот-источник — ДВА
+    // отдельных запроса, слитых в TS. Единый OR с LATERAL заставлял планировщик
+    // сек-сканить все order_details (~1.3s на 58k строк); раздельно оба пути
+    // индексные: exact — по orders/details, снапшот — от маленькой
+    // order_label_detail_data (только напечатанные бирки).
     const hasBazis = input.bazisFields != null && Object.keys(input.bazisFields).length > 0;
-    const params: unknown[] = [];
-    const p = (v: unknown) => {
-      params.push(v);
-      return `$${params.length}`;
-    };
+    const bazisJson = hasBazis ? JSON.stringify(input.bazisFields) : null;
 
-    const conditions: string[] = [];
-    if (input.detailId != null) conditions.push(`od.detail_id = ${p(input.detailId)}`);
-    if (input.orderId != null) conditions.push(`od.order_id = ${p(input.orderId)}`);
-    if (input.orderName) conditions.push(`lower(o.order_name) = lower(${p(input.orderName)})`);
-    // Источник 2: заказ переименовали после печати — ищем по снапшоту.
-    if (hasBazis) {
-      conditions.push(`ld_match.detail_id IS NOT NULL`);
-    }
-    if (conditions.length === 0) return []; // защита от полного скана
+    const selectList = (withSnapshotMatch: boolean, detailNumberExpr: string | null) => `
+           od.detail_id, od.order_id, o.order_name, od.detail_number,
+           od.width, od.height, od.quantity, od.material_name,
+           ps.production_status_name,
+           ${withSnapshotMatch ? `(ld_match.detail_id IS NOT NULL)` : `TRUE`} AS snapshot_match
+           ${detailNumberExpr ? `, (od.detail_number = ${detailNumberExpr}) AS detail_number_match` : ''}`;
 
-    const detailNumberParam = input.detailNumber != null ? p(input.detailNumber) : null;
-    const bazisParam = hasBazis ? p(JSON.stringify(input.bazisFields)) : null;
+    const queries: Array<Promise<{ rows: ScanCandidateQueryRow[] }>> = [];
 
-    const result = await this.database.query<ScanCandidateQueryRow>(
-      `SELECT od.detail_id, od.order_id, o.order_name, od.detail_number,
-              od.width, od.height, od.quantity, od.material_name,
-              ps.production_status_name,
-              ${bazisParam ? `(ld_match.detail_id IS NOT NULL) AS snapshot_match` : `FALSE AS snapshot_match`}
-              ${detailNumberParam ? `, (od.detail_number = ${detailNumberParam}) AS detail_number_match` : ''}
-         FROM order_details_view od
-         JOIN orders o ON o.order_id = od.order_id AND o.delete_flag = false
-         LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
-         ${bazisParam ? `LEFT JOIN LATERAL (
-           SELECT ld.detail_id FROM order_label_detail_data ld
-            WHERE ld.detail_id = od.detail_id
-              AND ld.bazis_fields @> ${bazisParam}::jsonb
-            LIMIT 1
-         ) ld_match ON TRUE` : ''}
-        WHERE (${conditions.join(' OR ')})
-        LIMIT 200`,
-      params,
-    );
-
-    return result.rows.map((row) => {
-      const matched: string[] = [];
-      if (input.detailId != null && toNumber(row.detail_id) === input.detailId) matched.push('detail_id');
-      if (input.orderId != null && toNumber(row.order_id) === input.orderId) matched.push('order_id');
-      if (input.orderName && (row.order_name ?? '').toLowerCase() === input.orderName.toLowerCase()) matched.push('order_name');
-      if (detailNumberParam && row.detail_number_match === true) matched.push('detail_number');
-      if (row.snapshot_match === true) matched.push('snapshot');
-      return {
-        detailId: toNumber(row.detail_id),
-        orderId: toNumber(row.order_id),
-        orderName: row.order_name ?? '',
-        detailNumber: row.detail_number == null ? null : Number(row.detail_number),
-        width: nullableNumber(row.width),
-        height: nullableNumber(row.height),
-        quantity: nullableNumber(row.quantity),
-        materialName: row.material_name,
-        productionStatusName: row.production_status_name,
-        matchedFields: matched,
+    // Запрос A: точные поля (индексный доступ); снапшот здесь — только ТЕГ
+    // (LATERAL по уже отобранным строкам — дёшево).
+    {
+      const params: unknown[] = [];
+      const p = (v: unknown) => {
+        params.push(v);
+        return `$${params.length}`;
       };
-    });
+      const conditions: string[] = [];
+      if (input.detailId != null) conditions.push(`od.detail_id = ${p(input.detailId)}`);
+      if (input.orderId != null) conditions.push(`od.order_id = ${p(input.orderId)}`);
+      if (input.orderName) conditions.push(`lower(o.order_name) = lower(${p(input.orderName)})`);
+      if (conditions.length > 0) {
+        const detailNumberParam = input.detailNumber != null ? p(input.detailNumber) : null;
+        const bazisParam = bazisJson ? p(bazisJson) : null;
+        queries.push(
+          this.database.query<ScanCandidateQueryRow>(
+            `SELECT ${selectList(bazisParam != null, detailNumberParam)}
+               FROM order_details_view od
+               JOIN orders o ON o.order_id = od.order_id AND o.delete_flag = false
+               LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+               ${bazisParam ? `LEFT JOIN LATERAL (
+                 SELECT ld.detail_id FROM order_label_detail_data ld
+                  WHERE ld.detail_id = od.detail_id
+                    AND ld.bazis_fields @> ${bazisParam}::jsonb
+                  LIMIT 1
+               ) ld_match ON TRUE` : ''}
+              WHERE (${conditions.join(' OR ')})
+              LIMIT 200`,
+            params,
+          ),
+        );
+      }
+    }
+
+    // Запрос B: снапшот как ИСТОЧНИК (заказ переименовали после печати) —
+    // драйвим от order_label_detail_data, а не от 58k деталей.
+    if (bazisJson) {
+      const params: unknown[] = [bazisJson];
+      const detailNumberParam = input.detailNumber != null ? (params.push(input.detailNumber), `$${params.length}`) : null;
+      queries.push(
+        this.database.query<ScanCandidateQueryRow>(
+          `SELECT DISTINCT ON (od.detail_id) ${selectList(false, detailNumberParam)}
+             FROM order_label_detail_data ld
+             JOIN order_details_view od ON od.detail_id = ld.detail_id
+             JOIN orders o ON o.order_id = od.order_id AND o.delete_flag = false
+             LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+            WHERE ld.bazis_fields @> $1::jsonb
+            ORDER BY od.detail_id
+            LIMIT 200`,
+          params,
+        ),
+      );
+    }
+
+    if (queries.length === 0) return []; // защита от полного скана
+
+    const results = await Promise.all(queries);
+    const byDetail = new Map<number, ScanCandidateRow>();
+    for (const result of results) {
+      for (const row of result.rows) {
+        const detailId = toNumber(row.detail_id);
+        const matched: string[] = [];
+        if (input.detailId != null && detailId === input.detailId) matched.push('detail_id');
+        if (input.orderId != null && toNumber(row.order_id) === input.orderId) matched.push('order_id');
+        if (input.orderName && (row.order_name ?? '').toLowerCase() === input.orderName.toLowerCase()) matched.push('order_name');
+        if (input.detailNumber != null && row.detail_number_match === true) matched.push('detail_number');
+        if (row.snapshot_match === true) matched.push('snapshot');
+        const existing = byDetail.get(detailId);
+        if (existing) {
+          // слияние тегов из обоих источников
+          existing.matchedFields = [...new Set([...existing.matchedFields, ...matched])];
+          continue;
+        }
+        byDetail.set(detailId, {
+          detailId,
+          orderId: toNumber(row.order_id),
+          orderName: row.order_name ?? '',
+          detailNumber: row.detail_number == null ? null : Number(row.detail_number),
+          width: nullableNumber(row.width),
+          height: nullableNumber(row.height),
+          quantity: nullableNumber(row.quantity),
+          materialName: row.material_name,
+          productionStatusName: row.production_status_name,
+          matchedFields: matched,
+        });
+      }
+    }
+    return [...byDetail.values()].slice(0, 200);
   }
 }
 

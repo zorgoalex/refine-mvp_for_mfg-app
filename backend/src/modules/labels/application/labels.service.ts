@@ -189,13 +189,13 @@ export class LabelsService {
     const templates = await this.getActiveQrTemplates();
     const interpretations: Array<{ input: ScanSearchInput; parsed: Record<string, string> | null; matchedBy: string }> = [];
 
+    const seen = new Set<string>(); // dedupe интерпретаций ГЛОБАЛЬНО по всем шаблонам
     for (const tpl of templates) {
       const compiled = compileQrTemplate(tpl);
       if (!compiled) continue;
       // ДВЕ интерпретации на шаблон: лево- и право-якорная (право-якорная
       // восстанавливает имя заказа, содержащее разделитель — Codex R2).
       const attempts = [parseQrPayload(payload, compiled), parseQrPayloadRight(payload, compiled)];
-      const seen = new Set<string>();
       for (const attempt of attempts) {
         if (!attempt || Object.keys(attempt).length === 0) continue;
         const dedupeKey = JSON.stringify(attempt);
@@ -234,9 +234,13 @@ export class LabelsService {
     // породившей ПОБЕДИВШЕГО кандидата, а не первым попавшимся (Codex R3:
     // для 'A|B|60084|1' победит право-якорная → parsed.orderName='A|B', не 'A').
     type Merged = ScanCandidateRow & { score: number; matchedBy: string; parsed: Record<string, string> | null };
+    // Интерпретации независимы — гоняем запросы ПАРАЛЛЕЛЬНО (последовательные
+    // await складывали латентности и давали многосекундный скан).
+    const perInterpretation = await Promise.all(
+      interpretations.map(async (it) => ({ it, rows: await this.repo.findScanCandidates(it.input) })),
+    );
     const byDetail = new Map<number, Merged>();
-    for (const it of interpretations) {
-      const rows = await this.repo.findScanCandidates(it.input);
+    for (const { it, rows } of perInterpretation) {
       for (const row of rows) {
         const score = scoreCandidate(row.matchedFields);
         const existing = byDetail.get(row.detailId);
