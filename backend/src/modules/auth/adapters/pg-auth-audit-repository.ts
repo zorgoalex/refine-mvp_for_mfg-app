@@ -10,6 +10,7 @@ export class PgAuthAuditRepository implements AuthAuditPort {
   async writeLoginFailed(input: {
     username: string;
     user?: Pick<AuthUserRecord, 'id' | 'username' | 'roleId' | 'isActive'>;
+    relatedUserId?: string;
     reason: LoginFailedReason;
     requestId?: string;
     userAgent?: string;
@@ -35,8 +36,9 @@ export class PgAuthAuditRepository implements AuthAuditPort {
         toNullableUserId(input.user?.id),
         input.user?.username ?? input.username,
         role,
-        // Query-ready dimension (plan §4.8): the resolved account, when known.
-        toNullableUserId(input.user?.id),
+        // Query-ready dimension (plan §4.8): the resolved account, when known
+        // — even when the user row was not loadable (stale link race).
+        toNullableUserId(input.user?.id ?? input.relatedUserId),
         input.requestId ?? DEFAULT_REQUEST_ID,
         input.ipAddress ?? null,
         input.userAgent ?? null,

@@ -66,6 +66,8 @@ export interface AuthAuditPort {
   writeLoginFailed(input: {
     username: string;
     user?: Pick<AuthUserRecord, 'id' | 'username' | 'roleId' | 'isActive'>;
+    /** Resolved account id when known WITHOUT a loadable user row (stale link). */
+    relatedUserId?: string;
     reason: LoginFailedReason;
     requestId?: string;
     userAgent?: string;

@@ -179,6 +179,17 @@ describe('WorkosAuthService.loginWithCode', () => {
     );
   });
 
+  it('keeps the resolved account id in the audit when the linked user row is gone (stale link race)', async () => {
+    const harness = createHarness({ userById: null });
+
+    await expect(harness.service.loginWithCode({ code: 'c' })).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIALS',
+    });
+    expect(harness.ports.loginFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'identity_not_linked', relatedUserId: '42' }),
+    );
+  });
+
   it('audits provider_error as auth.login.failed when the code exchange fails', async () => {
     const harness = createHarness({ identityError: new Error('workos down') });
 

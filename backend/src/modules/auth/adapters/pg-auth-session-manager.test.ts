@@ -310,6 +310,46 @@ describe('PgAuthSessionManager', () => {
     expect(logoutAudit?.params[8]).toBe('workos');
   });
 
+  it('normalizes dirty legacy auth_source values instead of dropping workos provenance', async () => {
+    const dirtyRow = {
+      token_id: 'token-old',
+      user_id: '42',
+      session_id: 'session-1',
+      token_family_id: 'family-1',
+      expires_at: new Date('2100-01-01T00:00:00.000Z'),
+      revoked_at: null,
+      session_status: 'active',
+      username: 'manager',
+      role_id: 10,
+      is_active: true,
+      auth_source: '  WORKOS  ',
+    };
+
+    const refreshDb = createDatabase({ refreshRow: dirtyRow });
+    await createManager(refreshDb.service, { supportsProviderSessions: true }).refresh({
+      refreshToken: 'refresh-login',
+    });
+    expect(findAudit(refreshDb.queries, 'auth.refresh')?.params[8]).toBe('workos');
+
+    // Garbage values degrade to 'backend', never crash or leak raw strings.
+    const garbageDb = createDatabase({ refreshRow: { ...dirtyRow, auth_source: 'sso?!' } });
+    await createManager(garbageDb.service, { supportsProviderSessions: true }).refresh({
+      refreshToken: 'refresh-login',
+    });
+    expect(findAudit(garbageDb.queries, 'auth.refresh')?.params[8]).toBe('backend');
+
+    const logoutDb = createDatabase({
+      refreshRow: dirtyRow,
+      providerSessionId: null,
+      authSource: ' WORKOS ',
+    });
+    await expect(
+      createManager(logoutDb.service, { supportsProviderSessions: true }).logout({
+        refreshToken: 'refresh-login',
+      }),
+    ).resolves.toEqual({ ok: true, authSource: 'workos' });
+  });
+
   it('persists auth_source even when the provider returned no sid, and logout surfaces it', async () => {
     const database = createDatabase();
     const manager = createManager(database.service, { supportsProviderSessions: true });

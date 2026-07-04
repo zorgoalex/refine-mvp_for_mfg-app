@@ -99,7 +99,9 @@ export class WorkosAuthService {
     const user = await this.ports.loadUserById(link.userId);
 
     if (!user) {
-      await this.writeLoginFailed(command, identity, 'identity_not_linked');
+      // Stale link (user row deleted mid-race): the account id is still
+      // resolved from the link — keep it query-ready in the audit row.
+      await this.writeLoginFailed(command, identity, 'identity_not_linked', undefined, link.userId);
       throw new InvalidCredentialsError();
     }
 
@@ -352,10 +354,12 @@ export class WorkosAuthService {
     identity: WorkosIdentity,
     reason: 'email_not_verified' | 'identity_not_linked' | 'inactive_user' | 'login_method_not_allowed',
     user?: AuthUserRecord,
+    relatedUserId?: string,
   ): Promise<void> {
     await this.ports.audit.writeLoginFailed({
       username: identity.email,
       user,
+      relatedUserId,
       reason,
       requestId: command.requestId,
       userAgent: command.userAgent,

@@ -353,7 +353,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     // with a garbage session_id.
     const raw = result.rows[0]?.provider_session_id;
     const normalized = typeof raw === 'string' ? raw.trim() : null;
-    const authSource = result.rows[0]?.auth_source ?? undefined;
+    const authSource = normalizeAuthSource(result.rows[0]?.auth_source);
 
     return {
       ...(normalized ? { providerSessionId: normalized } : {}),
@@ -578,9 +578,22 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
   }
 }
 
+/**
+ * Normalizes a stored auth_source at the read boundary: legacy/dirty values
+ * ('WORKOS', padded strings) must not silently lose WorkOS provenance.
+ */
+function normalizeAuthSource(value: unknown): 'workos' | 'backend' | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'workos' || normalized === 'backend' ? normalized : undefined;
+}
+
 /** The persisted issuing path of the session ('backend' when absent/legacy). */
 function sessionAuthSource(row: RefreshSessionRow): 'workos' | undefined {
-  return row.auth_source === 'workos' ? 'workos' : undefined;
+  return normalizeAuthSource(row.auth_source) === 'workos' ? 'workos' : undefined;
 }
 
 function toNullableUserId(userId: string | number): number | null {
