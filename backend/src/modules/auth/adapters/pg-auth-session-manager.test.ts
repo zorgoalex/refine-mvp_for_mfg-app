@@ -246,9 +246,41 @@ describe('PgAuthSessionManager', () => {
     ]);
     expect(JSON.stringify(audit?.params)).not.toContain('refresh-login');
   });
+
+  it('degrades whitespace-only legacy provider_session_id to a local logout', async () => {
+    const refreshRow = {
+      token_id: 'token-old',
+      user_id: '42',
+      session_id: 'session-1',
+      token_family_id: 'family-1',
+      expires_at: new Date('2026-05-02T12:00:00.000Z'),
+      revoked_at: null,
+      session_status: 'active',
+      username: 'manager',
+      role_id: 10,
+      is_active: true,
+    };
+
+    const dirty = createDatabase({ refreshRow, providerSessionId: '   ' });
+    await expect(
+      createManager(dirty.service, { supportsProviderSessions: true }).logout({
+        refreshToken: 'refresh-login',
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    const clean = createDatabase({ refreshRow, providerSessionId: 'sid-1' });
+    await expect(
+      createManager(clean.service, { supportsProviderSessions: true }).logout({
+        refreshToken: 'refresh-login',
+      }),
+    ).resolves.toEqual({ ok: true, providerSessionId: 'sid-1' });
+  });
 });
 
-function createManager(database: DatabaseService): PgAuthSessionManager {
+function createManager(
+  database: DatabaseService,
+  extraOptions: { supportsProviderSessions?: boolean } = {},
+): PgAuthSessionManager {
   return new PgAuthSessionManager(
     database,
     new FixedTokenService(),
@@ -260,11 +292,14 @@ function createManager(database: DatabaseService): PgAuthSessionManager {
     {
       refreshTokenPepper: 'test-refresh-pepper-with-at-least-32',
       refreshTokenTtlDays: 7,
+      ...extraOptions,
     },
   );
 }
 
-function createDatabase(options: { refreshRow?: Record<string, unknown> } = {}) {
+function createDatabase(
+  options: { refreshRow?: Record<string, unknown>; providerSessionId?: string | null } = {},
+) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const tx = {
     async query(text: string, params: readonly unknown[] = []) {
@@ -280,6 +315,15 @@ function createDatabase(options: { refreshRow?: Record<string, unknown> } = {}) 
 
       if (text.includes('FROM refresh_tokens rt')) {
         return { rows: options.refreshRow ? [options.refreshRow] : [] };
+      }
+
+      if (text.includes('SELECT provider_session_id FROM auth_sessions')) {
+        return {
+          rows:
+            options.providerSessionId === undefined
+              ? []
+              : [{ provider_session_id: options.providerSessionId }],
+        };
       }
 
       return { rows: [] };

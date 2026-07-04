@@ -329,7 +329,12 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       'SELECT provider_session_id FROM auth_sessions WHERE session_id = $1',
       [sessionId],
     );
-    return result.rows[0]?.provider_session_id ?? null;
+    // Normalize at the read boundary: legacy/dirty whitespace-only values
+    // must degrade to "no provider session", not leak into a logout redirect
+    // with a garbage session_id.
+    const raw = result.rows[0]?.provider_session_id;
+    const normalized = typeof raw === 'string' ? raw.trim() : null;
+    return normalized || null;
   }
 
   private async lockRefreshToken(

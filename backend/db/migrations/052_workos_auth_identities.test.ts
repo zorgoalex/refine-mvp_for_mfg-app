@@ -4,6 +4,13 @@ import { describe, expect, it } from 'vitest';
 const sql = readFileSync(new URL('./052_workos_auth_identities.sql', import.meta.url), 'utf8');
 
 describe('052_workos_auth_identities migration', () => {
+  it('enables the citext extension before using the CITEXT type', () => {
+    expect(sql).toMatch(/CREATE EXTENSION IF NOT EXISTS citext;/i);
+    expect(sql.indexOf('CREATE EXTENSION IF NOT EXISTS citext')).toBeLessThan(
+      sql.indexOf('email_at_link CITEXT'),
+    );
+  });
+
   it('creates the user_identities table keyed by provider identity', () => {
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS user_identities/i);
     expect(sql).toMatch(/user_id BIGINT NOT NULL REFERENCES users\(user_id\) ON DELETE CASCADE/i);

@@ -4,6 +4,10 @@
 
 BEGIN;
 
+-- email_at_link is CITEXT; a fresh database restored without the extension
+-- must not fail the rollout.
+CREATE EXTENSION IF NOT EXISTS citext;
+
 CREATE TABLE IF NOT EXISTS user_identities (
     identity_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
