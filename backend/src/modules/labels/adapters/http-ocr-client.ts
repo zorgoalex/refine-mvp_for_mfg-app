@@ -53,15 +53,25 @@ export class HttpOcrClient implements OcrPort {
       throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service is unavailable');
     }
 
-    let json: { lines?: Array<{ text: string; score: number }>; durationMs?: number };
+    // Shape-safe parsing: a 2xx with a malformed body (unparsable JSON, `null`,
+    // non-array `lines`, junk line entries) must surface as the contractual
+    // ApiError 503, never as a raw TypeError leaking out of the adapter.
     try {
-      json = (await res.json()) as typeof json;
+      const json = (await res.json()) as { lines?: unknown; durationMs?: unknown } | null;
+      if (json == null || !Array.isArray(json.lines)) {
+        throw new Error('malformed ocr response shape');
+      }
+      const lines: OcrLine[] = (json.lines as Array<{ text?: unknown; score?: unknown } | null>).map(
+        (line) => ({
+          text: String(line?.text ?? ''),
+          score: Number(line?.score ?? 0),
+        }),
+      );
+      const durationMs = Number(json.durationMs ?? 0);
+      return { lines, durationMs: Number.isFinite(durationMs) ? durationMs : 0 };
     } catch {
       throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service returned an invalid response');
     }
-
-    const lines: OcrLine[] = (json.lines ?? []).map((line) => ({ text: line.text, score: line.score }));
-    return { lines, durationMs: json.durationMs ?? 0 };
   }
 }
 

@@ -80,6 +80,26 @@ describe('HttpOcrClient', () => {
     });
   });
 
+  it('2xx with JSON body `null` → ApiError(503, OCR_SERVICE_UNAVAILABLE), not a raw TypeError', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(true, 200, null));
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    await expect(client.recognize(image, 'image/jpeg')).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'OCR_SERVICE_UNAVAILABLE',
+    });
+  });
+
+  it('2xx with non-array lines ({lines:"oops"}) → ApiError(503, OCR_SERVICE_UNAVAILABLE), not .map TypeError', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(true, 200, { lines: 'oops', durationMs: 1 }));
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    await expect(client.recognize(image, 'image/jpeg')).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'OCR_SERVICE_UNAVAILABLE',
+    });
+  });
+
   it('timeout (real AbortSignal.timeout wiring via injected short timeoutMs) → ApiError(503, OCR_SERVICE_UNAVAILABLE)', async () => {
     // Fetch mock that never resolves on its own, but honors the abort signal exactly
     // like a real fetch would — this exercises the client's actual timeout wiring
