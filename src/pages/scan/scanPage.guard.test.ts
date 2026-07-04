@@ -18,6 +18,14 @@ describe('qr scanner module', () => {
     // файл-декод не должен дёргать getUserMedia
     expect(src.split('decodeQrFromFile')[1]).not.toContain('getUserMedia');
   });
+
+  it('serves the zxing wasm from OUR bundle, not the default CDN (CSP blocks it)', () => {
+    // Без locateFile-override zxing тянет .wasm с fastly.jsdelivr.net —
+    // стейджовый CSP это режет и декод молча умирает (пойман на живой бирке).
+    const src = read('qrScanner.ts');
+    expect(src).toContain("zxing-wasm/reader/zxing_reader.wasm?url");
+    expect(src).toContain('prepareZXingModule');
+  });
 });
 
 describe('ScanPage', () => {

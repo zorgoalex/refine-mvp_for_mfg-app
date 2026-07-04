@@ -191,6 +191,10 @@ test('photo-file scan: uploaded QR image decodes in-browser and resolves to the 
         localStorage.setItem('scanDefaultAction:1', 'open-order');
     });
 
+    // Стейджовый CSP режет внешние хосты: wasm ОБЯЗАН приходить из нашего
+    // бандла. Блокируем CDN-хосты — декод всё равно должен работать.
+    await page.route(/jsdelivr\.net|unpkg\.com|fastly\./, (r) => r.abort());
+
     await page.goto('/scan', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('button', { name: 'Скан из фото' })).toBeVisible({ timeout: 30000 });
 
