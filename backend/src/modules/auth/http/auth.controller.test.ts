@@ -62,7 +62,15 @@ describe('AuthController HTTP shell', () => {
       }),
     ).resolves.toEqual(createAuthResponse());
 
-    expect(context.calls).toEqual(['rate-limit', 'rate-limit', 'login: manager :secret']);
+    // Limiter buckets are keyed on the TRIMMED username (same normalization
+    // as the auth lookup) and the per-account fail budget is refunded on
+    // success, so successful logins never consume it.
+    expect(context.calls).toEqual([
+      'rate-limit:auth_login:manager',
+      'rate-limit:auth_login_account:manager',
+      'login: manager :secret',
+      'refund:auth_login_account:manager',
+    ]);
     expect(context.cookies).toEqual([
       {
         name: REFRESH_COOKIE_NAME,
@@ -82,6 +90,23 @@ describe('AuthController HTTP shell', () => {
         password: 'secret',
       }),
     ).resolves.not.toHaveProperty('refreshToken');
+  });
+
+  it('keeps the per-account fail budget consumed when login fails', async () => {
+    const context = createController({ authEnabled: true, loginError: new ApiError(401, 'INVALID_CREDENTIALS', 'invalid') });
+
+    await expect(
+      context.controller.login(createRequest(), context.response, {
+        username: 'manager',
+        password: 'wrong',
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
+
+    expect(context.calls).toEqual([
+      'rate-limit:auth_login:manager',
+      'rate-limit:auth_login_account:manager',
+    ]);
+    expect(context.calls).not.toContain('refund:auth_login_account:manager');
   });
 
   it('requires refresh cookie for refresh endpoint', async () => {
@@ -104,7 +129,7 @@ describe('AuthController HTTP shell', () => {
       ),
     ).resolves.toEqual(createAuthResponse({ accessToken: 'access_refreshed' }));
 
-    expect(context.calls).toEqual(['rate-limit', 'refresh:old_refresh_token']);
+    expect(context.calls).toEqual(['rate-limit:auth_refresh:', 'refresh:old_refresh_token']);
     expect(context.cookies[0]).toMatchObject({
       name: REFRESH_COOKIE_NAME,
       value: 'refresh_token_secret',
@@ -200,6 +225,7 @@ function createController(options: {
   nodeEnv?: string;
   refreshCookieSecure?: boolean;
   refreshCookieSameSite?: 'lax' | 'strict' | 'none';
+  loginError?: Error;
 }) {
   const calls: string[] = [];
   const cookies: CookieWrite[] = [];
@@ -210,6 +236,9 @@ function createController(options: {
   };
   const auth = {
     async login(command: LoginCommand): Promise<LoginResult> {
+      if (options.loginError) {
+        throw options.loginError;
+      }
       calls.push(`login:${command.username}:${command.password}`);
       return createLoginResult();
     },
@@ -237,10 +266,13 @@ function createController(options: {
     },
   } as AuthRuntimeConfigService;
   const rateLimits = {
-    async assertAllowed(): Promise<void> {
-      calls.push('rate-limit');
+    async assertAllowed(input: { rule: { feature: string }; subject: { username?: string | null } }): Promise<void> {
+      calls.push(`rate-limit:${input.rule.feature}:${input.subject.username ?? ''}`);
     },
-  } as RateLimitService;
+    async refund(input: { rule: { feature: string }; subject: { username?: string | null } }): Promise<void> {
+      calls.push(`refund:${input.rule.feature}:${input.subject.username ?? ''}`);
+    },
+  } as unknown as RateLimitService;
 
   return {
     controller: new AuthController(auth, sessions, runtimeConfig, rateLimits, null),

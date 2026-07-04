@@ -124,7 +124,11 @@ export class PgUserIdentityRepository {
     });
   }
 
-  /** Removes the identity link and writes its audit event in one transaction. */
+  /**
+   * Removes ALL identity links of the provider for the user and writes one
+   * audit event PER removed identity in the same transaction (the plan
+   * explicitly supports several provider subs per user).
+   */
   async deleteLinkWithAudit(input: { actor: IdentityActor; provider: string }): Promise<boolean> {
     return this.database.transaction(async (tx) => {
       const deleted = await tx.query<UserIdentityRow>(
@@ -135,38 +139,54 @@ export class PgUserIdentityRepository {
         `,
         [input.actor.userId, input.provider],
       );
-      const row = deleted.rows[0];
 
-      if (!row) {
+      if (deleted.rows.length === 0) {
         return false;
       }
 
-      await tx.query(
-        `
-        INSERT INTO audit_log (
-          event, entity_type, entity_id, user_id, username, role_code, role,
-          request_id, ip_address, user_agent, source, metadata_json
-        )
-        VALUES ('auth.identity.unlinked', 'user', $1, $2, $3, $4, $4, $5, $6::inet, $7, 'workos', $8::jsonb)
-        `,
-        [
-          input.actor.userId,
-          toNullableUserId(input.actor.userId),
-          input.actor.username,
-          mapRoleIdToRole(input.actor.roleId),
-          input.actor.requestId ?? DEFAULT_REQUEST_ID,
-          input.actor.ipAddress ?? null,
-          input.actor.userAgent ?? null,
-          JSON.stringify({
-            provider: input.provider,
-            workosSub: row.provider_user_id,
-            emailAtLink: row.email_at_link,
-          }),
-        ],
-      );
+      for (const row of deleted.rows) {
+        await tx.query(
+          `
+          INSERT INTO audit_log (
+            event, entity_type, entity_id, user_id, username, role_code, role,
+            request_id, ip_address, user_agent, source, metadata_json
+          )
+          VALUES ('auth.identity.unlinked', 'user', $1, $2, $3, $4, $4, $5, $6::inet, $7, 'workos', $8::jsonb)
+          `,
+          [
+            input.actor.userId,
+            toNullableUserId(input.actor.userId),
+            input.actor.username,
+            mapRoleIdToRole(input.actor.roleId),
+            input.actor.requestId ?? DEFAULT_REQUEST_ID,
+            input.actor.ipAddress ?? null,
+            input.actor.userAgent ?? null,
+            JSON.stringify({
+              provider: input.provider,
+              workosSub: row.provider_user_id,
+              emailAtLink: row.email_at_link,
+            }),
+          ],
+        );
+      }
 
       return true;
     });
+  }
+
+  /** Live-session proof for link/unlink at callback time (plan §4.4в). */
+  async isSessionActive(sessionId: string): Promise<boolean> {
+    const result = await this.database.query(
+      `
+      SELECT 1
+      FROM auth_sessions
+      WHERE session_id = $1 AND status = 'active' AND expires_at > now()
+      LIMIT 1
+      `,
+      [sessionId],
+    );
+
+    return result.rows.length > 0;
   }
 
   async writeLinkFailed(input: {

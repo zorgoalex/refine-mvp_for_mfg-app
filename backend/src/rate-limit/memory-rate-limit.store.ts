@@ -29,4 +29,13 @@ export class MemoryRateLimitStore implements RateLimitStore {
       key,
     };
   }
+
+  async refund(input: RateLimitConsumeInput): Promise<void> {
+    const key = createRateLimitKey(input.rule.feature, input.subject);
+    const bucket = this.buckets.get(key);
+
+    if (bucket && bucket.resetAt > Date.now() && bucket.count > 0) {
+      bucket.count -= 1;
+    }
+  }
 }

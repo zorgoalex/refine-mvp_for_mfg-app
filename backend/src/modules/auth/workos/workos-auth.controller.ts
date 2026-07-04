@@ -296,6 +296,13 @@ export class WorkosAuthController {
           reason: 'state_mismatch',
           provider: WORKOS_PROVIDER,
         });
+      } else if (mode === 'login') {
+        // Audit contract §4.8: login-mode state mismatch → auth.login.failed.
+        await this.workos?.writeLoginStateMismatch({
+          requestId: request.requestId,
+          userAgent: request.get('user-agent') ?? undefined,
+          ipAddress: request.ip,
+        });
       }
     } catch {
       // audit must not mask the auth failure

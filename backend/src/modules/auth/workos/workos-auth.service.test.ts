@@ -44,6 +44,7 @@ interface Harness {
     insertLink: ReturnType<typeof vi.fn>;
     deleteLink: ReturnType<typeof vi.fn>;
     passwordValid: boolean;
+    sessionActive: boolean;
   };
 }
 
@@ -75,6 +76,7 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     })),
     deleteLink: vi.fn(async () => true),
     passwordValid: true,
+    sessionActive: true,
     ...overrides,
   };
 
@@ -97,6 +99,7 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
       deleteLinkWithAudit: state.deleteLink,
       writeLinkFailed: state.linkFailed,
       touchLastLogin: async () => undefined,
+      isSessionActive: async () => state.sessionActive,
     } as never,
     sessions: { createLoginSession: state.sessions },
     tokens: {
@@ -143,6 +146,17 @@ describe('WorkosAuthService.loginWithCode', () => {
     expect(harness.ports.insertLink).not.toHaveBeenCalled();
     expect(harness.ports.loginFailed).toHaveBeenCalledWith(
       expect.objectContaining({ reason: 'identity_not_linked' }),
+    );
+  });
+
+  it('audits provider_error as auth.login.failed when the code exchange fails', async () => {
+    const harness = createHarness({ identityError: new Error('workos down') });
+
+    await expect(harness.service.loginWithCode({ code: 'c', requestId: 'req-9' })).rejects.toThrow(
+      'workos down',
+    );
+    expect(harness.ports.loginFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'provider_error', authSource: 'workos', requestId: 'req-9' }),
     );
   });
 
@@ -230,6 +244,29 @@ describe('WorkosAuthService.linkWithCode', () => {
       expect.objectContaining({ reason: 'provider_error' }),
     );
   });
+
+  it('denies linking from a revoked/expired DB session even with a valid bearer token', async () => {
+    const harness = createHarness({ sessionActive: false });
+
+    await expect(harness.service.linkWithCode(command)).rejects.toMatchObject({
+      code: 'SESSION_INACTIVE',
+    });
+    expect(harness.ports.insertLink).not.toHaveBeenCalled();
+    expect(harness.ports.linkFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'session_inactive' }),
+    );
+  });
+});
+
+describe('WorkosAuthService.writeLoginStateMismatch', () => {
+  it('audits login-mode state mismatch as auth.login.failed with workos source', async () => {
+    const harness = createHarness();
+    await harness.service.writeLoginStateMismatch({ requestId: 'req-sm' });
+
+    expect(harness.ports.loginFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'state_mismatch', authSource: 'workos', requestId: 'req-sm' }),
+    );
+  });
 });
 
 describe('WorkosAuthService.unlink', () => {
@@ -249,6 +286,13 @@ describe('WorkosAuthService.unlink', () => {
     expect(harness.ports.loginFailed).toHaveBeenCalledWith(
       expect.objectContaining({ reason: 'invalid_password', metadata: { context: 'workos_unlink' } }),
     );
+  });
+
+  it('refuses unlink from a revoked/expired DB session', async () => {
+    const harness = createHarness({ sessionActive: false });
+
+    await expect(harness.service.unlink(command)).rejects.toMatchObject({ code: 'SESSION_INACTIVE' });
+    expect(harness.ports.deleteLink).not.toHaveBeenCalled();
   });
 
   it('refuses unlink when login policy is external-only', async () => {

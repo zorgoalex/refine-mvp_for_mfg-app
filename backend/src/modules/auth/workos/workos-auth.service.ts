@@ -62,7 +62,23 @@ export class WorkosAuthService {
    * created only by the explicit link flow below or admin provisioning.
    */
   async loginWithCode(command: WorkosLoginCommand): Promise<LoginResult> {
-    const identity = await this.ports.workos.authenticateWithCode(command.code);
+    let identity: WorkosIdentity;
+
+    try {
+      identity = await this.ports.workos.authenticateWithCode(command.code);
+    } catch (error) {
+      // Audit contract §4.8: code-exchange failures on the LOGIN path are
+      // auth.login.failed (source=workos); the actor is not resolved yet.
+      await this.ports.audit.writeLoginFailed({
+        username: 'unknown',
+        reason: 'provider_error',
+        requestId: command.requestId,
+        userAgent: command.userAgent,
+        ipAddress: command.ipAddress,
+        authSource: 'workos',
+      });
+      throw error;
+    }
 
     if (!identity.emailVerified) {
       await this.writeLoginFailed(command, identity, 'email_not_verified');
@@ -124,6 +140,21 @@ export class WorkosAuthService {
    */
   async linkWithCode(command: WorkosLinkCommand): Promise<{ linked: true }> {
     const actor = this.toActor(command);
+
+    // Plan §4.4(в): the bearer token alone is not enough — the JWT stays
+    // valid until TTL after logout/revoke, so the DB session status must be
+    // re-checked at callback time before any identity is attached.
+    const sessionId = command.currentUser.sessionId;
+
+    if (!sessionId || !(await this.ports.identities.isSessionActive(sessionId))) {
+      await this.ports.identities.writeLinkFailed({
+        actor,
+        reason: 'session_inactive',
+        provider: WORKOS_PROVIDER,
+      });
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново и повторите привязку');
+    }
+
     let identity: WorkosIdentity;
 
     try {
@@ -192,6 +223,13 @@ export class WorkosAuthService {
 
   /** Unlink requires password confirmation: after unlink only the password remains. */
   async unlink(command: WorkosUnlinkCommand): Promise<{ unlinked: boolean }> {
+    // Same dead-session window as the link flow: re-check the DB session.
+    const sessionId = command.currentUser.sessionId;
+
+    if (!sessionId || !(await this.ports.identities.isSessionActive(sessionId))) {
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
+
     const user = await this.ports.loadUserById(command.currentUser.id);
 
     if (!user || !user.isActive) {
@@ -231,6 +269,24 @@ export class WorkosAuthService {
 
   buildAuthorizeUrl(state: string): string {
     return this.ports.workos.buildAuthorizeUrl(state);
+  }
+
+  /**
+   * Audit contract §4.8: state mismatch in LOGIN mode is auth.login.failed
+   * (source=workos, no actor yet) — unlike link mode, which owns
+   * auth.identity.link_failed.
+   */
+  async writeLoginStateMismatch(
+    context: Pick<WorkosLoginCommand, 'requestId' | 'userAgent' | 'ipAddress'>,
+  ): Promise<void> {
+    await this.ports.audit.writeLoginFailed({
+      username: 'unknown',
+      reason: 'state_mismatch',
+      requestId: context.requestId,
+      userAgent: context.userAgent,
+      ipAddress: context.ipAddress,
+      authSource: 'workos',
+    });
   }
 
   buildProviderLogoutUrl(providerSessionId: string): string {

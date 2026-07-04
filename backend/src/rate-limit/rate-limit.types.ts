@@ -27,6 +27,12 @@ export interface RateLimitResult {
 
 export interface RateLimitStore {
   consume(input: RateLimitConsumeInput): Promise<RateLimitResult>;
+  /**
+   * Returns one previously consumed attempt (best-effort). Lets a caller
+   * count only FAILED attempts against a budget: consume before the check,
+   * refund after success.
+   */
+  refund?(input: RateLimitConsumeInput): Promise<void>;
   ping?(): Promise<void>;
   close?(): Promise<void>;
 }

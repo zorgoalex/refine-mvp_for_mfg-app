@@ -10,6 +10,7 @@ export interface RedisRateLimitStoreOptions {
 export interface RedisRateLimitClient {
   readonly isOpen?: boolean;
   incr(key: string): Promise<number>;
+  decr(key: string): Promise<number>;
   pExpire(key: string, milliseconds: number): Promise<boolean | number>;
   pTTL(key: string): Promise<number>;
   ping(): Promise<string>;
@@ -44,6 +45,18 @@ export class RedisRateLimitStore implements RateLimitStore {
       resetMs: Math.max(0, ttl),
       key,
     };
+  }
+
+  async refund(input: RateLimitConsumeInput): Promise<void> {
+    const client = await this.getClient();
+    const key = createRateLimitKey(input.rule.feature, input.subject);
+    const count = await client.decr(key);
+
+    // DECR on a missing/expired key creates it at -1 without a TTL; expire it
+    // immediately so the stray key cannot linger.
+    if (count < 0) {
+      await client.pExpire(key, 1);
+    }
   }
 
   async ping(): Promise<void> {
