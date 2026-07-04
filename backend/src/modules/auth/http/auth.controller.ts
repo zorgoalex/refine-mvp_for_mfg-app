@@ -17,8 +17,14 @@ import type { AuthResponse, LoginCommand } from '../auth.types';
 import { createClearRefreshCookie, createRefreshCookie, REFRESH_COOKIE_NAME } from '../refresh-cookie';
 import { AUTH_SESSION_HTTP_PORT, type AuthSessionHttpPort } from './auth-session-http.port';
 import { AuthRuntimeConfigService } from './auth-runtime-config.service';
-import { WORKOS_AUTH_SERVICE } from '../workos/workos-auth.controller';
-import type { WorkosAuthService } from '../workos/workos-auth.service';
+/**
+ * Builds the hosted provider logout URL. Deliberately its OWN token: it must
+ * stay available for already-issued SSO sessions even while the WorkOS
+ * entrypoints are rolled back (flag off / partial 052 schema) — otherwise a
+ * rollback silently leaves IdP sessions alive on shared machines.
+ */
+export const WORKOS_LOGOUT_URL_BUILDER = Symbol('WORKOS_LOGOUT_URL_BUILDER');
+export type WorkosLogoutUrlBuilder = (providerSessionId: string) => string;
 
 type AuthRequest = Request & RequestWithCurrentUser;
 type RequestWithRequestId = Request & { requestId?: string };
@@ -103,8 +109,8 @@ export class AuthController {
     private readonly runtimeConfig: AuthRuntimeConfigService,
     @Inject(RateLimitService)
     private readonly rateLimits: RateLimitService,
-    @Inject(WORKOS_AUTH_SERVICE)
-    private readonly workosAuth: WorkosAuthService | null,
+    @Inject(WORKOS_LOGOUT_URL_BUILDER)
+    private readonly workosLogoutUrl: WorkosLogoutUrlBuilder,
   ) {}
 
   @ApiBody({ schema: swaggerSchema(loginRequestSwaggerSchema) })
@@ -232,20 +238,18 @@ export class AuthController {
 
     // SSO-issued session: never collapse a failed provider-logout into the
     // local-session shape — the UI must warn that the provider session may
-    // still be alive (plan §4.4).
-    if (this.workosAuth) {
-      try {
-        return {
-          ok: true,
-          providerLogoutUrl: this.workosAuth.buildProviderLogoutUrl(result.providerSessionId),
-          providerLogoutStatus: 'redirect',
-        };
-      } catch {
-        return { ok: true, providerLogoutStatus: 'unavailable' };
-      }
+    // still be alive (plan §4.4). The URL builder works independently of the
+    // WorkOS feature flag/schema readiness so rollback keeps ending IdP
+    // sessions.
+    try {
+      return {
+        ok: true,
+        providerLogoutUrl: this.workosLogoutUrl(result.providerSessionId),
+        providerLogoutStatus: 'redirect',
+      };
+    } catch {
+      return { ok: true, providerLogoutStatus: 'unavailable' };
     }
-
-    return { ok: true, providerLogoutStatus: 'unavailable' };
   }
 
   @ApiBearerAuth()

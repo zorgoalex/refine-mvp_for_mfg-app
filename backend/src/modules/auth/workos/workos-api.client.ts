@@ -45,9 +45,7 @@ export class WorkosApiClient {
   }
 
   buildLogoutUrl(providerSessionId: string): string {
-    const url = new URL('/user_management/sessions/logout', this.options.apiBase);
-    url.searchParams.set('session_id', providerSessionId);
-    return url.toString();
+    return buildWorkosLogoutUrl(this.options.apiBase, providerSessionId);
   }
 
   async authenticateWithCode(code: string): Promise<WorkosIdentity> {
@@ -115,6 +113,17 @@ export class WorkosApiClient {
       providerSessionId: extractSessionId(payload.access_token),
     };
   }
+}
+
+/**
+ * Pure URL constructor: needs only the pinned WORKOS_API_BASE, so it stays
+ * available for logging out already-issued SSO sessions even while the
+ * WorkOS entrypoints are rolled back (flag off / partial 052 schema).
+ */
+export function buildWorkosLogoutUrl(apiBase: string, providerSessionId: string): string {
+  const url = new URL('/user_management/sessions/logout', apiBase);
+  url.searchParams.set('session_id', providerSessionId);
+  return url.toString();
 }
 
 function parseJson(value: string): Record<string, unknown> | null {

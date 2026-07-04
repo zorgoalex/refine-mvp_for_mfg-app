@@ -209,13 +209,30 @@ describe('AuthController HTTP shell', () => {
     ).resolves.toEqual({ ok: true, providerLogoutStatus: 'unavailable' });
   });
 
-  it('marks provider logout unavailable instead of faking a clean local logout', async () => {
-    // SSO session, but the workos adapter is not wired (flag off / misconfig):
-    // the UI must be able to warn that the provider session may still live.
+  it('keeps the provider redirect for already-issued SSO sessions during a WorkOS rollback', async () => {
+    // Flag off / partial 052 schema: the URL builder is independent of the
+    // WorkOS entrypoints, so a live IdP session is still terminated.
     const context = createController({
       authEnabled: true,
       providerSessionId: 'sid-1',
       logoutAuthSource: 'workos',
+    });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({
+      ok: true,
+      providerLogoutUrl: 'https://api.workos.test/logout?session_id=sid-1',
+      providerLogoutStatus: 'redirect',
+    });
+  });
+
+  it('marks provider logout unavailable when the logout URL cannot be built', async () => {
+    const context = createController({
+      authEnabled: true,
+      providerSessionId: 'sid-1',
+      logoutAuthSource: 'workos',
+      logoutUrlBuilderThrows: true,
     });
 
     await expect(
@@ -268,6 +285,7 @@ function createController(options: {
   providerSessionId?: string;
   logoutAuthSource?: string;
   workosLogoutUrl?: string;
+  logoutUrlBuilderThrows?: boolean;
 }) {
   const calls: string[] = [];
   const cookies: CookieWrite[] = [];
@@ -316,12 +334,17 @@ function createController(options: {
     },
   } as unknown as RateLimitService;
 
-  const workosAuth = options.workosLogoutUrl
-    ? ({ buildProviderLogoutUrl: () => options.workosLogoutUrl } as never)
-    : null;
+  // The logout-url builder is ALWAYS available (WORKOS_API_BASE default) —
+  // it must survive a WorkOS rollback for already-issued SSO sessions.
+  const logoutUrlBuilder = (providerSessionId: string): string => {
+    if (options.logoutUrlBuilderThrows) {
+      throw new Error('bad api base');
+    }
+    return options.workosLogoutUrl ?? `https://api.workos.test/logout?session_id=${providerSessionId}`;
+  };
 
   return {
-    controller: new AuthController(auth, sessions, runtimeConfig, rateLimits, workosAuth),
+    controller: new AuthController(auth, sessions, runtimeConfig, rateLimits, logoutUrlBuilder),
     response: response as never,
     calls,
     cookies,

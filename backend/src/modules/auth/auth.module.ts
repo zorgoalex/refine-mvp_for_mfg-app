@@ -14,13 +14,13 @@ import {
   UnavailableAuthSessionHttpPort,
 } from './adapters/unavailable-auth-ports';
 import { AccessTokenMiddleware } from './http/access-token.middleware';
-import { AuthController } from './http/auth.controller';
+import { AuthController, WORKOS_LOGOUT_URL_BUILDER } from './http/auth.controller';
 import { AUTH_SESSION_HTTP_PORT } from './http/auth-session-http.port';
 import { AuthRuntimeConfigService } from './http/auth-runtime-config.service';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { TokenService } from './token.service';
 import { PgUserIdentityRepository } from './workos/pg-user-identity-repository';
-import { WorkosApiClient } from './workos/workos-api.client';
+import { buildWorkosLogoutUrl, WorkosApiClient } from './workos/workos-api.client';
 import {
   WorkosAuthController,
   WORKOS_AUTH_SERVICE,
@@ -42,6 +42,15 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
       useFactory: (config: ConfigService<BackendEnv, true>, database: DatabaseService) =>
         resolveAuthSchemaCapabilities(config, database),
       inject: [ConfigService, DatabaseService],
+    },
+    {
+      // Independent of the WorkOS flag/schema readiness: logging out an
+      // already-issued SSO session must survive a rollback (WORKOS_API_BASE
+      // has a pinned default).
+      provide: WORKOS_LOGOUT_URL_BUILDER,
+      useFactory: (config: ConfigService<BackendEnv, true>) => (providerSessionId: string) =>
+        buildWorkosLogoutUrl(config.get('WORKOS_API_BASE', { infer: true }), providerSessionId),
+      inject: [ConfigService],
     },
     {
       provide: AuthService,
