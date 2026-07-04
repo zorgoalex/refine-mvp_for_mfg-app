@@ -207,13 +207,26 @@ export class WorkosAuthController {
       throw new ApiError(422, 'VALIDATION_ERROR', 'Требуется подтверждение паролем');
     }
 
-    return service.unlink({
+    // Unlink verifies the local password, so without its own budget it would
+    // be a brute-force bypass around the /auth/login limiters. Same
+    // consume-before-verify + refund-on-success discipline: only failed
+    // confirmations accumulate.
+    const unlinkLimit = {
+      rule: { feature: 'auth_workos_unlink', maxRequests: 10, windowMs: 3_600_000 },
+      subject: { route: 'auth/workos/link', userId: currentUser.id },
+    };
+    await this.rateLimits.assertAllowed(unlinkLimit);
+
+    const result = await service.unlink({
       currentUser,
       password: body.password,
       userAgent: request.get('user-agent') ?? undefined,
       ipAddress: request.ip,
       requestId: request.requestId,
     });
+    await this.rateLimits.refund(unlinkLimit);
+
+    return result;
   }
 
   @ApiBearerAuth()

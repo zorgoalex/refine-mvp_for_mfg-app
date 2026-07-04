@@ -9,6 +9,13 @@ import { legacyApiRoutes } from './api/legacyApiRoutes';
 import { featureFlags } from './config/featureFlags';
 
 /**
+ * One-shot sessionStorage flag: set when logout could not terminate the SSO
+ * provider session (providerLogoutStatus='unavailable'); the login page reads
+ * and clears it to show an inline warning (plan §4.4).
+ */
+export const SSO_LOGOUT_WARNING_KEY = 'erp_sso_logout_warning';
+
+/**
  * AuthProvider для Refine
  * Управляет аутентификацией пользователей через JWT токены
  */
@@ -253,6 +260,13 @@ async function logoutFromBackend() {
   try {
     const response = await authApi.logout();
     providerLogoutUrl = response.providerLogoutUrl;
+
+    // Plan §4.4: an SSO session whose provider logout could not be prepared
+    // must not look like a clean local logout — the provider session may
+    // still be alive. One-shot flag, rendered as a warning on /login.
+    if (response.providerLogoutStatus === 'unavailable') {
+      sessionStorage.setItem(SSO_LOGOUT_WARNING_KEY, '1');
+    }
   } catch (error) {
     logAuthError(error, 'Выход из системы');
   } finally {

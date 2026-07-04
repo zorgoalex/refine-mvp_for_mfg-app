@@ -9,6 +9,7 @@ const callbackSource = readFileSync(
 );
 const loginPageSource = readFileSync(new URL('../pages/login/index.tsx', import.meta.url), 'utf8');
 const profileSource = readFileSync(new URL('../pages/profile/index.tsx', import.meta.url), 'utf8');
+const authProviderSource = readFileSync(new URL('../authProvider.ts', import.meta.url), 'utf8');
 
 describe('workosAuth feature flag', () => {
   it('is off by default and readable from env and runtime config', () => {
@@ -77,5 +78,18 @@ describe('workos UI gating', () => {
   it('login SSO button and profile link card render only behind the flag', () => {
     expect(loginPageSource).toContain('featureFlags.workosAuth && <WorkosSsoButton />');
     expect(profileSource).toContain('featureFlags.workosAuth && <WorkosLinkCard />');
+  });
+});
+
+describe('provider logout fallback warning (plan §4.4)', () => {
+  it('logout stores the one-shot flag when the provider logout is unavailable', () => {
+    expect(authProviderSource).toContain("providerLogoutStatus === 'unavailable'");
+    expect(authProviderSource).toContain('sessionStorage.setItem(SSO_LOGOUT_WARNING_KEY');
+  });
+
+  it('login page consumes the flag and shows the inline warning', () => {
+    expect(loginPageSource).toContain('consumeSsoLogoutWarning');
+    expect(loginPageSource).toContain('sessionStorage.removeItem(SSO_LOGOUT_WARNING_KEY)');
+    expect(loginPageSource).toContain('Сессия SSO-провайдера может быть ещё активна');
   });
 });

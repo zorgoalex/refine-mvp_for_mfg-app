@@ -179,7 +179,7 @@ describe('AuthController HTTP shell', () => {
         },
         context.response,
       ),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, providerLogoutStatus: 'not_applicable' });
 
     expect(context.calls).toEqual(['logout:refresh_to_revoke:user_manager']);
     expect(context.cookies).toEqual([
@@ -195,6 +195,32 @@ describe('AuthController HTTP shell', () => {
         },
       },
     ]);
+  });
+
+  it('returns providerLogoutUrl with redirect status for SSO-issued sessions', async () => {
+    const context = createController({
+      authEnabled: true,
+      providerSessionId: 'sid-1',
+      workosLogoutUrl: 'https://sso.example/logout?session_id=sid-1',
+    });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({
+      ok: true,
+      providerLogoutUrl: 'https://sso.example/logout?session_id=sid-1',
+      providerLogoutStatus: 'redirect',
+    });
+  });
+
+  it('marks provider logout unavailable instead of faking a clean local logout', async () => {
+    // SSO session, but the workos adapter is not wired (flag off / misconfig):
+    // the UI must be able to warn that the provider session may still live.
+    const context = createController({ authEnabled: true, providerSessionId: 'sid-1' });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({ ok: true, providerLogoutStatus: 'unavailable' });
   });
 
   it('requires current user for /api/v1/me and returns permissions without tokens', () => {
@@ -226,6 +252,8 @@ function createController(options: {
   refreshCookieSecure?: boolean;
   refreshCookieSameSite?: 'lax' | 'strict' | 'none';
   loginError?: Error;
+  providerSessionId?: string;
+  workosLogoutUrl?: string;
 }) {
   const calls: string[] = [];
   const cookies: CookieWrite[] = [];
@@ -248,9 +276,9 @@ function createController(options: {
       calls.push(`refresh:${command.refreshToken}`);
       return createLoginResult({ accessToken: 'access_refreshed' });
     },
-    async logout(command: LogoutCommand): Promise<{ ok: true }> {
+    async logout(command: LogoutCommand): Promise<{ ok: true; providerSessionId?: string }> {
       calls.push(`logout:${command.refreshToken}:${command.currentUser?.id ?? 'anonymous'}`);
-      return { ok: true };
+      return { ok: true, providerSessionId: options.providerSessionId };
     },
   } as AuthSessionHttpPort;
   const runtimeConfig = {
@@ -274,8 +302,12 @@ function createController(options: {
     },
   } as unknown as RateLimitService;
 
+  const workosAuth = options.workosLogoutUrl
+    ? ({ buildProviderLogoutUrl: () => options.workosLogoutUrl } as never)
+    : null;
+
   return {
-    controller: new AuthController(auth, sessions, runtimeConfig, rateLimits, null),
+    controller: new AuthController(auth, sessions, runtimeConfig, rateLimits, workosAuth),
     response: response as never,
     calls,
     cookies,

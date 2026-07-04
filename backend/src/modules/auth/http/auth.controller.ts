@@ -29,6 +29,13 @@ export interface LogoutResponse {
   ok: true;
   /** Hosted provider logout URL; present when the session came from SSO. */
   providerLogoutUrl?: string;
+  /**
+   * Explicit provider-logout outcome (plan §4.4): 'redirect' — follow
+   * providerLogoutUrl; 'unavailable' — the session came from SSO but the
+   * provider logout could not be prepared (the provider session may still be
+   * alive, the UI must warn); 'not_applicable' — plain local session.
+   */
+  providerLogoutStatus?: 'redirect' | 'unavailable' | 'not_applicable';
 }
 
 export interface MeResponse {
@@ -72,6 +79,7 @@ const logoutResponseSwaggerSchema = {
   properties: {
     ok: { type: 'boolean', enum: [true] },
     providerLogoutUrl: { type: 'string' },
+    providerLogoutStatus: { type: 'string', enum: ['redirect', 'unavailable', 'not_applicable'] },
   },
 } as const;
 
@@ -226,11 +234,26 @@ export class AuthController {
     });
     this.clearRefreshCookie(response);
 
-    if (result.providerSessionId && this.workosAuth) {
-      return { ok: true, providerLogoutUrl: this.workosAuth.buildProviderLogoutUrl(result.providerSessionId) };
+    if (!result.providerSessionId) {
+      return { ok: true, providerLogoutStatus: 'not_applicable' };
     }
 
-    return { ok: true };
+    // SSO-issued session: never collapse a failed provider-logout into the
+    // local-session shape — the UI must warn that the provider session may
+    // still be alive (plan §4.4).
+    if (this.workosAuth) {
+      try {
+        return {
+          ok: true,
+          providerLogoutUrl: this.workosAuth.buildProviderLogoutUrl(result.providerSessionId),
+          providerLogoutStatus: 'redirect',
+        };
+      } catch {
+        return { ok: true, providerLogoutStatus: 'unavailable' };
+      }
+    }
+
+    return { ok: true, providerLogoutStatus: 'unavailable' };
   }
 
   @ApiBearerAuth()

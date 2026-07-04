@@ -1,10 +1,18 @@
 import React from "react";
-import { Form, Input, Button, Card, Typography } from "antd";
+import { Form, Input, Button, Card, Typography, Alert } from "antd";
 import { UserOutlined, LockOutlined, LoginOutlined } from "@ant-design/icons";
 import { useLogin } from "@refinedev/core";
 import { featureFlags } from "../../config/featureFlags";
+import { SSO_LOGOUT_WARNING_KEY } from "../../authProvider";
 
 const { Title, Text } = Typography;
+
+/** One-shot: read and clear the SSO-logout warning left by authProvider. */
+function consumeSsoLogoutWarning(): boolean {
+  const raised = sessionStorage.getItem(SSO_LOGOUT_WARNING_KEY) === "1";
+  sessionStorage.removeItem(SSO_LOGOUT_WARNING_KEY);
+  return raised;
+}
 
 /**
  * Кастомная страница входа в систему
@@ -12,6 +20,7 @@ const { Title, Text } = Typography;
  */
 export const LoginPage: React.FC = () => {
   const { mutate: login, isLoading } = useLogin();
+  const [ssoLogoutWarning] = React.useState(consumeSsoLogoutWarning);
 
   const onFinish = (values: { username: string; password: string }) => {
     login(values);
@@ -42,6 +51,16 @@ export const LoginPage: React.FC = () => {
             Система управления производством
           </Text>
         </div>
+
+        {ssoLogoutWarning && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="Сессия SSO-провайдера может быть ещё активна"
+            description="Не удалось завершить сессию провайдера входа. На общем компьютере завершите её вручную (выход из аккаунта провайдера)."
+          />
+        )}
 
         <Form
           name="login"

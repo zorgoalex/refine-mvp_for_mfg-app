@@ -7615,6 +7615,15 @@ components:
             Hosted-провайдерский logout URL (WorkOS). Присутствует только когда
             завершаемая сессия была создана через SSO; фронт делает redirect,
             чтобы погасить и сессию провайдера (best-effort).
+        providerLogoutStatus:
+          type: string
+          enum: [redirect, unavailable, not_applicable]
+          description: |
+            Явный исход provider-logout: redirect — перейти по
+            providerLogoutUrl; unavailable — сессия была SSO, но logout
+            провайдера подготовить не удалось (сессия провайдера может быть
+            жива — UI показывает предупреждение); not_applicable — обычная
+            локальная сессия.
 
     WorkosAuthorizeResponse:
       type: object
