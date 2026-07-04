@@ -28,6 +28,8 @@ import {
 } from './workos/workos-auth.controller';
 import { WorkosAuthService } from './workos/workos-auth.service';
 
+export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
+
 @Module({
   imports: [DatabaseModule],
   controllers: [AuthController, WorkosAuthController],
@@ -36,21 +38,28 @@ import { WorkosAuthService } from './workos/workos-auth.service';
     AccessTokenMiddleware,
     TokenService,
     {
+      provide: AUTH_SCHEMA_CAPABILITIES,
+      useFactory: (config: ConfigService<BackendEnv, true>, database: DatabaseService) =>
+        resolveAuthSchemaCapabilities(config, database),
+      inject: [ConfigService, DatabaseService],
+    },
+    {
       provide: AuthService,
       useFactory: (
         config: ConfigService<BackendEnv, true>,
         database: DatabaseService,
         tokenService: TokenService,
         rateLimits: RateLimitService,
+        capabilities: AuthSchemaCapabilities,
       ) => {
-        const sessionManager = createPgSessionManager(config, database, tokenService);
+        const sessionManager = createPgSessionManager(config, database, tokenService, capabilities);
 
         if (!sessionManager) {
           return createUnavailableAuthService();
         }
 
         return new AuthService({
-          users: createUserRepository(config, database),
+          users: createUserRepository(capabilities, database),
           passwords: new BcryptPasswordVerifier(),
           sessions: sessionManager,
           tokens: createAccessTokenIssuer(config),
@@ -58,7 +67,7 @@ import { WorkosAuthService } from './workos/workos-auth.service';
           rateLimits,
         });
       },
-      inject: [ConfigService, DatabaseService, TokenService, RateLimitService],
+      inject: [ConfigService, DatabaseService, TokenService, RateLimitService, AUTH_SCHEMA_CAPABILITIES],
     },
     {
       provide: AUTH_SESSION_HTTP_PORT,
@@ -66,8 +75,11 @@ import { WorkosAuthService } from './workos/workos-auth.service';
         config: ConfigService<BackendEnv, true>,
         database: DatabaseService,
         tokenService: TokenService,
-      ) => createPgSessionManager(config, database, tokenService) ?? new UnavailableAuthSessionHttpPort(),
-      inject: [ConfigService, DatabaseService, TokenService],
+        capabilities: AuthSchemaCapabilities,
+      ) =>
+        createPgSessionManager(config, database, tokenService, capabilities) ??
+        new UnavailableAuthSessionHttpPort(),
+      inject: [ConfigService, DatabaseService, TokenService, AUTH_SCHEMA_CAPABILITIES],
     },
     {
       provide: WORKOS_IDENTITY_REPOSITORY,
@@ -81,15 +93,16 @@ import { WorkosAuthService } from './workos/workos-auth.service';
         config: ConfigService<BackendEnv, true>,
         database: DatabaseService,
         tokenService: TokenService,
+        capabilities: AuthSchemaCapabilities,
       ): WorkosAuthService | null => {
-        const sessionManager = createPgSessionManager(config, database, tokenService);
+        const sessionManager = createPgSessionManager(config, database, tokenService, capabilities);
         const workosClient = createWorkosClient(config);
 
         if (!workosClient || !sessionManager) {
           return null;
         }
 
-        const users = createUserRepository(config, database);
+        const users = createUserRepository(capabilities, database);
 
         return new WorkosAuthService({
           workos: workosClient,
@@ -136,7 +149,7 @@ import { WorkosAuthService } from './workos/workos-auth.service';
           },
         });
       },
-      inject: [ConfigService, DatabaseService, TokenService],
+      inject: [ConfigService, DatabaseService, TokenService, AUTH_SCHEMA_CAPABILITIES],
     },
   ],
 })
@@ -150,13 +163,64 @@ function isWorkosEnabled(config: ConfigService<BackendEnv, true>): boolean {
   return config.get('BACKEND_ENABLE_WORKOS_AUTH', { infer: true }) === true;
 }
 
-function createUserRepository(
+export interface AuthSchemaCapabilities {
+  /** users.login_policy exists (migration 052). */
+  loginPolicy: boolean;
+  /** auth_sessions.provider_session_id + auth_source exist (migration 052). */
+  providerSessions: boolean;
+}
+
+/**
+ * Migration-052 columns are gated by SCHEMA capability, not by the WorkOS
+ * feature flag: turning the flag off is a rollback of the SSO entrypoints
+ * only — login_policy enforcement and the provenance of already-issued
+ * WorkOS sessions must survive it (plan §8 rollback semantics). The probe
+ * keeps a pre-052 database deployable; on a probe hiccup it falls back to
+ * the flag so boot never breaks.
+ */
+export async function resolveAuthSchemaCapabilities(
   config: ConfigService<BackendEnv, true>,
   database: DatabaseService,
+): Promise<AuthSchemaCapabilities> {
+  if (!database.isConfigured) {
+    return { loginPolicy: false, providerSessions: false };
+  }
+
+  try {
+    const result = await database.query<{
+      has_login_policy: boolean;
+      has_provider_session_id: boolean;
+      has_auth_source: boolean;
+    }>(
+      `
+      SELECT
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'login_policy') AS has_login_policy,
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'auth_sessions' AND column_name = 'provider_session_id') AS has_provider_session_id,
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'auth_sessions' AND column_name = 'auth_source') AS has_auth_source
+      `,
+    );
+    const row = result.rows[0];
+
+    return {
+      loginPolicy: row?.has_login_policy === true,
+      providerSessions: row?.has_provider_session_id === true && row?.has_auth_source === true,
+    };
+  } catch {
+    const enabled = isWorkosEnabled(config);
+    return { loginPolicy: enabled, providerSessions: enabled };
+  }
+}
+
+function createUserRepository(
+  capabilities: AuthSchemaCapabilities,
+  database: DatabaseService,
 ): PgAuthUserRepository {
-  // login_policy exists only after migration 052; select it only when the
-  // WorkOS flag is on (enabled in the same operational window as the migration).
-  return new PgAuthUserRepository(database, { includeLoginPolicy: isWorkosEnabled(config) });
+  // Selected whenever the column exists — flag-off must not reopen local
+  // password login for external-only accounts.
+  return new PgAuthUserRepository(database, { includeLoginPolicy: capabilities.loginPolicy });
 }
 
 function createWorkosClient(config: ConfigService<BackendEnv, true>): WorkosApiClient | null {
@@ -191,6 +255,7 @@ function createPgSessionManager(
   config: ConfigService<BackendEnv, true>,
   database: DatabaseService,
   tokenService: TokenService,
+  capabilities: AuthSchemaCapabilities,
 ): PgAuthSessionManager | null {
   const refreshTokenPepper = config.get('REFRESH_TOKEN_PEPPER', { infer: true });
   const accessTokenSecret = config.get('JWT_ACCESS_SECRET', { infer: true });
@@ -202,6 +267,9 @@ function createPgSessionManager(
   return new PgAuthSessionManager(database, tokenService, createAccessTokenIssuer(config), {
     refreshTokenPepper,
     refreshTokenTtlDays: config.get('REFRESH_TOKEN_TTL_DAYS', { infer: true }),
-    supportsProviderSessions: isWorkosEnabled(config),
+    // Schema capability, NOT the feature flag: already-issued WorkOS
+    // sessions keep their provenance (audit source, sid-less 'unavailable'
+    // logout) even while the SSO entrypoints are rolled back.
+    supportsProviderSessions: capabilities.providerSessions,
   });
 }
