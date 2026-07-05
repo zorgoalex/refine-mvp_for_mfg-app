@@ -71,6 +71,13 @@ async def run_ocr_queued(data: bytes) -> dict:
 
 @app.post("/ocr")
 async def ocr(request: Request):
+    # Fast-fail BEFORE reading any body bytes: if the queue is already at
+    # capacity, an over-capacity request must not pay for buffering up to
+    # MAX_BYTES of memory just to be rejected afterwards. This is a coarse
+    # pre-check (race between check and enqueue is fine — run_ocr_queued
+    # still re-checks queue_slots_available() itself right before enqueueing).
+    if not queue_slots_available():
+        raise HTTPException(status_code=429, detail="ocr service busy, try again later")
     data = await read_capped(request)
     if not data:
         raise HTTPException(status_code=400, detail="empty body")

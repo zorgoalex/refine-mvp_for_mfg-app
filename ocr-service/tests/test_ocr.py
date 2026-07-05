@@ -75,3 +75,18 @@ def test_busy_returns_429(monkeypatch):
     monkeypatch.setattr(m, "queue_slots_available", lambda: False)
     r = client.post("/ocr", content=b"x", headers={"Content-Type": "application/octet-stream"})
     assert r.status_code == 429
+
+
+def test_busy_rejects_before_reading_body(monkeypatch):
+    # Fast-fail: busy → 429 ДО чтения тела (генератор упадёт, если тронут).
+    # Пре-проверка вне read_capped, поэтому даже без Content-Length сервис не
+    # должен буферизовать байты over-capacity запроса.
+    from app import main as m
+    monkeypatch.setattr(m, "queue_slots_available", lambda: False)
+
+    def gen():
+        raise AssertionError("body must not be read when queue is busy")
+        yield b""
+
+    r = client.post("/ocr", content=gen(), headers={"Content-Type": "application/octet-stream"})
+    assert r.status_code == 429
