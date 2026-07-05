@@ -54,7 +54,6 @@ import type {
   ScanSearchInput,
   ScanCandidateRow,
   OcrPort,
-  OcrLine,
 } from './labels.types';
 import { LabelFieldBindingError } from '../errors/labels.errors';
 
@@ -64,8 +63,10 @@ export interface PreviewOcrLabelCommand extends LabelsContext {
 }
 
 export interface PreviewOcrLabelResult {
-  lines: OcrLine[];
+  lines: Array<{ text: string; score: number; box?: number[][] }>;
   durationMs: number;
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 export interface TestOcrTemplateCommand extends LabelsContext {
@@ -75,9 +76,11 @@ export interface TestOcrTemplateCommand extends LabelsContext {
 }
 
 export interface TestOcrTemplateResult {
-  lines: OcrLine[];
+  lines: Array<{ text: string; score: number; box?: number[][] }>;
   matched: { templateWon: boolean; score: number; fields: LabelTextFields };
   fallbackFields: LabelTextFields;
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 export interface LabelsServicePorts {
@@ -249,8 +252,13 @@ export class LabelsService {
     if (!this.ocr) {
       throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service is not configured');
     }
-    const { lines, durationMs } = await this.ocr.recognize(cmd.image, cmd.contentType);
-    return { lines: lines.map((line) => ({ text: line.text, score: line.score })), durationMs };
+    const { lines, durationMs, imageWidth, imageHeight } = await this.ocr.recognize(cmd.image, cmd.contentType);
+    return {
+      lines: lines.map((line) => ({ text: line.text, score: line.score, box: line.box })),
+      durationMs,
+      imageWidth,
+      imageHeight,
+    };
   }
 
   /** Dry-run of a candidate rule set against a real photo (template-config UI): recognizes the
@@ -261,14 +269,16 @@ export class LabelsService {
     if (!this.ocr) {
       throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service is not configured');
     }
-    const { lines } = await this.ocr.recognize(cmd.image, cmd.contentType);
+    const { lines, imageWidth, imageHeight } = await this.ocr.recognize(cmd.image, cmd.contentType);
     const lineTexts = lines.map((line) => line.text);
     const matched = matchOcrTemplates(lineTexts, [{ id: 0, name: 'preview', rules: cmd.rules }]);
     const fallbackFields = extractLabelFields(lineTexts);
     return {
-      lines: lines.map((line) => ({ text: line.text, score: line.score })),
+      lines: lines.map((line) => ({ text: line.text, score: line.score, box: line.box })),
       matched: { templateWon: matched !== null, score: matched?.score ?? 0, fields: matched?.fields ?? {} },
       fallbackFields,
+      imageWidth,
+      imageHeight,
     };
   }
 
