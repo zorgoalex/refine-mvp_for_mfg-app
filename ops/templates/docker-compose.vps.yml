@@ -284,6 +284,22 @@ services:
     # (Codex-гейт scan-ocr плана; НЕ копировать паттерн cad-service ниже).
     networks:
       - back
+    # Blast-radius isolation (final-review): CPU/mem/pids caps — OCR-инференс
+    # CPU-тяжёлый и не должен голодить backend/hasura; лог-кэп против диска.
+    cpus: ${OCR_CPUS:-1.0}
+    mem_limit: ${OCR_MEM_LIMIT:-768m}
+    pids_limit: ${OCR_PIDS_LIMIT:-128}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   cad-service:
     build:
